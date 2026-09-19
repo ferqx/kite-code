@@ -59,6 +59,7 @@ export type ModelResourcePlanner = (
     requestedMaxOutputTokens?: number;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
+    replaceReservationId?: string;
   },
 ) => ModelResourcePreparationPlan;
 
@@ -218,6 +219,7 @@ export class ModelInvocationGateway {
     provenance: ModelInvocationProvenanceInput;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
+    replaceReservationId?: string;
     limits?: Partial<ModelInvocationEnvelope['resource']['limits']>;
     signal?: AbortSignal;
     emitEphemeral?: (event: Event) => void;
@@ -242,6 +244,7 @@ export class ModelInvocationGateway {
         : {}),
       resourceKind: input.resourceKind,
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
+      ...(input.replaceReservationId ? { replaceReservationId: input.replaceReservationId } : {}),
     });
     assertResourceMatchesSurface(resource, input.compiled);
     const envelope: ModelInvocationEnvelope = {

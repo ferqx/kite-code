@@ -1,6 +1,7 @@
 import {
   type BuiltinOperationExecutionValue,
   type BuiltinShellExecutionResult,
+  classifyBuiltinShellIntent,
   createBuiltinPreparedToolDispatchAdapter,
 } from '@kite-ai/builtin-runtime';
 import {
@@ -50,6 +51,7 @@ import {
   createAppBuiltinPreparedDispatchPort,
   createAppDynamicMcpPreparedDispatchAdapter,
 } from './builtin-prepared-dispatch-port';
+import { managedShellOwnerKey, managedShellRuntime } from './managed-shell';
 import {
   type AppToolPipelineAttemptComposition,
   createAppToolPipelineAttemptComposition,
@@ -88,6 +90,10 @@ export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_ = Object.freeze([
   'builtin:update_plan',
   'builtin:web_fetch',
   'builtin:shell_execute',
+  'builtin:shell_read',
+  'builtin:shell_stop',
+  'builtin:task_read',
+  'builtin:task_cancel',
   'builtin:activate_skill',
 ] as const);
 
@@ -449,6 +455,10 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
               operationId: target.operationId,
               attempt: attemptInput.attempt,
               signal: attemptInput.signal,
+              ownerKey: managedShellOwnerKey(
+                attemptInput.threadId,
+                attemptInput.mechanismResources.workspace,
+              ),
             })
           : undefined;
       mechanisms = resolveMechanism({
@@ -606,34 +616,58 @@ function createShellExecutor(input: {
   readonly operationId: string;
   readonly attempt: number;
   readonly signal: AbortSignal;
+  readonly ownerKey: string;
 }) {
   const composition = input.composition;
   const identity = input.prepared.identity;
   if (
-    !composition ||
-    input.operationId !== 'builtin:shell_execute' ||
+    (input.operationId === 'builtin:shell_execute' && !composition) ||
+    !['builtin:shell_execute', 'builtin:shell_read', 'builtin:shell_stop'].includes(
+      input.operationId,
+    ) ||
     identity.isDynamicMcp ||
-    identity.operationId !== 'builtin:shell_execute' ||
-    identity.executionMechanism !== 'shell' ||
-    identity.admissionDigest === null
+    !['builtin:shell_execute', 'builtin:shell_read', 'builtin:shell_stop'].includes(
+      identity.operationId,
+    ) ||
+    identity.executionMechanism !== 'shell'
   ) {
     throw new Error('Prepared Shell composition is unavailable or cross-bound.');
   }
   const admissionDigest = identity.admissionDigest;
   return Object.freeze({
+    read: (
+      readInput: Readonly<{
+        shellId: string;
+        cursor: number;
+        waitMs?: number;
+        waitUntil?: 'terminal';
+        signal: AbortSignal;
+      }>,
+    ) =>
+      managedShellRuntime
+        .readWaiting({ ...readInput, ownerKey: input.ownerKey })
+        .then((snapshot) => ({ ...snapshot })),
+    stop: (stopInput: Readonly<{ shellId: string }>) =>
+      managedShellRuntime
+        .stop(stopInput.shellId, input.ownerKey)
+        .then((snapshot) => ({ ...snapshot })),
     execute: async (
       shellInput: Readonly<{
         readonly workspace: string;
         readonly command: string;
-        readonly timeoutMs: number;
+        readonly timeoutMs?: number;
+        readonly mode?: 'finite' | 'service';
         readonly signal: AbortSignal;
         readonly readOnly: boolean;
         readonly networkAccess: 'none' | 'approved';
         readonly filesystemAccess: 'workspace_only' | 'external_read' | 'approved_external';
         readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+        readonly yieldMs?: number;
       }>,
     ): Promise<Readonly<BuiltinShellExecutionResult>> => {
       if (
+        input.operationId !== 'builtin:shell_execute' ||
+        admissionDigest === null ||
         shellInput.signal !== input.signal ||
         shellInput.command !==
           (input.prepared.input.arguments as Readonly<Record<string, unknown>>).command
@@ -642,30 +676,66 @@ function createShellExecutor(input: {
       }
       const lifecycle = input.persistence.createSandboxLifecycle({
         prepared: input.prepared,
-        artifacts: composition.artifacts,
+        artifacts: composition!.artifacts,
       });
-      return composition.execution.execute({
-        identity: Object.freeze({
-          toolCallId: identity.toolCallId,
-          capabilityId: identity.capabilityId,
-          capabilityRevision: identity.capabilityRevision,
-          invocationId: identity.invocationId,
-          attempt: input.attempt,
-          effectiveEffectsDigest: identity.effectiveEffectsDigest,
-          admissionDigest,
-          cancellationCorrelation: identity.attemptId,
-        }),
-        workspace: shellInput.workspace,
+      const execute = async (
+        signal: AbortSignal,
+        onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void,
+      ) => {
+        const result = await composition!.execution.execute({
+          identity: Object.freeze({
+            toolCallId: identity.toolCallId,
+            capabilityId: identity.capabilityId,
+            capabilityRevision: identity.capabilityRevision,
+            invocationId: identity.invocationId,
+            attempt: input.attempt,
+            effectiveEffectsDigest: identity.effectiveEffectsDigest,
+            admissionDigest,
+            cancellationCorrelation: identity.attemptId,
+          }),
+          workspace: shellInput.workspace,
+          command: shellInput.command,
+          ...(shellInput.timeoutMs === undefined ? {} : { timeoutMs: shellInput.timeoutMs }),
+          ...(shellInput.mode === undefined ? {} : { executionMode: shellInput.mode }),
+          signal,
+          filesystemMode:
+            shellInput.filesystemAccess === 'approved_external' ? 'allow_all' : 'workspace_only',
+          networkMode: shellInput.networkAccess === 'approved' ? 'allow_all' : 'disabled',
+          ...(shellInput.readOnly ? { executionTrust: 'policy_proven_read_only' as const } : {}),
+          ...(onProgress ? { onProgress } : {}),
+          lifecycle,
+        });
+        if (result.status === 'running') {
+          throw new Error('Prepared Shell Provider returned a nested running handle.');
+        }
+        return result;
+      };
+      if (shellInput.yieldMs === undefined) {
+        return execute(shellInput.signal, shellInput.onProgress);
+      }
+      const snapshot = await managedShellRuntime.start({
+        ownerKey: input.ownerKey,
+        mode: shellInput.mode ?? 'finite',
+        yieldMs: shellInput.yieldMs,
+        execute: (signal, onProgress) => execute(signal, onProgress),
+      });
+      if (snapshot.result) {
+        return {
+          ...snapshot.result,
+          shellId: snapshot.shellId,
+          status: 'exited' as const,
+          cursor: snapshot.cursor,
+        };
+      }
+      return {
         command: shellInput.command,
-        timeoutMs: shellInput.timeoutMs,
-        signal: shellInput.signal,
-        filesystemMode:
-          shellInput.filesystemAccess === 'approved_external' ? 'allow_all' : 'workspace_only',
-        networkMode: shellInput.networkAccess === 'approved' ? 'allow_all' : 'disabled',
-        ...(shellInput.readOnly ? { executionTrust: 'policy_proven_read_only' as const } : {}),
-        ...(shellInput.onProgress ? { onProgress: shellInput.onProgress } : {}),
-        lifecycle,
-      });
+        stdout: snapshot.stdout,
+        stderr: snapshot.stderr,
+        intent: classifyBuiltinShellIntent(shellInput.command),
+        shellId: snapshot.shellId,
+        status: 'running' as const,
+        cursor: snapshot.cursor,
+      };
     },
   });
 }

@@ -156,3 +156,15 @@ export interface WebCheckpointSnapshot {
   readonly sessionId: string;
   readonly checkpoints: readonly WebCheckpointSummary[];
 }
+
+export interface WebBackgroundSnapshot {
+  readonly sessionId: string;
+  readonly stale: boolean;
+  readonly executions: readonly {
+    readonly executionId: string;
+    readonly kind: 'shell' | 'service' | 'subagent';
+    readonly status: 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled' | 'unavailable';
+    readonly cleanupConfirmed: boolean;
+    readonly cursor?: number;
+  }[];
+}

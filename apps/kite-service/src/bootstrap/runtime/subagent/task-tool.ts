@@ -33,6 +33,13 @@ import type {
 import type { AgentConfig } from '#kite-service/config/index';
 import { computeExecutionBoundaryDigest } from '#kite-service/config/index';
 import type { ToolExecutionResult } from '../tool-result';
+import {
+  type AfterTurnContinuationReservation,
+  type AfterTurnContinuationRuntime,
+  afterTurnContinuationIdentity,
+  planAfterTurnContinuationReservation,
+} from './after-turn-continuation';
+import { type BackgroundSubagentRuntime, backgroundSubagentOwnerKey } from './background-runtime';
 import { serializeSubagentContinuation, subagentContinuationCursorId } from './continuation-codec';
 import { subagentResultFromObservation } from './observation-codec';
 import {
@@ -40,6 +47,14 @@ import {
   executeSubagentStartWithCoreToolAdapter,
 } from './tool-adapter';
 import type { SubAgentEventSink, SubAgentResult, SubAgentRunnerInput } from './types';
+
+type SubagentStartArguments = {
+  name: string;
+  subagent_type: 'explore' | 'plan' | 'code' | 'review';
+  task: string;
+  background?: boolean;
+  result_disposition?: 'required' | 'after_turn';
+};
 
 type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
   SubagentLifecycleArtifactAccess,
@@ -142,6 +157,14 @@ export interface TaskToolDeps {
     import('@kite-ai/runtime-host/kernel-adapter').RuntimeState,
     import('@kite-ai/runtime-host').StateRuntimeEvent
   >;
+  /** Session-mailbox persistence retained after a background Task Tool effect settles. */
+  backgroundModelInvocationPersistence?: import('@kite-ai/builtin-runtime/model').ModelInvocationPersistence<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeState,
+    import('@kite-ai/runtime-host').StateRuntimeEvent
+  > & {
+    readonly ownerKey: string;
+    readonly recoveryIdentityKey: string;
+  };
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
     getState(): Readonly<import('@kite-ai/runtime-host/kernel-adapter').RuntimeState>;
@@ -153,6 +176,10 @@ export interface TaskToolDeps {
   subagentInvocationIdentity?: SubagentInvocationIdentity;
   /** Pipeline-issued lifecycle runtime. Task adapters cannot compose or select Providers. */
   subagentRuntime?: SubagentInvocationRuntime;
+  /** Execution-host owner for admitted background children. */
+  backgroundSubagentRuntime?: BackgroundSubagentRuntime;
+  /** Binds eligible terminal reports to the existing Host Session mailbox. */
+  afterTurnContinuationRuntime?: AfterTurnContinuationRuntime;
   toolDispatcher?: import('./types').SubAgentToolDispatcher;
   maxDepth?: number;
   /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
@@ -169,10 +196,7 @@ export interface SubagentInvocationIdentity {
 }
 
 export interface SubagentInvocationRuntime {
-  start(
-    deps: TaskToolDeps,
-    args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
-  ): Promise<SubAgentResult>;
+  start(deps: TaskToolDeps, args: SubagentStartArguments): Promise<SubAgentResult>;
   resume(
     deps: TaskToolDeps,
     continuation: import('./types').RestoredSubAgentContinuation,
@@ -194,7 +218,7 @@ export class SubagentProviderRecoveryRequiredError extends Error {
 
 export async function runTaskSubAgent(
   deps: TaskToolDeps,
-  args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
+  args: SubagentStartArguments,
 ): Promise<SubAgentResult> {
   if (!deps.subagentRuntime) {
     return failed('Governed Subagent Pipeline runtime is unavailable.');
@@ -206,16 +230,41 @@ export async function runTaskSubAgent(
 export async function executePipelineIssuedSubagentStart(
   composition: GovernedSubagentComposition,
   deps: TaskToolDeps,
-  args: { name: string; subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string },
+  args: SubagentStartArguments,
 ): Promise<SubAgentResult> {
+  if (
+    args.result_disposition === 'after_turn' &&
+    (args.background !== true || deps.config.features?.afterTurnContinuation !== true)
+  ) {
+    return failed('after_turn_not_authorized');
+  }
   if (
     !deps.subagentInvocationIdentity ||
     !deps.modelEffectCoordinator ||
     !deps.modelInvocationPersistence ||
     !deps.modelInvocationParentId ||
-    !deps.modelInvocationParentToolCallId
+    !deps.modelInvocationParentToolCallId ||
+    (args.background === true &&
+      (!deps.backgroundSubagentRuntime ||
+        !deps.backgroundModelInvocationPersistence ||
+        !deps.threadId ||
+        !deps.subagentLifecyclePersistence ||
+        !deps.afterTurnContinuationRuntime))
   ) {
     return failed('Governed Subagent Provider execution context is unavailable.');
+  }
+  if (args.result_disposition === 'after_turn' && !deps.afterTurnContinuationRuntime) {
+    return failed('After-turn Runtime scheduling authority is unavailable.');
+  }
+  const backgroundPersistence =
+    args.background === true ? deps.backgroundModelInvocationPersistence : undefined;
+  if (
+    backgroundPersistence &&
+    (backgroundPersistence.recoveryIdentityKey !== deps.recoveryIdentityKey ||
+      backgroundPersistence.ownerKey !==
+        backgroundSubagentOwnerKey(deps.threadId!, deps.recoveryIdentityKey))
+  ) {
+    return failed('Background sub-agent Session persistence authority is cross-bound.');
   }
   const baseRole = getRoleConfig(args.subagent_type);
   const role = {
@@ -253,6 +302,11 @@ export async function executePipelineIssuedSubagentStart(
   const boundaryDigest = deps.config.executionBoundary
     ? computeExecutionBoundaryDigest(deps.config.executionBoundary)
     : `sha256:${digestCapabilityValue({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
+  // A background child outlives the outer Task effect, whose reservation is
+  // reconciled as soon as the stable task id is returned. Its model steps
+  // therefore reserve directly against the same active Run budget.
+  const childModelParentReservationId =
+    args.background === true ? undefined : deps.modelInvocationParentReservationId;
   const grant = authority.issueStart({
     parentInvocationId: deps.subagentInvocationIdentity.invocationId,
     parentToolCallId: deps.modelInvocationParentToolCallId,
@@ -289,7 +343,7 @@ export async function executePipelineIssuedSubagentStart(
       executionBoundaryDigest: boundaryDigest,
     },
     resource: {
-      parentReservationId: deps.modelInvocationParentReservationId ?? null,
+      parentReservationId: childModelParentReservationId ?? null,
       budgetDigest: digestCapabilityValue({
         schema: 'kite.subagent-resource-budget.v1',
         budget: stableBudgetCeiling(deps.modelInvocationPersistence.getState().resourceBudget),
@@ -301,6 +355,60 @@ export async function executePipelineIssuedSubagentStart(
       parentToolCallId: deps.modelInvocationParentToolCallId,
     },
   });
+  let backgroundOrigin:
+    | Readonly<{
+        originRunId: string;
+        originTurnId: string;
+        originToolCallId: string;
+        attempt: number;
+      }>
+    | undefined;
+  let backgroundLifecycleState:
+    | Readonly<import('@kite-ai/runtime-host/kernel-adapter').RuntimeState>
+    | undefined;
+  if (args.background === true) {
+    backgroundLifecycleState = deps.subagentLifecyclePersistence!.getState();
+    const originRunId = await deps.afterTurnContinuationRuntime!.resolveOriginRunId(
+      deps.threadId!,
+      backgroundLifecycleState.turn.turnId,
+    );
+    if (!originRunId) {
+      return failed('Background sub-agent origin Run authority is unavailable.');
+    }
+    backgroundOrigin = Object.freeze({
+      originRunId,
+      originTurnId: backgroundLifecycleState.turn.turnId,
+      originToolCallId: deps.modelInvocationParentToolCallId,
+      attempt: deps.subagentInvocationIdentity.attempt,
+    });
+  }
+  let afterTurnReservation: AfterTurnContinuationReservation | undefined;
+  if (args.result_disposition === 'after_turn') {
+    if (!deps.model || !backgroundOrigin || !backgroundLifecycleState) {
+      return failed('After-turn model budget authority is unavailable.');
+    }
+    try {
+      afterTurnReservation = planAfterTurnContinuationReservation({
+        state: backgroundLifecycleState,
+        config: deps.config,
+        model: deps.model,
+        childInvocationId,
+        originRunId: backgroundOrigin.originRunId,
+      });
+    } catch (error) {
+      if (!(error instanceof DescendantResourceAdmissionError)) throw error;
+      return {
+        ...failed(error.message),
+        resourceAdmissionFailure: {
+          reason: error.reason,
+          message: error.message,
+          parentInvocationId: deps.subagentInvocationIdentity.invocationId,
+          parentToolCallId: deps.modelInvocationParentToolCallId,
+          childInvocationId,
+        },
+      };
+    }
+  }
   let driverTerminalObserved = false;
   const forwardDriverEvent: SubAgentEventSink = (event) => {
     if (event.type === 'done' || event.type === 'error') driverTerminalObserved = true;
@@ -333,10 +441,10 @@ export async function executePipelineIssuedSubagentStart(
         model: deps.model,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
-        modelInvocationPersistence: deps.modelInvocationPersistence,
+        modelInvocationPersistence: backgroundPersistence ?? deps.modelInvocationPersistence,
         modelInvocationParentId: deps.modelInvocationParentId,
         modelInvocationParentToolCallId: deps.modelInvocationParentToolCallId,
-        modelInvocationParentReservationId: deps.modelInvocationParentReservationId,
+        modelInvocationParentReservationId: childModelParentReservationId,
         childInvocationId,
         subagentGrantContext: {
           parentInvocationId: deps.subagentInvocationIdentity.invocationId,
@@ -356,13 +464,21 @@ export async function executePipelineIssuedSubagentStart(
   );
   let registrationOwned = true;
   let preparedHandle: SubagentHandle | undefined;
+  let afterTurnReservationCommitted = false;
+  let afterTurnReservationTransferred = false;
   try {
     let dispatchIntentDigest: string;
     try {
-      dispatchIntentDigest = await recordSubagentDispatchIntent(deps, grant, {
-        name: args.name,
-        role: args.subagent_type,
-      });
+      dispatchIntentDigest = await recordSubagentDispatchIntent(
+        deps,
+        grant,
+        {
+          name: args.name,
+          role: args.subagent_type,
+        },
+        afterTurnReservation?.preparationEvents,
+      );
+      afterTurnReservationCommitted = afterTurnReservation !== undefined;
     } catch (error) {
       driver.abandon(grant);
       throw error;
@@ -391,7 +507,10 @@ export async function executePipelineIssuedSubagentStart(
         'Subagent handle-ready acknowledgement failed before Driver dispatch.',
       );
     }
-    const activated = await provider.activate({ handle: started.value, signal: deps.signal });
+    const activated = await provider.activate({
+      handle: started.value,
+      ...(args.background === true ? {} : { signal: deps.signal }),
+    });
     if (!activated.ok) {
       const cleanupConfirmed = await finalizeSubagentCleanup(
         composition,
@@ -409,52 +528,146 @@ export async function executePipelineIssuedSubagentStart(
     }
     driver.abandon(grant);
     registrationOwned = false;
-    const observed = await provider.observe({ handle: started.value, signal: deps.signal });
-    if (!observed.ok) {
-      const cleanupConfirmed = await finalizeSubagentCleanup(
+    const detachedDeps = backgroundPersistence
+      ? {
+          ...deps,
+          modelInvocationPersistence: backgroundPersistence,
+          subagentLifecyclePersistence: backgroundPersistence,
+        }
+      : deps;
+    const observe = () =>
+      observeActivatedSubagent({
         composition,
-        deps,
+        deps: detachedDeps,
         grant,
-        started.value,
+        handle: started.value,
         dispatchIntentDigest,
-      );
-      if (observed.failure.code === 'recovery_required') {
-        await provider.cancel({ handle: started.value, reason: observed.failure.message });
-      }
-      if (observed.failure.code === 'cancelled' && cleanupConfirmed) {
-        if (!driverTerminalObserved) return confirmedProviderFailure(deps, grant, observed.failure);
-        return {
-          ...failed(observed.failure.message),
-          terminalStatus:
-            runtimeAbortCause(deps.signal?.reason) === 'user' ? 'cancelled' : 'interrupted',
-        };
-      }
-      throw new SubagentProviderRecoveryRequiredError(
-        `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
-      );
+        driverTerminalObserved: () => driverTerminalObserved,
+        background: args.background === true,
+        ...(args.background === true ? {} : { signal: deps.signal }),
+      });
+    if (args.background === true) {
+      const backgroundRuntime = deps.backgroundSubagentRuntime!;
+      const origin = backgroundOrigin!;
+      let reservationRelease: Promise<void> | undefined;
+      const releaseTransferredReservation = (): Promise<void> => {
+        if (!afterTurnReservation) return Promise.resolve();
+        reservationRelease ??= releaseAfterTurnReservation(
+          detachedDeps,
+          afterTurnReservation.reservationId,
+        ).catch((error: unknown) => {
+          // A rejected persistence attempt is not a terminal release receipt.
+          // Clear the in-flight deduplication slot so recovery can retry.
+          reservationRelease = undefined;
+          throw error;
+        });
+        return reservationRelease;
+      };
+      backgroundRuntime.adopt({
+        taskId: grant.childInvocationId,
+        ownerKey: backgroundSubagentOwnerKey(deps.threadId!, deps.recoveryIdentityKey),
+        ...origin,
+        observe,
+        cancel: async (reason) => {
+          const cancelled = await provider.cancel({ handle: started.value, reason });
+          if (!cancelled.ok) throw new Error(cancelled.failure.message);
+        },
+        onSettlementFailed: async () => {
+          await releaseTransferredReservation();
+        },
+        ...(afterTurnReservation
+          ? { settlementRecoveryReservationId: afterTurnReservation.reservationId }
+          : {}),
+        onResultPersisted: async (notification) => {
+          if (
+            notification.originRunId !== origin.originRunId ||
+            notification.originTurnId !== origin.originTurnId ||
+            notification.originToolCallId !== origin.originToolCallId ||
+            notification.attempt !== origin.attempt
+          ) {
+            throw new SubagentProviderRecoveryRequiredError(
+              'Background sub-agent completion origin does not match its admitted work root.',
+            );
+          }
+          const afterTurn = afterTurnReservation
+            ? {
+                reservationId: afterTurnReservation.reservationId,
+                admissionRevision: detachedDeps.modelInvocationPersistence!.getState().revision + 1,
+                phase: deps.phase === 'planning' ? ('planning' as const) : ('building' as const),
+                status: notification.status as
+                  | 'completed'
+                  | 'failed'
+                  | 'cancelled'
+                  | 'interrupted'
+                  | 'exhausted'
+                  | 'suspended',
+                cancelRequested: notification.cancelRequested,
+                ...afterTurnContinuationIdentity({
+                  taskId: notification.taskId,
+                  attempt: notification.attempt,
+                  resultRevision: notification.resultArtifact.integrityIdentifier,
+                  originRunId: notification.originRunId,
+                }),
+              }
+            : undefined;
+          const persisted = await detachedDeps.modelInvocationPersistence!.persistEvents([
+            {
+              type: 'subagent.background_result_persisted',
+              taskId: notification.taskId,
+              notificationId: notification.notificationId,
+              artifactIntegrityIdentifier: notification.resultArtifact.integrityIdentifier,
+              shortReport: notification.shortReport,
+              source: notification.source,
+              modelRole: notification.modelRole,
+              originRunId: notification.originRunId,
+              originTurnId: notification.originTurnId,
+              originToolCallId: notification.originToolCallId,
+              attempt: notification.attempt,
+              ...(afterTurn ? { afterTurn } : {}),
+            },
+          ]);
+          if (!persisted) {
+            throw new SubagentProviderRecoveryRequiredError(
+              'Background sub-agent completion notification was not persisted.',
+            );
+          }
+          if (afterTurnReservation && afterTurn) {
+            await deps.afterTurnContinuationRuntime!.deliver({
+              sessionId: deps.threadId!,
+              phase: deps.phase ?? 'building',
+              attempt: notification.attempt,
+              admissionRevision: afterTurn.admissionRevision,
+              reservation: afterTurnReservation,
+              notification,
+              persistEvents: async (events) => {
+                if (
+                  events.length === 1 &&
+                  events[0]?.type === 'resource_budget.released' &&
+                  events[0].reservationId === afterTurnReservation.reservationId
+                ) {
+                  await releaseTransferredReservation();
+                  return true;
+                }
+                return detachedDeps.subagentLifecyclePersistence!.persistEvents([...events]);
+              },
+            });
+          }
+        },
+      });
+      afterTurnReservationTransferred = afterTurnReservation !== undefined;
+      return {
+        ok: true,
+        summary: `Background sub-agent accepted as ${grant.childInvocationId}.`,
+        backgroundTaskId: grant.childInvocationId,
+        toolCallCount: 0,
+        durationMs: 0,
+      };
     }
-    if (
-      !(await recordSubagentObservation(deps, grant, dispatchIntentDigest, observed.value.status))
-    ) {
-      throw new SubagentProviderRecoveryRequiredError(
-        'Subagent observation acknowledgement failed after Driver dispatch.',
-      );
-    }
-    if (
-      !(await finalizeSubagentCleanup(
-        composition,
-        deps,
-        grant,
-        started.value,
-        dispatchIntentDigest,
-      ))
-    ) {
-      throw new SubagentProviderRecoveryRequiredError(
-        'Subagent cleanup acknowledgement requires reconciliation.',
-      );
-    }
-    return subagentResultFromObservation(observed.value, started.value, deps.recoveryIdentityKey);
+    return observe();
   } finally {
+    if (afterTurnReservationCommitted && !afterTurnReservationTransferred && afterTurnReservation) {
+      await releaseAfterTurnReservation(deps, afterTurnReservation.reservationId);
+    }
     if (registrationOwned) {
       driver.abandon(grant);
       if (preparedHandle) {
@@ -465,6 +678,66 @@ export async function executePipelineIssuedSubagentStart(
       }
     }
   }
+}
+
+async function observeActivatedSubagent(input: {
+  readonly composition: GovernedSubagentComposition;
+  readonly deps: TaskToolDeps;
+  readonly grant: Readonly<SubagentDelegationGrant>;
+  readonly handle: SubagentHandle;
+  readonly dispatchIntentDigest: string;
+  readonly driverTerminalObserved: () => boolean;
+  readonly background: boolean;
+  readonly signal?: AbortSignal;
+}): Promise<SubAgentResult> {
+  const { composition, deps, grant, handle, dispatchIntentDigest } = input;
+  const observed = await composition.provider.observe({
+    handle,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (!observed.ok) {
+    const cleanupConfirmed = await finalizeSubagentCleanup(
+      composition,
+      deps,
+      grant,
+      handle,
+      dispatchIntentDigest,
+    );
+    if (observed.failure.code === 'recovery_required') {
+      await composition.provider.cancel({ handle, reason: observed.failure.message });
+    }
+    if (observed.failure.code === 'cancelled' && cleanupConfirmed) {
+      if (!input.driverTerminalObserved()) {
+        if (input.background) {
+          return { ...failed(observed.failure.message), terminalStatus: 'cancelled' };
+        }
+        return confirmedProviderFailure(deps, grant, observed.failure);
+      }
+      return {
+        ...failed(observed.failure.message),
+        terminalStatus:
+          input.background || runtimeAbortCause(input.signal?.reason) === 'user'
+            ? 'cancelled'
+            : 'interrupted',
+      };
+    }
+    throw new SubagentProviderRecoveryRequiredError(
+      `${observed.failure.code}: Subagent Provider outcome requires reconciliation.`,
+    );
+  }
+  if (
+    !(await recordSubagentObservation(deps, grant, dispatchIntentDigest, observed.value.status))
+  ) {
+    throw new SubagentProviderRecoveryRequiredError(
+      'Subagent observation acknowledgement failed after Driver dispatch.',
+    );
+  }
+  if (!(await finalizeSubagentCleanup(composition, deps, grant, handle, dispatchIntentDigest))) {
+    throw new SubagentProviderRecoveryRequiredError(
+      'Subagent cleanup acknowledgement requires reconciliation.',
+    );
+  }
+  return subagentResultFromObservation(observed.value, handle, deps.recoveryIdentityKey);
 }
 
 export async function resumeTaskSubAgent(
@@ -796,6 +1069,7 @@ async function recordSubagentDispatchIntent(
     | import('@kite-ai/runtime-spi').SubagentResumeGrant
   >,
   creating?: { readonly name: string; readonly role: 'explore' | 'plan' | 'code' | 'review' },
+  preparationEvents: readonly import('@kite-ai/runtime-host').StateRuntimeEvent[] = [],
 ): Promise<string> {
   if (!deps.subagentLifecyclePersistence) {
     throw new SubagentProviderRecoveryRequiredError(
@@ -805,6 +1079,7 @@ async function recordSubagentDispatchIntent(
   const dispatchIntentDigest = subagentDispatchIntentDigest(grant);
   const recordedAt = new Date().toISOString();
   const ok = await deps.subagentLifecyclePersistence.persistEvents([
+    ...preparationEvents,
     {
       type: 'capability.subagent_dispatch_intent_recorded',
       invocationId: grant.parentInvocationId,
@@ -843,6 +1118,20 @@ async function recordSubagentDispatchIntent(
     );
   }
   return dispatchIntentDigest;
+}
+
+async function releaseAfterTurnReservation(
+  deps: TaskToolDeps,
+  reservationId: string,
+): Promise<void> {
+  const persisted = await deps.subagentLifecyclePersistence?.persistEvents([
+    { type: 'resource_budget.released', reservationId },
+  ]);
+  if (persisted !== true) {
+    throw new SubagentProviderRecoveryRequiredError(
+      'After-turn model reservation could not be released after local dispatch failure.',
+    );
+  }
 }
 
 function confirmedProviderFailure(

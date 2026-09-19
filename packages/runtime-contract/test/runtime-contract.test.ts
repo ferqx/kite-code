@@ -136,6 +136,41 @@ describe('runtime contract package boundary', () => {
     expect(isRuntimeCommand({ ...deleteSession, snapshot: {} })).toBe(false);
   });
 
+  test('accepts a precise steer target without a volatile Session revision', () => {
+    const command: RuntimeCommand = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'steer-1',
+      type: 'steer_turn',
+      sessionId: 'session-1',
+      expectedRunId: 'run-1',
+      expectedTurnId: 'turn-2',
+      input: 'Please include the newly discovered failure case.',
+    };
+    expect(isRuntimeCommand(command)).toBe(true);
+    expect(isRuntimeCommand({ ...command, expectedRevision: 7 })).toBe(false);
+    expect(isRuntimeCommand({ ...command, expectedRunId: '' })).toBe(false);
+    expect(isRuntimeCommand({ ...command, expectedTurnId: 'turn\n2' })).toBe(false);
+    expect(isRuntimeCommand({ ...command, input: '' })).toBe(false);
+  });
+
+  test('fences background stop with independent Session and execution revisions', () => {
+    const command: RuntimeCommand = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'stop-shell-1',
+      type: 'stop_background_execution',
+      sessionId: 'session-1',
+      expectedRevision: 42,
+      executionId: 'shell-1',
+      executionKind: 'shell',
+      expectedOwnerGeneration: 'shell-owner-3',
+      expectedExecutionRevision: 7,
+    };
+    expect(isRuntimeCommand(command)).toBe(true);
+    expect(isRuntimeCommand({ ...command, expectedExecutionRevision: -1 })).toBe(false);
+    const { expectedExecutionRevision: _, ...missingExecutionRevision } = command;
+    expect(isRuntimeCommand(missingExecutionRevision)).toBe(false);
+  });
+
   test('requires complete State 27 interaction identity to settle an interaction', () => {
     const interaction = {
       kind: 'approval' as const,
@@ -896,6 +931,14 @@ describe('runtime contract package boundary', () => {
         type: 'get_run',
         sessionId: 'session-1',
         runId: 'run-1',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeQuery({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_background_execution',
+        sessionId: 'session-1',
+        executionId: 'shell-1',
       }),
     ).toBe(true);
 

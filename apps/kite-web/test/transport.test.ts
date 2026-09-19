@@ -11,7 +11,7 @@ function client(): AgentApiBrowserClient {
       api_version: 'v1',
       server_version: 'service-test',
       build_id: 'build-test',
-      capabilities: ['history', 'sessions', 'workspaces'],
+      capabilities: ['background_executions', 'history', 'sessions', 'workspaces'],
     })),
     listWorkspaces: vi.fn(async () => ({
       schema: 'kite.agent-api.workspace-page.v1',
@@ -52,6 +52,25 @@ function client(): AgentApiBrowserClient {
     getSession: vi.fn(async () => {
       throw new Error('unused');
     }),
+    listBackgroundExecutions: vi.fn(async () => ({
+      schema: 'kite.agent-api.background-execution-page.v1',
+      session_id: 'session-one',
+      session_revision: 7,
+      aggregate_generation: 'aggregate-1',
+      watermark: 4,
+      stale: false,
+      items: [
+        {
+          schema: 'kite.agent-api.background-execution.v1',
+          execution_id: 'task-1',
+          owner_generation: 'owner-1',
+          revision: 3,
+          kind: 'subagent',
+          status: 'completed',
+          cleanup_confirmed: true,
+        },
+      ],
+    })),
     listHistory: vi.fn(async () => ({
       schema: 'kite.agent-api.history-page.v1',
       session_id: 'session-one',
@@ -327,6 +346,22 @@ describe('Web REST transport', () => {
     await transport.disconnect();
     expect(api.revokeBrowser).toHaveBeenCalledOnce();
   });
+});
+
+it('loads typed background summaries through a read-only GET', async () => {
+  const api = client();
+  const transport = createWebRestTransport({
+    client: api,
+  });
+  await transport.connect();
+  await expect(transport.loadBackgroundExecutions?.('session-one')).resolves.toMatchObject({
+    sessionId: 'session-one',
+    stale: false,
+    executions: [
+      { executionId: 'task-1', kind: 'subagent', status: 'completed', cleanupConfirmed: true },
+    ],
+  });
+  expect(api.listBackgroundExecutions).toHaveBeenCalledWith('session-one');
 });
 
 function toolLifecycleItem(

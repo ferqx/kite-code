@@ -44,6 +44,7 @@ export interface BuiltinSandboxPreparationInput {
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;
   readonly timeoutMs?: number;
+  readonly executionMode?: 'finite' | 'service';
 }
 
 export interface BuiltinSandboxPreparationResult {
@@ -114,7 +115,11 @@ export function createBuiltinSandboxPreparation(
       ...limits,
       maxProcessTreeTasks: input.maxProcessTreeTasks ?? null,
     },
-    timeoutMs: resolveShellTimeoutMs(input.timeoutMs),
+    executionMode: input.executionMode ?? 'finite',
+    timeoutMs:
+      input.executionMode === 'service' && input.timeoutMs === undefined
+        ? null
+        : resolveShellTimeoutMs(input.timeoutMs),
     cancellationCorrelation: input.identity.cancellationCorrelation,
   });
   return Object.freeze({ canonicalWorkspace, preparation });

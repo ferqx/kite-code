@@ -11,6 +11,7 @@ import type {
 } from '@kite-ai/agent-api-contract';
 import { mergeMessages } from '../presentation/merge-messages';
 import type {
+  WebBackgroundSnapshot,
   WebCheckpointSnapshot,
   WebDirectorySnapshot,
   WebHistorySnapshot,
@@ -60,6 +61,7 @@ export interface WebRestTransport {
   loadLogs(sessionId: string, afterSequence?: number): Promise<WebSessionLogSnapshot>;
   loadModelContext(sessionId: string, invocationId: string): Promise<WebModelContextSnapshot>;
   loadCheckpoints(sessionId: string): Promise<WebCheckpointSnapshot>;
+  loadBackgroundExecutions?(sessionId: string): Promise<WebBackgroundSnapshot>;
   disconnect(): Promise<void>;
 }
 
@@ -99,7 +101,12 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       if (connected) return { generation };
       try {
         const info = await readWithBrowserSessionRecovery(() => client.getServerInfo(), true);
-        for (const required of ['workspaces', 'sessions', 'history'] as const) {
+        for (const required of [
+          'background_executions',
+          'workspaces',
+          'sessions',
+          'history',
+        ] as const) {
           if (!info.capabilities.includes(required)) {
             throw new WebRestTransportError('protocol_error');
           }
@@ -270,6 +277,28 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
         throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error, 'history_unavailable');
+      }
+    },
+    async loadBackgroundExecutions(sessionId: string) {
+      requireConnected(connected);
+      try {
+        const page = await readWithBrowserSessionRecovery(() =>
+          client.listBackgroundExecutions(sessionId),
+        );
+        if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+        return {
+          sessionId,
+          stale: page.stale,
+          executions: page.items.map((entry) => ({
+            executionId: entry.execution_id,
+            kind: entry.kind,
+            status: entry.status,
+            cleanupConfirmed: entry.cleanup_confirmed,
+            ...(entry.cursor === undefined ? {} : { cursor: entry.cursor }),
+          })),
+        };
+      } catch (error) {
+        throw normalizeError(error, 'session_unavailable');
       }
     },
     async disconnect() {

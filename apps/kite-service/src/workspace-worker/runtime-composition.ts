@@ -316,7 +316,7 @@ export async function createWorkspaceWorkerRuntimeComposition(
         }
         return applicationOwner.openAgentApiReadContext();
       },
-      capabilities: ['checkpoints', 'history', 'sessions'],
+      capabilities: ['background_executions', 'checkpoints', 'history', 'sessions'],
     });
     dataCarrier = createKiteServiceCarrier({
       application: wrappedApplication,

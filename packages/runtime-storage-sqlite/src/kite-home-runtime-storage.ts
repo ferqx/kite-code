@@ -715,6 +715,14 @@ function transactionalArtifactStore(
       assertOpen();
       return store.readSubagentTask(ref);
     },
+    findSubagentTaskResult(ownerKey, taskId) {
+      assertOpen();
+      return store.findSubagentTaskResult(ownerKey, taskId);
+    },
+    listSubagentTaskResults(ownerKey) {
+      assertOpen();
+      return store.listSubagentTaskResults(ownerKey);
+    },
     collectSubagentTaskGarbage(input) {
       assertOpen();
       return writer.run(() => store.collectSubagentTaskGarbage(input));

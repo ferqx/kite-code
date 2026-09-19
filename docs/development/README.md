@@ -1,5 +1,7 @@
 # 开发入口
 
+运行中引导、受管后台 Shell/service 与后台子 Agent 的产品行为见[执行与结果](../handbook/features/execution.md)；命令、投影、恢复与客户端合并语义分别由 Runtime Contract、Protocol、Host、Client 和 Service 的 owner 文档维护。
+
 这里提供两条路径：学习项目从架构逐层深入；完成任务从症状或功能直接进入负责模块，只在发现跨层影响时扩读。产品预期见[产品手册](../handbook/README.md)。
 
 ## 产品与架构全景

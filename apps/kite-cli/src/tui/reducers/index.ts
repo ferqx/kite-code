@@ -81,6 +81,7 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
         id: state.nextBlockId,
         kind: 'user',
         content: action.text,
+        localPromptId: action.localPromptId,
         presentationState: 'live',
         pendingEcho: true,
       }),
@@ -130,7 +131,9 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
           block.kind === 'user' &&
           block.pendingEcho === true &&
           block.messageId === undefined &&
-          block.content === action.text,
+          (action.localPromptId !== undefined
+            ? block.localPromptId === action.localPromptId
+            : block.content === action.text),
       );
     if (pending?.kind !== 'user') return state;
     return replaceBlockById(state, pending.id, { ...pending, messageId: action.messageId });
@@ -145,18 +148,26 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
     const hadPendingPrompt = state.turns.some((turn) =>
       turn.blocks.some(
         (block) =>
-          block.kind === 'user' && block.pendingEcho === true && block.content === action.text,
+          block.kind === 'user' &&
+          block.pendingEcho === true &&
+          (action.localPromptId !== undefined
+            ? block.localPromptId === action.localPromptId
+            : block.content === action.text),
       ),
     );
     const turns = state.turns
       .map((turn) => ({
         blocks: turn.blocks.filter(
           (block) =>
-            block.kind !== 'user' || block.pendingEcho !== true || block.content !== action.text,
+            block.kind !== 'user' ||
+            block.pendingEcho !== true ||
+            (action.localPromptId !== undefined
+              ? block.localPromptId !== action.localPromptId
+              : block.content !== action.text),
         ),
       }))
       .filter((turn) => turn.blocks.length > 0);
-    return hadPendingPrompt
+    return hadPendingPrompt && action.failureKind !== 'steer'
       ? {
           ...state,
           turns,
@@ -165,6 +176,50 @@ function reduceEvent(state: TuiState, action: Action): TuiState {
           exited: true,
         }
       : { ...state, turns };
+  }
+  if (action.type === 'DROP_SESSION_LOCAL_USER_PROMPT') {
+    if (state.activeSessionId === action.sessionId) {
+      return reduceEvent(state, {
+        type: 'DROP_LOCAL_USER_PROMPT',
+        text: action.text,
+        localPromptId: action.localPromptId,
+        failureKind: action.failureKind,
+      });
+    }
+    return {
+      ...state,
+      sessions: state.sessions.map((session) => {
+        if (session.threadId !== action.sessionId) return session;
+        const hadPendingPrompt = session.turns.some((turn) =>
+          turn.blocks.some(
+            (block) =>
+              block.kind === 'user' &&
+              block.pendingEcho === true &&
+              (action.localPromptId !== undefined
+                ? block.localPromptId === action.localPromptId
+                : block.content === action.text),
+          ),
+        );
+        return {
+          ...session,
+          turns: session.turns
+            .map((turn) => ({
+              blocks: turn.blocks.filter(
+                (block) =>
+                  block.kind !== 'user' ||
+                  block.pendingEcho !== true ||
+                  (action.localPromptId !== undefined
+                    ? block.localPromptId !== action.localPromptId
+                    : block.content !== action.text),
+              ),
+            }))
+            .filter((turn) => turn.blocks.length > 0),
+          ...(hadPendingPrompt && action.failureKind !== 'steer'
+            ? { runPromptPresented: false }
+            : {}),
+        };
+      }),
+    };
   }
 
   // ESCAPE 需要链式分发：uiReducer 关面板 → agentReducer 处理中断

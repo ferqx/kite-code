@@ -269,6 +269,141 @@ describe('closed RuntimeClientEvent reducer', () => {
     expect(state.runPromptPresented).toBe(false);
   });
 
+  test('removes a rejected steering prompt from its original background session', () => {
+    const initial = createInitialState();
+    const pendingTurn = eventReducer(
+      { ...initial, activeSessionId: 'session-one' },
+      { type: 'LOCAL_USER_PROMPT', text: 'Rejected guidance' },
+    ).turns;
+    const state: TuiState = {
+      ...initial,
+      activeSessionId: 'session-two',
+      sessions: [
+        {
+          threadId: 'session-one',
+          name: 'One',
+          workspace: '/one',
+          active: false,
+          pendingInterrupt: false,
+          interrupt: null,
+          plan: null,
+          status: initial.status,
+          turns: pendingTurn,
+          runPromptPresented: true,
+        },
+      ],
+    };
+
+    const next = eventReducer(state, {
+      type: 'DROP_SESSION_LOCAL_USER_PROMPT',
+      sessionId: 'session-one',
+      text: 'Rejected guidance',
+      failureKind: 'steer',
+    });
+
+    expect(next.activeSessionId).toBe('session-two');
+    expect(next.sessions[0]?.turns).toEqual([]);
+    expect(next.sessions[0]?.runPromptPresented).toBe(true);
+  });
+
+  test('a failed start admission drops the original background Session prompt', () => {
+    const initial = createInitialState();
+    const admitted = eventReducer(
+      { ...initial, activeSessionId: 'session-one' },
+      {
+        type: 'LOCAL_USER_PROMPT',
+        text: 'Start this task',
+        localPromptId: 'start-one',
+      },
+    );
+    const state: TuiState = {
+      ...initial,
+      activeSessionId: 'session-two',
+      sessions: [
+        {
+          threadId: 'session-one',
+          name: 'One',
+          workspace: '/one',
+          active: false,
+          pendingInterrupt: false,
+          interrupt: null,
+          plan: null,
+          status: initial.status,
+          turns: admitted.turns,
+          runPromptPresented: true,
+        },
+      ],
+    };
+
+    const next = eventReducer(state, {
+      type: 'DROP_SESSION_LOCAL_USER_PROMPT',
+      sessionId: 'session-one',
+      text: 'Start this task',
+      localPromptId: 'start-one',
+      failureKind: 'start',
+    });
+
+    expect(next.sessions[0]?.turns).toEqual([]);
+    expect(next.sessions[0]?.runPromptPresented).toBe(false);
+  });
+
+  test('a failed steer removes only its prompt without ending the active Run presentation', () => {
+    let state = eventReducer(createInitialState(), { type: 'SET_RUNNING' });
+    state = eventReducer(state, {
+      type: 'LOCAL_USER_PROMPT',
+      text: 'Rejected steer',
+      localPromptId: 'steer-one',
+    });
+    const runStartTime = state.runStartTime;
+
+    state = eventReducer(state, {
+      type: 'DROP_LOCAL_USER_PROMPT',
+      text: 'Rejected steer',
+      localPromptId: 'steer-one',
+      failureKind: 'steer',
+    });
+
+    expect(state.turns).toEqual([]);
+    expect(state.exited).toBe(false);
+    expect(state.runStartTime).toBe(runStartTime);
+    expect(isTuiRunActive(state)).toBe(true);
+  });
+
+  test('settles identical optimistic prompts independently by local identity', () => {
+    let state = createInitialState();
+    state = eventReducer(state, {
+      type: 'LOCAL_USER_PROMPT',
+      text: 'continue',
+      localPromptId: 'local-one',
+    });
+    state = eventReducer(state, {
+      type: 'LOCAL_USER_PROMPT',
+      text: 'continue',
+      localPromptId: 'local-two',
+    });
+    state = eventReducer(state, {
+      type: 'ACCEPT_LOCAL_PROMPT',
+      text: 'continue',
+      localPromptId: 'local-two',
+      messageId: 'message-two',
+    });
+    state = eventReducer(state, {
+      type: 'DROP_LOCAL_USER_PROMPT',
+      text: 'continue',
+      localPromptId: 'local-one',
+    });
+
+    const users = state.turns
+      .flatMap((turn) => turn.blocks)
+      .filter((block) => block.kind === 'user');
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({
+      content: 'continue',
+      localPromptId: 'local-two',
+      messageId: 'message-two',
+    });
+  });
+
   test('renders a durable user prompt once by message identity across replay', () => {
     const first = {
       type: 'user.message' as const,

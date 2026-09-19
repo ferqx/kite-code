@@ -86,10 +86,16 @@ export {
 } from './host/command-receipt';
 export {
   parseRuntimeStoredCommandResource,
+  parseRuntimeStoredInputResource,
   projectRuntimeStoredRun,
   runtimeStartMessageId,
 } from './host/run-projection';
-export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
+export type {
+  RuntimeHost,
+  RuntimeHostAfterTurnWake,
+  RuntimeHostAfterTurnWakeResult,
+  RuntimeHostCoordinatorPort,
+} from './host/runtime-host';
 
 export type {
   RuntimeHostExecutionServices,

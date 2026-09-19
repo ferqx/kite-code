@@ -57,7 +57,14 @@ type BuiltinModelToolName = KnownToolName;
 
 type PendingShellRequest = PendingBuiltinToolRequestBase & {
   readonly name: 'shell_execute';
-  readonly args: { command: string; description?: string; timeout_ms?: number };
+  readonly args: {
+    command: string;
+    description?: string;
+    timeout_ms?: number;
+    yield_ms?: number;
+    mode?: 'finite' | 'service';
+    result_disposition?: 'required' | 'after_turn';
+  };
 };
 
 type PendingTaskRequest = PendingBuiltinToolRequestBase & {
@@ -72,6 +79,8 @@ type PendingTaskRequest = PendingBuiltinToolRequestBase & {
         name: string;
         subagent_type: 'explore' | 'plan' | 'code' | 'review';
         taskArtifact: import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact;
+        background?: boolean;
+        result_disposition?: 'required' | 'after_turn';
       };
 };
 

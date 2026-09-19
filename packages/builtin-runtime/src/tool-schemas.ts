@@ -309,6 +309,13 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
       .describe(
         'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
       ),
+    background: z.boolean().optional().describe('Return after the child has been admitted.'),
+    result_disposition: z
+      .enum(['required', 'after_turn'])
+      .optional()
+      .describe(
+        'Result delivery obligation. Defaults to required; after_turn requires separate Runtime authorization and budget reservation.',
+      ),
   })
   .strict();
 
@@ -329,6 +336,8 @@ export const BUILTIN_TASK_PRIVATE_SCHEMA_ = z
         byteLength: z.number().int().positive(),
       })
       .strict(),
+    background: z.boolean().optional(),
+    result_disposition: z.enum(['required', 'after_turn']).optional(),
   })
   .strict();
 
@@ -336,6 +345,24 @@ export const BUILTIN_TASK_RUNTIME_SCHEMA_ = z.union([
   BUILTIN_TASK_PUBLIC_SCHEMA_,
   BUILTIN_TASK_PRIVATE_SCHEMA_,
 ]);
+
+const BUILTIN_TASK_ID_SCHEMA_ = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+
+export const BUILTIN_TASK_READ_SCHEMA_ = z
+  .object({
+    task_id: BUILTIN_TASK_ID_SCHEMA_.describe('Stable background task identity returned by task'),
+  })
+  .strict();
+
+export const BUILTIN_TASK_CANCEL_SCHEMA_ = z
+  .object({
+    task_id: BUILTIN_TASK_ID_SCHEMA_.describe('Stable background task identity returned by task'),
+  })
+  .strict();
 
 export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
   command: z.string().describe('Shell command to execute in the workspace'),
@@ -351,6 +378,36 @@ export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
     .describe(
       'Maximum runtime in milliseconds. Commands default to 600000ms when omitted; set a shorter limit for a TUI, dev server, watcher, or other long-running process, or a longer limit for an unusually slow finite command.',
     ),
+  yield_ms: z
+    .number()
+    .int()
+    .min(0)
+    .max(30_000)
+    .optional()
+    .describe('Return a managed shell handle if the command is still running after this wait.'),
+  mode: z
+    .enum(['finite', 'service'])
+    .optional()
+    .describe('Use service only for a deliberately long-lived process.'),
+  result_disposition: z
+    .enum(['required', 'after_turn'])
+    .optional()
+    .describe('Defaults to required; after_turn requires explicit Runtime authorization.'),
+});
+
+export const BUILTIN_SHELL_READ_SCHEMA_ = z
+  .object({
+    shell_id: z.string().min(4).max(128),
+    cursor: z.number().int().min(0).optional(),
+    wait_ms: z.number().int().min(0).max(30_000).optional(),
+    wait_until: z.enum(['terminal']).optional(),
+  })
+  .refine((value) => value.wait_ms === undefined || value.wait_until === undefined, {
+    message: 'wait_ms and wait_until are mutually exclusive',
+  });
+
+export const BUILTIN_SHELL_STOP_SCHEMA_ = z.object({
+  shell_id: z.string().min(4).max(128),
 });
 
 export const BUILTIN_TOOL_SEARCH_SCHEMA_ = z.object({
@@ -379,7 +436,11 @@ export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
   'builtin:update_plan': BUILTIN_UPDATE_PLAN_SCHEMA_,
   'builtin:write_plan': BUILTIN_WRITE_PLAN_SCHEMA_,
   'builtin:task': BUILTIN_TASK_RUNTIME_SCHEMA_,
+  'builtin:task_read': BUILTIN_TASK_READ_SCHEMA_,
+  'builtin:task_cancel': BUILTIN_TASK_CANCEL_SCHEMA_,
   'builtin:shell_execute': BUILTIN_SHELL_EXECUTE_SCHEMA_,
+  'builtin:shell_read': BUILTIN_SHELL_READ_SCHEMA_,
+  'builtin:shell_stop': BUILTIN_SHELL_STOP_SCHEMA_,
   'builtin:tool_search': BUILTIN_TOOL_SEARCH_SCHEMA_,
   'subagent:start': internalSchema,
   'subagent:resume': internalSchema,

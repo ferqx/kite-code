@@ -20,6 +20,9 @@ export function projectEventWithIdentity(
   event: RuntimeClientEvent,
   identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
+  if (event.type === 'model.response_superseded') {
+    return messages.filter((message) => message.id !== `model:${event.requestId}`);
+  }
   if (event.type === 'turn.terminal' || event.type === 'run.terminal') {
     const turnId = event.type === 'turn.terminal' ? event.turnId : (identity.turnId ?? event.runId);
     let finalReplyIndex = -1;

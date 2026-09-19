@@ -196,7 +196,10 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
  */
 export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecutor {
   return async function executeBuiltinShell(input: ShellInput): Promise<ShellResult> {
-    const timeoutMs = resolveShellTimeoutMs(input.timeoutMs);
+    const timeoutMs =
+      input.mode === 'service' && input.timeoutMs === undefined
+        ? undefined
+        : resolveShellTimeoutMs(input.timeoutMs);
     let timedOut = false;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -244,7 +247,7 @@ export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecuto
           : new Error('No Bash, cmd, PowerShell, or POSIX shell could be started.');
       }
 
-      timeoutId = setTimeout(() => terminate('timeout'), timeoutMs);
+      if (timeoutMs !== undefined) timeoutId = setTimeout(() => terminate('timeout'), timeoutMs);
       input.signal?.addEventListener('abort', cancel, { once: true });
       if (input.signal?.aborted) cancel();
 
@@ -272,7 +275,7 @@ export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecuto
         exitCode: timedOut ? 124 : cancelled ? 130 : exitCode,
         stdout: normalizeMsys2PathsInText(stdout),
         stderr: timedOut
-          ? appendTimeoutMessage(cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)), timeoutMs)
+          ? appendTimeoutMessage(cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)), timeoutMs!)
           : cancelled
             ? appendTerminalMessage(
                 cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
@@ -302,7 +305,7 @@ export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecuto
         exitCode: timedOut ? 124 : cancelled || isAbort ? 130 : -1,
         stdout: '',
         stderr: timedOut
-          ? timeoutMessage(timeoutMs)
+          ? timeoutMessage(timeoutMs!)
           : cancelled || isAbort
             ? 'Command cancelled by user.'
             : error instanceof Error

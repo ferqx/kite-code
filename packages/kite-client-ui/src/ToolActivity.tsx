@@ -56,6 +56,61 @@ function toolTitle(message: Message): string {
   );
 }
 
+type ShellSnapshot = {
+  readonly shellId?: string;
+  readonly mode?: 'finite' | 'service';
+  readonly status?: 'running' | 'exited';
+  readonly cursor?: number;
+};
+
+function shellSnapshot(message: Message): ShellSnapshot | undefined {
+  const shellTool =
+    message.toolName === 'shell_execute' ||
+    message.title === 'shell_read' ||
+    message.title === 'shell_stop';
+  if (!shellTool) return undefined;
+  const fromArguments = message.arguments ?? {};
+  let parsed: Record<string, unknown> | undefined;
+  for (const candidate of [message.toolResult?.stdout, message.text]) {
+    if (!candidate?.trim().startsWith('{')) continue;
+    try {
+      const value: unknown = JSON.parse(candidate);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        parsed = value as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      // Ordinary shell output is not required to be JSON.
+    }
+  }
+  const shellId =
+    typeof parsed?.shellId === 'string'
+      ? parsed.shellId
+      : typeof parsed?.shell_id === 'string'
+        ? parsed.shell_id
+        : typeof fromArguments.shell_id === 'string'
+          ? fromArguments.shell_id
+          : undefined;
+  const mode =
+    parsed?.mode === 'service' || fromArguments.mode === 'service'
+      ? ('service' as const)
+      : parsed?.mode === 'finite' || fromArguments.mode === 'finite'
+        ? ('finite' as const)
+        : undefined;
+  const status =
+    parsed?.status === 'running' || parsed?.status === 'exited' ? parsed.status : undefined;
+  const cursor = typeof parsed?.cursor === 'number' ? parsed.cursor : undefined;
+  if (!shellId && !mode && !status) return undefined;
+  return { shellId, mode, status, cursor };
+}
+
+function shellSnapshotLabel(snapshot: ShellSnapshot): string {
+  const kind = snapshot.mode === 'service' ? '长期服务' : '后台 Shell';
+  const state =
+    snapshot.status === 'running' ? '运行中' : snapshot.status === 'exited' ? '已退出' : '已受管';
+  return `${kind} · ${state}`;
+}
+
 function toolTarget(message: Message): string | undefined {
   const argument = (name: string) =>
     typeof message.arguments?.[name] === 'string' ? message.arguments[name] : undefined;
@@ -95,7 +150,12 @@ function toolTarget(message: Message): string | undefined {
     case 'skill':
       return argument('skill_id') ?? argument('path') ?? argument('activation_id');
     case 'task':
-      return argument('name') ?? argument('subagent_type');
+      return [
+        argument('name') ?? argument('subagent_type'),
+        argument('task_id') && `task_id ${argument('task_id')}`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
     default:
       return undefined;
   }
@@ -401,6 +461,7 @@ export function ToolActivity({
   const askMultiple = !!ask && ask.questions.length > 1;
   const grouped = messages.length > 1;
   const shell = !grouped && message.toolName === 'shell_execute';
+  const managedShell = !grouped ? shellSnapshot(message) : undefined;
   const read =
     !grouped &&
     ['read_file', 'search_content', 'search_files', 'glob', 'read_mcp_resource'].includes(
@@ -494,6 +555,13 @@ export function ToolActivity({
           role="status"
         >
           {status}
+        </span>
+      )}
+      {managedShell && (
+        <span className="managed-shell-summary" role="status">
+          {shellSnapshotLabel(managedShell)}
+          {managedShell.shellId && <code>{managedShell.shellId}</code>}
+          {managedShell.cursor !== undefined && <span>日志游标 {managedShell.cursor}</span>}
         </span>
       )}
       {!childProcess &&

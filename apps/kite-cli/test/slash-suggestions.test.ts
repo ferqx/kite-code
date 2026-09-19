@@ -24,6 +24,7 @@ describe('slash command suggestions', () => {
       'export',
       'context',
       'status',
+      'background',
       'clear',
       'help',
       'exit',

@@ -26,6 +26,8 @@ export function hasPendingSubagentProviderRecovery(state: Readonly<RuntimeState>
 /** App restore adapter for the Builtin-owned Subagent Provider lifecycle. */
 export async function reconcilePendingSubagentProvidersAfterCrash(input: {
   readonly composition: GovernedSubagentComposition;
+  /** Same-process background ownership proves this handle is live, not crash residue. */
+  readonly isLiveBackgroundTask?: (taskId: string) => boolean;
   /**
    * Same-process user cancellation already terminalizes the capability as a
    * waived failure. In that case recovery owns only Provider cleanup and must
@@ -40,6 +42,7 @@ export async function reconcilePendingSubagentProvidersAfterCrash(input: {
   for (const initial of Object.values(input.persistence.getState().capabilities.invocations)) {
     const lifecycle = initial.subagentProviderLifecycle;
     if (!lifecycle || lifecycle.status === 'cleanup_completed') continue;
+    if (input.isLiveBackgroundTask?.(lifecycle.childInvocationId) === true) continue;
     let cleanupAttempt = lifecycle.cleanupAttempt ?? 0;
     if (lifecycle.status !== 'cleanup_pending' || lifecycle.cleanupCompletedAt !== undefined) {
       cleanupAttempt += 1;

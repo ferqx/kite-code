@@ -18,6 +18,115 @@ function initialState(): RuntimeState {
 }
 
 describe('State runner effect acknowledgements', () => {
+  test.each([
+    'finite_shell',
+    'required_child',
+  ] as const)('does not advance the model for a no-progress required %s and resumes in the same turn after terminal read', async (kind) => {
+    let state = initialState();
+    const turnId = state.turn.turnId;
+    const startId = kind === 'finite_shell' ? 'shell-start' : 'child-start';
+    state = {
+      ...state,
+      tools: {
+        ...state.tools,
+        calls: {
+          ...state.tools.calls,
+          [startId]: {
+            toolCallId: startId,
+            modelMessageId: 'model-start',
+            name: kind === 'finite_shell' ? 'shell_execute' : 'task',
+            args:
+              kind === 'finite_shell'
+                ? { command: 'sleep 1', yield_ms: 0 }
+                : {
+                    task: 'inspect',
+                    subagent_type: 'explore',
+                    background: true,
+                    result_disposition: 'required',
+                  },
+            status: 'succeeded',
+            createdAtTurnId: turnId,
+            result: {
+              ok: true,
+              summary: 'running',
+              resultMeta:
+                kind === 'finite_shell'
+                  ? { shellId: 'sh-required', shellStatus: 'running' }
+                  : {
+                      taskId: 'child-required',
+                      taskStatus: 'running',
+                      taskDisposition: 'required',
+                    },
+            },
+          },
+        },
+      },
+    };
+    let phase: 'wait' | 'model' | 'stop' = 'wait';
+    let modelCalls = 0;
+    const waitingEffect = { type: 'run_tools' as const, toolCallIds: [startId] };
+    const kernel: RuntimeStateSessionPort = {
+      getState: () => state,
+      processEvent: () => ({ status: 'applied', eventId: 'unused' }),
+      processEventBatch: () => [],
+      getLastAppliedEvents: () => [],
+      selectPendingEffects: () =>
+        phase === 'wait'
+          ? [waitingEffect]
+          : phase === 'model'
+            ? [{ type: 'call_model' }]
+            : [{ type: 'stop' }],
+      acquireRunner: () => `runner-required-${kind}`,
+      releaseRunner: () => undefined,
+      beginEffect: (effect) => ({
+        effectId: `effect-${phase}`,
+        expectedRevision: state.revision,
+        turnId,
+        effect,
+      }),
+      isEffectEventCurrent: () => false,
+      applyEffectEvent: () => false,
+      applyEffectResult: () => false,
+      applyLateResourceReconciliation: () => false,
+      applyAction: () => ({
+        status: 'stale',
+        reason: 'unused',
+        telemetry: { type: 'runtime.action_ignored', reason: 'unused' },
+      }),
+    };
+    const run = () =>
+      runStateRuntimeLoop(
+        kernel,
+        async (effect) => {
+          if (effect.type === 'run_tools') {
+            phase = 'model';
+            return [];
+          }
+          if (effect.type === 'call_model') {
+            modelCalls += 1;
+            phase = 'stop';
+          }
+          return [];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10,
+      );
+    for await (const _event of run()) {
+      /* no presentation facts expected */
+    }
+    expect(modelCalls).toBe(0);
+    expect(state.turn.turnId).toBe(turnId);
+    expect(state.turn.status).toBe('active');
+
+    state = { ...state, revision: state.revision + 1 };
+    for await (const _event of run()) {
+      /* terminal read permits same-Run continuation */
+    }
+    expect(modelCalls).toBe(1);
+    expect(state.turn.turnId).toBe(turnId);
+    expect(state.turn.status).toBe('active');
+  });
+
   test('continues to the model when a background Shell advances durable State without returned events', async () => {
     let state = initialState();
     const shell1 = {

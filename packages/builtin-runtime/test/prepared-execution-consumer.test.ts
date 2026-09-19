@@ -42,6 +42,7 @@ function makeHarness(
     readonly tamperBackend?: boolean;
     readonly expired?: boolean;
     readonly mutablePrepared?: boolean;
+    readonly service?: boolean;
   } = {},
 ) {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-builtin-prepared-shell-'));
@@ -50,6 +51,7 @@ function makeHarness(
   let providerDisposeCalls = 0;
   let providerReconcileCalls = 0;
   let processCalls = 0;
+  let processTimeoutMs: number | undefined;
   let preparation: Readonly<SandboxPreparation> | undefined;
   let prepared: Readonly<PreparedSandboxExecution> | undefined;
   let dispatch:
@@ -85,7 +87,7 @@ function makeHarness(
     command: 'printf hello',
     executionBoundaryDigest: 'boundary-1',
     protectedPathRevision: 'protected-1',
-    timeoutMs: 5_000,
+    ...(options.service ? { executionMode: 'service' as const } : { timeoutMs: 5_000 }),
   });
   preparation = preparationDraft.preparation;
   const intentDigest = sandboxPreparationIntentDigest({
@@ -232,6 +234,7 @@ function makeHarness(
     async execute(input) {
       events.push('process');
       processCalls += 1;
+      processTimeoutMs = input.timeoutMs;
       if (options.processThrows) throw new Error('transport lost after dispatch');
       if (processResult.kind === 'completed') {
         await input.lifecycle.recordExecutionSupervisorStarted(input.prepared, {
@@ -289,11 +292,34 @@ function makeHarness(
       providerReconcileCalls,
       processCalls,
     }),
+    processTimeoutMs: () => processTimeoutMs,
     close: () => rmSync(workspace, { recursive: true, force: true }),
   };
 }
 
 describe('Builtin prepared shell execution consumer candidate', () => {
+  test('service preparation preserves an omitted total timeout through dispatch', async () => {
+    const harness = makeHarness({
+      service: true,
+      intentAcknowledged: true,
+      readyAcknowledged: true,
+      dispatchAcknowledged: true,
+    });
+    try {
+      const result = await harness.consumer({
+        identity: harness.identity,
+        workspace: harness.workspace,
+        command: 'printf hello',
+        executionMode: 'service',
+        lifecycle: harness.lifecycle,
+      });
+      expect(result.kind).toBe('completed');
+      expect(harness.processTimeoutMs()).toBeUndefined();
+    } finally {
+      harness.close();
+    }
+  });
+
   test('consumes one exact prepared attempt and disposes after the process port', async () => {
     const harness = makeHarness({
       intentAcknowledged: true,
@@ -310,6 +336,7 @@ describe('Builtin prepared shell execution consumer candidate', () => {
       });
       expect(result.kind).toBe('completed');
       expect(result.ok).toBe(true);
+      expect(harness.processTimeoutMs()).toBe(5_000);
       expect(result.processResult?.kind).toBe('completed');
       expect(harness.counts()).toEqual({
         providerPrepareCalls: 1,

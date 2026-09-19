@@ -13,3 +13,7 @@
 `history/load_session` 的可选 `page` 参数携带 `afterSequence` 与 `throughSequence`。分页响应为闭集 `history_session_page`，只传 source-sequence records，不重复传 flattened events；客户端合并后还原完整 transcript。单帧仍受 1 MiB 限制，不分页的显式读取保留完整响应语义。
 
 按需恢复的 command/query、codec、双向 mapper 和生成类型在同一配套版本更新：`recover_session` 绑定 expectedRevision/expectedAuthorityRevision，`get_session_recovery` 只读既有事实，`get_command_receipt` 查询原命令回执。原命令作为查询数据绝不进入 dispatch；Host 仍校验 scope 和 digest。create_session 允许显式请求目标 workspace，但准入规范化与信任校验后的上下文才是最终执行身份。无未发布格式的兼容分支。
+
+后台执行query结果把`sessionRevision`、列表`aggregateGeneration`、item `ownerGeneration`与item `revision`
+编码为四个独立必填字段。前者是Session mutation CAS；其余字段分别限定组合目录、原生执行owner和单项状态水位，
+不得互相代用。`stop_background_execution.expectedRevision`只来自同次读取的`sessionRevision`。

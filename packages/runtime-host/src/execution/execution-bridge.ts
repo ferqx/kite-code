@@ -29,6 +29,10 @@ export interface RuntimeHostPreparedExecution {
 export interface RuntimeHostAcceptedCommand {
   /** Must equal the Host-derived target for create/fork, or command Session otherwise. */
   readonly targetSessionId: string;
+  /** Recheck volatile CAS facts at the serialized boundary immediately before commit. */
+  readonly validate?: () =>
+    | Exclude<RuntimeCommandReceipt, { readonly status: 'applied' }>
+    | undefined;
   /**
    * The bridge may mutate only here. It must atomically persist the State
    * decision and supplied receipt evidence before resolving.
@@ -92,4 +96,9 @@ export interface RuntimeHostExecutionAdapterContext<Event = unknown, State = unk
   readonly capabilities: CapabilityExecutionPort;
   /** Exact frozen snapshot shared by Host execution and the App catalog projection. */
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
+  /** Schedule one external completion settlement through the canonical Session mailbox. */
+  readonly enqueueSessionWork: <Result>(
+    sessionId: string,
+    operation: () => Result | Promise<Result>,
+  ) => Promise<Result>;
 }

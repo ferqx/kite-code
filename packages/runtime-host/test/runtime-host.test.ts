@@ -746,6 +746,10 @@ describe('runtime host command and projection authority', () => {
 
   test('atomically deletes the durable Session, retains its receipt, and never recovers it on replay', async () => {
     const bridge = new TestExecutionBridge();
+    const shutdowns: string[] = [];
+    bridge.shutdownImplementation = async (sessionId) => {
+      shutdowns.push(sessionId);
+    };
     bridge.projections.set('session-1', projection('session-1', 3));
     const host = createRuntimeHost({
       storage: testStorage(),
@@ -775,6 +779,7 @@ describe('runtime host command and projection authority', () => {
       ).status,
     ).toBe('not_found');
     expect(bridge.calls).toEqual([]);
+    expect(shutdowns).toEqual(['session-1']);
 
     await expect(
       host.command({
@@ -791,6 +796,7 @@ describe('runtime host command and projection authority', () => {
       originalRevision: 3,
     });
     expect(bridge.recoveries).toEqual([]);
+    expect(shutdowns).toEqual(['session-1']);
     await host[Symbol.asyncDispose]();
   });
 
@@ -1346,6 +1352,163 @@ describe('runtime host command and projection authority', () => {
     await host.command(startCommand('turn-1', 'session-1', 0));
     await host.waitForSessionIdle('session-1');
     expect(observedReason).toEqual(createRuntimeAbortReason('error', 'deadline reached'));
+    await host[Symbol.asyncDispose]();
+  });
+
+  test('admits one stable after-turn wake through the Session mailbox and prefers an accepted human Run', async () => {
+    const bridge = new TestExecutionBridge();
+    const terminalProjection = (runId: string, revision: number, activeTurnId = runId) => ({
+      ...projection('session-1', revision),
+      currentRun: {
+        runId,
+        initialTurnId: runId,
+        activeTurnId,
+        status: 'completed' as const,
+        revision,
+        outcome: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' as const },
+      },
+    });
+    bridge.projections.set(
+      'session-1',
+      terminalProjection('origin-run', 1, 'continuation-active-turn'),
+    );
+    let dispatches = 0;
+    bridge.prepareImplementation = async (command) => {
+      if (command.type !== 'start_turn') throw new Error(`unexpected command: ${command.type}`);
+      if (command.sessionId === 'session-2') {
+        bridge.projections.set(command.sessionId, {
+          ...terminalProjection('human-run', 5),
+          sessionId: command.sessionId,
+          workspace: `/workspace/${command.sessionId}`,
+        });
+        return {
+          receipt: applied(command.commandId, command.sessionId, 5),
+          execution: {
+            sessionId: command.sessionId,
+            operationId: command.commandId,
+            committedRevision: 5,
+            operation: 'turn' as const,
+            run: async () => {},
+          },
+        };
+      }
+      bridge.projections.set(command.sessionId, projection(command.sessionId, 2));
+      return {
+        receipt: applied(command.commandId, command.sessionId, 2),
+        execution: {
+          sessionId: command.sessionId,
+          operationId: command.commandId,
+          committedRevision: 2,
+          operation: 'turn' as const,
+          run: async () => {
+            dispatches += 1;
+          },
+        },
+      };
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+    const wake = {
+      sessionId: 'session-1',
+      originRunId: 'origin-run',
+      eventId: 'a'.repeat(64),
+      wakeKey: 'b'.repeat(64),
+      admissionRevision: 1,
+      input: 'Background result ready.',
+      phase: 'building' as const,
+    };
+
+    expect(await host.resolveAfterTurnOriginRun('session-1', 'continuation-active-turn')).toBe(
+      'origin-run',
+    );
+    expect(await host.resolveAfterTurnOriginRun('session-1', 'origin-run')).toBeUndefined();
+    expect(await host.scheduleAfterTurnWake(wake)).toEqual({ status: 'started' });
+    await host.waitForSessionIdle('session-1');
+    expect(await host.scheduleAfterTurnWake(wake)).toEqual({ status: 'replayed' });
+    expect(dispatches).toBe(1);
+
+    bridge.projections.set('session-2', {
+      ...terminalProjection('origin-run', 4, 'origin-continuation-turn'),
+      sessionId: 'session-2',
+      workspace: '/workspace/session-2',
+    });
+    expect(
+      await host.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'start_turn',
+        commandId: 'human-start',
+        sessionId: 'session-2',
+        expectedRevision: 4,
+        input: 'Human message wins admission.',
+      }),
+    ).toMatchObject({ status: 'applied', revision: 5 });
+    await host.waitForSessionIdle('session-2');
+    expect(
+      await host.scheduleAfterTurnWake({
+        ...wake,
+        sessionId: 'session-2',
+        wakeKey: 'c'.repeat(64),
+      }),
+    ).toEqual({ status: 'suppressed', reason: 'human_start_preferred' });
+    expect(bridge.calls).toHaveLength(2);
+    await host[Symbol.asyncDispose]();
+  });
+
+  test('suppresses an after-turn command identity collision instead of replaying it', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-collision', {
+      ...projection('session-collision', 7),
+      currentRun: {
+        runId: 'origin-run',
+        initialTurnId: 'origin-turn',
+        activeTurnId: 'origin-turn',
+        status: 'completed',
+        revision: 7,
+        outcome: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+      },
+    });
+    const baseStorage = testStorage();
+    const wakeKey = 'd'.repeat(64);
+    const commandId = `after_turn_${wakeKey.slice(0, 48)}`;
+    const storage = {
+      ...baseStorage,
+      commandReceipts: {
+        lookup: (input: Parameters<typeof baseStorage.commandReceipts.lookup>[0]) =>
+          input.scopeSessionId === 'session-collision' && input.commandId === commandId
+            ? {
+                status: 'digest_mismatch' as const,
+                receipt: {
+                  scopeSessionId: input.scopeSessionId,
+                  commandId: input.commandId,
+                  requestDigest: '0'.repeat(64),
+                  targetSessionId: input.scopeSessionId,
+                  originalReceiptJson: '{}',
+                  committedRevision: 1,
+                  committedAt: 1,
+                },
+              }
+            : baseStorage.commandReceipts.lookup(input),
+      },
+    } as RuntimeStorage;
+    const host = createRuntimeHost({
+      storage,
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    expect(
+      await host.scheduleAfterTurnWake({
+        sessionId: 'session-collision',
+        originRunId: 'origin-run',
+        eventId: 'c'.repeat(64),
+        wakeKey,
+        admissionRevision: 7,
+        input: 'Background result ready.',
+        phase: 'building',
+      }),
+    ).toEqual({ status: 'suppressed', reason: 'command_identity_collision' });
+    expect(bridge.calls).toHaveLength(0);
     await host[Symbol.asyncDispose]();
   });
 

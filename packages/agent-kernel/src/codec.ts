@@ -453,6 +453,84 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('subagent.tool_result payload is invalid.');
       }
       break;
+    case 'subagent.background_result_persisted':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.afterTurn === undefined ? [] : ['afterTurn']),
+      ]);
+      requireNonEmptyString(value, 'taskId');
+      requireNonEmptyString(value, 'notificationId');
+      requireNonEmptyString(value, 'artifactIntegrityIdentifier');
+      requireNonEmptyString(value, 'originRunId');
+      requireNonEmptyString(value, 'originTurnId');
+      requireNonEmptyString(value, 'originToolCallId');
+      assertPositiveAttempt(value);
+      if (typeof value.shortReport !== 'string') {
+        throw new Error('Background subagent short report is invalid.');
+      }
+      if (value.source !== 'subagent' || value.modelRole !== 'user') {
+        throw new Error('Background subagent result authority is invalid.');
+      }
+      if (!/^sha256:[0-9a-f]{64}$/u.test(String(value.artifactIntegrityIdentifier))) {
+        throw new Error('Background subagent result artifact identity is invalid.');
+      }
+      if (value.afterTurn !== undefined) {
+        if (
+          !isRecord(value.afterTurn) ||
+          Object.keys(value.afterTurn).length !== 8 ||
+          ![
+            'reservationId',
+            'admissionRevision',
+            'eventId',
+            'wakeKey',
+            'runId',
+            'phase',
+            'status',
+            'cancelRequested',
+          ].every((field) => Object.hasOwn(value.afterTurn as Record<string, unknown>, field)) ||
+          typeof value.afterTurn.reservationId !== 'string' ||
+          value.afterTurn.reservationId.length === 0 ||
+          typeof value.afterTurn.admissionRevision !== 'number' ||
+          !Number.isSafeInteger(value.afterTurn.admissionRevision) ||
+          value.afterTurn.admissionRevision < 0 ||
+          typeof value.afterTurn.runId !== 'string' ||
+          value.afterTurn.runId.length === 0 ||
+          typeof value.afterTurn.eventId !== 'string' ||
+          !/^[0-9a-f]{64}$/u.test(value.afterTurn.eventId) ||
+          typeof value.afterTurn.wakeKey !== 'string' ||
+          !/^[0-9a-f]{64}$/u.test(value.afterTurn.wakeKey) ||
+          (value.afterTurn.phase !== 'planning' && value.afterTurn.phase !== 'building') ||
+          !['completed', 'failed', 'cancelled', 'interrupted', 'exhausted', 'suspended'].includes(
+            String(value.afterTurn.status),
+          ) ||
+          typeof value.afterTurn.cancelRequested !== 'boolean'
+        ) {
+          throw new Error('Background subagent after-turn authority is invalid.');
+        }
+      }
+      break;
+    case 'background_execution.stop_requested':
+      requireNonEmptyString(value, 'commandId');
+      requireNonEmptyString(value, 'executionId');
+      requireNonEmptyString(value, 'ownerGeneration');
+      if (
+        value.executionKind !== 'shell' &&
+        value.executionKind !== 'service' &&
+        value.executionKind !== 'subagent'
+      )
+        throw new Error('Background execution kind is invalid.');
+      break;
+    case 'background_execution.stop_settled':
+      requireNonEmptyString(value, 'commandId');
+      requireNonEmptyString(value, 'executionId');
+      if (value.cleanupConfirmed !== true)
+        throw new Error('Background execution cleanup confirmation is invalid.');
+      break;
+    case 'background_execution.stop_unknown':
+      requireNonEmptyString(value, 'commandId');
+      requireNonEmptyString(value, 'executionId');
+      requireNonEmptyString(value, 'reason');
+      break;
     case 'subagent.approval_deferred':
       exactEventKeys(value, [
         ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],

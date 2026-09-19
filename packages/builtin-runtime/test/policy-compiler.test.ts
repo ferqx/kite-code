@@ -140,12 +140,66 @@ describe('Builtin dynamic MCP policy compiler', () => {
 });
 
 describe('Builtin operation policy compiler', () => {
+  test('rejects after-turn execution without an existing structured authorization', () => {
+    expect(
+      compile('shell_execute', {
+        command: 'bun test',
+        yield_ms: 1,
+        result_disposition: 'after_turn',
+      }),
+    ).toMatchObject({ decision: 'deny', allowed: false, reason: 'after_turn_not_authorized' });
+    expect(
+      compile('task', {
+        name: 'review',
+        subagent_type: 'review',
+        task: 'Review the implementation and report evidence.',
+        background: true,
+        result_disposition: 'after_turn',
+      }),
+    ).toMatchObject({ decision: 'deny', allowed: false, reason: 'after_turn_not_authorized' });
+  });
+
+  test('allows background task after-turn only with the structured feature authorization', () => {
+    expect(
+      compile(
+        'task',
+        {
+          name: 'review',
+          subagent_type: 'review',
+          task: 'Review the implementation and report evidence.',
+          background: true,
+          result_disposition: 'after_turn',
+        },
+        {
+          ...CONTEXT,
+          featureFlags: { ...CONTEXT.featureFlags, afterTurnContinuation: true },
+        },
+      ),
+    ).toMatchObject({ decision: 'allow', allowed: true });
+    expect(
+      compile(
+        'task',
+        {
+          name: 'review',
+          subagent_type: 'review',
+          task: 'Review the implementation and report evidence.',
+          background: false,
+          result_disposition: 'after_turn',
+        },
+        {
+          ...CONTEXT,
+          featureFlags: { ...CONTEXT.featureFlags, afterTurnContinuation: true },
+        },
+      ),
+    ).toMatchObject({ decision: 'deny', allowed: false, reason: 'after_turn_not_authorized' });
+  });
+
   test('projects one compiler for each model operation and none for internals', () => {
     const result = projection();
     const model = result.entries.filter((entry) => entry.visibility === 'model');
     const internal = result.entries.filter((entry) => entry.visibility === 'internal');
-    expect(result.entries).toHaveLength(27);
-    expect(model).toHaveLength(19);
+    expect(result.entries).toHaveLength(31);
+    expect(model).toHaveLength(23);
     expect(internal).toHaveLength(8);
     expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
     expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);

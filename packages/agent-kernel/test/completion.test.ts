@@ -114,6 +114,78 @@ function withCompletedPlan(state: AgentState, document: PlanDocument): AgentStat
 }
 
 describe('State CompletionGuard parity', () => {
+  test('blocks a required background task until task_read or task_cancel records its terminal', () => {
+    const state = initialState();
+    const background = {
+      toolCallId: 'task-start',
+      name: 'task',
+      modelMessageId: 'model-1',
+      args: { background: true },
+      createdAtTurnId: state.turn.turnId,
+      status: 'succeeded' as const,
+      result: {
+        ok: true,
+        summary: 'background accepted',
+        resultMeta: {
+          taskId: 'child-1',
+          taskStatus: 'running' as const,
+          taskDisposition: 'required' as const,
+        },
+      },
+    };
+    const waiting = {
+      ...state,
+      tools: { ...state.tools, calls: { [background.toolCallId]: background } },
+    } as AgentState;
+    expect(decideUnplannedCompletion(waiting)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+    const plannedWaiting = withCompletedPlan(
+      waiting,
+      completedPlan({
+        schemaVersion: 1,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [],
+      }),
+    );
+    expect(decidePlannedCompletion(plannedWaiting)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+
+    for (const name of ['task_read', 'task_cancel'] as const) {
+      const terminal = {
+        toolCallId: `${name}-terminal`,
+        name,
+        modelMessageId: 'model-2',
+        args: { task_id: 'child-1' },
+        createdAtTurnId: state.turn.turnId,
+        status: 'succeeded' as const,
+        result: {
+          ok: true,
+          summary: 'terminal observed',
+          resultMeta: { taskId: 'child-1', taskStatus: 'completed' as const },
+        },
+      };
+      const settled = {
+        ...waiting,
+        tools: {
+          ...waiting.tools,
+          calls: { ...waiting.tools.calls, [terminal.toolCallId]: terminal },
+        },
+      } as AgentState;
+      expect(decideUnplannedCompletion(settled)).toEqual({
+        status: 'accepted',
+        version: 'completion_guard_v1',
+      });
+    }
+  });
+
   test('does not let provider readiness or admission facts decide an unplanned completion', () => {
     const state = initialState();
     const withProviderFacts = {

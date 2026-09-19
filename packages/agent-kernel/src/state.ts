@@ -636,6 +636,33 @@ export interface AgentSubagentProviderLifecycleState {
   readonly cleanupStartedAt?: string;
   readonly cleanupConfirmed?: boolean;
   readonly cleanupCompletedAt?: string;
+  readonly backgroundResult?: AgentBackgroundSubagentResultState;
+}
+
+export interface AgentBackgroundSubagentResultState {
+  readonly taskId: string;
+  readonly notificationId: string;
+  readonly artifactIntegrityIdentifier: string;
+  readonly originRunId: string;
+  readonly originTurnId: string;
+  readonly originToolCallId: string;
+  readonly attempt: number;
+  readonly afterTurn?: {
+    readonly reservationId: string;
+    readonly admissionRevision: number;
+    readonly eventId: string;
+    readonly wakeKey: string;
+    readonly runId: string;
+    readonly phase: 'planning' | 'building';
+    readonly status:
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted'
+      | 'exhausted'
+      | 'suspended';
+    readonly cancelRequested: boolean;
+  };
 }
 
 export interface AgentCapabilityInvocationState {
@@ -1006,6 +1033,21 @@ export interface AgentToolResultMeta {
   readonly path?: string;
   readonly totalLines?: number;
   readonly command?: string;
+  readonly shellId?: string;
+  readonly shellStatus?: 'running' | 'exited';
+  readonly taskId?: string;
+  readonly taskStatus?:
+    | 'running'
+    | 'cancelling'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'interrupted'
+    | 'exhausted'
+    | 'suspended'
+    | 'unknown'
+    | 'not_found';
+  readonly taskDisposition?: 'required' | 'after_turn';
   readonly intent?: string;
   readonly matchCount?: number;
   readonly truncated?: boolean;

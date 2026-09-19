@@ -51,7 +51,11 @@ import {
   resolveRuntimeCommandReceipt,
 } from './command-receipt';
 import { NotificationProjector } from './notification-projector';
-import { parseRuntimeStoredCommandResource, projectRuntimeStoredRun } from './run-projection';
+import {
+  parseRuntimeStoredCommandResource,
+  parseRuntimeStoredInputResource,
+  projectRuntimeStoredRun,
+} from './run-projection';
 import { SessionRegistry } from './session-registry';
 
 /**
@@ -67,8 +71,27 @@ export interface RuntimeHostCoordinatorPort extends RuntimeAccess, AsyncDisposab
   isSessionOperationActive(sessionId: string): boolean;
   /** Service lifecycle reads this aggregate after mutation admission is quiesced. */
   hasActiveSessionOperations(): boolean;
+  /** Host-internal after-turn admission; it reuses the original Session mailbox and start path. */
+  scheduleAfterTurnWake(input: RuntimeHostAfterTurnWake): Promise<RuntimeHostAfterTurnWakeResult>;
+  /** Resolve the stable owning Run while the originating active Turn is still executing. */
+  resolveAfterTurnOriginRun(sessionId: string, activeTurnId: string): Promise<string | undefined>;
   [Symbol.asyncDispose](): Promise<void>;
 }
+
+export interface RuntimeHostAfterTurnWake {
+  readonly sessionId: string;
+  readonly originRunId: string;
+  readonly eventId: string;
+  readonly wakeKey: string;
+  /** Session revision captured in the durable background-result fact before scheduling. */
+  readonly admissionRevision: number;
+  readonly input: string;
+  readonly phase: 'planning' | 'building';
+}
+
+export type RuntimeHostAfterTurnWakeResult =
+  | { readonly status: 'started' | 'replayed' }
+  | { readonly status: 'suppressed'; readonly reason: string };
 
 /** Bootstrap-only concrete Host composition surface. */
 export interface RuntimeHost<Event = unknown, State = unknown> extends RuntimeHostCoordinatorPort {
@@ -162,6 +185,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         services,
         capabilities,
         capabilityRegistrySnapshot: this.capabilityRegistrySnapshot,
+        enqueueSessionWork: async <Result>(
+          sessionId: string,
+          operation: () => Result | Promise<Result>,
+        ): Promise<Result> => this.#registry.mailbox(sessionId).run(async () => await operation()),
       }) satisfies RuntimeHostExecutionAdapterContext<Event, State>,
     );
     assertRuntimeHostExecutionBridge(this.#bridge);
@@ -256,6 +283,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           const expectedTarget = targetSessionIdFor(command);
           if (inspected.decision.targetSessionId !== expectedTarget) {
             throw new Error('Runtime Host inspected command target identity is invalid.');
+          }
+          const validation = inspected.decision.validate?.();
+          if (validation) {
+            return assertTerminalReceipt(command, { kind: 'terminal', receipt: validation });
           }
           let committed: Awaited<ReturnType<typeof inspected.decision.commit>>;
           try {
@@ -379,6 +410,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       command.type === 'delete_session' ||
       command.type === 'recover_session' ||
       command.type === 'start_turn' ||
+      command.type === 'steer_turn' ||
       command.type === 'set_interaction_mode'
     )
       return receipt;
@@ -425,10 +457,10 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     return receipt;
   }
 
-  #deleteSession(
+  async #deleteSession(
     command: Extract<RuntimeCommand, { readonly type: 'delete_session' }>,
     evidence: ReturnType<typeof createRuntimeCommandCommitEvidence>,
-  ): RuntimeCommandReceipt {
+  ): Promise<RuntimeCommandReceipt> {
     const projection = this.#registry.projection(command.sessionId);
     if (!projection) {
       return {
@@ -445,6 +477,13 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         currentRevision: projection.revision,
       };
     }
+    // Retained background owners can outlive the last Run. Quiesce them before
+    // deleting State so terminal callbacks cannot target a deleted Session.
+    await this.#bridge.shutdownSession(
+      command.sessionId,
+      'Runtime session deleted.',
+      (notification) => this.#notifications.publish(notification),
+    );
     const receipt = createRuntimeStoredCommandReceipt(evidence, projection.revision);
     this.storage.sessions.deleteSession(command.sessionId, {
       expectedRevision: projection.revision,
@@ -700,6 +739,69 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
 
   hasActiveSessionOperations(): boolean {
     return this.#lifecycle.sessionIds().some((sessionId) => this.#lifecycle.isActive(sessionId));
+  }
+
+  scheduleAfterTurnWake(input: RuntimeHostAfterTurnWake): Promise<RuntimeHostAfterTurnWakeResult> {
+    return this.#beginAccess(() => this.#scheduleAfterTurnWake(input));
+  }
+
+  resolveAfterTurnOriginRun(sessionId: string, activeTurnId: string): Promise<string | undefined> {
+    return this.#beginAccess(async () => {
+      this.#assertOpen();
+      await this.start();
+      const projection =
+        this.#registry.projection(sessionId) ?? (await this.#loadProjection(sessionId));
+      const currentRun = projection?.currentRun;
+      return currentRun?.activeTurnId === activeTurnId ? currentRun.runId : undefined;
+    });
+  }
+
+  async #scheduleAfterTurnWake(
+    input: RuntimeHostAfterTurnWake,
+  ): Promise<RuntimeHostAfterTurnWakeResult> {
+    this.#assertOpen();
+    if (!/^[a-f0-9]{64}$/u.test(input.eventId) || !/^[a-f0-9]{64}$/u.test(input.wakeKey)) {
+      return Object.freeze({ status: 'suppressed', reason: 'invalid_wake_identity' });
+    }
+    await this.start();
+    const commandId = `after_turn_${input.wakeKey.slice(0, 48)}`;
+    // Do not race the originating Run. Human start commands already admitted to the
+    // same mailbox linearize before this internal start and therefore retain priority.
+    await this.#lifecycle.waitForIdle(input.sessionId);
+    await Promise.resolve();
+    // Detached completion events may have advanced the durable Session after
+    // the originating Run's last published projection. Refresh inside the
+    // same Session mailbox before deriving the successor command CAS.
+    const projection = await this.#loadProjection(input.sessionId);
+    if (!projection) {
+      return Object.freeze({ status: 'suppressed', reason: 'session_not_found' });
+    }
+    const command = {
+      schema: 'kite.runtime-command.v1',
+      type: 'start_turn',
+      commandId,
+      sessionId: input.sessionId,
+      expectedRevision: input.admissionRevision,
+      input: input.input,
+      phase: input.phase,
+    } satisfies RuntimeCommand;
+    const prior = this.storage.commandReceipts.lookup({
+      scopeSessionId: input.sessionId,
+      commandId,
+      requestDigest: digestRuntimeCommand(command),
+    });
+    if (prior.status === 'replay') return Object.freeze({ status: 'replayed' });
+    if (prior.status === 'digest_mismatch') {
+      return Object.freeze({ status: 'suppressed', reason: 'command_identity_collision' });
+    }
+    if (projection.currentRun && projection.currentRun.runId !== input.originRunId) {
+      return Object.freeze({ status: 'suppressed', reason: 'human_start_preferred' });
+    }
+    const receipt = await this.#executeCommand(command);
+    if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
+      return Object.freeze({ status: 'suppressed', reason: receipt.code });
+    }
+    return Object.freeze({ status: receipt.status === 'applied' ? 'started' : 'replayed' });
   }
 
   [Symbol.asyncDispose](): Promise<void> {
@@ -1283,11 +1385,13 @@ function receiptFromStoredReceipt(
   receipt: RuntimeStoredCommandReceipt,
 ): Extract<RuntimeCommandReceipt, { readonly status: 'applied' }> {
   const resource = parseRuntimeStoredCommandResource(receipt.resourceResult, receipt.commandId);
+  const input = parseRuntimeStoredInputResource(receipt.resourceResult);
   return {
     status: 'applied',
     commandId: receipt.commandId,
     sessionId: receipt.targetSessionId,
     revision: receipt.committedRevision,
     ...(resource === undefined ? {} : { resource }),
+    ...(input === undefined ? {} : { input }),
   };
 }

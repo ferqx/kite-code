@@ -88,9 +88,9 @@ export function planStartTurnCommand(
   }
 
   const phase = command.phase ?? 'building';
-  const taskId = commandDerivedId(command.commandId, 'task');
+  const taskId = runtimeStartTurnDerivedId(command.commandId, 'task');
   const messageId = runtimeStartMessageId(command.commandId);
-  const turnId = commandDerivedId(command.commandId, 'turn');
+  const turnId = runtimeStartTurnDerivedId(command.commandId, 'turn');
   const events: RuntimeEvent[] = [...eventsForSupersededTurnRecovery(state)];
   if (phase === 'planning' && events.length > 0) {
     // The recovery batch can alter the active task/turn relationship.  This
@@ -287,7 +287,7 @@ export function assertPrecommittedStartTurn(
   }
 }
 
-function commandDerivedId(commandId: string, domain: 'task' | 'turn'): string {
+export function runtimeStartTurnDerivedId(commandId: string, domain: 'task' | 'turn'): string {
   const digest = createHash('sha256')
     .update(`kite.runtime.start-turn.v1\0${domain}\0${commandId}`)
     .digest('hex');

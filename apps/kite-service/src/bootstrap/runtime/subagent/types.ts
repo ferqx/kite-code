@@ -203,6 +203,8 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
+  /** Stable handle returned only by a successfully adopted background start. */
+  backgroundTaskId?: string;
   terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
   error?: string;
   /** Content-free reason retained across the private Provider observation seam. */

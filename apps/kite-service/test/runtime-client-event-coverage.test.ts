@@ -463,6 +463,14 @@ function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], 
       }),
     ],
     [
+      'model.response_superseded',
+      event({
+        type: 'model.response_superseded',
+        messageId: 'message-1',
+        invocationId: 'request-1',
+      }),
+    ],
+    [
       'model.retry',
       event({
         type: 'model.retry',

@@ -618,6 +618,72 @@ export function reduceContextState(
         },
       );
     }
+    case 'subagent.background_result_persisted': {
+      const taskId = nonEmptyStringField(payload, 'taskId');
+      const notificationId = nonEmptyStringField(payload, 'notificationId');
+      const shortReport = stringField(payload, 'shortReport');
+      const artifactIntegrityIdentifier = nonEmptyStringField(
+        payload,
+        'artifactIntegrityIdentifier',
+      );
+      const originRunId = nonEmptyStringField(payload, 'originRunId');
+      const originTurnId = nonEmptyStringField(payload, 'originTurnId');
+      const originToolCallId = nonEmptyStringField(payload, 'originToolCallId');
+      const attempt = numberField(payload, 'attempt');
+      const admittedResults = Object.values(state.capabilities.invocations).filter((invocation) => {
+        const result = invocation.subagentProviderLifecycle?.backgroundResult;
+        if (!result) return false;
+        return (
+          result.taskId === taskId &&
+          result.notificationId === notificationId &&
+          result.artifactIntegrityIdentifier === artifactIntegrityIdentifier &&
+          result.originRunId === originRunId &&
+          result.originTurnId === originTurnId &&
+          result.originToolCallId === originToolCallId &&
+          result.attempt === attempt
+        );
+      });
+      if (
+        !taskId ||
+        !notificationId ||
+        !artifactIntegrityIdentifier ||
+        !originRunId ||
+        !originTurnId ||
+        !originToolCallId ||
+        attempt === undefined ||
+        shortReport === undefined ||
+        payload.source !== 'subagent' ||
+        payload.modelRole !== 'user' ||
+        admittedResults.length !== 1 ||
+        state.turn.turnId !== originTurnId ||
+        state.transcript.messages.some((message) => message.messageId === notificationId)
+      )
+        return state;
+      return appendTranscript(
+        {
+          ...state,
+          // This event is the durable admission of new model-visible input.
+          // Preserve required Task settlement through task_read/task_cancel,
+          // but let the current Run make the model call that can issue it.
+          completionGuard: { correctionAttempts: 0 },
+          terminalOutcome: undefined,
+          transcript: { ...state.transcript, final: undefined },
+        },
+        {
+          kind: 'user',
+          messageId: notificationId,
+          turnId: originTurnId,
+          ordinal: state.transcript.messages.length,
+          createdAt: EPOCH_CREATED_AT,
+          content: [
+            `<subagent_result task_id="${taskId}">`,
+            shortReport,
+            'Full report remains available through task_read.',
+            '</subagent_result>',
+          ].join('\n'),
+        },
+      );
+    }
     case 'model.responded': {
       const messageId = nonEmptyStringField(payload, 'messageId');
       const toolCalls = parseModelToolCalls(payload);
@@ -665,6 +731,28 @@ export function reduceContextState(
         },
         message,
       );
+    }
+    case 'model.response_superseded': {
+      const messageId = nonEmptyStringField(payload, 'messageId');
+      const invocationId = nonEmptyStringField(payload, 'invocationId');
+      const last = state.transcript.messages.at(-1);
+      if (
+        !messageId ||
+        !invocationId ||
+        last?.kind !== 'assistant' ||
+        last.messageId !== messageId ||
+        !state.modelInvocations[invocationId]
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        transcript: {
+          ...state.transcript,
+          final: undefined,
+          messages: state.transcript.messages.slice(0, -1),
+        },
+      };
     }
     case 'model.invocation_prepared': {
       const invocationId = nonEmptyStringField(payload, 'invocationId');

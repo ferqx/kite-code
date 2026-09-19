@@ -1,9 +1,35 @@
 import { expect, test } from 'bun:test';
 import {
+  deleteTuiSessionDraft,
   ensureTuiPromptSession,
   observeTuiPromptSubmission,
+  restoreTuiSessionDraft,
   TuiPromptSubmissionQueue,
+  tuiPromptSubmissionMode,
 } from '../src/tui/prompt-submission-queue';
+
+test('rejected steering returns to its Session draft without overwriting newer text', () => {
+  expect(restoreTuiSessionDraft('', 'rejected guidance')).toBe('rejected guidance');
+  expect(restoreTuiSessionDraft('newer draft', 'rejected guidance')).toBe(
+    'rejected guidance\nnewer draft',
+  );
+});
+
+test('deleting a Session removes only its owned draft', () => {
+  const drafts = new Map([
+    ['session-one', 'one'],
+    ['session-two', 'two'],
+  ]);
+  deleteTuiSessionDraft(drafts, 'session-one');
+  expect([...drafts]).toEqual([['session-two', 'two']]);
+});
+
+test('active TUI input steers while inactive input preserves start and successor queue modes', () => {
+  expect(tuiPromptSubmissionMode({ activeRun: true, pendingSuccessor: false })).toBe('steer');
+  expect(tuiPromptSubmissionMode({ activeRun: true, pendingSuccessor: true })).toBe('steer');
+  expect(tuiPromptSubmissionMode({ activeRun: false, pendingSuccessor: false })).toBe('start');
+  expect(tuiPromptSubmissionMode({ activeRun: false, pendingSuccessor: true })).toBe('queue');
+});
 
 test('TUI prompt session creates the initial Runtime synchronously when startup effect has not run', () => {
   const created: string[] = [];

@@ -5,6 +5,11 @@ export {
   type AskQuestionnaireProps,
 } from './AskQuestionnaire';
 export {
+  type BackgroundExecutionSummary,
+  BackgroundExecutions,
+  type BackgroundExecutionsProps,
+} from './BackgroundExecutions';
+export {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,

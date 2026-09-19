@@ -18,7 +18,7 @@ OpenAPI/schema生成、Public compatibility或静态`/api-docs` artifact时。
 
 `@kite-ai/agent-api-contract`是private、browser-safe Public Agent API V1 wire contract owner。它从同一Zod source生成OpenAPI 3.1、JSON
 Schema、standalone wire declarations、examples与SHA-256 digest。`@kite-ai/agent-api-client`是唯一production Browser HTTP client，只封装
-已实现的Browser auth、Workspace、Session、History、诊断Log、Browser-only Model Context与Checkpoint read，不拥有discovery、重试daemon、offline cache、SSE或业务WebSocket。
+已实现的Browser auth、Workspace、Session、History、后台执行快照、诊断Log、Browser-only Model Context与Checkpoint read，不拥有discovery、重试daemon、offline cache、SSE或业务WebSocket。
 
 当前有两类principal；Browser principal只由显式App Server daemon v2 listener承载，Native/automation principal仍可由内部Worker carrier承载：
 
@@ -30,7 +30,7 @@ connection；Browser只读取Store 9 Directory允许投影的Workspace/Session�
 Native header混用fail closed。
 
 当前Browser-ready surface是`GET /v1`、Browser session续建与logout、Workspace page、Workspace-scoped Session page、Session get、History/Log/Model Context page、
-Checkpoint list/preview。History支持`after_sequence`增量边界；它与cursor互斥。Run、Interaction、mutation、SSE与外部SDK尚未ready，
+Checkpoint list/preview，以及Session-scoped后台执行快照。History支持`after_sequence`增量边界；它与cursor互斥。Run、Interaction、mutation、SSE与外部SDK尚未ready，
 OpenAPI中存在future contract不等于ServerInfo capability开放。
 
 ## Contract与安全规则
@@ -45,7 +45,7 @@ OpenAPI中存在future contract不等于ServerInfo capability开放。
   对仍有效的session不滑动续期。Agent请求拒绝Origin/Cookie/Sec-Fetch；
 - 所有response带`no-store`、API version、artifact digest与request ID；Problem不泄漏内部binding或path；
 - Session direct read在Browser context下先验证Directory membership；不存在的或不可见的identity统一404；
-- Browser capability仅发布`checkpoints/history/sessions/workspaces`，不把controller role或contract operation误当ready capability。
+- Browser capability发布`background_executions/checkpoints/history/sessions/workspaces`，不把controller role或未实现的contract operation误当ready capability。
 
 ## Bounded read与artifact
 
@@ -53,6 +53,8 @@ Workspace来自同一Store 9 Directory，不由Session数组反推；Workspace/S
 复用daemon已打开的Runtime/History/`kite-session.sqlite` authority，不创建第二SQLite connection、Browser cache或恢复sidecar。History固定
 `through_sequence`并用boundary digest与`sequence/public_ordinal`续页；`after_sequence`只读取更晚durable event，适合可见性敏感轮询。
 Checkpoint preview只返回计数，不返回path。
+
+后台执行route由同一Runtime query authority读取，但Service必须将private snapshot显式投影并通过Public closed response codec编码；Web只能经`agent-api-client`读取，不能直接fetch或维护第二套decoder。DTO显式区分Session CAS、aggregate generation、execution owner generation/revision，并携带watermark、stale标记与bounded execution items。
 
 Log page复用同一History读取authority与固定through boundary，但它不是raw Runtime event出口：每个item只包含sequence/time、event type、
 category、status、bounded summary及closed detail kind/标量fields/artifact availability。Public DTO不携带event ID、path、credential或任意metadata；

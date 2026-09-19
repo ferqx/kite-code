@@ -25,6 +25,10 @@
   均使用稳定 child/tool identity，不能由展示层按工具名或到达顺序补全。
 - `tool.review` 保留主工具的确切 toolId／reviewId、封闭审查状态与有界原因，来自真实 auto_review 请求／完成事件；不携带 reviewer model、权限材料或原始 result。`approval.granted` 可携带明确 approve_once／same_command，旧事实缺省时不猜授权范围。它们只表达展示事实，不提供新的授权路径。
 - 固定 command identity、expected revision、幂等回放与冲突语义。
+- 后台执行投影显式分离四种水位：`sessionRevision`只用于Session mutation CAS，snapshot的
+  `aggregateGeneration`只标识组合目录，item的`ownerGeneration`只标识原生执行owner，item的`revision`
+  只排序并fence该执行的状态。客户端不得在这些字段之间代换；准确停止同时携带item owner generation与
+  execution revision。
 - 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
   Run resource；这些DTO不代表Public Agent API route已开放。
 - Session projection schema v2把`activeTask`与current-or-last `currentRun`分开；currentRun携带stable

@@ -182,6 +182,7 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'user.message_appended',
   'user.command_invoked',
   'model.requested',
+  'model.response_superseded',
   'model.invocation_prepared',
   'model.invocation_attempt_started',
   'model.invocation_completed',
@@ -226,6 +227,10 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'subagent.cache_metrics',
   'subagent.suspended',
   'subagent.approval_deferred',
+  'subagent.background_result_persisted',
+  'background_execution.stop_requested',
+  'background_execution.stop_settled',
+  'background_execution.stop_unknown',
   'subagent.recovery_journal_merged',
   // Rewind intent/result identity is operational recovery evidence, not a
   // metric payload. Never project checkpoint or command fields into facts.

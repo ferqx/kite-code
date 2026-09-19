@@ -186,6 +186,8 @@ export {
   RUNTIME_FAILURE_MODES_,
   resolveFailureMode,
 } from './failure-mode-conformance';
+export type { KernelInputRevisionFact } from './input-delivery';
+export { countPendingSteerInputs } from './input-delivery';
 export type { PlanReviewSiblingCancellationDecision } from './interaction-governance';
 export {
   decidePlanReviewSiblingCancellations,

@@ -914,6 +914,21 @@ function toolTerminalEvent(
 function resultMetaForToolEvent(value: Readonly<StateBuiltinOperationStructuredContent>): {
   readonly command?: string;
   readonly exitCode?: number;
+  readonly shellId?: string;
+  readonly shellStatus?: 'running' | 'exited';
+  readonly taskId?: string;
+  readonly taskStatus?:
+    | 'running'
+    | 'cancelling'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'interrupted'
+    | 'exhausted'
+    | 'suspended'
+    | 'unknown'
+    | 'not_found';
+  readonly taskDisposition?: 'required' | 'after_turn';
   readonly path?: string;
   readonly totalLines?: number;
   readonly truncated?: boolean;
@@ -929,6 +944,15 @@ function resultMetaForToolEvent(value: Readonly<StateBuiltinOperationStructuredC
   return {
     ...(typeof source?.command === 'string' ? { command: source.command } : {}),
     ...(typeof source?.exitCode === 'number' ? { exitCode: source.exitCode } : {}),
+    ...(typeof source?.shellId === 'string' ? { shellId: source.shellId } : {}),
+    ...(source?.shellStatus === 'running' || source?.shellStatus === 'exited'
+      ? { shellStatus: source.shellStatus }
+      : {}),
+    ...(typeof source?.taskId === 'string' ? { taskId: source.taskId } : {}),
+    ...(isBackgroundTaskStatus(source?.taskStatus) ? { taskStatus: source.taskStatus } : {}),
+    ...(source?.taskDisposition === 'required' || source?.taskDisposition === 'after_turn'
+      ? { taskDisposition: source.taskDisposition }
+      : {}),
     ...(typeof value.path === 'string' ? { path: value.path } : {}),
     ...(typeof value.totalLines === 'number' ? { totalLines: value.totalLines } : {}),
     ...(typeof source?.truncated === 'boolean' ? { truncated: source.truncated } : {}),
@@ -945,6 +969,26 @@ function resultMetaForToolEvent(value: Readonly<StateBuiltinOperationStructuredC
       ? { networkFailureCode: source.networkFailureCode }
       : {}),
   };
+}
+
+function isBackgroundTaskStatus(
+  value: unknown,
+): value is NonNullable<ReturnType<typeof resultMetaForToolEvent>['taskStatus']> {
+  return (
+    typeof value === 'string' &&
+    [
+      'running',
+      'cancelling',
+      'completed',
+      'failed',
+      'cancelled',
+      'interrupted',
+      'exhausted',
+      'suspended',
+      'unknown',
+      'not_found',
+    ].includes(value)
+  );
 }
 
 function classifierAdviceForToolEvent(

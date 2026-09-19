@@ -8,7 +8,10 @@ import {
   resolveRuntimeCommandReceipt,
 } from '../src/host/command-receipt';
 import { runtimeStartMessageId } from '../src/host/run-projection';
-import { createRuntimeStoredCommandReceipt } from '../src/storage';
+import {
+  createRuntimeInputResourceResult,
+  createRuntimeStoredCommandReceipt,
+} from '../src/storage';
 
 const DIGEST = 'a'.repeat(64);
 
@@ -199,6 +202,43 @@ describe('Host persistent command receipt helper', () => {
         resourceResult: { ...record.resourceResult, digest: 'b'.repeat(64) },
       }),
     ).toThrow('digest does not match');
+  });
+
+  test('replays the accepted steer input after the target Run has moved on', () => {
+    const steer = {
+      schema: 'kite.runtime-command.v1',
+      commandId: 'steer-1',
+      type: 'steer_turn',
+      sessionId: 'session-1',
+      expectedRunId: 'run-1',
+      expectedTurnId: 'turn-2',
+      input: 'Use the new constraint.',
+    } satisfies RuntimeCommand;
+    const evidence = createRuntimeCommandCommitEvidence({
+      command: steer,
+      targetSessionId: 'session-1',
+      committedAt: 1_700_000_000_000,
+    });
+    const record = createRuntimeStoredCommandReceipt(
+      {
+        ...evidence,
+        resourceResult: createRuntimeInputResourceResult({
+          inputId: 'input-1',
+          runId: 'run-1',
+          turnId: 'turn-2',
+          sequence: 4,
+        }),
+      },
+      9,
+    );
+
+    expect(resolveRuntimeCommandReceipt(steer, record)).toEqual({
+      status: 'idempotent_replay',
+      commandId: 'steer-1',
+      sessionId: 'session-1',
+      originalRevision: 9,
+      input: { inputId: 'input-1', runId: 'run-1', turnId: 'turn-2', sequence: 4 },
+    });
   });
 
   test('retains a lowercase SHA-256 digest without persisting the command body', () => {

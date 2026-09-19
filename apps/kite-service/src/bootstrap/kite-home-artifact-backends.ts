@@ -167,6 +167,8 @@ export function createKiteHomeBuiltinArtifactBackends(
         });
       },
       read: (ref) => store.readSubagentTask(ref).canonicalJson,
+      findByOwnerTask: (ownerKey, taskId) => store.findSubagentTaskResult(ownerKey, taskId),
+      listByOwner: (ownerKey) => store.listSubagentTaskResults(ownerKey),
       collect: (input) => store.collectSubagentTaskGarbage(input),
     }),
     subagentLifecycle: backend<'subagent_handle'>({
@@ -220,6 +222,11 @@ function backend<Kind extends string>(owner: {
     value: unknown,
   ) => void;
   readonly read: (ref: KiteHomePrivateArtifactReference<Kind>) => string;
+  readonly findByOwnerTask?: (
+    ownerKey: string,
+    taskId: string,
+  ) => KiteHomePrivateArtifactReference<Kind> | undefined;
+  readonly listByOwner?: (ownerKey: string) => readonly KiteHomePrivateArtifactReference<Kind>[];
   readonly collect: (
     input: KiteHomeArtifactGarbageCollectionInput,
   ) => KiteHomeArtifactGarbageCollectionResult;
@@ -240,6 +247,15 @@ function backend<Kind extends string>(owner: {
         throw map(error, 'artifact_corrupt');
       }
     },
+    ...(owner.findByOwnerTask
+      ? {
+          findByOwnerTask: (ownerKey: string, taskId: string) =>
+            owner.findByOwnerTask!(ownerKey, taskId),
+        }
+      : {}),
+    ...(owner.listByOwner
+      ? { listByOwner: (ownerKey: string) => owner.listByOwner!(ownerKey) }
+      : {}),
     collectGarbage(options: PrivateArtifactGarbageCollectionOptions<Kind>) {
       try {
         const result = owner.collect({

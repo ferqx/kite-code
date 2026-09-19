@@ -283,7 +283,35 @@ class NativeTuiRuntimeClient {
         this.#previewRewind(threadId, checkpointId),
       executeRewind: (input: TuiRewindRequest) => this.#executeRewind(input),
       clearSessionCommandGrants: (threadId: string) => this.#clearSessionCommandGrants(threadId),
+      listBackgroundExecutions: (threadId: string) => this.#listBackgroundExecutions(threadId),
+      stopBackgroundExecution: (
+        execution: import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionProjection,
+      ) => this.#stopBackgroundExecution(execution),
     });
+  }
+
+  async #stopBackgroundExecution(
+    execution: import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionProjection,
+  ): Promise<RuntimeCommandReceipt> {
+    const result = await this.#runtime.stopBackgroundExecution({
+      commandId: randomUUID(),
+      execution,
+    });
+    return result.receipt;
+  }
+
+  async #listBackgroundExecutions(
+    sessionId: string,
+  ): Promise<import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionSnapshot> {
+    const result = await this.#runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'list_background_executions',
+      sessionId,
+    });
+    if (result.status !== 'ok' || !result.backgroundSnapshot) {
+      throw new Error('Runtime background execution snapshot is unavailable.');
+    }
+    return result.backgroundSnapshot;
   }
 
   #createSession(workspace: string): string {
@@ -724,6 +752,7 @@ class NativeTuiRuntimeClient {
         requestedPhase?: import('@kite-ai/runtime-contract').AgentPhase,
         initialSkills?: TuiInitialSkillActivation[],
       ) => this.#runTask(record, task, dependencies, requestedPhase, initialSkills),
+      steerTask: (input, onAccepted) => this.#steerTask(record, input, onAccepted),
       abort: () => this.#requestCancel(record),
       setForeground: (foreground: boolean) => {
         record.foreground = foreground;
@@ -1440,6 +1469,46 @@ class NativeTuiRuntimeClient {
       return record.projection ?? null;
     }
     return result.session ?? null;
+  }
+
+  async #steerTask(
+    record: NativeSessionRecord,
+    input: string,
+    onAccepted?: (identity: {
+      readonly inputId: string;
+      readonly runId: string;
+      readonly turnId: string;
+      readonly sequence: number;
+    }) => void,
+  ): Promise<void> {
+    await this.#waitForSessionReady(record.threadId);
+    await this.#ensureMutationAdmission(record);
+    const projection = await this.#getSessionProjection(record.threadId);
+    const run = projection?.currentRun;
+    if (
+      !run?.activeTurnId ||
+      (run.status !== 'queued' && run.status !== 'running' && run.status !== 'waiting')
+    ) {
+      throw new Error('当前执行已结束，无法继续引导。');
+    }
+    const receipt = await this.#command({
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: this.#nextCommandId(record.threadId, 'steer'),
+      type: 'steer_turn',
+      sessionId: record.threadId,
+      expectedRunId: run.runId,
+      expectedTurnId: run.activeTurnId,
+      input,
+    });
+    this.#assertApplied(receipt);
+    this.#recordRevision(record, receipt);
+    if (
+      (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') ||
+      !receipt.input
+    ) {
+      throw new Error('Runtime accepted steering without an input identity.');
+    }
+    onAccepted?.(receipt.input);
   }
 
   async #listRewindCheckpoints(sessionId: string): Promise<readonly RuntimeCheckpointProjection[]> {

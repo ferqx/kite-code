@@ -125,6 +125,7 @@ import {
   type CliRuntimeInteractionResolution,
   type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
+  readBackgroundExecutionSnapshot,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { commitInteractionModeCommand } from './bootstrap/runtime/command-control-decision';
 import { previewFilesToCheckpoint } from './bootstrap/runtime/file-checkpoints';
@@ -1507,7 +1508,8 @@ function createKiteCliRuntimeHost(
   });
   const projectIdentity = resolveProjectIdentity(input.workspace);
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBinding();
-  const host = createKiteRuntimeHost(
+  let host!: RuntimeHost<RuntimeEvent, RuntimeState>;
+  host = createKiteRuntimeHost(
     storage,
     (context, builtinToolCatalog) => {
       const { services, capabilities, capabilityRegistrySnapshot } = context;
@@ -1516,7 +1518,15 @@ function createKiteCliRuntimeHost(
         capabilities,
         builtinToolCatalog,
       );
-      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(modelOperationExecution);
+      const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
+        modelOperationExecution,
+        undefined,
+        {
+          resolveAfterTurnOriginRun: (sessionId, activeTurnId) =>
+            host.resolveAfterTurnOriginRun(sessionId, activeTurnId),
+          scheduleAfterTurnWake: (wake) => host.scheduleAfterTurnWake(wake),
+        },
+      );
       const modelInvocationRuntimeFactory = (workspace: string) => ({
         ...modelRuntime(workspace),
         builtinToolCatalog,
@@ -1535,6 +1545,7 @@ function createKiteCliRuntimeHost(
       return createCliRuntimeBridge(
         {
           ...input,
+          enqueueSessionWork: context.enqueueSessionWork,
           projectIdentity,
           storedProjection: () =>
             owner.readSnapshot(() => projectStoredSession(owner, input.sessionId)),
@@ -1622,18 +1633,12 @@ export function createKiteMultiWorkspaceRuntimeServer(
     left.canonicalPath === right.canonicalPath &&
     left.projectId === right.projectId &&
     left.workspaceDigest === right.workspaceDigest;
-  const persistedAdmissionForSession = (sessionId: string): AdmittedWorkspace | undefined => {
+  const readPersistedAdmissionForSession = (sessionId: string): AdmittedWorkspace | undefined => {
     const snapshot = owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId);
-    if (!snapshot) {
-      bySession.delete(sessionId);
-      return undefined;
-    }
+    if (!snapshot) return undefined;
     const projectId = snapshot.session.projectId;
     const workspaceDigest = snapshot.session.canonicalWorkspaceDigest;
-    if (!projectId || !workspaceDigest) {
-      bySession.delete(sessionId);
-      return undefined;
-    }
+    if (!projectId || !workspaceDigest) return undefined;
     const canonicalPath = snapshot.session.workspace;
     const identity = persistedWorkspaceIdentity(canonicalPath);
     if (
@@ -1641,26 +1646,26 @@ export function createKiteMultiWorkspaceRuntimeServer(
       projectId !== identity.projectId ||
       workspaceDigest !== identity.workspaceDigest
     ) {
-      bySession.delete(sessionId);
       return undefined;
     }
     const key = `${workspaceDigest}\0${projectId}\0${canonicalPath}`;
     const registered = byWorkspace.get(key);
-    if (registered) {
-      bySession.set(sessionId, registered.admission);
-      return registered.admission;
-    }
+    if (registered) return registered.admission;
     if (input.workspaceTemplateFor) {
       const admission: AdmittedWorkspace = Object.freeze({
         canonicalPath,
         projectId,
         workspaceDigest: identity.workspaceDigest,
       });
-      bySession.set(sessionId, admission);
       return admission;
     }
-    bySession.delete(sessionId);
     return undefined;
+  };
+  const persistedAdmissionForSession = (sessionId: string): AdmittedWorkspace | undefined => {
+    const admission = readPersistedAdmissionForSession(sessionId);
+    if (admission) bySession.set(sessionId, admission);
+    else bySession.delete(sessionId);
+    return admission;
   };
   const projectStoredSessionForOwner = (threadId: string, snapshot?: RuntimeState | null) =>
     projectStoredSession(owner, threadId, snapshot);
@@ -1677,7 +1682,16 @@ export function createKiteMultiWorkspaceRuntimeServer(
   let recoverInterruptedSession:
     | ((sessionId: string, generation: number, assertCurrent: () => boolean) => Promise<void>)
     | undefined;
-  const host = createKiteRuntimeHost(
+  let readUnownedBackgroundQuery:
+    | ((
+        query: Extract<
+          RuntimeQuery,
+          { readonly type: 'list_background_executions' | 'get_background_execution' }
+        >,
+      ) => RuntimeQueryResult)
+    | undefined;
+  let host!: RuntimeHost<RuntimeEvent, RuntimeState>;
+  host = createKiteRuntimeHost(
     owner.storage,
     (context, builtinToolCatalog) => {
       const { services, capabilities, capabilityRegistrySnapshot } = context;
@@ -1689,12 +1703,63 @@ export function createKiteMultiWorkspaceRuntimeServer(
       const modelRuntime = createInstalledKiteRuntimeCompositionFactory(
         modelOperationExecution,
         artifactBackends,
+        {
+          resolveAfterTurnOriginRun: (sessionId, activeTurnId) =>
+            host.resolveAfterTurnOriginRun(sessionId, activeTurnId),
+          scheduleAfterTurnWake: (wake) => host.scheduleAfterTurnWake(wake),
+        },
       );
       const modelInvocationRuntimeFactory = (workspace: string) => ({
         ...modelRuntime(workspace),
         builtinToolCatalog,
         toolPipelineComposition,
       });
+      readUnownedBackgroundQuery = (query) => {
+        const state = owner.loadCurrentSnapshot(query.sessionId);
+        const admission = readPersistedAdmissionForSession(query.sessionId);
+        if (!state) {
+          return {
+            status: 'not_found',
+            queryType: query.type,
+            code: 'session_not_found',
+          };
+        }
+        if (!admission) {
+          return {
+            status: 'unavailable',
+            queryType: query.type,
+            code: 'session_unavailable',
+          };
+        }
+        const recoveryIdentityKey = services.recoveryIdentities.read(query.sessionId);
+        if (!recoveryIdentityKey) {
+          return {
+            status: 'unavailable',
+            queryType: query.type,
+            code: 'session_unavailable',
+          };
+        }
+        const snapshot = readBackgroundExecutionSnapshot({
+          sessionId: query.sessionId,
+          sessionRevision: state.revision,
+          workspace: admission.canonicalPath,
+          modelInvocationRuntimeFactory,
+          recoveryIdentityKey,
+        });
+        if (query.type === 'list_background_executions') {
+          return {
+            status: 'ok',
+            queryType: query.type,
+            backgroundSnapshot: snapshot,
+          };
+        }
+        const execution = snapshot.executions.find(
+          (candidate) => candidate.executionId === query.executionId,
+        );
+        return execution
+          ? { status: 'ok', queryType: query.type, backgroundExecution: execution }
+          : { status: 'not_found', queryType: query.type, code: 'run_not_found' };
+      };
       runtimeCoordinatorBinding.bind({
         services,
         capabilities,
@@ -1766,6 +1831,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
                   config: sessionConfig,
                   sessionId,
                   restartRecoveryOwnership: () => recoveryGenerations.get(sessionId),
+                  enqueueSessionWork: context.enqueueSessionWork,
                   projectIdentity: bridgeIdentity,
                 },
                 capabilities,
@@ -2194,6 +2260,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
     // Projection queries refresh the Host subscriber registry from the Store.
     // Recovery and resource cleanup are admitted only by execution commands.
     if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
+    if (
+      (query.type === 'list_background_executions' || query.type === 'get_background_execution') &&
+      owner.ownsSessionExecution?.(query.sessionId) !== true
+    ) {
+      return (
+        readUnownedBackgroundQuery?.(query) ?? {
+          status: 'unavailable',
+          queryType: query.type,
+          code: 'session_unavailable',
+        }
+      );
+    }
     const direct = owner.readSnapshot(() => {
       if (query.type === 'list_sessions') {
         return {

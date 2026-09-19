@@ -66,6 +66,11 @@ import type {
   RuntimeState,
   StateRuntimeStorage,
 } from './state-runtime';
+import {
+  type CommittedSteerTurnCommand,
+  commitSteerTurnCommand,
+  steerQueueHasCapacity,
+} from './steer-command-decision';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import {
   type CommittedStartTurnCommand,
@@ -187,6 +192,11 @@ export interface RuntimeSessionCoordinator {
     evidence: RuntimeCommandCommitEvidence,
     context?: StartTurnSkillPlanningContext,
   ): CommittedStartTurnCommand;
+  commitSteerTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'steer_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedSteerTurnCommand;
+  canAcceptSteerInput(): boolean;
   /** Commits the queued-to-running Store 8 activation before execution scheduling. */
   activateStartTurnRun?(runId: string): void;
   /** Commits one Host-inspected interaction command against its exact accepted revision. */
@@ -653,6 +663,30 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     return committed;
   }
 
+  commitSteerTurnCommand(
+    command: Extract<RuntimeCommand, { readonly type: 'steer_turn' }>,
+    evidence: RuntimeCommandCommitEvidence,
+  ): CommittedSteerTurnCommand {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = commitSteerTurnCommand(
+      this.session,
+      command,
+      evidence,
+      this.#store.sessions.loadEventsStrict(this.sessionId),
+    );
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  canAcceptSteerInput(): boolean {
+    this.#assertOpen();
+    return steerQueueHasCapacity(
+      this.getState(),
+      this.#store.sessions.loadEventsStrict(this.sessionId),
+    );
+  }
+
   activateStartTurnRun(runId: string): void {
     this.#assertOpen();
     this.session.activateRun(runId);
@@ -976,6 +1010,8 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     } = {
       runtimeStore: this.#store,
       getState: () => this.session.getState(),
+      waitForRevisionChange: (revision, signal) =>
+        this.session.waitForRevisionChange!(revision, signal),
       processEvent: (event: RuntimeEvent) => {
         const before = this.session.getState();
         const result = this.session.processEvent(event);

@@ -7,6 +7,7 @@ import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAbortReason,
+  type RuntimeBackgroundExecutionSnapshot,
   type RuntimeClientInteraction,
   type RuntimeCommand,
   type RuntimeCommandContext,
@@ -58,6 +59,7 @@ import { KiteAppServerSessionError } from '../kite-session-app-server-storage';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
 import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import { assertPrecommittedRewind } from './command-rewind-decision';
+import { managedShellOwnerKey, managedShellRuntime } from './managed-shell';
 import type {
   RuntimeSessionCoordinator,
   RuntimeSessionCoordinatorAccess,
@@ -71,6 +73,11 @@ import {
 } from './state-actions';
 import type { RuntimeActionProvider, RuntimeInteractionCommandCommitPort } from './state-runner';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
+import type { AfterTurnContinuationRuntime } from './subagent/after-turn-continuation';
+import {
+  type BackgroundSubagentControlRuntime,
+  backgroundSubagentOwnerKey,
+} from './subagent/background-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 import type {
   PrecommittedStartTurnDescriptor,
@@ -79,6 +86,10 @@ import type {
 import type { RuntimeTurnInput } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInput {
+  readonly enqueueSessionWork?: <Result>(
+    sessionId: string,
+    operation: () => Result | Promise<Result>,
+  ) => Promise<Result>;
   readonly restartRecoveryOwnership?: () =>
     | {
         readonly kind: 'fenced_previous_execution';
@@ -166,6 +177,43 @@ export function createCliRuntimeBridge(
   );
 }
 
+export function readBackgroundExecutionSnapshot(input: {
+  readonly sessionId: string;
+  readonly sessionRevision: number;
+  readonly workspace: string;
+  readonly modelInvocationRuntimeFactory: (
+    workspace: string,
+  ) => RuntimeTurnInput['modelInvocationRuntime'];
+  readonly recoveryIdentityKey: string;
+}): RuntimeBackgroundExecutionSnapshot {
+  const shell = managedShellRuntime.listSnapshot(
+    input.sessionId,
+    managedShellOwnerKey(input.sessionId, input.workspace),
+  );
+  const modelRuntime = input.modelInvocationRuntimeFactory(input.workspace);
+  const backgroundSubagentRuntime =
+    'backgroundSubagentRuntime' in modelRuntime
+      ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined)
+      : undefined;
+  const children = backgroundSubagentRuntime?.listSnapshot(
+    input.sessionId,
+    backgroundSubagentOwnerKey(input.sessionId, input.recoveryIdentityKey),
+  );
+  return Object.freeze({
+    sessionId: input.sessionId,
+    sessionRevision: input.sessionRevision,
+    aggregateGeneration: `${shell.aggregateGeneration}:${children?.aggregateGeneration ?? 'no-subagents'}`,
+    // Both owner watermarks are monotonic within the combined aggregate
+    // generation. Their sum advances whenever either directory changes.
+    watermark: shell.watermark + (children?.watermark ?? 0),
+    executions: Object.freeze(
+      [...shell.executions, ...(children?.executions ?? [])].map((item) =>
+        Object.freeze({ ...item, sessionRevision: input.sessionRevision }),
+      ),
+    ),
+  });
+}
+
 class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   readonly #input: CliRuntimeBridgeInput;
   readonly #capabilityExecution: NonNullable<RuntimeTurnInput['capabilityExecution']>;
@@ -187,6 +235,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   #pendingInteraction: PendingCliInteraction | undefined;
   #desiredConfig: AgentConfig;
   #activeRunConfig: AgentConfig | undefined;
+  readonly #pendingAfterTurnRecoveries = new Set<string>();
 
   constructor(
     input: CliRuntimeBridgeInput,
@@ -232,6 +281,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   ): Promise<void> {
     if (sessionId !== this.#input.sessionId) return;
     const coordinator = this.#ensureCoordinator();
+    this.#driveBackgroundStopIntents(coordinator);
+    if (!this.#created) this.#recoverFailedAfterTurnReservationReleases(coordinator);
+    if (!this.#created) this.#queuePendingAfterTurnRecoveries(coordinator);
     const recoveryOwnership = this.#input.restartRecoveryOwnership?.();
     if (recoveryOwnership) {
       const result = await reconcileRuntimeSessionAfterRestart({
@@ -268,6 +320,266 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       revision: this.#revision,
       projection: { kind: 'session', session: this.#projection() },
     });
+  }
+
+  #driveBackgroundStopIntents(coordinator: RuntimeSessionCoordinator): void {
+    const events = coordinator
+      .getStateRuntimeStorage()
+      .sessions.loadEventsStrict(this.#input.sessionId)
+      .map((entry) => entry.event);
+    const done = new Set(
+      events
+        .filter(
+          (event) =>
+            event.type === 'background_execution.stop_settled' ||
+            event.type === 'background_execution.stop_unknown',
+        )
+        .map((event) => event.commandId),
+    );
+    const shellOwner = managedShellOwnerKey(this.#input.sessionId, this.#input.workspace);
+    const shell = managedShellRuntime.listSnapshot(this.#input.sessionId, shellOwner);
+    const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+    const children =
+      'backgroundSubagentRuntime' in modelRuntime
+        ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined)
+        : undefined;
+    const childOwner = backgroundSubagentOwnerKey(
+      this.#input.sessionId,
+      this.#resolveRecoveryIdentity(this.#input.sessionId),
+    );
+    const childSnapshot = children?.listSnapshot(this.#input.sessionId, childOwner);
+    for (const intent of events) {
+      if (intent.type !== 'background_execution.stop_requested' || done.has(intent.commandId))
+        continue;
+      const target = [...shell.executions, ...(childSnapshot?.executions ?? [])].find(
+        (item) =>
+          item.executionId === intent.executionId &&
+          item.kind === intent.executionKind &&
+          item.ownerGeneration === intent.ownerGeneration,
+      );
+      if (!target) {
+        this.#settleBackgroundStop(coordinator, intent.commandId, intent.executionId, false);
+        continue;
+      }
+      if (target.cleanupConfirmed) {
+        this.#settleBackgroundStop(coordinator, intent.commandId, intent.executionId, true);
+        continue;
+      }
+      if (target.status === 'unavailable') {
+        this.#settleBackgroundStop(coordinator, intent.commandId, intent.executionId, false);
+        continue;
+      }
+      const settled = () => {
+        const redrive = () => {
+          const current = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+          if (current) this.#driveBackgroundStopIntents(current);
+        };
+        if (this.#input.enqueueSessionWork)
+          void this.#input.enqueueSessionWork(this.#input.sessionId, redrive);
+        else queueMicrotask(redrive);
+      };
+      const requested =
+        intent.executionKind === 'subagent'
+          ? (children?.requestCancel(childOwner, intent.executionId, settled) ?? false)
+          : managedShellRuntime.requestStop(intent.executionId, shellOwner, settled);
+      // The handle may become terminal after the snapshot above but before the
+      // stop request registers its callback. Re-read the directory so every
+      // durable stop intent receives a terminal settlement.
+      if (!requested) settled();
+    }
+  }
+
+  #recoverFailedAfterTurnReservationReleases(coordinator: RuntimeSessionCoordinator): void {
+    const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+    const children =
+      'backgroundSubagentRuntime' in modelRuntime
+        ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined)
+        : undefined;
+    const ownerKey = backgroundSubagentOwnerKey(
+      this.#input.sessionId,
+      this.#resolveRecoveryIdentity(this.#input.sessionId),
+    );
+    const state = coordinator.getState();
+    if (state.resourceBudget.status !== 'active') return;
+    for (const reservationId of children?.settlementRecoveryReservations?.(ownerKey) ?? []) {
+      if (state.resourceBudget.reservations[reservationId]?.state !== 'reserved') continue;
+      coordinator.control.processEvent({
+        type: 'resource_budget.released',
+        reservationId,
+      });
+    }
+  }
+
+  #queuePendingAfterTurnRecoveries(coordinator: RuntimeSessionCoordinator): void {
+    const events = coordinator
+      .getStateRuntimeStorage()
+      .sessions.loadEventsStrict(this.#input.sessionId)
+      .map((entry) => entry.event)
+      .filter(
+        (event): event is Extract<typeof event, { type: 'subagent.background_result_persisted' }> =>
+          event.type === 'subagent.background_result_persisted' && event.afterTurn !== undefined,
+      );
+    for (const event of events) {
+      const afterTurn = event.afterTurn!;
+      const state = coordinator.getState();
+      if (
+        state.resourceBudget.status !== 'active' ||
+        state.resourceBudget.reservations[afterTurn.reservationId]?.state !== 'reserved' ||
+        this.#pendingAfterTurnRecoveries.has(event.notificationId)
+      ) {
+        continue;
+      }
+      this.#pendingAfterTurnRecoveries.add(event.notificationId);
+      const recover = async () => {
+        try {
+          const current = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+          if (!current) return;
+          const currentState = current.getState();
+          if (
+            currentState.resourceBudget.status !== 'active' ||
+            currentState.resourceBudget.reservations[afterTurn.reservationId]?.state !== 'reserved'
+          ) {
+            return;
+          }
+          const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+          const children =
+            'backgroundSubagentRuntime' in modelRuntime
+              ? (modelRuntime.backgroundSubagentRuntime as
+                  | BackgroundSubagentControlRuntime
+                  | undefined)
+              : undefined;
+          const continuation =
+            'afterTurnContinuationRuntime' in modelRuntime
+              ? (modelRuntime.afterTurnContinuationRuntime as
+                  | AfterTurnContinuationRuntime
+                  | undefined)
+              : undefined;
+          if (!children || !continuation) return;
+          const ownerKey = backgroundSubagentOwnerKey(
+            this.#input.sessionId,
+            this.#resolveRecoveryIdentity(this.#input.sessionId),
+          );
+          const durable = await children.readTask(ownerKey, event.taskId);
+          const artifact = durable.artifact as
+            | Readonly<{
+                artifactId: string;
+                kind: 'subagent_task';
+                integrityIdentifier: string;
+                byteLength: number;
+              }>
+            | undefined;
+          if (!artifact || artifact.integrityIdentifier !== event.artifactIntegrityIdentifier)
+            return;
+          await continuation.deliver({
+            sessionId: this.#input.sessionId,
+            admissionRevision: afterTurn.admissionRevision,
+            phase: afterTurn.phase,
+            attempt: event.attempt,
+            reservation: {
+              reservationId: afterTurn.reservationId,
+              originRunId: event.originRunId,
+              deadlineAt: currentState.resourceBudget.deadlineAt,
+              preparationEvents: [],
+            },
+            notification: {
+              notificationId: event.notificationId,
+              source: 'subagent',
+              modelRole: 'user',
+              ownerKey,
+              taskId: event.taskId,
+              originRunId: event.originRunId,
+              originTurnId: event.originTurnId,
+              originToolCallId: event.originToolCallId,
+              attempt: event.attempt,
+              status: afterTurn.status,
+              shortReport: event.shortReport,
+              resultArtifact: artifact,
+              cancelRequested: afterTurn.cancelRequested,
+            },
+            persistEvents: async (
+              settlementEvents: Parameters<typeof current.control.processEvent>[0][],
+            ) => {
+              for (const settlementEvent of settlementEvents) {
+                current.control.processEvent(settlementEvent);
+              }
+              return true;
+            },
+          });
+        } finally {
+          this.#pendingAfterTurnRecoveries.delete(event.notificationId);
+        }
+      };
+      if (this.#input.enqueueSessionWork) {
+        void this.#input.enqueueSessionWork(this.#input.sessionId, recover).catch(() => {
+          // The durable pending intent remains authoritative for the next recovery pass.
+        });
+      } else {
+        queueMicrotask(() => {
+          void recover().catch(() => {
+            // The durable pending intent remains authoritative for the next recovery pass.
+          });
+        });
+      }
+    }
+  }
+
+  #hasLiveBackgroundExecutions(): boolean {
+    const shell = managedShellRuntime.listSnapshot(
+      this.#input.sessionId,
+      managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
+    );
+    const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+    const children =
+      'backgroundSubagentRuntime' in modelRuntime
+        ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined)
+        : undefined;
+    const childSnapshot = children?.listSnapshot(
+      this.#input.sessionId,
+      backgroundSubagentOwnerKey(
+        this.#input.sessionId,
+        this.#resolveRecoveryIdentity(this.#input.sessionId),
+      ),
+    );
+    return [...shell.executions, ...(childSnapshot?.executions ?? [])].some(
+      (execution) => !execution.cleanupConfirmed,
+    );
+  }
+
+  #settleBackgroundStop(
+    coordinator: RuntimeSessionCoordinator,
+    commandId: string,
+    executionId: string,
+    confirmed: boolean,
+  ): void {
+    const events = coordinator
+      .getStateRuntimeStorage()
+      .sessions.loadEventsStrict(this.#input.sessionId)
+      .map((entry) => entry.event);
+    if (
+      events.some(
+        (event) =>
+          (event.type === 'background_execution.stop_settled' ||
+            event.type === 'background_execution.stop_unknown') &&
+          event.commandId === commandId,
+      )
+    )
+      return;
+    coordinator.control.processEvent(
+      confirmed
+        ? {
+            type: 'background_execution.stop_settled',
+            commandId,
+            executionId,
+            cleanupConfirmed: true,
+          }
+        : {
+            type: 'background_execution.stop_unknown',
+            commandId,
+            executionId,
+            reason: 'external_outcome_unknown',
+          },
+    );
+    this.#revision = coordinator.getState().revision;
   }
 
   /** Rebuild only an already-committed resume with no durable dispatch facts. */
@@ -324,6 +636,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       }
       const source = this.#runtimeSessionCoordinator.get(command.sourceSessionId);
       if (!source) return terminal(this.#rejected(command, 'session_unavailable'));
+      if (this.#hasLiveBackgroundExecutions()) {
+        return terminal(this.#rejected(command, 'runtime_busy'));
+      }
       return {
         kind: 'accepted',
         decision: {
@@ -375,6 +690,99 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     }
     if ('sessionId' in command && command.sessionId !== this.#input.sessionId) {
       return terminal(this.#notFound(command));
+    }
+    if (command.type === 'stop_background_execution') {
+      if (!this.#input.enqueueSessionWork) return terminal(this.#rejected(command, 'unsupported'));
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      const currentRevision = coordinator.getState().revision;
+      if (command.expectedRevision !== currentRevision) {
+        this.#revision = currentRevision;
+        return terminal(this.#rejected(command, 'revision_conflict'));
+      }
+      const shellOwner = managedShellOwnerKey(this.#input.sessionId, this.#input.workspace);
+      const shell = managedShellRuntime.listSnapshot(this.#input.sessionId, shellOwner);
+      const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+      const children =
+        'backgroundSubagentRuntime' in modelRuntime
+          ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined)
+          : undefined;
+      const childOwner = backgroundSubagentOwnerKey(
+        this.#input.sessionId,
+        this.#resolveRecoveryIdentity(this.#input.sessionId),
+      );
+      const child = children?.listSnapshot(this.#input.sessionId, childOwner);
+      const target = [...shell.executions, ...(child?.executions ?? [])].find(
+        (item) => item.executionId === command.executionId,
+      );
+      if (
+        !target ||
+        target.kind !== command.executionKind ||
+        target.ownerGeneration !== command.expectedOwnerGeneration ||
+        target.revision !== command.expectedExecutionRevision ||
+        target.status !== 'running'
+      )
+        return terminal(this.#rejected(command, 'target_ended'));
+      return {
+        kind: 'accepted',
+        decision: {
+          targetSessionId: this.#input.sessionId,
+          validate: () => {
+            const commitRevision = coordinator.getState().revision;
+            if (command.expectedRevision !== commitRevision) {
+              this.#revision = commitRevision;
+              return {
+                status: 'conflict' as const,
+                commandId: command.commandId,
+                code: 'revision_conflict' as const,
+                currentRevision: commitRevision,
+              };
+            }
+            const currentShell = managedShellRuntime.listSnapshot(
+              this.#input.sessionId,
+              shellOwner,
+            );
+            const currentChild = children?.listSnapshot(this.#input.sessionId, childOwner);
+            const currentTarget = [
+              ...currentShell.executions,
+              ...(currentChild?.executions ?? []),
+            ].find((item) => item.executionId === command.executionId);
+            if (
+              !currentTarget ||
+              currentTarget.kind !== command.executionKind ||
+              currentTarget.ownerGeneration !== command.expectedOwnerGeneration ||
+              currentTarget.revision !== command.expectedExecutionRevision ||
+              currentTarget.status !== 'running'
+            ) {
+              this.#revision = commitRevision;
+              return this.#rejected(command, 'target_ended');
+            }
+            return undefined;
+          },
+          commit: async (evidence) => {
+            const committed = coordinator.session.commitCommandBatch(
+              [
+                {
+                  type: 'background_execution.stop_requested',
+                  commandId: command.commandId,
+                  executionId: command.executionId,
+                  executionKind: command.executionKind,
+                  ownerGeneration: command.expectedOwnerGeneration,
+                },
+              ],
+              evidence,
+            );
+            const receipt = receiptFromStored(committed.receipt);
+            return {
+              receipt,
+              activation: async () => {
+                this.#revision = receipt.revision;
+                this.#driveBackgroundStopIntents(coordinator);
+              },
+            };
+          },
+        },
+      };
     }
     if (command.type === 'respond_interaction') {
       const pending = this.#pendingInteraction;
@@ -597,6 +1005,60 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         },
       };
     }
+    if (command.type === 'steer_turn') {
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
+      const state = coordinator.getState();
+      const run = coordinator.session.getLifecycleProjection().currentRun;
+      if (
+        state.turn.status !== 'active' ||
+        state.turn.turnId !== command.expectedTurnId ||
+        run?.runId !== command.expectedRunId
+      ) {
+        return terminal(this.#rejected(command, 'target_ended'));
+      }
+      if (!coordinator.canAcceptSteerInput()) {
+        return terminal(this.#rejected(command, 'steer_queue_full'));
+      }
+      return {
+        kind: 'accepted',
+        decision: {
+          targetSessionId: this.#input.sessionId,
+          commit: async (evidence) => {
+            const pending = this.#pendingInteraction;
+            const committed = coordinator.commitSteerTurnCommand(command, evidence);
+            const receipt = receiptFromStored(committed.receipt);
+            return {
+              receipt,
+              activation: async (publish) => {
+                this.#revision = receipt.revision;
+                this.#activePublish = publish;
+                this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'turn', {
+                  runId: command.expectedRunId,
+                  turnId: command.expectedTurnId,
+                });
+                managedShellRuntime.notifyInput(
+                  managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
+                );
+                if (
+                  committed.supersededInteractionId &&
+                  pending?.interaction.interactionId === committed.supersededInteractionId
+                ) {
+                  if (this.#pendingInteraction === pending) this.#pendingInteraction = undefined;
+                  const resolution = this.#interactionBroker.resolve(pending.brokerIdentity, {
+                    type: 'superseded_by_user_input',
+                    interactionId: committed.supersededInteractionId,
+                  });
+                  if (resolution !== 'resolved') {
+                    throw new Error(`Runtime steer interaction supersession failed: ${resolution}`);
+                  }
+                }
+              },
+            };
+          },
+        },
+      };
+    }
     if (command.type === 'cancel_turn') {
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
       if (!coordinator) return terminal(this.#rejected(command, 'session_unavailable'));
@@ -629,6 +1091,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       return this.#compactionDecision(command, coordinator, plan);
     }
     if (command.type === 'rewind_session') {
+      if (this.#hasLiveBackgroundExecutions()) {
+        return terminal(this.#rejected(command, 'runtime_busy'));
+      }
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
       if (!coordinator?.commitRewindCommand || !coordinator.persistRewindTerminal) {
         return terminal(this.#rejected(command, 'session_unavailable'));
@@ -899,6 +1364,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
               this.#closed = true;
               this.#rejectPendingInteraction(new Error('Runtime session closed.'));
               this.#publishCommittedEvents(committed.events, receipt.revision, publish, 'session');
+              await this.shutdownSession(this.#input.sessionId, 'Runtime session closed.', publish);
             },
           };
         },
@@ -995,6 +1461,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     }
     // Generator delivery and command activation may interleave. Both consume
     // this one commit-ordered queue; a later generator yield is already delivered.
+    const directEvents = new Set(events);
     for (const event of coordinator.takeCommittedEventsThrough(finalRevision)) {
       const eventState = coordinator.stateForEvent?.(event);
       const revision = coordinator.revisionForEvent?.(event);
@@ -1010,9 +1477,14 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       }
       if (projectedEvent?.type === 'run.terminal' && session.currentRun)
         projectedEvent = { ...projectedEvent, runId: session.currentRun.runId };
-      const runId = identity.runId ?? session.currentRun?.runId;
-      const taskId = identity.taskId ?? session.activeTask?.taskId ?? session.currentRun?.taskId;
-      const turnId = identity.turnId ?? session.currentRun?.activeTurnId;
+      // Events already pending before this direct batch retain the Run/Turn
+      // projected by their exact post-event State. This matters when a late
+      // background completion is drained by the successor start activation.
+      const directIdentity = directEvents.has(event) ? identity : {};
+      const runId = directIdentity.runId ?? session.currentRun?.runId;
+      const taskId =
+        directIdentity.taskId ?? session.activeTask?.taskId ?? session.currentRun?.taskId;
+      const turnId = directIdentity.turnId ?? session.currentRun?.activeTurnId;
       publish({
         schema: RUNTIME_NOTIFICATION_SCHEMA_,
         durability: 'durable',
@@ -1040,11 +1512,46 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     this.#rejectPendingInteraction(new Error(reason));
     if (!this.#closed) this.#persistCancellation(reason, publish);
     this.#closed = true;
+    const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+    const disposeSubagents =
+      'backgroundSubagentRuntime' in modelRuntime
+        ? (
+            modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined
+          )?.disposeOwner?.(
+            backgroundSubagentOwnerKey(
+              this.#input.sessionId,
+              this.#resolveRecoveryIdentity(this.#input.sessionId),
+            ),
+            reason,
+          )
+        : undefined;
+    await Promise.all([
+      managedShellRuntime.disposeOwner(
+        managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
+        reason,
+      ),
+      disposeSubagents,
+    ]);
+    const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+    if (coordinator) this.#driveBackgroundStopIntents(coordinator);
   }
 
-  close(): Promise<void> {
+  async close(): Promise<void> {
     if (this.#ownsInteractionBroker) this.#interactionBroker.close();
-    return this.#runtimeSessionCoordinator.close();
+    await managedShellRuntime.disposeOwner(
+      managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
+    );
+    const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+    if ('backgroundSubagentRuntime' in modelRuntime)
+      await (
+        modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime | undefined
+      )?.disposeOwner?.(
+        backgroundSubagentOwnerKey(
+          this.#input.sessionId,
+          this.#resolveRecoveryIdentity(this.#input.sessionId),
+        ),
+      );
+    await this.#runtimeSessionCoordinator.close();
   }
 
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
@@ -1095,6 +1602,29 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           compactionAvailable: coordinator?.isTurnActive() !== true && !this.#closed,
         },
       });
+    }
+    if (query.type === 'list_background_executions' || query.type === 'get_background_execution') {
+      const snapshot = readBackgroundExecutionSnapshot({
+        sessionId: this.#input.sessionId,
+        sessionRevision: projection.revision,
+        workspace: this.#input.workspace,
+        modelInvocationRuntimeFactory: this.#modelInvocationRuntimeFactory,
+        recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
+      });
+      const executions = snapshot.executions;
+      if (query.type === 'list_background_executions') {
+        return Promise.resolve({
+          status: 'ok',
+          queryType: query.type,
+          backgroundSnapshot: snapshot,
+        });
+      }
+      const execution = executions.find((item) => item.executionId === query.executionId);
+      return Promise.resolve(
+        execution
+          ? { status: 'ok', queryType: query.type, backgroundExecution: execution }
+          : { status: 'not_found', queryType: query.type, code: 'run_not_found' },
+      );
     }
     if (query.type === 'list_checkpoints') {
       const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
@@ -1212,6 +1742,11 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       if (!presentationTurnId) {
         throw new Error('Runtime turn execution has no accepted Turn identity.');
       }
+      const recoveryIdentityKey = this.#resolveRecoveryIdentity(this.#input.sessionId);
+      const backgroundModelInvocationPersistence = this.#backgroundModelInvocationPersistence(
+        coordinator,
+        recoveryIdentityKey,
+      );
       const publishPresentation = (event: RuntimeEvent): void => {
         const notification = projectRuntimeEphemeralNotification(event, {
           sessionId: this.#input.sessionId,
@@ -1237,7 +1772,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           userId: this.#input.userId,
           threadId: this.#input.sessionId,
           workspace: this.#input.workspace,
-          recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
+          recoveryIdentityKey,
           capabilityExecution: this.#capabilityExecution,
           modelInvocationRuntime: this.#modelInvocationRuntimeFactory(this.#input.workspace),
           config: execution.config,
@@ -1272,6 +1807,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           ...(execution.resumeCommittedInteraction === true
             ? { resumeCommittedInteraction: true }
             : {}),
+          ...(backgroundModelInvocationPersistence === undefined
+            ? {}
+            : { backgroundModelInvocationPersistence }),
         },
         this.#createClientActionProvider(publish),
       );
@@ -1281,7 +1819,13 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         const eventRevision = coordinator.revisionForEvent?.(event);
         const eventState = coordinator.stateForEvent?.(event);
         if (eventRevision === undefined || !eventState || eventState.revision !== eventRevision) {
-          throw new Error('Runtime event revision was unavailable or out of order.');
+          // A detached background commit can advance and drain the canonical
+          // commit queue before the parent generator resumes with its local
+          // event object. Publication follows that queue, not generator object
+          // identity; flush everything committed through the current State.
+          this.#publishCommittedEvents([], coordinator.getState().revision, publish, 'turn');
+          publishedRevision = Math.max(publishedRevision, this.#revision);
+          continue;
         }
         this.#publishCommittedEvents([event], eventRevision, publish, 'turn', {
           runId: presentationRunId,
@@ -1315,6 +1859,60 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       }
       if (terminalState.turn.status !== 'active') this.#activeRunConfig = undefined;
     }
+  }
+
+  #backgroundModelInvocationPersistence(
+    coordinator: RuntimeSessionCoordinator,
+    recoveryIdentityKey: string,
+  ): NonNullable<RuntimeTurnInput['backgroundModelInvocationPersistence']> | undefined {
+    const enqueueSessionWork = this.#input.enqueueSessionWork;
+    if (!enqueueSessionWork) return undefined;
+    const sessionId = this.#input.sessionId;
+    const currentState = (): Readonly<RuntimeState> | undefined => {
+      if (
+        this.#closed ||
+        this.#runtimeSessionCoordinator.get(sessionId) !== coordinator ||
+        coordinator.lifecycle === 'closing' ||
+        coordinator.lifecycle === 'closed'
+      ) {
+        return undefined;
+      }
+      try {
+        const state = coordinator.getState();
+        return state.toolRecovery.identityKey === recoveryIdentityKey ? state : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    return Object.freeze({
+      ownerKey: backgroundSubagentOwnerKey(sessionId, recoveryIdentityKey),
+      recoveryIdentityKey,
+      getState: () => {
+        const state = currentState();
+        if (!state) {
+          throw new Error('Background model persistence authority is no longer current.');
+        }
+        return state;
+      },
+      persistEvents: async (events: RuntimeEvent[]) => {
+        if (events.length === 0) return true;
+        try {
+          return await enqueueSessionWork(sessionId, () => {
+            if (!currentState()) return false;
+            try {
+              const applied = coordinator.control.processEventBatch(events);
+              if (applied.length !== events.length) return false;
+              this.#revision = coordinator.getState().revision;
+              return true;
+            } catch {
+              return false;
+            }
+          });
+        } catch {
+          return false;
+        }
+      },
+    });
   }
 
   #failActivation(

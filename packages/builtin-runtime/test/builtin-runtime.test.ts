@@ -157,7 +157,7 @@ describe('builtin runtime package boundary', () => {
     expect(Object.isFrozen(modules)).toBe(true);
   });
 
-  test('creates the exact frozen State 27 turn binding without authorization', () => {
+  test('creates the exact frozen State 29 turn binding without authorization', () => {
     const binding = createCapabilityBinding({
       capabilityId: 'mcp:docs:search',
       capabilityRevision: 'revision-1',
@@ -179,7 +179,7 @@ describe('builtin runtime package boundary', () => {
   test('registers the exact RM-10 through RM-15 owners and executors', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
-    expect(registry.snapshot().capabilities).toHaveLength(27);
+    expect(registry.snapshot().capabilities).toHaveLength(31);
     expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
       capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
       revision: TOOL_SEARCH_CAPABILITY_REVISION_,
@@ -265,7 +265,7 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 27 registered operations without Git inspection', () => {
+  test('projects all 31 registered operations without Git inspection', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -276,8 +276,8 @@ describe('builtin runtime package boundary', () => {
         featureFlags: { skillWorkflow: true, skillActivation: true },
       },
     });
-    expect(projection.entries).toHaveLength(27);
-    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(19);
+    expect(projection.entries).toHaveLength(31);
+    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(23);
     expect(projection.entries.some((entry) => entry.operationId === 'builtin:git_inspect')).toBe(
       false,
     );
@@ -298,11 +298,15 @@ describe('builtin runtime package boundary', () => {
       'builtin:write_file': 'filesystem',
       'builtin:edit_file': 'filesystem',
       'builtin:shell_execute': 'shell',
+      'builtin:shell_read': 'shell',
+      'builtin:shell_stop': 'shell',
       'builtin:ask_user': 'user_input',
       'builtin:read_plan': 'planning',
       'builtin:update_plan': 'planning',
       'builtin:write_plan': 'planning',
       'builtin:task': 'subagent',
+      'builtin:task_read': 'task_control',
+      'builtin:task_cancel': 'task_control',
       'subagent:start': 'subagent',
       'subagent:resume': 'subagent',
       'verification:deterministic': 'verification',
@@ -311,7 +315,7 @@ describe('builtin runtime package boundary', () => {
       'model:auto_review': 'model',
       'model:subagent': 'model',
     };
-    expect(Object.keys(expectedMechanisms)).toHaveLength(27);
+    expect(Object.keys(expectedMechanisms)).toHaveLength(31);
     expect(projection.entries.map((entry) => entry.operationId).sort()).toEqual(
       Object.keys(expectedMechanisms).sort(),
     );
@@ -335,7 +339,11 @@ describe('builtin runtime package boundary', () => {
       'search_content',
       'search_files',
       'shell_execute',
+      'shell_read',
+      'shell_stop',
       'task',
+      'task_cancel',
+      'task_read',
       'tool_search',
       'update_plan',
       'web_fetch',
@@ -502,7 +510,11 @@ describe('builtin runtime package boundary', () => {
       'builtin:search_content',
       'builtin:search_files',
       'builtin:shell_execute',
+      'builtin:shell_read',
+      'builtin:shell_stop',
       'builtin:task',
+      'builtin:task_cancel',
+      'builtin:task_read',
       'builtin:web_fetch',
     ]);
     expect(shell.descriptor.policy).toMatchObject({
@@ -688,10 +700,30 @@ describe('builtin runtime package boundary', () => {
         sideEffect: false,
         reason: 'explore sub-agent is read-only by role.',
       },
+      task_read: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Reads or stops one Runtime-owned background sub-agent.',
+      },
+      task_cancel: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Reads or stops one Runtime-owned background sub-agent.',
+      },
       shell_execute: {
         effectClass: 'read_only',
         sideEffect: false,
         reason: 'Shell command matches the versioned conservative read-only grammar.',
+      },
+      shell_read: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Reads one Runtime-owned Shell execution.',
+      },
+      shell_stop: {
+        effectClass: 'external_side_effect',
+        sideEffect: true,
+        reason: 'Stops one Runtime-owned Shell execution.',
       },
     };
     for (const entry of projection.entries.filter(
@@ -701,8 +733,12 @@ describe('builtin runtime package boundary', () => {
       let input: RuntimeJsonValue = {};
       if (entry.name === 'task') {
         input = { subagent_type: 'explore', task: 'inspect the repository' };
+      } else if (entry.name === 'task_read' || entry.name === 'task_cancel') {
+        input = { task_id: 'subagent-test' };
       } else if (entry.name === 'shell_execute') {
         input = { command: 'cat package.json' };
+      } else if (entry.name === 'shell_read' || entry.name === 'shell_stop') {
+        input = { shell_id: 'sh_test' };
       }
       const expected = expectedEffects[entry.name];
       if (!expected) throw new Error(`missing effects parity fixture: ${entry.name}`);
@@ -816,8 +852,8 @@ describe('builtin runtime package boundary', () => {
       featureFlags: { skillWorkflow: true, skillActivation: true },
     });
     expect(hidden.revision).toBe(fullTurn.revision);
-    expect(Object.keys(hidden.toolSet)).toHaveLength(14);
-    expect(Object.keys(fullTurn.toolSet)).toHaveLength(19);
+    expect(Object.keys(hidden.toolSet)).toHaveLength(16);
+    expect(Object.keys(fullTurn.toolSet)).toHaveLength(23);
     expect(
       hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search')?.descriptor
         .availability,

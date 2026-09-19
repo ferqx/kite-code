@@ -685,6 +685,7 @@ export function isValidSandboxReady(value: unknown): boolean {
 }
 
 function assertCapabilityLifecycleEvidence(
+  state: AgentState,
   invocationId: string,
   invocation: UnknownRecord,
   status: string | undefined,
@@ -777,6 +778,61 @@ function assertCapabilityLifecycleEvidence(
         validTimestamp(lifecycle.cleanupCompletedAt),
       `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
     );
+  const backgroundResult = recordValue(lifecycle, 'backgroundResult');
+  if (backgroundResult) {
+    const afterTurn = recordValue(backgroundResult, 'afterTurn');
+    assert(
+      lifecycleStatus === 'cleanup_completed' &&
+        exactShape(backgroundResult, [
+          'taskId',
+          'notificationId',
+          'artifactIntegrityIdentifier',
+          'originRunId',
+          'originTurnId',
+          'originToolCallId',
+          'attempt',
+          ...(afterTurn ? ['afterTurn'] : []),
+        ]) &&
+        stringValue(backgroundResult, 'taskId') === stringValue(lifecycle, 'childInvocationId') &&
+        validString(backgroundResult.notificationId) &&
+        /^sha256:[a-f0-9]{64}$/u.test(
+          stringValue(backgroundResult, 'artifactIntegrityIdentifier') ?? '',
+        ) &&
+        validString(backgroundResult.originRunId) &&
+        stringValue(backgroundResult, 'originToolCallId') ===
+          stringValue(invocation, 'toolCallId') &&
+        numberValue(backgroundResult, 'attempt') === numberValue(lifecycle, 'attempt') &&
+        state.tools.calls[stringValue(invocation, 'toolCallId') ?? '']?.createdAtTurnId ===
+          stringValue(backgroundResult, 'originTurnId'),
+      `governed Subagent invocation ${invocationId} has invalid background result authority.`,
+    );
+    if (afterTurn) {
+      assert(
+        exactShape(afterTurn, [
+          'reservationId',
+          'admissionRevision',
+          'eventId',
+          'wakeKey',
+          'runId',
+          'phase',
+          'status',
+          'cancelRequested',
+        ]) &&
+          validString(afterTurn.reservationId) &&
+          Number.isSafeInteger(afterTurn.admissionRevision) &&
+          Number(afterTurn.admissionRevision) >= 0 &&
+          validString(afterTurn.runId) &&
+          (afterTurn.phase === 'planning' || afterTurn.phase === 'building') &&
+          ['completed', 'failed', 'cancelled', 'interrupted', 'exhausted', 'suspended'].includes(
+            String(afterTurn.status),
+          ) &&
+          typeof afterTurn.cancelRequested === 'boolean' &&
+          /^[a-f0-9]{64}$/u.test(stringValue(afterTurn, 'eventId') ?? '') &&
+          /^[a-f0-9]{64}$/u.test(stringValue(afterTurn, 'wakeKey') ?? ''),
+        `governed Subagent invocation ${invocationId} has invalid after-turn authority.`,
+      );
+    }
+  }
 }
 
 function assertModelInvocations(state: AgentState): void {
@@ -1022,7 +1078,7 @@ function assertCapabilityInvocations(state: AgentState): void {
           stringValue(sandboxReady, 'intentDigest') === stringValue(sandboxIntent, 'intentDigest'),
         `sandbox invocation ${invocationId} ready evidence is invalid.`,
       );
-    assertCapabilityLifecycleEvidence(invocationId, invocation, status);
+    assertCapabilityLifecycleEvidence(state, invocationId, invocation, status);
     const toolCallId = stringValue(invocation, 'toolCallId');
     if (status === 'recorded' || status === 'running') {
       const call = toolCallId ? state.tools.calls[toolCallId] : undefined;

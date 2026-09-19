@@ -77,6 +77,28 @@ describe('ACORE-AGENT-01 delegation contract', () => {
     expect(validateDelegatedTask({ delegatedTask: 'bounded!' }).valid).toBe(true);
   });
 
+  test('keeps background execution separate from cross-turn result disposition', () => {
+    const base = {
+      name: 'Inspect code',
+      subagent_type: 'explore' as const,
+      task: 'Inspect the runtime contract and report evidence.',
+    };
+    expect(BUILTIN_TASK_PUBLIC_SCHEMA_.parse({ ...base, background: true })).toEqual({
+      ...base,
+      background: true,
+    });
+    expect(
+      BUILTIN_TASK_PUBLIC_SCHEMA_.parse({
+        ...base,
+        background: true,
+        result_disposition: 'after_turn',
+      }),
+    ).toEqual({ ...base, background: true, result_disposition: 'after_turn' });
+    expect(
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({ ...base, result_disposition: 'later' }).success,
+    ).toBe(false);
+  });
+
   test('keeps raw and private Artifact-backed task forms disjoint', () => {
     const taskArtifact = {
       artifactId: `pa_${'a'.repeat(64)}`,
@@ -133,6 +155,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
         summary: 'Plan evidence gathered.',
         toolCallCount: 1,
         durationMs: 10,
+        terminalStatus: 'completed',
       },
     });
     expect(JSON.parse(projected.stdout).nextActions).toEqual([

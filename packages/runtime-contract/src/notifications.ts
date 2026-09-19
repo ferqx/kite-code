@@ -153,6 +153,11 @@ export type RuntimeClientEvent =
       readonly summary?: string;
     }
   | {
+      readonly type: 'model.response_superseded';
+      readonly messageId: string;
+      readonly requestId: string;
+    }
+  | {
       readonly type: 'model.retry';
       readonly requestId: string;
       readonly attempt: number;
@@ -467,6 +472,7 @@ const RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_ = {
   'reasoning.activity': 'turn',
   'model.text_delta': 'turn',
   'model.responded': 'turn',
+  'model.response_superseded': 'turn',
   'model.retry': 'turn',
   'model.cache': 'turn',
   'tool.queued': 'turn',
@@ -887,6 +893,12 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
         isNonNegativeSafeInteger(value.toolCallCount) &&
         (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs)) &&
         (!Object.hasOwn(value, 'summary') || isBoundedUserText(value.summary))
+      );
+    case 'model.response_superseded':
+      return (
+        hasExactKeys(value, ['type', 'messageId', 'requestId']) &&
+        isIdentifier(value.messageId) &&
+        isIdentifier(value.requestId)
       );
     case 'model.retry':
       return (

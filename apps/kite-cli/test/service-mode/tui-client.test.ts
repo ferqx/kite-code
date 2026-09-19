@@ -132,6 +132,12 @@ test('Native TUI facade uses Runtime commands/events and close only tears down t
   });
   expect(remote.commands).toContain('rewind_session');
 
+  const background = await facade.listBackgroundExecutions(sessionId);
+  expect(background.executions).toHaveLength(1);
+  const stopReceipt = await facade.stopBackgroundExecution(background.executions[0]!);
+  expect(stopReceipt.status).toBe('applied');
+  expect(remote.commands).toContain('stop_background_execution');
+
   await facade.dispose();
   expect(closeCalls).toBe(1);
   expect(remote.closeCalls).toBe(1);
@@ -446,6 +452,42 @@ test('Native TUI facade waits for a restored active turn before admitting the ne
   await facade.dispose();
 });
 
+test('Native TUI facade steers the stable active run instead of starting a successor turn', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.restoreActiveTurnOnSubscribe();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const session = facade.getRuntime(sessionId)!;
+  expect(session.agentLoopActive).toBe(true);
+
+  let accepted:
+    | {
+        readonly inputId: string;
+        readonly runId: string;
+        readonly turnId: string;
+        readonly sequence: number;
+      }
+    | undefined;
+  await session.steerTask('please also inspect the TUI', (identity) => {
+    accepted = identity;
+  });
+
+  expect(remote.commands).toContain('steer_turn');
+  expect(remote.commands).not.toContain('start_turn');
+  expect(remote.steerTargets).toEqual([
+    { runId: 'run-1', turnId: 'turn-1', input: 'please also inspect the TUI' },
+  ]);
+  expect(accepted).toEqual({
+    inputId: 'input-steer-1',
+    runId: 'run-1',
+    turnId: 'turn-1',
+    sequence: 1,
+  });
+  expect(session.agentLoopActive).toBe(true);
+  await facade.dispose();
+});
+
 test('Native TUI facade retries a queued turn after an exact revision conflict', async () => {
   const remote = new FakeRuntimeConnection();
   remote.conflictNextStartTurnAt(7);
@@ -690,6 +732,7 @@ test('App Server TUI keeps historical open observer-only and resumes on the firs
 
 class FakeRuntimeConnection implements RuntimeClientConnection {
   readonly commands: string[] = [];
+  readonly steerTargets: Array<{ runId: string; turnId: string; input: string }> = [];
   readonly interactionExpectedRevisions: number[] = [];
   readonly interactionPayloadRevisions: number[] = [];
   readonly interactionCommandIds: string[] = [];
@@ -726,6 +769,7 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
   #currentRunCreatedRevision = 0;
   #currentRunTerminalRevision: number | undefined;
   #pendingInteraction: RuntimeClientInteraction | undefined;
+
   #interactionConflictsRemaining = 1;
   #cancelSessionUnavailableRemaining = 0;
   readonly #subscriptionBySession = new Map<string, string>();
@@ -905,6 +949,52 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
       }
       if (message.method === 'runtime/query') {
         const query = message.params.query;
+        if (query.type === 'list_background_executions') {
+          this.push(
+            result(message.id, {
+              status: 'ok',
+              queryType: query.type,
+              backgroundSnapshot: {
+                sessionId: query.sessionId,
+                sessionRevision: this.#authoritativeRevision,
+                aggregateGeneration: 'aggregate-1',
+                watermark: 4,
+                executions: [
+                  {
+                    executionId: 'service-1',
+                    sessionId: query.sessionId,
+                    sessionRevision: this.#authoritativeRevision,
+                    kind: 'service',
+                    status: 'running',
+                    ownerGeneration: 'shell-owner-1',
+                    revision: 4,
+                    cleanupConfirmed: false,
+                  },
+                ],
+              },
+            }),
+          );
+          return;
+        }
+        if (query.type === 'get_background_execution') {
+          this.push(
+            result(message.id, {
+              status: 'ok',
+              queryType: query.type,
+              backgroundExecution: {
+                executionId: query.executionId,
+                sessionId: query.sessionId,
+                sessionRevision: this.#authoritativeRevision,
+                kind: 'service',
+                status: 'stopping',
+                ownerGeneration: 'shell-owner-1',
+                revision: 5,
+                cleanupConfirmed: false,
+              },
+            }),
+          );
+          return;
+        }
         if (query.type === 'get_run') {
           const revision = this.#currentRunTerminalRevision ?? this.#authoritativeRevision;
           this.idleQueryRevisions.push(revision);
@@ -1085,6 +1175,21 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
         );
         return;
       }
+      if (command.type === 'stop_background_execution') {
+        expect(command.expectedRevision).toBe(this.#authoritativeRevision);
+        expect(command.expectedOwnerGeneration).toBe('shell-owner-1');
+        expect(command.expectedExecutionRevision).toBe(4);
+        this.#authoritativeRevision += 1;
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: this.#authoritativeRevision,
+          }),
+        );
+        return;
+      }
       if (command.type === 'respond_interaction') {
         this.interactionExpectedRevisions.push(command.expectedRevision);
         this.interactionPayloadRevisions.push(command.interaction.sessionRevision);
@@ -1183,6 +1288,29 @@ class FakeRuntimeConnection implements RuntimeClientConnection {
               turnId: command.turnId,
               status: 'cancelled',
               cause: 'user',
+            },
+          }),
+        );
+        return;
+      }
+      if (command.type === 'steer_turn') {
+        this.steerTargets.push({
+          runId: command.expectedRunId,
+          turnId: command.expectedTurnId,
+          input: command.input,
+        });
+        this.#authoritativeRevision += 1;
+        this.push(
+          result(message.id, {
+            status: 'applied',
+            commandId: command.commandId,
+            sessionId: command.sessionId,
+            revision: this.#authoritativeRevision,
+            input: {
+              inputId: `input-steer-${this.steerTargets.length}`,
+              runId: command.expectedRunId,
+              turnId: command.expectedTurnId,
+              sequence: this.steerTargets.length,
             },
           }),
         );
@@ -1605,6 +1733,7 @@ function initializeResult(instanceId: string): object {
         'server/ping',
       ],
       subscriptions: ['session', 'sessions'],
+      features: { steer: true, backgroundQuery: true, backgroundControl: true },
     },
     limits: {
       maxMessageBytes: 1024,

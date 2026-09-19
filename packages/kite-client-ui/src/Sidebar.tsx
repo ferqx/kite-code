@@ -169,6 +169,8 @@ function Workspace({
                       <Badge>待用户输入</Badge>
                     ) : session.status === 'running' ? (
                       <Spinner aria-label="会话运行中" />
+                    ) : session.backgroundExecutionCount ? (
+                      <Badge>{session.backgroundExecutionCount} 个后台任务</Badge>
                     ) : null}
                   </Button>
                 </TooltipTrigger>

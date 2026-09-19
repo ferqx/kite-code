@@ -14,7 +14,7 @@ export type StateReducerOwner =
   | 'domains/work';
 
 /**
- * Auditable one-owner classification of all 140 State discriminants. The
+ * Auditable one-owner classification of all 141 State discriminants. The
  * reducer implementation may observe a fact in a secondary journal reducer,
  * but this table names the single primary state owner for replay review.
  */
@@ -127,8 +127,10 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'model.reasoning_delta',
     'model.requested',
     'model.responded',
+    'model.response_superseded',
     'model.retry',
     'model.text_delta',
+    'subagent.background_result_persisted',
     'user.message_appended',
   ],
   'domains/interaction': [
@@ -152,6 +154,9 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'user_input.requested',
   ],
   'domains/recovery': [
+    'background_execution.stop_requested',
+    'background_execution.stop_settled',
+    'background_execution.stop_unknown',
     'runtime.cancellation_diagnostic',
     'session.rewind_requested',
     'session.rewind_completed',

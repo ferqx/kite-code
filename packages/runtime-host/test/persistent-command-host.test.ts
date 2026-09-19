@@ -16,6 +16,7 @@ import {
   type RuntimeHostExecutionBridge,
 } from '@kite-ai/runtime-host';
 import {
+  createRuntimeInputResourceResult,
   createRuntimeStoredCommandReceipt,
   type RuntimeCommandCommitEvidence,
   type RuntimeCommandReceiptLookupInput,
@@ -41,6 +42,7 @@ interface ReceiptBridgeOptions {
   readonly activationFailure?: Error;
   readonly mismatchPersistedRevision?: boolean;
   readonly terminal?: Exclude<RuntimeCommandReceipt, { readonly status: 'applied' }>;
+  readonly validationReceipt?: Exclude<RuntimeCommandReceipt, { readonly status: 'applied' }>;
   readonly withExecution?: boolean;
 }
 
@@ -76,15 +78,30 @@ class ReceiptBridge implements RuntimeHostExecutionBridge {
       kind: 'accepted',
       decision: {
         targetSessionId,
+        ...(this.#options.validationReceipt
+          ? { validate: () => this.#options.validationReceipt }
+          : {}),
         commit: async (evidence) => {
           this.commits.push(evidence);
           this.#order.push('commit');
           await this.#options.commitGate;
           if (this.#options.commitFailure) throw this.#options.commitFailure;
           const revision = this.#options.mismatchPersistedRevision ? 2 : 1;
+          const resourceResult =
+            command.type === 'steer_turn'
+              ? createRuntimeInputResourceResult({
+                  inputId: `input-${this.commits.length}`,
+                  runId: command.expectedRunId,
+                  turnId: command.expectedTurnId,
+                  sequence: this.commits.length,
+                })
+              : undefined;
           this.#records.set(
             receiptKey(evidence),
-            createRuntimeStoredCommandReceipt(evidence, revision),
+            createRuntimeStoredCommandReceipt(
+              resourceResult === undefined ? evidence : { ...evidence, resourceResult },
+              revision,
+            ),
           );
           const receipt = applied(command.commandId, targetSessionId, 1);
           return {
@@ -486,6 +503,130 @@ describe('Host persistent receipt command flow', () => {
     await host[Symbol.asyncDispose]();
   });
 
+  test('replays an accepted steer after its target ends without recovery or re-inspection', async () => {
+    const accepted = harness();
+    const command = steerCommand('steer-replay', 'first input');
+    const firstHost = createRuntimeHost({
+      storage: accepted.storage,
+      modules: testRuntimeModules(() => accepted.bridge),
+    });
+    try {
+      expect(await firstHost.command(command)).toMatchObject({
+        status: 'applied',
+        input: { runId: 'run-1', turnId: 'turn-1', sequence: 1 },
+      });
+    } finally {
+      await firstHost[Symbol.asyncDispose]();
+    }
+
+    const ended = harness({
+      terminal: {
+        status: 'rejected',
+        commandId: command.commandId,
+        code: 'target_ended',
+      },
+    });
+    for (const [key, value] of accepted.records) ended.records.set(key, value);
+    const restartedHost = createRuntimeHost({
+      storage: ended.storage,
+      modules: testRuntimeModules(() => ended.bridge),
+      runWithSessionExecution: () => {
+        throw new Error('receipt replay must not reacquire execution ownership');
+      },
+    });
+    try {
+      expect(await restartedHost.command(command)).toMatchObject({
+        status: 'idempotent_replay',
+        input: { runId: 'run-1', turnId: 'turn-1', sequence: 1 },
+      });
+      expect(ended.bridge.inspections).toHaveLength(0);
+      expect(ended.bridge.recoveries).toEqual([]);
+      expect(ended.order).toEqual(['lookup']);
+    } finally {
+      await restartedHost[Symbol.asyncDispose]();
+    }
+  });
+
+  test('rejects a reused steer command ID with a different digest before target inspection', async () => {
+    const h = harness();
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    try {
+      expect(await host.command(steerCommand('steer-conflict', 'first input'))).toMatchObject({
+        status: 'applied',
+      });
+      expect(await host.command(steerCommand('steer-conflict', 'changed input'))).toEqual({
+        status: 'rejected',
+        commandId: 'steer-conflict',
+        code: 'invalid_command',
+      });
+      expect(h.bridge.inspections).toHaveLength(1);
+      expect(h.bridge.commits).toHaveLength(1);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('returns target_ended for a first steer aimed at the wrong active target', async () => {
+    const command = steerCommand('steer-wrong-target', 'new input', 'old-run', 'old-turn');
+    const h = harness({
+      terminal: {
+        status: 'rejected',
+        commandId: command.commandId,
+        code: 'target_ended',
+      },
+    });
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    try {
+      expect(await host.command(command)).toEqual({
+        status: 'rejected',
+        commandId: 'steer-wrong-target',
+        code: 'target_ended',
+      });
+      expect(h.bridge.inspections).toEqual([command]);
+      expect(h.bridge.commits).toHaveLength(0);
+      expect(h.records).toHaveLength(0);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('serializes two accepted steers in server mailbox order', async () => {
+    const h = harness();
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    const first = steerCommand('steer-order-1', 'first input');
+    const second = steerCommand('steer-order-2', 'second input');
+    try {
+      const [firstReceipt, secondReceipt] = await Promise.all([
+        host.command(first),
+        host.command(second),
+      ]);
+      expect(firstReceipt).toMatchObject({
+        status: 'applied',
+        input: { inputId: 'input-1', sequence: 1 },
+      });
+      expect(secondReceipt).toMatchObject({
+        status: 'applied',
+        input: { inputId: 'input-2', sequence: 2 },
+      });
+      expect(h.bridge.inspections).toEqual([first, second]);
+      expect(h.bridge.commits.map((evidence) => evidence.commandId)).toEqual([
+        'steer-order-1',
+        'steer-order-2',
+      ]);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
   test('does not activate or schedule after a failed commit or persisted/returned mismatch', async () => {
     for (const options of [
       { commitFailure: new Error('commit failed') },
@@ -547,6 +688,31 @@ describe('Host persistent receipt command flow', () => {
     await host[Symbol.asyncDispose]();
   });
 
+  test('returns serialized validation conflicts without entering commit', async () => {
+    const h = harness({
+      validationReceipt: {
+        status: 'conflict',
+        commandId: 'command-1',
+        code: 'revision_conflict',
+        currentRevision: 2,
+      },
+    });
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+
+    await expect(host.command(startCommand())).resolves.toEqual({
+      status: 'conflict',
+      commandId: 'command-1',
+      code: 'revision_conflict',
+      currentRevision: 2,
+    });
+    expect(h.records).toHaveLength(0);
+    expect(h.bridge.commits).toHaveLength(0);
+    await host[Symbol.asyncDispose]();
+  });
+
   test('keeps command IDs scoped by session', async () => {
     const h = harness();
     const host = createRuntimeHost({
@@ -568,6 +734,23 @@ function startCommand(input = 'hello'): StartCommand {
     type: 'start_turn',
     sessionId: 'session-1',
     expectedRevision: 0,
+    input,
+  };
+}
+
+function steerCommand(
+  commandId: string,
+  input: string,
+  expectedRunId = 'run-1',
+  expectedTurnId = 'turn-1',
+): Extract<RuntimeCommand, { type: 'steer_turn' }> {
+  return {
+    schema: RUNTIME_COMMAND_SCHEMA_,
+    commandId,
+    type: 'steer_turn',
+    sessionId: 'session-1',
+    expectedRunId,
+    expectedTurnId,
     input,
   };
 }

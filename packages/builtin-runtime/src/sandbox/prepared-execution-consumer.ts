@@ -47,6 +47,7 @@ export interface BuiltinPreparedShellExecutionInput {
   readonly command: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  readonly executionMode?: 'finite' | 'service';
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   readonly filesystemMode?: ShellFilesystemMode;
   readonly networkMode?: ShellNetworkMode;
@@ -160,6 +161,7 @@ export function createBuiltinPreparedShellExecutionConsumer(
           : {}),
         ...(options.resourceLimits ? { resourceLimits: options.resourceLimits } : {}),
         ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+        ...(input.executionMode ? { executionMode: input.executionMode } : {}),
       }).preparation;
     } catch (error) {
       return denied(input, message(error), 'preparation_failed', false);
@@ -306,7 +308,7 @@ export function createBuiltinPreparedShellExecutionConsumer(
             prepared,
             dispatchIntent: dispatch.acknowledgement,
             lifecycle,
-            timeoutMs: Math.min(preparation.timeoutMs, remainingLifetimeMs),
+            ...(preparation.timeoutMs === null ? {} : { timeoutMs: preparation.timeoutMs }),
             ...(input.signal ? { signal: input.signal } : {}),
             ...(input.onProgress ? { onProgress: input.onProgress } : {}),
             ephemeralEnvironment: projectApprovedProxyEnvironment({

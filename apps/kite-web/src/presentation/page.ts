@@ -34,6 +34,7 @@ export function pageMessages(messages: readonly WebPresentationMessage[]): reado
             id: `tool:${block.toolId}`,
             role: 'tool',
             title: block.label,
+            toolName: runtimeToolName(block.label),
             text: block.summary ?? '',
             status: block.status,
             settled: false,
@@ -44,6 +45,7 @@ export function pageMessages(messages: readonly WebPresentationMessage[]): reado
             id: `tool:${block.toolId}`,
             role: 'tool',
             title: block.label,
+            toolName: runtimeToolName(block.label),
             text: [block.stdout, block.stderr].filter(Boolean).join('\n'),
             status: block.status ?? (block.ok ? 'completed' : 'failed'),
             toolResult: {
@@ -73,4 +75,8 @@ export function pageMessages(messages: readonly WebPresentationMessage[]): reado
       }
     }),
   );
+}
+
+function runtimeToolName(label: string): Message['toolName'] {
+  return label === 'shell_execute' ? 'shell_execute' : undefined;
 }

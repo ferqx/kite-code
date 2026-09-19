@@ -278,6 +278,7 @@ const featuresSchema = z
     networkBoundary: z.boolean().optional(),
     releaseProfile: z.boolean().optional(),
     observabilityMetrics: z.boolean().optional(),
+    afterTurnContinuation: z.boolean().optional(),
   })
   .strict()
   .optional();

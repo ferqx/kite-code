@@ -39,6 +39,114 @@ export interface SubagentTaskArtifactStoreOptions {
   readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
 }
 
+export interface SubagentResultArtifactRef {
+  readonly artifactId: string;
+  readonly kind: 'subagent_task';
+  readonly integrityIdentifier: string;
+  readonly byteLength: number;
+}
+
+export interface SubagentResultArtifactAccess {
+  write(input: {
+    readonly ownerKey: string;
+    readonly taskId: string;
+    readonly result: Readonly<Record<string, unknown>>;
+  }): SubagentResultArtifactRef;
+  read(ref: SubagentResultArtifactRef, taskId: string): Readonly<Record<string, unknown>>;
+  lookup(
+    ownerKey: string,
+    taskId: string,
+  ):
+    | Readonly<{ ref: SubagentResultArtifactRef; result: Readonly<Record<string, unknown>> }>
+    | undefined;
+  list(ownerKey: string): readonly Readonly<{
+    taskId: string;
+    ref: SubagentResultArtifactRef;
+    result: Readonly<Record<string, unknown>>;
+  }>[];
+}
+
+/** Bounded immutable terminal report store. Repeated reads never consume Provider observation. */
+export class SubagentResultArtifactStore implements SubagentResultArtifactAccess {
+  readonly #storage: PrivateImmutableArtifactStorage<'subagent_task'>;
+  constructor(
+    options: {
+      root?: string;
+      backend?: PrivateImmutableArtifactStorageBackend<'subagent_task_request' | 'subagent_task'>;
+    } = {},
+  ) {
+    this.#storage = new PrivateImmutableArtifactStorage({
+      ...(options.backend
+        ? { backend: options.backend as PrivateImmutableArtifactStorageBackend<'subagent_task'> }
+        : { root: options.root ?? subagentTaskArtifactRoot() }),
+      namespace: 'subagent-tasks',
+      partitions: [{ kind: 'subagent_task', directory: 'results', extension: '.json' }],
+      maxArtifactBytes: DEFAULT_MAX_BYTES,
+    });
+  }
+  write(input: {
+    readonly ownerKey: string;
+    readonly taskId: string;
+    readonly result: Readonly<Record<string, unknown>>;
+  }): SubagentResultArtifactRef {
+    if (!SAFE_ID.test(input.taskId))
+      throw new SubagentTaskArtifactError(
+        'invalid_task',
+        'Subagent result task identity is invalid.',
+      );
+    if (input.ownerKey.length === 0)
+      throw new SubagentTaskArtifactError(
+        'invalid_task',
+        'Subagent result owner identity is invalid.',
+      );
+    const payload = Object.freeze({
+      artifactFormatVersion: 1,
+      ownerKey: input.ownerKey,
+      taskId: input.taskId,
+      result: input.result,
+    });
+    return this.#storage.write('subagent_task', Buffer.from(canonicalModelJson(payload), 'utf8'));
+  }
+  lookup(ownerKey: string, taskId: string) {
+    const ref = this.#storage.findByOwnerTask?.(ownerKey, taskId) as
+      | SubagentResultArtifactRef
+      | undefined;
+    return ref ? Object.freeze({ ref, result: this.read(ref, taskId) }) : undefined;
+  }
+  list(ownerKey: string) {
+    return this.#storage.listByOwner(ownerKey).map((ref) => {
+      const taskId = JSON.parse(new TextDecoder().decode(this.#storage.read(ref))).taskId as string;
+      return Object.freeze({
+        taskId,
+        ref: ref as SubagentResultArtifactRef,
+        result: this.read(ref as SubagentResultArtifactRef, taskId),
+      });
+    });
+  }
+  read(ref: SubagentResultArtifactRef, taskId: string): Readonly<Record<string, unknown>> {
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
+      const value = JSON.parse(text) as {
+        artifactFormatVersion?: unknown;
+        taskId?: unknown;
+        result?: unknown;
+      };
+      if (
+        canonicalModelJson(value) !== text ||
+        value.artifactFormatVersion !== 1 ||
+        value.taskId !== taskId ||
+        !value.result ||
+        typeof value.result !== 'object' ||
+        Array.isArray(value.result)
+      )
+        corrupt();
+      return Object.freeze(value.result as Record<string, unknown>);
+    } catch (error) {
+      throw mapStorageError(error, 'artifact_corrupt');
+    }
+  }
+}
+
 export interface SubagentTaskArtifactAccess {
   write(input: { readonly owner: SubagentTaskArtifactOwner; readonly task: string }): {
     readonly ref: SubagentTaskArtifact;

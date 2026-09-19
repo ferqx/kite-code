@@ -2,6 +2,36 @@
 
 export type AgentApiVersion = "v1";
 
+export type AgentApiBackgroundExecution = {
+  readonly "cleanup_confirmed": boolean;
+  readonly "cursor"?: number;
+  readonly "execution_id": string;
+  readonly "kind": "shell" | "service" | "subagent";
+  readonly "owner_generation": string;
+  readonly "revision": number;
+  readonly "schema": "kite.agent-api.background-execution.v1";
+  readonly "status": "running" | "stopping" | "completed" | "failed" | "cancelled" | "unavailable";
+};
+
+export type AgentApiBackgroundExecutionPage = {
+  readonly "aggregate_generation": string;
+  readonly "items": readonly ({
+    readonly "cleanup_confirmed": boolean;
+    readonly "cursor"?: number;
+    readonly "execution_id": string;
+    readonly "kind": "shell" | "service" | "subagent";
+    readonly "owner_generation": string;
+    readonly "revision": number;
+    readonly "schema": "kite.agent-api.background-execution.v1";
+    readonly "status": "running" | "stopping" | "completed" | "failed" | "cancelled" | "unavailable";
+  })[];
+  readonly "schema": "kite.agent-api.background-execution-page.v1";
+  readonly "session_id": string;
+  readonly "session_revision": number;
+  readonly "stale": boolean;
+  readonly "watermark": number;
+};
+
 export type AgentApiCancelRunRequest = {
   readonly "schema": "kite.agent-api.cancel-run.v1";
 };
@@ -59,7 +89,7 @@ export type AgentApiCloseSessionRequest = {
 export type AgentApiContext = {
   readonly "access_token": string;
   readonly "api_version": "v1";
-  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
+  readonly "capabilities": readonly ("background_executions" | "checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "expires_at": string;
   readonly "role": "observer" | "controller";
   readonly "schema": "kite.agent-api.context.v1";
@@ -209,7 +239,7 @@ export type AgentApiEvent = {
 
 export type AgentApiExchangeRequest = {
   readonly "api_version": "v1";
-  readonly "required_capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
+  readonly "required_capabilities": readonly ("background_executions" | "checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "schema": "kite.agent-api.exchange.v1";
 };
 
@@ -922,7 +952,7 @@ export type AgentApiProblem = {
   readonly "detail"?: string;
   readonly "field"?: string;
   readonly "limit_bytes"?: number;
-  readonly "missing_capabilities"?: readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
+  readonly "missing_capabilities"?: readonly ("background_executions" | "checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "recovery_entry"?: "none" | "retry" | "reconcile" | "new_run" | "operator_action";
   readonly "request_id": string;
   readonly "required_header"?: "If-Match";
@@ -1088,7 +1118,7 @@ export type AgentApiRunPage = {
 export type AgentApiServerInfo = {
   readonly "api_version": "v1";
   readonly "build_id": string;
-  readonly "capabilities": readonly ("checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
+  readonly "capabilities": readonly ("background_executions" | "checkpoints" | "history" | "interactions" | "runs" | "session_stream" | "sessions" | "workspaces")[];
   readonly "schema": "kite.agent-api.server-info.v1";
   readonly "server_version": string;
 };

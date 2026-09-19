@@ -80,6 +80,14 @@ export interface RuntimeFrame {
   label?: string;
 }
 
+/** Persisted background-child completion, exposed at user privilege only. */
+export interface SubagentResultFrame {
+  kind: 'subagent_result';
+  notificationId: string;
+  taskId: string;
+  content: string;
+}
+
 /** M2 compaction summary frame (reserved for PR 7+) / M2 压缩摘要帧（PR 7+ 预留） */
 export interface CompactionSummaryFrame {
   kind: 'compaction_summary';
@@ -93,6 +101,7 @@ export type ContextFrame =
   | AssistantFrame
   | ToolCallBlockFrame
   | RuntimeFrame
+  | SubagentResultFrame
   | CompactionSummaryFrame;
 
 // ── Type guards ──
@@ -111,6 +120,10 @@ export function isAssistantFrame(f: ContextFrame): f is AssistantFrame {
 
 export function isRuntimeFrame(f: ContextFrame): f is RuntimeFrame {
   return f.kind === 'runtime';
+}
+
+export function isSubagentResultFrame(f: ContextFrame): f is SubagentResultFrame {
+  return f.kind === 'subagent_result';
 }
 
 export function isCompactionSummaryFrame(f: ContextFrame): f is CompactionSummaryFrame {

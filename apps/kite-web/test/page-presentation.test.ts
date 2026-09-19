@@ -57,3 +57,34 @@ test('shared-page projection retains text, thought and terminal tool evidence wi
   expect(messages[4]).toMatchObject({ id: 'tool:cancelled', status: 'cancelled' });
   expect(messages[5]).toMatchObject({ title: 'unavailable', text: '读取失败' });
 });
+
+test('read-only Web preserves managed Shell summaries for the shared card', () => {
+  const [shell] = pageMessages([
+    {
+      messageId: 'tool:shell',
+      role: 'assistant',
+      sequence: 8,
+      blocks: [
+        {
+          kind: 'tool_result',
+          toolId: 'shell',
+          label: 'shell_execute',
+          ok: true,
+          stdout: JSON.stringify({
+            shellId: 'sh_web_fixture',
+            mode: 'service',
+            status: 'running',
+            cursor: 2,
+          }),
+          stderr: '',
+        },
+      ],
+    },
+  ]);
+  expect(shell).toMatchObject({
+    role: 'tool',
+    toolName: 'shell_execute',
+    status: 'completed',
+  });
+  expect(shell?.toolResult?.stdout).toContain('sh_web_fixture');
+});

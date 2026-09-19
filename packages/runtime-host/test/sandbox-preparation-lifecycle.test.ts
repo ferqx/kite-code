@@ -59,6 +59,7 @@ const preparation: Readonly<SandboxPreparation> = deepFreeze({
     processes: 4,
     maxProcessTreeTasks: 4,
   },
+  executionMode: 'finite',
   timeoutMs: 1_000,
   cancellationCorrelation: 'cancel-1',
 });

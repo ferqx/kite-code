@@ -416,6 +416,84 @@ describe('Runtime Host State session', () => {
     expect(session.getState().providerAdmission.waivers).toEqual({});
   });
 
+  test('projects required background waiting as non-terminal and resumes the same Run on wake', () => {
+    const f = fixture(initialState(), true);
+    const session = createRuntimeHostStateSession(f.input);
+    session.commitCommandBatch([{ type: 'turn.started', turnId: 'run-background' }], {
+      ...commandEvidence(),
+      runStart: { runId: 'run-background', phase: 'building' },
+    });
+    session.activateRun('run-background');
+    session.processEventBatch([
+      {
+        type: 'tool.queued',
+        toolCallId: 'task-background',
+        name: 'task',
+        args: {
+          name: 'inspect',
+          subagent_type: 'explore',
+          task: 'inspect runtime',
+          background: true,
+          result_disposition: 'required',
+        },
+      },
+      { type: 'tool.started', toolCallId: 'task-background' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'task-background',
+        name: 'task',
+        result: {
+          ok: true,
+          command: 'task',
+          exitCode: 0,
+          stdout: 'accepted',
+          stderr: '',
+          resultMeta: {
+            taskId: 'child-background',
+            taskStatus: 'running',
+            taskDisposition: 'required',
+          },
+        },
+      },
+      { type: 'model.responded', messageId: 'premature-final', text: 'Done.' },
+    ]);
+    session.processEvent({
+      type: 'completion.blocked',
+      turnId: 'run-background',
+      guardVersion: 'completion_guard_v1',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+      planning: 'building_without_plan',
+      correctionAttempt: 1,
+    });
+    expect(f.runs.get('state-session-test\0run-background')).toMatchObject({
+      runId: 'run-background',
+      status: 'waiting',
+    });
+    expect(f.runs.get('state-session-test\0run-background')?.finishedAtMs).toBeUndefined();
+
+    session.processEvent({
+      type: 'subagent.background_result_persisted',
+      taskId: 'child-background',
+      notificationId: `subagent:child-background:sha256:${'a'.repeat(64)}`,
+      artifactIntegrityIdentifier: `sha256:${'a'.repeat(64)}`,
+      shortReport: 'Child completed.',
+      source: 'subagent',
+      modelRole: 'user',
+      originRunId: 'run-background',
+      originTurnId: 'run-background',
+      originToolCallId: 'tool-background',
+      attempt: 1,
+    });
+    expect(f.runs.get('state-session-test\0run-background')?.status).toBe('waiting');
+    session.processEvent(preparedModelEvent('model-after-background-wake'));
+    expect(f.runs.get('state-session-test\0run-background')).toMatchObject({
+      runId: 'run-background',
+      status: 'running',
+    });
+    expect(f.runs.get('state-session-test\0run-background')?.finishedAtMs).toBeUndefined();
+  });
+
   test('keeps a queued Run unchanged when its activation transaction fails', () => {
     const f = fixture(initialState(), true);
     const session = createRuntimeHostStateSession(f.input);

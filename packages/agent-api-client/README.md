@@ -9,7 +9,7 @@
 
 - Browser session续建原语与logout；
 - ServerInfo capability读取；
-- Workspace、Workspace Session、Session、History、诊断Log、Browser-only Model Context、Checkpoint list/preview request；
+- Workspace、Workspace Session、Session、History、后台执行快照、诊断Log、Browser-only Model Context、Checkpoint list/preview request；
 - identifier、page cursor、filter与非负`after_sequence`编码；
 - success/Problem Public codec及API version、artifact digest、content type、`no-store`响应校验；
 - `AbortSignal`透传。

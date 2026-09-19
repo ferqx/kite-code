@@ -156,6 +156,25 @@ export function buildCanonicalFrames(messages: BaseMessage[]): ContextFrame[] {
 
     // ── HumanMessage → UserFrame ──
     if (m.type === 'human' || isHumanMessage(msg)) {
+      if (
+        typeof msg.id === 'string' &&
+        msg.id.startsWith('subagent:') &&
+        typeof msg.content === 'string'
+      ) {
+        const match =
+          /^<subagent_result task_id="([^"]+)">\n([\s\S]*)\nFull report remains available through task_read\.\n<\/subagent_result>$/u.exec(
+            msg.content,
+          );
+        if (match?.[1] && match[2] !== undefined) {
+          frames.push({
+            kind: 'subagent_result',
+            notificationId: msg.id,
+            taskId: match[1],
+            content: match[2],
+          });
+          continue;
+        }
+      }
       frames.push({
         kind: 'user',
         turnId: typeof m.turnId === 'string' ? m.turnId : undefined,

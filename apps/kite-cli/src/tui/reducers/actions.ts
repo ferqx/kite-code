@@ -25,8 +25,21 @@ export type Action =
       projection: TuiRuntimeAuthorityProjection;
     }
   | { type: 'LOCAL_TEXT'; text: string; isError?: boolean }
-  | { type: 'LOCAL_USER_PROMPT'; text: string }
-  | { type: 'DROP_LOCAL_USER_PROMPT'; text: string }
+  | { type: 'LOCAL_USER_PROMPT'; text: string; localPromptId?: string }
+  | {
+      type: 'DROP_LOCAL_USER_PROMPT';
+      text: string;
+      localPromptId?: string;
+      /** Omitted only for legacy callers, where a failed start admission was the sole meaning. */
+      failureKind?: 'start' | 'steer';
+    }
+  | {
+      type: 'DROP_SESSION_LOCAL_USER_PROMPT';
+      sessionId: string;
+      text: string;
+      localPromptId?: string;
+      failureKind?: 'start' | 'steer';
+    }
   | { type: 'QUEUE_LOCAL_PROMPT'; id: number; sessionId: string; text: string }
   | {
       type: 'ACCEPT_QUEUED_PROMPT';
@@ -35,7 +48,7 @@ export type Action =
       text: string;
       messageId: string;
     }
-  | { type: 'ACCEPT_LOCAL_PROMPT'; text: string; messageId: string }
+  | { type: 'ACCEPT_LOCAL_PROMPT'; text: string; messageId: string; localPromptId?: string }
   | { type: 'DEQUEUE_LOCAL_PROMPT'; id: number }
   | { type: 'SET_EXITED' }
   | { type: 'SET_RUNNING' }

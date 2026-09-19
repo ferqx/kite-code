@@ -1942,6 +1942,7 @@ function samplePreparation(workspace: string): SandboxPreparation {
       processes: -1,
       maxProcessTreeTasks: null,
     },
+    executionMode: 'finite',
     timeoutMs: 60_000,
     cancellationCorrelation: 'tool-call',
   };

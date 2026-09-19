@@ -47,6 +47,7 @@ type RuntimeEffectExecutor = HostStateRuntimeEffectExecutor<
  */
 export interface RuntimeStateSessionPort {
   getState(): Readonly<RuntimeState>;
+  waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string };
   processEventBatch(events: RuntimeEvent[]): readonly RuntimeEvent[];
   getLastAppliedEvents(): readonly RuntimeEvent[];
@@ -543,6 +544,10 @@ export async function* runStateRuntimeLoop(
   signal?: AbortSignal,
   schedulerFacts?: (state: Readonly<RuntimeState>) => SchedulerFacts,
   onFailure?: (error: unknown) => void,
+  waitForRequiredBackground?: (
+    state: Readonly<RuntimeState>,
+    signal?: AbortSignal,
+  ) => Promise<void>,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -779,6 +784,14 @@ export async function* runStateRuntimeLoop(
         if (effect.decision.canCorrect) {
           kernel.processEvent(blocked);
           yield blocked;
+          if (
+            effect.decision.code === 'tool_pending' &&
+            effect.decision.nextAction === 'wait_for_tool' &&
+            waitForRequiredBackground
+          ) {
+            await waitForRequiredBackground(kernel.getState(), signal);
+            if (signal?.aborted) return;
+          }
           continue;
         }
         if (effect.decision.code === 'plan_draft_pending') {
@@ -1076,6 +1089,8 @@ export async function* runStateRuntimeLoop(
         continue;
       }
       count += 1;
+      const modelInputBoundary =
+        effect.type === 'call_model' ? kernel.getState().transcript.messages.length : undefined;
       const lease = kernel.beginEffect(effect);
       let outcome: EffectExecutionOutcome;
       try {
@@ -1098,6 +1113,39 @@ export async function* runStateRuntimeLoop(
       }
       if (!outcome.emitted && kernel.getState().revision === lease.expectedRevision) return;
       if (!outcome.applied) continue;
+      if (effect.type === 'call_model' && modelInputBoundary !== undefined) {
+        const current = kernel.getState();
+        const inputArrivedDuringInvocation = current.transcript.messages
+          .slice(modelInputBoundary)
+          .some((message) => message.kind === 'user');
+        const response = current.transcript.messages.at(-1);
+        if (inputArrivedDuringInvocation && response?.kind === 'assistant') {
+          const invocationId = Object.values(current.modelInvocations)
+            .filter(
+              (invocation) =>
+                invocation.purpose === 'primary_agent' && invocation.status === 'completed',
+            )
+            .at(-1)?.invocationId;
+          if (invocationId) {
+            const superseded: RuntimeEvent[] = [
+              ...response.toolCalls.map(
+                (call): RuntimeEvent => ({
+                  type: 'tool.rejected',
+                  toolCallId: call.id,
+                  reason: 'superseded_by_user_input',
+                }),
+              ),
+              {
+                type: 'model.response_superseded',
+                messageId: response.messageId,
+                invocationId,
+              },
+            ];
+            kernel.processEventBatch(superseded);
+            yield* superseded;
+          }
+        }
+      }
     }
     throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
   } catch (error) {

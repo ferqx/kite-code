@@ -157,6 +157,13 @@ export interface KiteHomeArtifactStore {
   readSubagentTask(
     ref: KiteHomePrivateArtifactReference<KiteHomeSubagentTaskArtifactKind>,
   ): Readonly<{ artifactFormatVersion: number; canonicalJson: string }>;
+  findSubagentTaskResult(
+    ownerKey: string,
+    taskId: string,
+  ): KiteHomePrivateArtifactReference<'subagent_task'> | undefined;
+  listSubagentTaskResults(
+    ownerKey: string,
+  ): readonly KiteHomePrivateArtifactReference<'subagent_task'>[];
   collectSubagentTaskGarbage(
     input: KiteHomeArtifactGarbageCollectionInput,
   ): KiteHomeArtifactGarbageCollectionResult;
@@ -369,6 +376,34 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
         canonicalJson: storedString(row, 'canonical_json'),
       });
     },
+    findSubagentTaskResult: (ownerKey, taskId) => {
+      const row = database
+        .query<Record<string, Binding>, [string, string]>(
+          `SELECT artifact_id, kind, integrity_identifier, byte_length FROM subagent_task_artifacts WHERE kind = 'subagent_task' AND json_extract(canonical_json, '$.ownerKey') = ? AND json_extract(canonical_json, '$.taskId') = ? ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(ownerKey, taskId);
+      if (!row) return undefined;
+      return Object.freeze({
+        artifactId: storedString(row, 'artifact_id'),
+        kind: 'subagent_task' as const,
+        integrityIdentifier: storedString(row, 'integrity_identifier'),
+        byteLength: storedInteger(row, 'byte_length'),
+      });
+    },
+    listSubagentTaskResults: (ownerKey) =>
+      database
+        .query<Record<string, Binding>, [string]>(
+          `SELECT artifact_id, kind, integrity_identifier, byte_length FROM subagent_task_artifacts WHERE kind = 'subagent_task' AND json_extract(canonical_json, '$.ownerKey') = ? ORDER BY created_at`,
+        )
+        .all(ownerKey)
+        .map((row) =>
+          Object.freeze({
+            artifactId: storedString(row, 'artifact_id'),
+            kind: 'subagent_task' as const,
+            integrityIdentifier: storedString(row, 'integrity_identifier'),
+            byteLength: storedInteger(row, 'byte_length'),
+          }),
+        ),
     collectSubagentTaskGarbage: (input) => collect(database, 'subagent_task_artifacts', input),
 
     writeSubagentLifecycle: (input) => {

@@ -277,6 +277,17 @@ function completeEvidenceFixture(
 
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
+    if (type.startsWith('background_execution.stop_')) {
+      if (field === 'executionKind') return 'shell';
+      if (field === 'ownerGeneration') return 'owner-fixture';
+      if (field === 'cleanupConfirmed') return true;
+    }
+    if (type === 'subagent.background_result_persisted') {
+      if (field === 'source') return 'subagent';
+      if (field === 'modelRole') return 'user';
+      if (field === 'shortReport') return 'fixture report';
+      if (field === 'artifactIntegrityIdentifier') return `sha256:${'a'.repeat(64)}`;
+    }
     if (field === 'grantKey') return 'grant-key-fixture';
     if (field === 'owner') return { kind: 'root_tool', toolCallId: 'fixture' };
     if (field === 'failureCode' && type === 'session.rewind_failed') {
@@ -882,13 +893,24 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(140);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(145);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
-    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(10);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(13);
   });
 
   test('validates and decodes every current State event discriminant', () => {
     const fixtureValue = (field: string, eventType: RuntimeEventType): unknown => {
+      if (eventType.startsWith('background_execution.stop_')) {
+        if (field === 'executionKind') return 'shell';
+        if (field === 'ownerGeneration') return 'owner-fixture';
+        if (field === 'cleanupConfirmed') return true;
+      }
+      if (eventType === 'subagent.background_result_persisted') {
+        if (field === 'source') return 'subagent';
+        if (field === 'modelRole') return 'user';
+        if (field === 'shortReport') return 'fixture report';
+        if (field === 'artifactIntegrityIdentifier') return `sha256:${'a'.repeat(64)}`;
+      }
       if (field === 'fullModeBypassEligible' || field === 'fullModePolicyBypassAllowed') {
         return false;
       }
@@ -1087,12 +1109,12 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
   });
 
-  test('classifies all 140 events into one static owner or an explicit default no-op', () => {
+  test('classifies all 145 events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(140);
-    expect(new Set(covered).size).toBe(140);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(130);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(140);
+    expect(covered).toHaveLength(145);
+    expect(new Set(covered).size).toBe(145);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(132);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(145);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -1121,7 +1143,7 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, requested)).toEqual(state);
   });
 
-  test('runs the complete 130-case compatibility switch corpus and proves ten default events are no-op', () => {
+  test('runs the complete 132-case compatibility switch corpus and proves ten default events are no-op', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
@@ -1422,6 +1444,164 @@ describe('agent kernel package boundary', () => {
       createdAt: '2026-08-20T00:00:00.000Z',
     });
     expect(Object.hasOwn(first.events[0]!, 'taskId')).toBe(false);
+  });
+
+  test('replays a persisted background result as one idempotent low-privilege context fact', () => {
+    const seed = () => {
+      let state = createInitialAgentState({
+        threadId: 'session-1',
+        userId: 'user-1',
+        workspace: '/workspace',
+        turnId: 'turn-1',
+        recoveryIdentityKey: IDENTITY_KEY,
+      });
+      const apply = (event: KernelEvent) => {
+        state = reduceAgentState(state, event);
+      };
+      apply({
+        type: 'tool.queued',
+        toolCallId: 'tool-1',
+        name: 'task',
+        args: { task: 'inspect' },
+      });
+      apply({ type: 'tool.started', toolCallId: 'tool-1' });
+      apply({
+        type: 'capability.invocation_recorded',
+        invocationId: 'invocation-1',
+        toolCallId: 'tool-1',
+        capabilityId: 'builtin:task',
+        capabilityRevision: 'task-v1',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        admissionDigest: 'admission',
+        effectiveEffectsDigest: 'effects',
+        effectiveEffects: { filesystem: 'none', network: 'none', externalState: 'none' },
+        receiptRequirement: 'observation_receipt',
+        recordedAt: '2026-08-20T00:00:00.000Z',
+      });
+      apply({
+        type: 'capability.execution_started',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        startedAt: '2026-08-20T00:00:00.000Z',
+      });
+      const dispatchIntentDigest = `sha256:${'d'.repeat(64)}`;
+      apply({
+        type: 'capability.subagent_dispatch_intent_recorded',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: 'child-1',
+        taskArtifact: {
+          kind: 'subagent_task',
+          artifactId: `pa_${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+          byteLength: 1,
+        },
+        dispatchIntentDigest,
+        recordedAt: '2026-08-20T00:00:00.000Z',
+      });
+      apply({
+        type: 'capability.subagent_handle_recorded',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        dispatchIntentDigest,
+        handleArtifact: {
+          kind: 'subagent_handle',
+          artifactId: `pa_${'c'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'e'.repeat(64)}`,
+          byteLength: 1,
+        },
+        handleIntegrityIdentifier: `sha256:${'e'.repeat(64)}`,
+        recordedAt: '2026-08-20T00:00:01.000Z',
+      });
+      apply({
+        type: 'capability.subagent_observation_recorded',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        dispatchIntentDigest,
+        status: 'completed',
+        observedAt: '2026-08-20T00:00:02.000Z',
+      });
+      apply({
+        type: 'capability.subagent_cleanup_started',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        dispatchIntentDigest,
+        cleanupAttempt: 1,
+        cleanupKind: 'handle_reconcile',
+        startedAt: '2026-08-20T00:00:03.000Z',
+      });
+      apply({
+        type: 'capability.subagent_cleanup_completed',
+        invocationId: 'invocation-1',
+        attempt: 1,
+        dispatchIntentDigest,
+        cleanupAttempt: 1,
+        cleanupKind: 'handle_reconcile',
+        cleanupConfirmed: true,
+        completedAt: '2026-08-20T00:00:04.000Z',
+      });
+      return state;
+    };
+    const event: KernelEvent = {
+      type: 'subagent.background_result_persisted',
+      taskId: 'child-1',
+      notificationId: `subagent:child-1:sha256:${'a'.repeat(64)}`,
+      artifactIntegrityIdentifier: `sha256:${'a'.repeat(64)}`,
+      shortReport: 'Inspected the runtime owner.',
+      source: 'subagent',
+      modelRole: 'user',
+      originRunId: 'run-1',
+      originTurnId: 'turn-1',
+      originToolCallId: 'tool-1',
+      attempt: 1,
+    };
+    const afterTurnEvent: KernelEvent = {
+      ...event,
+      afterTurn: {
+        reservationId: 'after-turn-reservation',
+        admissionRevision: 9,
+        eventId: 'a'.repeat(64),
+        wakeKey: 'b'.repeat(64),
+        runId: 'after-turn-run',
+        phase: 'building',
+        status: 'completed',
+        cancelRequested: false,
+      },
+    };
+    expect(decodeCurrentRuntimeEventJson(JSON.stringify(afterTurnEvent))).toEqual(afterTurnEvent);
+    const { admissionRevision: _legacyAdmissionRevision, ...legacyAfterTurn } =
+      afterTurnEvent.afterTurn!;
+    expect(() =>
+      decodeCurrentRuntimeEventJson(
+        JSON.stringify({ ...afterTurnEvent, afterTurn: legacyAfterTurn }),
+      ),
+    ).toThrow();
+    const waiting = {
+      ...seed(),
+      completionGuard: { correctionAttempts: 1, guardVersion: 'completion_guard_v1' as const },
+      transcript: { messages: [], final: 'Background work is still pending.' },
+    };
+    const once = reduceAgentState(waiting, event);
+    const twice = reduceAgentState(once, event);
+    expect(once.transcript.messages).toHaveLength(1);
+    expect(twice.transcript.messages).toHaveLength(1);
+    expect(once.transcript.messages[0]).toMatchObject({
+      kind: 'user',
+      messageId: 'notificationId' in event ? event.notificationId : undefined,
+    });
+    expect(once.transcript.messages[0]?.content).toContain('task_read');
+    expect(once.transcript.final).toBeUndefined();
+    expect(once.completionGuard).toEqual({ correctionAttempts: 0 });
+    expect(decodeCurrentAgentStateJson(encodeCurrentAgentStateJson(once))).toEqual(once);
+
+    const changedTurn = reduceAgentState(seed(), { type: 'turn.started', turnId: 'turn-2' });
+    const late = reduceAgentState(changedTurn, event);
+    expect(late.transcript.messages).toHaveLength(0);
+    expect(
+      late.capabilities.invocations['invocation-1']?.subagentProviderLifecycle?.backgroundResult,
+    ).toMatchObject({ originRunId: 'run-1', originTurnId: 'turn-1' });
   });
 
   test('fails closed on invalid, duplicate, or conflicting Task allocations', () => {

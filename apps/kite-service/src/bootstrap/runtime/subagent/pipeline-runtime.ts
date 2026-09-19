@@ -4,6 +4,7 @@ import type {
   SubagentLifecycleArtifactAccess,
   SubagentTaskArtifactAccess,
 } from '@kite-ai/builtin-runtime/subagent';
+import type { BackgroundSubagentRuntime } from './background-runtime';
 import {
   executePipelineIssuedSubagentResume,
   executePipelineIssuedSubagentStart,
@@ -26,9 +27,15 @@ type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
  */
 export function createPipelineSubagentRuntime(
   compositionFactory: () => GovernedSubagentComposition,
+  backgroundRuntime?: BackgroundSubagentRuntime,
 ): SubagentInvocationRuntime {
   const runtime: SubagentInvocationRuntime = {
-    start: (deps, args) => executePipelineIssuedSubagentStart(compositionFactory(), deps, args),
+    start: (deps, args) =>
+      executePipelineIssuedSubagentStart(
+        compositionFactory(),
+        { ...deps, ...(backgroundRuntime ? { backgroundSubagentRuntime: backgroundRuntime } : {}) },
+        args,
+      ),
     resume: (deps, continuation, toolResult) =>
       executePipelineIssuedSubagentResume(compositionFactory(), deps, continuation, toolResult),
   };

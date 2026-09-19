@@ -24,6 +24,7 @@ export const AGENT_API_SCHEMA_DIGEST_HEADER = 'Kite-Agent-API-Schema-Digest' as 
 export const AGENT_API_VERSION_HEADER = 'Kite-Agent-API-Version' as const;
 
 export const AGENT_API_CAPABILITIES = [
+  'background_executions',
   'checkpoints',
   'history',
   'interactions',
@@ -53,6 +54,8 @@ export const AGENT_API_CHECKPOINT_PREVIEW_SCHEMA = 'kite.agent-api.checkpoint-pr
 export const AGENT_API_HISTORY_ITEM_SCHEMA = 'kite.agent-api.history-item.v1' as const;
 export const AGENT_API_LOG_ITEM_SCHEMA = 'kite.agent-api.log-item.v1' as const;
 export const AGENT_API_MODEL_CONTEXT_SCHEMA = 'kite.agent-api.model-context.v1' as const;
+export const AGENT_API_BACKGROUND_EXECUTION_SCHEMA =
+  'kite.agent-api.background-execution.v1' as const;
 export const AGENT_API_EVENT_SCHEMA = 'kite.agent-api.event.v1' as const;
 export const AGENT_API_RESYNC_SCHEMA = 'kite.agent-api.resync.v1' as const;
 export const AGENT_API_PROBLEM_SCHEMA = 'kite.agent-api.problem.v1' as const;
@@ -528,6 +531,18 @@ export const agentApiModelContextSchema = z.object({
 });
 export type AgentApiModelContext = z.infer<typeof agentApiModelContextSchema>;
 
+export const agentApiBackgroundExecutionSchema = z.object({
+  schema: z.literal(AGENT_API_BACKGROUND_EXECUTION_SCHEMA),
+  execution_id: agentApiIdentifierSchema,
+  owner_generation: agentApiIdentifierSchema,
+  revision: agentApiRevisionSchema,
+  kind: z.enum(['shell', 'service', 'subagent']),
+  status: z.enum(['running', 'stopping', 'completed', 'failed', 'cancelled', 'unavailable']),
+  cleanup_confirmed: z.boolean(),
+  cursor: agentApiRevisionSchema.optional(),
+});
+export type AgentApiBackgroundExecution = z.infer<typeof agentApiBackgroundExecutionSchema>;
+
 export const AGENT_API_SSE_CHANNELS = [
   'interactions',
   'lifecycle',
@@ -683,12 +698,32 @@ export const agentApiCheckpointPageSchema = z
       context.addIssue({ code: 'custom', message: 'Checkpoint page contains a different Session' });
     }
   });
+export const agentApiBackgroundExecutionPageSchema = z
+  .object({
+    schema: z.literal('kite.agent-api.background-execution-page.v1'),
+    session_id: agentApiIdentifierSchema,
+    session_revision: agentApiRevisionSchema,
+    aggregate_generation: agentApiIdentifierSchema,
+    watermark: agentApiRevisionSchema,
+    stale: z.boolean(),
+    items: z.array(agentApiBackgroundExecutionSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  })
+  .superRefine((value, context) => {
+    const identities = value.items.map((item) => item.execution_id);
+    if (new Set(identities).size !== identities.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'background execution identities must be unique',
+      });
+    }
+  });
 export type AgentApiSessionPage = z.infer<typeof agentApiSessionPageSchema>;
 export type AgentApiWorkspacePage = z.infer<typeof agentApiWorkspacePageSchema>;
 export type AgentApiRunPage = z.infer<typeof agentApiRunPageSchema>;
 export type AgentApiHistoryPage = z.infer<typeof agentApiHistoryPageSchema>;
 export type AgentApiLogPage = z.infer<typeof agentApiLogPageSchema>;
 export type AgentApiCheckpointPage = z.infer<typeof agentApiCheckpointPageSchema>;
+export type AgentApiBackgroundExecutionPage = z.infer<typeof agentApiBackgroundExecutionPageSchema>;
 
 export const AGENT_API_PROBLEM_CODES = [
   'checkpoint_unavailable',

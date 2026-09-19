@@ -909,6 +909,12 @@ body {
     padding: 0;
     border-radius: 10px;
   }
+
+  .composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
   .stop-action,
   .stop-action:disabled {
     opacity: 1;
@@ -1790,6 +1796,21 @@ body {
   line-height: 18px;
   color: inherit;
 }
+.kite-client .managed-shell-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.kite-client .managed-shell-summary code {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .kite-client .tool-activity-state[data-status="issue"],
 .kite-client
   .tool-step-status:is([data-status="failed"], [data-status="rejected"], [data-status="unknown"]) {
@@ -1910,6 +1931,7 @@ body {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
 .kite-client .tool-detail {
   @apply scroll-fade-y;
   margin: 0;
@@ -2509,4 +2531,35 @@ body {
   .kite-client .tool-diff-toggle > svg {
     transition: none;
   }
+}
+.background-executions {
+  margin: 12px 16px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.kite-client .background-executions header,
+.kite-client .background-executions li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.kite-client .background-executions header {
+  justify-content: space-between;
+}
+.kite-client .background-executions ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.kite-client .background-executions li + li {
+  margin-top: 6px;
+}
+.kite-client .background-executions code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.background-stale {
+  color: var(--muted-foreground);
 }

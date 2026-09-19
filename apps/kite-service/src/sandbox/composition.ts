@@ -308,6 +308,7 @@ function shellInputFromPrepared(
     command: input.command,
     ...(input.signal ? { signal: input.signal } : {}),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.executionMode === undefined ? {} : { mode: input.executionMode }),
     ...(input.onProgress ? { onProgress: input.onProgress } : {}),
     ...(input.networkMode ? { networkMode: input.networkMode } : {}),
     ...(input.filesystemMode ? { filesystemMode: input.filesystemMode } : {}),

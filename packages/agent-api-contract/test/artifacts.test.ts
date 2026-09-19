@@ -118,6 +118,7 @@ describe('Agent API generated artifacts', () => {
         '/v1/workspaces/{workspace_id}/sessions',
         '/v1/sessions',
         '/v1/sessions/{session_id}',
+        '/v1/sessions/{session_id}/background-executions',
         '/v1/sessions/{session_id}/checkpoints',
         '/v1/sessions/{session_id}/checkpoints/{checkpoint_id}/preview',
         '/v1/sessions/{session_id}/close',
@@ -200,7 +201,7 @@ describe('Agent API generated artifacts', () => {
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     const committed = committedFiles();
     const schemaPaths = [...committed.keys()].filter((path) => path.startsWith('schema/'));
-    expect(schemaPaths).toHaveLength(38);
+    expect(schemaPaths).toHaveLength(40);
     for (const path of schemaPaths) {
       const schema = JSON.parse(committed.get(path) ?? '{}');
       expect(ajv.validateSchema(schema), `${path}: ${ajv.errorsText()}`).toBeTrue();

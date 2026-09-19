@@ -32,6 +32,22 @@ export class TuiPromptSubmissionQueue {
   }
 }
 
+export function tuiPromptSubmissionMode(options: {
+  readonly activeRun: boolean;
+  readonly pendingSuccessor: boolean;
+}): 'steer' | 'queue' | 'start' {
+  if (options.activeRun) return 'steer';
+  return options.pendingSuccessor ? 'queue' : 'start';
+}
+
+export function restoreTuiSessionDraft(currentDraft: string, rejectedInput: string): string {
+  return currentDraft.length === 0 ? rejectedInput : `${rejectedInput}\n${currentDraft}`;
+}
+
+export function deleteTuiSessionDraft(drafts: Map<string, string>, sessionId: string): void {
+  drafts.delete(sessionId);
+}
+
 export function ensureTuiPromptSession(options: {
   readonly submittedSessionId: string;
   readonly getActiveSessionId: () => string;

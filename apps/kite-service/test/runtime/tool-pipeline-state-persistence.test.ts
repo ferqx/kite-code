@@ -2391,6 +2391,44 @@ describe('App State Tool Pipeline persistence', () => {
     });
   });
 
+  test('preserves managed shell and required child identity in the State tool terminal', async () => {
+    const harness = persistenceHarness();
+    const acknowledgement = await harness.persistence.recordAttempt(prepared(1));
+    await harness.persistence.commitTerminal({
+      acknowledgement,
+      result: result({
+        status: 'error',
+        failure: {
+          code: 'builtin_operation_failed',
+          message: 'background handle projection fixture',
+          retryable: false,
+          modelFixable: false,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: true,
+        },
+        structuredContent: structuredContent({
+          ok: false,
+          resultMeta: {
+            shellId: 'sh_background_1',
+            shellStatus: 'running',
+            taskId: 'child-background-1',
+            taskStatus: 'running',
+            taskDisposition: 'required',
+          },
+        }),
+      }),
+    });
+
+    expect(harness.session.getState().tools.calls['call-1']?.result?.resultMeta).toMatchObject({
+      shellId: 'sh_background_1',
+      shellStatus: 'running',
+      taskId: 'child-background-1',
+      taskStatus: 'running',
+      taskDisposition: 'required',
+    });
+  });
+
   test('durably admits exactly one Dynamic MCP safe-read retry without a terminal receipt', async () => {
     const harness = persistenceHarness({ toolName: 'mcp__server__fixture' });
     const first = await harness.persistence.recordAttempt(dynamicRetryPrepared(1));

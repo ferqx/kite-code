@@ -62,7 +62,8 @@ function createWindowsPreparedProcessExecutionPort(): SandboxPreparedProcessExec
       const shellInput: ShellInput = {
         workspace: prepared.canonicalWorkspace,
         command: prepared.approvedArgv.join(' '),
-        timeoutMs: input.timeoutMs,
+        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+        mode: input.timeoutMs === undefined ? 'service' : 'finite',
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       };

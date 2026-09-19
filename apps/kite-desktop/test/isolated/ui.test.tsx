@@ -1681,6 +1681,34 @@ test('clicking switches sessions immediately and restores each draft', async () 
   expect(client.sent).toEqual([]);
 });
 
+test('a failed session switch and stale steer rejection keep the draft on its original target', async () => {
+  const client = new UiClient();
+  client.view.projection = {
+    ...client.view.projection!,
+    currentRun: {
+      runId: 'run-old',
+      activeTurnId: 'turn-old',
+      status: 'running',
+    },
+  } as RuntimeSessionProjection;
+  client.sendResult = async () => {
+    throw new Error('target_ended');
+  };
+  client.selectSession = async (id: string) => {
+    client.selectedIds.push(id);
+    throw new Error('switch failed');
+  };
+  await render(<App client={client} />);
+  await write(input(), '只能留在 s0 的草稿');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(client.getSnapshot().selected).toBe('s0');
+  expect(input().value).toBe('只能留在 s0 的草稿');
+  await key(input(), 'Enter');
+  await act(() => Bun.sleep(0));
+  expect(client.sentTargets).toEqual(['s0']);
+  expect(input().value).toBe('只能留在 s0 的草稿');
+});
+
 test('loading a live projection preserves the title already shown by the directory', async () => {
   const client = new UiClient(1);
   const directorySession = { ...client.view.sessions[0]!, displayName: '目录中的会话标题' };
@@ -1739,6 +1767,7 @@ test('empty, IME, Shift+Enter and repeated submit cannot issue unintended turns;
   await key(input(), 'Enter', { isComposing: true });
   await key(input(), 'Enter', { shiftKey: true });
   expect(client.sent).toEqual([]);
+  expect(client.cancelled).toBe(0);
   let reject!: (error: Error) => void;
   client.sendResult = () =>
     new Promise<void>((_, fail) => {

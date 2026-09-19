@@ -8,6 +8,7 @@ import type {
 import {
   assertRuntimeStoredCommandResourceResult,
   assertRuntimeStoredRun,
+  RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_,
   RUNTIME_RUN_PHASES,
   RUNTIME_RUN_STATUSES,
   type RuntimeStoredCommandResourceResult,
@@ -116,6 +117,37 @@ export function parseRuntimeStoredCommandResource(
   }
   if (!commandId) throw new Error('Runtime Run resource projection requires command identity.');
   return Object.freeze({ kind: 'run', run, messageId: runtimeStartMessageId(commandId) });
+}
+
+export function parseRuntimeStoredInputResource(
+  result: RuntimeStoredCommandResourceResult | undefined,
+): Extract<RuntimeCommandReceipt, { status: 'applied' | 'idempotent_replay' }>['input'] {
+  if (result === undefined || result.schema !== RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_) {
+    return undefined;
+  }
+  assertRuntimeStoredCommandResourceResult(result);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.json);
+  } catch {
+    throw new Error('Runtime input resource result JSON is malformed.');
+  }
+  const record = plainRecord(parsed);
+  const input = plainRecord(record.input);
+  const projected = Object.freeze({
+    inputId: stringField(input.inputId),
+    runId: stringField(input.runId),
+    turnId: stringField(input.turnId),
+    sequence: integerField(input.sequence),
+  });
+  const canonical = JSON.stringify({
+    schema: RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_,
+    input: projected,
+  });
+  if (record.schema !== RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_ || canonical !== result.json) {
+    throw new Error('Runtime input resource result is not the closed canonical projection.');
+  }
+  return projected;
 }
 
 export function runtimeStartMessageId(commandId: string): string {

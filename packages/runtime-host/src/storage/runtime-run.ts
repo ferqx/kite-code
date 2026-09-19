@@ -111,6 +111,8 @@ export interface RuntimeStoredCommandResourceResult {
 }
 
 export const RUNTIME_RUN_RESOURCE_RESULT_SCHEMA_ = 'kite.runtime.run-resource-result.v1' as const;
+export const RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_ =
+  'kite.runtime.input-resource-result.v1' as const;
 
 const TERMINAL_STATUSES = new Set<RuntimeRunStatus>([
   'completed',
@@ -253,6 +255,36 @@ export function createRuntimeRunStartResourceResult(
   });
   return Object.freeze({
     schema: RUNTIME_RUN_RESOURCE_RESULT_SCHEMA_,
+    json,
+    digest: createHash('sha256').update(json).digest('hex'),
+  });
+}
+
+export function createRuntimeInputResourceResult(input: {
+  readonly inputId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly sequence: number;
+}): RuntimeStoredCommandResourceResult {
+  for (const [field, value] of Object.entries({
+    inputId: input.inputId,
+    runId: input.runId,
+    turnId: input.turnId,
+  })) {
+    assertRunText(value, `input resource ${field}`);
+  }
+  assertSafeNonNegative(input.sequence, 'input resource sequence');
+  const json = JSON.stringify({
+    schema: RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_,
+    input: {
+      inputId: input.inputId,
+      runId: input.runId,
+      turnId: input.turnId,
+      sequence: input.sequence,
+    },
+  });
+  return Object.freeze({
+    schema: RUNTIME_INPUT_RESOURCE_RESULT_SCHEMA_,
     json,
     digest: createHash('sha256').update(json).digest('hex'),
   });

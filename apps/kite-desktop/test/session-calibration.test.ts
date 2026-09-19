@@ -50,6 +50,8 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
   let nextGate: ReturnType<typeof gate> | undefined;
   let nextCreationGate: ReturnType<typeof gate> | undefined;
   const lostCreations = new Set<unknown>();
+  const lostSteers = new Set<unknown>();
+  let loseNextSteer = false;
   const allGates: ReturnType<typeof gate>[] = [];
   const gated = new Map<unknown, ReturnType<typeof gate>>();
   const failures = new Map<unknown, NonNullable<typeof nextFailure>>();
@@ -106,8 +108,20 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
       // This fixture keeps a lost creation genuinely unknown: its receipt read is unavailable too.
-      if (message.method === 'runtime/query' && message.params.query.type === 'get_command_receipt')
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'get_command_receipt' &&
+        message.params.query.command.type === 'create_session'
+      )
         failures.set(message.id, 'temporary');
+      if (
+        loseNextSteer &&
+        message.method === 'runtime/command' &&
+        message.params?.command?.type === 'steer_turn'
+      ) {
+        lostSteers.add(message.id);
+        loseNextSteer = false;
+      }
       if (
         message.method === 'runtime/command' &&
         message.params?.command?.type === 'create_session' &&
@@ -176,6 +190,16 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
             data: { code: 'internal_error' },
           },
         }) as T;
+      if (lostSteers.delete(message.id))
+        return JSON.stringify({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32603,
+            message: 'fixture lost steer receipt',
+            data: { code: 'internal_error' },
+          },
+        }) as T;
       const failure = failures.get(message.id);
       if (failure) {
         failures.delete(message.id);
@@ -235,6 +259,9 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
       nextCreationGate = gate();
       allGates.push(nextCreationGate);
       return nextCreationGate;
+    },
+    loseNextSteerReceipt() {
+      loseNextSteer = true;
     },
     async close() {
       for (const pending of allGates) pending.release();
@@ -309,6 +336,76 @@ test('provider authentication failure is visible once during live delivery and a
   } finally {
     await f.close();
     provider.stop(true);
+  }
+}, 20_000);
+
+test('sends active input as steer and the same Run uses it at the next model boundary', async () => {
+  const f = await fixture([
+    { delay: 250, message: { content: 'Old answer.' } },
+    {
+      response: (request) => {
+        expect(
+          request.messages.some(
+            (message) =>
+              message.role === 'user' && String(message.content).includes('new constraint'),
+          ),
+        ).toBe(true);
+        expect(
+          request.messages.some(
+            (message) => message.role === 'assistant' && message.content === 'Old answer.',
+          ),
+        ).toBe(false);
+        return { message: { content: 'Answer with the new constraint.' } };
+      },
+    },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Start the work.');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'running');
+    const runId = f.client.getSnapshot().projection!.currentRun!.runId;
+
+    await f.client.send('Apply the new constraint.');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+
+    expect(f.client.getSnapshot().projection?.currentRun?.runId).toBe(runId);
+    expect(
+      f.client
+        .getSnapshot()
+        .messages.filter((message) => message.role === 'user')
+        .map((message) => message.text),
+    ).toEqual(['Start the work.', 'Apply the new constraint.']);
+    expect(f.client.getSnapshot().messages.some((message) => message.text === 'Old answer.')).toBe(
+      false,
+    );
+    expect(f.client.getSnapshot().messages.at(-1)?.text).toContain('new constraint');
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('recovers a lost steer response from the same command receipt without creating another Run', async () => {
+  const f = await fixture([
+    { delay: 250, message: { content: 'Old answer.' } },
+    { message: { content: 'Recovered steer answer.' } },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Start one run.');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'running');
+    const runId = f.client.getSnapshot().projection!.currentRun!.runId;
+    f.loseNextSteerReceipt();
+    await expect(f.client.send('Steer with a lost response.')).resolves.toBeUndefined();
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(f.client.getSnapshot().projection?.currentRun?.runId).toBe(runId);
+    expect(
+      f.client
+        .getSnapshot()
+        .messages.filter((message) => message.role === 'user')
+        .map((m) => m.text),
+    ).toEqual(['Start one run.', 'Steer with a lost response.']);
+  } finally {
+    await f.close();
   }
 }, 20_000);
 

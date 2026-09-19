@@ -116,6 +116,20 @@ describe('Kite Home typed Artifact Store', () => {
       });
       expect(store.readSubagentTask(task).canonicalJson).toBe(taskJson);
 
+      const resultJson =
+        '{"artifactFormatVersion":1,"ownerKey":"session-owner","result":{"status":"completed","summary":"done"},"taskId":"child-1"}';
+      const result = reference('subagent_task', '9', resultJson);
+      store.writeSubagentTask({
+        ref: result,
+        artifactFormatVersion: 1,
+        canonicalJson: resultJson,
+        createdAt: 1,
+      });
+      expect(store.readSubagentTask(result).canonicalJson).toBe(resultJson);
+      expect(store.findSubagentTaskResult('session-owner', 'child-1')).toEqual(result);
+      expect(store.findSubagentTaskResult('other-owner', 'child-1')).toBeUndefined();
+      expect(store.listSubagentTaskResults('session-owner')).toEqual([result]);
+
       const lifecycleJson = '{"artifactFormatVersion":1,"handle":{}}';
       const lifecycle = reference('subagent_handle', 'e', lifecycleJson);
       store.writeSubagentLifecycle({

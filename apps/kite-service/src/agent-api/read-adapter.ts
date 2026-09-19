@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   AGENT_API_LIMITS,
+  type AgentApiBackgroundExecutionPage,
   type AgentApiCheckpoint,
   type AgentApiCheckpointPage,
   type AgentApiCheckpointPreview,
@@ -13,6 +14,7 @@ import {
   type AgentApiSession,
   type AgentApiSessionPage,
   type AgentApiWorkspacePage,
+  agentApiBackgroundExecutionPageSchema,
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
   agentApiHistoryPageSchema,
@@ -264,6 +266,9 @@ export async function dispatchAgentApiReadRequest(input: {
         return matched(await getModelContext(input.context, route.sessionId, route.invocationId));
       case 'checkpoints':
         return matched(await listCheckpoints(input.context, input.url, route.sessionId));
+      case 'background_executions':
+        requireNoQuery(input.url);
+        return matched(await listBackgroundExecutions(input.context, route.sessionId));
       case 'checkpoint_preview':
         requireNoQuery(input.url);
         return matched(await previewCheckpoint(input.context, route.sessionId, route.checkpointId));
@@ -301,6 +306,7 @@ function parseReadRoute(pathname: string):
   | { readonly kind: 'logs'; readonly sessionId: string }
   | { readonly kind: 'model_context'; readonly sessionId: string; readonly invocationId: string }
   | { readonly kind: 'checkpoints'; readonly sessionId: string }
+  | { readonly kind: 'background_executions'; readonly sessionId: string }
   | {
       readonly kind: 'checkpoint_preview';
       readonly sessionId: string;
@@ -339,6 +345,9 @@ function parseReadRoute(pathname: string):
   }
   if (segments.length === 5 && segments[4] === 'checkpoints') {
     return { kind: 'checkpoints', sessionId };
+  }
+  if (segments.length === 5 && segments[4] === 'background-executions') {
+    return { kind: 'background_executions', sessionId };
   }
   if (segments.length === 7 && segments[4] === 'checkpoints' && segments[6] === 'preview') {
     const checkpointId = decodeIdentifier(segments[5]);
@@ -792,6 +801,43 @@ async function listCheckpoints(
       session_id: sessionId,
       items,
       ...(nextCursor ? { next_cursor: nextCursor } : {}),
+    }),
+  };
+}
+
+async function listBackgroundExecutions(
+  context: AgentApiReadContext,
+  sessionId: string,
+): Promise<{ readonly ok: true; readonly body: AgentApiBackgroundExecutionPage }> {
+  requireVisibleSession(context, sessionId);
+  const result = await context.query({
+    schema: 'kite.runtime-query.v1',
+    type: 'list_background_executions',
+    sessionId,
+  });
+  if (result.status !== 'ok' || !result.backgroundSnapshot) {
+    throw new ReadFailure(503, 'temporarily_unavailable', true);
+  }
+  const snapshot = result.backgroundSnapshot;
+  return {
+    ok: true,
+    body: encodeAgentApiResponse(agentApiBackgroundExecutionPageSchema, {
+      schema: 'kite.agent-api.background-execution-page.v1',
+      session_id: sessionId,
+      session_revision: snapshot.sessionRevision,
+      aggregate_generation: snapshot.aggregateGeneration,
+      watermark: snapshot.watermark,
+      stale: false,
+      items: snapshot.executions.map((execution) => ({
+        schema: 'kite.agent-api.background-execution.v1' as const,
+        execution_id: execution.executionId,
+        owner_generation: execution.ownerGeneration,
+        revision: execution.revision,
+        kind: execution.kind,
+        status: execution.status,
+        cleanup_confirmed: execution.cleanupConfirmed,
+        ...(execution.cursor === undefined ? {} : { cursor: execution.cursor }),
+      })),
     }),
   };
 }

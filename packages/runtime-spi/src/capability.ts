@@ -35,6 +35,7 @@ export const CAPABILITY_EXECUTION_MECHANISMS_ = Object.freeze([
   'skill',
   'planning',
   'subagent',
+  'task_control',
   'user_input',
   'verification',
   'model',
@@ -103,6 +104,8 @@ export type CapabilityDescriptorKind = 'builtin_tool';
 export interface CapabilityFeatureFlags {
   readonly skillWorkflow?: boolean;
   readonly skillActivation?: boolean;
+  /** Structured Runtime configuration; a Task cannot self-authorize cross-turn execution. */
+  readonly afterTurnContinuation?: boolean;
 }
 
 /** Immutable facts available to a Builtin availability/effects callback. */

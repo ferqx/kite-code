@@ -46,6 +46,9 @@
   notification retention，也不让Client取得raw Runtime event或Store authority。
 - Native descriptor/discovery/process、WebSocket/History/App Control connector contract 位于
   `@kite-ai/kite-local-runtime/client`；本 package 不反向依赖该 Native owner，也不在 browser build 中加入环境分支。
+- 后台执行facade从投影的`sessionRevision`构造Session CAS，从item `ownerGeneration + revision`构造准确执行fence；Store以
+  `aggregateGeneration`判断列表替换、以item generation/revision判断单项新旧，不再把组合generation与原生owner相等
+  作为detail合并条件。
 
 ## 允许依赖
 

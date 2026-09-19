@@ -31,3 +31,11 @@ App Server 的释放回调由 Host 在会话 mailbox 中调用，与下一条命
 延迟发布前一轮 State 的通知时，Run 投影选用该 State revision 当时已创建的 Run；不能把后续新 Run 的排队状态投到旧 revision，造成同 revision 投影冲突。
 
 get_command_receipt 只读取原命令的持久结果，校验查询 scope 与原命令相符，不进入 mailbox、不获取执行权、不执行 activation。缺失回执保持未知；命令自身的持久幂等校验继续保留。验证见[命令与清理回归](../test/persistent-command-host.test.ts)。
+
+## 引导与后台控制
+
+`steer_turn`、`stop_background_execution` 与普通 Run 命令共用 Session mailbox 和持久 command receipt。引导首次受理时在同一事务核对活动 Run/Turn、owner 与队列容量并追加输入；相同 commandId 与摘要重放原回执，即使目标随后已经结束。后台停止先持久化精确 execution identity 和 stop intent，再由 activation 驱动实际 owner 清理；崩溃恢复重复扫描同一 intent，丢失活句柄时落为 unknown，不伪造成功。
+
+After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。
+
+活动或正在停止的 Shell/service/subagent 会阻止 Fork 与 Rewind；终态历史不会。Session close/delete 先等待现有 bridge 清理这些资源，再释放或删除 State；迟到 callback 不能恢复已删除会话。相关组合回归见 [persistent command host](../test/persistent-command-host.test.ts) 与 Service 的 [Runtime coordinator](../../../apps/kite-service/test/runtime/runtime-session-coordinator.test.ts)。

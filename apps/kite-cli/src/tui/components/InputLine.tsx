@@ -30,7 +30,7 @@ export type { SlashSuggestionData } from '#kite-cli/tui/hooks/useSlashSuggestion
 
 interface InputLineProps {
   mode: 'prompt' | 'approval' | 'question';
-  onSubmit: (value: string) => void;
+  onSubmit: (value: string, restore: () => void) => void;
   disabled?: boolean;
   placeholder?: string;
   workspace: string;
@@ -40,6 +40,8 @@ interface InputLineProps {
   initialValue?: string;
   /** Called when the input value changes (for external state sync). */
   onValueChange?: (value: string) => void;
+  /** Parent-owned value replacement that preserves this component's input history. */
+  restoreRequest?: { readonly revision: number; readonly value: string };
   /** Plan mode — 方案模式下显示专用 indicator bar */
   planMode?: boolean;
   /** Plan name — 方案名称，显示在顶部边框中 */
@@ -101,6 +103,7 @@ export default function InputLine({
   onSlashSuggestionChange,
   initialValue = '',
   onValueChange,
+  restoreRequest,
   planMode = false,
   planName,
 }: InputLineProps) {
@@ -121,6 +124,7 @@ export default function InputLine({
   // Prevent stale useInput handler from firing after unmount (session switch via key={activeSessionId})
   const mountedRef = useRef(true);
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -180,6 +184,32 @@ export default function InputLine({
     textKeyRef.current++;
     setValue(next);
   }, []);
+  const appliedRestoreRevisionRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!restoreRequest || appliedRestoreRevisionRef.current === restoreRequest.revision) return;
+    appliedRestoreRevisionRef.current = restoreRequest.revision;
+    valueRef.current = restoreRequest.value;
+    commitValue(restoreRequest.value);
+    onValueChange?.(restoreRequest.value);
+  }, [commitValue, onValueChange, restoreRequest]);
+  const restoreSubmittedValue = useCallback(
+    (submitted: string) => {
+      let restored = false;
+      return () => {
+        if (restored) return;
+        restored = true;
+        setTimeout(() => {
+          if (!mountedRef.current) return;
+          const current = valueRef.current;
+          const next = current.length === 0 ? submitted : `${submitted}\n${current}`;
+          valueRef.current = next;
+          commitValue(next);
+          onValueChange?.(next);
+        }, 0);
+      };
+    },
+    [commitValue, onValueChange],
+  );
   // Track whether slash input needs commit (active suggestions + partial match).
   // Set after slashMatched is computed below.
   const slashNeedsCommitRef = useRef(false);
@@ -301,10 +331,11 @@ export default function InputLine({
       // render its result. Waiting for the effect driven by setValue('') lets
       // a subsequent exact command be routed through a stale suggestion.
       if (finalValue.startsWith('/')) onSlashSuggestionChange?.(null);
-      onSubmit(finalValue);
+      valueRef.current = '';
       setValue('');
+      onSubmit(finalValue, restoreSubmittedValue(finalValue));
     },
-    [onSubmit, onValueChange, onSlashSuggestionChange],
+    [onSubmit, onValueChange, onSlashSuggestionChange, restoreSubmittedValue],
   );
   const handleSubmitRef = useRef(handleSubmit);
   handleSubmitRef.current = handleSubmit;
@@ -434,8 +465,9 @@ export default function InputLine({
             setHistoryIndex(-1);
             textKeyRef.current++;
             onSlashSuggestionChange?.(null);
+            valueRef.current = '';
             setValue('');
-            onSubmit(fullCmd);
+            onSubmit(fullCmd, restoreSubmittedValue(fullCmd));
           }
           return;
         }
@@ -475,7 +507,8 @@ export default function InputLine({
             setHistory((prev) => [...prev, newVal]);
             setHistoryIndex(-1);
             textKeyRef.current++;
-            onSubmit(newVal);
+            valueRef.current = '';
+            onSubmit(newVal, restoreSubmittedValue(newVal));
             setValue('');
           }
           return;

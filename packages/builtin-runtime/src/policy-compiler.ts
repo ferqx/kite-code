@@ -336,6 +336,21 @@ export function taskBuiltinPolicyRule(
   declaredEffects: CapabilityEffects,
   _minimumApproval: CapabilityApproval,
 ): BuiltinPolicyRuleResult {
+  if (stringField(input, 'result_disposition') === 'after_turn') {
+    if (
+      booleanField(input, 'background') !== true ||
+      context.featureFlags?.afterTurnContinuation !== true
+    ) {
+      return denyRule({
+        risk: 'plan',
+        reason: 'after_turn_not_authorized',
+        userVisibleSummary:
+          'This task cannot continue after the current Run without an existing structured authorization.',
+        expectedEffects: ['No sub-agent will be dispatched'],
+        effectiveEffects: taskEffectsClassifier(declaredEffects)(input, context).effectiveEffects,
+      });
+    }
+  }
   const role = stringField(input, 'subagent_type');
   const effectiveEffects = taskEffectsClassifier(declaredEffects)(input, context).effectiveEffects;
   if (context.phase === 'planning' && role !== 'explore' && role !== 'plan') {
@@ -396,6 +411,16 @@ export function shellBuiltinPolicyRule(
   _minimumApproval: CapabilityApproval,
 ): BuiltinPolicyRuleResult {
   const command = stringField(input, 'command')?.trim() ?? '';
+  if (stringField(input, 'result_disposition') === 'after_turn') {
+    return denyRule({
+      risk: 'unknown',
+      reason: 'after_turn_not_authorized',
+      userVisibleSummary:
+        'This Shell execution cannot continue after the current Run without an existing structured authorization.',
+      expectedEffects: ['No command will be executed'],
+      effectiveEffects: declaredEffects,
+    });
+  }
   if (!command) {
     return denyRule({
       risk: 'unknown',
@@ -816,6 +841,12 @@ function stringField(input: RuntimeJsonValue, key: string): string | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
   const value = (input as Readonly<Record<string, RuntimeJsonValue>>)[key];
   return typeof value === 'string' ? value : undefined;
+}
+
+function booleanField(input: RuntimeJsonValue, key: string): boolean | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const value = (input as { readonly [key: string]: RuntimeJsonValue })[key];
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 const GIT_PATH_VALUE_OPTIONS_ = new Set([

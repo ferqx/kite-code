@@ -58,6 +58,10 @@ import {
   ProviderReadinessUnknownError,
 } from '#kite-service/bootstrap/runtime/provider-readiness';
 import type { RuntimeEvent, RuntimeState } from '#kite-service/bootstrap/runtime/state-runtime';
+import {
+  type BackgroundSubagentControlRuntime,
+  backgroundSubagentOwnerKey,
+} from '#kite-service/bootstrap/runtime/subagent/background-runtime';
 import type { SubAgentResult } from '#kite-service/bootstrap/runtime/subagent/types';
 import type { AppToolPipelineComposition } from '#kite-service/bootstrap/runtime/tool-pipeline-composition';
 import {
@@ -143,6 +147,13 @@ export async function executeAppRuntimeTools(params: {
     RuntimeState,
     RuntimeEvent
   >;
+  backgroundModelInvocationPersistence?: import('@kite-ai/builtin-runtime/model').ModelInvocationPersistence<
+    RuntimeState,
+    RuntimeEvent
+  > & {
+    readonly ownerKey: string;
+    readonly recoveryIdentityKey: string;
+  };
   /** Parent reservation for a task/skill child model step. */
   modelInvocationParentReservationId?: string;
   subagentEventSink?: SubAgentEventSink;
@@ -180,6 +191,8 @@ export async function executeAppRuntimeTools(params: {
   authorizationFromLoopMode?: boolean;
   /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
   subagentRuntimeFactory?: import('#kite-service/bootstrap/runtime/subagent/pipeline-runtime').AppSubagentRuntimeFactory;
+  backgroundSubagentRuntime?: BackgroundSubagentControlRuntime;
+  afterTurnContinuationRuntime?: import('#kite-service/bootstrap/runtime/subagent/after-turn-continuation').AfterTurnContinuationRuntime;
   subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
@@ -392,6 +405,17 @@ export async function executeAppRuntimeTools(params: {
             name: privateTask.name,
             subagent_type: privateTask.role,
             task: privateTask.task,
+            ...(typeof (args as Record<string, unknown>).background === 'boolean'
+              ? { background: (args as Record<string, unknown>).background as boolean }
+              : {}),
+            ...((args as Record<string, unknown>).result_disposition === 'required' ||
+            (args as Record<string, unknown>).result_disposition === 'after_turn'
+              ? {
+                  result_disposition: (args as Record<string, unknown>).result_disposition as
+                    | 'required'
+                    | 'after_turn',
+                }
+              : {}),
           },
         };
       } catch {
@@ -1031,6 +1055,30 @@ export async function executeAppRuntimeTools(params: {
                         modelMessageId: call.modelMessageId,
                         ordinal: call.ordinal,
                         deferPlanReviewSiblingCancellation: true,
+                      }),
+                    }),
+                  }
+                : {}),
+              ...(cutoverExecutionMechanism === 'task_control' && params.backgroundSubagentRuntime
+                ? {
+                    preassembledMechanism: Object.freeze({
+                      taskControl: Object.freeze({
+                        readTask: (taskId: string) =>
+                          params.backgroundSubagentRuntime!.readTask(
+                            backgroundSubagentOwnerKey(
+                              liveState.session.threadId,
+                              liveState.toolRecovery.identityKey,
+                            ),
+                            taskId,
+                          ),
+                        cancelTask: (taskId: string) =>
+                          params.backgroundSubagentRuntime!.cancelTask(
+                            backgroundSubagentOwnerKey(
+                              liveState.session.threadId,
+                              liveState.toolRecovery.identityKey,
+                            ),
+                            taskId,
+                          ),
                       }),
                     }),
                   }

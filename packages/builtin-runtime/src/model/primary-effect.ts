@@ -128,6 +128,8 @@ export interface BuiltinPrimaryModelEffectInput<
   readonly capabilityBindingFacts: BuiltinPrimaryCapabilityBindingFacts;
   readonly autoCompaction: BuiltinPrimaryAutoCompactionFacts;
   readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmission;
+  /** Same-ledger after-turn placeholder replaced by the exact primary Surface reservation. */
+  readonly replaceReservationId?: string;
   readonly persistence?: ModelInvocationPersistence<State, Event>;
   readonly compactionReporter?: CompactionReporter;
   readonly signal?: AbortSignal;
@@ -319,6 +321,7 @@ export async function executeBuiltinPrimaryModelEffect<
       ),
     },
     resourceKind: 'model',
+    ...(input.replaceReservationId ? { replaceReservationId: input.replaceReservationId } : {}),
     signal: input.signal,
     emitEphemeral: input.emitEphemeral,
   });

@@ -2,6 +2,8 @@ import { type ZodType, z } from 'zod';
 import { AGENT_API_LIMITS } from './limits';
 import {
   AGENT_API_VERSION,
+  agentApiBackgroundExecutionPageSchema,
+  agentApiBackgroundExecutionSchema,
   agentApiCancelRunRequestSchema,
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
@@ -64,6 +66,12 @@ const schemaRegistry = Object.freeze([
   ['AgentApiExchangeRequest', 'exchange-request', agentApiExchangeRequestSchema],
   ['AgentApiContext', 'context', agentApiContextSchema],
   ['AgentApiWorkspace', 'workspace', agentApiWorkspaceSchema],
+  ['AgentApiBackgroundExecution', 'background-execution', agentApiBackgroundExecutionSchema],
+  [
+    'AgentApiBackgroundExecutionPage',
+    'background-execution-page',
+    agentApiBackgroundExecutionPageSchema,
+  ],
   ['AgentApiWorkspacePage', 'workspace-page', agentApiWorkspacePageSchema],
   ['AgentApiSession', 'session', agentApiSessionSchema],
   ['AgentApiSessionPage', 'session-page', agentApiSessionPageSchema],
@@ -213,6 +221,7 @@ function createOpenApiDocument(
     ],
     tags: [
       { name: 'Authentication' },
+      { name: 'Background Executions' },
       { name: 'System' },
       { name: 'Workspaces' },
       { name: 'Sessions' },
@@ -564,6 +573,19 @@ function createPaths(examples: Readonly<Record<string, AgentApiArtifactJson>>): 
         parameters: [afterSequenceParameter(), limitParameter(), cursorParameter()],
         success: { 200: jsonResponse('AgentApiHistoryPage', 'History page') },
         errors: [400, 401, 403, 404, 406, 409, 429, 503],
+      }),
+    },
+    '/v1/sessions/{session_id}/background-executions': {
+      parameters: [sessionPath],
+      get: operation({
+        id: 'listAgentApiBackgroundExecutions',
+        tag: 'Background Executions',
+        summary: 'Read the bounded background execution snapshot for one Session',
+        security: authenticated,
+        success: {
+          200: jsonResponse('AgentApiBackgroundExecutionPage', 'Background execution snapshot'),
+        },
+        errors: [400, 401, 403, 404, 406, 429, 503],
       }),
     },
     '/v1/sessions/{session_id}/logs': {

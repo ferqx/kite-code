@@ -1,5 +1,6 @@
 import type {
   RuntimeAccessNotification,
+  RuntimeBackgroundExecutionProjection,
   RuntimeClientEvent,
   RuntimeCommand,
   RuntimeCommandReceipt,
@@ -40,6 +41,18 @@ export interface RuntimeClientInfo {
   readonly version: string;
   readonly instanceId: string;
 }
+
+export interface RuntimeClientFeatures {
+  readonly steer: boolean;
+  readonly backgroundQuery: boolean;
+  readonly backgroundControl: boolean;
+}
+
+const NO_RUNTIME_FEATURES: RuntimeClientFeatures = Object.freeze({
+  steer: false,
+  backgroundQuery: false,
+  backgroundControl: false,
+});
 
 export interface RuntimeClientOptions {
   readonly transport: RuntimeClientTransport;
@@ -221,6 +234,7 @@ export class RuntimeClient implements AsyncDisposable {
   #nextSubscription = 0;
   #connectPromise: Promise<void> | undefined;
   #closed = false;
+  #features: RuntimeClientFeatures = NO_RUNTIME_FEATURES;
 
   constructor(options: RuntimeClientOptions) {
     this.#transport = options.transport;
@@ -338,6 +352,10 @@ export class RuntimeClient implements AsyncDisposable {
     return this.#connectionGeneration;
   }
 
+  get features(): RuntimeClientFeatures {
+    return this.#features;
+  }
+
   async connect(): Promise<void> {
     if (this.#closed) throw closedError();
     if (this.#connection) return;
@@ -362,6 +380,18 @@ export class RuntimeClient implements AsyncDisposable {
   }
 
   async command(command: RuntimeCommand): Promise<RuntimeCommandReceipt> {
+    if (command.type === 'steer_turn' && !this.#features.steer) {
+      throw new RuntimeClientError(
+        'unsupported_command',
+        'Runtime Host does not advertise steering support.',
+      );
+    }
+    if (command.type === 'stop_background_execution' && !this.#features.backgroundControl) {
+      throw new RuntimeClientError(
+        'unsupported_command',
+        'Runtime Host does not advertise background control support.',
+      );
+    }
     const wire = mapRuntimeCommandToProtocol(command);
     if (!wire) {
       throw new RuntimeClientError(
@@ -376,7 +406,66 @@ export class RuntimeClient implements AsyncDisposable {
     return result;
   }
 
+  /** Stop exactly the background execution represented by a previously read projection. */
+  async stopBackgroundExecution(input: {
+    readonly commandId: string;
+    readonly execution: RuntimeBackgroundExecutionProjection;
+  }): Promise<{
+    readonly receipt: RuntimeCommandReceipt;
+    readonly execution?: RuntimeBackgroundExecutionProjection;
+  }> {
+    const target = input.execution;
+    const command = Object.freeze({
+      schema: 'kite.runtime-command.v1' as const,
+      commandId: input.commandId,
+      type: 'stop_background_execution' as const,
+      sessionId: target.sessionId,
+      expectedRevision: target.sessionRevision,
+      executionId: target.executionId,
+      executionKind: target.kind,
+      expectedOwnerGeneration: target.ownerGeneration,
+      expectedExecutionRevision: target.revision,
+    });
+    let receipt: RuntimeCommandReceipt;
+    try {
+      receipt = await this.command(command);
+    } catch (error) {
+      const resolved = await this.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_command_receipt',
+        sessionId: target.sessionId,
+        command,
+      }).catch(() => undefined);
+      if (resolved?.status !== 'ok' || !resolved.receipt) throw error;
+      receipt = resolved.receipt;
+    }
+    let execution: RuntimeBackgroundExecutionProjection | undefined;
+    if (
+      receipt.status === 'applied' ||
+      receipt.status === 'idempotent_replay' ||
+      receipt.status === 'conflict'
+    ) {
+      const refreshed = await this.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_background_execution',
+        sessionId: target.sessionId,
+        executionId: target.executionId,
+      });
+      execution = refreshed.status === 'ok' ? refreshed.backgroundExecution : undefined;
+    }
+    return { receipt, ...(execution ? { execution } : {}) };
+  }
+
   async query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
+    if (
+      (query.type === 'list_background_executions' || query.type === 'get_background_execution') &&
+      !this.#features.backgroundQuery
+    ) {
+      throw new RuntimeClientError(
+        'unsupported_query',
+        'Runtime Host does not advertise background query support.',
+      );
+    }
     const wire = mapRuntimeQueryToProtocol(query);
     if (!wire) {
       throw new RuntimeClientError(
@@ -384,9 +473,30 @@ export class RuntimeClient implements AsyncDisposable {
         `Runtime query is not available in Protocol V2: ${query.type}`,
       );
     }
+    const connectionGeneration = this.#connectionGeneration;
     const result = await this.#request('runtime/query', { query: wire });
     if (!isQueryResult(result)) {
       throw new RuntimeClientError('protocol_error', 'Protocol returned a non-query result.');
+    }
+    if (
+      result.status === 'ok' &&
+      result.queryType === 'list_background_executions' &&
+      result.backgroundSnapshot !== undefined
+    ) {
+      this.#store.applyBackgroundSnapshot({
+        connectionGeneration,
+        snapshot: result.backgroundSnapshot,
+      });
+    }
+    if (
+      result.status === 'ok' &&
+      result.queryType === 'get_background_execution' &&
+      result.backgroundExecution !== undefined
+    ) {
+      this.#store.applyBackgroundExecution({
+        connectionGeneration,
+        execution: result.backgroundExecution,
+      });
     }
     return result;
   }
@@ -589,6 +699,7 @@ export class RuntimeClient implements AsyncDisposable {
     const generation = previousGeneration + 1;
     this.#connectionGeneration = generation;
     this.#connection = undefined;
+    this.#features = NO_RUNTIME_FEATURES;
     // A remote id belongs to the connection that created it. It must never be
     // matched, or unsubscribed, on the replacement connection.
     for (const state of this.#subscriptions.values()) {
@@ -612,10 +723,30 @@ export class RuntimeClient implements AsyncDisposable {
       }
       this.#connection = connection;
       void this.#receive(connection, generation);
-      const initialize = await this.#request('initialize', {
-        protocolVersion: RUNTIME_PROTOCOL_VERSION,
-        clientInfo: this.#clientInfo,
-      });
+      let initialize: RuntimeProtocolResult;
+      try {
+        initialize = await this.#request('initialize', {
+          protocolVersion: RUNTIME_PROTOCOL_VERSION,
+          clientInfo: this.#clientInfo,
+          featureNegotiation: true,
+        });
+      } catch (error) {
+        if (
+          !(error instanceof RuntimeClientError) ||
+          error.code !== 'protocol_error' ||
+          (error.protocol?.data.code !== 'invalid_request' &&
+            error.protocol?.data.code !== 'invalid_params')
+        ) {
+          throw error;
+        }
+        // A strict pre-negotiation Host rejects the additive request field.
+        // Retrying initialize without it is safe: no Runtime mutation or
+        // subscription has been admitted yet, and all feature bits remain false.
+        initialize = await this.#request('initialize', {
+          protocolVersion: RUNTIME_PROTOCOL_VERSION,
+          clientInfo: this.#clientInfo,
+        });
+      }
       if (!isInitializeResult(initialize)) {
         throw new RuntimeClientError(
           'protocol_error',
@@ -623,6 +754,11 @@ export class RuntimeClient implements AsyncDisposable {
         );
       }
       this.#assertExpectedServer(initialize);
+      this.#features = Object.freeze({
+        steer: initialize.capabilities.features?.steer ?? false,
+        backgroundQuery: initialize.capabilities.features?.backgroundQuery ?? false,
+        backgroundControl: initialize.capabilities.features?.backgroundControl ?? false,
+      });
       this.#store.setConnection({
         generation,
         status: 'active',

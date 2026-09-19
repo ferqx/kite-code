@@ -88,6 +88,19 @@ describe('parseSlashCommand', () => {
     expect(parseSlashCommand('/context')).toEqual({ type: 'context' });
     expect(parseSlashCommand('/status')).toEqual({ type: 'status' });
     expect(parseSlashCommand('/status extra')).toEqual({ type: 'unknown', raw: '/status extra' });
+    expect(parseSlashCommand('/background')).toEqual({
+      type: 'background',
+      operation: 'list',
+    });
+    expect(parseSlashCommand('/bg stop sh_123')).toEqual({
+      type: 'background',
+      operation: 'stop',
+      executionId: 'sh_123',
+    });
+    expect(parseSlashCommand('/background stop')).toEqual({
+      type: 'unknown',
+      raw: '/background stop',
+    });
   });
 
   // ── /clear ──

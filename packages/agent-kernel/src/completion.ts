@@ -335,6 +335,71 @@ function hasCurrentNonTerminalTool(state: AgentState): boolean {
   );
 }
 
+function hasRequiredManagedShell(state: AgentState): boolean {
+  const settledShells = new Set(
+    Object.values(state.tools.calls)
+      .filter(
+        (call) =>
+          toolCallBelongsToCurrentWork(state, call) &&
+          call.result?.resultMeta?.shellStatus === 'exited' &&
+          call.result.resultMeta.shellId,
+      )
+      .map((call) => call.result!.resultMeta!.shellId!),
+  );
+  return Object.values(state.tools.calls).some((call) => {
+    if (
+      call.name !== 'shell_execute' ||
+      !toolCallBelongsToCurrentWork(state, call) ||
+      call.result?.resultMeta?.shellStatus !== 'running' ||
+      !call.result.resultMeta.shellId
+    ) {
+      return false;
+    }
+    const args =
+      call.args && typeof call.args === 'object' && !Array.isArray(call.args)
+        ? (call.args as Readonly<Record<string, unknown>>)
+        : {};
+    return args.mode !== 'service' && !settledShells.has(call.result.resultMeta.shellId);
+  });
+}
+
+const SETTLED_BACKGROUND_TASK_STATUSES = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted',
+  'exhausted',
+  'suspended',
+]);
+
+function hasRequiredBackgroundTask(state: AgentState): boolean {
+  const settledTasks = new Set(
+    Object.values(state.tools.calls)
+      .filter((call) => {
+        const meta = call.result?.resultMeta;
+        return (
+          (call.name === 'task_read' || call.name === 'task_cancel') &&
+          toolCallBelongsToCurrentWork(state, call) &&
+          typeof meta?.taskId === 'string' &&
+          typeof meta.taskStatus === 'string' &&
+          SETTLED_BACKGROUND_TASK_STATUSES.has(meta.taskStatus)
+        );
+      })
+      .map((call) => call.result!.resultMeta!.taskId!),
+  );
+  return Object.values(state.tools.calls).some((call) => {
+    const meta = call.result?.resultMeta;
+    return (
+      call.name === 'task' &&
+      toolCallBelongsToCurrentWork(state, call) &&
+      meta?.taskStatus === 'running' &&
+      meta.taskDisposition === 'required' &&
+      typeof meta.taskId === 'string' &&
+      !settledTasks.has(meta.taskId)
+    );
+  });
+}
+
 function hasCurrentSuspendedSubagent(state: AgentState): boolean {
   return Object.keys(state.suspendedSubagents).some((toolCallId) => {
     const call = state.tools.calls[toolCallId];
@@ -442,7 +507,11 @@ function commonBlocker(state: AgentState): UnplannedCompletionGuardBlocked | und
       'interaction_pending',
       'wait_for_interaction',
     );
-  if (hasCurrentNonTerminalTool(state))
+  if (
+    hasCurrentNonTerminalTool(state) ||
+    hasRequiredManagedShell(state) ||
+    hasRequiredBackgroundTask(state)
+  )
     return blockedUnplannedCompletion(state, planning, 'tool_pending', 'wait_for_tool');
   if (hasCurrentSuspendedSubagent(state))
     return blockedUnplannedCompletion(state, planning, 'subagent_suspended', 'wait_for_subagent');
@@ -685,7 +754,12 @@ export function decidePlannedCompletion(state: AgentState): PlannedCompletionGua
 
   if (state.interactions.kind !== 'idle')
     return block('interaction_pending', 'wait_for_interaction');
-  if (hasCurrentNonTerminalTool(state)) return block('tool_pending', 'wait_for_tool');
+  if (
+    hasCurrentNonTerminalTool(state) ||
+    hasRequiredManagedShell(state) ||
+    hasRequiredBackgroundTask(state)
+  )
+    return block('tool_pending', 'wait_for_tool');
   if (hasCurrentSuspendedSubagent(state)) return block('subagent_suspended', 'wait_for_subagent');
   if (hasCurrentUnknownInvocation(state))
     return block('unknown_external_invocation', 'reconcile_invocation');

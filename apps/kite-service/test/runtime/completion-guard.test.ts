@@ -327,6 +327,220 @@ describe('CompletionGuard V1', () => {
     });
   });
 
+  test('keeps a required finite managed Shell blocking until its terminal read is processed', () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'managed-shell-completion',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state.tools.calls.start = {
+      toolCallId: 'start',
+      modelMessageId: 'model-start',
+      name: 'shell_execute',
+      args: { command: 'bun test', yield_ms: 1 },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'sh_1', shellStatus: 'running' },
+      },
+    };
+    expect(decideUnplannedCompletion(state)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+
+    state.tools.calls.read = {
+      toolCallId: 'read',
+      modelMessageId: 'model-read',
+      name: 'shell_read',
+      args: { shell_id: 'sh_1', wait_until: 'terminal' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'exited',
+        resultMeta: { shellId: 'sh_1', shellStatus: 'exited' },
+      },
+    };
+    expect(decideUnplannedCompletion(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+
+    delete state.tools.calls.read;
+    state.tools.calls.start = {
+      ...state.tools.calls.start,
+      args: { command: 'bun run dev', mode: 'service', yield_ms: 1 },
+    };
+    expect(decideUnplannedCompletion(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+  });
+
+  test('keeps a required background child blocking after durable result until task_read is processed', () => {
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '1'.repeat(64),
+      threadId: 'required-background-child',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state.tools.calls.start = {
+      toolCallId: 'start',
+      modelMessageId: 'model-start',
+      name: 'task',
+      args: {
+        name: 'inspect',
+        subagent_type: 'explore',
+        task: 'inspect runtime',
+        background: true,
+        result_disposition: 'required',
+      },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'accepted',
+        resultMeta: {
+          taskId: 'child-required-1',
+          taskStatus: 'running',
+          taskDisposition: 'required',
+        },
+      },
+    };
+    expect(decideUnplannedCompletion(state)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+
+    // Artifact persistence and its short-report context fact are not the model's
+    // authoritative consumption of the terminal result.
+    state = {
+      ...state,
+      transcript: {
+        ...state.transcript,
+        messages: [
+          ...state.transcript.messages,
+          {
+            kind: 'user',
+            messageId: `subagent:child-required-1:sha256:${'a'.repeat(64)}`,
+            turnId: state.turn.turnId,
+            ordinal: 0,
+            createdAt: '1970-01-01T00:00:00.000Z',
+            content: 'child result is durable',
+          },
+        ],
+      },
+    };
+    expect(decideUnplannedCompletion(state)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+    });
+
+    state.tools.calls.read = {
+      toolCallId: 'read',
+      modelMessageId: 'model-read',
+      name: 'task_read',
+      args: { task_id: 'child-required-1' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'completed',
+        resultMeta: { taskId: 'child-required-1', taskStatus: 'completed' },
+      },
+    };
+    expect(decideUnplannedCompletion(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+  });
+
+  test('waits for a required background terminal wake without polling the model', async () => {
+    const state = activePlanningState();
+    state.transcript.final = 'Premature final.';
+    state.tools.calls.background = {
+      toolCallId: 'background',
+      modelMessageId: 'model-background',
+      name: 'task',
+      args: {
+        name: 'inspect',
+        subagent_type: 'explore',
+        task: 'inspect runtime',
+        background: true,
+        result_disposition: 'required',
+      },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'accepted',
+        resultMeta: {
+          taskId: 'child-wait-1',
+          taskStatus: 'running',
+          taskDisposition: 'required',
+        },
+      },
+    };
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let wake!: () => void;
+    const waiting = new Promise<void>((resolve) => (wake = resolve));
+    let modelCalls = 0;
+    const stream = runStateRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls += 1;
+        return [{ type: 'model.responded' as const, messageId: 'after-wake', text: 'Done.' }];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      10_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => waiting,
+    );
+
+    expect((await stream.next()).value).toMatchObject({
+      type: 'completion.blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+    const resumed = stream.next();
+    await Promise.resolve();
+    expect(modelCalls).toBe(0);
+    (kernel.getState().tools.calls as Record<string, (typeof state.tools.calls)[string]>).read = {
+      toolCallId: 'read',
+      modelMessageId: 'model-read',
+      name: 'task_read',
+      args: { task_id: 'child-wait-1' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'completed',
+        resultMeta: { taskId: 'child-wait-1', taskStatus: 'completed' },
+      },
+    };
+    wake();
+    expect((await resumed).value).toMatchObject({
+      type: 'model.responded',
+      messageId: 'after-wake',
+    });
+    expect(modelCalls).toBe(1);
+    await stream.return(undefined);
+    kernel.close();
+  });
+
   test('ignores Task-owned Skill and suspended child blockers from an older Task', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',

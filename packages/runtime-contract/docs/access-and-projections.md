@@ -14,6 +14,10 @@
 
 准确字段以源码为准，语义变化同时检查 [Protocol](../../runtime-protocol/docs/wire-format.md)、[Client](../../runtime-client/docs/requests-and-history.md) 和真实 projector。验证：[contract tests](../test/)。
 
+后台执行列表的`aggregateGeneration`属于组合目录；每项`ownerGeneration`和`revision`属于其原生执行owner。
+列表和单项同时携带读取时的`sessionRevision`，它才是`stop_background_execution.expectedRevision`的来源。
+组合目录generation、执行owner generation、执行revision都不能充当Session CAS。
+
 
 主工具审批展示使用 `tool.review` 的 toolId／reviewId／status／有界 summary；`approval.granted.grant` 可选地保留 approve_once／same_command。二者经过同一 Protocol allowlist 进入 live 和历史回放，缺失 grant 不推导授权范围，不接收原始 reviewer result 或模型身份。具体字段见 [notifications](../src/notifications.ts)。
 

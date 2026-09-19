@@ -348,6 +348,244 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('treats omitted feature capabilities as unsupported without sending fallback mutations', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        if ('featureNegotiation' in message.params) {
+          target.push({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32602,
+              message: 'Unknown initialize field.',
+              data: { code: 'invalid_params' },
+            },
+          });
+        } else {
+          target.push(result(message.id, initializeResult('old-host')));
+        }
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    expect(client.features).toEqual({
+      steer: false,
+      backgroundQuery: false,
+      backgroundControl: false,
+    });
+    await expect(
+      client.command({
+        schema: 'kite.runtime-command.v1',
+        commandId: 'steer-1',
+        type: 'steer_turn',
+        sessionId: 'session-1',
+        expectedRunId: 'run-1',
+        expectedTurnId: 'turn-1',
+        input: 'keep going',
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported_command' });
+    await expect(
+      client.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId: 'session-1',
+      }),
+    ).rejects.toMatchObject({ code: 'unsupported_query' });
+    expect(connection.requests('runtime/command')).toHaveLength(0);
+    expect(connection.requests('runtime/query')).toHaveLength(0);
+    expect(connection.requests('initialize')).toHaveLength(2);
+    await client.close();
+  });
+
+  test('two clients preserve server admission order while steering the same Run', async () => {
+    const admitted: string[] = [];
+    const connection = () =>
+      new FakeConnection((message, target) => {
+        if (message.method === 'initialize')
+          target.push(
+            result(
+              message.id,
+              initializeResult('shared-host', {
+                steer: true,
+                backgroundQuery: false,
+                backgroundControl: false,
+              }),
+            ),
+          );
+        if (message.method === 'runtime/command') {
+          admitted.push(message.params.command.commandId);
+          target.push(
+            result(message.id, {
+              status: 'applied',
+              commandId: message.params.command.commandId,
+              sessionId: 'session-1',
+              revision: admitted.length,
+              input: {
+                inputId: `input-${admitted.length}`,
+                runId: 'run-1',
+                turnId: 'turn-1',
+                sequence: admitted.length,
+              },
+            }),
+          );
+        }
+      });
+    const first = new RuntimeClient({
+      transport: transport(connection()),
+      clientInfo: clientInfo(),
+    });
+    const second = new RuntimeClient({
+      transport: transport(connection()),
+      clientInfo: clientInfo(),
+    });
+    await Promise.all([first.connect(), second.connect()]);
+    const steer = (commandId: string, input: string) => ({
+      schema: 'kite.runtime-command.v1' as const,
+      type: 'steer_turn' as const,
+      commandId,
+      sessionId: 'session-1',
+      expectedRunId: 'run-1',
+      expectedTurnId: 'turn-1',
+      input,
+    });
+    const receipts = await Promise.all([
+      first.command(steer('steer-a', 'first')),
+      second.command(steer('steer-b', 'second')),
+    ]);
+    expect(admitted).toEqual(['steer-a', 'steer-b']);
+    expect(receipts.map((receipt) => receipt.status)).toEqual(['applied', 'applied']);
+    const inputs = receipts.flatMap((receipt) =>
+      receipt.status === 'applied' && receipt.input ? [receipt.input] : [],
+    );
+    expect(inputs.map((input) => input.runId)).toEqual(['run-1', 'run-1']);
+    expect(inputs.map((input) => input.sequence)).toEqual([1, 2]);
+    await Promise.all([first.close(), second.close()]);
+  });
+
+  test('exposes advertised features while background control remains independently false', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(
+          result(
+            message.id,
+            initializeResult('new-host', {
+              steer: true,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    expect(client.features).toEqual({
+      steer: true,
+      backgroundQuery: true,
+      backgroundControl: false,
+    });
+    await client.close();
+  });
+
+  test('stops one exact background projection and refreshes its detail after admission', async () => {
+    const projection = {
+      executionId: 'shell-1',
+      sessionId: 'session-1',
+      sessionRevision: 42,
+      kind: 'shell' as const,
+      status: 'running' as const,
+      ownerGeneration: 'shell-owner',
+      revision: 7,
+      cleanupConfirmed: false,
+    };
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('new-host', {
+              steer: true,
+              backgroundQuery: true,
+              backgroundControl: true,
+            }),
+          ),
+        );
+      if (message.method === 'runtime/command')
+        target.push(
+          result(
+            message.id,
+            message.params.command.commandId === 'stop-conflict'
+              ? {
+                  status: 'conflict',
+                  commandId: 'stop-conflict',
+                  code: 'revision_conflict',
+                  currentRevision: 9,
+                }
+              : {
+                  status: 'applied',
+                  commandId: message.params.command.commandId,
+                  sessionId: 'session-1',
+                  revision: 8,
+                },
+          ),
+        );
+      if (message.method === 'runtime/query')
+        target.push(
+          result(message.id, {
+            status: 'ok',
+            queryType: 'get_background_execution',
+            backgroundExecution: { ...projection, status: 'stopping', revision: 8 },
+          }),
+        );
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    const stopped = await client.stopBackgroundExecution({
+      commandId: 'stop-1',
+      execution: projection,
+    });
+    expect(stopped).toMatchObject({
+      receipt: { status: 'applied', commandId: 'stop-1' },
+      execution: { executionId: 'shell-1', status: 'stopping' },
+    });
+    expect(connection.requests('runtime/command')[0]).toMatchObject({
+      params: {
+        command: {
+          commandId: 'stop-1',
+          sessionId: 'session-1',
+          expectedRevision: 42,
+          executionId: 'shell-1',
+          executionKind: 'shell',
+          expectedOwnerGeneration: 'shell-owner',
+          expectedExecutionRevision: 7,
+        },
+      },
+    });
+    expect(connection.requests('runtime/query')).toHaveLength(1);
+    await expect(
+      client.stopBackgroundExecution({ commandId: 'stop-conflict', execution: projection }),
+    ).resolves.toMatchObject({
+      receipt: { status: 'conflict', currentRevision: 9 },
+      execution: { executionId: 'shell-1' },
+    });
+    expect(connection.requests('runtime/command')[1]).toMatchObject({
+      params: { command: { executionId: 'shell-1', expectedOwnerGeneration: 'shell-owner' } },
+    });
+    expect(connection.requests('runtime/query')[1]).toMatchObject({
+      params: { query: { type: 'get_background_execution', executionId: 'shell-1' } },
+    });
+    await client.close();
+  });
+
   test('times out an unanswered command without replaying it or accepting a late receipt', async () => {
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize')
@@ -1074,7 +1312,10 @@ function transport(...connections: readonly FakeConnection[]): RuntimeClientTran
 function result(id: string, value: object): object {
   return { jsonrpc: '2.0', id, result: value };
 }
-function initializeResult(instanceId: string): object {
+function initializeResult(
+  instanceId: string,
+  features?: { steer: boolean; backgroundQuery: boolean; backgroundControl: boolean },
+): object {
   return {
     protocolVersion: 2,
     protocolSchema: 'kite.runtime-protocol.v2',
@@ -1089,6 +1330,7 @@ function initializeResult(instanceId: string): object {
         'server/ping',
       ],
       subscriptions: ['session', 'sessions'],
+      ...(features === undefined ? {} : { features }),
     },
     limits: {
       maxMessageBytes: 1024,

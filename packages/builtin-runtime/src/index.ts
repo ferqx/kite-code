@@ -243,6 +243,8 @@ export type {
   BuiltinShellExecutionMechanism,
   BuiltinShellExecutionResult,
   BuiltinShellIntent,
+  BuiltinShellRunningExecutionResult,
+  BuiltinShellTerminalExecutionResult,
   PlanningExecutionMechanisms,
 } from './planning/runtime-module';
 export {
@@ -383,8 +385,12 @@ export {
   BUILTIN_SEARCH_CONTENT_SCHEMA_,
   BUILTIN_SEARCH_FILES_SCHEMA_,
   BUILTIN_SHELL_EXECUTE_SCHEMA_,
+  BUILTIN_SHELL_READ_SCHEMA_,
+  BUILTIN_SHELL_STOP_SCHEMA_,
+  BUILTIN_TASK_CANCEL_SCHEMA_,
   BUILTIN_TASK_PRIVATE_SCHEMA_,
   BUILTIN_TASK_PUBLIC_SCHEMA_,
+  BUILTIN_TASK_READ_SCHEMA_,
   BUILTIN_TASK_RUNTIME_SCHEMA_,
   BUILTIN_TOOL_SEARCH_SCHEMA_,
   BUILTIN_UPDATE_PLAN_SCHEMA_,

@@ -80,6 +80,8 @@ export interface PrivateImmutableArtifactStorageOptions<Kind extends string> {
 export interface PrivateImmutableArtifactStorageBackend<Kind extends string> {
   write(ref: PrivateImmutableArtifactRef<Kind>, payload: Uint8Array): void;
   read(ref: PrivateImmutableArtifactRef<Kind>): Uint8Array;
+  findByOwnerTask?(ownerKey: string, taskId: string): PrivateImmutableArtifactRef<Kind> | undefined;
+  listByOwner?(ownerKey: string): readonly PrivateImmutableArtifactRef<Kind>[];
   collectGarbage(
     options: PrivateArtifactGarbageCollectionOptions<Kind>,
   ): PrivateArtifactGarbageCollectionResult;
@@ -362,6 +364,13 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
       storageError('artifact_corrupt', 'Private Artifact integrity verification failed.');
     }
     return bytes;
+  }
+
+  findByOwnerTask(ownerKey: string, taskId: string): PrivateImmutableArtifactRef<Kind> | undefined {
+    return this.backend?.findByOwnerTask?.(ownerKey, taskId);
+  }
+  listByOwner(ownerKey: string): readonly PrivateImmutableArtifactRef<Kind>[] {
+    return this.backend?.listByOwner?.(ownerKey) ?? [];
   }
 
   collectGarbage(

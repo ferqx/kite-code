@@ -41,9 +41,12 @@ import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage, useI18n } from './i18n';
 import { isTuiRunActive } from './presentation/selectors';
 import {
+  deleteTuiSessionDraft,
   ensureTuiPromptSession,
   observeTuiPromptSubmission,
+  restoreTuiSessionDraft,
   TuiPromptSubmissionQueue,
+  tuiPromptSubmissionMode,
 } from './prompt-submission-queue';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
@@ -402,9 +405,21 @@ function TuiApp({
   // A cancelled run may still be unwinding while the next prompt has already
   // been accepted. Older run finalizers must not clear the newer run's state.
   const inputValueRef = React.useRef('');
+  const sessionDraftsRef = React.useRef(new Map<string, string>());
+  const [draftRestoreRequest, setDraftRestoreRequest] = React.useState<{
+    readonly sessionId: string;
+    readonly revision: number;
+    readonly value: string;
+  }>();
+  const localPromptSequenceRef = React.useRef(0);
   const handleInputValueChange = React.useCallback((v: string) => {
     inputValueRef.current = v;
+    sessionDraftsRef.current.set(threadIdRef.current, v);
   }, []);
+  React.useEffect(() => {
+    inputValueRef.current =
+      sessionDraftsRef.current.get(state.activeSessionId || threadIdRef.current) ?? '';
+  }, [state.activeSessionId]);
   const canToggleLastOutputBlock = React.useCallback(
     () => inputValueRef.current.trim().length === 0,
     [],
@@ -1048,6 +1063,7 @@ function TuiApp({
           });
           return;
         }
+        deleteTuiSessionDraft(sessionDraftsRef.current, threadId);
         if (wasActive) {
           // Deleted the active session — create a new one so TUI has an active session
           const newId = sessionManager.createSession(workspace);
@@ -1297,6 +1313,60 @@ function TuiApp({
         ...(appServerRuntime ? {} : { isError: true }),
       });
     },
+    (operation, executionId) => {
+      const targetThreadId = threadIdRef.current;
+      const command =
+        operation === 'stop' ? `/background stop ${executionId ?? ''}`.trim() : '/background';
+      dispatchSessionLoad({ type: 'LOCAL_COMMAND', text: command });
+      void sessionManager
+        .listBackgroundExecutions(targetThreadId)
+        .then(async (snapshot) => {
+          if (operation === 'stop') {
+            const execution = snapshot.executions.find(
+              (candidate) => candidate.executionId === executionId,
+            );
+            if (!execution) throw new Error(`Background execution not found: ${executionId}`);
+            if (execution.status !== 'running') {
+              throw new Error(
+                `Background execution is already ${execution.status}: ${executionId}`,
+              );
+            }
+            const receipt = await sessionManager.stopBackgroundExecution(execution);
+            if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
+              throw new Error(`Runtime rejected the stop command: ${receipt.code}`);
+            }
+            if (threadIdRef.current === targetThreadId) {
+              dispatchSessionLoad({
+                type: 'LOCAL_TEXT',
+                text: `  ⎿  Stopping ${execution.kind} ${execution.executionId}.`,
+              });
+            }
+            return;
+          }
+          if (threadIdRef.current !== targetThreadId) return;
+          const rows = snapshot.executions.map(
+            (execution) =>
+              `${execution.executionId}  ${execution.kind}  ${execution.status}${
+                execution.cleanupConfirmed ? '  cleanup confirmed' : ''
+              }`,
+          );
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text:
+              rows.length > 0
+                ? `  ⎿  Background executions:\n${rows.map((row) => `     ${row}`).join('\n')}`
+                : '  ⎿  No background executions.',
+          });
+        })
+        .catch((error) => {
+          if (threadIdRef.current !== targetThreadId) return;
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  Background operation failed: ${toErrorMessage(error)}`,
+            isError: true,
+          });
+        });
+    },
   );
 
   // Keyboard cancellation must reach the Runtime Client facade in the same input turn as
@@ -1367,6 +1437,7 @@ function TuiApp({
         input: Record<string, unknown>;
       }>,
       queuedPromptId?: number,
+      localPromptId?: string,
     ) => {
       // A prompt queued behind an active turn belongs to the Session that was
       // foreground when the user pressed Enter. Do not retarget it if the user
@@ -1459,16 +1530,25 @@ function TuiApp({
                 }
                 return;
               }
-              dispatch({ type: 'ACCEPT_LOCAL_PROMPT', text: task, messageId: identity.messageId });
+              dispatch({
+                type: 'ACCEPT_LOCAL_PROMPT',
+                text: task,
+                messageId: identity.messageId,
+                localPromptId,
+              });
             },
           },
           requestedPhase,
           initialSkillActivations,
         );
       } catch (error) {
-        if (threadIdRef.current === threadId) {
-          dispatch({ type: 'DROP_LOCAL_USER_PROMPT', text: task });
-        }
+        dispatch({
+          type: 'DROP_SESSION_LOCAL_USER_PROMPT',
+          sessionId: threadId,
+          text: task,
+          localPromptId,
+          failureKind: 'start',
+        });
         throw error;
       } finally {
         // Only dispatch global state changes if this session is still active.
@@ -1518,15 +1598,26 @@ function TuiApp({
       queuedPromptId?: number,
     ): Promise<void> => {
       const submittedThreadId = threadIdRef.current;
+      const localPromptId =
+        queuedPromptId === undefined
+          ? `${submittedThreadId || 'pending'}:${++localPromptSequenceRef.current}`
+          : undefined;
       if (queuedPromptId === undefined) {
         // An idle prompt has no predecessor to disturb. Acknowledge it in the
         // presentation immediately, before Session readiness/cleanup and the
         // start_turn receipt; authoritative Runtime events join the identity.
         dispatch({ type: 'SET_RUNNING' });
-        dispatch({ type: 'LOCAL_USER_PROMPT', text: task });
+        dispatch({ type: 'LOCAL_USER_PROMPT', text: task, localPromptId });
       }
       return promptSubmissionQueueRef.current!.enqueue(submittedThreadId, (targetThreadId) =>
-        runTaskNow(targetThreadId, task, requestedPhase, initialSkillActivations, queuedPromptId),
+        runTaskNow(
+          targetThreadId,
+          task,
+          requestedPhase,
+          initialSkillActivations,
+          queuedPromptId,
+          localPromptId,
+        ),
       );
     },
     [dispatch, runTaskNow],
@@ -1540,7 +1631,7 @@ function TuiApp({
   handleSlashCommandRef.current = handleSlashCommand;
 
   const handleInput = React.useCallback(
-    (value: string) => {
+    (value: string, _restoreInput: () => void) => {
       if (value.startsWith('/')) {
         handleSlashCommandRef.current(value);
         return;
@@ -1551,10 +1642,58 @@ function TuiApp({
       // silently fall back to building while the Footer still says plan.
       const submittedSessionId = threadIdRef.current;
       const submittedRuntime = sessionManager.getRuntime(submittedSessionId);
-      const queued =
-        isTuiRunActive(stateRef.current) ||
-        submittedRuntime?.agentLoopActive === true ||
-        promptSubmissionQueueRef.current!.hasPending(submittedSessionId);
+      const activeRun =
+        isTuiRunActive(stateRef.current) || submittedRuntime?.agentLoopActive === true;
+      const submissionMode = tuiPromptSubmissionMode({
+        activeRun,
+        pendingSuccessor: promptSubmissionQueueRef.current!.hasPending(submittedSessionId),
+      });
+      if (submissionMode === 'steer' && submittedRuntime) {
+        const localPromptId = `${submittedSessionId}:${++localPromptSequenceRef.current}`;
+        dispatchSessionLoad({ type: 'LOCAL_USER_PROMPT', text: value, localPromptId });
+        observeTuiPromptSubmission({
+          queued: false,
+          submit: () =>
+            submittedRuntime.steerTask(value, (identity) => {
+              if (threadIdRef.current === submittedSessionId) {
+                dispatchSessionLoad({
+                  type: 'ACCEPT_LOCAL_PROMPT',
+                  text: value,
+                  messageId: identity.inputId,
+                  localPromptId,
+                });
+              }
+            }),
+          onQueued: () => {},
+          onFailure: (error) => {
+            void dispatchSessionLoad({
+              type: 'DROP_SESSION_LOCAL_USER_PROMPT',
+              sessionId: submittedSessionId,
+              text: value,
+              localPromptId,
+              failureKind: 'steer',
+            });
+            const currentDraft = sessionDraftsRef.current.get(submittedSessionId) ?? '';
+            const restoredDraft = restoreTuiSessionDraft(currentDraft, value);
+            sessionDraftsRef.current.set(submittedSessionId, restoredDraft);
+            if (threadIdRef.current === submittedSessionId) {
+              inputValueRef.current = restoredDraft;
+              setDraftRestoreRequest((current) => ({
+                sessionId: submittedSessionId,
+                revision: (current?.revision ?? 0) + 1,
+                value: restoredDraft,
+              }));
+              dispatchSessionLoad({
+                type: 'LOCAL_TEXT',
+                text: `  ⎿  Task could not be guided: ${toErrorMessage(error)}`,
+                isError: true,
+              });
+            }
+          },
+        });
+        return;
+      }
+      const queued = submissionMode === 'queue';
       const queuedPromptId = queued ? ++queuedPromptIdRef.current : undefined;
       if (queuedPromptId !== undefined) {
         dispatchSessionLoad({
@@ -1677,8 +1816,15 @@ function TuiApp({
             !!state.interrupt
           }
           onSlashSuggestionChange={setSlashSuggestion}
-          initialValue={inputValueRef.current}
+          initialValue={
+            sessionDraftsRef.current.get(state.activeSessionId || threadIdRef.current) ?? ''
+          }
           onValueChange={handleInputValueChange}
+          restoreRequest={
+            draftRestoreRequest?.sessionId === state.activeSessionId
+              ? draftRestoreRequest
+              : undefined
+          }
           planMode={state.status.phase === 'planning'}
           planName={state.status.plan?.name}
         />

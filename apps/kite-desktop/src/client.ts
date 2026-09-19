@@ -12,6 +12,7 @@ import {
   type KiteAppServerConnection,
 } from '@kite-ai/kite-local-runtime/client/protocol';
 import {
+  type RuntimeClientBackgroundState,
   RuntimeClientError,
   type RuntimeClientNotificationWithGeneration,
   readCommandReceipt,
@@ -90,6 +91,7 @@ export interface DesktopView {
   ready: boolean;
   loadingSession: boolean;
   hasLoadedHistory: boolean;
+  background?: Readonly<Record<string, RuntimeClientBackgroundState>>;
 }
 
 export async function readCompleteSessionDirectory(
@@ -126,6 +128,7 @@ export class DesktopClient {
     ready: false,
     loadingSession: false,
     hasLoadedHistory: false,
+    background: {},
   };
   #listeners = new Set<() => void>();
   #connection?: KiteAppServerConnection;
@@ -444,6 +447,7 @@ export class DesktopClient {
         ...(directory && !directory.every((item, index) => item === this.#view.directory?.[index])
           ? { directory }
           : {}),
+        background: snapshot.background,
       });
       if (resyncSession) {
         // A replacement subscription restores projection, not omitted message events.
@@ -649,6 +653,28 @@ export class DesktopClient {
           workspace: entry.workspace ? paths.get(entry.workspace.workspaceDigest) : undefined,
           model: entry.model,
         }));
+        if (connection.runtime.features.backgroundQuery) {
+          let backgroundIndex = 0;
+          await Promise.all(
+            Array.from({ length: Math.min(8, sessions.length) }, async () => {
+              while (
+                backgroundIndex < sessions.length &&
+                this.#connection === connection &&
+                read === this.#directoryRead
+              ) {
+                const session = sessions[backgroundIndex++];
+                if (!session) continue;
+                await connection.runtime
+                  .query({
+                    schema: 'kite.runtime-query.v1',
+                    type: 'list_background_executions',
+                    sessionId: session.sessionId,
+                  })
+                  .catch(() => undefined);
+              }
+            }),
+          );
+        }
         const byId = new Map(sessions.map((session) => [session.sessionId, session]));
         const previous = this.#view.directory ?? [];
         const known = new Set(previous.map((session) => session.sessionId));
@@ -950,6 +976,28 @@ export class DesktopClient {
     }
   }
 
+  async stopBackgroundExecution(
+    execution: import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionProjection,
+  ) {
+    const connection = this.#requireConnection();
+    if (!connection.runtime.features.backgroundControl)
+      throw new Error('当前 Runtime Host 不支持停止后台执行。');
+    const result = await connection.runtime.stopBackgroundExecution({
+      commandId: crypto.randomUUID(),
+      execution,
+    });
+    if (this.#connection !== connection) throw new Error('连接已变化，请刷新后台状态。');
+    if (result.receipt.status === 'applied' || result.receipt.status === 'idempotent_replay')
+      return;
+    if (result.receipt.status === 'conflict')
+      throw new Error('会话状态已更新；已刷新同一后台执行，请确认后重试。');
+    throw new Error(
+      result.receipt.code === 'target_ended'
+        ? '该后台执行已结束；状态已刷新。'
+        : `停止请求未受理：${result.receipt.code}`,
+    );
+  }
+
   async newSession(model?: { readonly provider: string; readonly name: string }): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const connection = this.#requireConnection();
@@ -994,7 +1042,9 @@ export class DesktopClient {
   }
   selectSession(sessionId: string): Promise<void> {
     const connection = this.#connection;
-    if (connection?.status !== 'active') return Promise.reject(new Error('请先连接项目。'));
+    if (connection?.status !== 'active') {
+      return this.connect().then(() => this.selectSession(sessionId));
+    }
     if (
       this.#selectionLoad?.sessionId === sessionId &&
       this.#selectionLoad.connection === connection
@@ -1198,7 +1248,14 @@ export class DesktopClient {
         this.#publish({ messages: [], hasLoadedHistory: false, projection: undefined });
       }
       this.#publish({ ready: false });
-      if (timedOut) throw new Error('会话加载超时，请重新加载会话。');
+      if (timedOut) {
+        await connection.close().catch(() => undefined);
+        if (this.#connection === connection) {
+          this.#connection = undefined;
+          this.#publish({ connected: false });
+        }
+        throw new Error('会话加载超时，请重新加载会话。');
+      }
       if (this.#view.hasLoadedHistory)
         throw new Error(`会话更新失败，已保留已读内容。${messageOf(error)}`);
       throw error;
@@ -1307,6 +1364,24 @@ export class DesktopClient {
       sessionId,
     });
     if (result.status !== 'ok' || !result.session) throw new Error('会话当前不可用。');
+    const activeRun = result.session.currentRun;
+    if (
+      activeRun?.activeTurnId &&
+      (activeRun.status === 'queued' ||
+        activeRun.status === 'running' ||
+        activeRun.status === 'waiting')
+    ) {
+      await this.#command({
+        schema: 'kite.runtime-command.v1',
+        commandId: crypto.randomUUID(),
+        type: 'steer_turn',
+        sessionId,
+        expectedRunId: activeRun.runId,
+        expectedTurnId: activeRun.activeTurnId,
+        input,
+      });
+      return;
+    }
     await this.#command({
       schema: 'kite.runtime-command.v1',
       commandId: crypto.randomUUID(),

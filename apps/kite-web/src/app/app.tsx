@@ -6,7 +6,7 @@ import {
   Sun03Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { SessionPage } from '@kite-ai/kite-client-ui';
+import { BackgroundExecutions, SessionPage } from '@kite-ai/kite-client-ui';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useMatch, useNavigate } from 'react-router';
 import { ModelContextInspector } from '@/components/session/model-context-inspector';
@@ -21,6 +21,7 @@ import {
   webPresentationReducer,
 } from '@/presentation/reducer';
 import type {
+  WebBackgroundSnapshot,
   WebCheckpointSummary,
   WebModelContextSnapshot,
   WebSessionLogEntry,
@@ -44,6 +45,9 @@ export function App(props: AppProps = {}) {
   const [logEntries, setLogEntries] = useState<readonly WebSessionLogEntry[]>([]);
   const [logThroughSequence, setLogThroughSequence] = useState(0);
   const [logReason, setLogReason] = useState<string | null>(null);
+  const [backgroundBySession, setBackgroundBySession] = useState<
+    Readonly<Record<string, WebBackgroundSnapshot>>
+  >({});
   const [modelContextView, setModelContextView] = useState<{
     readonly invocationId: string;
     readonly status: 'loading' | 'loaded' | 'error';
@@ -209,8 +213,29 @@ export function App(props: AppProps = {}) {
         if (active) dispatch({ type: 'checkpoints_failed', sessionId, generation });
       }
     };
+    const loadBackground = async () => {
+      try {
+        const snapshot = await transport.loadBackgroundExecutions?.(sessionId);
+        if (!snapshot) throw new Error('Background execution REST projection is unavailable.');
+        if (active) {
+          setBackgroundBySession((current) => ({ ...current, [sessionId]: snapshot }));
+        }
+      } catch {
+        if (active) {
+          setBackgroundBySession((current) => ({
+            ...current,
+            [sessionId]: {
+              sessionId,
+              stale: true,
+              executions: current[sessionId]?.executions ?? [],
+            },
+          }));
+        }
+      }
+    };
     void loadHistory();
     void loadCheckpoints();
+    void loadBackground();
     return () => {
       active = false;
     };
@@ -393,6 +418,12 @@ export function App(props: AppProps = {}) {
       beforeConversation={
         state.selectedSessionId && (
           <>
+            {state.selectedSessionId && backgroundBySession[state.selectedSessionId] && (
+              <BackgroundExecutions
+                executions={backgroundBySession[state.selectedSessionId]!.executions}
+                stale={backgroundBySession[state.selectedSessionId]!.stale}
+              />
+            )}
             <SessionViewTabs value={activeSessionView} onChange={selectSessionView} />
             {activeSessionView === 'history' && (
               <CheckpointStrip checkpoints={state.checkpoints} status={state.checkpointState} />

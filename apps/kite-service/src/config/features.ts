@@ -27,6 +27,8 @@ export interface FeatureFlags {
   networkBoundary: boolean;
   releaseProfile: boolean;
   observabilityMetrics: boolean;
+  /** Explicit operator authorization for one budget-reserved after-turn Task report. */
+  afterTurnContinuation: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -54,6 +56,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   networkBoundary: false,
   releaseProfile: false,
   observabilityMetrics: false,
+  afterTurnContinuation: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

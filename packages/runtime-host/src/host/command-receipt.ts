@@ -7,7 +7,10 @@ import type {
   RuntimeStoredCommandReceipt,
 } from '../storage';
 import { assertRuntimeStoredCommandResourceResult } from '../storage';
-import { parseRuntimeStoredCommandResource } from './run-projection';
+import {
+  parseRuntimeStoredCommandResource,
+  parseRuntimeStoredInputResource,
+} from './run-projection';
 
 const APPLIED_RECEIPT_KEYS = ['commandId', 'revision', 'sessionId', 'status'] as const;
 
@@ -87,12 +90,14 @@ export function resolveRuntimeCommandReceipt(
     });
   }
   const resource = parseRuntimeStoredCommandResource(record.resourceResult, record.commandId);
+  const input = parseRuntimeStoredInputResource(record.resourceResult);
   return Object.freeze({
     status: 'idempotent_replay',
     commandId: applied.commandId,
     sessionId: applied.sessionId,
     originalRevision: applied.revision,
     ...(resource === undefined ? {} : { resource }),
+    ...(input === undefined ? {} : { input }),
   });
 }
 

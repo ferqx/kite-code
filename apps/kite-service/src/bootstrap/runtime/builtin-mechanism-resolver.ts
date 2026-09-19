@@ -18,18 +18,32 @@ export type AppBuiltinMechanismGrantUsed = 'none' | 'approve_once' | 'same_comma
 export interface AppBuiltinShellExecutorInput {
   readonly workspace: string;
   readonly command: string;
-  readonly timeoutMs: number;
+  readonly timeoutMs?: number;
+  readonly mode?: 'finite' | 'service';
   readonly signal: AbortSignal;
   readonly readOnly: boolean;
   readonly networkAccess: 'none' | 'approved';
   readonly filesystemAccess: 'workspace_only' | 'external_read' | 'approved_external';
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  readonly yieldMs?: number;
 }
 
 export interface AppBuiltinShellExecutor {
   readonly execute: (
     input: Readonly<AppBuiltinShellExecutorInput>,
   ) => Promise<Readonly<BuiltinShellExecutionResult>>;
+  readonly read?: (
+    input: Readonly<{
+      shellId: string;
+      cursor: number;
+      waitMs?: number;
+      waitUntil?: 'terminal';
+      signal: AbortSignal;
+    }>,
+  ) => Promise<Readonly<Record<string, unknown>>>;
+  readonly stop?: (
+    input: Readonly<{ shellId: string }>,
+  ) => Promise<Readonly<Record<string, unknown>>>;
 }
 
 export interface AppBuiltinPreassembledMechanismResolverInput {
@@ -100,6 +114,7 @@ function resolveBuiltinMechanisms(
     case 'mcp':
     case 'skill':
     case 'planning':
+    case 'task_control':
       return preassembledMechanism(input);
     case 'subagent':
     case 'user_input':
@@ -173,7 +188,20 @@ function shellMechanism(
   if (input.preassembledMechanism !== undefined || !input.shellExecutor) {
     fail('mechanism_missing');
   }
-  const command = recordString(input.canonicalArguments, 'command');
+  const shellId = recordOptionalString(input.canonicalArguments, 'shell_id');
+  const command = recordOptionalString(input.canonicalArguments, 'command');
+  if (shellId) {
+    const executor = input.shellExecutor;
+    const mechanism = Object.freeze({
+      read: executor.read,
+      stop: executor.stop,
+    });
+    return mergeBuiltinMechanismBundle({
+      executionMechanism: 'shell',
+      prepared: Object.freeze({ shell: mechanism }),
+    });
+  }
+  if (!command) fail('invalid_facts');
   const sandboxScope = input.sandboxScope;
   if (!sandboxScope) fail('invalid_facts');
   // Read-only command proof cannot narrow an approved full filesystem scope.
@@ -197,24 +225,34 @@ function shellMechanism(
   }
   const executor = input.shellExecutor;
   const mechanism = Object.freeze({
-    execute: (shellInput: Readonly<{ command: string; timeoutMs: number }>) => {
+    execute: (
+      shellInput: Readonly<{
+        command: string;
+        timeoutMs?: number;
+        yieldMs?: number;
+        mode?: 'finite' | 'service';
+      }>,
+    ) => {
       if (input.signal.aborted) fail('signal_aborted');
       if (
         typeof shellInput.command !== 'string' ||
         shellInput.command !== command ||
-        !Number.isSafeInteger(shellInput.timeoutMs) ||
-        shellInput.timeoutMs <= 0
+        (shellInput.timeoutMs !== undefined &&
+          (!Number.isSafeInteger(shellInput.timeoutMs) || shellInput.timeoutMs <= 0)) ||
+        (shellInput.timeoutMs === undefined && shellInput.mode !== 'service')
       ) {
         fail('invalid_facts');
       }
       return executor.execute({
         workspace: input.workspace,
         command: shellInput.command,
-        timeoutMs: shellInput.timeoutMs,
+        ...(shellInput.timeoutMs === undefined ? {} : { timeoutMs: shellInput.timeoutMs }),
         signal: input.signal,
         readOnly,
         networkAccess,
         filesystemAccess,
+        ...(shellInput.yieldMs === undefined ? {} : { yieldMs: shellInput.yieldMs }),
+        ...(shellInput.mode === undefined ? {} : { mode: shellInput.mode }),
         ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
       });
     },
@@ -223,6 +261,12 @@ function shellMechanism(
     executionMechanism: 'shell',
     prepared: Object.freeze({ shell: mechanism }),
   });
+}
+
+function recordOptionalString(value: Readonly<RuntimeJsonValue>, key: string): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = (value as Readonly<Record<string, RuntimeJsonValue>>)[key];
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
 function preassembledMechanism(
@@ -321,17 +365,6 @@ function assertFrozenJson(value: unknown, label: string): asserts value is Runti
     throw new AppBuiltinMechanismResolverError('invalid_facts');
   }
   void label;
-}
-
-function recordString(value: RuntimeJsonValue, key: string): string {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    fail('invalid_facts');
-  }
-  const record = value as { readonly [key: string]: RuntimeJsonValue };
-  if (typeof record[key] !== 'string' || record[key].length === 0) {
-    fail('invalid_facts');
-  }
-  return record[key] as string;
 }
 
 function fail(code: AppBuiltinMechanismResolverFailureCode): never {

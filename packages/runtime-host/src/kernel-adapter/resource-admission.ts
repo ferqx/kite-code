@@ -55,6 +55,8 @@ export function planModelInvocationResource(
     requestedMaxOutputTokens?: number;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
+    /** Reserved after-turn report budget replaced atomically by this exact Surface. */
+    replaceReservationId?: string;
     now?: Date;
   },
 ): ModelResourcePreparationPlan {
@@ -76,7 +78,7 @@ export function planModelInvocationResource(
   if (state.resourceBudget.status !== 'active') {
     throw new DescendantResourceAdmissionError('budget_unconfigured');
   }
-  const budget = state.resourceBudget;
+  let budget = state.resourceBudget;
   if (Object.values(budget.reservations).some((reservation) => reservation.state === 'unknown')) {
     throw new DescendantResourceAdmissionError('reconciliation_required');
   }
@@ -85,6 +87,26 @@ export function planModelInvocationResource(
     if (parent?.state !== 'dispatch_started') {
       throw new DescendantResourceAdmissionError('reconciliation_required');
     }
+  }
+  const preparationEvents: RuntimeEvent[] = [];
+  if (input.replaceReservationId) {
+    const placeholder = budget.reservations[input.replaceReservationId];
+    if (
+      placeholder?.state !== 'reserved' ||
+      placeholder.resourceKind !== 'model' ||
+      placeholder.parentReservationId !== undefined
+    ) {
+      throw new DescendantResourceAdmissionError('reconciliation_required');
+    }
+    const release: RuntimeEvent = {
+      type: 'resource_budget.released',
+      reservationId: placeholder.reservationId,
+    };
+    budget = reduceResourceBudgetState(
+      budget,
+      release as Extract<RuntimeEvent, { type: 'resource_budget.released' }>,
+    ) as ActiveResourceBudgetRuntimeState;
+    preparationEvents.push(release);
   }
   const committed = committedResourceUsage(budget);
   const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
@@ -121,7 +143,7 @@ export function planModelInvocationResource(
       reservationId: reservation.reservationId,
       parentReservationId: reservation.parentReservationId ?? null,
     },
-    preparationEvents: [{ type: 'resource_budget.reserved', reservation }],
+    preparationEvents: [...preparationEvents, { type: 'resource_budget.reserved', reservation }],
     maxOutputTokens,
   };
 }

@@ -8,6 +8,7 @@ import {
   generateRuntimeProtocolArtifactDigest,
   generateRuntimeProtocolArtifacts,
   generateRuntimeProtocolTypeScript,
+  INITIALIZE_RESULT_SCHEMA_,
   mapProtocolCommandToRuntimeCommand,
   mapRuntimeAccessNotificationToSubscriptionMessage,
   mapRuntimeClientEventToProtocol,
@@ -62,6 +63,21 @@ describe('Runtime Protocol', () => {
     ).json();
     const decoded = decodeRuntimeProtocolMessage(fixture);
     expect(JSON.parse(JSON.stringify(decoded))).toEqual(fixture);
+    expect(
+      INITIALIZE_RESULT_SCHEMA_.safeParse({
+        protocolVersion: 2,
+        protocolSchema: 'kite.runtime-protocol.v2',
+        serverInfo: { version: 'old', instanceId: 'old-host' },
+        capabilities: { methods: ['initialize'], subscriptions: [] },
+        limits: {
+          maxMessageBytes: 1,
+          maxDepth: 1,
+          maxInFlightRequests: 1,
+          maxSubscriptions: 1,
+          maxOutboundMessages: 1,
+        },
+      }).success,
+    ).toBeTrue();
   });
 
   test('rejects all malformed JSON-RPC shapes before routing', () => {
@@ -384,6 +400,55 @@ describe('Runtime Protocol', () => {
       resource: { kind: 'run' as const, run, messageId: 'message-1' },
     };
     expect(RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(receipt).success).toBeTrue();
+    const backgroundQuery = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_background_executions' as const,
+      sessionId: 'session-1',
+    };
+    expect(mapRuntimeQueryToProtocol(backgroundQuery)).toEqual(backgroundQuery);
+    expect(
+      mapRuntimeQueryResultToProtocol({
+        status: 'ok',
+        queryType: 'list_background_executions',
+        backgroundSnapshot: {
+          sessionId: 'session-1',
+          sessionRevision: 11,
+          aggregateGeneration: 'aggregate-1',
+          watermark: 2,
+          executions: [
+            {
+              executionId: 'shell-1',
+              sessionId: 'session-1',
+              sessionRevision: 11,
+              kind: 'service',
+              status: 'running',
+              ownerGeneration: 'owner-1',
+              revision: 2,
+              cleanupConfirmed: false,
+              cursor: 4,
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      queryType: 'list_background_executions',
+      backgroundSnapshot: { aggregateGeneration: 'aggregate-1', sessionRevision: 11, watermark: 2 },
+    });
+    expect(
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+        status: 'ok',
+        queryType: 'get_background_execution',
+        backgroundExecution: {
+          executionId: 'shell-1',
+          sessionId: 'session-1',
+          kind: 'shell',
+          status: 'running',
+          ownerGeneration: 'shell-owner',
+          revision: 2,
+          cleanupConfirmed: false,
+        },
+      }).success,
+    ).toBeFalse();
     expect(
       RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
         ...receipt,
@@ -990,7 +1055,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'c4d81dba:3e66ac49';
+    const expectedDigest = 'd5d5b073:641d2d20';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

@@ -2319,6 +2319,79 @@ describe('InputLine', () => {
     expect(submitted).toEqual(['/help', '/clear']);
     view.unmount();
   });
+
+  test('restores a submitted prompt when asynchronous steering rejects it', async () => {
+    let restore!: () => void;
+    const view = render(
+      <InputLine
+        mode="prompt"
+        onSubmit={(_value, restoreSubmittedInput) => {
+          restore = restoreSubmittedInput;
+        }}
+        workspace={process.cwd()}
+      />,
+    );
+
+    view.stdin.write('keep this guidance');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+    expect(view.lastFrame()).not.toContain('keep this guidance');
+
+    restore();
+    await waitForFrameText(view.lastFrame, 'keep this guidance');
+    view.unmount();
+  });
+
+  test('restores rejected guidance without overwriting a newer draft', async () => {
+    let restore!: () => void;
+    const view = render(
+      <InputLine
+        mode="prompt"
+        onSubmit={(_value, restoreSubmittedInput) => {
+          restore = restoreSubmittedInput;
+        }}
+        workspace={process.cwd()}
+      />,
+    );
+
+    view.stdin.write('first guidance');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+    view.stdin.write('new draft');
+    await Promise.resolve();
+    restore();
+    await waitForFrameText(view.lastFrame, 'first guidance');
+
+    expect(view.lastFrame()).toContain('new draft');
+    view.unmount();
+  });
+
+  test('parent-owned draft restoration preserves submitted input history', async () => {
+    const props = {
+      mode: 'prompt' as const,
+      onSubmit: () => {},
+      workspace: process.cwd(),
+    };
+    const view = render(<InputLine {...props} />);
+    view.stdin.write('history item');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+
+    view.rerender(
+      <InputLine
+        {...props}
+        restoreRequest={{ revision: 1, value: 'restored rejected guidance' }}
+      />,
+    );
+    await waitForFrameText(view.lastFrame, 'restored rejected guidance');
+    view.stdin.write('\u001B[A');
+    await waitForFrameText(view.lastFrame, 'history item');
+    expect(view.lastFrame()).not.toContain('restored rejected guidance');
+    view.unmount();
+  });
 });
 
 // ── OutputArea ──

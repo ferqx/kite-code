@@ -681,7 +681,7 @@ describe('Workspace Worker runtime foreground composition', () => {
         api_version: 'v1',
         server_version: 'kite-workspace-worker-v1',
         build_id: 'build-foreground',
-        capabilities: ['checkpoints', 'history', 'sessions'],
+        capabilities: ['background_executions', 'checkpoints', 'history', 'sessions'],
       });
       expect(await agentClient.listSessions('?limit=1')).toEqual({
         schema: 'kite.agent-api.session-page.v1',

@@ -59,10 +59,26 @@ export interface StartTurnCommand extends RuntimeSessionCommandBase {
   }[];
 }
 
+/** Append one human input to the currently active Run without creating a new Run. */
+export interface SteerTurnCommand extends RuntimeCommandBase {
+  readonly type: 'steer_turn';
+  readonly sessionId: string;
+  readonly expectedRunId: string;
+  readonly expectedTurnId: string;
+  readonly input: string;
+}
+
 export interface CancelTurnCommand extends RuntimeSessionCommandBase {
   readonly type: 'cancel_turn';
   readonly turnId: string;
   readonly runId: string;
+}
+export interface StopBackgroundExecutionCommand extends RuntimeSessionCommandBase {
+  readonly type: 'stop_background_execution';
+  readonly executionId: string;
+  readonly executionKind: 'shell' | 'service' | 'subagent';
+  readonly expectedOwnerGeneration: string;
+  readonly expectedExecutionRevision: number;
 }
 
 export type RuntimeInteractionResponse =
@@ -164,7 +180,9 @@ export type RuntimeCommand =
   | ResumeSessionCommand
   | RecoverSessionCommand
   | StartTurnCommand
+  | SteerTurnCommand
   | CancelTurnCommand
+  | StopBackgroundExecutionCommand
   | RespondInteractionCommand
   | SetInteractionModeCommand
   | CompactSessionCommand
@@ -181,6 +199,8 @@ export type RuntimeCommandErrorCode =
   | 'revision_conflict'
   | 'turn_not_found'
   | 'run_not_found'
+  | 'target_ended'
+  | 'steer_queue_full'
   | 'interaction_mismatch'
   | 'checkpoint_unavailable'
   | 'policy_denied'
@@ -204,6 +224,12 @@ export type RuntimeCommandReceipt =
         readonly run: RuntimeRunProjection;
         readonly messageId: string;
       };
+      readonly input?: {
+        readonly inputId: string;
+        readonly runId: string;
+        readonly turnId: string;
+        readonly sequence: number;
+      };
     }
   | {
       readonly status: 'conflict' | 'rejected' | 'not_found';
@@ -221,6 +247,12 @@ export type RuntimeCommandReceipt =
         readonly run: RuntimeRunProjection;
         readonly messageId: string;
       };
+      readonly input?: {
+        readonly inputId: string;
+        readonly runId: string;
+        readonly turnId: string;
+        readonly sequence: number;
+      };
     };
 
 const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
@@ -228,7 +260,9 @@ const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
   'resume_session',
   'recover_session',
   'start_turn',
+  'steer_turn',
   'cancel_turn',
+  'stop_background_execution',
   'respond_interaction',
   'set_interaction_mode',
   'compact_session',
@@ -287,11 +321,42 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
         isStartTurn(candidate) &&
         (!Object.hasOwn(candidate, 'model') || isRuntimeModelRoute(candidate.model))
       );
+    case 'steer_turn':
+      return (
+        hasExactKeys(candidate, [
+          'schema',
+          'commandId',
+          'type',
+          'sessionId',
+          'expectedRunId',
+          'expectedTurnId',
+          'input',
+        ]) &&
+        isIdentifier(candidate.sessionId) &&
+        isIdentifier(candidate.expectedRunId) &&
+        isIdentifier(candidate.expectedTurnId) &&
+        isBoundedUserText(candidate.input)
+      );
     case 'cancel_turn':
       return (
         isSessionCommand(candidate, ['turnId', 'runId']) &&
         isIdentifier(candidate.turnId) &&
         isIdentifier(candidate.runId)
+      );
+    case 'stop_background_execution':
+      return (
+        isSessionCommand(candidate, [
+          'executionId',
+          'executionKind',
+          'expectedOwnerGeneration',
+          'expectedExecutionRevision',
+        ]) &&
+        isIdentifier(candidate.executionId) &&
+        (candidate.executionKind === 'shell' ||
+          candidate.executionKind === 'service' ||
+          candidate.executionKind === 'subagent') &&
+        isIdentifier(candidate.expectedOwnerGeneration) &&
+        isNonNegativeSafeInteger(candidate.expectedExecutionRevision)
       );
     case 'respond_interaction':
       return (

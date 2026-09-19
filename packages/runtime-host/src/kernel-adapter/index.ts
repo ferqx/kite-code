@@ -1,3 +1,4 @@
+export { countPendingSteerInputs } from '@kite-ai/agent-kernel';
 export type { RuntimeActionEmission } from './action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './action-emission';
 export type {

@@ -354,6 +354,13 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
         workspace,
         grant.preparationDigest,
       );
+      if (preparation.timeoutMs === null) {
+        cleanupWindowsSandboxRuntimeDirNoSpawn(runtimeRoot);
+        return failure(
+          'backend_unavailable',
+          'Service execution without an explicit timeout is unavailable on the Windows restricted-token backend.',
+        );
+      }
       const prepared = prepareWindowsRestrictedTokenTransport(
         {
           enabled: true,
@@ -364,7 +371,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
         {
           workspace,
           command: commandFromArgv(preparation.argv),
-          timeoutMs: preparation.timeoutMs,
+          ...(preparation.timeoutMs === null ? {} : { timeoutMs: preparation.timeoutMs }),
           networkMode: preparation.networkMode,
           filesystemMode: preparation.filesystemMode,
           ...(preparation.executionTrust === 'policy_proven_read_only'

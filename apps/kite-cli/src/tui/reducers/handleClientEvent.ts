@@ -401,6 +401,13 @@ function reducePresentationBlocks(
       return projectModelTextDelta(state, event);
     case 'model.responded':
       return projectModelResponded(state, event);
+    case 'model.response_superseded': {
+      const answer = findBlock(
+        state,
+        (block) => block.kind === 'text' && block.modelRequestId === event.requestId,
+      );
+      return answer ? removeBlockById(state, answer.id) : state;
+    }
     case 'model.retry':
       return {
         ...settlePresentationBoundary(state),

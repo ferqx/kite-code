@@ -37,7 +37,9 @@ export function mapProtocolCommandToRuntimeCommand(
     case 'recover_session':
     case 'resume_session':
     case 'start_turn':
+    case 'steer_turn':
     case 'cancel_turn':
+    case 'stop_background_execution':
     case 'respond_interaction':
     case 'set_interaction_mode':
     case 'compact_session':
@@ -61,7 +63,9 @@ export function mapRuntimeCommandToProtocol(
     case 'recover_session':
     case 'resume_session':
     case 'start_turn':
+    case 'steer_turn':
     case 'cancel_turn':
+    case 'stop_background_execution':
     case 'respond_interaction':
     case 'set_interaction_mode':
     case 'compact_session':
@@ -93,6 +97,8 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
     case 'get_rewind_preview':
     case 'get_run':
     case 'list_runs':
+    case 'list_background_executions':
+    case 'get_background_execution':
       return query;
   }
 }
@@ -109,6 +115,8 @@ export function mapRuntimeQueryToProtocol(query: RuntimeQuery): RuntimeProtocolQ
     case 'get_rewind_preview':
     case 'get_run':
     case 'list_runs':
+    case 'list_background_executions':
+    case 'get_background_execution':
       return query;
     default:
       return undefined;
@@ -141,6 +149,7 @@ export function mapRuntimeClientEventToProtocol(
     case 'user.message':
     case 'model.requested':
     case 'model.responded':
+    case 'model.response_superseded':
     case 'model.retry':
     case 'model.cache':
     case 'interaction.settled':
@@ -435,6 +444,22 @@ export function mapRuntimeQueryResultToProtocol(
         runs: result.runs ?? [],
         ...(result.nextRunCursor === undefined ? {} : { nextRunCursor: result.nextRunCursor }),
       }).data;
+    case 'list_background_executions':
+      return result.backgroundSnapshot === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            backgroundSnapshot: result.backgroundSnapshot,
+          }).data;
+    case 'get_background_execution':
+      return result.backgroundExecution === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            backgroundExecution: result.backgroundExecution,
+          }).data;
     default:
       return undefined;
   }

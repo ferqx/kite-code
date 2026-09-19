@@ -156,6 +156,18 @@ describe('Web REST App lifecycle', () => {
           },
         ],
       })),
+      loadBackgroundExecutions: vi.fn(async (sessionId: string) => ({
+        sessionId,
+        stale: false,
+        executions: [
+          {
+            executionId: 'subagent-web-1',
+            kind: 'subagent' as const,
+            status: 'completed' as const,
+            cleanupConfirmed: true,
+          },
+        ],
+      })),
       disconnect: vi.fn(async () => undefined),
     };
     render(
@@ -168,6 +180,8 @@ describe('Web REST App lifecycle', () => {
     expect((await screen.findAllByText('Session one')).length).toBeGreaterThan(0);
     expect(await screen.findByText('hello REST')).toBeTruthy();
     expect(await screen.findByText('Saved')).toBeTruthy();
+    expect(await screen.findByText('subagent-web-1')).toBeTruthy();
+    expect(await screen.findByText('清理已确认')).toBeTruthy();
     expect(screen.getByTestId('current-path').textContent).toBe('/sessions/session-one');
     expect(screen.getByRole('button', { name: new RegExp(LONG_SESSION_NAME) }).textContent).toBe(
       LONG_SESSION_NAME,

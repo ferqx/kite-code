@@ -54,6 +54,7 @@ import {
 } from '#kite-service/session-logger';
 import type { CapabilityExecutionPort } from '#runtime-spi';
 import { recordRuntimeFailure } from './failures';
+import { managedShellOwnerKey, managedShellRuntime } from './managed-shell';
 import { projectRuntimeSchedulerFacts } from './scheduler-facts';
 import {
   eventsForRunCancellation,
@@ -152,6 +153,8 @@ export interface RuntimeTurnInput {
   precommittedStart?: PrecommittedStartTurnDescriptor;
   /** Continue the already-active durable turn after a recovered interaction receipt commits. */
   resumeCommittedInteraction?: boolean;
+  /** Host Session-mailbox authority retained by detached background children. */
+  backgroundModelInvocationPersistence?: RuntimeExecutorDependencies['backgroundModelInvocationPersistence'];
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
@@ -440,6 +443,12 @@ export async function* executeRuntimeTurn(
       yield* externalCancellationEvents;
       return;
     }
+    const precommittedStart = input.precommittedStart;
+    if (precommittedStart) {
+      // Validate the exact command commit before budget initialization or
+      // recovery appends any runner-owned events and advances State revision.
+      assertPrecommittedStartTurn(kernel.getState(), precommittedStart, input.threadId);
+    }
     if (getFeatureFlags(input.config).resourceBudget) {
       if (kernel.getState().resourceBudget.status !== 'unconfigured') {
         if (kernel.getState().resourceBudget.status !== 'active') {
@@ -562,10 +571,7 @@ export async function* executeRuntimeTurn(
         return;
       }
     }
-    const precommittedStart = input.precommittedStart;
-    if (precommittedStart) {
-      assertPrecommittedStartTurn(kernel.getState(), precommittedStart, input.threadId);
-    } else {
+    if (!precommittedStart) {
       const resumedInteraction =
         input.resumeCommittedInteraction === true ||
         (getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState()));
@@ -735,6 +741,15 @@ export async function* executeRuntimeTurn(
         'subagentRuntimeFactory' in modelInvocationRuntime
           ? modelInvocationRuntime.subagentRuntimeFactory
           : undefined,
+      backgroundSubagentRuntime:
+        'backgroundSubagentRuntime' in modelInvocationRuntime
+          ? (modelInvocationRuntime.backgroundSubagentRuntime as RuntimeExecutorDependencies['backgroundSubagentRuntime'])
+          : undefined,
+      afterTurnContinuationRuntime:
+        'afterTurnContinuationRuntime' in modelInvocationRuntime
+          ? (modelInvocationRuntime.afterTurnContinuationRuntime as RuntimeExecutorDependencies['afterTurnContinuationRuntime'])
+          : undefined,
+      backgroundModelInvocationPersistence: input.backgroundModelInvocationPersistence,
       subagentContinuationArtifacts:
         'subagentContinuationArtifacts' in modelInvocationRuntime
           ? modelInvocationRuntime.subagentContinuationArtifacts
@@ -774,6 +789,15 @@ export async function* executeRuntimeTurn(
         // unknown effects. The catch below persists the classified failure.
         runCancelled = true;
         abortExecution(error instanceof Error ? error.message : String(error));
+      },
+      async (state, waitSignal) => {
+        const revision = state.revision;
+        const ownerKey = managedShellOwnerKey(input.threadId, input.workspace);
+        const shellWatermark = managedShellRuntime.ownerWatermark(ownerKey);
+        await Promise.race([
+          kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {}),
+          managedShellRuntime.waitForOwnerChange(ownerKey, shellWatermark, waitSignal),
+        ]);
       },
     );
     // Own iterator closure explicitly: abort incomplete work before returning

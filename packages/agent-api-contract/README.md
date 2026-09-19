@@ -3,12 +3,12 @@
 ## 定位
 
 `@kite-ai/agent-api-contract`拥有本机Kite Agent API V1的browser-safe Public wire contract。显式App Server daemon listener已经实现
-Agent bearer与Browser cookie认证、Browser session续建，以及Workspace、Session、History、诊断Log、Browser-only Model Context、Checkpoint只读route；default
+Agent bearer与Browser cookie认证、Browser session续建，以及Workspace、Session、History、后台执行快照、诊断Log、Browser-only Model Context、Checkpoint只读route；default
 stdio App Server不开放HTTP，Run mutation、SSE与外部SDK尚未ready。
 
 ## 拥有职责
 
-- 定义ServerInfo、Workspace、Session、Run、Interaction、History、诊断Log、Model Context、Checkpoint、mutation result、Problem Details、page/query、SSE event与resync
+- 定义ServerInfo、Workspace、Session、Run、Interaction、History、后台执行快照、诊断Log、Model Context、Checkpoint、mutation result、Problem Details、page/query、SSE event与resync
   boundary的closed `snake_case` DTO；
 - 定义strict mutation/exchange request schema与JSON/text/identifier/page/stream hard limits；
 - 在Zod遍历前拒绝non-JSON、cycle、accessor、prototype-shaped、unsafe-number、deep、oversized与forbidden-key input；
@@ -44,6 +44,7 @@ generator是package-local build tool，不从root runtime export导出；consume
 - byte limit使用UTF-8；number必须finite，并在revision/count处是safe integer；timestamp精确为三位毫秒UTC RFC 3339；
 - ID是bounded ASCII identity，opaque cursor/event ID是bounded base64url；
 - Browser projection只包含opaque Workspace identity/safe label与Directory-scoped Session；不包含canonical path；
+- 后台执行快照只包含Session-scoped identity、Session CAS、aggregate/owner generation、execution revision、kind、status、cleanup、cursor与watermark，不透传private Runtime DTO；
 - History `after_sequence`是非负safe integer并与page cursor互斥；
 - History/SSE工具生命周期区分`failed`与`rejected`；后者表示dispatch前终止，可携带稳定`reason_code`与脱敏摘要，
   不能伪造exit code、output或raw Runtime reason；

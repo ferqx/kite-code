@@ -24,6 +24,12 @@ CLI in-process组合在已完成执行释放coordinator后，也从同一Store�
 
 [RuntimeSessionCoordinator](../src/bootstrap/runtime/RuntimeSessionCoordinator.ts) 保留每个 canonical event 的确切 post-event State，并由 Bridge 的命令 activation、runner 消费和取消路径共同按 revision 排空原有待发布队列。控制命令不能越过后台已提交、尚未被 generator 读取的事件；generator 之后交出已发布对象时不重复通知。所有 event 都来自 Kernel 接受的 batch，不再以 event type／部分 identity 猜测原始对象的 revision。Provider action 的 `started` 在相同确切 State 上投影当前 interaction availability，不能先发布空事件版本再补发同版本交互。[coordinator 回归](../test/runtime/runtime-session-coordinator.test.ts)同时验证控制命令交错与 canonical 失败事件。
 
+运行中引导沿相同 coordinator/mailbox 提交 `user.message_appended` 与持久回执。主模型 invocation 的 prepared State revision 是输入消费水位；队列最多保留 8 条未消费引导，subagent 自己的模型 invocation 不推进该水位。新输入不会中止已派发工作，但会使旧模型响应中尚未派发的工具和根审批确定性失效。`shell_read` 的等待器订阅同一输入水位，因此可返回 `new_input` 后把决定权交回模型。
+
+[Managed Shell](../src/bootstrap/runtime/managed-shell.ts)持有有限 Shell/service 的活句柄、总期限、256 KiB 有界输出、多读取者游标和进程树清理；持久 State 只保存可恢复事实，不尝试在宿主重启后接管旧 pid。[Background subagent Runtime](../src/bootstrap/runtime/subagent/background-runtime.ts)独占 child observe，先保存 immutable Artifact，再发布 task 终态和具名低权限结果。[After-turn continuation](../src/bootstrap/runtime/subagent/after-turn-continuation.ts)只消费已持久化的授权、预算 reservation 与稳定 wakeKey，通过现有 Host `start_turn` 创建至多一个后续 Run；它不是第二套 scheduler。observe、Artifact、具名结果持久化、通知或 Host wake 任一环节失败时，统一的 settlement failure 回调幂等释放该 reservation；不能因报告链路失败永久占用原 Run 预算。
+
+Bridge 把 Shell 与 child 快照合并为带 Session revision、aggregate generation 与 owner-local generation 的 typed background projection，并通过 Agent API 提供只读列表。精确停止命令先提交 requested fact 和回执，activation/recovery 再驱动对应活 owner；实际完成回调回到 mailbox 提交 settled，句柄遗失提交 unknown。Session close/delete 调用同一 `shutdownSession` 清理，Fork/Rewind 在 live background 存在时拒绝。验证见 [managed shell](../test/runtime/managed-shell.test.ts)、[background subagent](../test/background-subagent-runtime.test.ts)、[after-turn](../test/after-turn-continuation.test.ts) 与 [coordinator](../test/runtime/runtime-session-coordinator.test.ts)。
+
 [Turn coordinator](../src/bootstrap/runtime/turn-coordinator.ts) 显式持有 State runner iterator：消费者提前关闭或投影失败时，先提交当前 Turn 的错误取消与 unknown 结果，再中止本地 Provider I/O、关闭 iterator 并等待原有有界清理，最后释放 runner。后台 Shell 用实际执行 Promise 集合承担收尾，不在消费者离开后继续占用失去 owner 的运行状态。日志记录已提交终态；持久提交失败仍停止本地 I/O，不能伪造成功或清理确认。[coordinator 回归](../test/runtime/runtime-session-coordinator.test.ts)覆盖提前关闭与真实 Bridge 投影故障，[并发取消回归](../test/runtime/concurrent-shell-cancel.test.ts)覆盖前台与后台工具的清理等待。
 
 提交 start 或恢复审批回执后，如果 activation 失败，Host 不会 dispatch；Bridge 必须在丢失执行 owner 前持久结束已接受 Turn。审批路径还须按捕获的 broker identity 释放准确 waiter，不能因清空 pending 字段后发布失败而永久挂起。执行前的模型／投影初始化也属于同一故障收尾范围。已恢复审批被拒绝后不再为已经终止的 Turn 准备 resume。提前退出的已分类执行故障与错误取消在同一 batch 提交，保留原始 canonical failure，不能再被通用的消费者关闭错误覆盖。
@@ -234,5 +240,7 @@ Service 的会话投影查询、历史读取及订阅只读取持久事实并刷
 主执行停止原因沿 AbortSignal 显式传递：只有主动取消命令使用 user，Host 关闭、租约丢失、执行错误及截止时间使用 error；未分类信号按中断处理，不通过错误文案猜测用户意图。Provider observation 保留 interrupted，避免丢失子终态后恢复时将中断误判为失败。取消收尾覆盖已暂停的子任务；同一子执行已有终态不重复追加，清理未确认不伪造取消成功。
 
 子 Agent 生命周期沿现有持久事件传递：派发意图与带 `status: creating` 的 `subagent.started` 在同一批次保存，实际开始／恢复的 started 为 running。`subagent.failed` 的可选 status 区分 failed、interrupted、cancelled，旧 payload 仍可读取；服务投影把旧的明确 aborted／timed_out 诊断分类为 interrupted，不猜测取消。创建失败也在确认准备资源收尾后提供子任务终态，避免卡在 creating。
+
+后台 child 不保留父工具 effect 的短生命周期写端口。模型 lifecycle、完成 Artifact 引用与 after-turn 事实通过原 Session mailbox 提交给发起时的 exact coordinator，并同时核对 coordinator 对象、recovery identity、bridge close 与 lifecycle fence；前台 child 仍使用原 effect-scoped persistence。该路径只复用现有 Session writer，不建立第二个事件 authority。
 
 `auto_review.requested` 表示进入自动审批队列；执行器选中该审批并验证输入后，必须先确认 `auto_review.started` 持久化，再调用 reviewer。该事实只记录阶段，不授予权限或改变审批结果。审批模型请求必须接入当前主执行的停止信号；停止后不再派发请求或提交迟到的审批完成事件。客户端 review queued 对应等待，reviewing 对应自动审批中；审批返回之后仍须等真正的子任务恢复事实才能显示运行中。父工具状态与子任务状态分别维护，不能用父工具取消推断子任务已经停止。

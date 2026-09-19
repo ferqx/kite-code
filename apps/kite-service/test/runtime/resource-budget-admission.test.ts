@@ -5,6 +5,7 @@ import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 
 import { aiMessage } from '@kite-ai/builtin-runtime/model';
 import {
+  committedResourceUsage,
   createDescendantResourceAdmission,
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
@@ -82,6 +83,39 @@ describe('runtime resource budget admission', () => {
     expect(reconciled.resourceBudget).toMatchObject({
       status: 'active',
       reconciledUsage: { counters: { modelRequests: 1 } },
+    });
+  });
+
+  test('atomically replaces one reserved after-turn report with the exact model reservation', () => {
+    const initial = configuredState({ maxRunInputTokens: 100, maxRunOutputTokens: 100 });
+    const placeholder = planModelInvocationResource(initial, {
+      invocationId: 'after-turn-placeholder',
+      inputTokens: 80,
+      requestedMaxOutputTokens: 80,
+      resourceKind: 'model',
+    });
+    if (placeholder.budget.kind !== 'reservation') throw new Error('Expected placeholder.');
+    const reserved = apply(initial, placeholder.preparationEvents);
+    const exact = planModelInvocationResource(reserved, {
+      invocationId: 'after-turn-exact',
+      inputTokens: 10,
+      requestedMaxOutputTokens: 20,
+      resourceKind: 'model',
+      replaceReservationId: placeholder.budget.reservationId,
+    });
+    expect(exact.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.released',
+      'resource_budget.reserved',
+    ]);
+    const replaced = apply(reserved, exact.preparationEvents);
+    if (replaced.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(replaced.resourceBudget.reservations[placeholder.budget.reservationId]?.state).toBe(
+      'released',
+    );
+    expect(committedResourceUsage(replaced.resourceBudget).counters).toMatchObject({
+      modelRequests: 1,
+      inputTokens: 10,
+      outputTokens: 20,
     });
   });
 

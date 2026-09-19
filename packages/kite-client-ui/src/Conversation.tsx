@@ -154,6 +154,9 @@ const MessageItem = memo(function MessageItem({
   if (message.role === 'tool') return null;
   if (message.role === 'subagent') {
     if (!showProcess) return null;
+    const taskId = message.id.startsWith('subagent:')
+      ? message.id.slice('subagent:'.length)
+      : message.id;
     const childEnded =
       message.settled &&
       ['completed', 'failed', 'interrupted', 'cancelled'].includes(message.status ?? '');
@@ -222,7 +225,7 @@ const MessageItem = memo(function MessageItem({
             role: 'tool',
             toolName: 'task',
             title: '运行子 Agent',
-            arguments: { name: message.title },
+            arguments: { name: message.title, task_id: taskId },
             text: '',
           },
         ]}

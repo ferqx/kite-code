@@ -14,6 +14,29 @@ import { hasExactKeys, isIdentifier, isNonNegativeSafeInteger, isRecord } from '
 
 export const RUNTIME_QUERY_SCHEMA_ = 'kite.runtime-query.v1' as const;
 
+export interface RuntimeBackgroundExecutionProjection {
+  readonly executionId: string;
+  readonly sessionId: string;
+  /** Session mutation CAS observed together with this execution projection. */
+  readonly sessionRevision: number;
+  readonly kind: 'shell' | 'service' | 'subagent';
+  readonly status: 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled' | 'unavailable';
+  readonly ownerGeneration: string;
+  readonly revision: number;
+  readonly cleanupConfirmed: boolean;
+  readonly cursor?: number;
+}
+
+export interface RuntimeBackgroundExecutionSnapshot {
+  readonly sessionId: string;
+  /** Session mutation CAS observed together with this aggregate snapshot. */
+  readonly sessionRevision: number;
+  /** Generation of the combined execution directory, not an execution owner identity. */
+  readonly aggregateGeneration: string;
+  readonly watermark: number;
+  readonly executions: readonly RuntimeBackgroundExecutionProjection[];
+}
+
 export interface RuntimeSessionRecoverySummary {
   readonly authorityRevision: number;
   readonly status: 'idle' | 'active' | 'detached' | 'recovery_required';
@@ -75,6 +98,17 @@ export type RuntimeQuery =
       readonly phase?: RuntimeRunPhase;
       readonly cursor?: RuntimeRunPageCursor;
       readonly limit: number;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'list_background_executions';
+      readonly sessionId: string;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'get_background_execution';
+      readonly sessionId: string;
+      readonly executionId: string;
     };
 
 export type RuntimeQueryResult =
@@ -92,6 +126,8 @@ export type RuntimeQueryResult =
       readonly run?: RuntimeRunProjection;
       readonly runs?: readonly RuntimeRunProjection[];
       readonly nextRunCursor?: RuntimeRunPageCursor;
+      readonly backgroundSnapshot?: RuntimeBackgroundExecutionSnapshot;
+      readonly backgroundExecution?: RuntimeBackgroundExecutionProjection;
     }
   | {
       readonly status: 'not_found' | 'rejected' | 'unavailable';
@@ -120,7 +156,14 @@ export function isRuntimeQuery(value: unknown): value is RuntimeQuery {
     case 'get_session_recovery':
     case 'get_context_status':
     case 'list_checkpoints':
+    case 'list_background_executions':
       return hasExactKeys(value, ['schema', 'type', 'sessionId']) && isIdentifier(value.sessionId);
+    case 'get_background_execution':
+      return (
+        hasExactKeys(value, ['schema', 'type', 'sessionId', 'executionId']) &&
+        isIdentifier(value.sessionId) &&
+        isIdentifier(value.executionId)
+      );
     case 'get_rewind_preview':
       return (
         hasExactKeys(value, ['schema', 'type', 'sessionId', 'checkpointId']) &&

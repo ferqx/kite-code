@@ -346,6 +346,7 @@ export async function projectPrimaryModelEffect(params: {
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  replaceReservationId?: string;
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
   modelEffectCoordinator: BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent>;
@@ -586,6 +587,7 @@ export async function projectPrimaryModelEffect(params: {
       masterEnabled: flags.contextCompaction && flags.contextCompactionAuto,
     },
     resourceAdmission: params.resourceAdmission,
+    ...(params.replaceReservationId ? { replaceReservationId: params.replaceReservationId } : {}),
     persistence: params.modelInvocationPersistence,
     compactionReporter: params.compactionReporter,
     signal: params.signal,
@@ -634,6 +636,10 @@ export async function projectPrimaryModelEffect(params: {
               role: role as 'explore' | 'plan' | 'code' | 'review',
               task,
             }),
+            ...(call.args.background === undefined ? {} : { background: call.args.background }),
+            ...(call.args.result_disposition === undefined
+              ? {}
+              : { result_disposition: call.args.result_disposition }),
           },
         };
       });

@@ -7,6 +7,7 @@ import type {
   CompactionReporter,
   ContextCompactionProgressPhase,
   ModelInvocationGateway,
+  ModelInvocationPersistence,
   SupportedChatModel,
 } from '@kite-ai/builtin-runtime/model';
 import {
@@ -33,7 +34,12 @@ import type {
 } from '../../workspace-worker/effect-adapter';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
-import type { RuntimeEffect, RuntimeState, StateRuntimeStorage } from './state-runtime';
+import type {
+  RuntimeEffect,
+  RuntimeEvent,
+  RuntimeState,
+  StateRuntimeStorage,
+} from './state-runtime';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 
 export type AppWorkspaceEffectDispatchComposition = Readonly<WorkspaceEffectDispatchComposition> & {
@@ -88,6 +94,13 @@ export interface RuntimeExecutorDependencies {
   workspaceFilesystemRuntime?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
   sandboxPreparationArtifacts?: import('@kite-ai/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
+  backgroundSubagentRuntime?: import('./subagent/background-runtime').BackgroundSubagentControlRuntime;
+  afterTurnContinuationRuntime?: import('./subagent/after-turn-continuation').AfterTurnContinuationRuntime;
+  /** Session-mailbox persistence retained after the starting Tool effect settles. */
+  backgroundModelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent> & {
+    readonly ownerKey: string;
+    readonly recoveryIdentityKey: string;
+  };
   subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   /** Independent user/admin authorization source for one remote MCP invocation. */

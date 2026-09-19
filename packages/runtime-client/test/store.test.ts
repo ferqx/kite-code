@@ -3,6 +3,198 @@ import type { RuntimeNotification, RuntimeSessionProjection } from '@kite-ai/run
 import { RuntimeSnapshotStore } from '../src/store';
 
 describe('Runtime Snapshot Store', () => {
+  test('retains background work for non-selected sessions and fences stale generations', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-1' });
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 1,
+        snapshot: background('other-session', 'owner-1', 2, 'running'),
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['other-session']).toMatchObject({
+      stale: false,
+      snapshot: { watermark: 2, executions: [{ status: 'running' }] },
+    });
+
+    store.setConnection({ generation: 1, status: 'reconnecting' });
+    expect(store.getSnapshot().background['other-session']?.stale).toBeTrue();
+    store.setConnection({ generation: 2, status: 'active', serverInstanceId: 'server-1' });
+    expect(store.getSnapshot().background['other-session']).toMatchObject({
+      stale: true,
+      snapshot: { executions: [{ status: 'running' }] },
+    });
+    store.setConnection({ generation: 3, status: 'active', serverInstanceId: 'server-2' });
+    expect(store.getSnapshot().background['other-session']).toMatchObject({
+      stale: true,
+      snapshot: { executions: [{ status: 'unavailable', cleanupConfirmed: false }] },
+    });
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 2,
+        snapshot: background('other-session', 'owner-1', 3, 'completed'),
+      }),
+    ).toBe('ignored');
+  });
+
+  test('ignores lower background watermarks and never reverses terminal work', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    store.applyBackgroundSnapshot({
+      connectionGeneration: 1,
+      snapshot: background('session-1', 'owner-1', 5, 'completed'),
+    });
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 1,
+        snapshot: background('session-1', 'owner-1', 4, 'running'),
+      }),
+    ).toBe('ignored');
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 1,
+        snapshot: background('session-1', 'owner-1', 5, 'running'),
+      }),
+    ).toBe('ignored');
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 1,
+        snapshot: background('session-1', 'owner-1', 6, 'running'),
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['session-1']?.snapshot.executions[0]?.status).toBe(
+      'completed',
+    );
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 1,
+        execution: {
+          ...background('session-1', 'owner-1', 7, 'completed').executions[0]!,
+          revision: 7,
+        },
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['session-1']?.snapshot.watermark).toBe(6);
+  });
+  test('orders detail refinements by item authority instead of aggregate watermark', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    const aggregate = background('session-1', 'aggregate-owner', 50, 'running');
+    store.applyBackgroundSnapshot({
+      connectionGeneration: 1,
+      snapshot: {
+        ...aggregate,
+        executions: [{ ...aggregate.executions[0]!, revision: 1 }],
+      },
+    });
+
+    const listed = store.getSnapshot().background['session-1']!.snapshot.executions[0]!;
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 1,
+        execution: { ...listed, revision: 2, status: 'completed' },
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['session-1']?.snapshot).toMatchObject({
+      watermark: 50,
+      executions: [{ ownerGeneration: listed.ownerGeneration, revision: 2, status: 'completed' }],
+    });
+
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 1,
+        snapshot: {
+          ...aggregate,
+          sessionRevision: 151,
+          executions: [{ ...aggregate.executions[0]!, revision: 1, status: 'running' }],
+        },
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['session-1']?.snapshot).toMatchObject({
+      sessionRevision: 151,
+      watermark: 50,
+      executions: [{ sessionRevision: 151, revision: 2, status: 'completed' }],
+    });
+
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 1,
+        execution: { ...listed, sessionRevision: 152, revision: 2, status: 'running' },
+      }),
+    ).toBe('applied');
+    expect(store.getSnapshot().background['session-1']?.snapshot).toMatchObject({
+      sessionRevision: 152,
+      executions: [{ sessionRevision: 152, revision: 2, status: 'completed' }],
+    });
+
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 1,
+        execution: { ...listed, revision: 1, status: 'running' },
+      }),
+    ).toBe('ignored');
+    expect(store.getSnapshot().background['session-1']?.snapshot.executions[0]).toMatchObject({
+      ownerGeneration: listed.ownerGeneration,
+      revision: 2,
+      status: 'completed',
+    });
+  });
+  test('merges list and detail through one aggregate owner without dropping siblings', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 4, status: 'active', serverInstanceId: 'server-1' });
+    const listed = background('session-1', 'aggregate-1', 5, 'running');
+    store.applyBackgroundSnapshot({
+      connectionGeneration: 4,
+      snapshot: {
+        ...listed,
+        executions: [
+          listed.executions[0]!,
+          { ...listed.executions[0]!, executionId: 'task-2', kind: 'subagent' },
+        ],
+      },
+    });
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 4,
+        execution: { ...listed.executions[0]!, status: 'completed', revision: 6 },
+      }),
+    ).toBe('applied');
+    expect(
+      store
+        .getSnapshot()
+        .background['session-1']?.snapshot.executions.map((execution) => execution.executionId),
+    ).toEqual(['task-2', 'shell-1']);
+    expect(
+      store.applyBackgroundExecution({
+        connectionGeneration: 4,
+        execution: { ...listed.executions[0]!, ownerGeneration: 'native-shell-owner', revision: 8 },
+      }),
+    ).toBe('ignored');
+    expect(store.getSnapshot().background['session-1']?.snapshot.executions).toHaveLength(2);
+    expect(
+      store
+        .getSnapshot()
+        .background['session-1']?.snapshot.executions.find(
+          (execution) => execution.executionId === 'shell-1',
+        )?.ownerGeneration,
+    ).toBe(listed.executions[0]!.ownerGeneration);
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 3,
+        snapshot: background('session-1', 'aggregate-old', 99, 'running'),
+      }),
+    ).toBe('ignored');
+
+    const detailOnly = new RuntimeSnapshotStore();
+    detailOnly.setConnection({ generation: 1, status: 'active' });
+    expect(
+      detailOnly.applyBackgroundExecution({
+        connectionGeneration: 1,
+        execution: { ...listed.executions[0]!, status: 'completed', revision: 6 },
+      }),
+    ).toBe('ignored');
+    expect(detailOnly.getSnapshot().background).toEqual({});
+  });
   test('atomically replaces an index and removes stale sessions at reset end', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-old' });
@@ -431,6 +623,33 @@ describe('Runtime Snapshot Store', () => {
     expect(observed).toBe(1);
   });
 });
+
+function background(
+  sessionId: string,
+  aggregateGeneration: string,
+  watermark: number,
+  status: 'running' | 'completed',
+) {
+  return {
+    sessionId,
+    sessionRevision: watermark + 100,
+    aggregateGeneration,
+    watermark,
+    executions: [
+      {
+        executionId: 'shell-1',
+        sessionId,
+        sessionRevision: watermark + 100,
+        kind: 'shell' as const,
+        status,
+        ownerGeneration: `shell:${aggregateGeneration}`,
+        revision: watermark,
+        cleanupConfirmed: status === 'completed',
+        cursor: 1,
+      },
+    ],
+  };
+}
 
 function projection(
   sessionId: string,

@@ -1,4 +1,6 @@
 import type {
+  RuntimeBackgroundExecutionProjection,
+  RuntimeBackgroundExecutionSnapshot,
   RuntimeClientEvent,
   RuntimeNotification,
   RuntimeSessionProjection,
@@ -40,6 +42,12 @@ export interface RuntimeClientEphemeralStream {
   readonly event: RuntimeClientEvent;
 }
 
+export interface RuntimeClientBackgroundState {
+  readonly snapshot: RuntimeBackgroundExecutionSnapshot;
+  readonly connectionGeneration: number;
+  readonly stale: boolean;
+}
+
 export interface RuntimeClientSnapshot {
   readonly connectionGeneration: number;
   readonly status: RuntimeClientConnectionStatus;
@@ -51,6 +59,7 @@ export interface RuntimeClientSnapshot {
   };
   readonly sessions: Readonly<Record<string, RuntimeClientSessionState>>;
   readonly streams: Readonly<Record<string, RuntimeClientEphemeralStream>>;
+  readonly background: Readonly<Record<string, RuntimeClientBackgroundState>>;
 }
 
 interface PendingIndexReset {
@@ -78,6 +87,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     index: { subscriptionGeneration: 0, indexRevision: 0, ready: false },
     sessions: {},
     streams: {},
+    background: {},
   });
   #pendingIndex: PendingIndexReset | undefined;
   readonly #closedRuns = new Map<string, ClosedRunFence>();
@@ -101,6 +111,10 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
   }): void {
     if (input.generation < this.#snapshot.connectionGeneration || this.#closed) return;
     const generationChanged = input.generation !== this.#snapshot.connectionGeneration;
+    const serverInstanceChanged =
+      input.serverInstanceId !== undefined &&
+      this.#snapshot.serverInstanceId !== undefined &&
+      input.serverInstanceId !== this.#snapshot.serverInstanceId;
     this.#pendingIndex = generationChanged ? undefined : this.#pendingIndex;
     if (generationChanged) this.#closedRuns.clear();
     this.#replace({
@@ -122,9 +136,131 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
             // generation projection available while subscriptions re-establish.
             sessions: {},
             streams: {},
+            background: serverInstanceChanged
+              ? markBackgroundUnavailable(this.#snapshot.background, input.generation)
+              : markBackgroundStale(this.#snapshot.background, input.generation),
           }
-        : {}),
+        : input.status === 'active'
+          ? serverInstanceChanged
+            ? { background: markBackgroundUnavailable(this.#snapshot.background, input.generation) }
+            : {}
+          : { background: markBackgroundStale(this.#snapshot.background, input.generation) }),
     });
+  }
+
+  applyBackgroundSnapshot(input: {
+    readonly connectionGeneration: number;
+    readonly snapshot: RuntimeBackgroundExecutionSnapshot;
+  }): RuntimeSnapshotApplyResult {
+    if (!this.#acceptConnection(input.connectionGeneration)) return 'ignored';
+    const current = this.#snapshot.background[input.snapshot.sessionId];
+    if (
+      current?.snapshot.aggregateGeneration === input.snapshot.aggregateGeneration &&
+      input.snapshot.watermark <= current.snapshot.watermark
+    ) {
+      if (input.snapshot.sessionRevision <= current.snapshot.sessionRevision) return 'ignored';
+      this.#replace({
+        ...this.#snapshot,
+        background: {
+          ...this.#snapshot.background,
+          [input.snapshot.sessionId]: {
+            snapshot: {
+              ...current.snapshot,
+              sessionRevision: input.snapshot.sessionRevision,
+              executions: current.snapshot.executions.map((execution) => ({
+                ...execution,
+                sessionRevision: input.snapshot.sessionRevision,
+              })),
+            },
+            connectionGeneration: input.connectionGeneration,
+            stale: false,
+          },
+        },
+      });
+      return 'applied';
+    }
+    const snapshot = retainTerminalBackground(current?.snapshot, input.snapshot);
+    this.#replace({
+      ...this.#snapshot,
+      background: {
+        ...this.#snapshot.background,
+        [snapshot.sessionId]: {
+          snapshot,
+          connectionGeneration: input.connectionGeneration,
+          stale: false,
+        },
+      },
+    });
+    return 'applied';
+  }
+
+  applyBackgroundExecution(input: {
+    readonly connectionGeneration: number;
+    readonly execution: RuntimeBackgroundExecutionProjection;
+  }): RuntimeSnapshotApplyResult {
+    if (!this.#acceptConnection(input.connectionGeneration)) return 'ignored';
+    const current = this.#snapshot.background[input.execution.sessionId];
+    // A detail result does not carry aggregate directory identity. It can
+    // refine an established list, but must not invent a second aggregate.
+    if (!current) return 'ignored';
+    const prior = current.snapshot.executions.find(
+      (execution) => execution.executionId === input.execution.executionId,
+    );
+    // Only the aggregate list may establish or replace item ownership. Owner
+    // generations are opaque fences, so a delayed detail from another owner
+    // cannot be ordered against the list's current authority.
+    if (!prior || prior.ownerGeneration !== input.execution.ownerGeneration) return 'ignored';
+    if (
+      prior.revision >= input.execution.revision ||
+      (isTerminalBackground(prior) && input.execution.status === 'running')
+    ) {
+      if (input.execution.sessionRevision <= current.snapshot.sessionRevision) return 'ignored';
+      this.#replace({
+        ...this.#snapshot,
+        background: {
+          ...this.#snapshot.background,
+          [input.execution.sessionId]: {
+            snapshot: {
+              ...current.snapshot,
+              sessionRevision: input.execution.sessionRevision,
+              executions: current.snapshot.executions.map((execution) => ({
+                ...execution,
+                sessionRevision: input.execution.sessionRevision,
+              })),
+            },
+            connectionGeneration: input.connectionGeneration,
+            stale: false,
+          },
+        },
+      });
+      return 'applied';
+    }
+    const retained =
+      current.snapshot.executions.filter(
+        (execution) => execution.executionId !== input.execution.executionId,
+      ) ?? [];
+    // Item detail is ordered by its owner generation and execution revision,
+    // independently from the directory aggregate watermark. Applying it through
+    // applyBackgroundSnapshot would incorrectly compare those separate clocks.
+    this.#replace({
+      ...this.#snapshot,
+      background: {
+        ...this.#snapshot.background,
+        [input.execution.sessionId]: {
+          snapshot: {
+            ...current.snapshot,
+            sessionRevision: Math.max(
+              current.snapshot.sessionRevision,
+              input.execution.sessionRevision,
+            ),
+            executions: [...retained, input.execution],
+          },
+          connectionGeneration: input.connectionGeneration,
+          stale: false,
+        },
+      },
+    });
+    return 'applied';
   }
 
   beginIndexReset(input: {
@@ -538,5 +674,67 @@ function freezeSnapshot(snapshot: RuntimeClientSnapshot): RuntimeClientSnapshot 
     index: Object.freeze({ ...snapshot.index }),
     sessions: Object.freeze({ ...snapshot.sessions }),
     streams: Object.freeze({ ...snapshot.streams }),
+    background: Object.freeze({ ...snapshot.background }),
   });
+}
+
+function markBackgroundStale(
+  background: Readonly<Record<string, RuntimeClientBackgroundState>>,
+  connectionGeneration: number,
+): Readonly<Record<string, RuntimeClientBackgroundState>> {
+  return Object.fromEntries(
+    Object.entries(background).map(([sessionId, state]) => [
+      sessionId,
+      { ...state, connectionGeneration, stale: true },
+    ]),
+  );
+}
+
+function markBackgroundUnavailable(
+  background: Readonly<Record<string, RuntimeClientBackgroundState>>,
+  connectionGeneration: number,
+): Readonly<Record<string, RuntimeClientBackgroundState>> {
+  return Object.fromEntries(
+    Object.entries(background).map(([sessionId, state]) => [
+      sessionId,
+      {
+        snapshot: {
+          ...state.snapshot,
+          executions: state.snapshot.executions.map((execution) =>
+            execution.status === 'running'
+              ? { ...execution, status: 'unavailable' as const, cleanupConfirmed: false }
+              : execution,
+          ),
+        },
+        connectionGeneration,
+        stale: true,
+      },
+    ]),
+  );
+}
+
+function retainTerminalBackground(
+  current: RuntimeBackgroundExecutionSnapshot | undefined,
+  next: RuntimeBackgroundExecutionSnapshot,
+): RuntimeBackgroundExecutionSnapshot {
+  if (!current) return next;
+  const currentById = new Map(
+    current.executions.map((execution) => [execution.executionId, execution]),
+  );
+  return {
+    ...next,
+    executions: next.executions.map((execution) => {
+      const prior = currentById.get(execution.executionId);
+      return prior &&
+        prior.ownerGeneration === execution.ownerGeneration &&
+        isTerminalBackground(prior) &&
+        execution.status === 'running'
+        ? prior
+        : execution;
+    }),
+  };
+}
+
+function isTerminalBackground(execution: RuntimeBackgroundExecutionProjection): boolean {
+  return execution.status !== 'running' && execution.status !== 'unavailable';
 }

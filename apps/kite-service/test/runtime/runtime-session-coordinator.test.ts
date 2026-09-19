@@ -55,6 +55,7 @@ import type {
 } from '../../src/bootstrap/runtime/runtime-effect-dependencies';
 import { obsoleteGlobalAdmissionSettlementEvents } from '../../src/bootstrap/runtime/state-actions';
 import type { StateRuntimeStorage } from '../../src/bootstrap/runtime/state-runtime';
+import { backgroundSubagentOwnerKey } from '../../src/bootstrap/runtime/subagent/background-runtime';
 import { createAppToolPipelineComposition } from '../../src/bootstrap/runtime/tool-pipeline-composition';
 import {
   assertPrecommittedStartTurn,
@@ -513,6 +514,7 @@ function createFixtureBridge(
 ) {
   return createCliRuntimeBridge(
     {
+      enqueueSessionWork: async (_sessionId, operation) => await operation(),
       sessionId,
       userId: 'tui-user',
       workspace: retainedWorkspace,
@@ -686,6 +688,260 @@ describe('retained TUI session coordinator', () => {
         'revision conflict',
       );
       expect(coordinator.getState().transcript.messages).toHaveLength(1);
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('commits a steer input into the active Turn without creating another Turn', async () => {
+    const sessionId = 'retained-command-steer';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      const turnId = started.descriptor.turnId;
+      const steer = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'command_steer_fixture',
+        type: 'steer_turn' as const,
+        sessionId,
+        expectedRunId: turnId,
+        expectedTurnId: turnId,
+        input: 'Include the new failure case.',
+      };
+      const committed = coordinator.commitSteerTurnCommand(
+        steer,
+        commandEvidence(sessionId, steer.commandId),
+      );
+
+      expect(coordinator.getState().turn.turnId).toBe(turnId);
+      expect(coordinator.getState().turn.status).toBe('active');
+      expect(coordinator.getState().transcript.messages.at(-1)).toMatchObject({
+        kind: 'user',
+        messageId: committed.input.inputId,
+        content: steer.input,
+      });
+      expect(committed.input).toMatchObject({ runId: turnId, turnId, sequence: 1 });
+      expect(committed.receipt.resourceResult).toBeUndefined();
+    } finally {
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a steer for the wrong active target and preserves accepted steer order', async () => {
+    const sessionId = 'retained-command-steer-order';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => undefined);
+      const coordinator = access.get(sessionId);
+      if (!coordinator) throw new Error('Recovered Runtime coordinator is unavailable.');
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      const turnId = started.descriptor.turnId;
+      const runId = turnId;
+      const wrongTarget = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_steer_wrong_target',
+          type: 'steer_turn',
+          sessionId,
+          expectedRunId: 'ended-run',
+          expectedTurnId: 'ended-turn',
+          input: 'This must not be retargeted.',
+        },
+        { targetSessionId: sessionId },
+      );
+      expect(wrongTarget).toMatchObject({
+        kind: 'terminal',
+        receipt: {
+          status: 'rejected',
+          commandId: 'command_steer_wrong_target',
+          code: 'target_ended',
+        },
+      });
+
+      const first = coordinator.commitSteerTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_steer_order_1',
+          type: 'steer_turn',
+          sessionId,
+          expectedRunId: turnId,
+          expectedTurnId: turnId,
+          input: 'First accepted input.',
+        },
+        commandEvidence(sessionId, 'command_steer_order_1'),
+      );
+      const second = coordinator.commitSteerTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_steer_order_2',
+          type: 'steer_turn',
+          sessionId,
+          expectedRunId: turnId,
+          expectedTurnId: turnId,
+          input: 'Second accepted input.',
+        },
+        commandEvidence(sessionId, 'command_steer_order_2'),
+      );
+      expect(second.input.sequence).toBe(first.input.sequence + 1);
+      expect(
+        coordinator
+          .getState()
+          .transcript.messages.slice(-2)
+          .map((message) => message.content),
+      ).toEqual(['First accepted input.', 'Second accepted input.']);
+
+      for (let index = 3; index <= 8; index += 1) {
+        coordinator.commitSteerTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: `command_steer_order_${index}`,
+            type: 'steer_turn',
+            sessionId,
+            expectedRunId: runId,
+            expectedTurnId: turnId,
+            input: `Accepted input ${index}.`,
+          },
+          commandEvidence(sessionId, `command_steer_order_${index}`),
+        );
+      }
+      expect(coordinator.canAcceptSteerInput()).toBe(false);
+      expect(() =>
+        coordinator.commitSteerTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_steer_queue_full',
+            type: 'steer_turn',
+            sessionId,
+            expectedRunId: runId,
+            expectedTurnId: turnId,
+            input: 'This input exceeds the pending queue.',
+          },
+          commandEvidence(sessionId, 'command_steer_queue_full'),
+        ),
+      ).toThrow('Runtime steer queue is full.');
+
+      const preparedStateRevision = coordinator.getState().revision;
+      coordinator.control.processEventBatch([
+        {
+          type: 'model.invocation_prepared',
+          invocationId: 'model-after-steer-queue',
+          purpose: 'primary_agent',
+          surfaceArtifact: {
+            artifactId: 'surface-after-steer-queue',
+            kind: 'model_surface',
+            integrityIdentifier: 'surface-integrity-after-steer-queue',
+            byteLength: 1,
+          },
+          surfaceIntegrityIdentifier: 'surface-integrity-after-steer-queue',
+          routeFingerprint: `sha256:${'3'.repeat(64)}`,
+          budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+          limits: { maxAttempts: 1, perAttemptTimeoutMs: 1, totalTimeBudgetMs: 1 },
+          preparedStateRevision,
+          parentInvocationId: null,
+          parentToolCallId: null,
+        },
+      ]);
+      expect(coordinator.canAcceptSteerInput()).toBe(true);
+      expect(
+        coordinator.commitSteerTurnCommand(
+          {
+            schema: RUNTIME_COMMAND_SCHEMA_,
+            commandId: 'command_steer_after_delivery',
+            type: 'steer_turn',
+            sessionId,
+            expectedRunId: runId,
+            expectedTurnId: turnId,
+            input: 'Capacity recovered after model preparation.',
+          },
+          commandEvidence(sessionId, 'command_steer_after_delivery'),
+        ).input.sequence,
+      ).toBeGreaterThan(second.input.sequence);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('atomically supersedes a focused root approval before accepting steer input', async () => {
+    const sessionId = 'retained-command-steer-approval';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    try {
+      const coordinator = access.ensure(identity(sessionId));
+      const started = coordinator.commitStartTurnCommand(
+        startCommand(sessionId, coordinator.getState().revision),
+        commandEvidence(sessionId),
+      );
+      coordinator.control.processEventBatch([
+        {
+          type: 'tool.queued',
+          toolCallId: 'old-shell',
+          name: 'shell_execute',
+          args: { command: 'printf old' },
+        },
+        {
+          type: 'approval.requested',
+          interactionId: 'old-approval',
+          toolCallId: 'old-shell',
+          fullModeBypassEligible: false,
+          fullModePolicyBypassAllowed: false,
+          owner: { kind: 'root_tool', toolCallId: 'old-shell' },
+          approval: {
+            scope: 'once',
+            cwd: retainedWorkspace,
+            threadId: sessionId,
+            tool: 'shell_execute',
+            command: 'printf old',
+            risk: 'execute_code',
+            approvalHash: 'old-approval-hash',
+            summary: 'Old command.',
+            reason: 'Fixture approval.',
+            expectedEffects: [],
+            grantOptions: ['approve_once'],
+            recommendedGrant: 'approve_once',
+          },
+        },
+      ]);
+      const committed = coordinator.commitSteerTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_steer_supersede_approval',
+          type: 'steer_turn',
+          sessionId,
+          expectedRunId: started.descriptor.turnId,
+          expectedTurnId: started.descriptor.turnId,
+          input: 'Use a different command.',
+        },
+        commandEvidence(sessionId, 'command_steer_supersede_approval'),
+      );
+      expect(committed.supersededInteractionId).toBe('old-approval');
+      expect(committed.events.map((event) => event.type)).toEqual([
+        'tool.rejected',
+        'approval.rejected',
+        'user.message_appended',
+      ]);
+      expect(coordinator.getState().tools.calls['old-shell']?.status).toBe('rejected');
+      expect(coordinator.getState().interactions.kind).toBe('idle');
+      expect(coordinator.getState().transcript.messages.at(-1)).toMatchObject({
+        kind: 'user',
+        content: 'Use a different command.',
+      });
     } finally {
       await access.close();
       fixture.storage.close();
@@ -1487,6 +1743,16 @@ describe('retained TUI session coordinator', () => {
         sessionId,
       });
       expect(projection.status).toBe('ok');
+      const background = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId,
+      });
+      expect(background).toMatchObject({
+        status: 'ok',
+        queryType: 'list_background_executions',
+        backgroundSnapshot: { sessionId, executions: [] },
+      });
     } finally {
       await bridge.close();
       await access.close();
@@ -3157,5 +3423,445 @@ describe('retained TUI session coordinator', () => {
       }),
     ]);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test('rejects a background stop before item CAS when the Session revision is stale', async () => {
+    const sessionId = 'retained-background-stop-stale-session';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const ownerGeneration = 'subagent-owner-stale-session';
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          aggregateGeneration: ownerGeneration,
+          watermark: 0,
+          executions: [
+            {
+              executionId: 'task-stale-session',
+              sessionId,
+              kind: 'subagent',
+              status: 'running',
+              ownerGeneration,
+              revision: 0,
+              cleanupConfirmed: false,
+            },
+          ],
+        }),
+        requestCancel: () => {
+          throw new Error('stale Session CAS must reject before item cancellation');
+        },
+      },
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const staleRevision = coordinator.getState().revision;
+      coordinator.commitStartTurnCommand(
+        startCommand(sessionId, staleRevision),
+        commandEvidence(sessionId, 'advance-before-background-stop'),
+      );
+      const inspected = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'stop_background_execution',
+          commandId: 'stop-stale-session',
+          sessionId,
+          expectedRevision: staleRevision,
+          executionId: 'task-stale-session',
+          executionKind: 'subagent',
+          expectedOwnerGeneration: ownerGeneration,
+          expectedExecutionRevision: 0,
+        },
+        { targetSessionId: sessionId },
+      );
+      expect(inspected).toEqual({
+        kind: 'terminal',
+        receipt: {
+          status: 'rejected',
+          commandId: 'stop-stale-session',
+          code: 'revision_conflict',
+          currentRevision: coordinator.getState().revision,
+        },
+      });
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rechecks background stop CAS at the commit boundary', async () => {
+    const sessionId = 'retained-background-stop-commit-race';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const ownerGeneration = 'subagent-owner-commit-race';
+    let itemRevision = 0;
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          aggregateGeneration: ownerGeneration,
+          watermark: itemRevision,
+          executions: [
+            {
+              executionId: 'task-commit-race',
+              sessionId,
+              kind: 'subagent',
+              status: 'running',
+              ownerGeneration,
+              revision: itemRevision,
+              cleanupConfirmed: false,
+            },
+          ],
+        }),
+        requestCancel: () => {
+          throw new Error('commit-time CAS conflict must not cancel the item');
+        },
+      },
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    const commandId = 'stop-commit-race';
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const revision = coordinator.getState().revision;
+      const inspected = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'stop_background_execution',
+          commandId,
+          sessionId,
+          expectedRevision: revision,
+          executionId: 'task-commit-race',
+          executionKind: 'subagent',
+          expectedOwnerGeneration: ownerGeneration,
+          expectedExecutionRevision: 0,
+        },
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('stop was not initially accepted');
+      itemRevision = 1;
+      expect(inspected.decision.validate?.()).toEqual({
+        status: 'rejected',
+        commandId,
+        code: 'target_ended',
+        currentRevision: revision,
+      });
+      expect(
+        fixture.storage.sessions
+          .loadEventsStrict(sessionId)
+          .some((entry) => entry.event.type === 'background_execution.stop_requested'),
+      ).toBeFalse();
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('recovers a committed background stop after activation loss exactly once', async () => {
+    const sessionId = 'retained-background-stop-recovery';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    let status: 'running' | 'stopping' | 'cancelled' = 'running';
+    let cancelCalls = 0;
+    let terminal!: () => void;
+    const ownerGeneration = 'subagent-owner-recovery';
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          aggregateGeneration: ownerGeneration,
+          watermark: cancelCalls,
+          executions: [
+            {
+              executionId: 'task-recovery',
+              sessionId,
+              kind: 'subagent',
+              status,
+              ownerGeneration,
+              revision: cancelCalls,
+              cleanupConfirmed: status === 'cancelled',
+            },
+          ],
+        }),
+        requestCancel: (_owner: string, _taskId: string, onTerminal: () => void) => {
+          if (status === 'running') {
+            cancelCalls += 1;
+            status = 'stopping';
+            terminal = onTerminal;
+          }
+          return status !== 'cancelled';
+        },
+      },
+    });
+    const first = createFixtureBridge(sessionId, fixture, access);
+    const commandId = 'stop-after-commit-crash';
+    try {
+      await first.recoverSession(sessionId, () => {});
+      const inspected = await first.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'stop_background_execution',
+          commandId,
+          sessionId,
+          expectedRevision: coordinator.getState().revision,
+          executionId: 'task-recovery',
+          executionKind: 'subagent',
+          expectedOwnerGeneration: ownerGeneration,
+          expectedExecutionRevision: 0,
+        },
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('stop not accepted');
+      await inspected.decision.commit(commandEvidence(sessionId, commandId));
+      const rebuilt = createFixtureBridge(sessionId, fixture, access);
+      await rebuilt.recoverSession(sessionId, () => {});
+      await rebuilt.recoverSession(sessionId, () => {});
+      expect(cancelCalls).toBe(1);
+      status = 'cancelled';
+      terminal();
+      await Bun.sleep(0);
+      expect(
+        fixture.storage.sessions
+          .loadEventsStrict(sessionId)
+          .map((entry) => entry.event.type)
+          .filter((type) => type.startsWith('background_execution.stop_')),
+      ).toEqual(['background_execution.stop_requested', 'background_execution.stop_settled']);
+      await rebuilt.close();
+    } finally {
+      await first.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('settles a recovered stop as unknown when the host handle was lost', async () => {
+    const sessionId = 'retained-background-stop-lost';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const commandId = 'stop-lost-handle';
+    coordinator.session.commitCommandBatch(
+      [
+        {
+          type: 'background_execution.stop_requested',
+          commandId,
+          executionId: 'lost-task',
+          executionKind: 'subagent',
+          ownerGeneration: 'lost-generation',
+        },
+      ],
+      commandEvidence(sessionId, commandId),
+    );
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      await bridge.recoverSession(sessionId, () => {});
+      expect(
+        fixture.storage.sessions
+          .loadEventsStrict(sessionId)
+          .map((entry) => entry.event.type)
+          .filter((type) => type.startsWith('background_execution.stop_')),
+      ).toEqual(['background_execution.stop_requested', 'background_execution.stop_unknown']);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('re-drives a stop when the child terminates before callback registration', async () => {
+    const sessionId = 'retained-background-stop-terminal-race';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const ownerGeneration = 'subagent-owner-terminal-race';
+    let status: 'running' | 'cancelled' = 'running';
+    let requestCalls = 0;
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          aggregateGeneration: ownerGeneration,
+          watermark: requestCalls,
+          executions: [
+            {
+              executionId: 'task-terminal-race',
+              sessionId,
+              kind: 'subagent',
+              status,
+              ownerGeneration,
+              revision: requestCalls,
+              cleanupConfirmed: status === 'cancelled',
+            },
+          ],
+        }),
+        requestCancel: () => {
+          requestCalls += 1;
+          status = 'cancelled';
+          return false;
+        },
+      },
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    const commandId = 'stop-terminal-race';
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const inspected = await bridge.inspectCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'stop_background_execution',
+          commandId,
+          sessionId,
+          expectedRevision: coordinator.getState().revision,
+          executionId: 'task-terminal-race',
+          executionKind: 'subagent',
+          expectedOwnerGeneration: ownerGeneration,
+          expectedExecutionRevision: 0,
+        },
+        { targetSessionId: sessionId },
+      );
+      if (inspected.kind !== 'accepted') throw new Error('stop not accepted');
+      await inspected.decision.commit(commandEvidence(sessionId, commandId));
+      await bridge.recoverSession(sessionId, () => {});
+      await Bun.sleep(0);
+      expect(requestCalls).toBe(1);
+      expect(
+        fixture.storage.sessions
+          .loadEventsStrict(sessionId)
+          .map((entry) => entry.event.type)
+          .filter((type) => type.startsWith('background_execution.stop_')),
+      ).toEqual(['background_execution.stop_requested', 'background_execution.stop_settled']);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('blocks fork and rewind on live background ownership but not terminal evidence', async () => {
+    const sessionId = 'retained-structural-background-gate';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    let status: 'running' | 'unavailable' | 'completed' = 'running';
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          ownerGeneration: 'structural-owner',
+          watermark: 1,
+          executions: [
+            {
+              executionId: 'structural-task',
+              sessionId,
+              kind: 'subagent',
+              status,
+              ownerGeneration: 'structural-owner',
+              revision: 1,
+              cleanupConfirmed: status === 'completed',
+            },
+          ],
+        }),
+      },
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    const fork = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'fork_session' as const,
+      commandId: 'fork-live-background',
+      sourceSessionId: sessionId,
+      sourceRevision: coordinator.getState().revision,
+    };
+    const rewind = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'rewind_session' as const,
+      commandId: 'rewind-live-background',
+      sessionId,
+      expectedRevision: coordinator.getState().revision,
+      checkpointId: 'missing-checkpoint',
+      scope: 'conversation_only' as const,
+    };
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      expect(await bridge.inspectCommand(fork, { targetSessionId: 'fork-target' })).toMatchObject({
+        kind: 'terminal',
+        receipt: { code: 'runtime_busy' },
+      });
+      expect(await bridge.inspectCommand(rewind, { targetSessionId: sessionId })).toMatchObject({
+        kind: 'terminal',
+        receipt: { code: 'runtime_busy' },
+      });
+      status = 'unavailable';
+      expect(await bridge.inspectCommand(fork, { targetSessionId: 'fork-target' })).toMatchObject({
+        kind: 'terminal',
+        receipt: { code: 'runtime_busy' },
+      });
+      status = 'completed';
+      const completed = await bridge.inspectCommand(rewind, { targetSessionId: sessionId });
+      expect(
+        completed.kind === 'terminal' && 'code' in completed.receipt
+          ? completed.receipt.code
+          : 'accepted',
+      ).not.toBe('runtime_busy');
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('close_session reuses shutdownSession to dispose retained background owners', async () => {
+    const sessionId = 'retained-close-background-cleanup';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const disposed: string[] = [];
+    Object.assign(fixture.runtime, {
+      backgroundSubagentRuntime: {
+        listSnapshot: () => ({
+          sessionId,
+          aggregateGeneration: 'close-owner',
+          watermark: 0,
+          executions: [],
+        }),
+        disposeOwner: async (ownerKey: string) => {
+          disposed.push(ownerKey);
+        },
+      },
+    });
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'close_session' as const,
+        commandId: 'close-background-cleanup',
+        sessionId,
+        expectedRevision: coordinator.getState().revision,
+      };
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Expected close command admission.');
+      const committed = await inspected.decision.commit(
+        commandEvidence(sessionId, command.commandId),
+      );
+      await committed.activation?.(() => {});
+      expect(disposed).toEqual([backgroundSubagentOwnerKey(sessionId, 'a'.repeat(64))]);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 });

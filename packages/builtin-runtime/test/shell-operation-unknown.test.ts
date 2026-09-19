@@ -36,6 +36,29 @@ function context(execute: () => Promise<Record<string, unknown>>) {
 }
 
 describe('Builtin Shell operation terminal certainty', () => {
+  test('projects a running handle without fabricating terminal exit facts', async () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const executor = registry.executor('builtin:shell_execute');
+    if (!executor) throw new Error('Shell executor is unavailable.');
+    const receipt = await executor.execute(
+      { ...request(), input: { command: 'printf ok', yield_ms: 0 } },
+      context(async () => ({
+        status: 'running',
+        shellId: 'sh_test',
+        cursor: 0,
+        command: 'printf ok',
+        stdout: '',
+        stderr: '',
+        intent: 'inspect',
+      })),
+    );
+    expect(receipt).toMatchObject({
+      status: 'succeeded',
+      value: { resultMeta: { shell_id: 'sh_test', status: 'running', cursor: 0 } },
+    });
+    expect(JSON.stringify(receipt)).not.toContain('exitCode');
+  });
+
   test('throws the package marker for post-GO unknown instead of emitting a normal failure', async () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const executor = registry.executor('builtin:shell_execute');

@@ -30,7 +30,12 @@ function fixture(
     readonly randomBytes?: (size: number) => Uint8Array;
     readonly admitWorkspace?: () => Promise<'admitted' | 'untrusted' | 'unavailable'>;
     readonly openReadContext?: (binding: AgentApiCapabilityBinding) => Promise<AgentApiReadContext>;
-    readonly capabilities?: readonly ('checkpoints' | 'history' | 'sessions')[];
+    readonly capabilities?: readonly (
+      | 'background_executions'
+      | 'checkpoints'
+      | 'history'
+      | 'sessions'
+    )[];
     readonly browserReadContext?: AgentApiReadContext;
   } = {},
 ) {
@@ -56,7 +61,13 @@ function fixture(
     ...(options.browserReadContext
       ? {
           browserReadContext: options.browserReadContext,
-          browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+          browserCapabilities: [
+            'background_executions',
+            'checkpoints',
+            'history',
+            'sessions',
+            'workspaces',
+          ],
         }
       : {}),
     ...(options.maxContexts === undefined ? {} : { maxContexts: options.maxContexts }),
@@ -217,7 +228,7 @@ describe('Agent API context and route shell', () => {
     expect(info.status).toBe(200);
     expect(
       decodeAgentApiResponse(agentApiServerInfoSchema, await info.json()).capabilities,
-    ).toEqual(['checkpoints', 'history', 'sessions', 'workspaces']);
+    ).toEqual(['background_executions', 'checkpoints', 'history', 'sessions', 'workspaces']);
 
     const crossSite = await f.handler.handle(
       new Request('http://127.0.0.1:43123/v1', {

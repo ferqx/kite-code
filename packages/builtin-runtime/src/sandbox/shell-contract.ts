@@ -67,6 +67,8 @@ export interface ShellInput {
   signal?: AbortSignal;
   /** 最大运行时间（毫秒）；超时后终止子进程 / Max runtime in milliseconds; kills child on timeout */
   timeoutMs?: number;
+  /** Service executions have no total deadline unless timeoutMs is explicit. */
+  mode?: 'finite' | 'service';
   /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** 本次调用的网络权限；未指定时使用执行器默认值 / Network permission for this call */

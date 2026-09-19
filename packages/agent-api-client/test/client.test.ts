@@ -141,6 +141,41 @@ describe('Agent API Browser client', () => {
     expect(url).toBe('/v1/sessions/session-1/model-invocations/invocation-1/context');
   });
 
+  test('reads a closed background execution snapshot through the canonical client', async () => {
+    let url = '';
+    const client = createAgentApiBrowserClient({
+      fetch: async (input) => {
+        url = String(input);
+        return new Response(
+          JSON.stringify({
+            schema: 'kite.agent-api.background-execution-page.v1',
+            session_id: 'session-1',
+            session_revision: 7,
+            aggregate_generation: 'aggregate-1',
+            watermark: 2,
+            stale: false,
+            items: [
+              {
+                schema: 'kite.agent-api.background-execution.v1',
+                execution_id: 'shell-1',
+                owner_generation: 'owner-1',
+                revision: 3,
+                kind: 'shell',
+                status: 'running',
+                cleanup_confirmed: false,
+                cursor: 3,
+              },
+            ],
+          }),
+          { status: 200, headers },
+        );
+      },
+    });
+    const page = await client.listBackgroundExecutions('session-1');
+    expect(url).toBe('/v1/sessions/session-1/background-executions');
+    expect(page.items[0]?.execution_id).toBe('shell-1');
+  });
+
   test('decodes closed Problem responses and rejects contract drift', async () => {
     const client = createAgentApiBrowserClient({
       fetch: async () =>

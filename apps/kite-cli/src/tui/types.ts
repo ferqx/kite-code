@@ -83,6 +83,8 @@ export type OutputBlockVariant =
        * Local-only slash-command echoes intentionally omit it.
        */
       messageId?: string;
+      /** Client-local identity for joining one optimistic submission to its receipt. */
+      localPromptId?: string;
       /** Live-only echo shown before the authoritative Runtime user.message arrives. */
       pendingEcho?: boolean;
     }

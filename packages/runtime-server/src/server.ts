@@ -462,6 +462,15 @@ class ServerConnection implements RuntimeServerConnection {
           'server/ping',
         ],
         subscriptions: ['session', 'sessions'],
+        ...(request.params.featureNegotiation
+          ? {
+              features: {
+                steer: true,
+                backgroundQuery: true,
+                backgroundControl: true,
+              },
+            }
+          : {}),
       },
       limits: {
         maxMessageBytes: RUNTIME_PROTOCOL_LIMITS.maxMessageBytes,

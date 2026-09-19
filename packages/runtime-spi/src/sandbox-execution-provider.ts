@@ -58,7 +58,8 @@ export interface SandboxPreparation {
   readonly networkMode: 'disabled' | 'allow_all';
   readonly executionTrust: 'policy_proven_read_only' | null;
   readonly resourceLimits: SandboxResourceLimits;
-  readonly timeoutMs: number;
+  readonly executionMode: 'finite' | 'service';
+  readonly timeoutMs: number | null;
   readonly cancellationCorrelation: string;
 }
 
@@ -347,7 +348,7 @@ export interface SandboxPreparedProcessExecutionPort {
     readonly prepared: Readonly<PreparedSandboxExecution>;
     readonly dispatchIntent: Readonly<SandboxExecutionDispatchIntentAcknowledgement>;
     readonly lifecycle: SandboxPreparationLifecycle;
-    readonly timeoutMs: number;
+    readonly timeoutMs?: number;
     readonly signal?: AbortSignal;
     readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
     /** Caller-owned ephemeral facts; never part of the prepared artifact. */

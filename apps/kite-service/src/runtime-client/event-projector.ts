@@ -54,6 +54,12 @@ export function projectRuntimeClientEvent(
         toolCallCount: event.toolCalls?.length ?? 0,
         ...(event.text ? { summary: projectRuntimeClientText(event.text) } : {}),
       };
+    case 'model.response_superseded':
+      return {
+        type: 'model.response_superseded',
+        messageId: event.messageId,
+        requestId: event.invocationId,
+      };
     case 'model.retry':
       return {
         type: 'model.retry',

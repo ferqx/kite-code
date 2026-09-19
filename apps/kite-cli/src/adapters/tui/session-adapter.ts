@@ -4,6 +4,7 @@ import type {
   AgentPlan,
   ContextCompactionProgressPhase,
   ContextStatusSnapshot,
+  RuntimeBackgroundExecutionSnapshot,
   RuntimeCheckpointProjection,
   RuntimeCommandReceipt,
   RuntimeInteractionQueueProjection,
@@ -191,6 +192,15 @@ export interface TuiSessionFacade {
     requestedPhase?: AgentPhase,
     initialSkillActivations?: TuiInitialSkillActivation[],
   ): Promise<void>;
+  steerTask(
+    input: string,
+    onAccepted?: (identity: {
+      readonly inputId: string;
+      readonly runId: string;
+      readonly turnId: string;
+      readonly sequence: number;
+    }) => void,
+  ): Promise<void>;
   abort(): Promise<void>;
   setForeground(foreground: boolean): void;
   setInteractionMode(mode: 'accept_edits' | 'auto' | 'full'): void;
@@ -268,6 +278,10 @@ export interface TuiRuntimeClientFacade {
   ): Promise<RuntimeRewindPreviewProjection | null>;
   executeRewind(input: TuiRewindRequest): Promise<TuiRewindResult>;
   clearSessionCommandGrants(threadId: string): Promise<RuntimeCommandReceipt>;
+  listBackgroundExecutions(threadId: string): Promise<RuntimeBackgroundExecutionSnapshot>;
+  stopBackgroundExecution(
+    execution: import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionProjection,
+  ): Promise<RuntimeCommandReceipt>;
 }
 
 export interface TuiRuntimeClientDependencies {

@@ -41,7 +41,7 @@ export interface RuntimeHostPreparedProcessInput {
   readonly supervisorNonce: string;
   readonly dispatchIntentDigest: string;
   readonly signal?: AbortSignal;
-  readonly timeoutMs: number;
+  readonly timeoutMs?: number;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** Caller-owned ephemeral environment facts; never persisted. */
   readonly ephemeralEnvironment?: Readonly<Record<string, string>>;
@@ -278,7 +278,7 @@ export async function executePosixSupervised(input: RuntimeHostPreparedProcessIn
         outcome: {
           exitCode: 124,
           stdout,
-          stderr: append(stderr, `Command timed out after ${input.timeoutMs}ms.`),
+          stderr: append(stderr, `Command timed out after ${input.timeoutMs!}ms.`),
           terminationReason: 'timed_out',
           processCleanup: cleanupEvidence(termination, true),
         },
@@ -710,7 +710,7 @@ function assertExactKeys(value: Record<string, unknown>, expected: readonly stri
 async function waitForTerminal(
   frames: ReturnType<typeof createFrameReader>,
   signal: AbortSignal | undefined,
-  timeoutMs: number,
+  timeoutMs: number | undefined,
 ): Promise<
   | { reason: 'completed'; frame: Extract<SupervisorFrame, { type: 'exit' | 'error' }> }
   | { reason: 'timeout' | 'cancelled' }
@@ -723,9 +723,13 @@ async function waitForTerminal(
         if (frame.type === 'ready') throw new Error('Duplicate supervisor ready frame.');
         return { reason: 'completed' as const, frame };
       }),
-      new Promise<{ reason: 'timeout' }>((resolve) => {
-        timer = setTimeout(() => resolve({ reason: 'timeout' }), timeoutMs);
-      }),
+      ...(timeoutMs === undefined
+        ? []
+        : [
+            new Promise<{ reason: 'timeout' }>((resolve) => {
+              timer = setTimeout(() => resolve({ reason: 'timeout' }), timeoutMs);
+            }),
+          ]),
       new Promise<{ reason: 'cancelled' }>((resolve) => {
         cancel = () => resolve({ reason: 'cancelled' });
         signal?.addEventListener('abort', cancel, { once: true });

@@ -114,6 +114,7 @@ function isCapabilityEvent(type: KernelEvent['type']): boolean {
     case 'capability.subagent_observation_recorded':
     case 'capability.subagent_cleanup_started':
     case 'capability.subagent_cleanup_completed':
+    case 'subagent.background_result_persisted':
     case 'capability.execution_result_recorded':
     case 'capability.execution_succeeded':
     case 'capability.execution_failed':
@@ -182,6 +183,75 @@ export function reduceCapabilityState(state: AgentState, event: KernelEvent): Ag
         pendingSearch: payload.result,
       }),
     };
+  }
+
+  if (event.type === 'subagent.background_result_persisted') {
+    const taskId = nonEmptyStringField(payload, 'taskId');
+    const notificationId = nonEmptyStringField(payload, 'notificationId');
+    const artifactIntegrityIdentifier = nonEmptyStringField(payload, 'artifactIntegrityIdentifier');
+    const originRunId = nonEmptyStringField(payload, 'originRunId');
+    const originTurnId = nonEmptyStringField(payload, 'originTurnId');
+    const originToolCallId = nonEmptyStringField(payload, 'originToolCallId');
+    const attempt = numberField(payload, 'attempt');
+    if (
+      !taskId ||
+      !notificationId ||
+      !artifactIntegrityIdentifier ||
+      !originRunId ||
+      !originTurnId ||
+      !originToolCallId ||
+      attempt === undefined
+    ) {
+      return state;
+    }
+    const matches = Object.values(state.capabilities.invocations).filter((invocation) => {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      return (
+        invocation.toolCallId === originToolCallId &&
+        state.tools.calls[originToolCallId]?.createdAtTurnId === originTurnId &&
+        lifecycle?.status === 'cleanup_completed' &&
+        lifecycle.childInvocationId === taskId &&
+        lifecycle.attempt === attempt
+      );
+    });
+    if (matches.length !== 1) return state;
+    const invocation = matches[0];
+    if (!invocation || invocation.subagentProviderLifecycle?.backgroundResult) return state;
+    const afterTurn = recordField(payload, 'afterTurn');
+    const backgroundResult = {
+      taskId,
+      notificationId,
+      artifactIntegrityIdentifier,
+      originRunId,
+      originTurnId,
+      originToolCallId,
+      attempt,
+      ...(afterTurn
+        ? {
+            afterTurn: {
+              reservationId: eventValue<string>(afterTurn, 'reservationId'),
+              admissionRevision: eventValue<number>(afterTurn, 'admissionRevision'),
+              eventId: eventValue<string>(afterTurn, 'eventId'),
+              wakeKey: eventValue<string>(afterTurn, 'wakeKey'),
+              runId: eventValue<string>(afterTurn, 'runId'),
+              phase: eventValue<'planning' | 'building'>(afterTurn, 'phase'),
+              status: eventValue<
+                'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended'
+              >(afterTurn, 'status'),
+              cancelRequested: eventValue<boolean>(afterTurn, 'cancelRequested'),
+            },
+          }
+        : {}),
+    };
+    return updateCapabilityInvocation(state, invocation.invocationId, (current) => ({
+      ...current,
+      subagentProviderLifecycle: current.subagentProviderLifecycle
+        ? {
+            ...current.subagentProviderLifecycle,
+            backgroundResult,
+          }
+        : undefined,
+    }));
   }
 
   if (event.type === 'capability.invocation_recorded') {

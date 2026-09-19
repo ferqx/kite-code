@@ -140,7 +140,7 @@ export function Composer(props: ComposerProps) {
       ? 'zh'
       : 'en';
   const permissionText = permissionCopy[permissionLanguage];
-  const canSend = !!props.onSend && !props.disabled && !!props.draft.trim() && !props.active;
+  const canSend = !!props.onSend && !props.disabled && !!props.draft.trim();
   const selectedModel = props.model
     ? props.models?.find(
         (model) => model.provider === props.model?.provider && model.name === props.model?.name,
@@ -325,8 +325,24 @@ export function Composer(props: ComposerProps) {
               </DropdownMenu>
             )}
           </div>
-          {props.active ? (
-            props.onCancel && (
+          <div className="composer-actions">
+            <Button
+              className="primary composer-action"
+              size="icon-sm"
+              type="submit"
+              aria-label={
+                props.submitStatus
+                  ? `发送消息：${props.submitStatus}`
+                  : props.active
+                    ? '发送运行中引导'
+                    : '发送消息'
+              }
+              title={props.submitStatus || (props.active ? '发送运行中引导' : '发送消息')}
+              disabled={!canSend}
+            >
+              <HugeiconsIcon icon={ArrowUp01Icon} />
+            </Button>
+            {props.active && props.onCancel && (
               <Button
                 className="primary composer-action stop-action"
                 size="icon-sm"
@@ -337,19 +353,8 @@ export function Composer(props: ComposerProps) {
               >
                 <HugeiconsIcon icon={SquareStopIcon} />
               </Button>
-            )
-          ) : (
-            <Button
-              className="primary composer-action"
-              size="icon-sm"
-              type="submit"
-              aria-label={props.submitStatus ? `发送消息：${props.submitStatus}` : '发送消息'}
-              title={props.submitStatus || '发送消息'}
-              disabled={!canSend}
-            >
-              <HugeiconsIcon icon={ArrowUp01Icon} />
-            </Button>
-          )}
+            )}
+          </div>
         </div>
       </form>
       <AlertDialog

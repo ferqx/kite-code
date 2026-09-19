@@ -19,6 +19,25 @@ describe('Builtin mechanism authority', () => {
     expect(Object.isFrozen(merged)).toBe(true);
   });
 
+  test('accepts only typed managed Shell control ports', () => {
+    const shell = Object.freeze({
+      read: async () => Object.freeze({ status: 'running' }),
+      stop: async () => Object.freeze({ status: 'stopping' }),
+    });
+    expect(
+      mergeBuiltinMechanismBundle({
+        executionMechanism: 'shell',
+        prepared: Object.freeze({ shell }),
+      }),
+    ).toEqual({ shell });
+    expect(() =>
+      mergeBuiltinMechanismBundle({
+        executionMechanism: 'shell',
+        prepared: Object.freeze({ shell: Object.freeze({ read: true }) }),
+      }),
+    ).toThrow(BuiltinMechanismAuthorityError);
+  });
+
   test('rejects duplicate or mismatched mechanism owners fail closed', () => {
     const mcp = Object.freeze({
       runtime: Object.freeze({ callCapability: async () => Object.freeze({}) }),

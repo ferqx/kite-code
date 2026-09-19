@@ -27,6 +27,7 @@ describe('runtime SPI registry ownership', () => {
       'skill',
       'planning',
       'subagent',
+      'task_control',
       'user_input',
       'verification',
       'model',

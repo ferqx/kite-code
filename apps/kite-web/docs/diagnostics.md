@@ -16,6 +16,6 @@
 
 [App.loadSessionLogs](../src/app/app.tsx) 在失败时保留 logEntries，但切换为 error/unavailable；[日志列表](../src/components/session/session-log-list.tsx) 只在 content 时渲染条目，所以已有快照会从界面隐藏。手册要求“保留已读内容并显示错误”尚未兑现；内存数组未清空不等于用户仍能阅读。
 
-修复应保留 stale条目并显示错误，增加首次成功→刷新失败仍可读的测试。已有 [app lifecycle](../test/app-lifecycle.test.tsx) 证明迟到日志隔离，不证明失败保留。
+后台执行刷新失败会保留同一 Session 的 last-known 条目并标记 stale；切换 Session 时旧条目由 Session identity 隔离，不会进入新页面。[background lifecycle](../test/background-lifecycle.test.tsx) 覆盖首次成功→刷新失败仍可读与 Session 隔离，[app lifecycle](../test/app-lifecycle.test.tsx) 覆盖迟到日志隔离。
 
 API Docs 当前只渲染方法、路径、摘要和 schema 数量，详情读取同源 `/api-docs/openapi.json`。[渲染器](../src/api-docs/api-docs.tsx) 尚未展示参数和请求/响应结构；现有 [API Docs test](../test/api-docs.test.tsx) 只证明路径可见与无在线执行控件，不能证明完整参考已经呈现。

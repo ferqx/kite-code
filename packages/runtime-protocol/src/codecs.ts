@@ -334,10 +334,30 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
     .strict(),
   z
     .object({
+      ...commandBase,
+      type: z.literal('steer_turn'),
+      sessionId: identifier,
+      expectedRunId: identifier,
+      expectedTurnId: identifier,
+      input: inputText,
+    })
+    .strict(),
+  z
+    .object({
       ...sessionCommandBase,
       type: z.literal('cancel_turn'),
       turnId: identifier,
       runId: identifier,
+    })
+    .strict(),
+  z
+    .object({
+      ...sessionCommandBase,
+      type: z.literal('stop_background_execution'),
+      executionId: identifier,
+      executionKind: z.enum(['shell', 'service', 'subagent']),
+      expectedOwnerGeneration: identifier,
+      expectedExecutionRevision: safeRevision,
     })
     .strict(),
   respondInteractionCommands,
@@ -448,6 +468,21 @@ export const RUNTIME_PROTOCOL_QUERY_SCHEMA_ = z.discriminatedUnion('type', [
       limit: safeRevision.min(1).max(200),
     })
     .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('list_background_executions'),
+      sessionId: identifier,
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('get_background_execution'),
+      sessionId: identifier,
+      executionId: identifier,
+    })
+    .strict(),
 ]);
 export type RuntimeProtocolQuery = z.infer<typeof RUNTIME_PROTOCOL_QUERY_SCHEMA_>;
 export const RUNTIME_SUBSCRIPTION_SPEC_SCHEMA_ = z.discriminatedUnion('scope', [
@@ -471,7 +506,11 @@ const clientInfo = z
   })
   .strict();
 export const INITIALIZE_PARAMS_SCHEMA_ = z
-  .object({ protocolVersion: z.literal(RUNTIME_PROTOCOL_VERSION), clientInfo })
+  .object({
+    protocolVersion: z.literal(RUNTIME_PROTOCOL_VERSION),
+    clientInfo,
+    featureNegotiation: z.literal(true).optional(),
+  })
   .strict();
 export type InitializeParams = z.infer<typeof INITIALIZE_PARAMS_SCHEMA_>;
 export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
@@ -944,6 +983,14 @@ const runResource = z
       context.addIssue({ code: 'custom', message: 'Original Run resource must be queued' });
     }
   });
+const inputResource = z
+  .object({
+    inputId: identifier,
+    runId: identifier,
+    turnId: identifier,
+    sequence: safeRevision,
+  })
+  .strict();
 const commandErrorCode = z.enum([
   'invalid_command',
   'invalid_session',
@@ -951,6 +998,8 @@ const commandErrorCode = z.enum([
   'revision_conflict',
   'turn_not_found',
   'run_not_found',
+  'target_ended',
+  'steer_queue_full',
   'interaction_mismatch',
   'checkpoint_unavailable',
   'policy_denied',
@@ -971,6 +1020,7 @@ export const RUNTIME_COMMAND_RECEIPT_SCHEMA_ = z.union([
       sessionId: identifier,
       revision: safeRevision,
       resource: runResource.optional(),
+      input: inputResource.optional(),
     })
     .strict(),
   z
@@ -988,6 +1038,7 @@ export const RUNTIME_COMMAND_RECEIPT_SCHEMA_ = z.union([
       sessionId: identifier,
       originalRevision: safeRevision,
       resource: runResource.optional(),
+      input: inputResource.optional(),
     })
     .strict(),
 ]);
@@ -1084,6 +1135,70 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
     .strict(),
   z
     .object({
+      status: z.literal('ok'),
+      queryType: z.literal('list_background_executions'),
+      backgroundSnapshot: z
+        .object({
+          sessionId: identifier,
+          sessionRevision: safeRevision,
+          aggregateGeneration: identifier,
+          watermark: safeRevision,
+          executions: z
+            .array(
+              z
+                .object({
+                  executionId: identifier,
+                  sessionId: identifier,
+                  sessionRevision: safeRevision,
+                  kind: z.enum(['shell', 'service', 'subagent']),
+                  status: z.enum([
+                    'running',
+                    'stopping',
+                    'completed',
+                    'failed',
+                    'cancelled',
+                    'unavailable',
+                  ]),
+                  ownerGeneration: identifier,
+                  revision: safeRevision,
+                  cleanupConfirmed: z.boolean(),
+                  cursor: safeRevision.optional(),
+                })
+                .strict(),
+            )
+            .max(10_000),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
+      queryType: z.literal('get_background_execution'),
+      backgroundExecution: z
+        .object({
+          executionId: identifier,
+          sessionId: identifier,
+          sessionRevision: safeRevision,
+          kind: z.enum(['shell', 'service', 'subagent']),
+          status: z.enum([
+            'running',
+            'stopping',
+            'completed',
+            'failed',
+            'cancelled',
+            'unavailable',
+          ]),
+          ownerGeneration: identifier,
+          revision: safeRevision,
+          cleanupConfirmed: z.boolean(),
+          cursor: safeRevision.optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
       status: z.enum(['not_found', 'rejected', 'unavailable']),
       queryType: z.enum([
         'list_sessions',
@@ -1095,6 +1210,8 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
         'get_rewind_preview',
         'get_run',
         'list_runs',
+        'list_background_executions',
+        'get_background_execution',
       ]),
       code: commandErrorCode,
     })
@@ -1112,6 +1229,14 @@ export const INITIALIZE_RESULT_SCHEMA_ = z
           .min(1)
           .max(RUNTIME_PROTOCOL_METHOD_SCHEMA_.options.length),
         subscriptions: z.array(z.enum(['session', 'sessions'])).max(2),
+        features: z
+          .object({
+            steer: z.boolean(),
+            backgroundQuery: z.boolean(),
+            backgroundControl: z.boolean(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     limits: z
@@ -1291,6 +1416,13 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       durationMs: safeRevision.optional(),
       toolCallCount: safeRevision,
       summary: outputText.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('model.response_superseded'),
+      messageId: identifier,
+      requestId: identifier,
     })
     .strict(),
   z

@@ -13,16 +13,24 @@ import {
   isReadOnlyShellCommand,
   parserForBuiltinOperation,
   shellEffectsClassifier,
+  staticEffectsClassifier,
 } from '../catalog-contract';
 import { projectionDigest, truncateProjectedStreams } from '../filesystem/projection';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
-import { createBuiltinPolicyCompiler, shellBuiltinPolicyRule } from '../policy-compiler';
+import {
+  createBuiltinPolicyCompiler,
+  readOnlyBuiltinPolicyRule,
+  shellBuiltinPolicyRule,
+  taskBuiltinPolicyRule,
+} from '../policy-compiler';
 import { SHELL_SEMANTICS_REVISION_ } from '../shell-semantics';
 import { builtinToolDescription } from '../tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_, BUILTIN_ZOD_SCHEMAS_ } from '../tool-schemas';
 
 export const PLANNING_PROVIDER_ID_ = 'kite-builtin-runtime-planning' as const;
 export const PLANNING_OPERATION_ID_ = 'builtin:shell_execute' as const;
+export const SHELL_READ_OPERATION_ID_ = 'builtin:shell_read' as const;
+export const SHELL_STOP_OPERATION_ID_ = 'builtin:shell_stop' as const;
 export const DEFAULT_SHELL_TIMEOUT_MS_ = 10 * 60 * 1_000;
 
 export const SHELL_EXECUTE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:shell_execute'];
@@ -87,7 +95,8 @@ export function projectBuiltinShellIntent(meta: { readonly intent?: string }): B
     : 'other';
 }
 
-export interface BuiltinShellExecutionResult {
+export interface BuiltinShellTerminalExecutionResult {
+  readonly status?: 'exited';
   readonly ok: boolean;
   readonly command: string;
   readonly exitCode: number;
@@ -114,7 +123,23 @@ export interface BuiltinShellExecutionResult {
     readonly forced: boolean;
     readonly unconfirmedDescendantCount: number;
   }>;
+  readonly shellId?: string;
+  readonly cursor?: number;
 }
+
+export interface BuiltinShellRunningExecutionResult {
+  readonly status: 'running';
+  readonly shellId: string;
+  readonly cursor: number;
+  readonly command: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly intent: BuiltinShellIntent;
+}
+
+export type BuiltinShellExecutionResult =
+  | BuiltinShellTerminalExecutionResult
+  | BuiltinShellRunningExecutionResult;
 
 /** Package-owned marker for an attempted Shell operation without a trustworthy terminal. */
 export class BuiltinShellExecutionUnknownError extends Error {
@@ -129,8 +154,23 @@ export class BuiltinShellExecutionUnknownError extends Error {
 /** Invocation-scoped Host mechanism. Workspace, authority, signal and progress are closed over. */
 export interface BuiltinShellExecutionMechanism {
   execute(
-    input: Readonly<{ command: string; timeoutMs: number }>,
+    input: Readonly<{
+      command: string;
+      timeoutMs?: number;
+      yieldMs?: number;
+      mode?: 'finite' | 'service';
+    }>,
   ): Promise<BuiltinShellExecutionResult>;
+  read?(
+    input: Readonly<{
+      shellId: string;
+      cursor: number;
+      waitMs?: number;
+      waitUntil?: 'terminal';
+      signal: AbortSignal;
+    }>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+  stop?(input: Readonly<{ shellId: string }>): Promise<Readonly<Record<string, unknown>>>;
 }
 
 export interface PlanningExecutionMechanisms extends Readonly<Record<string, unknown>> {
@@ -142,7 +182,11 @@ export function createPlanningRuntimeModule(): RuntimeModule {
     moduleId: 'kite-builtin-runtime-planning',
     providerId: PLANNING_PROVIDER_ID_,
     revision: 'planning-current',
-    operationIds: Object.freeze([PLANNING_OPERATION_ID_]),
+    operationIds: Object.freeze([
+      PLANNING_OPERATION_ID_,
+      SHELL_READ_OPERATION_ID_,
+      SHELL_STOP_OPERATION_ID_,
+    ]),
     register: registerPlanningOperation,
   });
 }
@@ -197,6 +241,134 @@ function registerPlanningOperation(registry: RuntimeModuleRegistryWriter): void 
     executorRevision: PLANNING_EXECUTOR_REVISION_,
     execute: executeShellOperation,
   } satisfies CapabilityExecutor);
+  registerManagedShellOperation(registry, SHELL_READ_OPERATION_ID_, true);
+  registerManagedShellOperation(registry, SHELL_STOP_OPERATION_ID_, false);
+}
+
+function registerManagedShellOperation(
+  registry: RuntimeModuleRegistryWriter,
+  operationId: typeof SHELL_READ_OPERATION_ID_ | typeof SHELL_STOP_OPERATION_ID_,
+  readOnly: boolean,
+): void {
+  const inputSchema = BUILTIN_JSON_SCHEMAS_[operationId];
+  const revision = digestCapabilityBindingValue({
+    schema: 'kite.managed-shell-operation.current',
+    operationId,
+    inputSchema,
+  });
+  const executorRevision = digestCapabilityBindingValue({ operationId, revision });
+  const parser = parserForBuiltinOperation(operationId, revision);
+  const effects = Object.freeze({
+    filesystem: 'none' as const,
+    network: 'none' as const,
+    externalState: readOnly ? ('none' as const) : ('write' as const),
+  });
+  registry.registerCapability(
+    defineBuiltinCapabilityContract(
+      {
+        capabilityId: operationId,
+        revision,
+        providerId: PLANNING_PROVIDER_ID_,
+        title: `Builtin Runtime operation ${operationId}`,
+        executionMechanism: 'shell',
+        toolName: operationId.slice('builtin:'.length),
+        description: builtinToolDescription(
+          operationId.slice('builtin:'.length) as 'shell_read' | 'shell_stop',
+        ),
+        visibility: 'model',
+        effects,
+        inputSchema,
+        inputSchemaDigest: digestCapabilityBindingValue(inputSchema),
+      },
+      {
+        parser,
+        kind: 'computer',
+        minimumApproval: 'none',
+        governanceRevision: 'managed-shell-control-v1',
+        effectsClassifier: staticEffectsClassifier(
+          readOnly ? 'read_only' : 'external_side_effect',
+          !readOnly,
+          readOnly
+            ? 'Reads one Runtime-owned Shell execution.'
+            : 'Stops one Runtime-owned Shell execution.',
+          effects,
+        ),
+        executionTraitsDeclaration: builtinExecutionTraits({
+          resourceScopes: [{ kind: 'process', key: 'shell' }],
+          interactionBarrier: false,
+          concurrencyGroup: 'parallel-read',
+        }),
+        execution: { retry: readOnly ? 'safe_read' : 'never' },
+        policyCompiler: createBuiltinPolicyCompiler({
+          operationId,
+          capabilityRevision: revision,
+          parserRevision: parser.parserRevision,
+          declaredEffects: effects,
+          minimumApproval: 'none',
+          rule: readOnly ? readOnlyBuiltinPolicyRule : taskBuiltinPolicyRule,
+        }),
+      },
+    ),
+  );
+  registry.registerExecutor({
+    providerId: PLANNING_PROVIDER_ID_,
+    capabilityId: operationId,
+    capabilityRevision: revision,
+    executorRevision,
+    execute: (request, context) =>
+      executeManagedShellOperation(operationId, executorRevision, request, context),
+  } satisfies CapabilityExecutor);
+}
+
+async function executeManagedShellOperation(
+  operationId: typeof SHELL_READ_OPERATION_ID_ | typeof SHELL_STOP_OPERATION_ID_,
+  executorRevision: string,
+  request: Parameters<CapabilityExecutor['execute']>[0],
+  context: CapabilityExecutionContext,
+): Promise<ExecutionReceipt> {
+  const parsed = BUILTIN_ZOD_SCHEMAS_[operationId].safeParse(request.input);
+  if (!parsed.success)
+    return failedReceipt(request.invocationId, context, 'invalid_input', executorRevision);
+  const input = parsed.data as {
+    shell_id: string;
+    cursor?: number;
+    wait_ms?: number;
+    wait_until?: 'terminal';
+  };
+  const mechanism = (context.environment.mechanisms as PlanningExecutionMechanisms | undefined)
+    ?.shell;
+  const snapshot =
+    operationId === SHELL_STOP_OPERATION_ID_
+      ? await mechanism?.stop?.({ shellId: input.shell_id })
+      : await mechanism?.read?.({
+          shellId: input.shell_id,
+          cursor: input.cursor ?? 0,
+          ...(input.wait_ms === undefined ? {} : { waitMs: input.wait_ms }),
+          ...(input.wait_until === undefined ? {} : { waitUntil: input.wait_until }),
+          signal: context.signal,
+        });
+  if (!snapshot)
+    return failedReceipt(request.invocationId, context, 'mechanism_unavailable', executorRevision);
+  const text = JSON.stringify(snapshot);
+  return succeededReceipt(
+    request.invocationId,
+    context,
+    Object.freeze({
+      schema: 'kite.builtin-operation-result.v1',
+      ok: true,
+      stdout: text,
+      stderr: '',
+      resultMeta: Object.freeze({
+        operation: operationId,
+        snapshot: snapshot as never,
+        ...(typeof snapshot.shellId === 'string' ? { shellId: snapshot.shellId } : {}),
+        ...(snapshot.status === 'running' || snapshot.status === 'exited'
+          ? { shellStatus: snapshot.status }
+          : {}),
+      }),
+    }) as BuiltinOperationExecutionValue,
+    executorRevision,
+  );
 }
 
 async function executeShellOperation(
@@ -205,7 +377,12 @@ async function executeShellOperation(
 ): Promise<ExecutionReceipt> {
   const parsed = BUILTIN_ZOD_SCHEMAS_[PLANNING_OPERATION_ID_].safeParse(request.input);
   const input = parsed.success
-    ? (parsed.data as { readonly command: string; readonly timeout_ms?: number })
+    ? (parsed.data as {
+        readonly command: string;
+        readonly timeout_ms?: number;
+        readonly yield_ms?: number;
+        readonly mode?: 'finite' | 'service';
+      })
     : undefined;
   if (!input) {
     return failedReceipt(request.invocationId, context, 'invalid_input');
@@ -227,7 +404,15 @@ async function executeShellOperation(
     try {
       result = await mechanism.execute({
         command: input.command,
-        timeoutMs: optionalPositiveInteger(input.timeout_ms) ?? DEFAULT_SHELL_TIMEOUT_MS_,
+        ...(input.mode === 'service' && input.timeout_ms === undefined
+          ? {}
+          : { timeoutMs: optionalPositiveInteger(input.timeout_ms) ?? DEFAULT_SHELL_TIMEOUT_MS_ }),
+        ...(input.mode === 'service'
+          ? { yieldMs: input.yield_ms ?? 0 }
+          : input.yield_ms === undefined
+            ? {}
+            : { yieldMs: input.yield_ms }),
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
       });
     } catch (error) {
       if (error instanceof BuiltinShellExecutionUnknownError) throw error;
@@ -247,6 +432,31 @@ async function executeShellOperation(
 }
 
 function projectShellResult(output: BuiltinShellExecutionResult): BuiltinOperationExecutionValue {
+  if (output.status === 'running') {
+    const value = Object.freeze({
+      shell_id: output.shellId,
+      status: output.status,
+      cursor: output.cursor,
+      stdout: output.stdout,
+      stderr: output.stderr,
+    });
+    return Object.freeze({
+      schema: 'kite.builtin-operation-result.v1',
+      // The start operation succeeded; this does not claim command completion.
+      ok: true,
+      stdout: JSON.stringify(value),
+      stderr: '',
+      resultMeta: Object.freeze({
+        command: output.command,
+        intent: output.intent,
+        shell_id: output.shellId,
+        shellId: output.shellId,
+        status: output.status,
+        shellStatus: output.status,
+        cursor: output.cursor,
+      }),
+    }) as BuiltinOperationExecutionValue;
+  }
   if (output.executionPhase === 'unknown_after_go') {
     throw new BuiltinShellExecutionUnknownError(output.stderr);
   }
@@ -268,6 +478,9 @@ function projectShellResult(output: BuiltinShellExecutionResult): BuiltinOperati
       command: output.command,
       intent: output.intent,
       truncated: streams.truncated,
+      ...(output.shellId ? { shell_id: output.shellId } : {}),
+      ...(output.status ? { status: output.status } : {}),
+      ...(output.cursor !== undefined ? { cursor: output.cursor } : {}),
       rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       exitCode: output.exitCode,
       ...(output.timedOut ? { timedOut: true } : {}),
@@ -295,12 +508,13 @@ function succeededReceipt(
   invocationId: string,
   context: CapabilityExecutionContext,
   value: BuiltinOperationExecutionValue,
+  executorRevision = PLANNING_EXECUTOR_REVISION_,
 ): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
     providerId: PLANNING_PROVIDER_ID_,
-    executorRevision: PLANNING_EXECUTOR_REVISION_,
+    executorRevision,
     requestDigest: context.requestDigest,
     status: 'succeeded',
     dispatchCertainty: 'attempted',
@@ -313,12 +527,13 @@ function failedReceipt(
   invocationId: string,
   context: CapabilityExecutionContext,
   code: string,
+  executorRevision = PLANNING_EXECUTOR_REVISION_,
 ): ExecutionReceipt {
   return Object.freeze({
     invocationId,
     attemptId: context.attempt.attemptId,
     providerId: PLANNING_PROVIDER_ID_,
-    executorRevision: PLANNING_EXECUTOR_REVISION_,
+    executorRevision,
     requestDigest: context.requestDigest,
     status: 'failed',
     dispatchCertainty: 'none',

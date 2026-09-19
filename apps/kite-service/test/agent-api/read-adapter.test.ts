@@ -109,6 +109,31 @@ function fixture(
             }
           : { status: 'not_found', queryType: query.type, code: 'checkpoint_unavailable' };
       }
+      if (query.type === 'list_background_executions') {
+        return {
+          status: 'ok',
+          queryType: query.type,
+          backgroundSnapshot: {
+            sessionId: query.sessionId,
+            sessionRevision: 7,
+            aggregateGeneration: 'aggregate-1',
+            watermark: 3,
+            executions: [
+              {
+                executionId: 'shell-1',
+                sessionId: query.sessionId,
+                sessionRevision: 7,
+                kind: 'service',
+                status: 'running',
+                ownerGeneration: 'owner-1',
+                revision: 3,
+                cleanupConfirmed: false,
+                cursor: 7,
+              },
+            ],
+          },
+        };
+      }
       return { status: 'rejected', queryType: query.type, code: 'unsupported' };
     },
     history: {
@@ -680,6 +705,39 @@ describe('Agent API bounded read adapter', () => {
       },
     });
     expect(JSON.stringify(preview)).not.toContain('hidden.ts');
+  });
+
+  test('projects owner-scoped background executions through GET only', async () => {
+    const f = fixture();
+    const result = await dispatch(f.context, '/v1/sessions/session-1/background-executions');
+    expect(result).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: {
+          schema: 'kite.agent-api.background-execution-page.v1',
+          session_id: 'session-1',
+          stale: false,
+          items: [
+            {
+              schema: 'kite.agent-api.background-execution.v1',
+              execution_id: 'shell-1',
+              owner_generation: 'owner-1',
+              revision: 3,
+              kind: 'service',
+              status: 'running',
+              cleanup_confirmed: false,
+              cursor: 7,
+            },
+          ],
+        },
+      },
+    });
+    expect(
+      await dispatch(f.context, '/v1/sessions/session-hidden/background-executions'),
+    ).toMatchObject({
+      result: { ok: false, status: 404 },
+    });
   });
 
   test('does not register mutation methods or unknown read paths', async () => {

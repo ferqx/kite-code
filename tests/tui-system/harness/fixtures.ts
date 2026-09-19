@@ -13,7 +13,7 @@ import { startTestHttpServer } from '../../helpers/test-http-server';
 // Reuse the MockResponse shape from the existing mock model
 export interface MockResponse {
   /** Test-only response factory evaluated against the request consuming this queue slot. */
-  response?: (request: MockChatRequest) => MockResponse;
+  response?: (request: MockChatRequest) => MockResponse | Promise<MockResponse>;
   message?: {
     content?: string;
     /** Optional SSE chunks; joined for non-streaming responses. */
@@ -208,7 +208,7 @@ export function createMockModelServer(): MockModelServer {
         let resolvedResponse: MockResponse;
         try {
           resolvedResponse = queued.response
-            ? queued.response({ body: bodyRecord, messages })
+            ? await queued.response({ body: bodyRecord, messages })
             : queued;
         } catch (error) {
           const message =

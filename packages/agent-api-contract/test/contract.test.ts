@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   AGENT_API_LIMITS,
   AgentApiContractValidationError,
+  agentApiBackgroundExecutionPageSchema,
   agentApiContextSchema,
   agentApiCreateRunRequestSchema,
   agentApiExchangeRequestSchema,
@@ -28,6 +29,43 @@ async function fixture(name: string): Promise<unknown> {
 }
 
 describe('Agent API V1 contract', () => {
+  test('keeps background execution snapshots closed and authority fields distinct', () => {
+    const snapshot = {
+      schema: 'kite.agent-api.background-execution-page.v1' as const,
+      session_id: 'session-1',
+      session_revision: 7,
+      aggregate_generation: 'aggregate-1',
+      watermark: 3,
+      stale: false,
+      items: [
+        {
+          schema: 'kite.agent-api.background-execution.v1' as const,
+          execution_id: 'shell-1',
+          owner_generation: 'owner-1',
+          revision: 2,
+          kind: 'shell' as const,
+          status: 'running' as const,
+          cleanup_confirmed: false,
+        },
+      ],
+    };
+    expect(encodeAgentApiResponse(agentApiBackgroundExecutionPageSchema, snapshot)).toEqual(
+      snapshot,
+    );
+    expect(() =>
+      encodeAgentApiResponse(agentApiBackgroundExecutionPageSchema, {
+        ...snapshot,
+        items: [{ ...snapshot.items[0], private_runtime_state: 'hidden' }],
+      } as unknown as typeof snapshot),
+    ).toThrow('response.items[0] contains an undeclared response field');
+    expect(
+      agentApiBackgroundExecutionPageSchema.safeParse({
+        ...snapshot,
+        items: [...snapshot.items, snapshot.items[0]],
+      }).success,
+    ).toBeFalse();
+  });
+
   test('decodes the committed request and response fixtures', async () => {
     const createRun = await fixture('create-run-request.json');
     expect(

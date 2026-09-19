@@ -163,6 +163,7 @@ export interface StateRuntimeCommandCommitResult {
 export interface StateRuntimeSession {
   readonly sessionId: string;
   getState(): Readonly<AgentState>;
+  waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   /** True only when the injected storage owner has passed Store 8 preflight. */
   supportsRunStorage(): boolean;
   getLifecycleProjection(state?: Readonly<AgentState>): Readonly<{
@@ -293,6 +294,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   #lastProcessedEventId: string | undefined;
   #runnerId: string | null = null;
   #currentRunId: string | undefined;
+  readonly #revisionWaiters = new Set<() => void>();
 
   constructor(input: StateRuntimeSessionInput) {
     assertStateRuntimeSessionState(input.state);
@@ -336,6 +338,20 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
 
   getState(): Readonly<AgentState> {
     return this.#state;
+  }
+
+  waitForRevisionChange(revision: number, signal?: AbortSignal): Promise<void> {
+    if (this.#state.revision !== revision || signal?.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        this.#revisionWaiters.delete(finish);
+        signal?.removeEventListener('abort', finish);
+        resolve();
+      };
+      this.#revisionWaiters.add(finish);
+      signal?.addEventListener('abort', finish, { once: true });
+      if (this.#state.revision !== revision || signal?.aborted) finish();
+    });
   }
 
   supportsRunStorage(): boolean {
@@ -600,6 +616,8 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     // The durable transaction is the publication boundary. Never expose a
     // speculative reducer result to an executor or caller before this point.
     this.#state = decision.nextState;
+    for (const wake of this.#revisionWaiters) wake();
+    this.#revisionWaiters.clear();
     if (runCommit?.mutation.type === 'insert') this.#currentRunId = runCommit.mutation.run.runId;
     this.#lastAppliedEvents = [...decision.events];
     this.#lastProcessedEventId = decision.envelopes[0]?.eventId;
@@ -1010,7 +1028,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const continuationAdvanced =
       nextState.turn.status === 'active' && previousState.turn.turnId !== nextState.turn.turnId;
     const status =
-      projectRunStatus(previousState, nextState, current.status) ??
+      projectRunStatus(previousState, nextState, current.status, events) ??
       (continuationAdvanced ? current.status : undefined);
     if (!status || (status === current.status && !continuationAdvanced)) return undefined;
     if (current.status === 'unknown' && !isPreciseTerminalRunStatus(status)) return undefined;
@@ -1200,6 +1218,7 @@ function projectRunStatus(
   previousState: Readonly<AgentState>,
   nextState: Readonly<AgentState>,
   current: RuntimeRunStatus,
+  events: readonly KernelEvent[],
 ): RuntimeRunStatus | undefined {
   if (nextState.turn.status === 'completed') return 'completed';
   if (nextState.turn.status === 'aborted') {
@@ -1208,6 +1227,17 @@ function projectRunStatus(
   }
   if (nextState.turn.status !== 'active') return undefined;
   if (nextState.interactions.kind !== 'idle') return 'waiting';
+  if (
+    events.some(
+      (event) =>
+        event.type === 'completion.blocked' &&
+        event.code === 'tool_pending' &&
+        event.nextAction === 'wait_for_tool',
+    )
+  )
+    return 'waiting';
+  if (current === 'waiting' && events.some((event) => event.type === 'model.invocation_prepared'))
+    return 'running';
   if (current === 'waiting' && previousState.interactions.kind !== 'idle') return 'running';
   return undefined;
 }

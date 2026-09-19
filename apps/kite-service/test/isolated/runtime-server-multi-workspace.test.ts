@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-client';
@@ -894,7 +894,7 @@ test('hydrates an unregistered persisted Session from the shared Store after own
   }
 }, 30_000);
 
-test('lists persisted Sessions from the shared Store without composing their Workspace', async () => {
+test('pure reads do not compose or cache routing for a persisted Session', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-store-index-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -916,8 +916,19 @@ test('lists persisted Sessions from the shared Store without composing their Wor
   }
 
   let workspaceCompositions = 0;
+  const restartedStorage = await createKiteSessionAppServerStorageComposition({
+    databasePath: join(root, 'kite-session.sqlite'),
+    hostInstanceId: 'store-index-reader-owner',
+  });
+  const originalRecoveryIdentity = restartedStorage.storage.recoveryIdentities.read(sessionId);
+  if (!originalRecoveryIdentity) throw new Error('seeded Session must have a recovery identity');
+  restartedStorage.runWithSessionExecution(sessionId, () =>
+    restartedStorage.storage.recoveryIdentities.remove(sessionId),
+  );
+  restartedStorage.releaseExecutions(true);
   const restartedOwner = createKiteMultiWorkspaceRuntimeServer({
     checkpointPath,
+    storageOwner: restartedStorage,
     workspaceTemplateFor: () => {
       workspaceCompositions += 1;
       return runtimeInput(workspace, model.baseURL, 'store-index-model');
@@ -932,6 +943,66 @@ test('lists persisted Sessions from the shared Store without composing their Wor
       sessions: expect.arrayContaining([expect.objectContaining({ sessionId })]),
     });
     expect(workspaceCompositions).toBe(0);
+    await expect(
+      restartedOwner.runtime.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_background_executions',
+        sessionId,
+      }),
+    ).resolves.toEqual({
+      status: 'unavailable',
+      queryType: 'list_background_executions',
+      code: 'session_unavailable',
+    });
+    expect(restartedOwner.storage.recoveryIdentities.read(sessionId)).toBeNull();
+    restartedStorage.runWithSessionExecution(sessionId, () =>
+      restartedStorage.storage.recoveryIdentities.getOrCreate(
+        sessionId,
+        () => originalRecoveryIdentity,
+      ),
+    );
+    restartedStorage.releaseExecutions(true);
+
+    const unavailableWorkspace = `${workspace}-temporarily-unavailable`;
+    renameSync(workspace, unavailableWorkspace);
+    symlinkSync(unavailableWorkspace, workspace);
+    await expect(
+      restartedOwner.runtime.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_background_executions',
+        sessionId,
+      }),
+    ).resolves.toEqual({
+      status: 'unavailable',
+      queryType: 'list_background_executions',
+      code: 'session_unavailable',
+    });
+    expect(workspaceCompositions).toBe(0);
+    rmSync(workspace);
+    renameSync(unavailableWorkspace, workspace);
+
+    await expect(
+      restartedClient.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'list_background_executions',
+        sessionId,
+      }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      queryType: 'list_background_executions',
+      backgroundSnapshot: { sessionId, executions: [] },
+    });
+    expect(workspaceCompositions).toBe(0);
+
+    await expect(
+      restartedClient.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        commandId: 'resume-after-pure-read',
+        type: 'resume_session',
+        sessionId,
+      }),
+    ).resolves.toMatchObject({ status: 'applied', sessionId });
+    expect(workspaceCompositions).toBe(1);
   } finally {
     await restartedClient.close();
     await restartedOwner[Symbol.asyncDispose]();

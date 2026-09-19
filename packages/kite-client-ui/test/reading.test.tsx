@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { BackgroundExecutions } from '../src/BackgroundExecutions';
 import { Conversation, type ReadingState } from '../src/Conversation';
 import { MessageContent } from '../src/MessageContent';
 import { SessionPage } from '../src/SessionPage';
@@ -38,6 +39,91 @@ const globals = {
   cancelAnimationFrame: (handle: number) => clearTimeout(handle),
   IS_REACT_ACT_ENVIRONMENT: true,
 };
+
+test('background execution cards distinguish stale last-known work without controls', async () => {
+  await render(
+    <BackgroundExecutions
+      stale
+      executions={[
+        {
+          executionId: 'task-stable-1',
+          kind: 'subagent',
+          status: 'unavailable',
+          cleanupConfirmed: false,
+        },
+      ]}
+    />,
+  );
+  expect(document.body.textContent).toContain('子 Agent');
+  expect(document.body.textContent).toContain('task-stable-1');
+  expect(document.body.textContent).toContain('上次已知状态');
+  expect(document.querySelector('button')).toBeNull();
+});
+
+test('background execution stop is exact and duplicate clicks are disabled while accepted', async () => {
+  const stopped: string[] = [];
+  await render(
+    <BackgroundExecutions
+      stoppingExecutionId="shell-1"
+      onStop={(execution) => stopped.push(execution.executionId)}
+      executions={[
+        {
+          executionId: 'shell-1',
+          sessionId: 'session-1',
+          ownerGeneration: 'owner-1',
+          revision: 4,
+          kind: 'shell',
+          status: 'running',
+          cleanupConfirmed: false,
+        },
+        {
+          executionId: 'child-1',
+          sessionId: 'session-1',
+          ownerGeneration: 'owner-1',
+          revision: 4,
+          kind: 'subagent',
+          status: 'stopping',
+          cleanupConfirmed: false,
+        },
+      ]}
+    />,
+  );
+  const button = document.querySelector('button') as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  expect(button.textContent).toContain('已受理');
+  button.click();
+  expect(stopped).toEqual([]);
+  expect(document.body.textContent).toContain('正在停止');
+  expect(document.body.textContent).toContain('清理未确认');
+});
+
+test('directory exposes retained background work for a non-selected session', async () => {
+  await render(
+    <Sidebar
+      workspaces={[
+        {
+          id: 'workspace-1',
+          label: 'Workspace',
+          state: 'loaded',
+          sessionCount: 1,
+          sessions: [
+            {
+              sessionId: 'background-session',
+              displayName: 'Background session',
+              status: 'idle',
+              backgroundExecutionCount: 2,
+            },
+          ],
+        },
+      ]}
+      defaultExpanded
+      onOpen={() => {}}
+      actions={{}}
+      connectionLabel=""
+    />,
+  );
+  expect(document.body.textContent).toContain('2 个后台任务');
+});
 const originals = new Map<string, PropertyDescriptor | undefined>();
 for (const [key, value] of Object.entries(globals)) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -892,6 +978,33 @@ test('running and failed subagents do not claim that a result was sent to the ma
   expect(subagents.every((item) => !item.textContent?.includes('已发送给主 Agent'))).toBe(true);
 });
 
+test('completed subagents show their stable task id without exposing hidden prose or reviving thinking', async () => {
+  await render(
+    <Conversation
+      messages={[
+        {
+          id: 'subagent:task_stable_42',
+          role: 'subagent',
+          title: 'reviewer',
+          text: '检查完成：没有发现阻塞问题。',
+          settled: true,
+          status: 'completed',
+          steps: [],
+        },
+      ]}
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+    />,
+  );
+  expect(document.querySelector('.tool-activity')?.textContent).toContain('reviewer');
+  expect(document.querySelector('.tool-activity')?.textContent).toContain('task_id task_stable_42');
+  expect(document.body.textContent).not.toContain('检查完成：没有发现阻塞问题。');
+  expect(document.querySelector('.thinking-activity')).toBeNull();
+  expect(document.querySelector('.tool-activity.is-running')).toBeNull();
+});
+
 test('finished subagents stop unfinished child tool animations without inventing tool results', async () => {
   const child: Message = {
     id: 'subagent:child',
@@ -1721,6 +1834,76 @@ test('Shell distinguishes stopping automatic review from cancellation after exec
   expect(document.querySelector('.shell-output pre')?.textContent).toContain('命令正在执行');
   expect(document.querySelector('.shell-output')?.textContent).not.toContain('未执行');
   expect(document.querySelector('.shell-output')?.textContent).not.toContain('未开始执行');
+});
+
+test('managed Shell cards distinguish retained services and expose only opaque handles', async () => {
+  const service: Message = {
+    id: 'tool:service',
+    role: 'tool',
+    toolName: 'shell_execute',
+    arguments: { command: 'bun run dev', mode: 'service', yield_ms: 1000 },
+    text: JSON.stringify({
+      shellId: 'sh_service_fixture',
+      mode: 'service',
+      status: 'running',
+      cursor: 4,
+      stdout: 'ready',
+    }),
+    settled: true,
+    status: 'completed',
+    toolResult: {
+      ok: true,
+      stdout: JSON.stringify({
+        shellId: 'sh_service_fixture',
+        mode: 'service',
+        status: 'running',
+        cursor: 4,
+      }),
+    },
+  };
+  await render(
+    <Conversation messages={[service]} selected connected loading={false} saveReading={() => {}} />,
+  );
+  const summary = document.querySelector('.managed-shell-summary');
+  expect(summary?.textContent).toContain('长期服务 · 运行中');
+  expect(summary?.textContent).toContain('sh_service_fixture');
+  expect(summary?.textContent).toContain('日志游标 4');
+  expect(document.body.textContent).not.toContain('PID');
+
+  await act(() =>
+    root!.render(
+      <Conversation
+        messages={[
+          {
+            ...service,
+            arguments: { command: 'bun test', mode: 'finite' },
+            text: JSON.stringify({
+              shellId: 'sh_finite_fixture',
+              mode: 'finite',
+              status: 'exited',
+              cursor: 7,
+            }),
+            toolResult: {
+              ok: true,
+              stdout: JSON.stringify({
+                shellId: 'sh_finite_fixture',
+                mode: 'finite',
+                status: 'exited',
+                cursor: 7,
+              }),
+            },
+          },
+        ]}
+        selected
+        connected
+        loading={false}
+        saveReading={() => {}}
+      />,
+    ),
+  );
+  expect(document.querySelector('.managed-shell-summary')?.textContent).toContain(
+    '后台 Shell · 已退出',
+  );
 });
 
 test('cancelled tool status does not repeat the generic event summary', async () => {

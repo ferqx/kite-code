@@ -35,6 +35,7 @@ const REQUIRED_MECHANISM_KEYS_: Readonly<Partial<Record<CapabilityExecutionMecha
     skill: 'skill',
     planning: 'planning',
     subagent: 'subagent',
+    task_control: 'taskControl',
     verification: 'verification',
     model: 'model',
   });
@@ -175,8 +176,15 @@ function assertMechanismWrapper(key: string, value: unknown): void {
       assertFunction(record, 'inspect', key);
       return;
     case 'shell':
-      assertExactKeys(value, ['execute']);
-      assertFunction(record, 'execute', key);
+      assertExactKeys(value, ['execute', 'read', 'stop']);
+      for (const operation of ['execute', 'read', 'stop'] as const) {
+        if (record[operation] !== undefined) assertFunction(record, operation, key);
+      }
+      if (record.execute === undefined && record.read === undefined && record.stop === undefined) {
+        throw new BuiltinMechanismAuthorityError(
+          `Builtin mechanism '${key}' requires an execution or managed-control port.`,
+        );
+      }
       return;
     case 'planning':
       assertExactKeys(value, ['read', 'update', 'write']);
@@ -190,6 +198,11 @@ function assertMechanismWrapper(key: string, value: unknown): void {
         throw new BuiltinMechanismAuthorityError(`Builtin mechanism '${key}' phase is invalid.`);
       }
       assertFunction(record, 'executeTask', key);
+      return;
+    case 'taskControl':
+      assertExactKeys(value, ['cancelTask', 'readTask']);
+      assertFunction(record, 'cancelTask', key);
+      assertFunction(record, 'readTask', key);
       return;
     case 'verification':
       assertExactKeys(value, ['execute']);

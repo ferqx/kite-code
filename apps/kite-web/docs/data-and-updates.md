@@ -4,7 +4,7 @@
 
 Browser adapter 只消费 browser-safe agent-api-client → agent-api-contract，不导入 Native、Host、Store、Protocol、SQLite 或 Service raw source。Web 本地 presentation 经[页面投影](../src/presentation/page.ts)转换后交给共享 React 页面；组件不直接消费 REST DTO。
 
-同源 `/v1` 验证 browser principal 能力；workspaces 独立分页，首个 workspace 可预取 Sessions，其余展开读取。Session 选择读取 history 与 checkpoint metadata，logs 独立按需读取。
+同源 `/v1` 验证 browser principal 的`background_executions/workspaces/sessions/history`能力；workspaces 独立分页，首个 workspace 可预取 Sessions，其余展开读取。Session 选择读取 history、checkpoint metadata与closed后台执行快照，logs 独立按需读取。后台执行只使用agent-api-client的canonical method，Web不直接fetch该route、不维护第二套wire decoder；刷新失败保留最后快照并标记stale。
 
 selected Session running/waiting 且页面可见时，约 2 秒单飞读取 after_sequence History 并刷新 Session projection；page 生命周期停止对应工作。logs 只显式刷新，不新增第二个 scheduler。失败保留最后快照并显式错误，不恢复旧 bootstrap、WebSocket、SSE、BFF 或离线 fallback。
 

@@ -320,6 +320,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'model.reasoning_delta': ['requestId', 'text'],
   'model.requested': ['requestId'],
   'model.responded': ['messageId'],
+  'model.response_superseded': ['messageId', 'invocationId'],
   'model.retry': ['invocationId', 'attempt', 'maxAttempts', 'error', 'delayMs'],
   'model.text_delta': ['requestId', 'text'],
   'network.admission_decided': ['toolCallId', 'decision'],
@@ -489,6 +490,26 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'failureCode',
   ],
   'subagent.approval_deferred': ['toolCallId', 'subagentId', 'parentToolCallId'],
+  'subagent.background_result_persisted': [
+    'taskId',
+    'notificationId',
+    'artifactIntegrityIdentifier',
+    'shortReport',
+    'source',
+    'modelRole',
+    'originRunId',
+    'originTurnId',
+    'originToolCallId',
+    'attempt',
+  ],
+  'background_execution.stop_requested': [
+    'commandId',
+    'executionId',
+    'executionKind',
+    'ownerGeneration',
+  ],
+  'background_execution.stop_settled': ['commandId', 'executionId', 'cleanupConfirmed'],
+  'background_execution.stop_unknown': ['commandId', 'executionId', 'reason'],
   'subagent.cache_metrics': ['subagent'],
   'subagent.completed': ['subagent'],
   'subagent.failed': ['subagent'],
@@ -536,7 +557,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
 /** Count of current State event discriminants; read-only compatibility remains separate. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 140 as const;
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 145 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -571,6 +592,9 @@ export const STATE_DIAGNOSTIC_EVENT_TYPES = [
 
 /** Current discriminants intentionally handled by the reducer default branch. */
 export const STATE_DEFAULT_EVENT_TYPES = [
+  'background_execution.stop_requested',
+  'background_execution.stop_settled',
+  'background_execution.stop_unknown',
   'runtime.cancellation_diagnostic',
   // Rewind is a durable App post-commit intent. State 27 deliberately has no
   // rewind projection; recovery reconstructs unmatched intents from history.
@@ -588,7 +612,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 140 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 145 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -1682,6 +1706,11 @@ type StateEventMap = ResourceBudgetEventMap &
       inputTokens?: number;
       outputTokens?: number;
     };
+    'model.response_superseded': {
+      type: 'model.response_superseded';
+      messageId: string;
+      invocationId: string;
+    };
     'model.retry': {
       type: 'model.retry';
       invocationId: string;
@@ -1836,6 +1865,48 @@ type StateEventMap = ResourceBudgetEventMap &
         | 'awaiting_user'
         | 'authorized_queued';
     };
+    'subagent.background_result_persisted': {
+      type: 'subagent.background_result_persisted';
+      taskId: string;
+      notificationId: string;
+      artifactIntegrityIdentifier: string;
+      shortReport: string;
+      source: 'subagent';
+      modelRole: 'user';
+      originRunId: string;
+      originTurnId: string;
+      originToolCallId: string;
+      attempt: number;
+      afterTurn?: {
+        reservationId: string;
+        admissionRevision: number;
+        eventId: string;
+        wakeKey: string;
+        runId: string;
+        phase: 'planning' | 'building';
+        status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
+        cancelRequested: boolean;
+      };
+    };
+    'background_execution.stop_requested': {
+      type: 'background_execution.stop_requested';
+      commandId: string;
+      executionId: string;
+      executionKind: 'shell' | 'service' | 'subagent';
+      ownerGeneration: string;
+    };
+    'background_execution.stop_settled': {
+      type: 'background_execution.stop_settled';
+      commandId: string;
+      executionId: string;
+      cleanupConfirmed: true;
+    };
+    'background_execution.stop_unknown': {
+      type: 'background_execution.stop_unknown';
+      commandId: string;
+      executionId: string;
+      reason: string;
+    };
     'subagent.recovery_journal_merged': {
       type: 'subagent.recovery_journal_merged';
       toolCallId: string;
@@ -1881,7 +1952,7 @@ export type ContextCompactionResetEvent = StateEventMap['context.compaction_rese
 
 type EventForType<EventType extends RuntimeEventType> = StateEventMap[EventType];
 
-/** The State union has one exact object type for each of its 140 discriminants. */
+/** The State union has one exact object type for each event discriminant. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

@@ -956,6 +956,7 @@ export type RuntimeUserAction =
   | { type: 'replan_verification'; verificationId: string; instruction: string }
   | { type: 'request_verification_compensation'; verificationId: string }
   | { type: 'input'; interactionId: string; text: string; answers?: Record<string, string> }
+  | { type: 'superseded_by_user_input'; interactionId: string }
   | {
       type: 'approve';
       interactionId: string;

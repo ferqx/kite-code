@@ -2,6 +2,7 @@ import { ArrowLeft01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Approval,
+  BackgroundExecutions,
   Button,
   Dialog,
   DialogContent,
@@ -75,6 +76,8 @@ export function App({ client }: { client: DesktopClient }) {
     mode: 'accept_edits' | 'auto' | 'full';
   }>();
   const [submitting, setSubmitting] = useState(false);
+  const [stoppingBackground, setStoppingBackground] = useState<string>();
+  const stoppingBackgroundRef = useRef(new Set<string>());
   const [selectingSession, setSelectingSession] = useState<string>();
   const [newConversationPermission, setNewConversationPermission] = useState<
     'accept_edits' | 'auto' | 'full'
@@ -465,6 +468,10 @@ export function App({ client }: { client: DesktopClient }) {
                 : (session.currentRun?.status ?? 'idle'),
             updatedAt: session.updatedAt,
             pendingInteractions: session.interactionQueue?.interactions.length ?? 0,
+            backgroundExecutionCount:
+              view.background?.[session.sessionId]?.snapshot.executions.filter(
+                (execution) => execution.status === 'running' || execution.status === 'stopping',
+              ).length ?? 0,
           })),
       }))}
       defaultExpanded
@@ -511,6 +518,46 @@ export function App({ client }: { client: DesktopClient }) {
         !workbenchView && !scheduledTasksView && !preparing && selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
+      }
+      beforeConversation={
+        selected && view.background?.[selected] ? (
+          <BackgroundExecutions
+            executions={view.background[selected]!.snapshot.executions}
+            stale={view.background[selected]!.stale}
+            stoppingExecutionId={stoppingBackground}
+            onStop={(execution) => {
+              if (
+                !execution.sessionId ||
+                execution.sessionRevision === undefined ||
+                !execution.ownerGeneration ||
+                execution.revision === undefined ||
+                stoppingBackgroundRef.current.has(execution.executionId)
+              )
+                return;
+              stoppingBackgroundRef.current.add(execution.executionId);
+              setStoppingBackground(execution.executionId);
+              void client
+                .stopBackgroundExecution({
+                  executionId: execution.executionId,
+                  kind: execution.kind,
+                  status: execution.status,
+                  cleanupConfirmed: execution.cleanupConfirmed,
+                  ...(execution.cursor === undefined ? {} : { cursor: execution.cursor }),
+                  sessionId: execution.sessionId,
+                  sessionRevision: execution.sessionRevision,
+                  ownerGeneration: execution.ownerGeneration,
+                  revision: execution.revision,
+                })
+                .catch((error) => client.report(error))
+                .finally(() => {
+                  stoppingBackgroundRef.current.delete(execution.executionId);
+                  setStoppingBackground((current) =>
+                    current === execution.executionId ? undefined : current,
+                  );
+                });
+            }}
+          />
+        ) : undefined
       }
       newConversation={
         !workbenchView && !scheduledTasksView && preparing
@@ -643,7 +690,9 @@ export function App({ client }: { client: DesktopClient }) {
           !scheduledTasksView &&
           !preparing &&
           projection?.currentRun?.status === 'waiting' && (
-            <p className="notice">任务正在等待尚未支持的扩展或验证交互，可以停止任务并检查结果。</p>
+            <p className="notice">
+              进行中 · 正在等待后台结果。可以继续发送引导、查看 Shell 日志或停止当前任务。
+            </p>
           )
         )
       }
@@ -711,211 +760,206 @@ export function App({ client }: { client: DesktopClient }) {
                       : undefined,
               onSettings: () => setSettingsOpen(true),
               onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
-              onSend:
-                canSubmit && !active
-                  ? () => {
-                      if (submittingRef.current) return;
-                      submittingRef.current = true;
-                      setSubmitting(true);
-                      const submitted = draft;
-                      const submittedNavigation = navigationRevision.current;
-                      const baselineUserIds = view.messages
-                        .filter((message) => message.role === 'user')
-                        .map((message) => message.id);
-                      const restoreDraft = (key: string) =>
-                        setDrafts((values) => ({
-                          ...values,
-                          [key]: values[key] ? `${submitted}\n${values[key]}` : submitted,
-                        }));
-                      const retryingFirst =
-                        firstSubmission?.phase === 'failed' &&
-                        firstSubmission.sessionId === selected;
-                      const abandonPendingSend = () => {
-                        restoreDraft(draftKey);
-                        if (retryingFirst)
-                          setFirstSubmission({
-                            ...firstSubmission,
-                            phase: 'failed',
-                            text: submitted,
-                          });
-                        else setFirstSubmission(undefined);
-                      };
-                      if (preparing) {
-                        setFirstSubmission({
-                          phase: 'preparing',
-                          text: submitted,
-                          visibleUntil: Date.now() + 300,
-                          navigation: submittedNavigation,
-                          baselineUserIds,
-                        });
-                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
-                      } else if (retryingFirst) {
+              onSend: canSubmit
+                ? () => {
+                    if (submittingRef.current) return;
+                    submittingRef.current = true;
+                    setSubmitting(true);
+                    const submitted = draft;
+                    const submittedNavigation = navigationRevision.current;
+                    const baselineUserIds = view.messages
+                      .filter((message) => message.role === 'user')
+                      .map((message) => message.id);
+                    const restoreDraft = (key: string) =>
+                      setDrafts((values) => ({
+                        ...values,
+                        [key]: values[key] ? `${submitted}\n${values[key]}` : submitted,
+                      }));
+                    const retryingFirst =
+                      firstSubmission?.phase === 'failed' && firstSubmission.sessionId === selected;
+                    const abandonPendingSend = () => {
+                      restoreDraft(draftKey);
+                      if (retryingFirst)
                         setFirstSubmission({
                           ...firstSubmission,
-                          phase: 'sending',
+                          phase: 'failed',
                           text: submitted,
-                          visibleUntil: Date.now() + 300,
-                          baselineUserIds,
                         });
-                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
-                      } else {
-                        setDrafts((values) => ({ ...values, [draftKey]: '' }));
-                      }
-                      client.clearError();
-                      void (async () => {
-                        let submittedKey = draftKey;
-                        let targetSession = selected;
-                        let sessionCreated = !preparing;
-                        let permissionApplied = !preparing;
-                        try {
-                          if (preparing) {
-                            if (conversationWorkspace !== client.getSnapshot().workspace) {
-                              if (!(await activateForWork(conversationWorkspace))) {
-                                abandonPendingSend();
-                                return;
-                              }
-                              setNewConversationBranch(client.getSnapshot().branch);
+                      else setFirstSubmission(undefined);
+                    };
+                    if (preparing) {
+                      setFirstSubmission({
+                        phase: 'preparing',
+                        text: submitted,
+                        visibleUntil: Date.now() + 300,
+                        navigation: submittedNavigation,
+                        baselineUserIds,
+                      });
+                      setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                    } else if (retryingFirst) {
+                      setFirstSubmission({
+                        ...firstSubmission,
+                        phase: 'sending',
+                        text: submitted,
+                        visibleUntil: Date.now() + 300,
+                        baselineUserIds,
+                      });
+                      setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                    } else {
+                      setDrafts((values) => ({ ...values, [draftKey]: '' }));
+                    }
+                    client.clearError();
+                    void (async () => {
+                      let submittedKey = draftKey;
+                      let targetSession = selected;
+                      let sessionCreated = !preparing;
+                      let permissionApplied = !preparing;
+                      try {
+                        if (preparing) {
+                          if (conversationWorkspace !== client.getSnapshot().workspace) {
+                            if (!(await activateForWork(conversationWorkspace))) {
+                              abandonPendingSend();
+                              return;
                             }
-                            if (
-                              newConversationTargetBranch &&
-                              client.getSnapshot().branch?.current !== newConversationTargetBranch
-                            ) {
-                              await client.switchBranch(newConversationTargetBranch);
-                              setNewConversationBranch(client.getSnapshot().branch);
-                            }
-                            await client.prepareNewConversation();
-                            targetSession = await client.newSession(model);
-                            sessionCreated = true;
-                            setFirstSubmission({
-                              phase: 'sending',
-                              text: submitted,
-                              visibleUntil: Date.now() + 300,
-                              navigation: submittedNavigation,
-                              baselineUserIds,
-                              sessionId: targetSession,
-                            });
-                            const current = client.getSnapshot();
-                            submittedKey = `session:${targetSession}`;
-                            setDrafts((values) => ({
-                              ...values,
-                              [submittedKey]: values[draftKey] ?? '',
-                              [draftKey]: '',
-                            }));
-                            if (navigationRevision.current === submittedNavigation) {
-                              setNewConversation(false);
-                              rememberNavigation(current.workspace, targetSession);
-                              await client.selectSession(targetSession);
-                            }
+                            setNewConversationBranch(client.getSnapshot().branch);
+                          }
+                          if (
+                            newConversationTargetBranch &&
+                            client.getSnapshot().branch?.current !== newConversationTargetBranch
+                          ) {
+                            await client.switchBranch(newConversationTargetBranch);
+                            setNewConversationBranch(client.getSnapshot().branch);
+                          }
+                          await client.prepareNewConversation();
+                          targetSession = await client.newSession(model);
+                          sessionCreated = true;
+                          setFirstSubmission({
+                            phase: 'sending',
+                            text: submitted,
+                            visibleUntil: Date.now() + 300,
+                            navigation: submittedNavigation,
+                            baselineUserIds,
+                            sessionId: targetSession,
+                          });
+                          const current = client.getSnapshot();
+                          submittedKey = `session:${targetSession}`;
+                          setDrafts((values) => ({
+                            ...values,
+                            [submittedKey]: values[draftKey] ?? '',
+                            [draftKey]: '',
+                          }));
+                          if (navigationRevision.current === submittedNavigation) {
+                            setNewConversation(false);
+                            rememberNavigation(current.workspace, targetSession);
+                            await client.selectSession(targetSession);
+                          }
+                          await client.setInteractionMode(targetSession, newConversationPermission);
+                          permissionApplied = true;
+                        }
+                        if (!preparing) {
+                          targetSession = selected;
+                          if (retryingFirst && firstSubmission.permissionRequired) {
                             await client.setInteractionMode(
-                              targetSession,
+                              targetSession!,
                               newConversationPermission,
                             );
                             permissionApplied = true;
+                            setFirstSubmission({
+                              ...firstSubmission,
+                              phase: 'sending',
+                              permissionRequired: false,
+                            });
                           }
-                          if (!preparing) {
-                            targetSession = selected;
-                            if (retryingFirst && firstSubmission.permissionRequired) {
-                              await client.setInteractionMode(
-                                targetSession!,
-                                newConversationPermission,
-                              );
-                              permissionApplied = true;
+                        }
+                        await client.send(submitted, targetSession, model);
+                      } catch (error) {
+                        if (error instanceof CommandResultUnknown) {
+                          if (error.commandType === 'resume_session') {
+                            restoreDraft(draftKey);
+                            if (retryingFirst)
                               setFirstSubmission({
                                 ...firstSubmission,
-                                phase: 'sending',
-                                permissionRequired: false,
-                              });
-                            }
-                          }
-                          await client.send(submitted, targetSession, model);
-                        } catch (error) {
-                          if (error instanceof CommandResultUnknown) {
-                            if (error.commandType === 'resume_session') {
-                              restoreDraft(draftKey);
-                              if (retryingFirst)
-                                setFirstSubmission({
-                                  ...firstSubmission,
-                                  phase: 'failed',
-                                  text: submitted,
-                                  uncertainty: undefined,
-                                });
-                              client.report(error);
-                              return;
-                            }
-                            if (
-                              error.commandType === 'set_interaction_mode' &&
-                              sessionCreated &&
-                              targetSession
-                            ) {
-                              const current = client.getSnapshot();
-                              submittedKey = `session:${targetSession}`;
-                              const permissionRequired =
-                                current.selected !== targetSession ||
-                                current.interactionMode !== newConversationPermission;
-                              setFirstSubmission({
                                 phase: 'failed',
                                 text: submitted,
-                                visibleUntil: Date.now(),
-                                navigation: submittedNavigation,
-                                baselineUserIds,
-                                sessionId: targetSession,
-                                permissionRequired,
+                                uncertainty: undefined,
                               });
-                              restoreDraft(submittedKey);
-                              client.report(error);
-                              return;
-                            }
-                            const current = client.getSnapshot();
-                            targetSession = sessionCreated ? targetSession : error.sessionId;
-                            if (targetSession) {
-                              submittedKey = `session:${targetSession}`;
-                              if (navigationRevision.current === submittedNavigation) {
-                                setNewConversation(false);
-                                rememberNavigation(current.workspace, targetSession);
-                              }
-                            }
-                            setFirstSubmission({
-                              phase: 'unknown',
-                              text: submitted,
-                              visibleUntil: Date.now(),
-                              navigation: submittedNavigation,
-                              baselineUserIds,
-                              sessionId: targetSession,
-                              uncertainty: sessionCreated ? 'turn' : 'create',
-                            });
-                            if (!sessionCreated && targetSession)
-                              setDrafts((values) => ({
-                                ...values,
-                                [submittedKey]: values[draftKey]
-                                  ? `${submitted}\n${values[draftKey]}`
-                                  : submitted,
-                                [draftKey]: '',
-                              }));
                             client.report(error);
                             return;
                           }
-                          if (preparing || retryingFirst) {
+                          if (
+                            error.commandType === 'set_interaction_mode' &&
+                            sessionCreated &&
+                            targetSession
+                          ) {
+                            const current = client.getSnapshot();
+                            submittedKey = `session:${targetSession}`;
+                            const permissionRequired =
+                              current.selected !== targetSession ||
+                              current.interactionMode !== newConversationPermission;
                             setFirstSubmission({
                               phase: 'failed',
                               text: submitted,
                               visibleUntil: Date.now(),
                               navigation: submittedNavigation,
                               baselineUserIds,
-                              sessionId: sessionCreated ? targetSession : undefined,
-                              permissionRequired: sessionCreated && !permissionApplied,
+                              sessionId: targetSession,
+                              permissionRequired,
                             });
+                            restoreDraft(submittedKey);
+                            client.report(error);
+                            return;
                           }
-                          restoreDraft(sessionCreated && targetSession ? submittedKey : draftKey);
+                          const current = client.getSnapshot();
+                          targetSession = sessionCreated ? targetSession : error.sessionId;
+                          if (targetSession) {
+                            submittedKey = `session:${targetSession}`;
+                            if (navigationRevision.current === submittedNavigation) {
+                              setNewConversation(false);
+                              rememberNavigation(current.workspace, targetSession);
+                            }
+                          }
+                          setFirstSubmission({
+                            phase: 'unknown',
+                            text: submitted,
+                            visibleUntil: Date.now(),
+                            navigation: submittedNavigation,
+                            baselineUserIds,
+                            sessionId: targetSession,
+                            uncertainty: sessionCreated ? 'turn' : 'create',
+                          });
+                          if (!sessionCreated && targetSession)
+                            setDrafts((values) => ({
+                              ...values,
+                              [submittedKey]: values[draftKey]
+                                ? `${submitted}\n${values[draftKey]}`
+                                : submitted,
+                              [draftKey]: '',
+                            }));
                           client.report(error);
-                        } finally {
-                          submittingRef.current = false;
-                          setSubmitting(false);
-                          if (preparing)
-                            void client.refreshSessions().catch((error) => client.report(error));
+                          return;
                         }
-                      })();
-                    }
-                  : undefined,
+                        if (preparing || retryingFirst) {
+                          setFirstSubmission({
+                            phase: 'failed',
+                            text: submitted,
+                            visibleUntil: Date.now(),
+                            navigation: submittedNavigation,
+                            baselineUserIds,
+                            sessionId: sessionCreated ? targetSession : undefined,
+                            permissionRequired: sessionCreated && !permissionApplied,
+                          });
+                        }
+                        restoreDraft(sessionCreated && targetSession ? submittedKey : draftKey);
+                        client.report(error);
+                      } finally {
+                        submittingRef.current = false;
+                        setSubmitting(false);
+                        if (preparing)
+                          void client.refreshSessions().catch((error) => client.report(error));
+                      }
+                    })();
+                  }
+                : undefined,
               onCancel: () =>
                 void act(async () => {
                   if (busy || !ready || loadingSession || stopping) return;

@@ -7,6 +7,7 @@ import {
   isAssistantFrame,
   isCompactionSummaryFrame,
   isRuntimeFrame,
+  isSubagentResultFrame,
   isToolCallBlockFrame,
   isUserFrame,
 } from './context-frame';
@@ -51,6 +52,19 @@ export function serializeFramesToMessages(frames: ContextFrame[]): BaseMessage[]
     } else if (isRuntimeFrame(frame)) {
       // Runtime frames are serialized as HumanMessages with a marker
       messages.push(humanMessage(frame.content));
+    } else if (isSubagentResultFrame(frame)) {
+      messages.push(
+        humanMessage({
+          id: frame.notificationId,
+          name: 'subagent',
+          content: [
+            `<subagent_result task_id="${frame.taskId}">`,
+            frame.content,
+            'Full report remains available through task_read.',
+            '</subagent_result>',
+          ].join('\n'),
+        }),
+      );
     } else if (isCompactionSummaryFrame(frame)) {
       // Compaction summary: injected as assistant history message with untrusted-data marker.
       // System prompt rule #9 instructs the model to treat <compacted_history> as derived data.

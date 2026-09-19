@@ -33,12 +33,15 @@ import {
   askUserBuiltinPolicyRule,
   createBuiltinPolicyCompiler,
   planBuiltinPolicyRule,
+  readOnlyBuiltinPolicyRule,
   taskBuiltinPolicyRule,
 } from '../policy-compiler';
 import { builtinToolDescription } from '../tool-contracts';
 import {
   BUILTIN_JSON_SCHEMAS_,
   BUILTIN_READ_PLAN_SCHEMA_,
+  BUILTIN_TASK_CANCEL_SCHEMA_,
+  BUILTIN_TASK_READ_SCHEMA_,
   BUILTIN_UPDATE_PLAN_SCHEMA_,
   BUILTIN_WRITE_PLAN_SCHEMA_,
   BUILTIN_ZOD_SCHEMAS_,
@@ -52,6 +55,8 @@ export const SUBAGENT_OPERATION_IDS_ = Object.freeze([
   'builtin:update_plan',
   'builtin:write_plan',
   'builtin:task',
+  'builtin:task_read',
+  'builtin:task_cancel',
   'subagent:start',
   'subagent:resume',
   'verification:deterministic',
@@ -69,6 +74,8 @@ export const READ_PLAN_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:read_plan'
 export const UPDATE_PLAN_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:update_plan'];
 export const WRITE_PLAN_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:write_plan'];
 export const TASK_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task'];
+export const TASK_READ_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_read'];
+export const TASK_CANCEL_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_cancel'];
 
 /**
  * Normalize the Builtin-owned ask_user input into the Host interrupt payload.
@@ -115,6 +122,8 @@ const INPUT_SCHEMAS_: Readonly<
   'builtin:update_plan': UPDATE_PLAN_INPUT_SCHEMA_,
   'builtin:write_plan': WRITE_PLAN_INPUT_SCHEMA_,
   'builtin:task': TASK_INPUT_SCHEMA_,
+  'builtin:task_read': TASK_READ_INPUT_SCHEMA_,
+  'builtin:task_cancel': TASK_CANCEL_INPUT_SCHEMA_,
   'subagent:start': BUILTIN_JSON_SCHEMAS_['subagent:start'],
   'subagent:resume': BUILTIN_JSON_SCHEMAS_['subagent:resume'],
   'verification:deterministic': BUILTIN_JSON_SCHEMAS_['verification:deterministic'],
@@ -142,6 +151,16 @@ const EFFECTS_ = Object.freeze({
     network: 'unknown',
     externalState: 'none',
   }),
+  'builtin:task_read': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
+  'builtin:task_cancel': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
   'subagent:start': Object.freeze({
     filesystem: 'unknown',
     network: 'unknown',
@@ -166,6 +185,8 @@ const EXECUTION_MECHANISMS_: Readonly<Record<SubagentOperationId, CapabilityExec
     'builtin:update_plan': 'planning',
     'builtin:write_plan': 'planning',
     'builtin:task': 'subagent',
+    'builtin:task_read': 'task_control',
+    'builtin:task_cancel': 'task_control',
     'subagent:start': 'subagent',
     'subagent:resume': 'subagent',
     'verification:deterministic': 'verification',
@@ -222,6 +243,11 @@ export interface BuiltinSubagentExecutionMechanism {
   executeTask(): Promise<Readonly<Record<string, unknown>>>;
 }
 
+export interface BuiltinTaskControlExecutionMechanism {
+  readTask(taskId: string): Promise<Readonly<Record<string, unknown>>>;
+  cancelTask(taskId: string): Promise<Readonly<Record<string, unknown>>>;
+}
+
 export interface BuiltinVerificationExecutionMechanism {
   execute(input: Readonly<Record<string, unknown>>): Promise<BuiltinOperationExecutionValue>;
 }
@@ -229,6 +255,7 @@ export interface BuiltinVerificationExecutionMechanism {
 export interface SubagentExecutionMechanisms extends Readonly<Record<string, unknown>> {
   readonly planning?: BuiltinPlanningExecutionMechanism;
   readonly subagent?: BuiltinSubagentExecutionMechanism;
+  readonly taskControl?: BuiltinTaskControlExecutionMechanism;
   readonly verification?: BuiltinVerificationExecutionMechanism;
 }
 
@@ -288,8 +315,9 @@ function subagentContractOptions(
     operationId === 'builtin:update_plan' ||
     operationId === 'builtin:write_plan';
   const task = operationId === 'builtin:task';
+  const taskControl = operationId === 'builtin:task_read' || operationId === 'builtin:task_cancel';
   const askUser = operationId === 'builtin:ask_user';
-  const readOnly = operationId === 'builtin:read_plan';
+  const readOnly = operationId === 'builtin:read_plan' || taskControl;
   const parser = task
     ? taskRuntimeParser(revision)
     : parserForBuiltinOperation(operationId, revision);
@@ -297,7 +325,9 @@ function subagentContractOptions(
     ? askUserBuiltinPolicyRule
     : task
       ? taskBuiltinPolicyRule
-      : planBuiltinPolicyRule;
+      : taskControl
+        ? readOnlyBuiltinPolicyRule
+        : planBuiltinPolicyRule;
   return {
     parser,
     ...(task
@@ -318,7 +348,7 @@ function subagentContractOptions(
           : ('internal_runtime' as const),
     ...(askUser ? { descriptorRevisionSource: 'content' as const } : {}),
     minimumApproval: task ? ('user' as const) : ('none' as const),
-    ...(task ? { availability: taskAvailability } : {}),
+    ...(task || taskControl ? { availability: taskAvailability } : {}),
     effectsClassifier: task
       ? taskEffectsClassifier(effects)
       : staticEffectsClassifier(
@@ -327,7 +357,9 @@ function subagentContractOptions(
           askUser
             ? 'Pauses execution for explicit user input.'
             : readOnly
-              ? 'Reads the active immutable Plan Artifact.'
+              ? taskControl
+                ? 'Reads or stops one Runtime-owned background sub-agent.'
+                : 'Reads the active immutable Plan Artifact.'
               : planAction
                 ? operationId === 'builtin:update_plan'
                   ? 'Updates progress in the active approved Plan.'
@@ -358,7 +390,14 @@ function subagentContractOptions(
             concurrencyGroup: 'parallel-subagent',
           }),
         }
-      : {}),
+      : taskControl
+        ? {
+            executionTraitsDeclaration: builtinExecutionTraits({
+              resourceScopes: [{ kind: 'subagent', key: 'child' }],
+              interactionBarrier: false,
+            }),
+          }
+        : {}),
     execution: readOnly ? { retry: 'safe_read' as const } : { retry: 'never' as const },
   };
 }
@@ -399,6 +438,12 @@ async function executeSubagentOperation(
       break;
     case 'builtin:task':
       value = await executeTask(input, mechanisms?.subagent);
+      break;
+    case 'builtin:task_read':
+      value = await executeTaskControl('read', input, mechanisms?.taskControl);
+      break;
+    case 'builtin:task_cancel':
+      value = await executeTaskControl('cancel', input, mechanisms?.taskControl);
       break;
     case 'verification:deterministic':
       value = mechanisms?.verification
@@ -454,6 +499,27 @@ async function executeTask(
   });
 }
 
+async function executeTaskControl(
+  action: 'read' | 'cancel',
+  input: Readonly<Record<string, unknown>>,
+  mechanism: BuiltinTaskControlExecutionMechanism | undefined,
+): Promise<BuiltinOperationExecutionValue> {
+  if (!mechanism) return operationFailure('Background sub-agent control Runtime is unavailable.');
+  const taskId =
+    action === 'read'
+      ? BUILTIN_TASK_READ_SCHEMA_.parse(input).task_id
+      : BUILTIN_TASK_CANCEL_SCHEMA_.parse(input).task_id;
+  const result =
+    action === 'read' ? await mechanism.readTask(taskId) : await mechanism.cancelTask(taskId);
+  const ok = result.ok === true;
+  const content = JSON.stringify(result);
+  const status = typeof result.status === 'string' ? result.status : 'unknown';
+  return operationResult(ok, ok ? content : '', ok ? '' : content, undefined, {
+    taskId,
+    taskStatus: status,
+  });
+}
+
 export function projectSubagentResult(input: {
   readonly input: Readonly<Record<string, unknown>>;
   readonly result: Readonly<Record<string, unknown>>;
@@ -468,7 +534,7 @@ export function projectSubagentResult(input: {
     const nextActions = planningContinuationAfterPlanSubagent({
       phase: input.phase,
       role,
-      childTerminal: true,
+      childTerminal: blocked || terminalStatus !== undefined,
       childOk: projected.ok,
       childStatus: blocked ? 'suspended' : terminalStatus,
     });
@@ -476,6 +542,7 @@ export function projectSubagentResult(input: {
       ok: projected.ok,
       summary: projected.summary,
       ...(typeof projected.error === 'string' ? { error: projected.error } : {}),
+      ...(projected.backgroundTaskId ? { task_id: projected.backgroundTaskId } : {}),
       ...(terminalStatus ? { terminalStatus } : {}),
       toolCallCount: projected.toolCallCount,
       durationMs: projected.durationMs,
@@ -486,7 +553,16 @@ export function projectSubagentResult(input: {
       ok: projected.ok,
       stdout: projected.ok ? modelContent : '',
       stderr: projected.ok ? '' : modelContent,
-      resultMeta: Object.freeze({}),
+      resultMeta: Object.freeze({
+        ...(projected.backgroundTaskId
+          ? {
+              taskId: projected.backgroundTaskId,
+              taskStatus: 'running',
+              taskDisposition:
+                input.input.result_disposition === 'after_turn' ? 'after_turn' : 'required',
+            }
+          : {}),
+      }),
       subagentResult: projected,
     }) as BuiltinOperationExecutionValue;
   } catch {
@@ -498,6 +574,7 @@ export function projectSubagentResult(input: {
 }
 
 const SUBAGENT_RESULT_KEYS_ = Object.freeze([
+  'backgroundTaskId',
   'blocked',
   'durationMs',
   'error',
@@ -517,6 +594,7 @@ const SUBAGENT_TERMINAL_STATUSES_ = Object.freeze([
   'completed',
   'failed',
   'cancelled',
+  'interrupted',
   'exhausted',
   'suspended',
 ] as const);
@@ -541,6 +619,7 @@ type ProjectedSubagentResult = Readonly<{
   readonly toolCallCount: number;
   readonly durationMs: number;
   readonly terminalStatus?: (typeof SUBAGENT_TERMINAL_STATUSES_)[number];
+  readonly backgroundTaskId?: string;
   readonly error?: string;
   readonly failureDiagnostic?: RuntimeJsonValue;
   readonly resourceAdmissionFailure?: RuntimeJsonValue;
@@ -580,6 +659,9 @@ function projectSubagentResultPayload(
     durationMs,
   };
   if (terminalStatus !== undefined) projected.terminalStatus = terminalStatus;
+  if (Object.hasOwn(value, 'backgroundTaskId')) {
+    projected.backgroundTaskId = requireString(value.backgroundTaskId, 'result.backgroundTaskId');
+  }
   if (Object.hasOwn(value, 'error')) {
     projected.error = requireString(value.error, 'result.error');
   }
@@ -1181,13 +1263,14 @@ function operationResult(
   stdout: string,
   stderr: string,
   runtimeEvents?: readonly BuiltinRuntimeEventValue[],
+  resultMeta: Readonly<Record<string, RuntimeJsonValue>> = {},
 ): BuiltinOperationExecutionValue {
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok,
     stdout: ok ? stdout : '',
     stderr: ok ? '' : stderr,
-    resultMeta: Object.freeze({}),
+    resultMeta: Object.freeze({ ...resultMeta }),
     ...(ok && runtimeEvents ? { runtimeEvents } : {}),
   }) as BuiltinOperationExecutionValue;
 }

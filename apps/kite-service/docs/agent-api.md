@@ -17,6 +17,7 @@ Browser cookie两种只读principal；default stdio App Server不开放HTTP。Ru
 | `GET /v1/sessions` | 仅Agent bearer的Workspace-scoped Session page；Browser固定404 |
 | `GET /v1/sessions/{session_id}` | closed Session projection与ETag；Browser先验证Directory membership |
 | `GET /v1/sessions/{session_id}/history` | 固定through boundary的safe History；可用互斥的`after_sequence`做增量读取 |
+| `GET /v1/sessions/{session_id}/background-executions` | 当前Session的closed后台执行快照；不暴露private Runtime DTO |
 | `GET /v1/sessions/{session_id}/logs` | 固定through boundary的safe durable diagnostic Log；只投影closed event type/category/status/summary/detail fields |
 | `GET /v1/sessions/{session_id}/model-invocations/{invocation_id}/context` | Browser-only、bounded Model Context；返回exact provider-neutral system/messages/tools与safe settings |
 | `GET /v1/sessions/{session_id}/checkpoints` | safe Checkpoint metadata page |
@@ -56,6 +57,8 @@ detail只允许Runtime log projector的固定kind、标量fields与artifact avai
 `tool.rejected`在History中保持独立`rejected`生命周期，使用稳定reason code和脱敏pre-dispatch摘要；不得映射为`failed`，
 也不得投影raw拒绝reason、exit code或输出。
 Checkpoint cursor按revision/id续页，preview不投影path。
+
+后台执行快照通过Public Agent API codec编码；字段限制为execution identity、Session CAS、aggregate/owner generation、execution revision、kind、status、cleanup、可选cursor及watermark。Service不手写旁路wire，Web也不持有私有decoder。
 
 `model.invocation_prepared` Log只公开opaque invocation identity与purpose。Model Context route先要求Browser Directory membership，再从同一Session的
 prepared event取得private Surface ref，通过Builtin `ModelArtifactStore`完成schema/integrity readback，并交叉验证ref integrity、route fingerprint与purpose。

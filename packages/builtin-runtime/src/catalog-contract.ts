@@ -519,7 +519,14 @@ export function taskRuntimeParser(revision: string): CapabilityParser {
   return createBuiltinZodParser({
     schema: BUILTIN_TASK_RUNTIME_SCHEMA_,
     parserRevision: revision,
-    knownFields: ['name', 'subagent_type', 'task', 'taskArtifact'],
+    knownFields: [
+      'name',
+      'subagent_type',
+      'task',
+      'taskArtifact',
+      'background',
+      'result_disposition',
+    ],
     schemaDigest: digestCapabilityBindingValue(BUILTIN_JSON_SCHEMAS_['builtin:task']),
   });
 }
@@ -528,7 +535,7 @@ export function taskModelParser(revision: string): CapabilityParser {
   return createBuiltinZodParser({
     parserRevision: revision,
     schemaForContext: taskModelSchema,
-    knownFields: ['name', 'subagent_type', 'task'],
+    knownFields: ['name', 'subagent_type', 'task', 'background', 'result_disposition'],
     schemaDigest: digestCapabilityBindingValue(z.toJSONSchema(BUILTIN_TASK_PUBLIC_SCHEMA_)),
   });
 }

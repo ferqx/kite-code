@@ -34,6 +34,10 @@ describe('Builtin catalog schema-hint formatter', () => {
     expect(formatBuiltinToolSchemaHint(modelEntry('update_plan'))).toContain('plan_id');
     expect(formatBuiltinToolSchemaHint(modelEntry('update_plan'))).toContain('complete_plan');
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).toContain('timeout_ms');
+    expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).toContain('yield_ms');
+    expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).toContain(
+      'result_disposition',
+    );
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).not.toContain('exitCode');
   });
 

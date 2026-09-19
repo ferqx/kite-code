@@ -44,6 +44,8 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 [展示类型](src/types.ts)只包含页面使用的数据，不导入 Runtime、Public API、Native 或 TUI 类型。端侧投影将真实数据转换为这些字段；缺失数据不能从名称或相邻消息补造。共享组件保留展开和阅读位置；服务状态、订阅与恢复由端侧现有 owner 管理。
 
+[`BackgroundExecutions`](src/BackgroundExecutions.tsx) 只展示端侧提供的后台执行摘要和 stale 状态。只有宿主显式提供 `onStop` 时才显示停止入口；组件不拥有 Session CAS、execution owner、命令回执或恢复状态。Web 使用只读投影，Desktop 仅对当前连接代次的新鲜 running 项提供宿主回调。
+
 子 Agent 在会话内按自身生命周期显示“创建中、运行中、等待中、自动审批中、已完成、已中断、已取消、已失败”。父 task 工具先完成时，标题仍显示子 Agent 的当前状态；子 Agent 的明确失败原因放在展开内容中。只有存在具体子 Agent 终态原因时，才省去父 task 重复的通用失败句；缺少原因仍保留原错误。
 
 [`AskQuestionnaire`](src/AskQuestionnaire.tsx)基于 `@shadcn/react/questionnaire` 提供补充问题的共享表单结构、原生单选、自由输入、快捷键和必答校验。组件只接收通用问题数据与提交／取消回调，不导入 Runtime 类型；交互队列、回答传输、取消含义和草稿生命周期继续由端侧 owner 负责。

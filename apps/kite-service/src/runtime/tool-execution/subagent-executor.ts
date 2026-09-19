@@ -231,6 +231,8 @@ export type PrivateSubagentTask = {
     readonly name: string;
     readonly subagent_type: 'explore' | 'plan' | 'code' | 'review';
     readonly task: string;
+    readonly background?: boolean;
+    readonly result_disposition?: 'required' | 'after_turn';
   };
 };
 
@@ -1766,6 +1768,7 @@ export async function executeAppTaskToolPipeline(input: {
       descendantResourceAdmission: params.descendantResourceAdmission,
       modelEffectCoordinator: params.modelEffectCoordinator,
       modelInvocationPersistence: params.modelInvocationPersistence,
+      backgroundModelInvocationPersistence: params.backgroundModelInvocationPersistence,
       subagentLifecyclePersistence: {
         getState: params.getRuntimeState!,
         persistEvents: params.persistRuntimeEvents!,
@@ -1784,6 +1787,7 @@ export async function executeAppTaskToolPipeline(input: {
       toolDispatcher: taskChildToolDispatcher,
       maxDepth: 0,
       recordFilePreimage: params.recordFilePreimage,
+      afterTurnContinuationRuntime: params.afterTurnContinuationRuntime,
     };
   };
   let capturedSubagentResult: Readonly<SubAgentResult> | undefined;

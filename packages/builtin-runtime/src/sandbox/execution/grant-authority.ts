@@ -351,6 +351,7 @@ function validatePreparation(value: SandboxPreparation): Readonly<SandboxPrepara
       'networkMode',
       'executionTrust',
       'resourceLimits',
+      'executionMode',
       'timeoutMs',
       'cancellationCorrelation',
     ]) ||
@@ -375,8 +376,9 @@ function validatePreparation(value: SandboxPreparation): Readonly<SandboxPrepara
     !['workspace_only', 'allow_all'].includes(copy.filesystemMode) ||
     !['disabled', 'allow_all'].includes(copy.networkMode) ||
     ![null, 'policy_proven_read_only'].includes(copy.executionTrust) ||
-    !Number.isSafeInteger(copy.timeoutMs) ||
-    copy.timeoutMs < 1 ||
+    !['finite', 'service'].includes(copy.executionMode) ||
+    (copy.timeoutMs !== null && (!Number.isSafeInteger(copy.timeoutMs) || copy.timeoutMs < 1)) ||
+    (copy.executionMode === 'finite' && copy.timeoutMs === null) ||
     !validResourceLimits(copy.resourceLimits) ||
     copy.commandDigest !== sandboxCommandDigest(copy.argv) ||
     !copy.executionBoundaryDigest ||

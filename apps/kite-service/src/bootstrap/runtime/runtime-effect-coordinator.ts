@@ -272,6 +272,11 @@ export function createAppRuntimeEffectExecutor(
       emitRuntimeEvent: emit,
       compactionReporter: dependencies.compactionReporter,
       resourceAdmission: effect.resourceEstimate,
+      replaceReservationId: dependencies.afterTurnContinuationRuntime?.replacementReservationId(
+        state.session.threadId,
+        state.turn.turnId,
+        state,
+      ),
       modelEffectCoordinator,
       modelInvocationPersistence,
       subagentTaskRequests: dependencies.subagentTaskRequests,

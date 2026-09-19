@@ -106,6 +106,28 @@ function project(
 }
 
 describe('RM-14 Builtin subagent result projection', () => {
+  test('projects a required background task as running completion-guard metadata', () => {
+    const projected = project(
+      {
+        ok: true,
+        summary: 'Background child accepted.',
+        backgroundTaskId: 'child-background-1',
+        toolCallCount: 0,
+        durationMs: 0,
+      },
+      {
+        name: 'Inspect README',
+        subagent_type: 'explore',
+        background: true,
+      },
+    );
+    expect(projected.resultMeta).toEqual({
+      taskId: 'child-background-1',
+      taskStatus: 'running',
+      taskDisposition: 'required',
+    });
+  });
+
   test('retains the explicit normal terminal allowlist as exact RuntimeJson', () => {
     const projected = project(completedResult());
     expect(projected).toMatchObject({

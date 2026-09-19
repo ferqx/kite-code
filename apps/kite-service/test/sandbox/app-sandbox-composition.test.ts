@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -18,6 +18,7 @@ import {
   appPreparedShellExecutionPort,
 } from '#kite-service/sandbox/prepared-tool-pipeline';
 import { withAcknowledgedSandboxLifecycleForTest } from '../../../../tests/helpers/sandbox-executor';
+import { ManagedShellRuntime } from '../../src/bootstrap/runtime/managed-shell';
 
 const shellSurface: ExecutionCapabilitySurface = {
   inProcessReadOnlyTools: null,
@@ -110,7 +111,141 @@ function acknowledgedShellInput(workspace: string, command: string): ShellInput 
   };
 }
 
+async function waitForFile(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (existsSync(path)) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Managed process tree did not publish its ready marker: ${path}`);
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidExit(pid: number): Promise<boolean> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) return true;
+    await Bun.sleep(10);
+  }
+  return !isPidAlive(pid);
+}
+
 describe('App sandbox composition', () => {
+  test('runs and cancels a no-deadline service through the real host process tree', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-service-shell-'));
+    const controller = new AbortController();
+    try {
+      const executor = composeAppSandboxExecutor({
+        entrypoint: 'tui',
+        workspace,
+        config: { sandbox: { enabled: false } },
+      });
+      const execution = executor({
+        ...acknowledgedShellInput(workspace, 'sleep 30'),
+        mode: 'service',
+        signal: controller.signal,
+      });
+      setTimeout(() => controller.abort('shell_stop'), 25);
+      const result = await execution;
+      expect(result).toMatchObject({ ok: false, exitCode: 130, terminationReason: 'cancelled' });
+      expect(result.processCleanup?.confirmedExited).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  describe.skipIf(process.platform !== 'darwin')('macOS managed process-tree qualification', () => {
+    for (const qualification of [
+      { name: 'shell_stop', mode: 'finite' as const, stop: 'handle' as const },
+      { name: 'service stop', mode: 'service' as const, stop: 'handle' as const },
+      { name: 'host close', mode: 'service' as const, stop: 'host' as const },
+    ]) {
+      test(`${qualification.name} ends the real parent and descendant before confirming cleanup`, async () => {
+        const workspace = mkdtempSync(join(tmpdir(), 'kite-macos-managed-tree-'));
+        const readyPath = join(workspace, 'ready.pids');
+        const runtime = new ManagedShellRuntime();
+        let parentPid = 0;
+        let descendantPid = 0;
+        try {
+          const executor = composeAppSandboxExecutor({
+            entrypoint: 'tui',
+            workspace,
+            config: { sandbox: { enabled: false } },
+          });
+          const command =
+            `sleep 60 & child=$!; printf '%s %s\\n' "$$" "$child" > ` +
+            `${JSON.stringify(readyPath)}; wait`;
+          const started = await runtime.start({
+            ownerKey: 'macos-session\0workspace',
+            mode: qualification.mode,
+            yieldMs: 0,
+            execute: async (signal, onProgress) => ({
+              ...(await executor({
+                ...acknowledgedShellInput(workspace, command),
+                mode: qualification.mode,
+                signal,
+                onProgress,
+              })),
+              intent: 'other',
+            }),
+          });
+
+          await waitForFile(readyPath);
+          [parentPid, descendantPid] = readFileSync(readyPath, 'utf8')
+            .trim()
+            .split(/\s+/)
+            .map(Number) as [number, number];
+          expect(isPidAlive(parentPid)).toBe(true);
+          expect(isPidAlive(descendantPid)).toBe(true);
+          expect(
+            runtime.listSnapshot('macos-session', 'macos-session\0workspace').executions[0],
+          ).toMatchObject({ status: 'running', cleanupConfirmed: false });
+
+          if (qualification.stop === 'host') await runtime.dispose();
+          else await runtime.stop(started.shellId, 'macos-session\0workspace');
+
+          if (qualification.stop !== 'host') {
+            const terminal = runtime.read(started.shellId, 'macos-session\0workspace');
+            expect(terminal).toMatchObject({
+              status: 'exited',
+              result: {
+                ok: false,
+                exitCode: 130,
+                terminationReason: 'cancelled',
+                processCleanup: { confirmedExited: true, unconfirmedDescendantCount: 0 },
+              },
+            });
+            expect(
+              runtime.listSnapshot('macos-session', 'macos-session\0workspace').executions[0],
+            ).toMatchObject({ cleanupConfirmed: true });
+          }
+          expect(await waitForPidExit(parentPid)).toBe(true);
+          expect(await waitForPidExit(descendantPid)).toBe(true);
+        } finally {
+          for (const pid of [parentPid, descendantPid]) {
+            if (!isPidAlive(pid)) continue;
+            try {
+              process.kill(pid, 'SIGKILL');
+            } catch {
+              // The bounded assertion already observed termination.
+            }
+          }
+          await runtime.dispose();
+          rmSync(workspace, { recursive: true, force: true });
+        }
+      });
+    }
+  });
+
   test('a deleted Session workspace leaves Shell at its original missing cwd', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-deleted-workspace-shell-'));
     const workspace = join(root, 'removed');

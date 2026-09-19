@@ -26,6 +26,7 @@ import {
   SubagentContinuationArtifactStore,
   type SubagentLifecycleArtifactAccess,
   SubagentLifecycleArtifactStore,
+  SubagentResultArtifactStore,
   type SubagentTaskArtifactAccess,
   SubagentTaskArtifactStore,
   type SubagentTaskRequestArtifactAccess,
@@ -35,6 +36,14 @@ import { planModelInvocationResource } from '@kite-ai/runtime-host/kernel-adapte
 import { userKiteCodeDir } from '#kite-service/config/paths';
 import type { KiteHomeBuiltinArtifactBackends } from './kite-home-artifact-backends';
 import type { RuntimeState } from './runtime/state-runtime';
+import {
+  AfterTurnContinuationRuntime,
+  type AfterTurnWakeScheduler,
+} from './runtime/subagent/after-turn-continuation';
+import {
+  type BackgroundSubagentControlRuntime,
+  BackgroundSubagentRuntime,
+} from './runtime/subagent/background-runtime';
 import {
   type AppSubagentRuntimeFactory,
   createPipelineSubagentRuntime,
@@ -47,11 +56,16 @@ type InstalledSubagentComposition = GovernedSubagentComposition<
   SubagentTaskArtifactAccess
 >;
 
-const installedSubagentCompositions = new Map<string, InstalledSubagentComposition>();
+interface InstalledSubagentRuntime {
+  readonly composition: InstalledSubagentComposition;
+  readonly background: BackgroundSubagentRuntime;
+}
+
+const installedSubagentCompositions = new Map<string, InstalledSubagentRuntime>();
 
 function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends) {
   if (backends) {
-    return createGovernedLocalSubagentComposition({
+    const composition = createGovernedLocalSubagentComposition({
       driver: new BuiltinChildRuntimeDriver(),
       taskArtifacts: new SubagentTaskArtifactStore({
         backend: backends.subagentTask,
@@ -60,6 +74,12 @@ function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends
         backend: backends.subagentLifecycle,
       }),
     });
+    return {
+      composition,
+      background: new BackgroundSubagentRuntime(
+        new SubagentResultArtifactStore({ backend: backends.subagentTask }),
+      ),
+    };
   }
   const installation = userKiteCodeDir();
   const existing = installedSubagentCompositions.get(installation);
@@ -71,8 +91,12 @@ function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends
     taskArtifacts,
     lifecycleArtifacts,
   });
-  installedSubagentCompositions.set(installation, composition);
-  return composition;
+  const runtime = {
+    composition,
+    background: new BackgroundSubagentRuntime(new SubagentResultArtifactStore()),
+  };
+  installedSubagentCompositions.set(installation, runtime);
+  return runtime;
 }
 
 export type InstalledKiteRuntimeComposition = {
@@ -96,6 +120,8 @@ export type InstalledKiteRuntimeComposition = {
   workspaceFilesystem?: BuiltinWorkspaceFilesystemRuntime;
   sandboxPreparationArtifacts: SandboxPreparationArtifactStore;
   subagentRuntimeFactory: AppSubagentRuntimeFactory;
+  backgroundSubagentRuntime: BackgroundSubagentControlRuntime;
+  afterTurnContinuationRuntime?: AfterTurnContinuationRuntime;
   reconcilePendingSubagents: (
     persistence: Parameters<typeof reconcilePendingSubagentProvidersAfterCrash>[0]['persistence'],
     options?: Readonly<{
@@ -114,9 +140,13 @@ export type InstalledKiteRuntimeCompositionFactory = (
 export function createInstalledKiteRuntimeCompositionFactory(
   operationExecution: BuiltinModelOperationExecutionPort,
   artifactBackends?: KiteHomeBuiltinArtifactBackends,
+  afterTurnScheduler?: AfterTurnWakeScheduler,
 ): InstalledKiteRuntimeCompositionFactory {
   const installed = new Map<string, InstalledKiteRuntimeComposition>();
   const subagentComposition = installedSubagentComposition(artifactBackends);
+  const afterTurnContinuationRuntime = afterTurnScheduler
+    ? new AfterTurnContinuationRuntime(afterTurnScheduler)
+    : undefined;
   return (workspace) => {
     const canonicalWorkspace = canonicalPathForComparison(workspace);
     const existing = installed.get(canonicalWorkspace);
@@ -126,6 +156,7 @@ export function createInstalledKiteRuntimeCompositionFactory(
       operationExecution,
       artifactBackends,
       subagentComposition,
+      afterTurnContinuationRuntime,
     );
     installed.set(canonicalWorkspace, created);
     return created;
@@ -137,7 +168,8 @@ export function resolveInstalledKiteRuntimeComposition(
   workspace?: string,
   operationExecution?: BuiltinModelOperationExecutionPort,
   artifactBackends?: KiteHomeBuiltinArtifactBackends,
-  injectedSubagentComposition?: InstalledSubagentComposition,
+  injectedSubagentRuntime?: InstalledSubagentRuntime,
+  afterTurnContinuationRuntime?: AfterTurnContinuationRuntime,
 ): InstalledKiteRuntimeComposition {
   if (!operationExecution) {
     throw new Error('Builtin Model operation execution port is unavailable.');
@@ -154,8 +186,10 @@ export function resolveInstalledKiteRuntimeComposition(
   const sandboxPreparationArtifacts = new SandboxPreparationArtifactStore(
     artifactBackends ? { backend: artifactBackends.sandboxPreparation } : {},
   );
-  const subagentComposition =
-    injectedSubagentComposition ?? installedSubagentComposition(artifactBackends);
+  const installedSubagents = injectedSubagentRuntime
+    ? injectedSubagentRuntime
+    : installedSubagentComposition(artifactBackends);
+  const subagentComposition = installedSubagents.composition;
   const subagentContinuationStore = new SubagentContinuationArtifactStore(
     artifactBackends ? { backend: artifactBackends.subagentContinuation } : {},
   );
@@ -191,11 +225,15 @@ export function resolveInstalledKiteRuntimeComposition(
     planArtifacts,
     capabilityArtifacts,
     sandboxPreparationArtifacts,
-    subagentRuntimeFactory: () => createPipelineSubagentRuntime(() => subagentComposition),
+    subagentRuntimeFactory: () =>
+      createPipelineSubagentRuntime(() => subagentComposition, installedSubagents.background),
+    backgroundSubagentRuntime: installedSubagents.background,
+    ...(afterTurnContinuationRuntime ? { afterTurnContinuationRuntime } : {}),
     reconcilePendingSubagents: (persistence, options) =>
       reconcilePendingSubagentProvidersAfterCrash({
         composition: subagentComposition,
         persistence,
+        isLiveBackgroundTask: (taskId) => installedSubagents.background.hasLiveTask(taskId),
         ...(options?.terminalDisposition
           ? { terminalDisposition: options.terminalDisposition }
           : {}),

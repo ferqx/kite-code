@@ -20,6 +20,8 @@ Host coordinator 维护 attempt 和提交身份，Builtin callback 提供实际�
 
 Subagent suspension 的等待事实绑定已解析参数；不能将 raw input 摘要作为第二执行身份。重试要保留正确的已执行/未执行边界，不通过重复调用制造一次成功结果。
 
+Shell 契约区分有限 `shell_execute`、增量 `shell_read`、精确 `shell_stop` 与显式 service；running 结果只发布受管句柄，不伪造 exit code。有限执行默认是本轮 required 义务，匹配的 read/stop 观察到真实终态后才能通过完成守卫。后台 `task` 同样用稳定 task identity 与 `task_read`/`task_cancel` 收敛；唯一 Runtime watcher 先把完整结果写入不可变 Artifact，再发布有界具名报告。`result_disposition=after_turn` 与 `background=true` 独立，缺少结构化授权或正预算预留时在派发前拒绝。
+
 ## 新增工具时
 
 先定义产品目的和输入输出，再选择现有 owner module，补全声明、解析、effects/traits、机制与 terminal 投影。把生产注册、模型披露、策略与验证一起核对；不要仅在测试注册工具。

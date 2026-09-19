@@ -1,6 +1,7 @@
 import {
   AGENT_API_ARTIFACT_DIGEST,
   AGENT_API_VERSION,
+  type AgentApiBackgroundExecutionPage,
   type AgentApiCheckpointPage,
   type AgentApiCheckpointPreview,
   type AgentApiHistoryPage,
@@ -11,6 +12,7 @@ import {
   type AgentApiSession,
   type AgentApiSessionPage,
   type AgentApiWorkspacePage,
+  agentApiBackgroundExecutionPageSchema,
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
   agentApiHistoryPageSchema,
@@ -54,6 +56,10 @@ export interface AgentApiBrowserClient {
     options?: AgentApiSessionPageOptions,
   ): Promise<AgentApiSessionPage>;
   getSession(sessionId: string, signal?: AbortSignal): Promise<AgentApiSession>;
+  listBackgroundExecutions(
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<AgentApiBackgroundExecutionPage>;
   listHistory(
     sessionId: string,
     options?: AgentApiHistoryPageOptions,
@@ -118,6 +124,12 @@ export function createAgentApiBrowserClient(
         method: 'GET',
         signal,
       }),
+    listBackgroundExecutions: (sessionId, signal) =>
+      requestJson(
+        `/v1/sessions/${identifier(sessionId)}/background-executions`,
+        agentApiBackgroundExecutionPageSchema,
+        { method: 'GET', signal },
+      ),
     listHistory: (sessionId, page = {}) =>
       requestJson(
         `/v1/sessions/${identifier(sessionId)}/history${historyPageQuery(page)}`,

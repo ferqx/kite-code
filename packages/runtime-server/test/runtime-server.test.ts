@@ -34,6 +34,27 @@ const initialize = {
 } as const;
 
 describe('Runtime Server', () => {
+  test('advertises optional features only after explicit initialize negotiation', async () => {
+    const legacy = createPair(new FakeRuntime());
+    const legacyMessages = legacy.client.messages()[Symbol.asyncIterator]();
+    await legacy.client.send(initialize);
+    expect(await next(legacyMessages)).not.toHaveProperty('result.capabilities.features');
+
+    const negotiated = createPair(new FakeRuntime());
+    const negotiatedMessages = negotiated.client.messages()[Symbol.asyncIterator]();
+    await negotiated.client.send({
+      ...initialize,
+      params: { ...initialize.params, featureNegotiation: true },
+    });
+    expect(await next(negotiatedMessages)).toMatchObject({
+      result: {
+        capabilities: {
+          features: { steer: true, backgroundQuery: true, backgroundControl: true },
+        },
+      },
+    });
+  });
+
   test('releases global subscription capacity after admission throws', async () => {
     const runtime = new FakeRuntime();
     runtime.notifications = emptyIndex();

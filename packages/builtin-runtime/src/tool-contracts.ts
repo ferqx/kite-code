@@ -59,6 +59,8 @@ export const KNOWN_TOOL_NAMES = [
   'edit_file',
   'write_file',
   'shell_execute',
+  'shell_read',
+  'shell_stop',
   'search_content',
   'search_files',
   'tool_search',
@@ -72,12 +74,14 @@ export const KNOWN_TOOL_NAMES = [
   'update_plan',
   'ask_user',
   'task',
+  'task_read',
+  'task_cancel',
   'web_fetch',
 ] as const;
 
 export type KnownToolName = (typeof KNOWN_TOOL_NAMES)[number];
 
-/** Canonical 19/19 builtin contract facts. No Runner or prompt layer owns a second guidance table. */
+/** Canonical builtin contract facts. No Runner or prompt layer owns a second guidance table. */
 export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContractSection>> = {
   read_file: {
     summary: 'Read a text file with line numbers.',
@@ -156,6 +160,29 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'The model supplies command plus optional description/timeout_ms only; policy derives effects and exact approval. Commands whose effects cannot be proven require user approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
     recovery:
       'A planning write is deferred until building: do not retry and do not ask for shell approval. Policy/approval denial, timeout, cancellation or unknown effects are never replayed; correct only explicit pre-dispatch argument errors.',
+  },
+  shell_read: {
+    summary: 'Read bounded output or wait for a managed Shell execution.',
+    useWhen: 'Inspect a shell_execute handle; use wait_until terminal when no other work remains.',
+    returns: {
+      format: 'json',
+      description: 'Current status, cursor, bounded output and terminal cleanup facts.',
+    },
+    constraints:
+      'The handle must belong to the active Runtime scope. wait_ms and wait_until are mutually exclusive.',
+    recovery: 'A cancelled read ends only the wait; use shell_stop to terminate the execution.',
+  },
+  shell_stop: {
+    summary: 'Stop one managed Shell execution.',
+    useWhen: 'Terminate an exact shell_id previously returned by shell_execute.',
+    returns: {
+      format: 'json',
+      description: 'The terminal process and cleanup facts after stop is accepted.',
+    },
+    constraints:
+      'Only exact Runtime-owned handles are accepted; arbitrary process ids are rejected.',
+    recovery:
+      'If cleanup is unconfirmed, report that fact and do not claim the process tree stopped.',
   },
   search_content: {
     summary: 'Search file contents by regular expression.',
@@ -370,6 +397,36 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     recovery:
       'Approval/policy denial and exhausted/unknown child effects are not replayed. Resume only a Runtime-owned continuation; use a new bounded task only after real replan/user/provider progress.',
   },
+  task_read: {
+    summary: 'Read the current status or durable terminal report for one background sub-agent.',
+    useWhen:
+      'Inspect the exact task_id returned by a background task. Repeated reads are non-consuming and never observe the child Provider directly.',
+    returns: {
+      format: 'json',
+      description:
+        'The stable task identity, lifecycle status, cleanup facts and terminal report when available.',
+      fields: ['ok', 'task_id', 'status', 'cleanup_confirmed', 'result', 'artifact'],
+    },
+    constraints:
+      'The task must belong to the active Session and Runtime owner. Reading does not grant cancellation or execution authority.',
+    recovery:
+      'A missing or foreign task identity is terminal for that invocation; use an exact previously returned task_id rather than guessing.',
+  },
+  task_cancel: {
+    summary: 'Stop one Runtime-owned background sub-agent and wait for its cleanup result.',
+    useWhen:
+      'Stop the exact task_id returned by a background task without cancelling the main Run.',
+    returns: {
+      format: 'json',
+      description:
+        'Cancellation acceptance plus the target terminal status, report reference and cleanup confirmation.',
+      fields: ['ok', 'task_id', 'status', 'cancel_requested', 'cleanup_confirmed', 'result'],
+    },
+    constraints:
+      'The task must belong to the active Session and Runtime owner. Cancellation affects only that child and its governed descendants.',
+    recovery:
+      'Repeated cancellation returns the existing terminal fact. If cleanup is unconfirmed, report it and do not claim the child stopped.',
+  },
   web_fetch: {
     summary: 'Fetch and extract one public HTTP or HTTPS document.',
     useWhen:
@@ -406,6 +463,8 @@ export const WRITE_PLAN_CONTRACT = currentToolContract('write_plan');
 export const UPDATE_PLAN_CONTRACT = currentToolContract('update_plan');
 export const ASK_USER_CONTRACT = currentToolContract('ask_user');
 export const TASK_CONTRACT = currentToolContract('task');
+export const TASK_READ_CONTRACT = currentToolContract('task_read');
+export const TASK_CANCEL_CONTRACT = currentToolContract('task_cancel');
 export const WEB_FETCH_CONTRACT = currentToolContract('web_fetch');
 
 /** Current contract registry view. */

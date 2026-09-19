@@ -250,7 +250,13 @@ async function createDaemonWebOwners(
     isClientGenerationCurrent: () => false,
     capabilities: [],
     browserReadContext,
-    browserCapabilities: ['checkpoints', 'history', 'sessions', 'workspaces'],
+    browserCapabilities: [
+      'background_executions',
+      'checkpoints',
+      'history',
+      'sessions',
+      'workspaces',
+    ],
   });
   try {
     const webGateway = createWebGatewayCarrier({

@@ -236,6 +236,8 @@ export async function executeAppRuntimeToolsEffect(
             sandboxBackendAvailable(dependencies.sandboxBackend ?? 'none'),
           authorizationObservedAt: Date.now(),
           subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
+          backgroundSubagentRuntime: dependencies.backgroundSubagentRuntime,
+          afterTurnContinuationRuntime: dependencies.afterTurnContinuationRuntime,
           subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
           subagentTaskRequests: dependencies.subagentTaskRequests,
           modelInvocationPersistence: executionContext
@@ -244,6 +246,7 @@ export async function executeAppRuntimeToolsEffect(
                 persistEvents: executionContext.persistEvents,
               }
             : undefined,
+          backgroundModelInvocationPersistence: dependencies.backgroundModelInvocationPersistence,
           modelInvocationParentReservationId: parentReservationId,
           subagentConcurrencyGroupId,
           subagentAutoReviewBatch: parallelExploreBatch,
