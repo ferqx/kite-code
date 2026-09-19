@@ -469,7 +469,7 @@ export function projectEventWithIdentity(
         role: 'assistant',
         text: event.summary ?? '',
         settled: true,
-        finalReply: event.toolCallCount === 0,
+        finalReply: false,
       };
       break;
     case 'tool.queued':

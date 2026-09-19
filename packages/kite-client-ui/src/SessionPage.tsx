@@ -48,6 +48,7 @@ export interface SessionPageProps {
   headerActions?: ReactNode;
   onHeaderMouseDown?: (clickCount: 1 | 2) => void;
   interaction?: ReactNode;
+  statusNotice?: ReactNode;
   beforeConversation?: ReactNode;
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
@@ -383,6 +384,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   {!props.workbench && !props.scheduledTasks && (
                     <footer className="conversation-footer">
                       <div className="bottom-controls">
+                        {props.statusNotice}
                         {props.interaction && (
                           <div className="interaction-area">{props.interaction}</div>
                         )}

@@ -382,7 +382,7 @@ describe('CompletionGuard V1', () => {
     });
   });
 
-  test('keeps a required background child blocking after durable result until task_read is processed', () => {
+  test('settles a required background child from its admitted durable result', () => {
     let state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '1'.repeat(64),
       threadId: 'required-background-child',
@@ -418,41 +418,47 @@ describe('CompletionGuard V1', () => {
       nextAction: 'wait_for_tool',
     });
 
-    // Artifact persistence and its short-report context fact are not the model's
-    // authoritative consumption of the terminal result.
     state = {
       ...state,
-      transcript: {
-        ...state.transcript,
-        messages: [
-          ...state.transcript.messages,
-          {
-            kind: 'user',
-            messageId: `subagent:child-required-1:sha256:${'a'.repeat(64)}`,
-            turnId: state.turn.turnId,
-            ordinal: 0,
-            createdAt: '1970-01-01T00:00:00.000Z',
-            content: 'child result is durable',
+      capabilities: {
+        ...state.capabilities,
+        invocations: {
+          background: {
+            invocationId: 'background',
+            toolCallId: 'start',
+            capabilityId: 'subagent',
+            capabilityRevision: 'v1',
+            argumentsDigest: 'arguments',
+            authorizationDigest: 'authorization',
+            effectiveEffectsDigest: 'effects',
+            status: 'succeeded',
+            recordedAt: '2026-09-20T00:00:00.000Z',
+            subagentProviderLifecycle: {
+              attempt: 1,
+              purpose: 'start',
+              childInvocationId: 'child-required-1',
+              taskArtifact: {
+                artifactId: 'task-artifact',
+                kind: 'subagent_task',
+                integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+                byteLength: 1,
+              },
+              dispatchIntentDigest: `sha256:${'b'.repeat(64)}`,
+              status: 'cleanup_completed',
+              recordedAt: '2026-09-20T00:00:00.000Z',
+              cleanupConfirmed: true,
+              backgroundResult: {
+                taskId: 'child-required-1',
+                notificationId: `subagent:child-required-1:sha256:${'c'.repeat(64)}`,
+                artifactIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
+                originRunId: 'run-1',
+                originTurnId: state.turn.turnId,
+                originToolCallId: 'start',
+                attempt: 1,
+              },
+            },
           },
-        ],
-      },
-    };
-    expect(decideUnplannedCompletion(state)).toMatchObject({
-      status: 'blocked',
-      code: 'tool_pending',
-    });
-
-    state.tools.calls.read = {
-      toolCallId: 'read',
-      modelMessageId: 'model-read',
-      name: 'task_read',
-      args: { task_id: 'child-required-1' },
-      status: 'succeeded',
-      createdAtTurnId: state.turn.turnId,
-      result: {
-        ok: true,
-        summary: 'completed',
-        resultMeta: { taskId: 'child-required-1', taskStatus: 'completed' },
+        },
       },
     };
     expect(decideUnplannedCompletion(state)).toEqual({
@@ -492,8 +498,7 @@ describe('CompletionGuard V1', () => {
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    let wake!: () => void;
-    const waiting = new Promise<void>((resolve) => (wake = resolve));
+    const wakes: Array<(reason: 'state_changed' | 'managed_shell_changed') => void> = [];
     let modelCalls = 0;
     const stream = runStateRuntimeLoop(
       kernel,
@@ -507,7 +512,10 @@ describe('CompletionGuard V1', () => {
       undefined,
       undefined,
       undefined,
-      async () => waiting,
+      async () =>
+        new Promise<'state_changed' | 'managed_shell_changed'>((resolve) => {
+          wakes.push(resolve);
+        }),
     );
 
     expect((await stream.next()).value).toMatchObject({
@@ -518,6 +526,10 @@ describe('CompletionGuard V1', () => {
     const resumed = stream.next();
     await Promise.resolve();
     expect(modelCalls).toBe(0);
+    wakes.shift()!('state_changed');
+    await Bun.sleep(0);
+    expect(modelCalls).toBe(0);
+    expect(wakes).toHaveLength(1);
     (kernel.getState().tools.calls as Record<string, (typeof state.tools.calls)[string]>).read = {
       toolCallId: 'read',
       modelMessageId: 'model-read',
@@ -531,7 +543,7 @@ describe('CompletionGuard V1', () => {
         resultMeta: { taskId: 'child-wait-1', taskStatus: 'completed' },
       },
     };
-    wake();
+    wakes.shift()!('state_changed');
     expect((await resumed).value).toMatchObject({
       type: 'model.responded',
       messageId: 'after-wake',

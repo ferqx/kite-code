@@ -60,6 +60,7 @@ import { createAppToolPipelineComposition } from '../../../src/bootstrap/runtime
 import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
+  createAppSharedChildToolDispatcher,
   createKernelApprovalBindingForBlockedSubagent,
   effectiveSubagentInteractionMode,
 } from '../../../src/runtime/tool-execution/subagent-executor';
@@ -576,6 +577,71 @@ async function executeUpdatePlan(
 }
 
 describe('executeTestRuntimeTools', () => {
+  test('uses detached persistence for a background child after the parent effect channel closes', async () => {
+    let liveState = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'detached-child-tool-persistence',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    let parentPersistenceCalls = 0;
+    const detachedEvents: RuntimeEvent[] = [];
+    const persistDetached = async (events: RuntimeEvent[]) => {
+      detachedEvents.push(...events);
+      for (const event of events) liveState = reduceCurrentEvent(liveState, event);
+      return true;
+    };
+    const catalog = testBuiltinToolCatalog();
+    const dispatcher = createAppSharedChildToolDispatcher({
+      parentToolCallId: 'background-task',
+      persistence: {
+        getState: () => liveState,
+        persistEvents: persistDetached,
+      },
+      params: {
+        state: liveState,
+        toolCallIds: [],
+        capabilityExecution: testRuntimeCapabilityExecutionPort(),
+        builtinToolCatalog: catalog,
+        toolPipelineComposition: createAppToolPipelineComposition(catalog),
+        getRuntimeState: () => liveState,
+        persistRuntimeEvents: async () => {
+          parentPersistenceCalls += 1;
+          return false;
+        },
+      },
+    });
+
+    const dispatched = await dispatcher.dispatch({
+      subagentId: 'background-child',
+      modelInvocationId: 'background-child-model',
+      modelToolCallId: 'read-fixture',
+      request: {
+        source: 'builtin',
+        name: 'read_file',
+        args: { path: 'package.json' },
+        reason: 'Read the fixture through detached persistence.',
+        protectedCommand: 'read_file package.json',
+      },
+      signal: new AbortController().signal,
+    });
+
+    expect(parentPersistenceCalls).toBe(0);
+    expect(detachedEvents).toContainEqual(
+      expect.objectContaining({ type: 'tool.queued', toolCallId: dispatched.runtimeToolCallId }),
+    );
+    expect(detachedEvents).toContainEqual(
+      expect.objectContaining({
+        type: expect.stringMatching(/^tool\.(finished|failed|rejected)$/),
+        toolCallId: dispatched.runtimeToolCallId,
+      }),
+    );
+    expect(dispatched.result.stderr).not.toContain('queue acknowledgement became stale');
+    expect(liveState.tools.calls[dispatched.runtimeToolCallId]?.status).toMatch(
+      /^(succeeded|failed|rejected|exhausted)$/,
+    );
+  });
+
   for (const status of ['approved', 'queued'] as const) {
     test(`rejects a ${status} private continuation before a new parent Task attempt`, async () => {
       const state = privateSuspensionFaultState(status);

@@ -4,6 +4,8 @@
 
 完成由 canonical facts、计划身份及所需执行/验证证据决定，不读取模型最后一句“完成”或客户端是否仍显示 Working。计划任务和非计划任务有各自完成输入；证据 identity 不匹配不能借用另一任务的成功。
 
+本轮 required 后台子 Agent 的已接纳 `backgroundResult` 是其生命周期终态事实；完成守卫按原始工具、task identity 与当前工作归属核对后直接解除对应等待。`task_read` 的终态结果同样可提供证据，但不是后台结果已经持久化后的第二次确认权威。
+
 ## 不同终点
 
 completed、aborted、blocked、unknown、budget_exhausted 和 resource_saturated 具有不同恢复含义。失败分类不能丢弃已知副作用，unknown 不能被转成普通失败后自动重放。

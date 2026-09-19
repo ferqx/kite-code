@@ -844,8 +844,13 @@ export function createAppSharedChildToolDispatcher(input: {
   readonly params: AppRuntimeToolExecutionInput;
   readonly parentToolCallId: string;
   readonly parentTaskId?: string;
+  /** Persistence authority that remains live after a detached parent effect settles. */
+  readonly persistence?: Pick<
+    NonNullable<AppRuntimeToolExecutionInput['backgroundModelInvocationPersistence']>,
+    'getState' | 'persistEvents'
+  >;
 }): SubAgentToolDispatcher {
-  const { params, parentToolCallId, parentTaskId } = input;
+  const { params, parentToolCallId, parentTaskId, persistence } = input;
   return {
     dispatch: async (childInput) => {
       const runtimeToolCallId = childRuntimeToolCallId({
@@ -871,16 +876,10 @@ export function createAppSharedChildToolDispatcher(input: {
           safeAutomaticRetry: false,
         },
       });
-      const beforeQueue = params.getRuntimeState?.();
-      if (!beforeQueue || !params.persistRuntimeEvents) {
-        return {
-          runtimeToolCallId,
-          result: failClosed('Runtime persistence is unavailable for child tool dispatch.'),
-        };
-      }
-      const getChildRuntimeState = params.getRuntimeState;
-      const persistChildRuntimeEvents = params.persistRuntimeEvents;
-      if (!getChildRuntimeState || !persistChildRuntimeEvents) {
+      const getChildRuntimeState = persistence?.getState ?? params.getRuntimeState;
+      const persistChildRuntimeEvents = persistence?.persistEvents ?? params.persistRuntimeEvents;
+      const beforeQueue = getChildRuntimeState?.();
+      if (!getChildRuntimeState || !beforeQueue || !persistChildRuntimeEvents) {
         return {
           runtimeToolCallId,
           result: failClosed('Runtime persistence is unavailable for child tool dispatch.'),
@@ -1452,6 +1451,9 @@ export async function executeAppTaskToolPipeline(input: {
     params,
     parentToolCallId: toolCallId,
     ...(call.taskId ? { parentTaskId: call.taskId } : {}),
+    ...(privateTask.payload.background === true && params.backgroundModelInvocationPersistence
+      ? { persistence: params.backgroundModelInvocationPersistence }
+      : {}),
   });
   let productionFlags = getFeatureFlags(params.taskConfig);
   let turnContext = createAppToolTurnContext({
@@ -1596,6 +1598,9 @@ export async function executeAppTaskToolPipeline(input: {
       params,
       parentToolCallId: toolCallId,
       ...(call.taskId ? { parentTaskId: call.taskId } : {}),
+      ...(privateTask.payload.background === true && params.backgroundModelInvocationPersistence
+        ? { persistence: params.backgroundModelInvocationPersistence }
+        : {}),
     });
     productionFlags = getFeatureFlags(params.taskConfig);
     turnContext = createAppToolTurnContext({

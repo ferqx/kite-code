@@ -114,7 +114,7 @@ function withCompletedPlan(state: AgentState, document: PlanDocument): AgentStat
 }
 
 describe('State CompletionGuard parity', () => {
-  test('blocks a required background task until task_read or task_cancel records its terminal', () => {
+  test('settles a required background task from either its durable result or task control', () => {
     const state = initialState();
     const background = {
       toolCallId: 'task-start',
@@ -156,6 +156,54 @@ describe('State CompletionGuard parity', () => {
       status: 'blocked',
       code: 'tool_pending',
       nextAction: 'wait_for_tool',
+    });
+
+    const durableSettled = {
+      ...waiting,
+      capabilities: {
+        ...waiting.capabilities,
+        invocations: {
+          background: {
+            invocationId: 'background',
+            toolCallId: 'task-start',
+            capabilityId: 'subagent',
+            capabilityRevision: 'v1',
+            argumentsDigest: 'arguments',
+            authorizationDigest: 'authorization',
+            effectiveEffectsDigest: 'effects',
+            status: 'succeeded' as const,
+            recordedAt: '2026-09-20T00:00:00.000Z',
+            subagentProviderLifecycle: {
+              attempt: 1,
+              purpose: 'start' as const,
+              childInvocationId: 'child-1',
+              taskArtifact: {
+                artifactId: 'task-artifact',
+                kind: 'subagent_task' as const,
+                integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+                byteLength: 1,
+              },
+              dispatchIntentDigest: `sha256:${'b'.repeat(64)}`,
+              status: 'cleanup_completed' as const,
+              recordedAt: '2026-09-20T00:00:00.000Z',
+              cleanupConfirmed: true,
+              backgroundResult: {
+                taskId: 'child-1',
+                notificationId: `subagent:child-1:sha256:${'c'.repeat(64)}`,
+                artifactIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
+                originRunId: 'run-1',
+                originTurnId: state.turn.turnId,
+                originToolCallId: 'task-start',
+                attempt: 1,
+              },
+            },
+          },
+        },
+      },
+    } as AgentState;
+    expect(decideUnplannedCompletion(durableSettled)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
     });
 
     for (const name of ['task_read', 'task_cancel'] as const) {

@@ -205,7 +205,7 @@ test('cumulative text and a late delta cannot duplicate or overwrite durable out
     text: 'Final answer',
     settled: true,
     turnId: 'turn-1',
-    finalReply: true,
+    finalReply: false,
   });
 });
 

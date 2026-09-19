@@ -794,9 +794,13 @@ export async function* executeRuntimeTurn(
         const revision = state.revision;
         const ownerKey = managedShellOwnerKey(input.threadId, input.workspace);
         const shellWatermark = managedShellRuntime.ownerWatermark(ownerKey);
-        await Promise.race([
-          kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {}),
-          managedShellRuntime.waitForOwnerChange(ownerKey, shellWatermark, waitSignal),
+        return Promise.race([
+          (
+            kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
+          ).then(() => 'state_changed' as const),
+          managedShellRuntime
+            .waitForOwnerChange(ownerKey, shellWatermark, waitSignal)
+            .then(() => 'managed_shell_changed' as const),
         ]);
       },
     );

@@ -685,16 +685,18 @@ export function App({ client }: { client: DesktopClient }) {
               })
             }
           />
-        ) : (
-          !workbenchView &&
-          !scheduledTasksView &&
-          !preparing &&
-          projection?.currentRun?.status === 'waiting' && (
-            <p className="notice">
-              进行中 · 正在等待后台结果。可以继续发送引导、查看 Shell 日志或停止当前任务。
-            </p>
-          )
-        )
+        ) : undefined
+      }
+      statusNotice={
+        !workbenchView &&
+        !scheduledTasksView &&
+        !preparing &&
+        !interaction &&
+        projection?.currentRun?.status === 'waiting' ? (
+          <p className="notice">
+            进行中 · 正在等待后台结果。可以继续发送引导、查看 Shell 日志或停止当前任务。
+          </p>
+        ) : undefined
       }
       composer={
         workbenchView || scheduledTasksView

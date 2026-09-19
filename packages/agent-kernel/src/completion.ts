@@ -387,6 +387,19 @@ function hasRequiredBackgroundTask(state: AgentState): boolean {
       })
       .map((call) => call.result!.resultMeta!.taskId!),
   );
+  for (const invocation of Object.values(state.capabilities.invocations)) {
+    const result = invocation.subagentProviderLifecycle?.backgroundResult;
+    const originCall = result ? state.tools.calls[result.originToolCallId] : undefined;
+    if (
+      result &&
+      originCall &&
+      invocation.toolCallId === result.originToolCallId &&
+      originCall.result?.resultMeta?.taskId === result.taskId &&
+      toolCallBelongsToCurrentWork(state, originCall)
+    ) {
+      settledTasks.add(result.taskId);
+    }
+  }
   return Object.values(state.tools.calls).some((call) => {
     const meta = call.result?.resultMeta;
     return (

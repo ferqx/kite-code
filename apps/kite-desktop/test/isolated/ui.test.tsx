@@ -1840,6 +1840,30 @@ test('waiting approval hides the prompt input and stop control while preserving 
   expect(input().value).toBe('稍后的要求');
 });
 
+test('waiting for background results keeps steering and stop controls available', async () => {
+  const client = new UiClient();
+  client.view = {
+    ...client.view,
+    projection: {
+      ...session('s0'),
+      currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 2 },
+    },
+  };
+  await render(<App client={client} />);
+
+  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+
+  await write(input(), '先检查最新日志');
+  await click(button('发送运行中引导'));
+  expect(client.sent).toEqual(['先检查最新日志']);
+  expect(client.sentTargets).toEqual(['s0']);
+
+  await click(button('停止任务'));
+  expect(client.cancelled).toBe(1);
+});
+
 test('cached history stays readable while calibrating, including cached empty history', async () => {
   const client = new UiClient();
   client.view = {

@@ -547,7 +547,7 @@ export async function* runStateRuntimeLoop(
   waitForRequiredBackground?: (
     state: Readonly<RuntimeState>,
     signal?: AbortSignal,
-  ) => Promise<void>,
+  ) => Promise<'state_changed' | 'managed_shell_changed'>,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -789,8 +789,19 @@ export async function* runStateRuntimeLoop(
             effect.decision.nextAction === 'wait_for_tool' &&
             waitForRequiredBackground
           ) {
-            await waitForRequiredBackground(kernel.getState(), signal);
-            if (signal?.aborted) return;
+            for (;;) {
+              const wake = await waitForRequiredBackground(kernel.getState(), signal);
+              if (signal?.aborted) return;
+              if (wake === 'managed_shell_changed') break;
+              const current = decideCompletion(kernel.getState());
+              if (
+                current.status !== 'blocked' ||
+                current.code !== 'tool_pending' ||
+                current.nextAction !== 'wait_for_tool'
+              ) {
+                break;
+              }
+            }
           }
           continue;
         }

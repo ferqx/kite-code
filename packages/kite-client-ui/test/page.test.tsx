@@ -114,6 +114,27 @@ test('new and running conversations share one composer prompt', () => {
   }
 });
 
+test('a passive run status notice does not hide the composer', () => {
+  const html = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      statusNotice={<p role="status">正在等待后台结果</p>}
+      composer={{
+        draft: '继续检查',
+        onChange: () => {},
+        onSend: () => {},
+        onCancel: () => {},
+        active: true,
+        stopping: false,
+        disabled: false,
+      }}
+    />,
+  );
+  expect(html).toContain('正在等待后台结果');
+  expect(html).toContain('aria-label="任务输入"');
+  expect(html).toContain('aria-label="发送运行中引导"');
+});
+
 test('the primary new-conversation navigation exposes its stable style hook while disabled', () => {
   const html = renderToStaticMarkup(
     <SessionPage {...base} busy actions={{ newSession: () => {} }} />,
