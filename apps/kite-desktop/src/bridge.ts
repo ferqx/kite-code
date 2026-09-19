@@ -40,6 +40,7 @@ export interface DesktopStartupStatus {
 }
 
 export type DesktopEditor = 'vscode' | 'zed' | 'textedit';
+export type DesktopTheme = 'light' | 'dark' | 'system';
 
 export interface DesktopConfirmOptions {
   message: string;
@@ -70,6 +71,7 @@ export interface KiteDesktopBridge {
   openEditor(connectionId: number, path: string, editor: DesktopEditor): Promise<void>;
   writeClipboardText(text: string): Promise<void>;
   toggleWindowMaximize(): Promise<void>;
+  setTheme(theme: DesktopTheme): Promise<void>;
   showConfirm(options: DesktopConfirmOptions): Promise<boolean>;
 }
 
@@ -91,6 +93,7 @@ export const DESKTOP_IPC_CHANNELS = {
   openEditor: 'kite:desktop:open-editor',
   writeClipboardText: 'kite:desktop:write-clipboard-text',
   toggleWindowMaximize: 'kite:desktop:toggle-window-maximize',
+  setTheme: 'kite:desktop:set-theme',
   showConfirm: 'kite:desktop:show-confirm',
 } as const satisfies Record<keyof KiteDesktopBridge, string>;
 

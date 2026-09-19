@@ -5,6 +5,7 @@ import {
   dialog,
   type IpcMain,
   type IpcMainInvokeEvent,
+  nativeTheme,
 } from 'electron';
 import { DESKTOP_IPC_CHANNELS, type DesktopIpcChannel, type DesktopIpcResult } from '../src/bridge';
 import type { DesktopHost } from './host';
@@ -19,6 +20,7 @@ import {
   pathPayload,
   runtimeSendPayload,
   switchPayload,
+  themePayload,
   workspacePayload,
 } from './security';
 
@@ -138,6 +140,12 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
     const window = requireWindow(options.getWindow());
     if (window.isMaximized()) window.unmaximize();
     else window.maximize();
+  });
+  handle(DESKTOP_IPC_CHANNELS.setTheme, (_event, payload) => {
+    const { theme } = themePayload(payload);
+    const window = requireWindow(options.getWindow());
+    nativeTheme.themeSource = theme;
+    window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa');
   });
   handle(DESKTOP_IPC_CHANNELS.showConfirm, async (_event, payload) => {
     const confirm = confirmPayload(payload);

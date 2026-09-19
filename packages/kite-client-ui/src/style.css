@@ -12,6 +12,7 @@ body {
 }
 :root {
   --background: #fafafa;
+  --page-background: var(--card);
   --card: #fff;
   --sidebar: #f5f5f5;
   --foreground: #222;
@@ -22,6 +23,7 @@ body {
   --border: #e7e7e7;
   --input: #c7c7c7;
   --primary: #252525;
+  --primary-hover: #41433d;
   --primary-foreground: #fff;
   --destructive: #a13e3e;
   --success: #287a4f;
@@ -30,6 +32,15 @@ body {
   --conversation-text-size: 14px;
   --scrollbar-thumb: #b8b8b8;
   --scrollbar-thumb-hover: #999;
+  --navigation-foreground: #484848;
+  --success-background: #e3f1e4;
+  --success-foreground: #2d6535;
+  --diff-added-background: #dff2df;
+  --diff-added-foreground: #20542c;
+  --diff-removed-background: #fbe5e0;
+  --diff-removed-foreground: #84392e;
+  --error-border: #bd8e85;
+  --error-foreground: #91493d;
 }
 .kite-client {
   & {
@@ -141,7 +152,7 @@ body {
     border-color: var(--primary);
   }
   .primary:hover:not(:disabled) {
-    background: #41433d;
+    background: var(--primary-hover);
   }
   .ghost {
     background: transparent;
@@ -175,7 +186,7 @@ body {
     background: var(--sidebar);
   }
   .client-main-panel {
-    background: var(--card);
+    background: var(--page-background);
   }
   [data-slot="resizable-handle"] {
     position: relative;
@@ -273,7 +284,7 @@ body {
     gap: 10px;
     border: 0;
     background: transparent;
-    color: #484848;
+    color: var(--navigation-foreground);
   }
   .primary-navigation .button.selected,
   .primary-navigation .button:hover:not(:disabled) {
@@ -430,7 +441,7 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: var(--card);
+    background: var(--page-background);
   }
   .session-header {
     display: flex;
@@ -441,7 +452,7 @@ body {
     border-bottom: 0.5px solid color-mix(in srgb, var(--foreground) 16%, transparent);
     flex: none;
     min-width: 0;
-    background: var(--card);
+    background: var(--page-background);
   }
   .breadcrumb {
     display: flex;
@@ -571,7 +582,7 @@ body {
     opacity: 0.78;
   }
   .message.user.failed {
-    border: 1px solid #bd8e85;
+    border: 1px solid var(--error-border);
   }
   .message.assistant {
     position: relative;
@@ -936,8 +947,8 @@ body {
     overflow-wrap: anywhere;
   }
   .notice.error {
-    color: #91493d;
-    border-color: #bd8e85;
+    color: var(--error-foreground);
+    border-color: var(--error-border);
     max-height: 25vh;
     overflow: auto;
   }
@@ -1116,12 +1127,12 @@ body {
     font-size: 12px;
   }
   .diff-added {
-    background: #dff2df;
-    color: #20542c;
+    background: var(--diff-added-background);
+    color: var(--diff-added-foreground);
   }
   .diff-removed {
-    background: #fbe5e0;
-    color: #84392e;
+    background: var(--diff-removed-background);
+    color: var(--diff-removed-foreground);
   }
   @media (max-width: 900px) {
     .sidebar {
@@ -1246,23 +1257,41 @@ body {
   overflow: visible;
 }
 [data-theme="dark"] {
-  --background: #20221e;
-  --card: #272a25;
-  --sidebar: #232520;
-  --foreground: #edede9;
-  --muted-foreground: #b3b6ad;
-  --directory-tertiary-foreground: #898d84;
-  --accent: #373b33;
-  --border: #484c42;
-  --input: #898d80;
-  --primary: #edede9;
-  --primary-foreground: #20221e;
+  --background: #191919;
+  --page-background: #191919;
+  --card: #242424;
+  --sidebar: #242424;
+  --foreground: #ededed;
+  --muted-foreground: #b5b5b5;
+  --directory-tertiary-foreground: #8c8c8c;
+  --accent: #333333;
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 18%);
+  --primary: #ededed;
+  --primary-hover: #cccccc;
+  --primary-foreground: #1c1c1c;
   --destructive: #e0a198;
   --success: #82c9a0;
   --attention-background: #4b3518;
   --attention-foreground: #ffe0a3;
-  --scrollbar-thumb: #62665b;
-  --scrollbar-thumb-hover: #7a7f72;
+  --scrollbar-thumb: #606060;
+  --scrollbar-thumb-hover: #7a7a7a;
+  --sidebar-accent: #303030;
+  --navigation-foreground: #d2d2d2;
+  --success-background: #254331;
+  --success-foreground: #a8ddb8;
+  --diff-added-background: #254331;
+  --diff-added-foreground: #b2e2bc;
+  --diff-removed-background: #4a2d2b;
+  --diff-removed-foreground: #f0b5ab;
+  --error-border: #a97168;
+  --error-foreground: #f0b5ab;
+}
+[data-theme="dark"] .kite-client {
+  color-scheme: dark;
+}
+[data-theme="dark"] .kite-client .session-header {
+  border-bottom-color: var(--border);
 }
 @media (max-width: 600px) {
   .kite-client .client-sidebar-panel.narrow {
@@ -1338,7 +1367,7 @@ body {
   place-items: center;
   border-radius: 14px;
   background: var(--sidebar-accent);
-  color: #62645e;
+  color: var(--muted-foreground);
   font-size: 27px;
 }
 .kite-client .scheduled-empty h2,
@@ -1383,7 +1412,7 @@ body {
 }
 .kite-client .scheduled-title-input::placeholder,
 .kite-client .scheduled-prompt-input::placeholder {
-  color: #999b95;
+  color: var(--directory-tertiary-foreground);
 }
 .kite-client .scheduled-prompt-input {
   min-height: 116px;
@@ -1493,8 +1522,8 @@ body {
   font-weight: 500;
 }
 .kite-client .scheduled-status.active {
-  background: #e3f1e4;
-  color: #2d6535;
+  background: var(--success-background);
+  color: var(--success-foreground);
 }
 .kite-client .scheduled-card-actions {
   display: flex;
@@ -1552,7 +1581,7 @@ body {
   min-width: 0;
   height: 100%;
   flex: 1;
-  background: var(--card);
+  background: var(--page-background);
   overflow-wrap: anywhere;
 }
 .kite-client .right-sidebar-tabs {
@@ -2205,7 +2234,7 @@ body {
   height: 6px;
   flex: none;
   border-radius: 9999px;
-  background: #666;
+  background: var(--muted-foreground);
 }
 @media (max-width: 960px) {
   .kite-client .workbench {

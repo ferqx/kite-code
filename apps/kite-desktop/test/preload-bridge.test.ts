@@ -43,6 +43,7 @@ test('preload exposes only frozen named methods with fixed channels and payloads
   await bridge.openEditor(7, 'src/main.ts', 'vscode');
   await bridge.writeClipboardText('Agent 最终回复');
   await bridge.toggleWindowMaximize();
+  await bridge.setTheme('system');
   await bridge.showConfirm({
     message: '继续？',
     title: '确认',
@@ -84,6 +85,7 @@ test('preload exposes only frozen named methods with fixed channels and payloads
       payload: { text: 'Agent 最终回复' },
     },
     { channel: DESKTOP_IPC_CHANNELS.toggleWindowMaximize, payload: undefined },
+    { channel: DESKTOP_IPC_CHANNELS.setTheme, payload: { theme: 'system' } },
     {
       channel: DESKTOP_IPC_CHANNELS.showConfirm,
       payload: {

@@ -23,6 +23,7 @@ export function createTestDesktopBridge(call: DesktopTestCall): KiteDesktopBridg
     openEditor: (connectionId, path, editor) => call('open_editor', { connectionId, path, editor }),
     writeClipboardText: (text) => call('write_clipboard_text', { text }),
     toggleWindowMaximize: () => call('animated_toggle_maximize'),
+    setTheme: async () => {},
     showConfirm: (options) => call('show_confirm', { ...options }),
   };
 }

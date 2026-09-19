@@ -1,6 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
-import type { BranchSnapshot, DesktopConfirmOptions, DesktopEditor } from '../src/bridge';
+import type {
+  BranchSnapshot,
+  DesktopConfirmOptions,
+  DesktopEditor,
+  DesktopTheme,
+} from '../src/bridge';
 
 export function assertTrustedIpc(
   event: IpcMainInvokeEvent,
@@ -32,6 +37,13 @@ export function sameRendererDocument(actualValue: string, expectedValue: string)
 
 export function noPayload(value: unknown): void {
   if (value !== undefined) throw new Error('桌面 IPC 参数无效。');
+}
+
+export function themePayload(value: unknown): { theme: DesktopTheme } {
+  const record = exactRecord(value, ['theme']);
+  if (record.theme !== 'light' && record.theme !== 'dark' && record.theme !== 'system')
+    throw new Error('桌面 IPC 参数无效。');
+  return { theme: record.theme };
 }
 
 export function pathPayload(value: unknown): { path: string } {

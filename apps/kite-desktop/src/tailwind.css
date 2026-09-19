@@ -14,7 +14,7 @@
 html,
 body,
 #root {
-  background: #fafafa;
+  background: var(--background, #fafafa);
 }
 
 .typeset-chat {
@@ -32,7 +32,7 @@ html[data-platform="macos"] .kite-client.shell {
 }
 
 html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
-  --sidebar: #191c18;
+  --sidebar: #242424;
 }
 
 html[data-platform="macos"] .kite-client :is(.sidebar-header, .session-header) {
@@ -61,6 +61,9 @@ html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-he
 @theme inline {
   --color-background: var(--background);
   --color-card: var(--card);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-muted: var(--accent);
   --color-foreground: var(--foreground);
   --color-input: var(--input);
   --color-border: var(--border);

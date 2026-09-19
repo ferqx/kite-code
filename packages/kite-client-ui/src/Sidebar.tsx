@@ -10,6 +10,17 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useId, useRef, useState } from 'react';
 import { Badge } from './components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './components/ui/dropdown-menu';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Spinner } from './components/ui/spinner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
@@ -200,6 +211,10 @@ export interface PageActions {
   workbench?: () => void;
   scheduledTasks?: () => void;
   settings?: () => void;
+  theme?: {
+    value: 'dark' | 'light' | 'system';
+    onChange: (value: 'dark' | 'light' | 'system') => void;
+  };
   connection?: { label: string; run: () => void };
   openFile?: (path: string) => void;
 }
@@ -278,15 +293,44 @@ export function Sidebar({
             </Button>
           )}
         </div>
-        {actions.settings && (
-          <Button className="profile-card" onClick={actions.settings}>
-            <HugeiconsIcon className="profile-avatar" icon={UserCircleIcon} />
-            <span>
-              <strong>本地用户</strong>
-              <small>个人工作区</small>
-            </span>
-            <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
-          </Button>
+        {(actions.settings || actions.theme) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button className="profile-card" aria-label="用户菜单">
+                <HugeiconsIcon className="profile-avatar" icon={UserCircleIcon} />
+                <span>
+                  <strong>本地用户</strong>
+                  <small>个人工作区</small>
+                </span>
+                <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" className="w-56">
+              {actions.settings && (
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={actions.settings}>设置</DropdownMenuItem>
+                </DropdownMenuGroup>
+              )}
+              {actions.settings && actions.theme && <DropdownMenuSeparator />}
+              {actions.theme && (
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>主题</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    aria-label="主题"
+                    value={actions.theme.value}
+                    onValueChange={(value) => {
+                      if (value === 'dark' || value === 'light' || value === 'system')
+                        actions.theme?.onChange(value);
+                    }}
+                  >
+                    <DropdownMenuRadioItem value="dark">暗</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="light">亮</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="system">跟随系统</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuGroup>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
     </>

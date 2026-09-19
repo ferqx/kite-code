@@ -71,3 +71,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 Ask 历史通过 `Message.ask.toolCallId` 关联唯一工具调用，主列表保留交互记录并隐藏其重复执行行；`Message.ask` 保留问题与按问题 ID 对应的答案。没有关联交互但存在结构化工具回答时仅展示其中 answer，不输出包装 JSON；未关联的失败工具仍保留。
 
 子 Agent 工具步骤复用 [ToolActivity](src/ToolActivity.tsx) 的动作、目标与状态展示；步骤摘要不充当标题，读取结果正文不在标题或步骤行展开。失败步骤的提示在工具行展开后显示完整内容，不挤入标题行；子 Agent 已结束而工具步骤缺少终态时仅在展示层标为结果未知并停止运行中动画；子 Agent 容器不重复显示父工具已有的完成状态；若 Service 已将步骤关联到同一持久子工具，主会话按精确 toolCallId 只保留子工具行。Service 仅凭唯一的持久父子派发关系将旧记录中误标 hidden 的父 task 恢复可见，不扩大其他 hidden 工具的显示范围。父 task 的失败状态始终保留；仅当对应子 Agent 已有具体失败终态时，折叠卡片才省去重复的 `Tool execution failed.` 文案。无子项原因时仍显示该文案。[Desktop 展示回归](../../apps/kite-desktop/test/isolated/subagent-history.test.tsx)覆盖这些情况。
+
+侧栏用户按钮使用共享 DropdownMenu 展示宿主提供的设置入口及可选主题单选项（暗、亮、跟随系统）；主题值、持久化及系统跟随由宿主拥有。共享样式按 `data-theme` 同步原生控件配色。
+
+共享 DropdownMenu 的浮层使用 `bg-popover`／`text-popover-foreground`／`border-border`，两端 Tailwind 入口必须提供对应语义颜色映射。浮层 Portal 挂到 body 后仍从根主题变量取得不透明背景与文字色，不依赖 `.kite-client` 内的业务菜单覆盖；复验需读取深浅色浮层的计算背景，截图不能单独证明背景不透明。

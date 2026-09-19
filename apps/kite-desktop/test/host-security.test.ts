@@ -7,6 +7,7 @@ import {
   runtimeSendPayload,
   sameRendererDocument,
   switchPayload,
+  themePayload,
 } from '../electron/security';
 
 test('renderer document validation accepts only the configured main document', () => {
@@ -34,6 +35,9 @@ test('IPC payload decoders reject unknown fields and malformed capabilities', ()
   expect(clipboardTextPayload({ text: 'Agent 回复' })).toEqual({ text: 'Agent 回复' });
   expect(() => clipboardTextPayload({ text: 'x', extra: true })).toThrow('参数无效');
   expect(() => clipboardTextPayload({ text: 'x'.repeat(1_048_577) })).toThrow('参数无效');
+  expect(themePayload({ theme: 'system' })).toEqual({ theme: 'system' });
+  expect(() => themePayload({ theme: 'auto' })).toThrow('参数无效');
+  expect(() => themePayload({ theme: 'dark', extra: true })).toThrow('参数无效');
   expect(
     confirmPayload({
       title: '切换项目？',

@@ -1,6 +1,6 @@
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { DesktopHost } from './host';
 import { registerDesktopIpc } from './ipc';
 import { sameRendererDocument } from './security';
@@ -103,7 +103,7 @@ function createMainWindow(rendererUrl: string, packaged: boolean): BrowserWindow
     minWidth: 760,
     minHeight: 540,
     show: false,
-    backgroundColor: '#fafafa',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 13, y: 19 } } : {}),
     webPreferences: {
@@ -156,6 +156,12 @@ function createMainWindow(rendererUrl: string, packaged: boolean): BrowserWindow
     });
   });
   window.once('ready-to-show', () => window.show());
+  const updateSystemBackground = () => {
+    if (!window.isDestroyed())
+      window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#191919' : '#fafafa');
+  };
+  nativeTheme.on('updated', updateSystemBackground);
+  window.once('closed', () => nativeTheme.off('updated', updateSystemBackground));
   window.on('close', (event) => {
     if (exitAllowed) return;
     event.preventDefault();

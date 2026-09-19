@@ -18,6 +18,7 @@ import { Interaction } from './Interaction';
 import { OperationToast } from './OperationToast';
 import { isActiveRun, projectEvent } from './presentation';
 import { Settings } from './Settings';
+import { useDesktopTheme } from './theme';
 import './startup.css';
 
 const navigationKey = 'kite.desktop.navigation';
@@ -137,6 +138,7 @@ export function App({ client }: { client: DesktopClient }) {
     view.projectError ||
     view.branchError ||
     (connected ? view.error : undefined);
+  const theme = useDesktopTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editor, setEditor] = useState<'vscode' | 'zed' | 'textedit'>('vscode');
   const [stopRequest, setStopRequest] = useState<{ key: string; runId: string }>();
@@ -501,6 +503,7 @@ export function App({ client }: { client: DesktopClient }) {
           setScheduledTasksView(true);
         },
         settings: () => setSettingsOpen(true),
+        theme,
         openFile: connected && selectedWorkspace === workspace ? openFile : undefined,
       }}
       writeClipboardText={(text) => client.copyText(text)}

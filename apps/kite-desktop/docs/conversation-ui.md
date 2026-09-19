@@ -52,7 +52,7 @@ Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示
 
 [Markdown](../../../packages/kite-client-ui/src/MessageContent.tsx)使用 react-markdown 与 remark-gfm 展示助手段落、列表、代码和表格；语义 HTML 的外层由 shadcn/typeset `typeset-chat` preset 统一排版，使用 Geist／Geist Mono、14 px 与 1.6 行高。Agent 正文不增加 padding 或独立限宽，与消息阅读列同宽。共享 CSS 只补充选择、溢出、链接和文件按钮行为，不再覆盖 Typeset 的正文排版。渲染跳过 HTML，保留默认 URL 安全转换，不自动请求图片。文件路径链接及 read_file 的结构化 path 调用既有 native editor 校验。编辑器选择在当前进程由 App 共享，默认 VS Code，可在设置中切换；限制见[文件与编辑器](results-and-editor.md)。
 
-普通用户与助手正文不重复绘制角色标签，但保留可访问名称。没有 active interaction 时，输入区位于底部，模型与权限选择及主控收在同一输入卡片中，不展示快捷键教学；底部共享 `DropdownMenu` 按 Provider 分组展示 App Control 实际返回的模型，选定后输入区只显示模型名称，不附带 Provider，并展示 Runtime 已有的 Ask（`accept_edits`）、Auto 与 Full 权限模式；不在共享组件中补造模型或权限。Full 菜单文案和风险弹窗标题使用警示色。桌面客户端每次从其他权限切换到 Full 时，由共享 `AlertDialog` 说明代理无需逐项征得同意即可在当前环境允许的范围内运行命令、读取或修改文件、访问互联网；明确提示文件可能被覆盖或删除，命令与联网操作可能传输敏感数据，并说明可以切回其他审批方式及系统限制仍然有效；取消不更改权限，明确确认后才沿原路径提交。点击当前已选中的权限不弹窗，也不重复提交权限命令。共享页面根节点声明 `color-scheme: light`，使其他原生表单控件与当前固定浅色客户端一致，不跟随系统暗色模式；未来若支持客户端暗色主题，再由客户端主题状态切换该值。已有会话确认后通过 `set_interaction_mode` 提交。切换会话时先从已加载的会话目录显示目标 Session 的模型，随后由该会话的投影校准；不等待历史和订阅全部完成才显示模型名称。模型选择是 Session 本地待提交 route：新对话随 `create_session` 提交，已有会话随下一次 `start_turn` 提交；它不调用 workspace 默认模型写入，也不覆盖其他 Session。新对话权限在创建会话后、首条消息前提交，失败则不发送任务；提交期间仍禁用模型和权限选择以避免并发 revision 冲突，但保持原有视觉，不通过短暂透明度变化制造闪烁，真正断连或加载不可用时仍显示禁用态。active interaction 由完整 queue 选择，审批／问题／计划放在底部操作区；此时共享 `SessionPage` 给 `Composer` 传入 `promptHidden`，整个 Composer 返回空，不渲染主 textarea、模型、权限或停止按钮，避免并行操作。主草稿仍由 App 持有，交互结束后原样恢复。Enter 发送、Shift+Enter 换行，composition 与 keyCode 229 防止中文组词确认误发。任务运行但未等待交互时允许先写草稿，尚未接入 TUI 消息队列；唯一主控为停止。命令失败保留草稿，成功只清除实际提交且未被继续编辑的草稿。
+普通用户与助手正文不重复绘制角色标签，但保留可访问名称。没有 active interaction 时，输入区位于底部，模型与权限选择及主控收在同一输入卡片中，不展示快捷键教学；底部共享 `DropdownMenu` 按 Provider 分组展示 App Control 实际返回的模型，选定后输入区只显示模型名称，不附带 Provider，并展示 Runtime 已有的 Ask（`accept_edits`）、Auto 与 Full 权限模式；不在共享组件中补造模型或权限。Full 菜单文案和风险弹窗标题使用警示色。桌面客户端每次从其他权限切换到 Full 时，由共享 `AlertDialog` 说明代理无需逐项征得同意即可在当前环境允许的范围内运行命令、读取或修改文件、访问互联网；明确提示文件可能被覆盖或删除，命令与联网操作可能传输敏感数据，并说明可以切回其他审批方式及系统限制仍然有效；取消不更改权限，明确确认后才沿原路径提交。点击当前已选中的权限不弹窗，也不重复提交权限命令。共享页面按当前 `data-theme` 切换 `color-scheme`，原生表单控件与当前明暗外观一致；主题偏好与系统跟随由桌面入口维护。已有会话确认后通过 `set_interaction_mode` 提交。切换会话时先从已加载的会话目录显示目标 Session 的模型，随后由该会话的投影校准；不等待历史和订阅全部完成才显示模型名称。模型选择是 Session 本地待提交 route：新对话随 `create_session` 提交，已有会话随下一次 `start_turn` 提交；它不调用 workspace 默认模型写入，也不覆盖其他 Session。新对话权限在创建会话后、首条消息前提交，失败则不发送任务；提交期间仍禁用模型和权限选择以避免并发 revision 冲突，但保持原有视觉，不通过短暂透明度变化制造闪烁，真正断连或加载不可用时仍显示禁用态。active interaction 由完整 queue 选择，审批／问题／计划放在底部操作区；此时共享 `SessionPage` 给 `Composer` 传入 `promptHidden`，整个 Composer 返回空，不渲染主 textarea、模型、权限或停止按钮，避免并行操作。主草稿仍由 App 持有，交互结束后原样恢复。Enter 发送、Shift+Enter 换行，composition 与 keyCode 229 防止中文组词确认误发。任务运行但未等待交互时允许先写草稿，尚未接入 TUI 消息队列；唯一主控为停止。命令失败保留草稿，成功只清除实际提交且未被继续编辑的草稿。
 
 切换已有会话的校准中间态保留上一条已确认权限作为禁用占位，并维持按钮不透明，不回退显示 `Auto`；目标历史返回后一次替换为该会话的真实权限，加载期间不会把占位值提交给目标会话。权限命令只有在连接发送或等待回执期间中断时才标记为结果未知；服务端明确拒绝保留原始原因。真正丢失回执后只读核对持久历史，目标权限已经生效时直接确认成功，不自动重放命令。
 
@@ -130,3 +130,11 @@ Ask 投影保留服务提供的 toolCallId 和有序问题；input.answered.answ
 Ask 历史沿用 TUI 单题/多题信息结构，使用共享 UI 的有序明细、悬挂缩进与每项五行截断；取消内容仅显示“已取消”，不重复题目。数据归属和问题 ID 映射保持不变。
 
 思考段计时由实时订阅传入 observedAt，消息投影保留首个 thinkingStartedAt 并在思考完成或 turn/run 终态写入 thinkingEndedAt；历史投影不使用重放时间生成耗时，只保留当前会话已有的对应段计时。共享标题以“思考中／已思考”表示生命周期，每秒重绘；思考完成或 turn/run 中断均落定为“已思考”并冻结已有计时，完成及卸载清理定时器，不新增 Runtime 时间协议。
+
+## 用户菜单与外观
+
+共享侧栏的用户按钮通过 shadcn DropdownMenu 展示设置入口与主题单选项，设置继续使用原有页面。桌面 [theme.ts](../src/theme.ts) 持有暗、亮、系统跟随偏好，保存在 `kite.desktop.theme`，默认系统跟随；入口挂载前应用已保存主题，系统模式订阅媒体查询并在卸载时移除监听。共享侧栏只消费宿主传入的主题值与回调，不持有存储。Electron 的封闭 `setTheme` IPC 同步原生外观与窗口背景，不涉及 Runtime 或会话配置。Web 保留现有主题入口与行为。
+
+本次使用隔离数据与真实共享组件在浏览器核对黑灰暗色、亮色、系统跟随菜单、选中标记和刷新后偏好恢复。自动化覆盖 [主题生命周期](../test/isolated/theme.test.tsx)、[设置菜单入口](../test/isolated/ui.test.tsx) 与 [preload 桥接](../test/preload-bridge.test.ts)。Electron 构建和参数边界已验证，未实测原生窗口中的系统外观切换。
+
+用户菜单浮层背景修正：两端 Tailwind 主题补齐 popover 语义映射，共享 DropdownMenu 显式使用主题边框色。浏览器计算样式确认修正前背景为 `rgba(0, 0, 0, 0)`，修正后亮色为 `rgb(255, 255, 255)`、暗色为 `rgb(36, 36, 36)`；Portal 不依赖页面私有菜单背景。

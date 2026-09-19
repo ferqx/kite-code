@@ -318,6 +318,16 @@ async function click(element: HTMLElement) {
     element.click();
   });
 }
+async function openUserSettings() {
+  await openDropdown(document.querySelector<HTMLElement>('.profile-card')!);
+  expect(document.querySelector('.desktop-settings-dialog')).toBeNull();
+  await click(
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (item) => item.textContent === '设置',
+    )!,
+  );
+}
+
 async function chooseModel(name: string) {
   await openDropdown(document.querySelector<HTMLElement>('[data-model-trigger]')!);
   await click(
@@ -2334,7 +2344,7 @@ test('default model selection preserves the picker and page without disabling or
     client.update({ models: { ...client.view.models!, selected: { provider, name } } });
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(
     [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
       (item) => item.textContent === '模型',
@@ -2384,7 +2394,7 @@ test('switching providers clears the previous endpoint, model and key before sav
     submitted = input;
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(button('提供商'));
   const rows = document.querySelectorAll<HTMLButtonElement>('.settings-provider-list button');
   await click(rows[2]!);
@@ -2434,7 +2444,7 @@ for (const outcome of ['success', 'failure'] as const) {
       saves++;
     };
     await render(<App client={client} />);
-    await click(document.querySelector<HTMLElement>('.profile-card')!);
+    await openUserSettings();
     await click(
       [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
         (b) => b.textContent === '模型',
@@ -2445,7 +2455,7 @@ for (const outcome of ['success', 'failure'] as const) {
       document.querySelectorAll<HTMLElement>('.settings-model-menu [role="menuitemradio"]')[1]!,
     );
     await click(button('返回应用'));
-    await click(document.querySelector<HTMLElement>('.profile-card')!);
+    await openUserSettings();
     expect(document.querySelector('.settings-content [role="status"]')?.textContent).toContain(
       '先前的设置操作',
     );
@@ -2533,7 +2543,7 @@ test('model switch keeps its new value and the settings surface stable while sav
     await original(provider, name, enabled);
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(
     [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
       (item) => item.textContent === '模型',
@@ -2583,7 +2593,7 @@ test('failed model switch restores the authoritative value without replacing its
     throw new Error('保存失败');
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(
     [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
       (item) => item.textContent === '模型',
@@ -2626,7 +2636,7 @@ test('enabling a model stays enabled while saving without refreshing the model l
     await original(provider, name, enabled);
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(
     [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
       (item) => item.textContent === '模型',
@@ -2665,7 +2675,7 @@ test('model refresh keeps the list and controls visible while the request is pen
     return client.view.models!;
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(
     [...document.querySelectorAll<HTMLButtonElement>('.settings-sidebar button')].find(
       (item) => item.textContent === '模型',
@@ -2707,7 +2717,7 @@ test('provider save preserves the open form and focus during the request', async
     await pending;
   };
   await render(<App client={client} />);
-  await click(document.querySelector<HTMLElement>('.profile-card')!);
+  await openUserSettings();
   await click(button('提供商'));
   await click(button('编辑'));
   const panel = document.querySelector('.settings-provider-panel')!;
