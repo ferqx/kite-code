@@ -2,7 +2,11 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite-ai/agent-kernel';
+import {
+  type ContextCompactionCheckpoint,
+  isConcurrentAutoReviewEffectBatchCurrent,
+  type RuntimeEvent,
+} from '@kite-ai/agent-kernel';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   BuiltinModelEffectCoordinator,
@@ -3197,6 +3201,38 @@ describe('retained TUI session coordinator', () => {
     expect(gatewayCalls).toBe(1);
   });
 
+  test('keeps an exact auto-review start current across unrelated background revisions', () => {
+    const state = autoReviewState('retained-auto-review-concurrent-start');
+    const lease = {
+      turnId: state.turn.turnId,
+      effect: {
+        type: 'run_auto_review' as const,
+        reviewId: 'retained-review-1',
+        toolCallId: 'reviewed-shell',
+      },
+    };
+    expect(
+      isConcurrentAutoReviewEffectBatchCurrent(state, lease, [
+        {
+          type: 'auto_review.started',
+          reviewId: 'retained-review-1',
+          toolCallId: 'reviewed-shell',
+          owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
+        },
+      ]),
+    ).toBe(true);
+    expect(
+      isConcurrentAutoReviewEffectBatchCurrent(state, lease, [
+        {
+          type: 'auto_review.started',
+          reviewId: 'different-review',
+          toolCallId: 'reviewed-shell',
+          owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
+        },
+      ]),
+    ).toBe(false);
+  });
+
   test.each([
     ['reject', false, false],
     ['ask_user', true, true],
@@ -3261,6 +3297,19 @@ describe('retained TUI session coordinator', () => {
         },
       ),
     ).rejects.toThrow('Auto-review start could not be persisted');
+    await expect(
+      createAppRuntimeEffectExecutor(dependencies)(
+        { type: 'run_auto_review', reviewId: 'retained-review-1', toolCallId: 'reviewed-shell' },
+        state,
+        undefined,
+        {
+          reservationIds: [],
+          getState: () => ({ ...state, revision: state.revision + 1 }),
+          persistEvent: async () => false,
+          persistEvents: async () => false,
+        },
+      ),
+    ).resolves.toEqual([]);
     // Escalation keeps the same durable review identity; it must not synthesize
     // a second approval.requested event.
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);

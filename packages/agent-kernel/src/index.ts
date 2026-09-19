@@ -68,6 +68,7 @@ export {
   planCompletionBlocker,
   planCompletionEvidenceMatchesRuntime,
   projectPlanCompletionEvidence,
+  requiredManagedShellIds,
 } from './completion';
 export type {
   AutoCompactionGuard,
@@ -139,6 +140,7 @@ export {
   assertCapabilityToolTerminalBatch,
   attachSuspendedCapabilityTerminals,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentAutoReviewEffectBatchCurrent,
   isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,

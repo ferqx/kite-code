@@ -547,7 +547,7 @@ export async function* runStateRuntimeLoop(
   waitForRequiredBackground?: (
     state: Readonly<RuntimeState>,
     signal?: AbortSignal,
-  ) => Promise<'state_changed' | 'managed_shell_changed'>,
+  ) => Promise<'state_changed' | 'managed_shell_changed' | 'managed_shell_terminal'>,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -792,7 +792,10 @@ export async function* runStateRuntimeLoop(
             for (;;) {
               const wake = await waitForRequiredBackground(kernel.getState(), signal);
               if (signal?.aborted) return;
-              if (wake === 'managed_shell_changed') break;
+              // A terminal managed Shell is intentionally not projected into State until
+              // the model reads it. Resume the correction path exactly once so it can issue
+              // shell_read; ordinary output/progress wakes must keep waiting.
+              if (wake === 'managed_shell_terminal') break;
               const current = decideCompletion(kernel.getState());
               if (
                 current.status !== 'blocked' ||

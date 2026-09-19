@@ -97,7 +97,7 @@ async function createSession(connection: Connection, sessionId: string): Promise
     type: 'set_interaction_mode',
     sessionId,
     expectedRevision: createdRevision,
-    mode: 'full',
+    mode: 'auto',
   });
   assert.equal(mode.status, 'applied');
   return mode.revision;
@@ -176,7 +176,12 @@ async function approvePendingInteraction(connection: Connection, sessionId: stri
     interaction,
     response: { kind: 'approval', decision: 'approve_once' },
   });
-  if (receipt.status === 'conflict') return;
+  if (
+    receipt.status === 'conflict' ||
+    (receipt.status === 'rejected' && receipt.code === 'interaction_mismatch')
+  ) {
+    return;
+  }
   if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
     throw new Error(`Approval was not accepted: ${JSON.stringify(receipt)}`);
   }

@@ -266,7 +266,7 @@ export function isConcurrentShellEffectEventCurrent(
     if (!invocation || !lease.effect.toolCallIds.includes(invocation.toolCallId)) return false;
     const call = state.tools.calls[invocation.toolCallId];
     return (
-      call?.name === 'shell_execute' &&
+      (call?.name === 'shell_execute' || call?.name === 'shell_read') &&
       (call.status === 'queued' ||
         call.status === 'approved' ||
         call.status === 'authorized_queued' ||
@@ -276,7 +276,7 @@ export function isConcurrentShellEffectEventCurrent(
   if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
   if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
   const call = state.tools.calls[event.toolCallId];
-  if (call?.name !== 'shell_execute') return false;
+  if (call?.name !== 'shell_execute' && call?.name !== 'shell_read') return false;
   switch (event.type) {
     case 'approval.requested':
     case 'auto_review.requested':
@@ -330,6 +330,41 @@ export function isConcurrentShellEffectBatchCurrent(
   return true;
 }
 
+/**
+ * Preserve the selected auto-review start when unrelated background work
+ * advances the Session revision after the review effect was leased. The
+ * approval identity remains the authority; a changed or settled approval is
+ * never admitted through this concurrent path.
+ */
+export function isConcurrentAutoReviewEffectBatchCurrent(
+  state: Readonly<AgentState>,
+  lease: AgentEffectLeaseIdentity,
+  events: readonly RuntimeEvent[],
+): boolean {
+  if (
+    lease.turnId !== state.turn.turnId ||
+    state.turn.status !== 'active' ||
+    lease.effect.type !== 'run_auto_review' ||
+    events.length !== 1
+  ) {
+    return false;
+  }
+  const event = events[0];
+  if (
+    event?.type !== 'auto_review.started' ||
+    event.reviewId !== lease.effect.reviewId ||
+    event.toolCallId !== lease.effect.toolCallId
+  ) {
+    return false;
+  }
+  const pending = state.pendingApprovals.get(event.reviewId);
+  return (
+    pending?.toolCallId === event.toolCallId &&
+    pending.status === 'auto_reviewing' &&
+    state.tools.calls[event.toolCallId]?.status === 'awaiting_auto_review'
+  );
+}
+
 function modelInvocationIdForConcurrentBatch(
   state: Readonly<AgentState>,
   lease: AgentEffectLeaseIdentity,
@@ -338,25 +373,34 @@ function modelInvocationIdForConcurrentBatch(
   if (
     lease.turnId !== state.turn.turnId ||
     state.turn.status !== 'active' ||
-    lease.effect.type !== 'call_model'
+    (lease.effect.type !== 'call_model' && lease.effect.type !== 'run_auto_review')
   ) {
     return undefined;
   }
   const first = events[0];
   if (!first) return undefined;
+  const autoReviewToolCallId =
+    lease.effect.type === 'run_auto_review' ? lease.effect.toolCallId : undefined;
+  const belongsToEffect = (invocation: AgentState['modelInvocations'][string] | undefined) =>
+    lease.effect.type === 'call_model' ||
+    (invocation?.purpose === 'auto_review' && invocation.parentToolCallId === autoReviewToolCallId);
   if (
     first.type === 'model.reasoning_delta' ||
     first.type === 'model.reasoning_completed' ||
     first.type === 'model.text_delta'
   ) {
     const invocation = state.modelInvocations[first.requestId];
-    return events.length === 1 && invocation?.status === 'dispatching'
+    return events.length === 1 &&
+      invocation?.status === 'dispatching' &&
+      belongsToEffect(invocation)
       ? first.requestId
       : undefined;
   }
   if (first.type === 'model.retry') {
     const invocation = state.modelInvocations[first.invocationId];
-    return events.length === 1 && invocation?.status === 'dispatching'
+    return events.length === 1 &&
+      invocation?.status === 'dispatching' &&
+      belongsToEffect(invocation)
       ? first.invocationId
       : undefined;
   }
@@ -367,6 +411,7 @@ function modelInvocationIdForConcurrentBatch(
     return undefined;
   }
   const invocation = state.modelInvocations[first.invocationId];
+  if (!belongsToEffect(invocation)) return undefined;
   if (first.type === 'model.invocation_completed' && invocation?.status !== 'dispatching') {
     return undefined;
   }

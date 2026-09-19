@@ -232,6 +232,45 @@ describe('State effect admission policy', () => {
     );
   });
 
+  test('admits an exact live shell_read terminal across unrelated background revisions', () => {
+    const state = runningShellState();
+    const shellReadState: AgentState = {
+      ...state,
+      tools: {
+        ...state.tools,
+        calls: {
+          shell: {
+            ...state.tools.calls.shell!,
+            name: 'shell_read',
+            args: { shell_id: 'sh-1', wait_until: 'terminal' },
+          },
+        },
+      },
+    };
+    expect(
+      isConcurrentShellEffectEventCurrent(shellReadState, lease, {
+        type: 'tool.finished',
+        toolCallId: 'shell',
+        name: 'shell_read',
+        result: {
+          ok: true,
+          command: 'sleep 5',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          resultMeta: { shellId: 'sh-1', shellStatus: 'exited' },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isConcurrentShellEffectEventCurrent(
+        shellReadState,
+        { ...lease, effect: { type: 'run_tools', toolCallIds: ['other'] } },
+        finished,
+      ),
+    ).toBe(false);
+  });
+
   test('admits only the exact live Model retry or terminal batch across control revisions', () => {
     const state = dispatchingModelState();
     const modelLease = { turnId: 'turn-1', effect: { type: 'call_model' as const } };

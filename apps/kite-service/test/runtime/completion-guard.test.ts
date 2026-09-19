@@ -16,6 +16,7 @@ import {
   setActivePlanning,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { runStateRuntimeLoop } from '#kite-service/bootstrap/runtime/state-runner';
+import { hasTerminalRequiredManagedShell } from '#kite-service/bootstrap/runtime/turn-coordinator';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   StateHostSessionHarness as AgentKernel,
@@ -498,7 +499,9 @@ describe('CompletionGuard V1', () => {
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const wakes: Array<(reason: 'state_changed' | 'managed_shell_changed') => void> = [];
+    const wakes: Array<
+      (reason: 'state_changed' | 'managed_shell_changed' | 'managed_shell_terminal') => void
+    > = [];
     let modelCalls = 0;
     const stream = runStateRuntimeLoop(
       kernel,
@@ -513,9 +516,11 @@ describe('CompletionGuard V1', () => {
       undefined,
       undefined,
       async () =>
-        new Promise<'state_changed' | 'managed_shell_changed'>((resolve) => {
-          wakes.push(resolve);
-        }),
+        new Promise<'state_changed' | 'managed_shell_changed' | 'managed_shell_terminal'>(
+          (resolve) => {
+            wakes.push(resolve);
+          },
+        ),
     );
 
     expect((await stream.next()).value).toMatchObject({
@@ -526,6 +531,10 @@ describe('CompletionGuard V1', () => {
     const resumed = stream.next();
     await Promise.resolve();
     expect(modelCalls).toBe(0);
+    wakes.shift()!('managed_shell_changed');
+    await Bun.sleep(0);
+    expect(modelCalls).toBe(0);
+    expect(wakes).toHaveLength(1);
     wakes.shift()!('state_changed');
     await Bun.sleep(0);
     expect(modelCalls).toBe(0);
@@ -543,13 +552,111 @@ describe('CompletionGuard V1', () => {
         resultMeta: { taskId: 'child-wait-1', taskStatus: 'completed' },
       },
     };
-    wakes.shift()!('state_changed');
+    wakes.shift()!('managed_shell_terminal');
     expect((await resumed).value).toMatchObject({
       type: 'model.responded',
       messageId: 'after-wake',
     });
     expect(modelCalls).toBe(1);
     await stream.return(undefined);
+    kernel.close();
+  });
+
+  test('classifies only the current required finite Shell terminal as a model wake', () => {
+    const state = activePlanningState();
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'model-shell',
+      name: 'shell_execute',
+      args: { command: 'sleep 5' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-required', shellStatus: 'running' },
+      },
+    };
+    const execution = {
+      executionId: 'shell-required',
+      sessionId: state.session.threadId,
+      kind: 'shell' as const,
+      status: 'completed' as const,
+      ownerGeneration: 'owner-1',
+      revision: 2,
+      cleanupConfirmed: true,
+      cursor: 0,
+    };
+    expect(hasTerminalRequiredManagedShell(state, [execution])).toBe(true);
+    expect(
+      hasTerminalRequiredManagedShell(state, [
+        { ...execution, status: 'running', cleanupConfirmed: false },
+      ]),
+    ).toBe(false);
+    expect(
+      hasTerminalRequiredManagedShell(state, [
+        { ...execution, executionId: 'other-shell', kind: 'service' },
+      ]),
+    ).toBe(false);
+  });
+
+  test('admits an exact auto-review start after unrelated background progress', () => {
+    let state = activePlanningState();
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'reviewed-shell',
+      name: 'shell_execute',
+      args: { command: 'sleep 5' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'auto_review.requested',
+      reviewId: 'review-concurrent',
+      toolCallId: 'reviewed-shell',
+      toolName: 'shell_execute',
+      reason: 'Shell requires review.',
+      fullModeBypassEligible: false,
+      fullModePolicyBypassAllowed: false,
+      owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
+      approval: {
+        scope: 'once',
+        cwd: '/tmp',
+        threadId: state.session.threadId,
+        tool: 'shell_execute',
+        command: 'sleep 5',
+        risk: 'unknown',
+        approvalHash: 'review-concurrent-hash',
+        summary: 'Run a shell command.',
+        reason: 'Shell requires review.',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    });
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const lease = kernel.beginEffect({
+      type: 'run_auto_review',
+      reviewId: 'review-concurrent',
+      toolCallId: 'reviewed-shell',
+    });
+    kernel.processEvent({
+      type: 'model.cache_metrics',
+      inputTokens: 1,
+      cacheHitTokens: 0,
+      cacheMissTokens: 1,
+      hitRate: 0,
+    });
+    expect(
+      kernel.applyEffectEvent(lease, {
+        type: 'auto_review.started',
+        reviewId: 'review-concurrent',
+        toolCallId: 'reviewed-shell',
+        owner: { kind: 'root_tool', toolCallId: 'reviewed-shell' },
+      }),
+    ).toBe(true);
     kernel.close();
   });
 

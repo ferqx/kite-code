@@ -9,6 +9,7 @@ import {
   finalizeAgentEvent,
   getEffectiveInteractionMode,
   hasLateTerminalEventForCancelledTool,
+  isConcurrentAutoReviewEffectBatchCurrent,
   isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   type KernelEvent,
@@ -926,6 +927,14 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         if (lease.effect.type === 'call_model') {
           return isConcurrentModelEffectBatchCurrent(this.#state, lease, events, () =>
             this.#eventTimestamp(),
+          );
+        }
+        if (lease.effect.type === 'run_auto_review') {
+          return (
+            isConcurrentAutoReviewEffectBatchCurrent(this.#state, lease, events) ||
+            isConcurrentModelEffectBatchCurrent(this.#state, lease, events, () =>
+              this.#eventTimestamp(),
+            )
           );
         }
         return false;

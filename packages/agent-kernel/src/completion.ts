@@ -335,7 +335,7 @@ function hasCurrentNonTerminalTool(state: AgentState): boolean {
   );
 }
 
-function hasRequiredManagedShell(state: AgentState): boolean {
+export function requiredManagedShellIds(state: AgentState): ReadonlySet<string> {
   const settledShells = new Set(
     Object.values(state.tools.calls)
       .filter(
@@ -346,21 +346,28 @@ function hasRequiredManagedShell(state: AgentState): boolean {
       )
       .map((call) => call.result!.resultMeta!.shellId!),
   );
-  return Object.values(state.tools.calls).some((call) => {
-    if (
-      call.name !== 'shell_execute' ||
-      !toolCallBelongsToCurrentWork(state, call) ||
-      call.result?.resultMeta?.shellStatus !== 'running' ||
-      !call.result.resultMeta.shellId
-    ) {
-      return false;
-    }
-    const args =
-      call.args && typeof call.args === 'object' && !Array.isArray(call.args)
-        ? (call.args as Readonly<Record<string, unknown>>)
-        : {};
-    return args.mode !== 'service' && !settledShells.has(call.result.resultMeta.shellId);
-  });
+  return new Set(
+    Object.values(state.tools.calls).flatMap((call) => {
+      if (
+        call.name !== 'shell_execute' ||
+        !toolCallBelongsToCurrentWork(state, call) ||
+        call.result?.resultMeta?.shellStatus !== 'running' ||
+        !call.result.resultMeta.shellId
+      ) {
+        return [];
+      }
+      const args =
+        call.args && typeof call.args === 'object' && !Array.isArray(call.args)
+          ? (call.args as Readonly<Record<string, unknown>>)
+          : {};
+      const shellId = call.result.resultMeta.shellId;
+      return args.mode !== 'service' && !settledShells.has(shellId) ? [shellId] : [];
+    }),
+  );
+}
+
+function hasRequiredManagedShell(state: AgentState): boolean {
+  return requiredManagedShellIds(state).size > 0;
 }
 
 const SETTLED_BACKGROUND_TASK_STATUSES = new Set([

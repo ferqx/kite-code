@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { requiredManagedShellIds } from '@kite-ai/agent-kernel';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite-ai/builtin-runtime/model';
 import {
@@ -80,6 +81,21 @@ import {
   assertPrecommittedStartTurn,
   type PrecommittedStartTurnDescriptor,
 } from './turn-command-decision';
+
+export function hasTerminalRequiredManagedShell(
+  state: Readonly<RuntimeState>,
+  executions: ReturnType<typeof managedShellRuntime.listSnapshot>['executions'],
+): boolean {
+  const requiredShellIds = requiredManagedShellIds(state);
+  return executions.some(
+    (execution) =>
+      requiredShellIds.has(execution.executionId) &&
+      execution.kind === 'shell' &&
+      execution.status !== 'running' &&
+      execution.status !== 'stopping' &&
+      execution.cleanupConfirmed,
+  );
+}
 
 function exhaustedModelFailureMode(
   error: unknown,
@@ -794,7 +810,7 @@ export async function* executeRuntimeTurn(
         const revision = state.revision;
         const ownerKey = managedShellOwnerKey(input.threadId, input.workspace);
         const shellWatermark = managedShellRuntime.ownerWatermark(ownerKey);
-        return Promise.race([
+        const wake = await Promise.race([
           (
             kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
           ).then(() => 'state_changed' as const),
@@ -802,6 +818,11 @@ export async function* executeRuntimeTurn(
             .waitForOwnerChange(ownerKey, shellWatermark, waitSignal)
             .then(() => 'managed_shell_changed' as const),
         ]);
+        if (wake === 'state_changed') return wake;
+        const executions = managedShellRuntime.listSnapshot(input.threadId, ownerKey).executions;
+        return hasTerminalRequiredManagedShell(state, executions)
+          ? ('managed_shell_terminal' as const)
+          : wake;
       },
     );
     // Own iterator closure explicitly: abort incomplete work before returning

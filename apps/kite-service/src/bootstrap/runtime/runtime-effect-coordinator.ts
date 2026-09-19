@@ -444,17 +444,31 @@ async function projectAutoReviewEffect(
   // Admission to the review queue is not the start of the reviewer. Persist
   // the selected effect's execution boundary before dispatching its model.
   if (dependencies.signal?.aborted) return [];
-  if (
-    !modelInvocationPersistence ||
-    !(await modelInvocationPersistence.persistEvents([
-      {
-        type: 'auto_review.started',
-        reviewId: effect.reviewId,
-        toolCallId: effect.toolCallId,
-        owner,
-      },
-    ]))
-  ) {
+  if (!modelInvocationPersistence) {
+    throw new Error('Auto-review start could not be persisted before dispatch.');
+  }
+  const startPersisted = await modelInvocationPersistence.persistEvents([
+    {
+      type: 'auto_review.started',
+      reviewId: effect.reviewId,
+      toolCallId: effect.toolCallId,
+      owner,
+    },
+  ]);
+  if (!startPersisted) {
+    const current = modelInvocationPersistence.getState();
+    const currentPending = current.pendingApprovals.get(effect.reviewId);
+    if (
+      current.revision > state.revision &&
+      currentPending?.toolCallId === effect.toolCallId &&
+      currentPending.status === 'auto_reviewing' &&
+      currentPending.generation === pendingGeneration
+    ) {
+      // Unrelated background work advanced the Session after this effect was
+      // leased. Let the scheduler acquire a fresh lease for the same exact
+      // approval instead of turning a safe concurrency race into run.error.
+      return [];
+    }
     throw new Error('Auto-review start could not be persisted before dispatch.');
   }
   // A control command can cancel the Turn while the start fact is being
