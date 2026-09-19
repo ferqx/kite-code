@@ -1692,8 +1692,8 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
       type: z.literal('subagent.completed'),
       subagentId: identifier,
       summary: shortText,
-      toolCallCount: safeRevision,
-      durationMs: safeRevision,
+      toolCallCount: safeRevision.optional(),
+      durationMs: safeRevision.optional(),
     })
     .strict(),
   z

@@ -524,6 +524,12 @@ export function projectRuntimeClientEvent(
         toolCallCount: event.subagent.toolCallCount,
         durationMs: event.subagent.durationMs,
       };
+    case 'subagent.background_result_persisted':
+      return {
+        type: 'subagent.completed',
+        subagentId: event.taskId,
+        summary: projectRuntimeClientText(event.shortReport, 8_192),
+      };
     case 'subagent.failed': {
       const status =
         event.subagent.status ??

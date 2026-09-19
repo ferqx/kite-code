@@ -52,6 +52,7 @@ import {
   testSubagentComposition,
   testSubagentContinuationArtifacts,
   testSubagentTaskRequests,
+  testWorkspaceFilesystemRuntime,
 } from '../../../../../tests/helpers/runtime-model';
 import { toolAvailabilityContext } from '../../../../../tests/helpers/tool-runtime-projection';
 import { createPipelineSubagentRuntime } from '../../../src/bootstrap/runtime/subagent/pipeline-runtime';
@@ -588,10 +589,14 @@ describe('executeTestRuntimeTools', () => {
     const detachedEvents: RuntimeEvent[] = [];
     const persistDetached = async (events: RuntimeEvent[]) => {
       detachedEvents.push(...events);
-      for (const event of events) liveState = reduceCurrentEvent(liveState, event);
+      for (const event of events) {
+        const reduced = reduceCurrentEvent(liveState, event);
+        liveState = { ...reduced, revision: liveState.revision + 1 };
+      }
       return true;
     };
     const catalog = testBuiltinToolCatalog();
+    const capabilityArtifacts = testCapabilityArtifactWriter();
     const dispatcher = createAppSharedChildToolDispatcher({
       parentToolCallId: 'background-task',
       persistence: {
@@ -602,6 +607,11 @@ describe('executeTestRuntimeTools', () => {
         state: liveState,
         toolCallIds: [],
         capabilityExecution: testRuntimeCapabilityExecutionPort(),
+        capabilityArtifactStore: capabilityArtifacts,
+        workspaceFilesystemRuntime: testWorkspaceFilesystemRuntime(
+          process.cwd(),
+          capabilityArtifacts,
+        ),
         builtinToolCatalog: catalog,
         toolPipelineComposition: createAppToolPipelineComposition(catalog),
         getRuntimeState: () => liveState,
@@ -636,7 +646,10 @@ describe('executeTestRuntimeTools', () => {
         toolCallId: dispatched.runtimeToolCallId,
       }),
     );
+    expect(dispatched.result).toMatchObject({ ok: true });
+    expect(dispatched.result.stdout).toContain('"name": "kite-code"');
     expect(dispatched.result.stderr).not.toContain('queue acknowledgement became stale');
+    expect(dispatched.result.classifierAdvice?.detailCode).not.toBe('persistence_unavailable');
     expect(liveState.tools.calls[dispatched.runtimeToolCallId]?.status).toMatch(
       /^(succeeded|failed|rejected|exhausted)$/,
     );

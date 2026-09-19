@@ -6,6 +6,7 @@ import {
   type PendingToolRequest,
   pendingToolRequestFromValidatedInvocation,
   toolRequestFromCall,
+  verifyBuiltinWorkspaceFilesystemTerminal,
 } from '@kite-ai/builtin-runtime';
 import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
@@ -57,7 +58,14 @@ import type {
   SubAgentToolDispatcher,
 } from '#kite-service/bootstrap/runtime/subagent/types';
 import type { AppToolPipelineComposition } from '#kite-service/bootstrap/runtime/tool-pipeline-composition';
-import type { AppTaskToolPipelineAttemptRuntime } from '#kite-service/bootstrap/runtime/tool-pipeline-task-attempt';
+import {
+  createAppOrdinaryToolPipelineAttemptRuntime,
+  createAppToolPipelineAttemptScope,
+} from '#kite-service/bootstrap/runtime/tool-pipeline-ordinary-attempt';
+import {
+  type AppTaskToolPipelineAttemptRuntime,
+  createAppTaskToolPipelineAttemptRuntime,
+} from '#kite-service/bootstrap/runtime/tool-pipeline-task-attempt';
 import {
   buildToolApproval,
   commandIdentityForToolApproval,
@@ -69,6 +77,7 @@ import {
 } from '#kite-service/bootstrap/runtime/tool-turn-context';
 import { getFeatureFlags } from '#kite-service/config/features';
 import { visibleProjectInstructions } from '#kite-service/runtime/tool-execution/project-instruction-guard';
+import { createAppStateToolPipelinePersistence } from '#kite-service/runtime/tool-persistence';
 import type {
   CapabilityToolTerminalResult,
   DurableSuspendedSubagent,
@@ -851,6 +860,36 @@ export function createAppSharedChildToolDispatcher(input: {
   >;
 }): SubAgentToolDispatcher {
   const { params, parentToolCallId, parentTaskId, persistence } = input;
+  const detachedAttemptRuntimes =
+    persistence && params.capabilityArtifactStore
+      ? (() => {
+          const durablePersistence = createAppStateToolPipelinePersistence({
+            getState: persistence.getState,
+            persistAttemptStartEvents: persistence.persistEvents,
+            persistTerminalRecoveryEvents: persistence.persistEvents,
+            persistReceiptEvents: persistence.persistEvents,
+            now: () => new Date().toISOString(),
+            capabilityArtifactWriter: params.capabilityArtifactStore,
+            verifyBuiltinWorkspaceFilesystemTerminal,
+            providerAction: Object.freeze({
+              enabled: getFeatureFlags(params.taskConfig).mcpProviderAction,
+              createInteractionId: genInteractionId,
+            }),
+            verificationEnabled: getFeatureFlags(params.taskConfig).verification === true,
+          });
+          const scope = createAppToolPipelineAttemptScope({ persistence: durablePersistence });
+          return Object.freeze({
+            ordinary: createAppOrdinaryToolPipelineAttemptRuntime({
+              persistence: durablePersistence,
+              scope,
+            }),
+            task: createAppTaskToolPipelineAttemptRuntime({
+              persistence: durablePersistence,
+              scope,
+            }),
+          });
+        })()
+      : undefined;
   return {
     dispatch: async (childInput) => {
       const runtimeToolCallId = childRuntimeToolCallId({
@@ -965,6 +1004,12 @@ export function createAppSharedChildToolDispatcher(input: {
         ...params,
         state: executionState as RuntimeState,
         toolCallIds: [runtimeToolCallId],
+        getRuntimeState: getChildRuntimeState,
+        persistRuntimeEvents: persistChildRuntimeEvents,
+        ordinaryToolPipelineAttemptRuntime:
+          detachedAttemptRuntimes?.ordinary ?? params.ordinaryToolPipelineAttemptRuntime,
+        taskToolPipelineAttemptRuntime:
+          detachedAttemptRuntimes?.task ?? params.taskToolPipelineAttemptRuntime,
         interactionModeOverride: effectiveSubagentInteractionMode(
           beforeQueue,
           parentToolCallId,

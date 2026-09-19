@@ -375,8 +375,9 @@ export type RuntimeClientEvent =
       readonly type: 'subagent.completed';
       readonly subagentId: string;
       readonly summary: string;
-      readonly toolCallCount: number;
-      readonly durationMs: number;
+      /** Omitted when replaying an older persisted background result. */
+      readonly toolCallCount?: number;
+      readonly durationMs?: number;
     }
   | {
       readonly type: 'subagent.failed';
@@ -1241,11 +1242,14 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'subagent.completed':
       return (
-        hasExactKeys(value, ['type', 'subagentId', 'summary', 'toolCallCount', 'durationMs']) &&
+        hasExactKeys(
+          value,
+          presentKeys(value, ['type', 'subagentId', 'summary'], ['toolCallCount', 'durationMs']),
+        ) &&
         isIdentifier(value.subagentId) &&
         isBoundedUserText(value.summary, 8_192) &&
-        isNonNegativeSafeInteger(value.toolCallCount) &&
-        isNonNegativeSafeInteger(value.durationMs)
+        (!Object.hasOwn(value, 'toolCallCount') || isNonNegativeSafeInteger(value.toolCallCount)) &&
+        (!Object.hasOwn(value, 'durationMs') || isNonNegativeSafeInteger(value.durationMs))
       );
     case 'subagent.failed':
       return (

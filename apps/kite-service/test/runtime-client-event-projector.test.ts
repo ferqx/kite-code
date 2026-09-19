@@ -424,6 +424,28 @@ describe('Runtime Client event projector', () => {
     expect(
       projectRuntimeClientEvent(
         {
+          type: 'subagent.background_result_persisted',
+          taskId: 'child-background',
+          notificationId: 'notification-background',
+          artifactIntegrityIdentifier: `sha256:${'a'.repeat(64)}`,
+          shortReport: 'Background inspection complete.',
+          source: 'subagent',
+          modelRole: 'user',
+          originRunId: 'run-background',
+          originTurnId: 'turn-background',
+          originToolCallId: 'tool-background',
+          attempt: 1,
+        } as RuntimeEvent,
+        context,
+      ),
+    ).toEqual({
+      type: 'subagent.completed',
+      subagentId: 'child-background',
+      summary: 'Background inspection complete.',
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
           type: 'subagent.failed',
           subagent: {
             id: 'child-2',
