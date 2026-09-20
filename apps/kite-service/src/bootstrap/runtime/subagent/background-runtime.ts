@@ -91,6 +91,12 @@ export interface BackgroundSubagentControlRuntime {
     ownerKey: string,
     taskId: string,
   ) => Promise<Readonly<Record<string, unknown>>>;
+  readonly waitTasks: (
+    ownerKey: string,
+    taskIds: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ) => Promise<Readonly<Record<string, unknown>>>;
   readonly requestCancel: (ownerKey: string, taskId: string, onTerminal: () => void) => boolean;
   readonly cancelOrigin: (
     ownerKey: string,
@@ -204,6 +210,41 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         : taskNotFound(taskId);
     }
     return this.#snapshot(record);
+  }
+
+  async waitTasks(
+    ownerKey: string,
+    taskIds: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      // Capture before reading so a terminal transition concurrent with the
+      // snapshots cannot be lost between observation and waiter enrollment.
+      const watermark = this.ownerWatermark(ownerKey);
+      const tasks = await Promise.all(taskIds.map((taskId) => this.readTask(ownerKey, taskId)));
+      const actionable = tasks.find((task) => !isWaitingTaskSnapshot(task));
+      if (actionable) {
+        return taskWaitResult(tasks, String(actionable.status), actionable.ok !== false);
+      }
+      if (signal?.aborted) {
+        return taskWaitResult(tasks, 'cancelled', false, 'run_cancelled');
+      }
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return taskWaitResult(tasks, 'timeout', true);
+
+      const waitController = new AbortController();
+      const onAbort = () => waitController.abort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      const timer = setTimeout(() => waitController.abort(), remainingMs);
+      try {
+        await this.waitForOwnerChange(ownerKey, watermark, waitController.signal);
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      }
+    }
   }
 
   async cancelTask(ownerKey: string, taskId: string): Promise<Readonly<Record<string, unknown>>> {
@@ -608,6 +649,24 @@ function taskNotFound(taskId: string): Readonly<Record<string, unknown>> {
     status: 'not_found',
     cleanup_confirmed: false,
     error: 'Background sub-agent task is unavailable for this Runtime owner.',
+  });
+}
+
+function isWaitingTaskSnapshot(task: Readonly<Record<string, unknown>>): boolean {
+  return task.status === 'running' || task.status === 'cancelling';
+}
+
+function taskWaitResult(
+  tasks: readonly Readonly<Record<string, unknown>>[],
+  status: string,
+  ok: boolean,
+  reason?: string,
+): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    ok,
+    status,
+    tasks: Object.freeze([...tasks]),
+    ...(reason ? { reason } : {}),
   });
 }
 

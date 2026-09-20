@@ -365,6 +365,26 @@ export const BUILTIN_TASK_READ_SCHEMA_ = z
   })
   .strict();
 
+export const BUILTIN_TASK_WAIT_SCHEMA_ = z
+  .object({
+    task_ids: z
+      .array(BUILTIN_TASK_ID_SCHEMA_)
+      .min(1)
+      .max(8)
+      .refine((taskIds) => new Set(taskIds).size === taskIds.length, {
+        message: 'task_ids must not contain duplicates',
+      })
+      .describe('One to eight distinct stable background task identities returned by task'),
+    timeout_ms: z
+      .number()
+      .int()
+      .min(0)
+      .max(60_000)
+      .optional()
+      .describe('Bounded wait in milliseconds; defaults to 30000'),
+  })
+  .strict();
+
 export const BUILTIN_TASK_CANCEL_SCHEMA_ = z
   .object({
     task_id: BUILTIN_TASK_ID_SCHEMA_.describe('Stable background task identity returned by task'),
@@ -444,6 +464,7 @@ export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
   'builtin:write_plan': BUILTIN_WRITE_PLAN_SCHEMA_,
   'builtin:task': BUILTIN_TASK_RUNTIME_SCHEMA_,
   'builtin:task_read': BUILTIN_TASK_READ_SCHEMA_,
+  'builtin:task_wait': BUILTIN_TASK_WAIT_SCHEMA_,
   'builtin:task_cancel': BUILTIN_TASK_CANCEL_SCHEMA_,
   'builtin:shell_execute': BUILTIN_SHELL_EXECUTE_SCHEMA_,
   'builtin:shell_read': BUILTIN_SHELL_READ_SCHEMA_,

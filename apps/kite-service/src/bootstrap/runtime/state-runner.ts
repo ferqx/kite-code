@@ -320,6 +320,12 @@ async function* executeEffectWithStreaming(
     {
       reservationIds,
       getState: () => kernel.getState(),
+      ...(kernel.waitForRevisionChange
+        ? {
+            waitForRevisionChange: (revision: number, signal?: AbortSignal) =>
+              kernel.waitForRevisionChange!(revision, signal),
+          }
+        : {}),
       persistEvent: (event) =>
         new Promise<boolean>((resolve, reject) => {
           // Keep the historical callback on the receipt_evidence-compatible

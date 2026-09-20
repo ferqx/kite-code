@@ -28,6 +28,8 @@ CLI in-process组合在已完成执行释放coordinator后，也从同一Store�
 
 [Managed Shell](../src/bootstrap/runtime/managed-shell.ts)持有有限 Shell/service 的活句柄、总期限、256 KiB 有界输出、多读取者游标和进程树清理；持久 State 只保存可恢复事实，不尝试在宿主重启后接管旧 pid。[Background subagent Runtime](../src/bootstrap/runtime/subagent/background-runtime.ts)独占 child observe，先保存 immutable Artifact，再发布 task 终态和具名低权限结果。[After-turn continuation](../src/bootstrap/runtime/subagent/after-turn-continuation.ts)只消费已持久化的授权、预算 reservation 与稳定 wakeKey，通过现有 Host `start_turn` 创建至多一个后续 Run；它不是第二套 scheduler。observe、Artifact、具名结果持久化、通知或 Host wake 任一环节失败时，统一的 settlement failure 回调幂等释放该 reservation；不能因报告链路失败永久占用原 Run 预算。
 
+显式 `task_wait` 复用 Background subagent Runtime 已有的 owner watermark 与 waiter，对 1–8 个目标执行单次有界 wait-any；目标终态、超时、Run abort 或当前 Turn 的新用户输入结束该工具调用。无关 State revision 和非目标 owner 变化只触发重新判定，不直接驱动模型；超时与 steer 不取消 child。它不建立持久 deadline、第二个 scheduler 或新的终态存储，宿主重启后的单次等待由普通 safe-read 重入重新开始。
+
 background task 返回“已接受”时，父工具 reservation 随工具终态结算；派发时已经创建的 descendant admission 仍引用同一 Run 内未释放的父 reservation，为 child 的后续模型轮次和工具调用逐项保留、派发并核销预算。Service 不在父工具结算后重建 admission，也不把该血缘扩展到其他 Run。
 
 required child 是 CompletionGuard 唯一 blocker 时，State runner 接纳 `wait_for_background` 并停止 Provider 循环；Kernel State 持久保存只含 required task ID 的 waiting reason，Bridge 将其投影到同一 Run。background owner watermark、Kernel revision 与 execution authority 只触发重新判定：只有已接纳终态／失败／取消、需父级处理的交互或用户输入等可行动事实才恢复模型，进度、心跳或日志 revision 只更新投影。相同 owner generation、task ID 与 execution revision 的 `running` 读取不会再次成为模型决策输入。owner generation 更替、authority detached／recovery_required、settlement admission 失败、deadline 或 Runtime stop 按既有 fail-closed recovery／unknown／取消边界收敛，不释放未被 Kernel 接纳的义务。

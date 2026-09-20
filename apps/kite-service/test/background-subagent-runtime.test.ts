@@ -86,6 +86,87 @@ describe('BackgroundSubagentRuntime', () => {
     firstResult.resolve(terminal());
   });
 
+  test('waits for the first actionable target without cancelling still-running siblings', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('wait-any', 'recovery');
+    const first = deferred<SubAgentResult>();
+    const second = deferred<SubAgentResult>();
+    owner.adopt({
+      taskId: 'wait-first',
+      ownerKey,
+      ...ORIGIN,
+      observe: () => first.promise,
+      cancel: async () => {},
+    });
+    owner.adopt({
+      taskId: 'wait-second',
+      ownerKey,
+      ...ORIGIN,
+      observe: () => second.promise,
+      cancel: async () => {},
+    });
+
+    const waiting = owner.waitTasks(ownerKey, ['wait-first', 'wait-second'], 1_000);
+    first.resolve(terminal({ summary: 'first finished' }));
+    await expect(waiting).resolves.toMatchObject({
+      ok: true,
+      status: 'completed',
+      tasks: [{ task_id: 'wait-first', status: 'completed' }, { status: 'running' }],
+    });
+    expect(await owner.readTask(ownerKey, 'wait-second')).toMatchObject({ status: 'running' });
+    second.resolve(terminal());
+  });
+
+  test('returns a successful timeout snapshot and leaves the child running', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('wait-timeout', 'recovery');
+    const completion = deferred<SubAgentResult>();
+    owner.adopt({
+      taskId: 'wait-timeout-task',
+      ownerKey,
+      ...ORIGIN,
+      observe: () => completion.promise,
+      cancel: async () => {},
+    });
+
+    await expect(owner.waitTasks(ownerKey, ['wait-timeout-task'], 1)).resolves.toMatchObject({
+      ok: true,
+      status: 'timeout',
+      tasks: [{ task_id: 'wait-timeout-task', status: 'running' }],
+    });
+    expect(owner.hasLiveTask('wait-timeout-task')).toBe(true);
+    completion.resolve(terminal());
+  });
+
+  test('returns not_found immediately and maps run abort without cancelling the child', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('wait-abort', 'recovery');
+    await expect(owner.waitTasks(ownerKey, ['missing'], 1_000)).resolves.toMatchObject({
+      ok: false,
+      status: 'not_found',
+    });
+
+    const completion = deferred<SubAgentResult>();
+    owner.adopt({
+      taskId: 'wait-abort-task',
+      ownerKey,
+      ...ORIGIN,
+      observe: () => completion.promise,
+      cancel: async () => {},
+    });
+    const controller = new AbortController();
+    const waiting = owner.waitTasks(ownerKey, ['wait-abort-task'], 1_000, controller.signal);
+    controller.abort();
+    await expect(waiting).resolves.toMatchObject({
+      ok: false,
+      status: 'cancelled',
+      reason: 'run_cancelled',
+      tasks: [{ status: 'running' }],
+    });
+    expect(owner.hasLiveTask('wait-abort-task')).toBe(true);
+    completion.resolve(terminal());
+  });
+
   test('reports settlement failure without letting callback failure hide the task error', async () => {
     const owner = runtime();
     const ownerKey = backgroundSubagentOwnerKey('failed', 'recovery');
@@ -694,6 +775,40 @@ describe('BackgroundSubagentRuntime', () => {
     });
     expect(execution.result?.stdout).toContain('durable control report');
     expect(execution.result?.stdout).toContain('subagent-control');
+  });
+
+  test('routes task_wait through the ordinary Host pipeline with a bounded timeout', async () => {
+    const owner = runtime();
+    const recoveryIdentityKey = 'c'.repeat(64);
+    const ownerKey = backgroundSubagentOwnerKey('session-wait-control', recoveryIdentityKey);
+    const completion = deferred<SubAgentResult>();
+    owner.adopt({
+      taskId: 'subagent-wait-control',
+      ownerKey,
+      ...ORIGIN,
+      observe: () => completion.promise,
+      cancel: async () => {},
+    });
+
+    const execution = await executeTestRuntimeTool({
+      workspace: process.cwd(),
+      toolName: 'task_wait',
+      args: { task_ids: ['subagent-wait-control'], timeout_ms: 0 },
+      state: {
+        threadId: 'session-wait-control',
+        userId: 'test-user',
+        recoveryIdentityKey,
+      },
+      execution: { backgroundSubagentRuntime: owner },
+    });
+    expect(execution.terminal).toMatchObject({
+      type: 'tool.finished',
+      toolCallId: 'test-tool:task_wait',
+    });
+    expect(execution.result?.stdout).toContain('"status":"timeout"');
+    expect(execution.result?.stdout).toContain('subagent-wait-control');
+    expect(owner.hasLiveTask('subagent-wait-control')).toBe(true);
+    completion.resolve(terminal());
   });
 
   test('routes task_cancel to the same owner and returns only after target cleanup', async () => {

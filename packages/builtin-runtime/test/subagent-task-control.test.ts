@@ -61,4 +61,60 @@ describe('Builtin background task control projection', () => {
       expect(calls).toEqual([`${method === 'readTask' ? 'read' : 'cancel'}:child-1`]);
     });
   }
+
+  test('task_wait forwards distinct task identities, the default timeout, and cancellation signal', async () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    const operationId = 'builtin:task_wait' as const;
+    const executor = registry.executor(operationId);
+    if (!executor) throw new Error(`${operationId} executor is unavailable.`);
+    const revision = SUBAGENT_CAPABILITY_REVISIONS_[operationId];
+    const controller = new AbortController();
+    const calls: unknown[] = [];
+    const receipt = await executor.execute(
+      {
+        invocationId: 'wait-invocation',
+        capabilityId: operationId,
+        capabilityRevision: revision,
+        input: { task_ids: ['child-1', 'child-2'] },
+      },
+      {
+        grant: {
+          grantId: 'grant-1',
+          capabilityId: operationId,
+          capabilityRevision: revision,
+          authority: {},
+        },
+        requestDigest: 'request-digest',
+        signal: controller.signal,
+        environment: {
+          environmentId: 'test',
+          kind: 'in_process',
+          mechanisms: Object.freeze({
+            taskControl: Object.freeze({
+              waitTasks: async (
+                taskIds: readonly string[],
+                timeoutMs: number,
+                signal?: AbortSignal,
+              ) => {
+                calls.push([taskIds, timeoutMs, signal]);
+                return { ok: true, status: 'completed', reason: 'terminal', cursor: 4 };
+              },
+            }),
+          }),
+        },
+        attempt: { invocationId: 'wait-invocation', attemptId: 'attempt-1' },
+      },
+    );
+    expect(receipt.status).toBe('succeeded');
+    if (receipt.status !== 'succeeded') throw new Error('task wait receipt failed');
+    expect(receipt.value).toMatchObject({
+      resultMeta: {
+        taskIds: ['child-1', 'child-2'],
+        taskStatus: 'completed',
+        reason: 'terminal',
+        cursor: 4,
+      },
+    });
+    expect(calls).toEqual([[['child-1', 'child-2'], 30_000, controller.signal]]);
+  });
 });

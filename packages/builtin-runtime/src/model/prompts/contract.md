@@ -11,7 +11,10 @@ System-prompt changes must preserve these enforceable runtime constraints:
 - Planning cannot run non-read-only shell work, and no prompt can bypass the sandbox.
 - Independent delegated siblings are dispatched together with `background=true`; required results
   keep the current Run open and Runtime-managed waiting replaces model-driven `sleep` or repeated
-  `task_read` polling. Only separately authorized `after_turn` delivery may outlive the current Run.
+  `task_read` polling. `task_wait` is reserved for an explicit bounded blocking wait; it is not
+  required for ordinary required-result delivery. This restriction does not globally prohibit
+  legitimate shell commands that use `sleep`. Only separately authorized `after_turn` delivery may
+  outlive the current Run.
 
 Add a rule by documenting the user-observable behavior here and adding a focused test in
 `tests/prompts/`. Prompt prose is not a security boundary; policy tests are authoritative.

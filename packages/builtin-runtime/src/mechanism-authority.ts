@@ -200,9 +200,10 @@ function assertMechanismWrapper(key: string, value: unknown): void {
       assertFunction(record, 'executeTask', key);
       return;
     case 'taskControl':
-      assertExactKeys(value, ['cancelTask', 'readTask']);
+      assertExactKeys(value, ['cancelTask', 'readTask', 'waitTasks']);
       assertFunction(record, 'cancelTask', key);
       assertFunction(record, 'readTask', key);
+      assertFunction(record, 'waitTasks', key);
       return;
     case 'verification':
       assertExactKeys(value, ['execute']);

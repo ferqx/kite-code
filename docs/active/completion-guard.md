@@ -76,3 +76,5 @@ document 与 revision feedback；不得写 `run.completed`、`task.completed` �
 首次可纠正的 `completion.blocked` 可单独持久化并进入一次 correction。第二次或其他不可纠正的 V1/V2 blocker 必须在任何对外 yield 前，由 Kernel 单事务按顺序持久化 `[completion.blocked, turn.aborted, run.error]`；durable turn 随即为 aborted，Scheduler 返回 stop，重启不能发起第三次模型调用。Runtime restore 只接受精确 schema version 与 format epoch，不为旧 completion event 建立 migration reducer 或 recovery surface。
 
 `wait_for_background` 是上述纠错规则的专用例外。重进从持久 waiting reason 与 canonical obligation 恢复；终态、失败、取消、需父级处理的交互或新用户输入可恢复同一 Run，纯进度／心跳／日志 revision 不触发模型。owner generation 更替、execution authority 失效、settlement admission 失败、deadline 或取消竞争必须进入既有 unknown／recovery／取消边界，不得永久等待或把未接纳结果视为完成。
+
+显式 `task_wait` 是普通的有界只读工具调用，不替代该自动等待决定，也不解除 required obligation；其返回只能帮助模型协调，canonical background result 仍是完成守卫接受的唯一 child 终态事实。

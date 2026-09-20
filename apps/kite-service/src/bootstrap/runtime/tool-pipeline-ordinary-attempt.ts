@@ -93,6 +93,7 @@ export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_ = Object.freeze([
   'builtin:shell_read',
   'builtin:shell_stop',
   'builtin:task_read',
+  'builtin:task_wait',
   'builtin:task_cancel',
   'builtin:activate_skill',
 ] as const);

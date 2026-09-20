@@ -266,6 +266,7 @@ export async function executeAppRuntimeToolsEffect(
           persistRuntimeEvent: executionContext?.persistEvent,
           persistRuntimeEvents: executionContext?.persistEvents,
           getRuntimeState: () => (executionContext?.getState?.() ?? state) as RuntimeState,
+          waitForStateRevisionChange: executionContext?.waitForRevisionChange,
           recordFilePreimage: createFilePreimageRecorder(
             dependencies.runtimeStore,
             state.session.threadId,

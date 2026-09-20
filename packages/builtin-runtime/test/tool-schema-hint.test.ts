@@ -46,6 +46,22 @@ describe('Builtin catalog schema-hint formatter', () => {
     const taskReadHint = formatBuiltinToolSchemaHint(modelEntry('task_read'));
     expect(taskReadHint).toContain('on-demand snapshot');
     expect(taskReadHint).toContain('not a waiting primitive');
+    const taskWaitHint = formatBuiltinToolSchemaHint(modelEntry('task_wait'));
+    expect(taskWaitHint).toContain('task_ids');
+    expect(taskWaitHint).toContain('defaults to 30000');
+    const taskWait = modelEntry('task_wait');
+    expect(taskWait.parse({ task_ids: ['child-1'], timeout_ms: 0 })).toMatchObject({
+      success: true,
+    });
+    expect(taskWait.parse({ task_ids: ['child-1', 'child-1'] })).toMatchObject({
+      success: false,
+    });
+    expect(
+      taskWait.parse({ task_ids: Array.from({ length: 9 }, (_, index) => `child-${index}`) }),
+    ).toMatchObject({ success: false });
+    expect(taskWait.parse({ task_ids: ['child-1'], timeout_ms: 60_001 })).toMatchObject({
+      success: false,
+    });
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).not.toContain('exitCode');
   });
 

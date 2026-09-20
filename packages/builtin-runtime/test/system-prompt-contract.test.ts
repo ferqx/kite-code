@@ -26,7 +26,11 @@ describe('current primary-agent system prompt', () => {
     expect(prompt).toContain('task calls together in one response with `background=true`');
     expect(prompt).toContain('do not start one and wait before dispatching an independent sibling');
     expect(prompt).toContain('yield control and let Runtime wait for required background results');
-    expect(prompt).toContain('Never use `sleep`, an empty loop, or fixed-interval `task_read`');
+    expect(prompt).toContain('Do not use `sleep`, an empty loop, or repeated `task_read`');
+    expect(prompt).toContain(
+      'ordinary shell commands that legitimately need `sleep` are not globally prohibited',
+    );
+    expect(prompt).toContain('Use `task_wait` sparingly for an explicit bounded blocking wait');
     expect(prompt).toContain('if it returns `running` at the same revision');
     expect(prompt).toContain('only an explicitly authorized `result_disposition=after_turn`');
   });

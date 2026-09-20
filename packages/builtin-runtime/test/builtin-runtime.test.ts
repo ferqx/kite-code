@@ -179,7 +179,7 @@ describe('builtin runtime package boundary', () => {
   test('registers the exact RM-10 through RM-15 owners and executors', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
-    expect(registry.snapshot().capabilities).toHaveLength(31);
+    expect(registry.snapshot().capabilities).toHaveLength(32);
     expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
       capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
       revision: TOOL_SEARCH_CAPABILITY_REVISION_,
@@ -265,7 +265,7 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 31 registered operations without Git inspection', () => {
+  test('projects all 32 registered operations without Git inspection', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -276,8 +276,8 @@ describe('builtin runtime package boundary', () => {
         featureFlags: { skillWorkflow: true, skillActivation: true },
       },
     });
-    expect(projection.entries).toHaveLength(31);
-    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(23);
+    expect(projection.entries).toHaveLength(32);
+    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(24);
     expect(projection.entries.some((entry) => entry.operationId === 'builtin:git_inspect')).toBe(
       false,
     );
@@ -306,6 +306,7 @@ describe('builtin runtime package boundary', () => {
       'builtin:write_plan': 'planning',
       'builtin:task': 'subagent',
       'builtin:task_read': 'task_control',
+      'builtin:task_wait': 'task_control',
       'builtin:task_cancel': 'task_control',
       'subagent:start': 'subagent',
       'subagent:resume': 'subagent',
@@ -315,7 +316,7 @@ describe('builtin runtime package boundary', () => {
       'model:auto_review': 'model',
       'model:subagent': 'model',
     };
-    expect(Object.keys(expectedMechanisms)).toHaveLength(31);
+    expect(Object.keys(expectedMechanisms)).toHaveLength(32);
     expect(projection.entries.map((entry) => entry.operationId).sort()).toEqual(
       Object.keys(expectedMechanisms).sort(),
     );
@@ -344,6 +345,7 @@ describe('builtin runtime package boundary', () => {
       'task',
       'task_cancel',
       'task_read',
+      'task_wait',
       'tool_search',
       'update_plan',
       'web_fetch',
@@ -515,6 +517,7 @@ describe('builtin runtime package boundary', () => {
       'builtin:task',
       'builtin:task_cancel',
       'builtin:task_read',
+      'builtin:task_wait',
       'builtin:web_fetch',
     ]);
     expect(shell.descriptor.policy).toMatchObject({
@@ -703,12 +706,17 @@ describe('builtin runtime package boundary', () => {
       task_read: {
         effectClass: 'read_only',
         sideEffect: false,
-        reason: 'Reads or stops one Runtime-owned background sub-agent.',
+        reason: 'Reads, waits for, or stops Runtime-owned background sub-agents.',
+      },
+      task_wait: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Reads, waits for, or stops Runtime-owned background sub-agents.',
       },
       task_cancel: {
         effectClass: 'read_only',
         sideEffect: false,
-        reason: 'Reads or stops one Runtime-owned background sub-agent.',
+        reason: 'Reads, waits for, or stops Runtime-owned background sub-agents.',
       },
       shell_execute: {
         effectClass: 'read_only',
@@ -735,6 +743,8 @@ describe('builtin runtime package boundary', () => {
         input = { subagent_type: 'explore', task: 'inspect the repository' };
       } else if (entry.name === 'task_read' || entry.name === 'task_cancel') {
         input = { task_id: 'subagent-test' };
+      } else if (entry.name === 'task_wait') {
+        input = { task_ids: ['subagent-test'] };
       } else if (entry.name === 'shell_execute') {
         input = { command: 'cat package.json' };
       } else if (entry.name === 'shell_read' || entry.name === 'shell_stop') {
@@ -853,7 +863,7 @@ describe('builtin runtime package boundary', () => {
     });
     expect(hidden.revision).toBe(fullTurn.revision);
     expect(Object.keys(hidden.toolSet)).toHaveLength(16);
-    expect(Object.keys(fullTurn.toolSet)).toHaveLength(23);
+    expect(Object.keys(fullTurn.toolSet)).toHaveLength(24);
     expect(
       hidden.entries.find((entry) => entry.operationId === 'builtin:tool_search')?.descriptor
         .availability,

@@ -25,6 +25,7 @@ export type StateRuntimeEffectEventSink<Event = RuntimeEvent> = (event: Event) =
 export interface StateRuntimeEffectExecutionContext<State = RuntimeState, Event = RuntimeEvent> {
   readonly reservationIds: readonly string[];
   getState?(): Readonly<State>;
+  waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   persistEvent(event: Event): Promise<boolean>;
   persistEvents(
     events: Event[],

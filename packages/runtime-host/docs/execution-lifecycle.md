@@ -38,6 +38,8 @@ get_command_receipt 只读取原命令的持久结果，校验查询 scope 与�
 
 CompletionGuard 的 `wait_for_background` 保持原 Run、Turn、deadline、预算、取消入口与 execution authority；Host 只投影关联 required task ID 的 waiting reason，不复制 child 状态。活动 Run 中的新纯文本仍通过 `steer_turn` 恢复同一 Run，不会取消 child 或创建第二个 Run；处理后义务仍未解除时可再次进入等待。纯进度 revision 不构成模型恢复理由，authority／owner generation 漂移和 deadline／取消竞争沿既有恢复或 unknown 边界收敛。
 
+普通工具调用中的 `task_wait` 只借用 Host 已有的 State revision 通知识别当前 Turn 的新输入，并复用 Background owner watermark 等待目标变化。它的单次 timeout 不持久化，不取得 CompletionGuard 或 child lifecycle 的写权限；新输入、timeout 或 Run abort 结束等待时均不取消 child。required 自动等待与 Kernel 接纳终态的权威关系不变。
+
 后台 task 接受后，父工具 reservation 可以按工具终态正常结算；在其仍属于同一 Run 且未显式释放时，派发期间创建的 descendant admission 继续作为 child 后续模型轮次和工具调用的预算血缘。admission 仍只能在父 reservation 为 `dispatch_started` 时创建，不能从已结算事实重新构造或扩大授权。
 
 After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。

@@ -42,6 +42,7 @@ import {
   BUILTIN_READ_PLAN_SCHEMA_,
   BUILTIN_TASK_CANCEL_SCHEMA_,
   BUILTIN_TASK_READ_SCHEMA_,
+  BUILTIN_TASK_WAIT_SCHEMA_,
   BUILTIN_UPDATE_PLAN_SCHEMA_,
   BUILTIN_WRITE_PLAN_SCHEMA_,
   BUILTIN_ZOD_SCHEMAS_,
@@ -56,6 +57,7 @@ export const SUBAGENT_OPERATION_IDS_ = Object.freeze([
   'builtin:write_plan',
   'builtin:task',
   'builtin:task_read',
+  'builtin:task_wait',
   'builtin:task_cancel',
   'subagent:start',
   'subagent:resume',
@@ -75,6 +77,7 @@ export const UPDATE_PLAN_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:update_p
 export const WRITE_PLAN_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:write_plan'];
 export const TASK_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task'];
 export const TASK_READ_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_read'];
+export const TASK_WAIT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_wait'];
 export const TASK_CANCEL_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_cancel'];
 
 /**
@@ -123,6 +126,7 @@ const INPUT_SCHEMAS_: Readonly<
   'builtin:write_plan': WRITE_PLAN_INPUT_SCHEMA_,
   'builtin:task': TASK_INPUT_SCHEMA_,
   'builtin:task_read': TASK_READ_INPUT_SCHEMA_,
+  'builtin:task_wait': TASK_WAIT_INPUT_SCHEMA_,
   'builtin:task_cancel': TASK_CANCEL_INPUT_SCHEMA_,
   'subagent:start': BUILTIN_JSON_SCHEMAS_['subagent:start'],
   'subagent:resume': BUILTIN_JSON_SCHEMAS_['subagent:resume'],
@@ -152,6 +156,11 @@ const EFFECTS_ = Object.freeze({
     externalState: 'none',
   }),
   'builtin:task_read': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
+  'builtin:task_wait': Object.freeze({
     filesystem: 'none',
     network: 'none',
     externalState: 'none',
@@ -186,6 +195,7 @@ const EXECUTION_MECHANISMS_: Readonly<Record<SubagentOperationId, CapabilityExec
     'builtin:write_plan': 'planning',
     'builtin:task': 'subagent',
     'builtin:task_read': 'task_control',
+    'builtin:task_wait': 'task_control',
     'builtin:task_cancel': 'task_control',
     'subagent:start': 'subagent',
     'subagent:resume': 'subagent',
@@ -245,6 +255,11 @@ export interface BuiltinSubagentExecutionMechanism {
 
 export interface BuiltinTaskControlExecutionMechanism {
   readTask(taskId: string): Promise<Readonly<Record<string, unknown>>>;
+  waitTasks(
+    taskIds: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<Readonly<Record<string, unknown>>>;
   cancelTask(taskId: string): Promise<Readonly<Record<string, unknown>>>;
 }
 
@@ -315,7 +330,10 @@ function subagentContractOptions(
     operationId === 'builtin:update_plan' ||
     operationId === 'builtin:write_plan';
   const task = operationId === 'builtin:task';
-  const taskControl = operationId === 'builtin:task_read' || operationId === 'builtin:task_cancel';
+  const taskControl =
+    operationId === 'builtin:task_read' ||
+    operationId === 'builtin:task_wait' ||
+    operationId === 'builtin:task_cancel';
   const askUser = operationId === 'builtin:ask_user';
   const readOnly = operationId === 'builtin:read_plan' || taskControl;
   const parser = task
@@ -358,7 +376,7 @@ function subagentContractOptions(
             ? 'Pauses execution for explicit user input.'
             : readOnly
               ? taskControl
-                ? 'Reads or stops one Runtime-owned background sub-agent.'
+                ? 'Reads, waits for, or stops Runtime-owned background sub-agents.'
                 : 'Reads the active immutable Plan Artifact.'
               : planAction
                 ? operationId === 'builtin:update_plan'
@@ -440,10 +458,13 @@ async function executeSubagentOperation(
       value = await executeTask(input, mechanisms?.subagent);
       break;
     case 'builtin:task_read':
-      value = await executeTaskControl('read', input, mechanisms?.taskControl);
+      value = await executeTaskControl('read', input, mechanisms?.taskControl, context.signal);
+      break;
+    case 'builtin:task_wait':
+      value = await executeTaskControl('wait', input, mechanisms?.taskControl, context.signal);
       break;
     case 'builtin:task_cancel':
-      value = await executeTaskControl('cancel', input, mechanisms?.taskControl);
+      value = await executeTaskControl('cancel', input, mechanisms?.taskControl, context.signal);
       break;
     case 'verification:deterministic':
       value = mechanisms?.verification
@@ -500,11 +521,27 @@ async function executeTask(
 }
 
 async function executeTaskControl(
-  action: 'read' | 'cancel',
+  action: 'read' | 'wait' | 'cancel',
   input: Readonly<Record<string, unknown>>,
   mechanism: BuiltinTaskControlExecutionMechanism | undefined,
+  signal?: AbortSignal,
 ): Promise<BuiltinOperationExecutionValue> {
   if (!mechanism) return operationFailure('Background sub-agent control Runtime is unavailable.');
+  if (action === 'wait') {
+    const parsed = BUILTIN_TASK_WAIT_SCHEMA_.parse(input);
+    const result = await mechanism.waitTasks(parsed.task_ids, parsed.timeout_ms ?? 30_000, signal);
+    const ok = result.ok === true;
+    const content = JSON.stringify(result);
+    const status = typeof result.status === 'string' ? result.status : 'unknown';
+    return operationResult(ok, ok ? content : '', ok ? '' : content, undefined, {
+      taskIds: parsed.task_ids,
+      taskStatus: status,
+      ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
+      ...(typeof result.cursor === 'string' || typeof result.cursor === 'number'
+        ? { cursor: result.cursor }
+        : {}),
+    });
+  }
   const taskId =
     action === 'read'
       ? BUILTIN_TASK_READ_SCHEMA_.parse(input).task_id

@@ -366,7 +366,7 @@ test('restart recovery interrupts an unfinished required child without replaying
     await restarted?.[Symbol.asyncDispose]();
     storage?.disposeStorage();
     model.assertComplete({ allowUnconsumedResponses: true });
-    model.stop(true);
+    model.stop();
     rmSync(resolve(root), { recursive: true, force: true });
   }
 }, 30_000);

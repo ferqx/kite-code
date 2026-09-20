@@ -205,6 +205,7 @@ export async function executeAppRuntimeTools(params: {
   emitTerminalEventBatch?: (events: RuntimeEvent[]) => void;
   /** Current Kernel state used to reject a prepared/leased effect that became unsafe. */
   getRuntimeState?: () => Readonly<RuntimeState>;
+  waitForStateRevisionChange?: (revision: number, signal?: AbortSignal) => Promise<void>;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorder;
@@ -1071,6 +1072,19 @@ export async function executeAppRuntimeTools(params: {
                             ),
                             taskId,
                           ),
+                        waitTasks: (taskIds: string[], timeoutMs: number, signal?: AbortSignal) =>
+                          waitForBackgroundTasks({
+                            runtime: params.backgroundSubagentRuntime!,
+                            ownerKey: backgroundSubagentOwnerKey(
+                              liveState.session.threadId,
+                              liveState.toolRecovery.identityKey,
+                            ),
+                            taskIds,
+                            timeoutMs,
+                            signal: signal ?? params.signal,
+                            getState: params.getRuntimeState,
+                            waitForStateRevisionChange: params.waitForStateRevisionChange,
+                          }),
                         cancelTask: (taskId: string) =>
                           params.backgroundSubagentRuntime!.cancelTask(
                             backgroundSubagentOwnerKey(
@@ -1565,4 +1579,75 @@ export async function executeAppRuntimeTools(params: {
     });
   }
   return events;
+}
+
+async function waitForBackgroundTasks(input: {
+  readonly runtime: BackgroundSubagentControlRuntime;
+  readonly ownerKey: string;
+  readonly taskIds: readonly string[];
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+  readonly getState?: () => Readonly<RuntimeState>;
+  readonly waitForStateRevisionChange?: (revision: number, signal?: AbortSignal) => Promise<void>;
+}): Promise<Readonly<Record<string, unknown>>> {
+  if (!input.getState || !input.waitForStateRevisionChange) {
+    return input.runtime.waitTasks(input.ownerKey, input.taskIds, input.timeoutMs, input.signal);
+  }
+  const getState = input.getState;
+  const waitForStateRevisionChange = input.waitForStateRevisionChange;
+  const initialState = getState();
+  const turnId = initialState.turn.turnId;
+  const initialUserMessages = new Set(
+    initialState.transcript.messages
+      .filter((message) => message.kind === 'user' && message.turnId === turnId)
+      .map((message) => message.messageId),
+  );
+  const deadline = Date.now() + input.timeoutMs;
+
+  while (true) {
+    const remainingMs = Math.max(0, deadline - Date.now());
+    const revision = getState().revision;
+    const waitController = new AbortController();
+    const onAbort = () => waitController.abort();
+    input.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const outcome = await Promise.race([
+        input.runtime
+          .waitTasks(input.ownerKey, input.taskIds, remainingMs, waitController.signal)
+          .then((result) => ({ kind: 'tasks' as const, result })),
+        waitForStateRevisionChange(revision, waitController.signal).then(() => ({
+          kind: 'state' as const,
+        })),
+      ]);
+      waitController.abort();
+      if (outcome.kind === 'tasks') return outcome.result;
+      if (input.signal?.aborted) {
+        return input.runtime.waitTasks(input.ownerKey, input.taskIds, 0, input.signal);
+      }
+      const state = getState();
+      const hasNewUserInput = state.transcript.messages.some(
+        (message) =>
+          message.kind === 'user' &&
+          message.turnId === turnId &&
+          !initialUserMessages.has(message.messageId),
+      );
+      if (hasNewUserInput) {
+        const tasks = await Promise.all(
+          input.taskIds.map((taskId) => input.runtime.readTask(input.ownerKey, taskId)),
+        );
+        return Object.freeze({
+          ok: true,
+          status: 'running',
+          reason: 'user_input',
+          tasks: Object.freeze(tasks),
+        });
+      }
+      if (Date.now() >= deadline) {
+        return input.runtime.waitTasks(input.ownerKey, input.taskIds, 0, input.signal);
+      }
+    } finally {
+      input.signal?.removeEventListener('abort', onAbort);
+      waitController.abort();
+    }
+  }
 }

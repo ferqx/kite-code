@@ -75,6 +75,7 @@ export const KNOWN_TOOL_NAMES = [
   'ask_user',
   'task',
   'task_read',
+  'task_wait',
   'task_cancel',
   'web_fetch',
 ] as const;
@@ -413,6 +414,21 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     recovery:
       'If status is running and the revision has not changed, do not immediately read again; yield so the Runtime watcher can deliver an actionable result. A missing or foreign task identity is terminal for that invocation.',
   },
+  task_wait: {
+    summary: 'Wait for an actionable update from one or more background sub-agents.',
+    useWhen:
+      'Use sparingly when an explicit blocking wait is needed for one to eight exact task_ids. Required background results normally use automatic Runtime-managed waiting, so task_wait is not needed after every task call.',
+    returns: {
+      format: 'json',
+      description:
+        'The wait reason and current task snapshots after a terminal, failed, cancelled, missing, interrupted, or timeout outcome.',
+      fields: ['ok', 'reason', 'cursor', 'tasks'],
+    },
+    constraints:
+      'task_ids must contain one to eight distinct Runtime-owned task identities. timeout_ms is bounded to 0-60000 and defaults to 30000. Do not repeatedly call task_wait after an unchanged timeout, and do not replace it with sleep or task_read polling.',
+    recovery:
+      'On timeout, continue meaningful independent work or yield to automatic required-result delivery. Treat missing or foreign task identities as terminal for that invocation; user input or cancellation interrupts the wait.',
+  },
   task_cancel: {
     summary: 'Stop one Runtime-owned background sub-agent and wait for its cleanup result.',
     useWhen:
@@ -465,6 +481,7 @@ export const UPDATE_PLAN_CONTRACT = currentToolContract('update_plan');
 export const ASK_USER_CONTRACT = currentToolContract('ask_user');
 export const TASK_CONTRACT = currentToolContract('task');
 export const TASK_READ_CONTRACT = currentToolContract('task_read');
+export const TASK_WAIT_CONTRACT = currentToolContract('task_wait');
 export const TASK_CANCEL_CONTRACT = currentToolContract('task_cancel');
 export const WEB_FETCH_CONTRACT = currentToolContract('web_fetch');
 
