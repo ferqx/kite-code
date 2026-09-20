@@ -42,11 +42,11 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 
 该套件通过真实 App Server 协议断言以下场景：
 
-- 会话 A 在同一响应中建立两个 `background + required` child，并从持久 waiting admission 到屏障释放保持父模型请求数和 `task_read` 数不变；
+- 会话 A 在同一响应中建立两个 `background + required` child，并从持久 waiting admission 到屏障释放保持父模型请求数和 `task_read` 数不变；两个 child 必须各执行一次指定 FIFO Shell、回报各自 marker，父 Agent 最终回复也必须匹配约定正文；
 - A 等待时创建会话 B，并由真实模型在 B 中调用文件工具；
 - A/B 的历史事件及后台执行投影互不串线；
 - 屏障释放后 A 以同一 Run identity 收敛两个 required child；
-- 会话 C 显式建立获授权的 `after_turn` child，父 Run 先完成，child 终态后按持久化的 `afterTurn.runId` 精确建立且仅建立一个后续 Run；
+- 会话 C 显式建立获授权的 `after_turn` child，父 Run 先以约定正文完成，child 必须执行一次指定 FIFO Shell 并保留 marker，终态后按持久化的 `afterTurn.runId` 精确建立且仅建立一个后续 Run；
 - 不重启 Service 热重进 A，历史正确投影 `subagent.completed`。
 
 这是付费且依赖公网的串行 E2E。超时可通过 `KITE_LIVE_BACKGROUND_TIMEOUT_MS` 调整；测试失败也不得把完整 provider payload 加入日志。

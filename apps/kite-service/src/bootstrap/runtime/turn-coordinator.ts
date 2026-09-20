@@ -912,6 +912,16 @@ export async function* executeRuntimeTurn(
       // post-abort events while accidentally hiding the rejection itself.
       if (abortReasonAfterProjection) abortExecution(abortReasonAfterProjection, 'user');
     }
+    if (runCancelled && 'backgroundSubagentRuntime' in modelInvocationRuntime) {
+      const background = modelInvocationRuntime.backgroundSubagentRuntime as
+        | BackgroundSubagentControlRuntime
+        | undefined;
+      await background?.cancelOrigin(
+        backgroundSubagentOwnerKey(input.threadId, input.recoveryIdentityKey),
+        kernel.getState().turn.turnId,
+        kernel.getState().turn.abortReason ?? 'origin_run_cancelled',
+      );
+    }
     // A cancelled concurrent tool batch can exhaust the generic effect
     // cleanup grace while its Subagent Provider handles are still durable.
     // Reconcile those handles before this generator releases the Session turn

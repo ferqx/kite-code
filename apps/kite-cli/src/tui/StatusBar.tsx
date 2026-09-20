@@ -17,8 +17,15 @@ export default function StatusBar({ runStatus, running }: StatusBarProps) {
 
   const cancelling = runStatus?.verb === 'Cancelling';
   const retrying = !cancelling && Boolean(runStatus?.retry);
-  const color = cancelling || retrying ? t.warning : t.primary;
-  const verb = cancelling ? 'Cancelling' : retrying ? 'Retrying' : 'Working';
+  const backgroundWaiting = !cancelling && !retrying && runStatus?.waiting === 'background';
+  const color = cancelling || retrying ? t.warning : backgroundWaiting ? t.muted : t.primary;
+  const verb = cancelling
+    ? 'Cancelling'
+    : retrying
+      ? 'Retrying'
+      : backgroundWaiting
+        ? 'Waiting · background results'
+        : 'Working';
 
   return (
     <Box>

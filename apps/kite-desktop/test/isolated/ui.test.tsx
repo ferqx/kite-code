@@ -1870,6 +1870,58 @@ test('waiting for background results keeps steering and stop controls available'
   expect(client.cancelled).toBe(1);
 });
 
+test('background waiting survives a second conversation and keeps both drafts isolated', async () => {
+  const client = new UiClient();
+  const waitingSession = {
+    ...session('s0', '工作 0'),
+    currentRun: {
+      runId: 'run-required-background',
+      initialTurnId: 'turn-required-background',
+      activeTurnId: 'turn-required-background',
+      status: 'waiting',
+      revision: 2,
+      waitingReason: { kind: 'required_background', taskIds: ['task-required'] },
+    },
+  } as RuntimeSessionProjection;
+  const secondSession = session('s1', '工作 1');
+  client.view = {
+    ...client.view,
+    sessions: [waitingSession, secondSession],
+    selected: 's0',
+    projection: waitingSession,
+  };
+  await render(<App client={client} />);
+
+  await write(input(), '等待期间留在 A 的草稿');
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(client.getSnapshot().selected).toBe('s1');
+  expect(input().value).toBe('');
+
+  await write(input(), '在 B 继续对话');
+  await click(button('发送'));
+  expect(client.sent).toEqual(['在 B 继续对话']);
+  expect(client.sentTargets).toEqual(['s1']);
+  await write(input(), '只属于 B 的新草稿');
+
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
+  expect(client.getSnapshot().selected).toBe('s0');
+  expect(client.getSnapshot().projection?.currentRun).toEqual(
+    expect.objectContaining({
+      runId: 'run-required-background',
+      status: 'waiting',
+      waitingReason: { kind: 'required_background', taskIds: ['task-required'] },
+    }),
+  );
+  expect(input().value).toBe('等待期间留在 A 的草稿');
+  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(input().value).toBe('只属于 B 的新草稿');
+  expect(client.cancelled).toBe(0);
+});
+
 test('cached history stays readable while calibrating, including cached empty history', async () => {
   const client = new UiClient();
   client.view = {

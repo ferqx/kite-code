@@ -90,6 +90,12 @@ export interface BackgroundSubagentControlRuntime {
     taskId: string,
   ) => Promise<Readonly<Record<string, unknown>>>;
   readonly requestCancel: (ownerKey: string, taskId: string, onTerminal: () => void) => boolean;
+  readonly cancelOrigin: (
+    ownerKey: string,
+    originRunId: string,
+    reason?: string,
+    timeoutMs?: number,
+  ) => Promise<void>;
   readonly disposeOwner?: (ownerKey: string, reason?: string, timeoutMs?: number) => Promise<void>;
   readonly settlementRecoveryReservations?: (ownerKey: string) => readonly string[];
   readonly settlementRecoveryEvents?: (
@@ -422,6 +428,26 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     timeoutMs = 10_000,
   ): Promise<void> {
     const records = [...this.#records.values()].filter((record) => record.ownerKey === ownerKey);
+    await this.#cancelRecords(records, reason, timeoutMs);
+  }
+
+  async cancelOrigin(
+    ownerKey: string,
+    originRunId: string,
+    reason = 'origin_run_cancelled',
+    timeoutMs = 10_000,
+  ): Promise<void> {
+    const records = [...this.#records.values()].filter(
+      (record) => record.ownerKey === ownerKey && record.originRunId === originRunId,
+    );
+    await this.#cancelRecords(records, reason, timeoutMs);
+  }
+
+  async #cancelRecords(
+    records: readonly BackgroundSubagentRecord[],
+    reason: string,
+    timeoutMs: number,
+  ): Promise<void> {
     const cancellations: Promise<void>[] = [];
     for (const record of records) {
       if (!record.cleanupConfirmed) {

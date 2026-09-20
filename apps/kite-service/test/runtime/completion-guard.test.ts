@@ -626,6 +626,179 @@ describe('CompletionGuard V1', () => {
     });
   }
 
+  for (const ordering of ['steer_before_terminal', 'terminal_before_steer_same_wake'] as const) {
+    test(`consumes one steer and wakes the model once when required background races ${ordering}`, async () => {
+      const state = activePlanningState();
+      const originTurnId = state.turn.turnId;
+      state.transcript.final = 'Premature final.';
+      state.tools.calls.background = {
+        toolCallId: 'background',
+        modelMessageId: 'model-background',
+        name: 'task',
+        args: {
+          name: 'inspect',
+          subagent_type: 'explore',
+          task: 'inspect runtime',
+          background: true,
+          result_disposition: 'required',
+        },
+        status: 'succeeded',
+        createdAtTurnId: originTurnId,
+        result: {
+          ok: true,
+          summary: 'accepted',
+          resultMeta: {
+            taskId: 'child-race-1',
+            taskStatus: 'running',
+            taskDisposition: 'required',
+          },
+        },
+      };
+      state.capabilities.invocations.background = {
+        invocationId: 'background',
+        toolCallId: 'background',
+        capabilityId: 'builtin:task',
+        capabilityRevision: 'v1',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        admissionDigest: 'admission',
+        effectiveEffectsDigest: 'effects',
+        receiptRequirement: 'observation_receipt',
+        attemptsStarted: 1,
+        status: 'succeeded',
+        reconciliation: 'confirmed_success',
+        recordedAt: '2026-09-20T00:00:00.000Z',
+        subagentProviderLifecycle: {
+          attempt: 1,
+          purpose: 'start',
+          childInvocationId: 'child-race-1',
+          taskArtifact: {
+            artifactId: `pa_${'d'.repeat(64)}`,
+            kind: 'subagent_task',
+            integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+            byteLength: 1,
+          },
+          dispatchIntentDigest: `sha256:${'b'.repeat(64)}`,
+          status: 'cleanup_completed',
+          recordedAt: '2026-09-20T00:00:00.000Z',
+          cleanupAttempt: 1,
+          cleanupKind: 'undispatched',
+          cleanupStartedAt: '2026-09-20T00:00:00.000Z',
+          cleanupConfirmed: true,
+          cleanupCompletedAt: '2026-09-20T00:00:00.000Z',
+        },
+      };
+      const kernel = new AgentKernel({
+        store: openStateStoreForTest(':memory:'),
+        initialState: state,
+        interactionMode: 'accept_edits',
+      });
+      const wakes: Array<
+        (
+          reason:
+            | 'state_changed'
+            | 'background_changed'
+            | 'managed_shell_changed'
+            | 'managed_shell_terminal',
+        ) => void
+      > = [];
+      let modelCalls = 0;
+      let modelTurnId: string | undefined;
+      let steerCopiesSeenByModel = 0;
+      const stream = runStateRuntimeLoop(
+        kernel,
+        async () => {
+          modelCalls += 1;
+          const current = kernel.getState();
+          modelTurnId = current.turn.turnId;
+          steerCopiesSeenByModel = current.transcript.messages.filter(
+            (message) => message.kind === 'user' && message.content === 'Use the new constraint.',
+          ).length;
+          return [
+            { type: 'model.responded' as const, messageId: 'after-race', text: 'Done once.' },
+          ];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () =>
+          new Promise<
+            | 'state_changed'
+            | 'background_changed'
+            | 'managed_shell_changed'
+            | 'managed_shell_terminal'
+          >((resolve) => {
+            wakes.push(resolve);
+          }),
+      );
+
+      expect((await stream.next()).value).toMatchObject({
+        type: 'completion.blocked',
+        nextAction: 'wait_for_background',
+        backgroundTaskIds: ['child-race-1'],
+      });
+      const resumed = stream.next();
+      await Promise.resolve();
+
+      const appendSteer = () =>
+        kernel.processEvent({
+          type: 'user.message_appended',
+          messageId: 'steer-race-1',
+          content: 'Use the new constraint.',
+        });
+      const persistTerminal = () =>
+        kernel.processEvent({
+          type: 'subagent.background_result_persisted',
+          taskId: 'child-race-1',
+          notificationId: `subagent:child-race-1:sha256:${'c'.repeat(64)}`,
+          artifactIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
+          shortReport: 'Child completed.',
+          source: 'subagent',
+          modelRole: 'user',
+          originRunId: originTurnId,
+          originTurnId,
+          originToolCallId: 'background',
+          attempt: 1,
+        });
+
+      if (ordering === 'steer_before_terminal') {
+        appendSteer();
+        wakes.shift()!('state_changed');
+        await Bun.sleep(0);
+        expect(modelCalls).toBe(0);
+        expect(wakes).toHaveLength(1);
+        persistTerminal();
+        wakes.shift()!('background_changed');
+      } else {
+        persistTerminal();
+        appendSteer();
+        wakes.shift()!('background_changed');
+      }
+
+      expect((await resumed).value).toMatchObject({
+        type: 'model.responded',
+        messageId: 'after-race',
+      });
+      expect(modelCalls).toBe(1);
+      expect(modelTurnId).toBe(originTurnId);
+      expect(steerCopiesSeenByModel).toBe(1);
+      expect(
+        kernel
+          .getState()
+          .transcript.messages.filter(
+            (message) => message.kind === 'user' && message.content === 'Use the new constraint.',
+          ),
+      ).toHaveLength(1);
+      await Bun.sleep(0);
+      expect(modelCalls).toBe(1);
+      await stream.return(undefined);
+      kernel.close();
+    });
+  }
+
   test('classifies only the current required finite Shell terminal as a model wake', () => {
     const state = activePlanningState();
     state.tools.calls.shell = {

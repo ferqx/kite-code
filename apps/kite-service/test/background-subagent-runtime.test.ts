@@ -235,6 +235,37 @@ describe('BackgroundSubagentRuntime', () => {
     expect(cancelled).toBe(1);
     expect(owner.listSnapshot('dispose', ownerKey).executions).toEqual([]);
   });
+
+  test('cancelOrigin cancels only children owned by the exact parent Run', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('cancel-origin', 'recovery');
+    const first = deferred<Readonly<SubAgentResult>>();
+    const second = deferred<Readonly<SubAgentResult>>();
+    const cancelled: string[] = [];
+    for (const [taskId, originRunId, completion] of [
+      ['first-origin-task', 'run-first', first],
+      ['second-origin-task', 'run-second', second],
+    ] as const) {
+      owner.adopt({
+        taskId,
+        ownerKey,
+        ...ORIGIN,
+        originRunId,
+        observe: () => completion.promise,
+        cancel: async () => {
+          cancelled.push(taskId);
+          completion.resolve(terminal({ ok: false, terminalStatus: 'cancelled' }));
+        },
+      });
+    }
+
+    await owner.cancelOrigin(ownerKey, 'run-first');
+
+    expect(cancelled).toEqual(['first-origin-task']);
+    expect(owner.hasLiveTask('first-origin-task')).toBe(false);
+    expect(owner.hasLiveTask('second-origin-task')).toBe(true);
+    second.resolve(terminal());
+  });
   test('disposeOwner returns at its bound and retains unresolved cleanup for recovery', async () => {
     const owner = runtime();
     const ownerKey = backgroundSubagentOwnerKey('dispose-timeout', 'recovery');

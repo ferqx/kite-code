@@ -273,6 +273,31 @@ function taskReadCount(events: readonly RuntimeClientEvent[]): number {
     .length;
 }
 
+function responseTexts(events: readonly RuntimeClientEvent[]): readonly string[] {
+  const pending = new Map<string, string>();
+  const responses: string[] = [];
+  for (const event of events) {
+    if (event.type === 'model.text_delta') {
+      pending.set(event.requestId, `${pending.get(event.requestId) ?? ''}${event.text}`);
+    } else if (event.type === 'model.response_superseded') {
+      pending.delete(event.requestId);
+    } else if (event.type === 'model.responded') {
+      const text = pending.get(event.requestId)?.trim();
+      if (text) responses.push(text);
+      pending.delete(event.requestId);
+    }
+  }
+  return responses;
+}
+
+function queuedShellCommands(events: readonly RuntimeClientEvent[]): readonly string[] {
+  return queuedToolEvents(events).flatMap((event) =>
+    event.toolName === 'shell_execute' && typeof event.arguments.command === 'string'
+      ? [event.arguments.command]
+      : [],
+  );
+}
+
 function queuedTasks(events: readonly RuntimeClientEvent[]) {
   return queuedToolEvents(events).filter(
     (event) => event.toolName === 'task' && typeof event.arguments.subagent_type === 'string',
@@ -839,6 +864,7 @@ try {
     'Session B did not finish read_file.',
   );
   assert.ok(includesEvent(eventsB, 'model.responded'), 'Session B has no model response.');
+  assert.equal(responseTexts(eventsB).at(-1), 'session-b-interacted');
   assert.ok(
     !includesEvent(eventsB, 'subagent.started'),
     'Session A subagent leaked into Session B.',
@@ -868,6 +894,18 @@ try {
       (event) => event.type === 'user.message' && event.text.includes('probe-b.txt'),
     ),
     'Session B input leaked into Session A history.',
+  );
+  assert.equal(responseTexts(reenteredAEvents).at(-1), 'session-a-completed');
+  const requiredChildSummaries = reenteredAEvents.flatMap((event) =>
+    event.type === 'subagent.completed' ? [event.summary] : [],
+  );
+  assert.ok(requiredChildSummaries.some((summary) => summary.includes('required-a-released')));
+  assert.ok(requiredChildSummaries.some((summary) => summary.includes('required-b-released')));
+  assert.deepEqual(
+    queuedShellCommands(reenteredAEvents)
+      .filter((command) => command.includes('required-gate-'))
+      .sort(),
+    ['head -n 1 required-gate-a', 'head -n 1 required-gate-b'],
   );
 
   const revisionC = await createSession(connection, sessionC);
@@ -941,6 +979,22 @@ try {
     afterTurnRuns.find((run) => run.runId === afterTurnOriginRunId)?.status,
     'completed',
   );
+  const finalAfterTurnEvents = eventsOf(await connection.history.loadSession(sessionC));
+  assert.ok(responseTexts(finalAfterTurnEvents).includes('session-c-accepted'));
+  assert.ok(
+    finalAfterTurnEvents.some(
+      (event) =>
+        event.type === 'subagent.completed' && event.summary.includes('after-turn-released'),
+    ),
+    'The after-turn child result did not preserve its gate marker.',
+  );
+  assert.deepEqual(
+    queuedShellCommands(finalAfterTurnEvents).filter((command) =>
+      command.includes('after-turn-gate'),
+    ),
+    ['head -n 1 after-turn-gate'],
+  );
+  assert.equal(settledInteractions.size, 0, 'The deterministic scenario requested an interaction.');
 
   assert.deepEqual((await projection(connection, sessionA)).model, {
     provider: PROVIDER,
