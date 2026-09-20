@@ -45,6 +45,41 @@ write();`,
   );
 });
 
+test('a timed-out stdin write keeps the shared Service alive for later inspection', async () => {
+  await withFixture(
+    `setTimeout(() => {
+  process.stdin.setEncoding('utf8');
+  let input = '';
+  process.stdin.on('data', (chunk) => {
+    input += chunk;
+    let newline;
+    while ((newline = input.indexOf('\\n')) >= 0) {
+      const frame = input.slice(0, newline);
+      input = input.slice(newline + 1);
+      process.stdout.write(JSON.stringify({ received: JSON.parse(frame).id }) + '\\n');
+    }
+  });
+  process.stdin.resume();
+}, 5_500);
+process.stdin.on('end', () => process.exit(0));
+setInterval(() => {}, 1_000);`,
+    async (carrier) => {
+      carrier.markInitialized();
+      const largeFrame = JSON.stringify({ id: 'large', data: 'x'.repeat(1_000_000) });
+      await expect(carrier.send(largeFrame)).rejects.toThrow('发送超时');
+      expect(carrier.finished).toBe(false);
+      expect(JSON.parse(await withDeadline(carrier.receive(), 3_000))).toEqual({
+        received: 'large',
+      });
+      await carrier.send(JSON.stringify({ id: 'probe' }));
+      expect(JSON.parse(await withDeadline(carrier.receive(), 3_000))).toEqual({
+        received: 'probe',
+      });
+      expect(carrier.finished).toBe(false);
+    },
+  );
+}, 12_000);
+
 test('invalid and oversized stdout close the owned Service instead of leaving it running', async () => {
   for (const source of [
     `process.stdout.write(Buffer.from([255, 10]));

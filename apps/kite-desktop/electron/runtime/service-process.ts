@@ -346,8 +346,12 @@ export class ServiceProcess {
           await this.#failStartup();
           return;
         }
+        // A timed-out write can still complete after the caller loses its receipt. Closing stdin
+        // here would dispose the shared App Server and cancel unrelated sessions and children.
+        // Keep the owned Service alive, report the unknown result, and let the renderer reconnect
+        // and inspect durable state without replaying the write.
+        if (error instanceof OperationTimeout) throw error;
         void this.close().catch(() => undefined);
-        if (error instanceof Error && error.message.includes('超时')) throw error;
         throw new Error('发送结果未知，请检查会话。');
       }
     });

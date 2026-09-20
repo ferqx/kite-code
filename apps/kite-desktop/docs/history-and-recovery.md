@@ -28,6 +28,8 @@
 
 客户端 transport close 只调用 `runtimeDetach`，取消旧页面的接收与订阅，不关闭 Service stdin。只有明确执行项目／分支切换与退出才调用 `runtimeClose` 关闭自有 Service。宿主已有健康 Service 时复用；确已退出才允许重新启动，不能承诺恢复已停止的执行。命令回执丢失仍保留“结果未知”提示，自动恢复不会重放创建、发送、审批、配置或 Git 命令。 Runtime 明确授权拒绝及带 `temporarily_unavailable` 详情的准入失败发生在 dispatch 前，作为确定失败处理；通用 `internal_error` 可能发生在持久提交之后，保留结果未知。权限切换遇到未知结果时，只读核对同一会话的持久权限，确认已生效才清除未知状态，不重复发送设置命令。
 
+向已启动 Service 写入请求超时同样只表示本次回执未知；已交给操作系统的写入仍可能稍后完成。Electron 宿主不因该超时关闭 Service stdin，也不自动重发；页面按现有重连与持久回执核对路径恢复。确定的管道写入失败、非法或超限协议输出仍使 peer 失效并进入受控清理。
+
 [renderer 连接 owner](../electron/runtime/renderer-connection.ts)在接收取消与 Service 帧同时完成时，先处理已经取得的帧再切换代次。已消费的 initialize 回执必须更新原 peer 的初始化事实，迟到的 subscribe 回执继续释放旧订阅；不能把“取消先唤醒”当作“没有收到帧”，否则会把初始化永久留在等待状态，使重复重接也无法恢复。[连接回归](../test/host-renderer-connection.test.ts)以确定的取消／回执交错验证这一边界，仍复用同一 Service，不重发初始化或业务命令。
 
 ## 验证
