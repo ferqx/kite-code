@@ -55,4 +55,4 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 - 结果：`manual-direct-summary` 因 `ContextCompactionValidationError: Summary was truncated` 失败，未进入 incremental 场景。本记录未保留 request 或 response 正文。
 - 2026-09-20，provider `deepseek`，model `deepseek-v4-flash`，正常本地网络条件。
 - 命令：从本地 Kite Code 配置填充 opt-in 变量后运行 `bun run test:model:live:background`。
-- 结果：`auto` 交互模式下，A/B 会话隔离、B 独立交互、后台 Shell 与后台子 Agent 的工具调用及持久终态、A 的主 Run 完成、热重进历史投影全部通过；A 的两项后台执行均为 `completed` 且 `cleanupConfirmed`。未保留 provider 请求或响应正文。
+- 结果：`auto` 交互模式下，A/B 会话隔离、B 独立交互、后台 Shell 与后台子 Agent 的工具调用及持久终态、A 的主 Run 完成、热重进历史投影全部通过；A 的两项后台执行均为 `completed` 且 `cleanupConfirmed`。Service 环境显式注入指向 Workspace 外启动脚本的 `BASH_ENV` 与 `ENV`，Shell stderr 为空且启动脚本副作用未发生。未保留 provider 请求或响应正文。

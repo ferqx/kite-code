@@ -35,6 +35,8 @@ const root = realpathSync.native(
 );
 const configRoot = join(root, '.kite-code');
 const workspace = join(root, 'workspace');
+const startupInjection = join(root, '.bashrc');
+const startupMarker = join(workspace, 'startup-injection-ran');
 const sessionA = 'live-background-session-a';
 const sessionB = 'live-background-session-b';
 const approvedInteractions = new Set<string>();
@@ -51,6 +53,8 @@ function openConnection(label: string) {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: root,
       USERPROFILE: root,
+      BASH_ENV: startupInjection,
+      ENV: startupInjection,
       NODE_ENV: 'production',
       KITE_CODE_HOME: configRoot,
       KITE_CODE_CONFIG_HOME: configRoot,
@@ -219,6 +223,11 @@ try {
   writeFileSync(join(workspace, 'probe-a.txt'), 'session-a-child-marker\n', { mode: 0o600 });
   writeFileSync(join(workspace, 'probe-b.txt'), 'session-b-marker\n', { mode: 0o600 });
   writeFileSync(
+    startupInjection,
+    `printf 'unexpected startup injection\\n' >&2\ntouch '${startupMarker}'\n`,
+    { mode: 0o600 },
+  );
+  writeFileSync(
     join(configRoot, 'kite-code.jsonc'),
     JSON.stringify({
       provider: {
@@ -355,6 +364,12 @@ try {
     ),
     'Hot re-entry did not project the background Shell terminal result.',
   );
+  const shellTerminal = reenteredAEvents.find(
+    (event) => event.type === 'tool.finished' && event.result.stdout.includes('shell-a-done'),
+  );
+  assert.ok(shellTerminal?.type === 'tool.finished');
+  assert.equal(shellTerminal.result.stderr, '');
+  assert.equal(await Bun.file(startupMarker).exists(), false);
   assert.ok(
     includesEvent(reenteredAEvents, 'subagent.completed'),
     'Hot re-entry did not project the background subagent terminal result.',
