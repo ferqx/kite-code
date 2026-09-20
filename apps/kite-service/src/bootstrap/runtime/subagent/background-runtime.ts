@@ -303,7 +303,6 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       });
       record.resultArtifact = artifact;
       record.status = terminalStatus(result);
-      this.#bump(record);
       if (onResultPersisted) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         let callbackSucceeded = false;
@@ -352,6 +351,12 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
           try {
             this.#persistSettlementProof(record, artifact);
             record.settlementConfirmed = true;
+            // Publish the terminal owner watermark only after both the result
+            // notification and its durable settlement proof are available.
+            // Required-run waiters treat an unavailable terminal as a recovery
+            // boundary, so exposing the status earlier creates a false failure
+            // window while the callback is still persisting the Kernel event.
+            this.#bump(record);
           } catch (error) {
             // The callback may already have committed an after-turn wake. Do
             // not release its exact replacement reservation on proof failure.
@@ -363,18 +368,26 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       } else {
         this.#persistSettlementProof(record, artifact);
         record.settlementConfirmed = true;
+        this.#bump(record);
       }
     } catch (error) {
       record.status = 'unknown';
       record.terminalError = boundedError(error);
-      this.#bump(record);
       if (settlementRecoveryReservationId && record.resultArtifact) {
-        this.#persistSettlementRecovery(
-          record,
-          record.resultArtifact,
-          settlementRecoveryReservationId,
-        );
+        try {
+          this.#persistSettlementRecovery(
+            record,
+            record.resultArtifact,
+            settlementRecoveryReservationId,
+          );
+        } catch (recoveryError) {
+          // A failed recovery write is itself the terminal boundary. Publish
+          // only after the attempt so waiters either observe its durable claim
+          // or fail closed against a genuinely unavailable recovery record.
+          record.terminalError = boundedError(recoveryError);
+        }
       }
+      this.#bump(record);
       await notifySettlementFailed(onSettlementFailed, error);
     } finally {
       // Once a durable result and its notification have settled, the Artifact is

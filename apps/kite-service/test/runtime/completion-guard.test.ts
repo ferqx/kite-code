@@ -16,7 +16,10 @@ import {
   setActivePlanning,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { runStateRuntimeLoop } from '#kite-service/bootstrap/runtime/state-runner';
-import { hasTerminalRequiredManagedShell } from '#kite-service/bootstrap/runtime/turn-coordinator';
+import {
+  hasTerminalRequiredManagedShell,
+  inspectRequiredBackgroundSettlement,
+} from '#kite-service/bootstrap/runtime/turn-coordinator';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   StateHostSessionHarness as AgentKernel,
@@ -46,6 +49,48 @@ function activePlanningState() {
     taskId: 'task-1',
     source: 'user_command',
   });
+}
+
+function requiredBackgroundState(...taskIds: string[]): RuntimeState {
+  const state = activePlanningState();
+  for (const [index, taskId] of taskIds.entries()) {
+    state.tools.calls[`background-${index}`] = {
+      toolCallId: `background-${index}`,
+      modelMessageId: `model-background-${index}`,
+      name: 'task',
+      args: {
+        name: `inspect-${index}`,
+        subagent_type: 'explore',
+        task: 'inspect runtime',
+        background: true,
+        result_disposition: 'required',
+      },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'accepted',
+        resultMeta: { taskId, taskStatus: 'running', taskDisposition: 'required' },
+      },
+    };
+  }
+  return state;
+}
+
+function backgroundRecoveryEvent(taskId: string, notificationId: string): RuntimeEvent {
+  return {
+    type: 'subagent.background_result_persisted',
+    taskId,
+    notificationId,
+    artifactIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
+    shortReport: 'Recovered child result.',
+    source: 'subagent',
+    modelRole: 'user',
+    originRunId: 'run-recovery',
+    originTurnId: 'turn-recovery',
+    originToolCallId: 'tool-recovery',
+    attempt: 1,
+  };
 }
 
 function v2ExecutingState(options: {
@@ -159,6 +204,50 @@ function v2ExecutingState(options: {
 }
 
 describe('CompletionGuard V1', () => {
+  test('recognizes a required background result that settled before waiting began', () => {
+    const awaited = new Set(['child-pre-settled']);
+    const current = requiredBackgroundState();
+
+    expect(inspectRequiredBackgroundSettlement(awaited, current, [], [])).toEqual({
+      kind: 'state_changed',
+      events: [],
+    });
+  });
+
+  test('requires a recovery claim for every unavailable required background child', () => {
+    const current = requiredBackgroundState('child-missing-claim', 'child-with-claim');
+    const recovery = backgroundRecoveryEvent('child-with-claim', 'recovered-child-with-claim');
+
+    expect(() =>
+      inspectRequiredBackgroundSettlement(
+        new Set(['child-missing-claim', 'child-with-claim']),
+        current,
+        [
+          { executionId: 'child-missing-claim', status: 'unavailable' },
+          { executionId: 'child-with-claim', status: 'unavailable' },
+        ],
+        [recovery],
+      ),
+    ).toThrow('Required background sub-agent settlement requires explicit recovery.');
+  });
+
+  test('returns only exact recovery events for unavailable required background children', () => {
+    const current = requiredBackgroundState('child-recover', 'child-running');
+    const recovery = backgroundRecoveryEvent('child-recover', 'recovered-child');
+
+    expect(
+      inspectRequiredBackgroundSettlement(
+        new Set(['child-recover', 'child-running']),
+        current,
+        [
+          { executionId: 'child-recover', status: 'unavailable' },
+          { executionId: 'child-running', status: 'running' },
+        ],
+        [recovery, backgroundRecoveryEvent('child-running', 'must-not-replay-running-child')],
+      ),
+    ).toEqual({ kind: 'state_changed', events: [recovery] });
+  });
+
   test('blocks every incomplete Plan lifecycle before it can become task completion', () => {
     const state = activePlanningState();
     expect(decideUnplannedCompletion(state)).toMatchObject({

@@ -77,7 +77,7 @@ export function projectEventWithIdentity(
       title: '本轮回复失败',
       text: authRequired
         ? '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。'
-        : '本轮回复失败。请检查会话和模型服务状态后再决定是否继续。',
+        : '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。',
       status: 'failed',
       settled: true,
     };

@@ -101,6 +101,44 @@ export function hasTerminalRequiredManagedShell(
   );
 }
 
+export function inspectRequiredBackgroundSettlement(
+  awaitedTaskIds: ReadonlySet<string>,
+  currentState: Readonly<RuntimeState>,
+  executions: readonly Readonly<{ executionId: string; status: string }>[],
+  recoveryEvents: readonly Readonly<Record<string, unknown>>[],
+):
+  | { readonly kind: 'none' }
+  | { readonly kind: 'state_changed'; readonly events: readonly RuntimeEvent[] } {
+  if (awaitedTaskIds.size === 0) return { kind: 'none' };
+  const currentRequired = new Set(requiredBackgroundTaskIds(currentState));
+  if ([...awaitedTaskIds].every((taskId) => !currentRequired.has(taskId))) {
+    return { kind: 'state_changed', events: [] };
+  }
+  const unavailable = executions.filter(
+    (execution) => currentRequired.has(execution.executionId) && execution.status === 'unavailable',
+  );
+  if (unavailable.length === 0) return { kind: 'none' };
+  const recoveryByTask = new Map(
+    recoveryEvents
+      .filter(
+        (event) =>
+          event.type === 'subagent.background_result_persisted' &&
+          typeof event.taskId === 'string' &&
+          currentRequired.has(event.taskId),
+      )
+      .map((event) => [event.taskId as string, event as RuntimeEvent] as const),
+  );
+  if (unavailable.some((execution) => !recoveryByTask.has(execution.executionId))) {
+    throw new Error('Required background sub-agent settlement requires explicit recovery.');
+  }
+  return {
+    kind: 'state_changed',
+    events: unavailable.map(
+      (execution) => recoveryByTask.get(execution.executionId) as RuntimeEvent,
+    ),
+  };
+}
+
 function exhaustedModelFailureMode(
   error: unknown,
 ): 'model_timeout' | 'model_rate_limit' | 'model_server_error' | undefined {
@@ -827,12 +865,33 @@ export async function* executeRuntimeTurn(
           ownerKey,
         ).executions;
         const requiredBackground = new Set(requiredBackgroundTaskIds(state));
+        const awaitedBackground = new Set(
+          state.completionGuard.waitingReason?.kind === 'required_background'
+            ? state.completionGuard.waitingReason.taskIds
+            : requiredBackground,
+        );
+        const inspectRequiredBackground = () => {
+          if (!children || awaitedBackground.size === 0) return undefined;
+          const currentState = kernel.getState();
+          if (currentState.revision !== revision) return 'state_changed' as const;
+          const inspection = inspectRequiredBackgroundSettlement(
+            awaitedBackground,
+            currentState,
+            children.listSnapshot(input.threadId, childOwnerKey).executions,
+            children.settlementRecoveryEvents?.(childOwnerKey) ?? [],
+          );
+          if (inspection.kind === 'none') return undefined;
+          for (const event of inspection.events) kernel.processEvent(event);
+          return 'state_changed' as const;
+        };
         if (
           requiredBackground.size === 0 &&
           hasTerminalRequiredManagedShell(state, currentShellExecutions)
         ) {
           return 'managed_shell_terminal' as const;
         }
+        const existingBackground = inspectRequiredBackground();
+        if (existingBackground) return existingBackground;
         const wake = await Promise.race([
           (
             kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
@@ -850,28 +909,8 @@ export async function* executeRuntimeTurn(
         ]);
         if (wake === 'state_changed') return wake;
         if (wake === 'background_changed' && children) {
-          const executions = children.listSnapshot(input.threadId, childOwnerKey).executions;
-          if (
-            executions.some(
-              (execution) =>
-                requiredBackground.has(execution.executionId) && execution.status === 'unavailable',
-            )
-          ) {
-            const recoveryEvents =
-              children
-                .settlementRecoveryEvents?.(childOwnerKey)
-                .filter(
-                  (event) =>
-                    event.type === 'subagent.background_result_persisted' &&
-                    typeof event.taskId === 'string' &&
-                    requiredBackground.has(event.taskId),
-                ) ?? [];
-            if (recoveryEvents.length > 0) {
-              for (const event of recoveryEvents) kernel.processEvent(event as RuntimeEvent);
-              return 'state_changed' as const;
-            }
-            throw new Error('Required background sub-agent settlement requires explicit recovery.');
-          }
+          const settledBackground = inspectRequiredBackground();
+          if (settledBackground) return settledBackground;
           return wake;
         }
         const executions = managedShellRuntime.listSnapshot(input.threadId, ownerKey).executions;

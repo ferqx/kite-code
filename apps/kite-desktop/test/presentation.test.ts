@@ -43,6 +43,26 @@ test('failed model run is visible without an assistant reply and replay does not
   ).toEqual(withFailure);
 });
 
+test('generic runtime failure does not misclassify the model service', () => {
+  const messages = projectEventWithIdentity([], {
+    type: 'run.terminal',
+    runId: 't1',
+    status: 'failed',
+    outcome: {
+      status: 'unknown',
+      reasonCode: 'runtime_failed',
+      safeRetry: false,
+      recoveryEntry: 'new_run',
+    },
+  });
+
+  expect(messages).toHaveLength(1);
+  expect(messages[0]?.text).toBe(
+    '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。',
+  );
+  expect(messages[0]?.text).not.toContain('模型服务');
+});
+
 test('turn and run terminal failures share one notice and remain scoped to their turn', () => {
   let messages = projectEventWithIdentity([], {
     type: 'turn.terminal',

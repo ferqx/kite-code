@@ -543,6 +543,42 @@ describe('BackgroundSubagentRuntime', () => {
     expect(failures[0]).toMatchObject({ message: 'notification persistence failed' });
   });
 
+  test('does not publish a suspended terminal before its settlement callback finishes', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('delayed-suspended-settlement', 'recovery');
+    const callbackStarted = deferred<void>();
+    const callback = deferred<void>();
+    owner.adopt({
+      taskId: 'delayed-suspended-task',
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal({ ok: false, terminalStatus: 'suspended' }),
+      cancel: async () => {},
+      onResultPersisted: () => {
+        callbackStarted.resolve();
+        return callback.promise;
+      },
+    });
+
+    const admittedWatermark = owner.ownerWatermark(ownerKey);
+    let woke = false;
+    const wake = owner.waitForOwnerChange(ownerKey, admittedWatermark).then(() => {
+      woke = true;
+    });
+    await callbackStarted.promise;
+    expect(woke).toBe(false);
+    expect(owner.ownerWatermark(ownerKey)).toBe(admittedWatermark);
+
+    callback.resolve();
+    await wake;
+    expect(owner.listSnapshot('delayed-suspended-settlement', ownerKey).executions).toEqual([
+      expect.objectContaining({
+        executionId: 'delayed-suspended-task',
+        status: 'unavailable',
+      }),
+    ]);
+  });
+
   test('durably exposes an after-turn release after all immediate release attempts fail', async () => {
     type Ref = PrivateImmutableArtifactRef<'subagent_task'>;
     const rows = new Map<
@@ -591,9 +627,7 @@ describe('BackgroundSubagentRuntime', () => {
         throw new Error('reservation persistence unavailable');
       },
     });
-    let watermark = owner.ownerWatermark(ownerKey);
-    await owner.waitForOwnerChange(ownerKey, watermark);
-    watermark = owner.ownerWatermark(ownerKey);
+    const watermark = owner.ownerWatermark(ownerKey);
     await owner.waitForOwnerChange(ownerKey, watermark);
     expect(owner.listSnapshot('release-recovery', ownerKey).executions).toEqual([
       expect.objectContaining({

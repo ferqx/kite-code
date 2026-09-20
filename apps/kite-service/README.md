@@ -61,6 +61,7 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
   零进展候选，全部后台 sibling 收敛、待发布事件排空且 revision 仍完全未前进后才可停止。全部 sibling 终结后必须继续模型调用并
   产生明确 Run/Turn terminal；runner 意外返回时必须在同一 durable batch 持久化失败与 Turn abort，不能留下孤立的 `running` Run或
   投影虚假的 completed。
+- required background child 的 terminal／unavailable owner watermark 不得早于 Kernel result admission、settlement proof 或 durable recovery claim；Kernel revision 与 owner wake 竞态时必须从最新 State 重算 required 集合。真实缺少 recovery claim 时仍按 fail-closed recovery 边界有限失败。
 - `CliRuntimeBridge`不维护`#running/#activeWork`影子生命周期；admission读取Coordinator，投影读取committed
   Task与Store Run。bridge/presentation异常若发生在active Turn内，会原子持久化unknown outcome与`turn.aborted`，使Store Run进入
   recovery-required边界；缺少真实Turn identity的`run.error`不会伪造Run id进入Client。
