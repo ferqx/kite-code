@@ -12,6 +12,7 @@ import {
   isConcurrentAutoReviewEffectBatchCurrent,
   isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
+  isConcurrentTaskControlEffectBatchCurrent,
   type KernelEvent,
   normalizeAgentEvent,
   normalizeCanonicalTaskCompletionFact,
@@ -929,8 +930,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     if (!this.#isConcurrentEffectEventCurrent) {
       try {
         if (lease.effect.type === 'run_tools') {
-          return isConcurrentShellEffectBatchCurrent(this.#state, lease, events, () =>
-            this.#eventTimestamp(),
+          return (
+            isConcurrentShellEffectBatchCurrent(this.#state, lease, events, () =>
+              this.#eventTimestamp(),
+            ) ||
+            isConcurrentTaskControlEffectBatchCurrent(this.#state, lease, events, () =>
+              this.#eventTimestamp(),
+            )
           );
         }
         if (lease.effect.type === 'call_model') {

@@ -10,7 +10,7 @@ Tool coordinator 在 preparation、dispatch、receipt 和结果提交之间维�
 
 ## 并发与失效
 
-dispatch 前严格检查 fence；已 dispatch 的同一模型 invocation 可按当前规则接受与无关用户控制 revision 并发的流和终态，但 Turn 终止、invocation 替换或 identity 漂移后拒绝迟到结果。
+dispatch 前严格检查 fence；已 dispatch 的同一模型 invocation 可按当前规则接受与无关用户控制 revision 并发的流和终态，但 Turn 终止、invocation 替换或 identity 漂移后拒绝迟到结果。后台 child 结算可能在 `task_read`、`task_wait` 或 `task_cancel` 已派发后先推进 revision；Host 只在原 Turn 仍活动、精确 Tool／Capability identity 仍 live 且返回批次仅关闭该调用时接纳其旧 lease 终态。该例外不适用于 attempt start、其他工具或已结束调用，也不把接纳已执行结果扩展为重试许可。
 
 命令返回和执行清理不是同一时刻。排队后继要等相应 lifecycle 可调度，不能因客户端已看到取消消息而越过 Provider 或子进程 cleanup；会话关闭后，即使带有排队许可也不得再调度。
 `waitForSessionIdle()` 等待当前执行及其清理期间排入的后继执行，直到该会话没有 scheduled work；关闭 Host 也使用同一空闲判定。

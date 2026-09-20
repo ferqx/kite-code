@@ -14,6 +14,8 @@ Kernel 负责从当前 State 和已确认 facts 决定下一状态，不执行 I
 
 `applied` 返回 events、envelopes、nextState 和 pendingEffects；`conflict` 指明当前 revision；拒绝和幂等重放都不能被调用者当成新的副作用执行许可。
 
+已确认派发的 effect 返回时若 State revision 已被无关事实推进，Kernel 默认拒绝旧 lease。例外必须按 effect 类型显式证明：`task_read`、`task_wait`、`task_cancel` 仅在同一活动 Turn、原 `run_tools` lease 内的精确 Tool 仍为 running、Capability attempt 已确认且结果批次只包含该调用的 Capability／Tool 终态时，允许跨 background settlement revision 接纳。dispatch 前的 attempt、错误 Tool identity、已取消或已终态调用及其他事件仍拒绝；该规则只保存已经执行的结果，不授权重放工具。
+
 ## 转换过程
 
 先验证当前写格式、输入 identity/revision 和 facts，再规范化事件并使用固定组合 reducer。Core 负责 intent、authorization、lease、lifecycle、completion；domain 负责 work、capability、context、interaction、recovery、verification。不同领域对同一事件的处理顺序由源码静态确定，不接受调用者注册第二 reducer。

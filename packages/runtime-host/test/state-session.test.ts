@@ -27,6 +27,47 @@ function initialState(): AgentState {
   });
 }
 
+function runningTaskWaitState(): AgentState {
+  const state = initialState();
+  return {
+    ...state,
+    tools: {
+      calls: {
+        wait: {
+          toolCallId: 'wait',
+          name: 'task_wait',
+          modelMessageId: 'message-1',
+          args: { task_ids: ['child-a', 'child-b'], timeout_ms: 30_000 },
+          createdAtTurnId: 'turn-1',
+          status: 'running',
+          effectClass: 'read_only',
+          sideEffect: false,
+        },
+      },
+      queue: [],
+      active: ['wait'],
+    },
+    capabilities: {
+      ...state.capabilities,
+      invocations: {
+        waitInvocation: {
+          invocationId: 'waitInvocation',
+          toolCallId: 'wait',
+          capabilityId: 'builtin:task_wait',
+          capabilityRevision: 'revision-1',
+          argumentsDigest: 'arguments-1',
+          authorizationDigest: 'authorization-1',
+          effectiveEffectsDigest: 'effects-1',
+          retryEligibility: 'none',
+          status: 'running',
+          recordedAt: NOW,
+          startedAt: NOW,
+        },
+      },
+    },
+  };
+}
+
 interface Fixture {
   input: StateRuntimeSessionInput;
   readonly writes: RuntimeTransactionInput<KernelEvent, AgentState>[];
@@ -903,6 +944,65 @@ describe('Runtime Host State session', () => {
     expect(session.isEffectLeaseCurrent(lease)).toBe(false);
     expect(session.applyEffectResult(lease, [completedModelEvent()])).toBe(true);
     expect(session.getState().modelInvocations['model-1']?.status).toBe('completed');
+  });
+
+  test('admits only an acknowledged exact task-control result after a child settlement revision', () => {
+    const f = fixture(runningTaskWaitState());
+    const session = createRuntimeHostStateSession(f.input);
+    const lease = session.beginEffect({ type: 'run_tools', toolCallIds: ['wait'] });
+    session.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    const terminal: KernelEvent = {
+      type: 'tool.finished',
+      toolCallId: 'wait',
+      name: 'task_wait',
+      result: { ok: true, command: '', exitCode: 0, stdout: '{}', stderr: '' },
+    };
+    const capabilityTerminal: KernelEvent = {
+      type: 'capability.execution_succeeded',
+      invocationId: 'waitInvocation',
+      resultDigest: 'result-digest',
+      evidenceDigest: 'evidence-digest',
+      finishedAt: NOW,
+      artifact: {
+        artifactId: 'task-wait-result',
+        kind: 'capability_result',
+        integrityIdentifier: 'task-wait-integrity',
+        byteLength: 1,
+      },
+    };
+
+    expect(session.isEffectLeaseCurrent(lease)).toBe(false);
+    expect(session.applyEffectResult(lease, [capabilityTerminal, terminal])).toBe(true);
+    expect(session.getState().tools.calls.wait?.status).toBe('succeeded');
+    expect(f.acknowledgements.at(-1)).toBe('receipt_evidence');
+
+    const attemptFixture = fixture(runningTaskWaitState());
+    const attemptSession = createRuntimeHostStateSession(attemptFixture.input);
+    const attemptLease = attemptSession.beginEffect({ type: 'run_tools', toolCallIds: ['wait'] });
+    attemptSession.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(attemptSession.applyEffectEvents(attemptLease, [terminal], 'attempt_start')).toBe(false);
+    expect(attemptFixture.acknowledgements).toEqual(['decision']);
+
+    const wrongFixture = fixture(runningTaskWaitState());
+    const wrongSession = createRuntimeHostStateSession(wrongFixture.input);
+    const wrongLease = wrongSession.beginEffect({ type: 'run_tools', toolCallIds: ['other'] });
+    wrongSession.processEvent({
+      type: 'interaction_mode.changed',
+      mode: 'auto',
+      source: 'user',
+      changedAt: NOW,
+    });
+    expect(wrongSession.applyEffectResult(wrongLease, [terminal])).toBe(false);
   });
 
   test('rejects stale Model attempt-start and completion after its Turn is aborted', () => {

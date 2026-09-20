@@ -146,6 +146,8 @@ export {
   isConcurrentModelEffectBatchCurrent,
   isConcurrentShellEffectBatchCurrent,
   isConcurrentShellEffectEventCurrent,
+  isConcurrentTaskControlEffectBatchCurrent,
+  isConcurrentTaskControlEffectEventCurrent,
   suspendedCapabilityTerminalRequirements,
 } from './effect-admission';
 export type { PendingEffect, RuntimeEffect } from './effects';

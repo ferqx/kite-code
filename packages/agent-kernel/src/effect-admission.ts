@@ -330,6 +330,110 @@ export function isConcurrentShellEffectBatchCurrent(
   return true;
 }
 
+const CONCURRENT_TASK_CONTROL_TOOL_NAMES = new Set(['task_read', 'task_wait', 'task_cancel']);
+
+/**
+ * Admit an acknowledged task-control result after child settlement advanced the
+ * Session revision. This is deliberately narrower than ordinary read-only Tool
+ * admission: only the exact still-running task-control call and its capability
+ * terminal may cross the stale revision boundary.
+ */
+export function isConcurrentTaskControlEffectEventCurrent(
+  state: Readonly<AgentState>,
+  lease: AgentEffectLeaseIdentity,
+  event: RuntimeEvent,
+): boolean {
+  if (
+    lease.turnId !== state.turn.turnId ||
+    state.turn.status !== 'active' ||
+    lease.effect.type !== 'run_tools'
+  ) {
+    return false;
+  }
+
+  if (isCapabilityTerminalEvent(event)) {
+    const invocation = state.capabilities.invocations[event.invocationId];
+    if (
+      !invocation ||
+      !lease.effect.toolCallIds.includes(invocation.toolCallId) ||
+      invocation.status !== 'running'
+    ) {
+      return false;
+    }
+    const call = state.tools.calls[invocation.toolCallId];
+    return Boolean(
+      call &&
+        CONCURRENT_TASK_CONTROL_TOOL_NAMES.has(call.name) &&
+        call.status === 'running' &&
+        state.tools.active.includes(call.toolCallId),
+    );
+  }
+
+  if (!isToolTerminalEvent(event)) return false;
+  if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
+  const call = state.tools.calls[event.toolCallId];
+  if (
+    !call ||
+    !CONCURRENT_TASK_CONTROL_TOOL_NAMES.has(call.name) ||
+    call.status !== 'running' ||
+    !state.tools.active.includes(call.toolCallId)
+  ) {
+    return false;
+  }
+  const acknowledgedInvocation = Object.values(state.capabilities.invocations).some(
+    (invocation) => invocation.toolCallId === call.toolCallId && invocation.status !== 'recorded',
+  );
+  if (!acknowledgedInvocation) return false;
+  return event.type !== 'tool.finished' || event.name === call.name;
+}
+
+/** Validate a concurrent task-control terminal batch after every projected event. */
+export function isConcurrentTaskControlEffectBatchCurrent(
+  state: Readonly<AgentState>,
+  lease: AgentEffectLeaseIdentity,
+  events: readonly RuntimeEvent[],
+  occurredAtForEvent: (index: number) => string,
+): boolean {
+  if (events.length === 0) return false;
+  const capabilityTerminalToolIds = new Set<string>();
+  const toolTerminalIds = new Set<string>();
+  for (const event of events) {
+    if (
+      event.type === 'capability.execution_succeeded' ||
+      event.type === 'capability.execution_failed' ||
+      event.type === 'capability.execution_unknown'
+    ) {
+      const invocation = state.capabilities.invocations[event.invocationId];
+      if (!invocation || capabilityTerminalToolIds.has(invocation.toolCallId)) return false;
+      capabilityTerminalToolIds.add(invocation.toolCallId);
+      continue;
+    }
+    if (isToolTerminalEvent(event)) {
+      if (toolTerminalIds.has(event.toolCallId)) return false;
+      toolTerminalIds.add(event.toolCallId);
+      continue;
+    }
+    return false;
+  }
+  if (
+    capabilityTerminalToolIds.size === 0 ||
+    capabilityTerminalToolIds.size !== toolTerminalIds.size ||
+    [...capabilityTerminalToolIds].some((toolCallId) => !toolTerminalIds.has(toolCallId))
+  ) {
+    return false;
+  }
+  let projectedState = state;
+  for (const [index, event] of events.entries()) {
+    if (!isConcurrentTaskControlEffectEventCurrent(projectedState, lease, event)) return false;
+    const occurredAt = occurredAtForEvent(index);
+    if (!occurredAt || !Number.isFinite(Date.parse(occurredAt))) return false;
+    projectedState = reduce(projectedState, [
+      normalizeAgentEvent(event, projectedState, occurredAt),
+    ]);
+  }
+  return true;
+}
+
 /**
  * Preserve the selected auto-review start when unrelated background work
  * advances the Session revision after the review effect was leased. The
