@@ -5,6 +5,8 @@
 验证：`bun test packages/agent-kernel/test/completion.test.ts packages/agent-kernel/test/core-reducers.test.ts tests/runtime`、`bun run typecheck`。
 相关：ADR-0095、`plan-mode-implementation.md`、`failure-classification.md`。
 
+required 后台子 Agent 的完成阻断、无模型调用等待和终态恢复将按[后台子 Agent 编排与受管等待优化](../plans/background-subagent-orchestration.md)进一步收敛；当前实现事实仍以本文与源码为准，方案不提前视为已交付。
+
 模型的无工具 final 文本只是 completion candidate。CompletionGuard 是 Agent Kernel-owned、单调版本化的纯判定；scheduler
 在选择 `emit_final` 前、runner 在持久化前、reducer 在接收 `run.completed` 时都按事件绑定的 guard version 重算，
 因此直接注入 `run.completed` 不能把未完成 Task 标为 `completed`。
