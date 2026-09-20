@@ -134,6 +134,7 @@ macOS Seatbelt profile 在生成任何 allow rule 前 canonicalize Workspace 与
 Hardened Shell environment从只读`/private/var/select/developer_dir`解析当前Apple developer toolchain，并把其
 真实`usr/bin`置于sandbox PATH首位；不得通过`/usr/bin/git`的xcrun shim写入Seatbelt scope外的
 `DARWIN_USER_CACHE_DIR`，也不得为该cache扩大系统临时目录写权限。
+该环境必须在创建 sandbox 外层 Shell 时直接传给 Host spawn，不能只在命令 preamble 中覆盖；否则 Bash 会在 preamble 执行前消费宿主的 `BASH_ENV`，POSIX Shell 也可能消费 `ENV`。两者在 spawn environment 与 preamble 中都必须移除，使外层及其后继子 Shell 均不执行审批内容之外的启动注入文件。
 Git linked worktree或external gitfile的Workspace内`.git`会指向canonical Workspace之外的repository metadata；
 不能仅凭该文本扩大文件系统身份，也不能因它不是标准registered worktree就把只读操作伪装成repository损坏。
 Builtin scope discovery 只解析 Git 实际需要读取的 canonical `gitDir/commondir`，不授予权限；普通 Workspace

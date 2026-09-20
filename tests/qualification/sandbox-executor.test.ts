@@ -57,6 +57,8 @@ describe('sandbox executor integration', () => {
     const ws = setupWorkspace();
     const home = mkdtempSync(join(tmpdir(), 'kite-sandbox-non-login-home-'));
     const previousHome = process.env.HOME;
+    const previousBashEnv = process.env.BASH_ENV;
+    const previousEnv = process.env.ENV;
     const marker = join(ws, 'profile-executed');
     try {
       writeFileSync(
@@ -68,6 +70,8 @@ describe('sandbox executor integration', () => {
         `printf 'unexpected bashrc output\\n' >&2\ntouch '${marker}'\n`,
       );
       process.env.HOME = home;
+      process.env.BASH_ENV = join(home, '.bashrc');
+      process.env.ENV = join(home, '.bashrc');
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({ workspace: ws, command: 'sleep 0.01; printf command-ok' });
       expect(result.ok).toBe(true);
@@ -77,6 +81,10 @@ describe('sandbox executor integration', () => {
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
+      if (previousBashEnv === undefined) delete process.env.BASH_ENV;
+      else process.env.BASH_ENV = previousBashEnv;
+      if (previousEnv === undefined) delete process.env.ENV;
+      else process.env.ENV = previousEnv;
       cleanupWorkspace(home);
       cleanupWorkspace(ws);
     }

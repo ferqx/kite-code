@@ -322,7 +322,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
       approvedArgv: preparation.argv,
       argv,
       cwd: workspace,
-      env: policyProvenReadOnly ? hardenedEnv : null,
+      env: hardenedEnv,
       stdin: null,
       transport: 'stdio',
       backend: this.#options.backend,

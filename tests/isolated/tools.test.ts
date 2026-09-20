@@ -548,6 +548,31 @@ describe('tool safety', () => {
     expect(result.stderr).toBe('');
   });
 
+  test('shell_execute removes non-interactive startup injection variables', async () => {
+    if (process.platform === 'win32') return;
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-shell-startup-env-'));
+    const startup = join(workspace, 'startup.sh');
+    const marker = join(workspace, 'startup-ran');
+    const previousBashEnv = process.env.BASH_ENV;
+    const previousEnv = process.env.ENV;
+    try {
+      writeFileSync(startup, `printf 'injected startup output\\n' >&2\ntouch '${marker}'\n`);
+      process.env.BASH_ENV = startup;
+      process.env.ENV = startup;
+      const result = await shellTool({ workspace, command: 'printf command-ok' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toBe('command-ok');
+      expect(result.stderr).toBe('');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      if (previousBashEnv === undefined) delete process.env.BASH_ENV;
+      else process.env.BASH_ENV = previousBashEnv;
+      if (previousEnv === undefined) delete process.env.ENV;
+      else process.env.ENV = previousEnv;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('shellTool aborts child process when signal fires', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-shell-abort');
     mkdirSync(workspace, { recursive: true });

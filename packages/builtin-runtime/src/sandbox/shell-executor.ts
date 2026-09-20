@@ -225,15 +225,20 @@ export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecuto
       const candidates = policyProvenReadOnly
         ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
         : buildHostShellInvocations(input.command);
-      const trustedEnv = policyProvenReadOnly
-        ? buildPolicyProvenReadOnlyEnv(input.workspace)
-        : undefined;
+      const trustedEnv: Record<string, string> = policyProvenReadOnly
+        ? { ...buildPolicyProvenReadOnlyEnv(input.workspace) }
+        : {};
+      if (!policyProvenReadOnly) {
+        for (const [key, value] of Object.entries(process.env)) {
+          if (value !== undefined && key !== 'BASH_ENV' && key !== 'ENV') trustedEnv[key] = value;
+        }
+      }
       for (const candidate of candidates) {
         try {
           proc = port.spawn({
             argv: candidate.argv,
             cwd: input.workspace,
-            ...(trustedEnv ? { env: trustedEnv } : {}),
+            env: trustedEnv,
           });
           processTree = proc;
           break;

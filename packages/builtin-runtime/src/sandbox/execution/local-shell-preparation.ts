@@ -97,6 +97,8 @@ export function buildEnvStripSnippet(): string {
     'MAVEN_OPTS',
     'SBT_OPTS',
     'RIPGREP_CONFIG_PATH',
+    'BASH_ENV',
+    'ENV',
   ];
   return `${dangerousVariables.map((name) => `unset ${name}`).join(' ; ')} ; `;
 }
