@@ -29,9 +29,29 @@ export function decodeCurrentAgentStateJson(serialized: string): AgentState {
   if (!isCurrentAgentStateSnapshot(value)) {
     throw new Error('Runtime snapshot is not State/current-epoch data.');
   }
-  const hydrated = hydrateApprovalMaps(value);
+  const hydrated = hydrateApprovalMaps(dropLegacyBackgroundResultAuthority(value));
   assertAgentStateInvariants(hydrated);
   return hydrated;
+}
+
+/**
+ * Background result admission revisions were added within the current State epoch. Older snapshots
+ * can contain the result notification without that authority fact. Preserve the Session, but drop
+ * only the unverifiable authority instead of inventing a revision or trusting it during recovery.
+ */
+function dropLegacyBackgroundResultAuthority(value: AgentState): AgentState {
+  const capabilities = value.capabilities as unknown as Record<string, unknown>;
+  const invocations = recordField(capabilities, 'invocations');
+  if (!invocations) return value;
+  for (const invocation of Object.values(invocations)) {
+    if (!isRecord(invocation)) continue;
+    const lifecycle = recordField(invocation, 'subagentProviderLifecycle');
+    const backgroundResult = lifecycle && recordField(lifecycle, 'backgroundResult');
+    if (backgroundResult && !Object.hasOwn(backgroundResult, 'admissionRevision')) {
+      delete (lifecycle as Record<string, unknown>).backgroundResult;
+    }
+  }
+  return value;
 }
 
 /**

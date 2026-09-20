@@ -1595,6 +1595,20 @@ describe('agent kernel package boundary', () => {
     expect(once.transcript.final).toBeUndefined();
     expect(once.completionGuard).toEqual({ correctionAttempts: 0 });
     expect(decodeCurrentAgentStateJson(encodeCurrentAgentStateJson(once))).toEqual(once);
+    const legacyCurrentState = structuredClone(once);
+    const legacyBackgroundResult =
+      legacyCurrentState.capabilities.invocations['invocation-1']?.subagentProviderLifecycle
+        ?.backgroundResult;
+    expect(legacyBackgroundResult).toBeDefined();
+    delete (legacyBackgroundResult as { admissionRevision?: number }).admissionRevision;
+    const decodedLegacyCurrentState = decodeCurrentAgentStateJson(
+      JSON.stringify(legacyCurrentState),
+    );
+    expect(
+      decodedLegacyCurrentState.capabilities.invocations['invocation-1']?.subagentProviderLifecycle
+        ?.backgroundResult,
+    ).toBeUndefined();
+    expect(decodedLegacyCurrentState.transcript).toEqual(once.transcript);
 
     const changedTurn = reduceAgentState(seed(), { type: 'turn.started', turnId: 'turn-2' });
     const late = reduceAgentState(changedTurn, event);

@@ -19,6 +19,7 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
+import { SqliteRuntimeStorageOpenError } from '@kite-ai/runtime-storage-sqlite';
 import { EffectSupervisor } from '../../../../packages/runtime-host/src/lifecycle/effect-supervisor';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import {
@@ -78,6 +79,71 @@ test('runs a real Host on the KASD Session Store and cleanly hands off its gener
     if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
     rmSync(resolve(root), { recursive: true, force: true });
+  }
+}, 30_000);
+
+test('bulk hydration isolates one incompatible stored Session and keeps new Sessions available', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-incompatible-session-index-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const model = createMockModelServer();
+  const databasePath = join(root, 'kite-session.sqlite');
+  const validSessionId = 'valid-stored-session';
+  const incompatibleSessionId = 'incompatible-stored-session';
+  const newSessionId = 'new-session-after-hydration';
+  const seedOwner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'isolation-model')],
+  });
+  const seedClient = client(seedOwner, admission(workspace), 'isolation-seed');
+  try {
+    await createSession(seedClient, validSessionId, workspace);
+    await createSession(seedClient, incompatibleSessionId, workspace);
+  } finally {
+    await seedClient.close();
+    await seedOwner[Symbol.asyncDispose]();
+  }
+
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'incompatible-session-reader',
+  });
+  const originalLoad = storageOwner.loadCurrentSnapshot.bind(storageOwner);
+  const isolatedStorageOwner = {
+    ...storageOwner,
+    loadCurrentSnapshot: (sessionId: string) => {
+      if (sessionId === incompatibleSessionId) {
+        throw new SqliteRuntimeStorageOpenError('Stored Session snapshot is incompatible.');
+      }
+      return originalLoad(sessionId);
+    },
+  };
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner: isolatedStorageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'isolation-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'isolation-reader');
+  try {
+    await expect(
+      runtime.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
+    ).resolves.toMatchObject({
+      status: 'ok',
+      sessions: [expect.objectContaining({ sessionId: validSessionId })],
+    });
+    await expect(createSession(runtime, newSessionId, workspace)).resolves.toBeUndefined();
+    const listed = await runtime.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' });
+    expect(listed.status).toBe('ok');
+    const sessions = listed.status === 'ok' ? (listed.sessions ?? []) : [];
+    expect(sessions.map(({ sessionId }) => sessionId)).toEqual(
+      expect.arrayContaining([validSessionId, newSessionId]),
+    );
+    expect(sessions.some(({ sessionId }) => sessionId === incompatibleSessionId)).toBe(false);
+  } finally {
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    model.stop();
+    rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
 

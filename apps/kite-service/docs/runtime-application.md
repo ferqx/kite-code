@@ -63,6 +63,12 @@ Store，不建立第二reader/writer authority。该Store-only list/startup hydr
 投影同revision的完整interaction queue与唯一focus；它不得用空queue占位，也不得为了恢复pending interaction启动
 Workspace context、MCP或Skill扫描。
 
+Store-only批量投影按Session隔离当前格式的不兼容snapshot：单个`invalid_configuration`会话保持原Store与History可读，
+但不进入Host预热列表，不能阻断其他会话投影或新会话创建；非该类Store错误仍整体失败。已知的旧后台结果若缺少后来新增的
+admission revision，State codec只丢弃这条无法验证的background authority，不补造revision，其他会话State与历史保持不变。
+回归见[多工作区集成](../test/isolated/runtime-server-multi-workspace.test.ts)与
+[Kernel codec](../../../packages/agent-kernel/test/agent-kernel.test.ts)。
+
 单Workspace Worker的first-run也是该惰性边界：Store 8、Host、Server和App Control可以在Provider未配置时ready，credential/model
 mutation仍由同一Worker owner处理；`workspaceTemplateFor`直到配置ready后的首个Runtime context请求才调用`runtimeInputsFor`并等待
 MCP readiness。它不创建configuration-only第二Worker或placeholder execution backend，未完成配置的Runtime请求保持unavailable。

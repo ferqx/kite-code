@@ -21,6 +21,8 @@ completed、aborted、blocked、unknown、budget_exhausted 和 resource_saturate
 
 [state migration](../src/state-migration.ts) 与 [state codec](../src/state-codec.ts) 按受支持格式解码；历史读取不重新授予当前 execution authority。Host 负责重新检查持久 lease 与操作状态，Kernel 根据明确 facts 选择恢复，不能自己读取数据库或杀进程。
 
+当前State epoch早期写入的后台结果可能没有`admissionRevision`。解码时保留其Session、transcript与已结算工具事实，但删除这条无法验证的`backgroundResult` authority；不得推测或补造revision。当前writer产生的后台结果仍必须携带完整revision并通过严格invariant。
+
 改动必须同时检查正常完成、取消前后、未知副作用、迟到事件及重放结果。规范见[完成契约](../../../docs/active/completion-guard.md)、[取消恢复](../../../docs/active/cancel-resume-cleanup.md)。
 
 验证：[completion](../test/completion.test.ts)、[recovery](../test/recovery.test.ts)、[restart recovery](../test/restart-recovery.test.ts)、[state migration](../test/state-migration.test.ts)。

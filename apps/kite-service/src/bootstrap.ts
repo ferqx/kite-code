@@ -98,6 +98,7 @@ import {
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   type SqliteRuntimeCompatibilityImportResult,
   type SqliteRuntimeLayoutPaths,
+  SqliteRuntimeStorageOpenError,
   type SqliteRuntimeStorageOptions,
   type SqliteRuntimeWorkspaceBinding,
   type SqliteWorkspaceAuthority,
@@ -1672,6 +1673,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
   };
   const projectStoredSessionForOwner = (threadId: string, snapshot?: RuntimeState | null) =>
     projectStoredSession(owner, threadId, snapshot);
+  const projectStoredSessionForList = (threadId: string): RuntimeSessionProjection | undefined => {
+    try {
+      return projectStoredSessionForOwner(threadId);
+    } catch (error) {
+      // A legacy snapshot that cannot satisfy the current State contract is local to that
+      // Session. Keep it untouched in the Store, but do not let neutral bulk hydration make
+      // every other persisted Session (or creation of a new one) unavailable.
+      if (error instanceof SqliteRuntimeStorageOpenError && error.code === 'invalid_configuration')
+        return undefined;
+      throw error;
+    }
+  };
   const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
   const desiredConfigs = new Map<string, AgentConfig>();
   const recoveryGenerations = new Map<
@@ -1996,7 +2009,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           // start MCP, or scan Skills for a Workspace the caller did not admit).
           const projections = owner
             .listCurrentSessions('', 1_000)
-            .map(({ threadId }) => projectStoredSessionForOwner(threadId));
+            .map(({ threadId }) => projectStoredSessionForList(threadId));
           return {
             status: 'ok',
             queryType: 'list_sessions',
@@ -2283,7 +2296,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           sessions: owner
             .listCurrentSessions('', 1_000)
             .map(({ threadId, name }) => {
-              const projection = projectStoredSessionForOwner(threadId);
+              const projection = projectStoredSessionForList(threadId);
               return projection
                 ? { ...projection, displayName: projectRuntimeClientText(name || threadId, 256) }
                 : undefined;
