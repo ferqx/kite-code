@@ -30,6 +30,8 @@
 
 向已启动 Service 写入请求超时同样只表示本次回执未知；已交给操作系统的写入仍可能稍后完成。Electron 宿主不因该超时关闭 Service stdin，也不自动重发；页面按现有重连与持久回执核对路径恢复。确定的管道写入失败、非法或超限协议输出仍使 peer 失效并进入受控清理。
 
+`start_turn` 在持久提交前明确返回 `revision_conflict` 时，Desktop 重新读取一次会话投影；若仍无活动 Run，使用新 commandId 与最新 revision 最多重提一次。若已出现活动 Run，不把原输入改投为 steer，保留草稿并明确提示未发送；第二次冲突直接返回失败。该路径不适用于 `internal_error`、回执未知、steer 或其他变更命令。
+
 [renderer 连接 owner](../electron/runtime/renderer-connection.ts)在接收取消与 Service 帧同时完成时，先处理已经取得的帧再切换代次。已消费的 initialize 回执必须更新原 peer 的初始化事实，迟到的 subscribe 回执继续释放旧订阅；不能把“取消先唤醒”当作“没有收到帧”，否则会把初始化永久留在等待状态，使重复重接也无法恢复。[连接回归](../test/host-renderer-connection.test.ts)以确定的取消／回执交错验证这一边界，仍复用同一 Service，不重发初始化或业务命令。
 
 ## 验证

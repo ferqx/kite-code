@@ -42,7 +42,7 @@ CompletionGuard 的 `wait_for_background` 保持原 Run、Turn、deadline、预�
 
 后台 task 接受后，父工具 reservation 可以按工具终态正常结算；在其仍属于同一 Run 且未显式释放时，派发期间创建的 descendant admission 继续作为 child 后续模型轮次和工具调用的预算血缘。admission 仍只能在父 reservation 为 `dispatch_started` 时创建，不能从已结算事实重新构造或扩大授权。
 
-After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。
+After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。首次执行在 Session mailbox 内另行绑定最新投影 revision 作为变更 CAS，该瞬时值不改变 canonical 请求摘要，因此持久回执和崩溃重放仍使用稳定身份。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。
 Session 已有用户启动的新活动 Run 时，`human_start_preferred` 抑制自动 continuation；持久结果保持可读，但 Host 不把迟到结果注入该活动 Run，也不并发创建第二个主 Run。
 
 活动或正在停止的 Shell/service/subagent 会阻止 Fork 与 Rewind；终态历史不会。Session close/delete 先等待现有 bridge 清理这些资源，再释放或删除 State；迟到 callback 不能恢复已删除会话。相关组合回归见 [persistent command host](../test/persistent-command-host.test.ts) 与 Service 的 [Runtime coordinator](../../../apps/kite-service/test/runtime/runtime-session-coordinator.test.ts)。

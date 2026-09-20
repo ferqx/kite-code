@@ -7,6 +7,7 @@ import type {
   PrivateImmutableArtifactStorageBackend,
 } from '@kite-ai/builtin-runtime/model';
 import { SubagentResultArtifactStore } from '@kite-ai/builtin-runtime/subagent';
+import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import { executeTestRuntimeTool } from '../../../tests/helpers/runtime-model';
 import {
   BackgroundSettlementAdmissionError,
@@ -809,6 +810,76 @@ describe('BackgroundSubagentRuntime', () => {
     expect(execution.result?.stdout).toContain('subagent-wait-control');
     expect(owner.hasLiveTask('subagent-wait-control')).toBe(true);
     completion.resolve(terminal());
+  });
+
+  test('returns a terminal task when user input and task completion race', async () => {
+    const sessionId = 'session-wait-user-race';
+    const recoveryIdentityKey = 'd'.repeat(64);
+    const initialState = createRuntimeHostStateInitialState({
+      threadId: sessionId,
+      userId: 'test-user',
+      recoveryIdentityKey,
+      workspace: process.cwd(),
+    });
+    let currentState = initialState;
+    const waiterReady = deferred<void>();
+    const stateChanged = deferred<void>();
+    let waitCalls = 0;
+    const backgroundSubagentRuntime = {
+      waitTasks: async (_ownerKey: string, _taskIds: readonly string[], timeoutMs: number) => {
+        waitCalls += 1;
+        if (timeoutMs > 0) return await new Promise<Readonly<Record<string, unknown>>>(() => {});
+        return {
+          ok: true,
+          status: 'completed',
+          tasks: [{ ok: true, task_id: 'subagent-wait-race', status: 'completed' }],
+        };
+      },
+    } as unknown as BackgroundSubagentRuntime;
+
+    const execution = executeTestRuntimeTool({
+      workspace: process.cwd(),
+      toolName: 'task_wait',
+      args: { task_ids: ['subagent-wait-race'], timeout_ms: 30_000 },
+      state: initialState,
+      execution: {
+        backgroundSubagentRuntime,
+        getRuntimeState: () => currentState,
+        waitForStateRevisionChange: async () => {
+          waiterReady.resolve();
+          await stateChanged.promise;
+        },
+      },
+    });
+    await waiterReady.promise;
+    currentState = {
+      ...currentState,
+      revision: currentState.revision + 1,
+      transcript: {
+        ...currentState.transcript,
+        messages: [
+          ...currentState.transcript.messages,
+          {
+            kind: 'user',
+            turnId: currentState.turn.turnId,
+            messageId: 'steer-wait-race',
+            ordinal: currentState.transcript.messages.length,
+            createdAt: new Date().toISOString(),
+            content: 'Use the new constraint.',
+          },
+        ],
+      },
+    };
+    stateChanged.resolve();
+
+    const result = await execution;
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      toolCallId: 'test-tool:task_wait',
+    });
+    expect(result.result?.stdout).toContain('"status":"completed"');
+    expect(result.result?.stdout).not.toContain('"reason":"user_input"');
+    expect(waitCalls).toBe(2);
   });
 
   test('routes task_cancel to the same owner and returns only after target cleanup', async () => {

@@ -210,6 +210,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   async #executeCommand(
     command: RuntimeCommand,
     context?: Readonly<RuntimeCommandContext>,
+    internalAdmission?: () => Promise<RuntimeCommand>,
   ): Promise<RuntimeCommandReceipt> {
     assertRuntimeCommand(command);
     const pinnedContext = context === undefined ? undefined : freezeRuntimeCommandContext(context);
@@ -248,45 +249,62 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
             } satisfies RuntimeCommandReceipt;
           }
 
-          const conflict = await this.#revisionConflict(command);
-          if (conflict) return conflict;
-          if (command.type === 'delete_session') return this.#deleteSession(command, evidence);
-          const allowQueuedSuccessor =
-            command.type === 'start_turn' &&
-            isTerminalRunProjection(this.#registry.projection(command.sessionId));
+          // Host-internal admissions may bind their volatile CAS only after
+          // entering the Session mailbox. The original command remains the
+          // durable request identity used by pending work and receipts.
+          const admittedCommand = internalAdmission ? await internalAdmission() : command;
+          assertRuntimeCommand(admittedCommand);
           if (
-            (command.type === 'start_turn' || command.type === 'compact_session') &&
-            !this.#lifecycle.canSchedule(command.sessionId) &&
+            admittedCommand.commandId !== command.commandId ||
+            runtimeCommandSessionId(admittedCommand) !== runtimeCommandSessionId(command) ||
+            admittedCommand.type !== command.type
+          ) {
+            throw new Error('Runtime Host internal admission changed command identity.');
+          }
+          const conflict = await this.#revisionConflict(admittedCommand);
+          if (conflict) return conflict;
+          if (admittedCommand.type === 'delete_session')
+            return this.#deleteSession(admittedCommand, evidence);
+          const allowQueuedSuccessor =
+            admittedCommand.type === 'start_turn' &&
+            isTerminalRunProjection(this.#registry.projection(admittedCommand.sessionId));
+          if (
+            (admittedCommand.type === 'start_turn' || admittedCommand.type === 'compact_session') &&
+            !this.#lifecycle.canSchedule(admittedCommand.sessionId) &&
             !allowQueuedSuccessor
           ) {
             return {
               status: 'rejected',
-              commandId: command.commandId,
+              commandId: admittedCommand.commandId,
               code: 'runtime_busy',
-              currentRevision: this.#registry.projection(command.sessionId)?.revision,
+              currentRevision: this.#registry.projection(admittedCommand.sessionId)?.revision,
             } satisfies RuntimeCommandReceipt;
           }
           if (
-            command.type !== 'create_session' &&
-            command.type !== 'set_interaction_mode' &&
-            command.type !== 'recover_session'
+            admittedCommand.type !== 'create_session' &&
+            admittedCommand.type !== 'set_interaction_mode' &&
+            admittedCommand.type !== 'recover_session'
           ) {
-            await this.#recoverSession(runtimeCommandSessionId(command));
+            await this.#recoverSession(runtimeCommandSessionId(admittedCommand));
           }
 
           const inspected = await this.#inspectCommand(
-            command,
-            targetSessionIdFor(command),
+            admittedCommand,
+            targetSessionIdFor(admittedCommand),
             pinnedContext,
           );
-          if (inspected.kind === 'terminal') return assertTerminalReceipt(command, inspected);
-          const expectedTarget = targetSessionIdFor(command);
+          if (inspected.kind === 'terminal')
+            return assertTerminalReceipt(admittedCommand, inspected);
+          const expectedTarget = targetSessionIdFor(admittedCommand);
           if (inspected.decision.targetSessionId !== expectedTarget) {
             throw new Error('Runtime Host inspected command target identity is invalid.');
           }
           const validation = inspected.decision.validate?.();
           if (validation) {
-            return assertTerminalReceipt(command, { kind: 'terminal', receipt: validation });
+            return assertTerminalReceipt(admittedCommand, {
+              kind: 'terminal',
+              receipt: validation,
+            });
           }
           let committed: Awaited<ReturnType<typeof inspected.decision.commit>>;
           try {
@@ -300,7 +318,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
             }
             throw error;
           }
-          assertAppliedReceipt(command, committed.receipt, expectedTarget);
+          assertAppliedReceipt(admittedCommand, committed.receipt, expectedTarget);
           const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
           if (!stored) throw new Error('Runtime Host command receipt was not persisted by commit.');
           const durable = parseRuntimeStoredCommandReceipt(stored);
@@ -322,7 +340,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           const prepared = committed.preparedExecution;
           if (prepared?.execution)
             this.#schedulePreparedExecution(
-              command,
+              admittedCommand,
               committed.receipt,
               prepared,
               allowQueuedSuccessor,
@@ -797,7 +815,16 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     if (projection.currentRun && projection.currentRun.runId !== input.originRunId) {
       return Object.freeze({ status: 'suppressed', reason: 'human_start_preferred' });
     }
-    const receipt = await this.#executeCommand(command);
+    const receipt = await this.#executeCommand(command, undefined, async () => {
+      // Bind the mutation CAS only after entering the Session mailbox. Keep
+      // the original admission revision in `command` as the stable durable
+      // request identity used for receipt replay after a crash.
+      const current = await this.#loadProjection(input.sessionId);
+      if (!current || (current.currentRun && current.currentRun.runId !== input.originRunId)) {
+        return command;
+      }
+      return Object.freeze({ ...command, expectedRevision: current.revision });
+    });
     if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
       return Object.freeze({ status: 'suppressed', reason: receipt.code });
     }

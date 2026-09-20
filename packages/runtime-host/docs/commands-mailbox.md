@@ -19,6 +19,8 @@
 
 SessionMailbox 用 Promise tail 串行化单 Session 的操作，失败也将 tail 收敛为可继续的 Promise，避免污染后续队列；不同 Session 不共用一条队列。进程内串行不能替代 SQLite 多进程 writer fencing。
 
+Host 内部的 after-turn 启动保留持久事实中的 canonical command 作为 commandId、pending 合并与回执 digest 权威；进入 Session mailbox 后才从最新投影绑定本次执行的 revision CAS。瞬时 CAS 不改变命令身份，重启重放仍查询原 digest；如果人工 Run 先进入 mailbox，内部启动必须被抑制或冲突，不并发创建第二个主 Run。
+
 ## Query 与通知
 
 query 可以读取 Store 中尚未进入本进程 registry 的 Session，并通过 projector hydrate 订阅者。query 不凭空提交业务事件。App 注入 ownsSessionExecution 时，只发布本进程实际拥有的执行投影；不能把能读到的 Session 都视为本进程可取消对象。

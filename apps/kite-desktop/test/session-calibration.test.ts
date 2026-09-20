@@ -52,6 +52,12 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
   const lostCreations = new Set<unknown>();
   const lostSteers = new Set<unknown>();
   let loseNextSteer = false;
+  let staleNextSendProjection: 'idle' | 'active_on_refresh' | 'stale_on_refresh' | undefined;
+  let refreshProjectionAfterConflict: 'active' | 'stale' | undefined;
+  const sendCommands: Array<{ type: string; commandId: string }> = [];
+  const rewrittenProjections = new Map<unknown, 'stale' | 'active'>();
+  const bufferedMessages: unknown[] = [];
+  let injectedMode: 'auto' | 'full' = 'auto';
   const allGates: ReturnType<typeof gate>[] = [];
   const gated = new Map<unknown, ReturnType<typeof gate>>();
   const failures = new Map<unknown, NonNullable<typeof nextFailure>>();
@@ -107,6 +113,32 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
     const carrier = carriers.get(args?.connectionId as number)!;
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'get_session_projection' &&
+        staleNextSendProjection
+      ) {
+        rewrittenProjections.set(message.id, refreshProjectionAfterConflict ?? 'stale');
+        if (refreshProjectionAfterConflict) {
+          staleNextSendProjection = undefined;
+          refreshProjectionAfterConflict = undefined;
+        } else if (staleNextSendProjection === 'active_on_refresh') {
+          refreshProjectionAfterConflict = 'active';
+        } else if (staleNextSendProjection === 'stale_on_refresh') {
+          refreshProjectionAfterConflict = 'stale';
+        } else {
+          staleNextSendProjection = undefined;
+        }
+      }
+      if (
+        message.method === 'runtime/command' &&
+        (message.params?.command?.type === 'start_turn' ||
+          message.params?.command?.type === 'steer_turn')
+      )
+        sendCommands.push({
+          type: message.params.command.type,
+          commandId: message.params.command.commandId,
+        });
       // This fixture keeps a lost creation genuinely unknown: its receipt read is unavailable too.
       if (
         message.method === 'runtime/query' &&
@@ -157,7 +189,9 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
       }
       await carrier.connection.send(message);
     } else if (command === 'runtime_receive') {
-      let item = await carrier.messages.next();
+      let item = bufferedMessages.length
+        ? { done: false as const, value: bufferedMessages.shift() }
+        : await carrier.messages.next();
       const eventType = (value: unknown) => {
         const frame = value as {
           method?: string;
@@ -216,6 +250,63 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
           },
         }) as T;
       }
+      const rewrite = rewrittenProjections.get(message.id);
+      if (rewrite) {
+        rewrittenProjections.delete(message.id);
+        const response = structuredClone(message) as {
+          result?: {
+            session?: {
+              sessionId: string;
+              revision: number;
+              currentRun?: Record<string, unknown>;
+            };
+          };
+        };
+        const session = response.result?.session;
+        if (!session) throw new Error('Expected a Session projection fixture response');
+        if (rewrite === 'stale') {
+          const commandId = crypto.randomUUID();
+          const requestId = `injected-revision-${commandId}`;
+          await carrier.connection.send({
+            jsonrpc: '2.0',
+            id: requestId,
+            method: 'runtime/command',
+            params: {
+              command: {
+                schema: 'kite.runtime-command.v1',
+                commandId,
+                type: 'set_interaction_mode',
+                sessionId: session.sessionId,
+                expectedRevision: session.revision,
+                mode: injectedMode,
+              },
+            },
+          });
+          injectedMode = injectedMode === 'auto' ? 'full' : 'auto';
+          for (;;) {
+            const injected = await carrier.messages.next();
+            if (injected.done) throw new Error('Fixture Runtime closed during revision injection');
+            const injectedMessage = injected.value as {
+              id?: unknown;
+              result?: { status?: string };
+            };
+            if (injectedMessage.id === requestId) {
+              if (injectedMessage.result?.status !== 'applied')
+                throw new Error('Fixture could not advance the Session revision');
+              break;
+            }
+            bufferedMessages.push(injected.value);
+          }
+        } else
+          session.currentRun = {
+            runId: 'concurrent-run',
+            initialTurnId: 'concurrent-turn',
+            activeTurnId: 'concurrent-turn',
+            status: 'running',
+            revision: session.revision,
+          };
+        return JSON.stringify(response) as T;
+      }
       return JSON.stringify(message) as T;
     } else if (command === 'runtime_close') await carrier.connection.close();
     else throw new Error(`Unexpected IPC ${command}`);
@@ -262,6 +353,12 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
     },
     loseNextSteerReceipt() {
       loseNextSteer = true;
+    },
+    staleNextStartProjection(refresh: 'idle' | 'active' | 'stale' = 'idle') {
+      staleNextSendProjection = refresh === 'idle' ? 'idle' : `${refresh}_on_refresh`;
+    },
+    get sendCommands() {
+      return sendCommands;
     },
     async close() {
       for (const pending of allGates) pending.release();
@@ -379,6 +476,51 @@ test('sends active input as steer and the same Run uses it at the next model bou
       false,
     );
     expect(f.client.getSnapshot().messages.at(-1)?.text).toContain('new constraint');
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('retries one pre-commit start conflict with a fresh revision and command identity', async () => {
+  const f = await fixture([{ message: { content: 'Accepted after refresh.' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    f.staleNextStartProjection();
+
+    await expect(f.client.send('Retry this admission once.')).resolves.toBeUndefined();
+
+    const starts = f.sendCommands.filter((command) => command.type === 'start_turn');
+    expect(starts).toHaveLength(2);
+    expect(starts[0]!.commandId).not.toBe(starts[1]!.commandId);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('does not retarget a conflicted start when the refreshed Session has an active Run', async () => {
+  const f = await fixture();
+  try {
+    await f.client.selectSession(f.a);
+    f.staleNextStartProjection('active');
+
+    await expect(f.client.send('Keep this as a draft.')).rejects.toThrow('已有任务正在运行');
+
+    expect(f.sendCommands.filter((command) => command.type === 'start_turn')).toHaveLength(1);
+    expect(f.sendCommands.filter((command) => command.type === 'steer_turn')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('does not retry a second start revision conflict', async () => {
+  const f = await fixture();
+  try {
+    await f.client.selectSession(f.a);
+    f.staleNextStartProjection('stale');
+
+    await expect(f.client.send('Only one retry is allowed.')).rejects.toThrow('revision_conflict');
+
+    expect(f.sendCommands.filter((command) => command.type === 'start_turn')).toHaveLength(2);
   } finally {
     await f.close();
   }

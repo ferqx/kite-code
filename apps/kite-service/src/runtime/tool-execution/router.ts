@@ -1632,14 +1632,18 @@ async function waitForBackgroundTasks(input: {
           !initialUserMessages.has(message.messageId),
       );
       if (hasNewUserInput) {
-        const tasks = await Promise.all(
-          input.taskIds.map((taskId) => input.runtime.readTask(input.ownerKey, taskId)),
+        const current = await input.runtime.waitTasks(
+          input.ownerKey,
+          input.taskIds,
+          0,
+          input.signal,
         );
+        if (current.status !== 'timeout') return current;
         return Object.freeze({
           ok: true,
           status: 'running',
           reason: 'user_input',
-          tasks: Object.freeze(tasks),
+          tasks: current.tasks,
         });
       }
       if (Date.now() >= deadline) {

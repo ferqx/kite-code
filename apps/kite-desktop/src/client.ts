@@ -21,6 +21,7 @@ import {
 import type {
   RuntimeApprovalInteraction,
   RuntimeCommand,
+  RuntimeCommandErrorCode,
   RuntimeInputInteraction,
   RuntimeInteractionResponse,
   RuntimeLogSessionPage,
@@ -54,6 +55,14 @@ export class CommandResultUnknown extends Error {
     this.commandType = commandType;
   }
   sessionId?: string;
+}
+
+class CommandRejected extends Error {
+  readonly code: RuntimeCommandErrorCode;
+  constructor(message: string, code: RuntimeCommandErrorCode) {
+    super(message);
+    this.code = code;
+  }
 }
 
 export type DesktopSessionSummary = Pick<
@@ -953,7 +962,10 @@ export class DesktopClient {
           ...(this.#view.selected === command.sessionId ? { ready: false } : {}),
         });
       }
-      throw new Error(reasons[receipt.code] ?? `操作未执行：${receipt.code}`);
+      throw new CommandRejected(
+        reasons[receipt.code] ?? `操作未执行：${receipt.code}`,
+        receipt.code,
+      );
     }
     return receipt;
   }
@@ -1408,16 +1420,34 @@ export class DesktopClient {
       });
       return;
     }
-    await this.#command({
-      schema: 'kite.runtime-command.v1',
-      commandId: crypto.randomUUID(),
-      type: 'start_turn',
-      sessionId,
-      expectedRevision: result.session.revision,
-      input,
-      phase: 'building',
-      ...(model === undefined ? {} : { model }),
-    });
+    const startTurn = (expectedRevision: number) =>
+      this.#command({
+        schema: 'kite.runtime-command.v1',
+        commandId: crypto.randomUUID(),
+        type: 'start_turn',
+        sessionId,
+        expectedRevision,
+        input,
+        phase: 'building',
+        ...(model === undefined ? {} : { model }),
+      });
+    try {
+      await startTurn(result.session.revision);
+    } catch (error) {
+      if (!(error instanceof CommandRejected) || error.code !== 'revision_conflict') throw error;
+      if (this.#connection !== connection) throw new Error('连接已变化，请重新加载会话。');
+      const refreshed = await connection.runtime.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_session_projection',
+        sessionId,
+      });
+      if (refreshed.status !== 'ok' || !refreshed.session)
+        throw new Error('会话状态已更新，但最新状态读取失败；消息未发送，请重试。');
+      if (isActiveRun(refreshed.session))
+        throw new Error('会话状态已更新且已有任务正在运行；消息未发送，请确认后重新发送。');
+      if (this.#connection !== connection) throw new Error('连接已变化，请重新加载会话。');
+      await startTurn(refreshed.session.revision);
+    }
   }
   async setInteractionMode(sessionId: string, mode: 'accept_edits' | 'auto' | 'full') {
     const connection = this.#requireConnection();

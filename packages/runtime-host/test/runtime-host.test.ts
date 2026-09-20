@@ -1456,6 +1456,56 @@ describe('runtime host command and projection authority', () => {
     await host[Symbol.asyncDispose]();
   });
 
+  test('admits an after-turn wake after an unrelated durable revision advances', async () => {
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set('session-stale-wake', {
+      ...projection('session-stale-wake', 2),
+      currentRun: {
+        runId: 'origin-run',
+        initialTurnId: 'origin-turn',
+        activeTurnId: 'origin-turn',
+        status: 'completed',
+        revision: 2,
+        outcome: { reasonCode: 'completed', safeRetry: false, recoveryEntry: 'none' },
+      },
+    });
+    bridge.prepareImplementation = async (command) => {
+      if (command.type !== 'start_turn') throw new Error(`unexpected command: ${command.type}`);
+      bridge.projections.set(command.sessionId, projection(command.sessionId, 3));
+      return {
+        receipt: applied(command.commandId, command.sessionId, 3),
+        execution: {
+          sessionId: command.sessionId,
+          operationId: command.commandId,
+          committedRevision: 3,
+          operation: 'turn' as const,
+          run: async () => {},
+        },
+      };
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+    });
+
+    const wake = {
+      sessionId: 'session-stale-wake',
+      originRunId: 'origin-run',
+      eventId: 'e'.repeat(64),
+      wakeKey: 'f'.repeat(64),
+      // The result event was revision 1; an unrelated durable event then
+      // advanced the Session before the wake entered the mailbox.
+      admissionRevision: 1,
+      input: 'Background result ready.',
+      phase: 'building' as const,
+    };
+    expect(await host.scheduleAfterTurnWake(wake)).toEqual({ status: 'started' });
+    expect(bridge.calls[0]).toMatchObject({ expectedRevision: 2 });
+    expect(await host.scheduleAfterTurnWake(wake)).toEqual({ status: 'replayed' });
+    expect(bridge.calls).toHaveLength(1);
+    await host[Symbol.asyncDispose]();
+  });
+
   test('suppresses an after-turn command identity collision instead of replaying it', async () => {
     const bridge = new TestExecutionBridge();
     bridge.projections.set('session-collision', {
