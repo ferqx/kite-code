@@ -42,7 +42,8 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 
 该套件通过真实 App Server 协议断言以下场景：
 
-- 会话 A 在同一响应中建立两个 `background + required` child，并从持久 waiting admission 到屏障释放保持父模型请求数和 `task_read` 数不变；两个 child 必须各执行一次指定 FIFO Shell、回报各自 marker，父 Agent 最终回复也必须匹配约定正文；
+- 会话 A 在同一响应中建立两个 `background + required` child，随后由真实模型显式且仅调用一次 `task_wait([A, B], 60000)`，全程不得调用 `task_read`、轮询或 sleep；两个 child 必须各执行一次指定 FIFO Shell 并回报各自 marker；
+- 只释放 A 的 FIFO 后，`task_wait` 必须成功终态，A 为 `completed`、B 仍为 `running`，同一个父 Run 保持 `required_background` waiting 且不得失败；再释放 B 后，同一个 Run 才完成并输出约定正文；
 - A 等待时创建会话 B，并由真实模型在 B 中调用文件工具；
 - A/B 的历史事件及后台执行投影互不串线；
 - 屏障释放后 A 以同一 Run identity 收敛两个 required child；

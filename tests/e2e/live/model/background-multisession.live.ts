@@ -421,6 +421,71 @@ function rawRunErrorDiagnostics(sessionId: string): readonly Readonly<Record<str
   }
 }
 
+interface RawTaskWaitFact {
+  readonly toolCallId: string;
+  readonly taskIds: readonly string[];
+  readonly timeoutMs: number;
+  readonly status: 'queued' | 'started' | 'finished' | 'failed' | 'cancelled';
+}
+
+function rawTaskWaitFacts(sessionId: string): readonly RawTaskWaitFact[] {
+  const database = new Database(join(configRoot, 'kite-session.sqlite'), { readonly: true });
+  try {
+    const taskWaitCalls = new Map<
+      string,
+      { readonly taskIds: readonly string[]; readonly timeoutMs: number }
+    >();
+    const facts: RawTaskWaitFact[] = [];
+    const events = database
+      .query<{ event_json: string }, [string]>(
+        'SELECT event_json FROM runtime_events WHERE session_id = ? ORDER BY sequence',
+      )
+      .all(sessionId)
+      .map(({ event_json }) => JSON.parse(event_json) as Readonly<Record<string, unknown>>);
+    for (const event of events) {
+      if (typeof event.toolCallId !== 'string') continue;
+      if (event.type === 'tool.queued' && event.name === 'task_wait') {
+        const argsValue =
+          event.args && typeof event.args === 'object' && !Array.isArray(event.args)
+            ? (event.args as Readonly<Record<string, unknown>>)
+            : undefined;
+        const taskIds = Array.isArray(argsValue?.task_ids)
+          ? argsValue.task_ids.filter((value): value is string => typeof value === 'string')
+          : [];
+        const timeoutMs = typeof argsValue?.timeout_ms === 'number' ? argsValue.timeout_ms : 0;
+        taskWaitCalls.set(event.toolCallId, { taskIds, timeoutMs });
+        facts.push({ toolCallId: event.toolCallId, taskIds, timeoutMs, status: 'queued' });
+        continue;
+      }
+      const call = taskWaitCalls.get(event.toolCallId);
+      if (!call) continue;
+      if (
+        event.type !== 'tool.started' &&
+        event.type !== 'tool.finished' &&
+        event.type !== 'tool.failed' &&
+        event.type !== 'tool.cancelled'
+      ) {
+        continue;
+      }
+      facts.push({
+        toolCallId: event.toolCallId,
+        ...call,
+        status:
+          event.type === 'tool.started'
+            ? 'started'
+            : event.type === 'tool.finished'
+              ? 'finished'
+              : event.type === 'tool.failed'
+                ? 'failed'
+                : 'cancelled',
+      });
+    }
+    return facts;
+  } finally {
+    database.close(false);
+  }
+}
+
 function completionDiagnostics(sessionId: string): readonly Readonly<Record<string, unknown>>[] {
   try {
     const database = new Database(join(configRoot, 'kite-session.sqlite'), { readonly: true });
@@ -752,15 +817,16 @@ try {
     revisionA,
     [
       'This is a deterministic live E2E for required background delegation.',
-      'The built-in task tool is directly disclosed in your tool schema. In one response, dispatch exactly two independent explore task calls with background=true and result_disposition="required". Do not call tool_search, task_read, or any other parent tool.',
+      'The built-in task and task_wait tools are directly disclosed in your tool schema. In one response, dispatch exactly two independent explore task calls with background=true and result_disposition="required".',
       'Task A must make exactly one shell_execute call with the read-only command `head -n 1 required-gate-a`, then report the gate marker after that command returns. The path is a FIFO, so do not substitute read_file.',
       'Task B must make exactly one shell_execute call with the read-only command `head -n 1 required-gate-b`, then report the gate marker after that command returns. The path is a FIFO, so do not substitute read_file.',
-      'After dispatching, do not poll, sleep, or finish early. Let Runtime wait for both required results, then reply exactly: session-a-completed',
+      'After both task calls return their acceptance objects, call task_wait exactly once with both returned task_id values and timeout_ms=60000. Do not call task_read, sleep, shell, or any other parent tool.',
+      'When that single task_wait returns one completed child, do not call task_wait or any other tool again and do not finish early. Let Runtime wait for the remaining required child, then reply exactly: session-a-completed',
     ].join('\n'),
   );
 
-  let waitingA: Awaited<ReturnType<typeof projection>> | undefined;
-  await waitFor('Session A required background waiting admission', async () => {
+  let waitingOnTaskWaitA: Awaited<ReturnType<typeof projection>> | undefined;
+  await waitFor('Session A single task_wait with both required children running', async () => {
     await settlePendingInteraction(connection!, sessionA);
     const candidate = await projection(connection!, sessionA);
     if (
@@ -768,13 +834,13 @@ try {
       candidate.currentRun?.status === 'cancelled' ||
       candidate.currentRun?.status === 'recovery_required'
     ) {
-      throw new Error(`Session A terminated before required background waiting admission.`);
+      throw new Error(`Session A terminated before task_wait was established.`);
     }
     const executions = await background(connection!, sessionA);
     if (
       executions.some((execution) => execution.kind === 'subagent' && execution.status === 'failed')
     ) {
-      throw new Error('Session A subagent failed before required background waiting admission.');
+      throw new Error('Session A subagent failed before task_wait was established.');
     }
     if (
       executions.filter((execution) => execution.kind === 'subagent').length >= 2 &&
@@ -782,19 +848,25 @@ try {
         .filter((execution) => execution.kind === 'subagent')
         .every((execution) => execution.status !== 'running')
     ) {
-      throw new Error(
-        'Session A subagents terminated before required background waiting admission.',
-      );
+      throw new Error('Session A subagents terminated before task_wait was established.');
     }
+    const taskWaitFacts = rawTaskWaitFacts(sessionA);
+    const taskWaits = taskWaitFacts.filter((fact) => fact.status === 'queued');
     if (
-      candidate.currentRun?.status === 'waiting' &&
-      candidate.currentRun.waitingReason?.kind === 'required_background' &&
-      candidate.currentRun.waitingReason.taskIds.length === 2 &&
+      taskWaits.length === 1 &&
+      taskWaitFacts.some(
+        (fact) => fact.toolCallId === taskWaits[0]?.toolCallId && fact.status === 'started',
+      ) &&
+      !taskWaitFacts.some(
+        (fact) =>
+          fact.toolCallId === taskWaits[0]?.toolCallId &&
+          (fact.status === 'finished' || fact.status === 'failed' || fact.status === 'cancelled'),
+      ) &&
       executions.filter(
         (execution) => execution.kind === 'subagent' && execution.status === 'running',
       ).length === 2
     ) {
-      waitingA = candidate;
+      waitingOnTaskWaitA = candidate;
       return true;
     }
     return false;
@@ -811,7 +883,7 @@ try {
       `${error instanceof Error ? error.message : String(error)} run=${JSON.stringify(runDiagnostic(session?.currentRun))} executions=${JSON.stringify(executionDiagnostics(executions))} events=${JSON.stringify(facts)} rawRunErrors=${JSON.stringify(rawRunErrors)} completionFacts=${JSON.stringify(completionFacts)} modelUsage=${JSON.stringify(modelUsage)} subagentFailures=${JSON.stringify(subagentFailures)}`,
     );
   });
-  assert.ok(waitingA?.currentRun, 'Session A waiting projection was not captured.');
+  assert.ok(waitingOnTaskWaitA?.currentRun, 'Session A task_wait projection was not captured.');
 
   const initialAHistory = await connection.history.loadSession(sessionA);
   const initialAEvents = eventsOf(initialAHistory);
@@ -821,12 +893,33 @@ try {
     assert.equal(call.arguments.background, true);
     assert.equal(call.arguments.result_disposition, 'required');
   }
-  assert.equal(
-    new Set(waitingA.currentRun.waitingReason?.taskIds).size,
-    2,
-    'Required waiting identities were not distinct.',
+  const taskWaitCalls = rawTaskWaitFacts(sessionA).filter((fact) => fact.status === 'queued');
+  assert.equal(taskWaitCalls.length, 1, 'Required scenario did not issue exactly one task_wait.');
+  const taskWaitCall = taskWaitCalls[0];
+  assert.ok(taskWaitCall, 'Required scenario task_wait was not captured.');
+  assert.equal(taskWaitCall.timeoutMs, 60_000);
+  const initialRequiredExecutions = (await background(connection, sessionA)).filter(
+    (execution) => execution.kind === 'subagent',
   );
-  const waitingRunId = waitingA.currentRun.runId;
+  const requiredExecutionIds = new Set(
+    initialRequiredExecutions.map((execution) => execution.executionId),
+  );
+  const taskWaitTargetIds = new Set(taskWaitCall.taskIds);
+  const taskWaitTargetsExactChildren =
+    taskWaitTargetIds.size === requiredExecutionIds.size &&
+    [...taskWaitTargetIds].every((taskId) => requiredExecutionIds.has(taskId));
+  assert.equal(
+    taskWaitTargetsExactChildren,
+    true,
+    'task_wait did not target exactly the two accepted required children.',
+  );
+  assert.equal(taskReadCount(initialAEvents), 0);
+  assert.equal(
+    new Set(initialRequiredExecutions.map((execution) => execution.executionId)).size,
+    2,
+    'Required execution identities were not distinct.',
+  );
+  const waitingRunId = waitingOnTaskWaitA.currentRun.runId;
   const requiredRequestBaseline = rootModelRequestCount(initialAEvents);
   const requiredReadBaseline = taskReadCount(initialAEvents);
 
@@ -839,21 +932,88 @@ try {
   );
   await waitForRunTerminal(connection, sessionB);
 
-  const stillWaitingA = await projection(connection, sessionA);
-  assert.equal(stillWaitingA.currentRun?.runId, waitingRunId);
-  if (stillWaitingA.currentRun?.status !== 'waiting') {
+  const activeTaskWaitA = await projection(connection, sessionA);
+  assert.equal(activeTaskWaitA.currentRun?.runId, waitingRunId);
+  if (
+    activeTaskWaitA.currentRun?.status === 'failed' ||
+    activeTaskWaitA.currentRun?.status === 'cancelled' ||
+    activeTaskWaitA.currentRun?.status === 'recovery_required' ||
+    activeTaskWaitA.currentRun?.status === 'completed'
+  ) {
     throw new Error(
-      `Session A left managed waiting while Session B ran. run=${JSON.stringify(runDiagnostic(stillWaitingA.currentRun))} executions=${JSON.stringify(executionDiagnostics(await background(connection, sessionA)))} rawRunErrors=${JSON.stringify(rawRunErrorDiagnostics(sessionA))} completionFacts=${JSON.stringify(completionDiagnostics(sessionA))} subagentFailures=${JSON.stringify(subagentFailureDiagnostics(sessionA))}`,
+      `Session A left its active task_wait while Session B ran. run=${JSON.stringify(runDiagnostic(activeTaskWaitA.currentRun))} executions=${JSON.stringify(executionDiagnostics(await background(connection, sessionA)))} rawRunErrors=${JSON.stringify(rawRunErrorDiagnostics(sessionA))} completionFacts=${JSON.stringify(completionDiagnostics(sessionA))} subagentFailures=${JSON.stringify(subagentFailureDiagnostics(sessionA))}`,
     );
   }
   const quietAEvents = eventsOf(await connection.history.loadSession(sessionA));
+  const activeTaskWaitFacts = rawTaskWaitFacts(sessionA);
+  assert.ok(
+    activeTaskWaitFacts.some(
+      (fact) => fact.toolCallId === taskWaitCall.toolCallId && fact.status === 'started',
+    ),
+  );
+  assert.ok(
+    !activeTaskWaitFacts.some(
+      (fact) =>
+        fact.toolCallId === taskWaitCall.toolCallId &&
+        (fact.status === 'finished' || fact.status === 'failed' || fact.status === 'cancelled'),
+    ),
+  );
+  assert.equal(
+    (await background(connection, sessionA)).filter(
+      (execution) => execution.kind === 'subagent' && execution.status === 'running',
+    ).length,
+    2,
+  );
   assert.equal(rootModelRequestCount(quietAEvents), requiredRequestBaseline);
   assert.equal(taskReadCount(quietAEvents), requiredReadBaseline);
 
   const requiredReleaseA = releaseEventGate(requiredGateA, 'required-a-released');
-  const requiredReleaseB = releaseEventGate(requiredGateB, 'required-b-released');
-  await Promise.all([requiredReleaseA.exited, requiredReleaseB.exited]);
+  await requiredReleaseA.exited;
   requiredGateAReleased = true;
+
+  let partialWaitingA: Awaited<ReturnType<typeof projection>> | undefined;
+  await waitFor('Session A partial task_wait settlement', async () => {
+    const candidate = await projection(connection!, sessionA);
+    if (
+      candidate.currentRun?.status === 'failed' ||
+      candidate.currentRun?.status === 'cancelled' ||
+      candidate.currentRun?.status === 'recovery_required'
+    ) {
+      throw new Error('Session A terminated after only one required child completed.');
+    }
+    const taskWaitFacts = rawTaskWaitFacts(sessionA);
+    const executions = await background(connection!, sessionA);
+    const subagents = executions.filter((execution) => execution.kind === 'subagent');
+    if (
+      taskWaitFacts.some(
+        (fact) => fact.toolCallId === taskWaitCall.toolCallId && fact.status === 'finished',
+      ) &&
+      !taskWaitFacts.some(
+        (fact) =>
+          fact.toolCallId === taskWaitCall.toolCallId &&
+          (fact.status === 'failed' || fact.status === 'cancelled'),
+      ) &&
+      taskWaitFacts.filter((fact) => fact.status === 'queued').length === 1 &&
+      subagents.filter((execution) => execution.status === 'completed').length === 1 &&
+      subagents.filter((execution) => execution.status === 'running').length === 1 &&
+      candidate.currentRun?.runId === waitingRunId &&
+      candidate.currentRun.status === 'waiting' &&
+      candidate.currentRun.waitingReason?.kind === 'required_background' &&
+      candidate.currentRun.waitingReason.taskIds.length === 1
+    ) {
+      partialWaitingA = candidate;
+      return true;
+    }
+    return false;
+  });
+  assert.ok(partialWaitingA?.currentRun, 'Session A partial waiting projection was not captured.');
+  assert.notEqual(partialWaitingA.currentRun.status, 'failed');
+  const partialAEvents = eventsOf(await connection.history.loadSession(sessionA));
+  assert.equal(rawTaskWaitFacts(sessionA).filter((fact) => fact.status === 'queued').length, 1);
+  assert.equal(taskReadCount(partialAEvents), 0);
+
+  const requiredReleaseB = releaseEventGate(requiredGateB, 'required-b-released');
+  await requiredReleaseB.exited;
   requiredGateBReleased = true;
   await waitForRunTerminal(connection, sessionA);
 
@@ -1017,6 +1177,7 @@ try {
       seed: null,
       scenarios: [
         'required-background-managed-wait-with-zero-parent-polling',
+        'required-background-partial-task-wait-settlement',
         'switch-to-session-b-and-interact-while-a-waits',
         'session-a-and-b-isolation',
         'authorized-after-turn-exactly-one-continuation',
@@ -1025,12 +1186,16 @@ try {
       redactedTrace: {
         required: {
           taskCalls: requiredCalls.length,
-          waitingTaskCount: waitingA.currentRun.waitingReason?.taskIds.length,
+          taskWaitCalls: taskWaitCalls.length,
+          taskWaitTimeoutMs: taskWaitCall.timeoutMs,
+          partialCompletedChildren: 1,
+          partialRunningChildren: 1,
+          partialWaitingTaskCount: partialWaitingA.currentRun.waitingReason?.taskIds.length,
           modelRequestsAtWaitingAdmission: requiredRequestBaseline,
           modelRequestsBeforeRelease: rootModelRequestCount(quietAEvents),
           taskReadsAtWaitingAdmission: requiredReadBaseline,
           taskReadsBeforeRelease: taskReadCount(quietAEvents),
-          runIdentityPreserved: stillWaitingA.currentRun?.runId === waitingRunId,
+          runIdentityPreserved: activeTaskWaitA.currentRun?.runId === waitingRunId,
         },
         afterTurn: {
           taskCalls: afterTurnCalls.length,
