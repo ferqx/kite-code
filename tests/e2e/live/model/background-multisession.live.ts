@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeApprovalInteraction, RuntimeClientEvent } from '@kite-ai/runtime-contract';
+import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
 import { trustWorkspace } from '../../../../apps/kite-service/src/config/workspace-trust';
 import {
   BunStdioChildRuntimeClientTransport,
@@ -39,15 +39,18 @@ const startupInjection = join(root, '.bashrc');
 const startupMarker = join(workspace, 'startup-injection-ran');
 const sessionA = 'live-background-session-a';
 const sessionB = 'live-background-session-b';
-const approvedInteractions = new Set<string>();
+const settledInteractions = new Set<string>();
 const serviceEntrypoint = join(
   import.meta.dir,
   '../../../qualification/fixtures/isolated-store-service.ts',
 );
+const packagedServiceExecutable = process.env.KITE_LIVE_BACKGROUND_SERVICE_EXECUTABLE;
 
 function openConnection(label: string) {
   const transport = new BunStdioChildRuntimeClientTransport({
-    argv: [process.execPath, serviceEntrypoint, 'app-server', 'run-stdio'],
+    argv: packagedServiceExecutable
+      ? [packagedServiceExecutable, 'app-server', 'run-stdio']
+      : [process.execPath, serviceEntrypoint, 'app-server', 'run-stdio'],
     cwd: join(import.meta.dir, '../../../..'),
     env: {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
@@ -141,6 +144,7 @@ async function waitFor(
 
 async function waitForRunTerminal(connection: Connection, sessionId: string): Promise<void> {
   await waitFor(`${sessionId} Run terminal`, async () => {
+    await settlePendingInteraction(connection, sessionId);
     const current = (await projection(connection, sessionId)).currentRun;
     if (current?.status === 'failed' || current?.status === 'cancelled') {
       throw new Error(`${sessionId} ended as ${current.status}.`);
@@ -163,23 +167,36 @@ async function waitForRunTerminal(connection: Connection, sessionId: string): Pr
   });
 }
 
-async function approvePendingInteraction(connection: Connection, sessionId: string): Promise<void> {
+async function settlePendingInteraction(connection: Connection, sessionId: string): Promise<void> {
   const session = await projection(connection, sessionId);
   const interaction = session.interactionQueue?.interactions.find(
-    (candidate): candidate is RuntimeApprovalInteraction =>
-      candidate.kind === 'approval' &&
-      candidate.interactionId === session.interactionQueue?.activeInteractionId,
+    (candidate) => candidate.interactionId === session.interactionQueue?.activeInteractionId,
   );
-  if (!interaction || approvedInteractions.has(interaction.interactionId)) return;
-  const receipt = await connection.runtime.command({
-    schema: 'kite.runtime-command.v1',
-    commandId: `approve-${interaction.interactionId}-${interaction.sessionRevision}`,
-    type: 'respond_interaction',
-    sessionId,
-    expectedRevision: interaction.sessionRevision,
-    interaction,
-    response: { kind: 'approval', decision: 'approve_once' },
-  });
+  if (!interaction || settledInteractions.has(interaction.interactionId)) return;
+  if (interaction.kind !== 'approval' && interaction.kind !== 'input') return;
+  const receipt =
+    interaction.kind === 'approval'
+      ? await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: `settle-${interaction.interactionId}-${interaction.sessionRevision}`,
+          type: 'respond_interaction',
+          sessionId,
+          expectedRevision: interaction.sessionRevision,
+          interaction,
+          response: { kind: 'approval', decision: 'approve_once' },
+        })
+      : await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: `settle-${interaction.interactionId}-${interaction.sessionRevision}`,
+          type: 'respond_interaction',
+          sessionId,
+          expectedRevision: interaction.sessionRevision,
+          interaction,
+          response: {
+            kind: 'text',
+            value: 'Continue the requested deterministic test without asking again.',
+          },
+        });
   if (
     receipt.status === 'conflict' ||
     (receipt.status === 'rejected' && receipt.code === 'interaction_mismatch')
@@ -187,9 +204,9 @@ async function approvePendingInteraction(connection: Connection, sessionId: stri
     return;
   }
   if (receipt.status !== 'applied' && receipt.status !== 'idempotent_replay') {
-    throw new Error(`Approval was not accepted: ${JSON.stringify(receipt)}`);
+    throw new Error(`Interaction response was not accepted: ${JSON.stringify(receipt)}`);
   }
-  approvedInteractions.add(interaction.interactionId);
+  settledInteractions.add(interaction.interactionId);
 }
 
 async function background(connection: Connection, sessionId: string) {
@@ -272,7 +289,7 @@ try {
   );
 
   await waitFor('Session A Shell and subagent to be running', async () => {
-    await approvePendingInteraction(connection!, sessionA);
+    await settlePendingInteraction(connection!, sessionA);
     const executions = await background(connection!, sessionA);
     return ['shell', 'subagent'].every((kind) =>
       executions.some((execution) => execution.kind === kind && execution.status === 'running'),

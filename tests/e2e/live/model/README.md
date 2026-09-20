@@ -31,6 +31,11 @@ KITE_LIVE_DEEPSEEK_API_KEY=... \
 bun run test:model:live:background
 ```
 
+默认从 TypeScript 服务入口运行。验证桌面端实际携带的服务二进制时，先执行
+`bun run --cwd apps/kite-desktop prepare:service`，再增加
+`KITE_LIVE_BACKGROUND_SERVICE_EXECUTABLE="$PWD/apps/kite-desktop/service/kite-service"`。
+该路径复用同一组真实模型、多会话、后台 Shell 与子 Agent 断言。
+
 默认 endpoint 为 `https://api.deepseek.com/v1`；只有使用受信的 DeepSeek-compatible 代理时才设置 `KITE_LIVE_DEEPSEEK_BASE_URL`。未设置 `KITE_RUN_LIVE_BACKGROUND_MULTISESSION=1` 时 runner 会在建立网络连接前明确拒绝执行。
 
 Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 Workspace，以权限 `0600` 写入从环境变量取得的 API key，并在 `finally` 中关闭 App Server、递归清理临时目录。日志只输出固定 provider/model 标识及通过的场景，不输出 key、prompt、request、response 或临时配置。
