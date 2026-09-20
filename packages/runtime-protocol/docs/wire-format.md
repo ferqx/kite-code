@@ -17,3 +17,7 @@
 后台执行query结果把`sessionRevision`、列表`aggregateGeneration`、item `ownerGeneration`与item `revision`
 编码为四个独立必填字段。前者是Session mutation CAS；其余字段分别限定组合目录、原生执行owner和单项状态水位，
 不得互相代用。`stop_background_execution.expectedRevision`只来自同次读取的`sessionRevision`。
+
+Session 当前 Run 的可选 `waitingReason` 经过严格 codec 编码为
+`{ kind: "required_background", taskIds: string[] }`，且只允许与 `status="waiting"` 同时出现；task ID 非空、唯一并受数量限制。
+该字段是等待原因投影，不承载 child lifecycle、Artifact 或 completion authority。live notification、history/query mapper 与生成类型使用同一闭集字段，未知 reason 不能透传。

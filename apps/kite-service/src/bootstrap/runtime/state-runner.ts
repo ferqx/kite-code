@@ -10,6 +10,7 @@ import {
   isStateRuntimeEffectDeferred,
   planRuntimeBudgetAdmission,
   reconciliationEventsForReservations,
+  runtimeHostStateRequiredBackgroundFinalRefresh as requiredBackgroundFinalRefresh,
   type StateRuntimeEffectLease,
   type StateRuntimeEffectPersistenceAcknowledgement,
 } from '@kite-ai/runtime-host/kernel-adapter';
@@ -547,7 +548,9 @@ export async function* runStateRuntimeLoop(
   waitForRequiredBackground?: (
     state: Readonly<RuntimeState>,
     signal?: AbortSignal,
-  ) => Promise<'state_changed' | 'managed_shell_changed' | 'managed_shell_terminal'>,
+  ) => Promise<
+    'state_changed' | 'background_changed' | 'managed_shell_changed' | 'managed_shell_terminal'
+  >,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -659,6 +662,19 @@ export async function* runStateRuntimeLoop(
       if (backgroundFailure) throw backgroundFailure;
       if (consumeSettledBackgroundNoProgress()) return;
 
+      const refresh = requiredBackgroundFinalRefresh(kernel.getState());
+      if (refresh) {
+        count += 1;
+        const superseded: RuntimeEvent = {
+          type: 'model.response_superseded',
+          messageId: refresh.messageId,
+          invocationId: refresh.modelInvocationId,
+        };
+        kernel.processEvent(superseded);
+        yield superseded;
+        continue;
+      }
+
       const state = kernel.getState();
       let facts = schedulerFacts?.(state);
       let effect = kernel.selectPendingEffects(state, facts)[0] ?? { type: 'stop' as const };
@@ -769,6 +785,7 @@ export async function* runStateRuntimeLoop(
       }
       if (effect.type === 'completion_blocked') {
         count += 1;
+        const finalMessage = kernel.getState().transcript.messages.at(-1);
         const blocked: RuntimeEvent = {
           type: 'completion.blocked',
           turnId: kernel.getState().turn.turnId,
@@ -777,10 +794,31 @@ export async function* runStateRuntimeLoop(
           nextAction: effect.decision.nextAction,
           planning: effect.decision.planning,
           correctionAttempt: effect.decision.correctionAttempt,
+          backgroundTaskIds: [...effect.decision.backgroundTaskIds],
+          ...(finalMessage?.kind === 'assistant' && finalMessage.modelInvocationId
+            ? { modelInvocationId: finalMessage.modelInvocationId }
+            : {}),
           ...(effect.decision.version === 'completion_guard_v2'
             ? { planIdentity: effect.decision.planIdentity }
             : {}),
         };
+        if (effect.decision.nextAction === 'wait_for_background' && waitForRequiredBackground) {
+          kernel.processEvent(blocked);
+          yield blocked;
+          for (;;) {
+            await waitForRequiredBackground(kernel.getState(), signal);
+            if (signal?.aborted) return;
+            const current = decideCompletion(kernel.getState());
+            if (
+              current.status !== 'blocked' ||
+              current.code !== 'tool_pending' ||
+              current.nextAction !== 'wait_for_background'
+            ) {
+              break;
+            }
+          }
+          continue;
+        }
         if (effect.decision.canCorrect) {
           kernel.processEvent(blocked);
           yield blocked;
@@ -792,9 +830,6 @@ export async function* runStateRuntimeLoop(
             for (;;) {
               const wake = await waitForRequiredBackground(kernel.getState(), signal);
               if (signal?.aborted) return;
-              // A terminal managed Shell is intentionally not projected into State until
-              // the model reads it. Resume the correction path exactly once so it can issue
-              // shell_read; ordinary output/progress wakes must keep waiting.
               if (wake === 'managed_shell_terminal') break;
               const current = decideCompletion(kernel.getState());
               if (

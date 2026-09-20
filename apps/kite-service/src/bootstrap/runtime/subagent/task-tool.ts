@@ -39,7 +39,11 @@ import {
   afterTurnContinuationIdentity,
   planAfterTurnContinuationReservation,
 } from './after-turn-continuation';
-import { type BackgroundSubagentRuntime, backgroundSubagentOwnerKey } from './background-runtime';
+import {
+  BackgroundSettlementAdmissionError,
+  type BackgroundSubagentRuntime,
+  backgroundSubagentOwnerKey,
+} from './background-runtime';
 import { serializeSubagentContinuation, subagentContinuationCursorId } from './continuation-codec';
 import { subagentResultFromObservation } from './observation-codec';
 import {
@@ -610,26 +614,30 @@ export async function executePipelineIssuedSubagentStart(
                 }),
               }
             : undefined;
-          const persisted = await detachedDeps.modelInvocationPersistence!.persistEvents([
-            {
-              type: 'subagent.background_result_persisted',
-              taskId: notification.taskId,
-              notificationId: notification.notificationId,
-              artifactIntegrityIdentifier: notification.resultArtifact.integrityIdentifier,
-              shortReport: notification.shortReport,
-              source: notification.source,
-              modelRole: notification.modelRole,
-              originRunId: notification.originRunId,
-              originTurnId: notification.originTurnId,
-              originToolCallId: notification.originToolCallId,
-              attempt: notification.attempt,
-              ...(afterTurn ? { afterTurn } : {}),
-            },
-          ]);
+          const recoveryEvent = {
+            type: 'subagent.background_result_persisted',
+            taskId: notification.taskId,
+            notificationId: notification.notificationId,
+            artifactIntegrityIdentifier: notification.resultArtifact.integrityIdentifier,
+            shortReport: notification.shortReport,
+            source: notification.source,
+            modelRole: notification.modelRole,
+            originRunId: notification.originRunId,
+            originTurnId: notification.originTurnId,
+            originToolCallId: notification.originToolCallId,
+            attempt: notification.attempt,
+            ...(afterTurn ? { afterTurn } : {}),
+          } as const;
+          let persisted = false;
+          try {
+            persisted = await detachedDeps.modelInvocationPersistence!.persistEvents([
+              recoveryEvent,
+            ]);
+          } catch {
+            throw new BackgroundSettlementAdmissionError(recoveryEvent);
+          }
           if (!persisted) {
-            throw new SubagentProviderRecoveryRequiredError(
-              'Background sub-agent completion notification was not persisted.',
-            );
+            throw new BackgroundSettlementAdmissionError(recoveryEvent);
           }
           if (afterTurnReservation && afterTurn) {
             await deps.afterTurnContinuationRuntime!.deliver({

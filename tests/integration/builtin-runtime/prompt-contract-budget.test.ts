@@ -53,10 +53,16 @@ describe('Prompt contract token budget', () => {
     expect(prompt).toContain('`subagent_type` and a concrete self-contained `task`');
     expect(prompt).toContain('`plan` for architecture/design planning');
     expect(prompt).toContain("`code` only when the user's task calls for implementation");
-    expect(prompt).toContain('issue their task calls together in one response');
+    expect(prompt).toContain(
+      'issue their task calls together in one response with `background=true`',
+    );
     expect(prompt).toContain('execute them concurrently within its shared budget');
     expect(prompt).toContain('Serialize dependent tasks');
     expect(prompt).toContain('Obey an explicit user instruction not to delegate');
     expect(prompt).toContain('do not duplicate the assigned investigation');
+    expect(prompt).toContain('let Runtime wait for required background results');
+    expect(prompt).toContain('fixed-interval `task_read`');
+    expect(prompt).toContain('`running` at the same revision');
+    expect(prompt).toContain('`result_disposition=after_turn`');
   });
 });

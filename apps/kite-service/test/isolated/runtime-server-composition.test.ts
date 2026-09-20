@@ -215,6 +215,7 @@ test('one Runtime Run waits for required background work, accepts steering, and 
     const run = waiting.projection.session.currentRun;
     expect(run?.runId).toBeDefined();
     expect(run?.activeTurnId).toBeDefined();
+    await bounded(childRequestStarted.promise, 'child model request start');
     expect(parentRequest).toBe(3);
     expect(model.getRequestCount()).toBe(4);
 

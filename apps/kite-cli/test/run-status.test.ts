@@ -501,6 +501,28 @@ describe('overlay states', () => {
     expect(snap.tone).toBe('warning');
     expect(snap.waiting).toBe('input');
   });
+
+  test('persisted background waiting is distinct from model work', () => {
+    const state = {
+      ...createInitialState(),
+      runtimeAuthority: {
+        revision: 2,
+        interactionQueue: { revision: 2, interactions: [] },
+        currentRun: {
+          runId: 'run-background',
+          initialTurnId: 'turn-background',
+          activeTurnId: 'turn-background',
+          status: 'waiting' as const,
+          revision: 2,
+          waitingReason: { kind: 'required_background' as const, taskIds: ['task-a'] },
+        },
+      },
+    };
+    const snap = deriveRunStatusSnapshot(state);
+    expect(snap.waiting).toBe('background');
+    expect(formatRunStatusLine(snap, 80)).toBe('Waiting… · background results');
+    expect(shouldDisablePromptInput(state)).toBe(false);
+  });
 });
 
 // ── token tracking ──

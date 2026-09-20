@@ -1,4 +1,4 @@
-import { decideCompletion } from './completion';
+import { decideCompletion, requiredBackgroundTaskIds } from './completion';
 import type {
   McpProviderDirectoryStatus,
   McpProviderRecoveryAction,
@@ -576,7 +576,10 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
       verificationId: stringField(blocking, 'verificationId') ?? '',
     };
 
-  if (state.transcript.final && !hasActiveSkillFrameForCurrentWork(state))
+  if (
+    state.transcript.final &&
+    (requiredBackgroundTaskIds(state).length > 0 || !hasActiveSkillFrameForCurrentWork(state))
+  )
     return completionDecision(state);
   const pendingCompaction = recordField(context, 'pendingCompaction');
   if (pendingCompaction)

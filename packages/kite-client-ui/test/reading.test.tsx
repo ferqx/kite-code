@@ -500,7 +500,7 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
           id: 'w',
           label: 'Workspace',
           state: 'loaded',
-          sessionCount: 4,
+          sessionCount: 5,
           sessions: [
             {
               sessionId: 'running',
@@ -509,8 +509,14 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
             },
             {
               sessionId: 'waiting',
-              displayName: '等待回答',
+              displayName: '旧等待状态',
               status: 'waiting',
+            },
+            {
+              sessionId: 'background-waiting',
+              displayName: '等待后台',
+              status: 'waiting',
+              waitingReason: 'required_background',
             },
             {
               sessionId: 'pending',
@@ -530,12 +536,14 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
   const rows = Array.from(document.querySelectorAll<HTMLElement>('.session-row'));
   expect(rows[0]?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('会话运行中');
   expect(rows[0]?.textContent).toBe('正在运行');
-  expect(rows[1]?.textContent).toBe('等待回答待用户输入');
+  expect(rows[1]?.textContent).toBe('旧等待状态');
   expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
-  expect(rows[2]?.textContent).toBe('运行时请求输入待用户输入');
+  expect(rows[2]?.textContent).toBe('等待后台等待后台结果');
   expect(rows[2]?.querySelector('[role="status"]')).toBeNull();
-  expect(rows[3]?.textContent).toBe('已经完成');
+  expect(rows[3]?.textContent).toBe('运行时请求输入待用户输入');
   expect(rows[3]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[4]?.textContent).toBe('已经完成');
+  expect(rows[4]?.querySelector('[role="status"]')).toBeNull();
 });
 
 test('tool activity keeps failures visible and groups adjacent tools without raw details', async () => {

@@ -84,7 +84,11 @@ export function planModelInvocationResource(
   }
   if (input.parentReservationId) {
     const parent = budget.reservations[input.parentReservationId];
-    if (parent?.state !== 'dispatch_started') {
+    if (
+      !parent ||
+      (parent.state !== 'dispatch_started' &&
+        !(parent.resourceKind === 'subagent' && parent.state === 'reconciled'))
+    ) {
       throw new DescendantResourceAdmissionError('reconciliation_required');
     }
   }
@@ -109,15 +113,23 @@ export function planModelInvocationResource(
     preparationEvents.push(release);
   }
   const committed = committedResourceUsage(budget);
+  const remainingInput = budget.budget.maxRunInputTokens - committed.counters.inputTokens;
   const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
   const maxOutputTokens = Math.min(
     input.requestedMaxOutputTokens ?? remainingOutput,
     remainingOutput,
   );
   if (maxOutputTokens <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
-  const usage = createZeroResourceUsage('versioned_upper_bound', 'model-surface-v1');
+  const inputTokenUpperBound = Math.min(input.inputTokens * 2, remainingInput);
+  if (inputTokenUpperBound < input.inputTokens) {
+    throw new DescendantResourceAdmissionError('budget_exhausted');
+  }
+  const usage = createZeroResourceUsage('versioned_upper_bound', 'model-surface-v2');
   usage.counters.modelRequests = 1;
-  usage.counters.inputTokens = input.inputTokens;
+  // Provider tokenizers and wire-level tool framing can exceed the local
+  // cl100k frozen-surface estimate. Reserve a bounded 2x envelope while the
+  // total Run input budget remains the hard ceiling.
+  usage.counters.inputTokens = inputTokenUpperBound;
   usage.counters.outputTokens = maxOutputTokens;
   const reservation: BudgetReservation = {
     version: 1,
@@ -494,12 +506,21 @@ export function createDescendantResourceAdmission(input: {
     notifyProjectionChange();
   };
 
-  const assertParentDispatchStarted = (budget: ActiveResourceBudgetRuntimeState): void => {
-    const currentParent = budget.reservations[parent.reservationId];
-    if (currentParent?.resourceKind !== 'subagent' || currentParent.state !== 'dispatch_started') {
+  const assertParentStillOwned = (budget: ActiveResourceBudgetRuntimeState): void => {
+    if (Object.values(budget.reservations).some((reservation) => reservation.state === 'unknown')) {
       throw new DescendantResourceAdmissionError(
         'reconciliation_required',
-        'Sub-agent parent reservation is no longer dispatch-started.',
+        'Sub-agent resource ledger contains an unknown reservation.',
+      );
+    }
+    const currentParent = budget.reservations[parent.reservationId];
+    if (
+      currentParent?.resourceKind !== 'subagent' ||
+      (currentParent.state !== 'dispatch_started' && currentParent.state !== 'reconciled')
+    ) {
+      throw new DescendantResourceAdmissionError(
+        'reconciliation_required',
+        'Sub-agent parent reservation is no longer owned by this Run.',
       );
     }
   };
@@ -529,7 +550,11 @@ export function createDescendantResourceAdmission(input: {
       try {
         return await withMutation(async () => {
           const budget = refreshProjected();
-          assertParentDispatchStarted(budget);
+          // Background task dispatch settles the parent Tool reservation as soon as
+          // ownership transfers to the background runtime. The admission object was
+          // created while that reservation was dispatch-started, so its descendants
+          // may continue against the same durable parent until it is explicitly released.
+          assertParentStillOwned(budget);
           assertBeforeRunDeadline(budget, now());
           const reservation: BudgetReservation = {
             version: 1,
@@ -672,7 +697,7 @@ export function createDescendantResourceAdmission(input: {
     while (true) {
       const attempt = await withMutation(async () => {
         const budget = refreshProjected();
-        assertParentDispatchStarted(budget);
+        assertParentStillOwned(budget);
         const unresolved = Object.values(budget.reservations).find(
           (reservation) =>
             reservation.invocationId === invocation.invocationId && reservation.state === 'unknown',

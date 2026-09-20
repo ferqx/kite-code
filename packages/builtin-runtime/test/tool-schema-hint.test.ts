@@ -38,6 +38,14 @@ describe('Builtin catalog schema-hint formatter', () => {
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).toContain(
       'result_disposition',
     );
+    const taskHint = formatBuiltinToolSchemaHint(modelEntry('task'));
+    expect(taskHint).toContain('background');
+    expect(taskHint).toContain('stable task identity');
+    expect(taskHint).toContain('result_disposition');
+    expect(taskHint).toContain('defaults to required');
+    const taskReadHint = formatBuiltinToolSchemaHint(modelEntry('task_read'));
+    expect(taskReadHint).toContain('on-demand snapshot');
+    expect(taskReadHint).toContain('not a waiting primitive');
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).not.toContain('exitCode');
   });
 

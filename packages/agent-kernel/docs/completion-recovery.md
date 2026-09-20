@@ -6,6 +6,11 @@
 
 本轮 required 后台子 Agent 的已接纳 `backgroundResult` 是其生命周期终态事实；完成守卫按原始工具、task identity 与当前工作归属核对后直接解除对应等待。`task_read` 的终态结果同样可提供证据，但不是后台结果已经持久化后的第二次确认权威。
 
+模型 final 只形成完成候选。required background 是唯一 blocker 时，Kernel 返回专用
+`required_background_pending → wait_for_background`，清除候选并持久化仅含 required task ID 的 waiting reason；
+这不是完成纠错，不消耗 correction attempt。交互、普通工具、required Shell、unknown invocation、active Skill 和 Plan
+仍按既有优先级先行。等待只由 Kernel 已接纳的终态、失败、取消等 canonical fact 解除；Artifact 或内存快照不能单独放行。
+
 ## 不同终点
 
 completed、aborted、blocked、unknown、budget_exhausted 和 resource_saturated 具有不同恢复含义。失败分类不能丢弃已知副作用，unknown 不能被转成普通失败后自动重放。

@@ -100,6 +100,7 @@ export interface SessionSummary {
   readonly status: string;
   readonly updatedAt?: string;
   readonly pendingInteractions?: number;
+  readonly waitingReason?: 'required_background';
   readonly backgroundExecutionCount?: number;
 }
 export interface WorkspaceSummary {

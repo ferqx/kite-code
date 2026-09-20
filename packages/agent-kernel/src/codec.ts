@@ -584,6 +584,43 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         }
       }
       break;
+    case 'model.invocation_interrupted': {
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.failureClassification === undefined ? [] : ['failureClassification']),
+        ...(value.providerStatusCode === undefined ? [] : ['providerStatusCode']),
+        ...(value.timedOut === undefined ? [] : ['timedOut']),
+      ]);
+      requireNonEmptyString(value, 'invocationId');
+      if (
+        value.failureClassification !== undefined &&
+        ![
+          'provider_rate_limited',
+          'provider_unavailable',
+          'connection_failure',
+          'attempt_timeout',
+          'provider_rejected',
+          'provider_failure',
+          'cancelled',
+          'transport_aborted',
+        ].includes(String(value.failureClassification))
+      ) {
+        throw new Error('model.invocation_interrupted failure classification is invalid.');
+      }
+      if (
+        value.providerStatusCode !== undefined &&
+        value.providerStatusCode !== null &&
+        (!Number.isSafeInteger(value.providerStatusCode) ||
+          Number(value.providerStatusCode) < 100 ||
+          Number(value.providerStatusCode) > 599)
+      ) {
+        throw new Error('model.invocation_interrupted provider status code is invalid.');
+      }
+      if (value.timedOut !== undefined && typeof value.timedOut !== 'boolean') {
+        throw new Error('model.invocation_interrupted timeout diagnostic is invalid.');
+      }
+      break;
+    }
     case 'capability.filesystem_intent_recorded': {
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'invocationId');

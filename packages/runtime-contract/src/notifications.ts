@@ -1639,7 +1639,7 @@ function isRuntimeSessionRunProjection(value: unknown): boolean {
       presentKeys(
         value,
         ['runId', 'initialTurnId', 'status', 'revision'],
-        ['activeTurnId', 'taskId', 'activeInteractionId', 'outcome'],
+        ['activeTurnId', 'taskId', 'waitingReason', 'activeInteractionId', 'outcome'],
       ),
     ) &&
     isIdentifier(value.runId) &&
@@ -1649,6 +1649,16 @@ function isRuntimeSessionRunProjection(value: unknown): boolean {
     (!Object.hasOwn(value, 'activeInteractionId') || isIdentifier(value.activeInteractionId)) &&
     isNonNegativeSafeInteger(value.revision) &&
     (active || recovery || terminal) &&
+    (!Object.hasOwn(value, 'waitingReason') ||
+      (status === 'waiting' &&
+        isRecord(value.waitingReason) &&
+        hasExactKeys(value.waitingReason, ['kind', 'taskIds']) &&
+        value.waitingReason.kind === 'required_background' &&
+        Array.isArray(value.waitingReason.taskIds) &&
+        value.waitingReason.taskIds.length > 0 &&
+        value.waitingReason.taskIds.length <= 256 &&
+        value.waitingReason.taskIds.every(isIdentifier) &&
+        new Set(value.waitingReason.taskIds).size === value.waitingReason.taskIds.length)) &&
     (!Object.hasOwn(value, 'outcome') || isRuntimeRunTerminalProjection(value.outcome)) &&
     (!active || Object.hasOwn(value, 'activeTurnId')) &&
     (!recovery || Object.hasOwn(value, 'outcome'))

@@ -135,11 +135,50 @@ describe('State CompletionGuard parity', () => {
     };
     const waiting = {
       ...state,
-      tools: { ...state.tools, calls: { [background.toolCallId]: background } },
+      tools: {
+        ...state.tools,
+        calls: {
+          [background.toolCallId]: background,
+          'child-shell': {
+            toolCallId: 'child-shell',
+            name: 'shell_execute',
+            modelMessageId: 'child-model',
+            args: { command: 'head -n 1 gate' },
+            createdAtTurnId: state.turn.turnId,
+            status: 'running' as const,
+            presentation: 'hidden' as const,
+            presentationOwner: {
+              subagentId: 'child-1',
+              parentToolCallId: background.toolCallId,
+            },
+          },
+        },
+      },
     } as AgentState;
     expect(decideUnplannedCompletion(waiting)).toMatchObject({
       status: 'blocked',
       code: 'tool_pending',
+      nextAction: 'wait_for_background',
+      backgroundTaskIds: ['child-1'],
+    });
+    const forgedOwner = {
+      ...waiting,
+      tools: {
+        ...waiting.tools,
+        calls: {
+          orphan: {
+            ...waiting.tools.calls['child-shell']!,
+            toolCallId: 'orphan',
+            presentationOwner: {
+              subagentId: 'different-child',
+              parentToolCallId: background.toolCallId,
+            },
+          },
+        },
+      },
+    } as AgentState;
+    expect(decideUnplannedCompletion(forgedOwner)).toMatchObject({
+      status: 'blocked',
       nextAction: 'wait_for_tool',
     });
     const plannedWaiting = withCompletedPlan(
@@ -155,7 +194,8 @@ describe('State CompletionGuard parity', () => {
     expect(decidePlannedCompletion(plannedWaiting)).toMatchObject({
       status: 'blocked',
       code: 'tool_pending',
-      nextAction: 'wait_for_tool',
+      nextAction: 'wait_for_background',
+      backgroundTaskIds: ['child-1'],
     });
 
     const durableSettled = {
@@ -206,7 +246,11 @@ describe('State CompletionGuard parity', () => {
       version: 'completion_guard_v1',
     });
 
-    for (const name of ['task_read', 'task_cancel'] as const) {
+    for (const [name, taskStatus] of [
+      ['task_read', 'completed'],
+      ['task_read', 'failed'],
+      ['task_cancel', 'cancelled'],
+    ] as const) {
       const terminal = {
         toolCallId: `${name}-terminal`,
         name,
@@ -217,7 +261,7 @@ describe('State CompletionGuard parity', () => {
         result: {
           ok: true,
           summary: 'terminal observed',
-          resultMeta: { taskId: 'child-1', taskStatus: 'completed' as const },
+          resultMeta: { taskId: 'child-1', taskStatus },
         },
       };
       const settled = {
@@ -232,6 +276,44 @@ describe('State CompletionGuard parity', () => {
         version: 'completion_guard_v1',
       });
     }
+
+    const secondBackground = {
+      ...background,
+      toolCallId: 'task-start-2',
+      result: {
+        ...background.result,
+        resultMeta: { ...background.result.resultMeta, taskId: 'child-2' },
+      },
+    };
+    const firstTerminal = {
+      toolCallId: 'task-read-child-1',
+      name: 'task_read',
+      modelMessageId: 'model-2',
+      args: { task_id: 'child-1' },
+      createdAtTurnId: state.turn.turnId,
+      status: 'succeeded' as const,
+      result: {
+        ok: true,
+        summary: 'first child failed',
+        resultMeta: { taskId: 'child-1', taskStatus: 'failed' as const },
+      },
+    };
+    const mixed = {
+      ...waiting,
+      tools: {
+        ...waiting.tools,
+        calls: {
+          [background.toolCallId]: background,
+          [secondBackground.toolCallId]: secondBackground,
+          [firstTerminal.toolCallId]: firstTerminal,
+        },
+      },
+    } as AgentState;
+    expect(decideUnplannedCompletion(mixed)).toMatchObject({
+      status: 'blocked',
+      nextAction: 'wait_for_background',
+      backgroundTaskIds: ['child-2'],
+    });
   });
 
   test('does not let provider readiness or admission facts decide an unplanned completion', () => {

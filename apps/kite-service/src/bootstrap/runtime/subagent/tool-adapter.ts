@@ -11,7 +11,7 @@ import {
 } from '@kite-ai/builtin-runtime';
 import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import type { BaseMessage } from '@kite-ai/builtin-runtime/model';
-import { countTokens, toolMessage } from '@kite-ai/builtin-runtime/model';
+import { countTokens, resolveModelCapabilities, toolMessage } from '@kite-ai/builtin-runtime/model';
 import { msys2ToWindowsPath } from '@kite-ai/builtin-runtime/sandbox';
 import {
   canonicalizeCapabilityArguments,
@@ -246,9 +246,13 @@ function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
 function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
   const configured =
     input.config.modelKwargs?.maxOutputTokens ?? input.config.modelKwargs?.maxTokens;
-  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured)
-    : undefined;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return resolveModelCapabilities({
+    config: input.config,
+    adapter: input.model?.capabilityMetadata,
+  }).maxOutputTokens;
 }
 
 function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {

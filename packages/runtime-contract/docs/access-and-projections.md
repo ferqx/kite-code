@@ -18,6 +18,11 @@
 列表和单项同时携带读取时的`sessionRevision`，它才是`stop_background_execution.expectedRevision`的来源。
 组合目录generation、执行owner generation、执行revision都不能充当Session CAS。
 
+活动 Run 可投影 `waitingReason={ kind: required_background, taskIds }`。它说明当前 Run 因哪些 required task 等待，
+不复制 task 的 running／terminal 生命周期，也不成为完成 authority；客户端仍从后台执行投影读取每个 task 的真实状态。
+该字段只允许出现在 `status=waiting` 的当前 Run，task ID 必须非空且唯一。客户端用它区分等待后台结果与模型持续思考，
+不能据此锁定输入或推导 child 成功。
+
 
 主工具审批展示使用 `tool.review` 的 toolId／reviewId／status／有界 summary；`approval.granted.grant` 可选地保留 approve_once／same_command。二者经过同一 Protocol allowlist 进入 live 和历史回放，缺失 grant 不推导授权范围，不接收原始 reviewer result 或模型身份。具体字段见 [notifications](../src/notifications.ts)。
 

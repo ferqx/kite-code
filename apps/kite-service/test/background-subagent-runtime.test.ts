@@ -9,6 +9,7 @@ import type {
 import { SubagentResultArtifactStore } from '@kite-ai/builtin-runtime/subagent';
 import { executeTestRuntimeTool } from '../../../tests/helpers/runtime-model';
 import {
+  BackgroundSettlementAdmissionError,
   BackgroundSubagentRuntime,
   backgroundSubagentOwnerKey,
 } from '../src/bootstrap/runtime/subagent/background-runtime';
@@ -54,6 +55,37 @@ function terminal(overrides: Partial<SubAgentResult> = {}): SubAgentResult {
 }
 
 describe('BackgroundSubagentRuntime', () => {
+  test('wakes only the exact owner when its background watermark advances', async () => {
+    const owner = runtime();
+    const firstOwner = backgroundSubagentOwnerKey('first', 'recovery');
+    const secondOwner = backgroundSubagentOwnerKey('second', 'recovery');
+    const firstResult = deferred<SubAgentResult>();
+    const firstWatermark = owner.ownerWatermark(firstOwner);
+    const secondWatermark = owner.ownerWatermark(secondOwner);
+    let firstWoke = false;
+    let secondWoke = false;
+    const firstWake = owner.waitForOwnerChange(firstOwner, firstWatermark).then(() => {
+      firstWoke = true;
+    });
+    void owner.waitForOwnerChange(secondOwner, secondWatermark).then(() => {
+      secondWoke = true;
+    });
+
+    owner.adopt({
+      taskId: 'first-task',
+      ownerKey: firstOwner,
+      ...ORIGIN,
+      observe: () => firstResult.promise,
+      cancel: async () => {},
+    });
+    await firstWake;
+    expect(firstWoke).toBe(true);
+    expect(secondWoke).toBe(false);
+    expect(owner.ownerWatermark(firstOwner)).toBeGreaterThan(firstWatermark);
+    expect(owner.ownerWatermark(secondOwner)).toBe(secondWatermark);
+    firstResult.resolve(terminal());
+  });
+
   test('reports settlement failure without letting callback failure hide the task error', async () => {
     const owner = runtime();
     const ownerKey = backgroundSubagentOwnerKey('failed', 'recovery');
@@ -432,18 +464,46 @@ describe('BackgroundSubagentRuntime', () => {
       cancel: async () => {},
       settlementRecoveryReservationId: 'reservation-release-recovery',
       onResultPersisted: async () => {
-        throw new Error('wake scheduling failed');
+        throw new BackgroundSettlementAdmissionError({
+          type: 'subagent.background_result_persisted',
+          taskId: 'release-recovery-task',
+          notificationId: 'recovered-notification',
+        });
       },
       onSettlementFailed: async () => {
         releaseAttempts += 1;
         throw new Error('reservation persistence unavailable');
       },
     });
-    while (releaseAttempts < 3) await Bun.sleep(0);
+    let watermark = owner.ownerWatermark(ownerKey);
+    await owner.waitForOwnerChange(ownerKey, watermark);
+    watermark = owner.ownerWatermark(ownerKey);
+    await owner.waitForOwnerChange(ownerKey, watermark);
+    expect(owner.listSnapshot('release-recovery', ownerKey).executions).toEqual([
+      expect.objectContaining({
+        executionId: 'release-recovery-task',
+        status: 'unavailable',
+      }),
+    ]);
+    expect(owner.settlementRecoveryEvents(ownerKey)).toEqual([
+      {
+        type: 'subagent.background_result_persisted',
+        taskId: 'release-recovery-task',
+        notificationId: 'recovered-notification',
+      },
+    ]);
+    expect(releaseAttempts).toBeGreaterThan(0);
     await owner.disposeOwner(ownerKey, 'test_settlement_recovery', 50);
     const rebuilt = new BackgroundSubagentRuntime(new SubagentResultArtifactStore({ backend }));
     expect(rebuilt.settlementRecoveryReservations(ownerKey)).toEqual([
       'reservation-release-recovery',
+    ]);
+    expect(rebuilt.settlementRecoveryEvents(ownerKey)).toEqual([
+      {
+        type: 'subagent.background_result_persisted',
+        taskId: 'release-recovery-task',
+        notificationId: 'recovered-notification',
+      },
     ]);
     expect(rebuilt.listSnapshot('release-recovery', ownerKey).executions).toEqual([
       expect.objectContaining({

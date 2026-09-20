@@ -212,6 +212,14 @@ function mapSession(session: RuntimeSessionProjection) {
       : {
           currentRun: {
             ...session.currentRun,
+            ...(session.currentRun.waitingReason === undefined
+              ? {}
+              : {
+                  waitingReason: {
+                    kind: session.currentRun.waitingReason.kind,
+                    taskIds: [...session.currentRun.waitingReason.taskIds],
+                  },
+                }),
             ...(session.currentRun.outcome === undefined
               ? {}
               : { outcome: { ...session.currentRun.outcome } }),

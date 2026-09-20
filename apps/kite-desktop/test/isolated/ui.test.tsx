@@ -1846,7 +1846,13 @@ test('waiting for background results keeps steering and stop controls available'
     ...client.view,
     projection: {
       ...session('s0'),
-      currentRun: { runId: 'r', initialTurnId: 't', status: 'waiting', revision: 2 },
+      currentRun: {
+        runId: 'r',
+        initialTurnId: 't',
+        status: 'waiting',
+        revision: 2,
+        waitingReason: { kind: 'required_background', taskIds: ['task-1'] },
+      },
     },
   };
   await render(<App client={client} />);

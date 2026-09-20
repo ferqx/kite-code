@@ -492,7 +492,7 @@ export {
 // ── Defaults (DeepSeek) ──
 
 const DEFAULT_DEEPSEEK_MODELS: AvailableModel[] = [
-  { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true, enabled: true },
+  { provider: 'deepseek', name: 'deepseek-flash', isDefault: true, enabled: true },
   { provider: 'deepseek', name: 'deepseek-v4-pro', isDefault: false, enabled: true },
 ];
 
@@ -578,12 +578,12 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
     provider: {
       deepseek: {
         baseURL: 'https://api.deepseek.com/v1',
-        model: 'deepseek-v4-flash',
-        models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        model: 'deepseek-flash',
+        models: ['deepseek-flash', 'deepseek-v4-pro'],
       },
     },
     model: {
-      default: { provider: 'deepseek', name: 'deepseek-v4-flash' },
+      default: { provider: 'deepseek', name: 'deepseek-flash' },
     },
     theme: 'dark',
     interactionMode: 'auto',
@@ -632,8 +632,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
   const selectedDefaultName =
     defaultModel?.provider === providerName ? defaultModel.name : undefined;
-  const modelName =
-    options.modelName ?? selectedDefaultName ?? provider.model ?? 'deepseek-v4-flash';
+  const modelName = options.modelName ?? selectedDefaultName ?? provider.model ?? 'deepseek-flash';
   if (!isModelEnabled(cfg, providerName, modelName)) {
     throw new Error(`Model '${providerName}:${modelName}' is disabled`);
   }
@@ -1238,7 +1237,7 @@ function defaultModelsForProvider(type: ModelProviderType): { name: string; defa
   switch (type) {
     case 'deepseek':
       return [
-        { name: 'deepseek-v4-flash', default: true },
+        { name: 'deepseek-flash', default: true },
         { name: 'deepseek-v4-pro', default: false },
       ];
     case 'openai':

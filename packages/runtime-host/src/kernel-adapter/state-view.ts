@@ -7,10 +7,12 @@ import {
   getEffectiveInteractionMode,
   interactionBelongsToCurrentWork,
   interactionToolCall,
+  requiredBackgroundFinalRefresh,
   toolCallBelongsToCurrentWork,
 } from '@kite-ai/agent-kernel';
 
 export const runtimeHostStateDecideCompletion = decideCompletion;
+export const runtimeHostStateRequiredBackgroundFinalRefresh = requiredBackgroundFinalRefresh;
 
 /** Host-facing read-only selectors over the exact State Kernel shape. */
 export function runtimeHostStateActiveTask(state: Readonly<AgentState>) {

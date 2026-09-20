@@ -128,6 +128,15 @@ function blockedEventMatchesDecision(
     payload.correctionAttempt !== decision.correctionAttempt
   )
     return false;
+  const backgroundTaskIds = payload.backgroundTaskIds ?? [];
+  if (
+    !Array.isArray(backgroundTaskIds) ||
+    backgroundTaskIds.length !== decision.backgroundTaskIds.length ||
+    backgroundTaskIds.some(
+      (value, index) => typeof value !== 'string' || value !== decision.backgroundTaskIds[index],
+    )
+  )
+    return false;
   return decision.version === COMPLETION_GUARD_UNPLANNED_VERSION
     ? true
     : samePlanIdentity(planIdentity(payload.planIdentity), decision.planIdentity);
@@ -278,6 +287,14 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
           guardVersion: blocked.version,
           ...(blocked.version === COMPLETION_GUARD_PLANNED_VERSION
             ? { planIdentity: blocked.planIdentity }
+            : {}),
+          ...(blocked.nextAction === 'wait_for_background'
+            ? {
+                waitingReason: {
+                  kind: 'required_background',
+                  taskIds: blocked.backgroundTaskIds,
+                },
+              }
             : {}),
         }),
         transcript: { ...state.transcript, final: undefined },

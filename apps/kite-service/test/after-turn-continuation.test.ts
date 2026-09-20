@@ -508,6 +508,12 @@ describe('after-turn continuation', () => {
         throw new Error('Background completion did not reach the after-turn model fixture.');
       }
       expect(notification.status).toBe('completed');
+      // Crash-window replay after the continuation Run/command receipt was
+      // committed is idempotent: the Host receipt is the durable consumption
+      // marker, so no second Run or model dispatch can be created.
+      await expect(afterTurn.deliver(delivery)).resolves.toEqual({ status: 'replayed' });
+      await host.waitForSessionIdle(sessionId);
+      expect(modelFixture.callCount.count).toBe(1);
       expect(reservation.originRunId).toBe(originRunId);
       expect(
         state.capabilities.invocations['after-turn-parent']?.subagentProviderLifecycle

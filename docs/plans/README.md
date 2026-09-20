@@ -14,8 +14,6 @@
 
 ## 已确认设计，待实施
 
-[后台子 Agent 编排与受管等待优化](background-subagent-orchestration.md)：独立委派默认异步，`background` 与 `required/after_turn` 正交；required 结果使用同 Run 的事件驱动等待，禁止模型以 `sleep` 或重复 `task_read` 维持等待，并分别验收并行派发、同轮恢复和跨轮自动回传。
-
 [会话存储兼容性与连续性 V1](session-store-compatibility-and-continuity.md)：统一正式数据入口，按明确路径自动兼容或无损迁移，覆盖维护协调、会话保留与跨版本客户端验收。当前仅设计完成，现有 epoch profile 分流与历史入口问题尚未按本方案修正。
 
 ## 待核实问题

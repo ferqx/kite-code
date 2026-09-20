@@ -377,13 +377,14 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task: {
     summary: 'Delegate bounded self-contained work that benefits from an isolated sub-agent.',
     useWhen:
-      'Use explore for evidence, plan for read-only architecture or design planning, review for bounded read-only review, and code only when the user task calls for implementation. Issue multiple independent sibling task calls in one response so Runtime can execute them concurrently within its shared budget; serialize dependent work and give concurrent code tasks disjoint write scopes. Do not delegate trivial or tightly coupled work, and obey an explicit user instruction not to delegate. Parent and child share Runtime authorization, phase, budget and recovery ceilings.',
+      'Use explore for evidence, plan for read-only architecture or design planning, review for bounded read-only review, and code only when the user task calls for implementation. Issue independent sibling task calls together with background=true so Runtime can execute them concurrently; serialize dependent work and give concurrent code tasks disjoint write scopes. Do not delegate trivial or tightly coupled work, and obey an explicit user instruction not to delegate. Parent and child share Runtime authorization, phase, budget and recovery ceilings.',
     returns: {
       format: 'json',
       description:
-        'Only ok, summary, error, terminalStatus, toolCallCount, durationMs and governed nextActions; private continuation/journal/lineage never reaches the model.',
+        'Synchronous calls return the bounded terminal result. A background call returns an accepted stable task_id; Runtime reliably delivers its admitted terminal result according to result_disposition.',
       fields: [
         'ok',
+        'task_id',
         'summary',
         'error',
         'terminalStatus',
@@ -393,14 +394,14 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       ],
     },
     constraints:
-      'name, subagent_type and task are required. name is a short public label that states what the child is doing; task is the concrete self-contained instruction. Clarify material ambiguity before dispatch: child agents cannot call ask_user and must return missing prerequisites to the parent. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
+      'name, subagent_type and task are required. background=true returns a stable task identity; result_disposition controls delivery and defaults to required. required remains part of the current Run; after_turn requires separate Runtime authorization and budget. Child agents cannot call ask_user. Planning permits only explore/plan; other roles never gain writes by implication.',
     recovery:
-      'Approval/policy denial and exhausted/unknown child effects are not replayed. Resume only a Runtime-owned continuation; use a new bounded task only after real replan/user/provider progress.',
+      'After background admission, continue meaningful independent work, then yield for Runtime-managed required-result waiting. Do not wait with sleep or task_read polling. Approval/policy denial and exhausted/unknown child effects are not replayed; resume only a Runtime-owned continuation.',
   },
   task_read: {
     summary: 'Read the current status or durable terminal report for one background sub-agent.',
     useWhen:
-      'Inspect the exact task_id returned by a background task. Repeated reads are non-consuming and never observe the child Provider directly.',
+      'Read the exact task_id for a user-requested status check, failure/cancellation diagnosis, or a full durable report after a truncated terminal result. This is an on-demand snapshot, not a waiting primitive or completion guard.',
     returns: {
       format: 'json',
       description:
@@ -408,9 +409,9 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       fields: ['ok', 'task_id', 'status', 'cleanup_confirmed', 'result', 'artifact'],
     },
     constraints:
-      'The task must belong to the active Session and Runtime owner. Reading does not grant cancellation or execution authority.',
+      'The task must belong to the active Session and Runtime owner. This non-consuming on-demand snapshot is not a waiting primitive or completion guard and does not grant cancellation or execution authority. Do not use sleep, loops, or fixed-interval reads to wait.',
     recovery:
-      'A missing or foreign task identity is terminal for that invocation; use an exact previously returned task_id rather than guessing.',
+      'If status is running and the revision has not changed, do not immediately read again; yield so the Runtime watcher can deliver an actionable result. A missing or foreign task identity is terminal for that invocation.',
   },
   task_cancel: {
     summary: 'Stop one Runtime-owned background sub-agent and wait for its cleanup result.',
