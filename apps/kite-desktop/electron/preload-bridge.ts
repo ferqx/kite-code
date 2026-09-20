@@ -1,23 +1,48 @@
 import {
   DESKTOP_IPC_CHANNELS,
+  DESKTOP_QUIT_INSPECTION_CHANNELS,
   type DesktopIpcChannel,
   type DesktopIpcResult,
   type KiteDesktopBridge,
 } from '../src/bridge';
 
 export type DesktopIpcInvoke = <T>(
-  channel: DesktopIpcChannel,
+  channel: DesktopIpcChannel | typeof DESKTOP_QUIT_INSPECTION_CHANNELS.result,
   payload?: unknown,
 ) => Promise<DesktopIpcResult<T>>;
 
-export function createPreloadBridge(call: DesktopIpcInvoke): Readonly<KiteDesktopBridge> {
-  const invoke = async <T>(channel: DesktopIpcChannel, payload?: unknown): Promise<T> => {
+export type DesktopIpcSubscribe = (
+  channel: typeof DESKTOP_QUIT_INSPECTION_CHANNELS.request,
+  listener: (requestId: number) => void,
+) => () => void;
+
+export function createPreloadBridge(
+  call: DesktopIpcInvoke,
+  subscribe: DesktopIpcSubscribe = () => () => undefined,
+): Readonly<KiteDesktopBridge> {
+  const invoke = async <T>(
+    channel: DesktopIpcChannel | typeof DESKTOP_QUIT_INSPECTION_CHANNELS.result,
+    payload?: unknown,
+  ): Promise<T> => {
     const result = await call<T>(channel, payload);
     if (!result.ok) throw new Error(result.error);
     return result.value;
   };
 
   return Object.freeze({
+    watchQuitInspection: (inspect) =>
+      subscribe(DESKTOP_QUIT_INSPECTION_CHANNELS.request, (requestId) => {
+        void inspect()
+          .then((hasActiveTasks) =>
+            invoke(DESKTOP_QUIT_INSPECTION_CHANNELS.result, { requestId, hasActiveTasks }),
+          )
+          .catch(() =>
+            invoke(DESKTOP_QUIT_INSPECTION_CHANNELS.result, {
+              requestId,
+              hasActiveTasks: true,
+            }),
+          );
+      }),
     listProjects: () => invoke(DESKTOP_IPC_CHANNELS.listProjects),
     runtimeStatus: () => invoke(DESKTOP_IPC_CHANNELS.runtimeStatus),
     runtimeStartupStatus: () => invoke(DESKTOP_IPC_CHANNELS.runtimeStartupStatus),

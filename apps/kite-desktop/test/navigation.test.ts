@@ -350,6 +350,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     await client.refreshBranch();
     activeDirectory = true;
     const beforeActive = closes;
+    expect(await client.hasActiveSessionTasks()).toBe(true);
     await expect(client.switchBranch('feature')).rejects.toThrow('运行');
     expect(closes).toBe(beforeActive);
     activeDifferentWorkspaceDigest = true;
@@ -357,6 +358,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(closes).toBe(beforeActive);
     activeDifferentWorkspaceDigest = false;
     activeDirectory = false;
+    expect(await client.hasActiveSessionTasks()).toBe(false);
     loseBranchResult = true;
     await expect(client.switchBranch('feature')).rejects.toThrow('lost branch');
     expect(client.getSnapshot().branch?.current).toBe('feature');

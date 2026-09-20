@@ -50,6 +50,7 @@ export interface SubagentResultArtifactAccess {
   write(input: {
     readonly ownerKey: string;
     readonly taskId: string;
+    readonly displayName?: string;
     readonly result: Readonly<Record<string, unknown>>;
   }): SubagentResultArtifactRef;
   read(ref: SubagentResultArtifactRef, taskId: string): Readonly<Record<string, unknown>>;
@@ -57,11 +58,16 @@ export interface SubagentResultArtifactAccess {
     ownerKey: string,
     taskId: string,
   ):
-    | Readonly<{ ref: SubagentResultArtifactRef; result: Readonly<Record<string, unknown>> }>
+    | Readonly<{
+        ref: SubagentResultArtifactRef;
+        displayName?: string;
+        result: Readonly<Record<string, unknown>>;
+      }>
     | undefined;
   list(ownerKey: string): readonly Readonly<{
     taskId: string;
     ref: SubagentResultArtifactRef;
+    displayName?: string;
     result: Readonly<Record<string, unknown>>;
   }>[];
 }
@@ -87,6 +93,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
   write(input: {
     readonly ownerKey: string;
     readonly taskId: string;
+    readonly displayName?: string;
     readonly result: Readonly<Record<string, unknown>>;
   }): SubagentResultArtifactRef {
     if (!SAFE_ID.test(input.taskId))
@@ -99,10 +106,19 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
         'invalid_task',
         'Subagent result owner identity is invalid.',
       );
+    if (
+      input.displayName !== undefined &&
+      (input.displayName.length === 0 || input.displayName.length > 256)
+    )
+      throw new SubagentTaskArtifactError(
+        'invalid_task',
+        'Subagent result display name is invalid.',
+      );
     const payload = Object.freeze({
       artifactFormatVersion: 1,
       ownerKey: input.ownerKey,
       taskId: input.taskId,
+      ...(input.displayName ? { displayName: input.displayName } : {}),
       result: input.result,
     });
     return this.#storage.write('subagent_task', Buffer.from(canonicalModelJson(payload), 'utf8'));
@@ -111,36 +127,61 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
     const ref = this.#storage.findByOwnerTask?.(ownerKey, taskId) as
       | SubagentResultArtifactRef
       | undefined;
-    return ref ? Object.freeze({ ref, result: this.read(ref, taskId) }) : undefined;
+    if (!ref) return undefined;
+    const payload = this.#readPayload(ref, taskId);
+    return Object.freeze({
+      ref,
+      ...(payload.displayName ? { displayName: payload.displayName } : {}),
+      result: payload.result,
+    });
   }
   list(ownerKey: string) {
     return this.#storage.listByOwner(ownerKey).map((ref) => {
       const taskId = JSON.parse(new TextDecoder().decode(this.#storage.read(ref))).taskId as string;
+      const payload = this.#readPayload(ref as SubagentResultArtifactRef, taskId);
       return Object.freeze({
         taskId,
         ref: ref as SubagentResultArtifactRef,
-        result: this.read(ref as SubagentResultArtifactRef, taskId),
+        ...(payload.displayName ? { displayName: payload.displayName } : {}),
+        result: payload.result,
       });
     });
   }
   read(ref: SubagentResultArtifactRef, taskId: string): Readonly<Record<string, unknown>> {
+    return this.#readPayload(ref, taskId).result;
+  }
+  #readPayload(
+    ref: SubagentResultArtifactRef,
+    taskId: string,
+  ): Readonly<{
+    displayName?: string;
+    result: Readonly<Record<string, unknown>>;
+  }> {
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const value = JSON.parse(text) as {
         artifactFormatVersion?: unknown;
         taskId?: unknown;
+        displayName?: unknown;
         result?: unknown;
       };
       if (
         canonicalModelJson(value) !== text ||
         value.artifactFormatVersion !== 1 ||
         value.taskId !== taskId ||
+        (value.displayName !== undefined &&
+          (typeof value.displayName !== 'string' ||
+            value.displayName.length === 0 ||
+            value.displayName.length > 256)) ||
         !value.result ||
         typeof value.result !== 'object' ||
         Array.isArray(value.result)
       )
         corrupt();
-      return Object.freeze(value.result as Record<string, unknown>);
+      return Object.freeze({
+        ...(typeof value.displayName === 'string' ? { displayName: value.displayName } : {}),
+        result: Object.freeze(value.result as Record<string, unknown>),
+      });
     } catch (error) {
       throw mapStorageError(error, 'artifact_corrupt');
     }

@@ -283,6 +283,7 @@ describe('BackgroundSubagentRuntime', () => {
     let observeCalls = 0;
     owner.adopt({
       taskId: 'subagent-one',
+      displayName: 'Inspect background ownership',
       ownerKey,
       ...ORIGIN,
       observe: () => {
@@ -305,6 +306,7 @@ describe('BackgroundSubagentRuntime', () => {
       executions: [
         {
           executionId: 'subagent-one',
+          displayName: 'Inspect background ownership',
           kind: 'subagent',
           status: 'running',
           cleanupConfirmed: false,
@@ -329,6 +331,7 @@ describe('BackgroundSubagentRuntime', () => {
     const terminalSnapshot = owner.listSnapshot('session-a', ownerKey);
     expect(terminalSnapshot.watermark).toBeGreaterThan(runningSnapshot.watermark);
     expect(terminalSnapshot.executions[0]).toMatchObject({
+      displayName: 'Inspect background ownership',
       status: 'completed',
       cleanupConfirmed: true,
     });

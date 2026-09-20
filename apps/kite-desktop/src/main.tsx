@@ -11,4 +11,5 @@ if (macOS) document.documentElement.dataset.platform = 'macos';
 applyTheme(readThemePreference());
 
 const client = new DesktopClient();
+window.kiteDesktop?.watchQuitInspection(() => client.hasActiveSessionTasks());
 createRoot(document.getElementById('root')!).render(<App client={client} />);

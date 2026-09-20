@@ -16,6 +16,8 @@ export const RUNTIME_QUERY_SCHEMA_ = 'kite.runtime-query.v1' as const;
 
 export interface RuntimeBackgroundExecutionProjection {
   readonly executionId: string;
+  /** Optional user-facing label supplied when a sub-agent is created. */
+  readonly displayName?: string;
   readonly sessionId: string;
   /** Session mutation CAS observed together with this execution projection. */
   readonly sessionRevision: number;

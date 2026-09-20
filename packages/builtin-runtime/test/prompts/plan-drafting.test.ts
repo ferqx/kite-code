@@ -23,12 +23,11 @@ test('system prompt requires reading existing code before proposing a plan', () 
 
 test('system prompt keeps executable validation in building', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain(
-    'leave tests, builds, installs, formatting, generation, and mutations in the plan for Building',
-  );
+  expect(prompt).toContain('preserve implementation and executable verification for Building');
 });
 
 test('system prompt directs planning edits into the Plan instead of an approval request', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('do not call file-writing or side-effectful tools');
+  expect(prompt).toContain('Planning is read-only');
+  expect(prompt).toContain('Tool Results as the source of truth');
 });

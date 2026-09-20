@@ -69,6 +69,7 @@ const MessageItem = memo(function MessageItem({
   inlineProcess = false,
   childTools = [],
   expandedItems = {},
+  restoredExpanded,
 }: {
   message: Message;
   expanded?: boolean;
@@ -76,6 +77,7 @@ const MessageItem = memo(function MessageItem({
   inlineProcess?: boolean;
   childTools?: readonly Message[];
   expandedItems?: Record<string, boolean>;
+  restoredExpanded?: ReadonlySet<string>;
   onToggle: (id: string, open: boolean) => void;
   openFile?: (path: string) => void;
   copyText?: string;
@@ -180,6 +182,8 @@ const MessageItem = memo(function MessageItem({
             },
           ]}
           expanded={expandedItems[id]}
+          activityId={id}
+          restoredExpanded={restoredExpanded}
           onToggle={(open) => onToggle(id, open)}
           openFile={openFile}
           renderChildren={() => null}
@@ -198,6 +202,8 @@ const MessageItem = memo(function MessageItem({
             : tool,
         ]}
         expanded={expandedItems[tool.id]}
+        activityId={tool.id}
+        restoredExpanded={restoredExpanded}
         onToggle={(open) => onToggle(tool.id, open)}
         openFile={openFile}
         renderChildren={() => null}
@@ -230,6 +236,8 @@ const MessageItem = memo(function MessageItem({
           },
         ]}
         expanded={expanded}
+        activityId={message.id}
+        restoredExpanded={restoredExpanded}
         onToggle={(open) => onToggle(message.id, open)}
         openFile={openFile}
         renderChildren={() => process}
@@ -257,6 +265,8 @@ const MessageItem = memo(function MessageItem({
           },
         ]}
         expanded={expanded}
+        activityId={message.id}
+        restoredExpanded={restoredExpanded}
         onToggle={(open) => onToggle(message.id, open)}
         renderChildren={() => null}
       />
@@ -350,6 +360,13 @@ export function Conversation({
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
+  const restoredExpanded = useRef(
+    new Set(
+      Object.entries(initialReading?.expanded ?? {})
+        .filter(([, open]) => open)
+        .map(([id]) => id),
+    ),
+  );
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
@@ -433,6 +450,7 @@ export function Conversation({
     }
   });
   const onToggle = useRef((id: string, open: boolean) => {
+    restoredExpanded.current.delete(id);
     setExpanded((values) => (values[id] === open ? values : { ...values, [id]: open }));
   }).current;
   const visibleToolIds = new Set(
@@ -600,6 +618,8 @@ export function Conversation({
                       )
                     }
                     expanded={expanded[activityKey]}
+                    activityId={activityKey}
+                    restoredExpanded={restoredExpanded.current}
                     expandedItems={expanded}
                     onToggleItem={onToggle}
                     onToggle={(open) => onToggle(activityKey, open)}
@@ -615,6 +635,7 @@ export function Conversation({
                               inlineProcess
                               childTools={childTools.get(child.id.slice(9))}
                               expandedItems={expanded}
+                              restoredExpanded={restoredExpanded.current}
                               expanded={expanded[child.id]}
                               showProcess={taskExpanded}
                               onToggle={onToggle}
@@ -634,6 +655,7 @@ export function Conversation({
                           : undefined
                       }
                       expandedItems={expanded}
+                      restoredExpanded={restoredExpanded.current}
                       expanded={expanded[message.id]}
                       onToggle={onToggle}
                       openFile={openFile}

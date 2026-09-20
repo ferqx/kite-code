@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 import { createPreloadBridge, type DesktopIpcInvoke } from '../electron/preload-bridge';
-import { type BranchSnapshot, DESKTOP_IPC_CHANNELS } from '../src/bridge';
+import {
+  type BranchSnapshot,
+  DESKTOP_IPC_CHANNELS,
+  DESKTOP_QUIT_INSPECTION_CHANNELS,
+} from '../src/bridge';
 
 const branch: BranchSnapshot = {
   workspace: '/project',
@@ -22,7 +26,9 @@ test('preload exposes only frozen named methods with fixed channels and payloads
   const bridge = createPreloadBridge(invoke);
 
   expect(Object.isFrozen(bridge)).toBe(true);
-  expect(Object.keys(bridge).sort()).toEqual(Object.keys(DESKTOP_IPC_CHANNELS).sort());
+  expect(Object.keys(bridge).sort()).toEqual(
+    [...Object.keys(DESKTOP_IPC_CHANNELS), 'watchQuitInspection'].sort(),
+  );
   for (const forbidden of ['invoke', 'send', 'on', 'once', 'removeListener', 'ipcRenderer'])
     expect(forbidden in bridge).toBe(false);
 
@@ -100,6 +106,37 @@ test('preload exposes only frozen named methods with fixed channels and payloads
   expect(new Set(Object.values(DESKTOP_IPC_CHANNELS)).size).toBe(
     Object.keys(DESKTOP_IPC_CHANNELS).length,
   );
+});
+
+test('preload answers quit inspection through a fixed channel', async () => {
+  const calls: Array<{ channel: string; payload: unknown }> = [];
+  let request: ((requestId: number) => void) | undefined;
+  const bridge = createPreloadBridge(
+    async <T>(channel: string, payload?: unknown) => {
+      calls.push({ channel, payload });
+      return { ok: true, value: undefined as T };
+    },
+    (_channel, listener) => {
+      request = listener;
+      return () => {
+        request = undefined;
+      };
+    },
+  );
+
+  const unsubscribe = bridge.watchQuitInspection(async () => false);
+  request?.(17);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  expect(calls).toEqual([
+    {
+      channel: DESKTOP_QUIT_INSPECTION_CHANNELS.result,
+      payload: { requestId: 17, hasActiveTasks: false },
+    },
+  ]);
+  unsubscribe();
+  expect(request).toBeUndefined();
 });
 
 test('preload restores a host error without exposing its IPC envelope', async () => {

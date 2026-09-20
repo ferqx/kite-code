@@ -12,6 +12,7 @@ import {
   ModelInvocationGateway,
   type ModelInvocationPersistence,
   type ModelResponseSource,
+  type ModelResponseSourceAttemptInput,
   type ModelRuntimeConfig,
 } from '@kite-ai/builtin-runtime/model';
 import {
@@ -117,9 +118,11 @@ function createGatewayFixture() {
   let sourceCalls = 0;
   let invocationOrdinal = 0;
   let purpose: string | undefined;
+  let providerOptions: unknown;
   const source: ModelResponseSource = Object.freeze({
-    attempt: async () => {
+    attempt: async (input: ModelResponseSourceAttemptInput) => {
       sourceCalls += 1;
+      providerOptions = input.surface.request.providerOptions;
       return successfulOutcome();
     },
   });
@@ -150,6 +153,7 @@ function createGatewayFixture() {
   return {
     gateway,
     counts: () => ({ operationCalls, sourceCalls, purpose }),
+    providerOptions: () => providerOptions,
   };
 }
 
@@ -273,6 +277,27 @@ describe('Builtin primary Model effect execution', () => {
       operationCalls: 2,
       sourceCalls: 2,
       purpose: 'primary_agent',
+    });
+  });
+
+  test('binds configured reasoning effort to the primary Agent Surface', async () => {
+    const fixture = createGatewayFixture();
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
+    const reasoningConfig = {
+      ...CONFIG,
+      reasoningEffort: 'high',
+    };
+
+    await coordinator.executePrimaryModelEffect({
+      ...baseInput(),
+      config: reasoningConfig,
+      model: createChatModel(reasoningConfig),
+      persistence: persistence(stateWithHistory()),
+    });
+
+    expect(fixture.providerOptions()).toMatchObject({
+      kind: 'inline',
+      value: { openaiCompatible: { reasoningEffort: 'high' } },
     });
   });
 });

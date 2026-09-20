@@ -5,6 +5,7 @@ export type DesktopTestCall = <T>(command: string, args?: Record<string, unknown
 /** Adapts existing service fixtures to the named renderer bridge contract. */
 export function createTestDesktopBridge(call: DesktopTestCall): KiteDesktopBridge {
   return {
+    watchQuitInspection: () => () => undefined,
     listProjects: () => call('list_projects'),
     runtimeStatus: () => call('runtime_status'),
     runtimeStartupStatus: () => call('runtime_startup_status'),

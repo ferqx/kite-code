@@ -10,7 +10,7 @@
     "build:desktop": "bun run build && bun run build:electron && bun run scripts/package.ts",
     "prepare:service": "bun run ../../scripts/release/prepare-desktop-service.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test --cwd ../.. apps/kite-desktop/test",
+    "test": "bun test --parallel=1 --max-concurrency=1 --cwd ../.. apps/kite-desktop/test",
     "build:electron": "bun run scripts/build-electron.ts",
     "test:native:window": "bun run scripts/native-smoke.ts"
   },

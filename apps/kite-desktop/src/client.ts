@@ -34,7 +34,12 @@ import type {
   DesktopRuntimeStatus,
   KiteDesktopBridge,
 } from './bridge';
-import { projectHistory } from './history-projection';
+import {
+  addCacheMetrics,
+  type DesktopCacheMetrics,
+  projectCacheMetrics,
+  projectHistory,
+} from './history-projection';
 import { type ProviderInput, saveProvider } from './models';
 import { isActiveRun, type Message, projectEventWithIdentity } from './presentation';
 import { SessionHistoryCache } from './session-cache';
@@ -86,6 +91,7 @@ export interface DesktopView {
   sessions: readonly DesktopSessionSummary[];
   selected?: string;
   messages: readonly Message[];
+  cacheMetrics?: DesktopCacheMetrics;
   projection?: RuntimeSessionProjection;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   ready: boolean;
@@ -179,6 +185,16 @@ export class DesktopClient {
   }
   copyText(text: string) {
     return this.#native().writeClipboardText(text);
+  }
+  async hasActiveSessionTasks(): Promise<boolean> {
+    const connection = this.#requireConnection();
+    const directory = await connection.runtime.query({
+      schema: 'kite.runtime-query.v1',
+      type: 'list_sessions',
+    });
+    if (directory.status !== 'ok' || !directory.sessions || directory.sessions.length >= 1000)
+      throw new Error('无法完整确认任务状态。');
+    return directory.sessions.some(isActiveRun);
   }
   #publish(change: Partial<DesktopView>) {
     if (
@@ -1096,6 +1112,7 @@ export class DesktopClient {
     this.#publish({
       selected: sessionId,
       messages: sameSelection ? this.#view.messages : (usableCache?.messages ?? []),
+      cacheMetrics: sameSelection ? this.#view.cacheMetrics : undefined,
       hasLoadedHistory: sameSelection
         ? this.#view.hasLoadedHistory
         : (usableCache?.hasLoadedHistory ?? false),
@@ -1137,6 +1154,7 @@ export class DesktopClient {
       this.#historyConnection = connection;
       this.#publish({
         messages: messages.messages,
+        cacheMetrics: messages.cacheMetrics,
         interactionMode: messages.interactionMode,
         hasLoadedHistory: true,
       });
@@ -1221,6 +1239,7 @@ export class DesktopClient {
       };
       this.#publish({
         messages: messages.messages,
+        cacheMetrics: messages.cacheMetrics,
         interactionMode: messages.interactionMode,
         hasLoadedHistory: true,
         projection: session?.projection,
@@ -1245,7 +1264,12 @@ export class DesktopClient {
       if (invalidatesHistory(error)) {
         this.#historyWorkspaceDigest = undefined;
         this.#historyConnection = undefined;
-        this.#publish({ messages: [], hasLoadedHistory: false, projection: undefined });
+        this.#publish({
+          messages: [],
+          cacheMetrics: undefined,
+          hasLoadedHistory: false,
+          projection: undefined,
+        });
       }
       this.#publish({ ready: false });
       if (timedOut) {
@@ -1275,6 +1299,7 @@ export class DesktopClient {
     const messages = await projectHistory(transcript.records, previous, signal);
     return {
       messages,
+      cacheMetrics: projectCacheMetrics(transcript.records),
       interactionMode: transcript.interactionMode,
       throughSequence: transcript.session.lastSequence,
     };
@@ -1314,6 +1339,7 @@ export class DesktopClient {
               turnId: notification.turnId,
               observedAt: Date.now(),
             }),
+            cacheMetrics: addCacheMetrics(this.#view.cacheMetrics, event),
             ...(event.type === 'interaction_mode.changed' ? { interactionMode: event.mode } : {}),
           });
       }

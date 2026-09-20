@@ -4,6 +4,7 @@ import {
   clipboardTextPayload,
   confirmPayload,
   connectionPayload,
+  quitInspectionPayload,
   runtimeSendPayload,
   sameRendererDocument,
   switchPayload,
@@ -38,6 +39,11 @@ test('IPC payload decoders reject unknown fields and malformed capabilities', ()
   expect(themePayload({ theme: 'system' })).toEqual({ theme: 'system' });
   expect(() => themePayload({ theme: 'auto' })).toThrow('参数无效');
   expect(() => themePayload({ theme: 'dark', extra: true })).toThrow('参数无效');
+  expect(quitInspectionPayload({ requestId: 3, hasActiveTasks: true })).toEqual({
+    requestId: 3,
+    hasActiveTasks: true,
+  });
+  expect(() => quitInspectionPayload({ requestId: 0, hasActiveTasks: false })).toThrow('参数无效');
   expect(
     confirmPayload({
       title: '切换项目？',

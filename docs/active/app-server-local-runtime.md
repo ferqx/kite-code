@@ -17,7 +17,7 @@
 
 `prepare:service` 复用 release owner 验证 candidate，只提取当前目标的 stdio Service 与 `desktop.json`。`build:electron` 要求该清单存在，并把 candidate build ID、服务摘要、expected server version 与环境变量名白名单编入 main bundle；打开项目只从自身资源目录启动摘要匹配的服务，不根据运行时更新的清单换版本。开发包与打包版均使用 canonical config root，不因 checkout、schema 或 epoch 改变正常数据入口；数据目录校验类型、owner 并限制为私有权限。Electron carrier 的单消费者、16 帧有界队列、1 MiB 帧、EOF 清理与异常结果由 desktop owner 维护，不能把终止自有 child 等同于停止共享 daemon。
 
-Electron `before-quit` 进入绑定主窗口的确认；确认后先关闭 stdin，Service 清理完成才再次退出。重复退出请求不得提前取得退出许可；窗口关闭只隐藏应用。崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。上述生命周期仍须 packaged Electron 原生场景确认。
+Electron `before-quit` 先经 renderer 使用既有 Runtime 连接完整查询会话任务；只有存在 queued、running 或 waiting 任务时进入绑定主窗口的确认，无活动任务直接清理退出，查询失败或目录无法证明完整时保守确认。确认退出和空闲直接退出都先关闭 stdin，Service 清理完成才再次退出。重复退出请求不得提前取得退出许可；窗口关闭只隐藏应用。崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。上述生命周期仍须 packaged Electron 原生场景确认。
 
 桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [ADR-0184](../adr/0184-electron-desktop-runtime-host.md)。
 

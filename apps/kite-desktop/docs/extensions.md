@@ -1,6 +1,6 @@
 # 设置中的 MCP 与 Skills
 
-[设置](../src/Settings.tsx)按模型与 Provider、MCP、Skills 切换；[扩展面板](../src/Extensions.tsx)沿用 [TUI 扩展语义](../../../docs/handbook/clients/tui/guides/mcp-and-skills.md)。页面只消费现有 App Control，不能根据设计示例补造 Server、Skill、连接成功或安装状态。
+[设置](../src/Settings.tsx)按模型与 Provider、MCP、Skills 直接切换，不维护搜索或过滤状态；全屏设置页的返回入口复用共享 `Button`，尺寸和交互与主侧栏的新对话入口一致。macOS 通过页面已有的 `data-platform` 标记只为设置页头部预留原生交通灯区域，侧栏分类从返回按钮之后继续布局。[扩展面板](../src/Extensions.tsx)沿用 [TUI 扩展语义](../../../docs/handbook/clients/tui/guides/mcp-and-skills.md)。页面只消费现有 App Control，不能根据设计示例补造 Server、Skill、连接成功或安装状态。
 
 [DesktopClient](../src/client.ts)通过同一个已连接的 App Server 请求 `getMcpSnapshot` 和 `getSkillCatalog`。首次打开对应分类时读取，用户可明确刷新；不常驻轮询。请求绑定当前 Workspace identity，断开清除快照，旧连接和被后发读取取代的响应不能回填当前页面。目录读取不安装 Skill、不添加配置、不启动认证。
 

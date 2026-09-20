@@ -23,7 +23,7 @@
 | [根 AGENTS](../../AGENTS.md) | 授权与自主推进边界、读取入口、核心工程约束、同步触发时机 |
 | [docs AGENTS](../AGENTS.md) | 文档任务入口与局部格式约束 |
 | 本页 | 内容归属、当前与目标状态、历史资料生命周期 |
-| [文档同步 Skill](../../.agents/skills/document-before-commit/SKILL.md) | action 执行、验证范围、证据复用与 ready/blocked 判定 |
+| [文档同步 Skill](../../.agents/skills/document-before-commit/SKILL.md) | action 路由与 ready/blocked 判定；Git 范围和验证细则按需读取 Skill references |
 | [PR 模板](../../.github/pull_request_template.md) | 本次变化、同步、验证及剩余问题的交付证据 |
 
 入口只保留定位所需提醒，不复制完整执行流程。影响映射提供候选；是否需要修改由产品定义、实际 diff 和实现证据共同判断，有文档 diff 不等于语义通过。

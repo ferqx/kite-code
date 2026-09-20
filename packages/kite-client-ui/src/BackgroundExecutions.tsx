@@ -1,5 +1,10 @@
+import { BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
+import { Button } from './ui';
+
 export interface BackgroundExecutionSummary {
   readonly executionId: string;
+  readonly displayName?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
   readonly status: 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled' | 'unavailable';
   readonly cleanupConfirmed: boolean;
@@ -11,18 +16,60 @@ export interface BackgroundExecutionSummary {
 }
 
 export interface BackgroundExecutionsProps {
+  readonly id?: string;
   readonly executions: readonly BackgroundExecutionSummary[];
   readonly stale?: boolean;
+  readonly currentOnly?: boolean;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
 }
 
 export function BackgroundExecutions({
+  id,
   executions,
   stale,
+  currentOnly,
   stoppingExecutionId,
   onStop,
 }: BackgroundExecutionsProps) {
+  if (currentOnly) {
+    const fresh = stale ? [] : executions;
+    const shells = fresh.filter(
+      (execution) =>
+        execution.kind === 'shell' &&
+        (execution.status === 'running' || execution.status === 'stopping'),
+    );
+    const subagents = fresh.filter(
+      (execution) => execution.kind === 'subagent' && execution.status !== 'unavailable',
+    );
+    return (
+      <section
+        className="background-executions environment-information"
+        id={id}
+        aria-label="环境信息"
+      >
+        <header>
+          <strong>环境信息</strong>
+        </header>
+        <ExecutionGroup
+          icon={TerminalIcon}
+          label="当前运行的 Shell"
+          emptyLabel="无运行中的 Shell"
+          executions={shells}
+          stoppingExecutionId={stoppingExecutionId}
+          onStop={onStop}
+        />
+        <ExecutionGroup
+          icon={BotIcon}
+          label="子智能体"
+          emptyLabel="暂无子智能体记录"
+          executions={subagents}
+          stoppingExecutionId={stoppingExecutionId}
+          onStop={onStop}
+        />
+      </section>
+    );
+  }
   if (!executions.length && !stale) return null;
   return (
     <section className="background-executions" aria-label="后台执行">
@@ -49,6 +96,60 @@ export function BackgroundExecutions({
                 >
                   {stoppingExecutionId === execution.executionId ? '停止请求已受理' : '停止'}
                 </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ExecutionGroup({
+  icon,
+  label,
+  emptyLabel,
+  executions,
+  stoppingExecutionId,
+  onStop,
+}: {
+  readonly icon: typeof TerminalIcon;
+  readonly label: string;
+  readonly emptyLabel: string;
+  readonly executions: readonly BackgroundExecutionSummary[];
+  readonly stoppingExecutionId?: string;
+  readonly onStop?: (execution: BackgroundExecutionSummary) => void;
+}) {
+  return (
+    <section className="background-execution-group" aria-label={label}>
+      <h3>
+        <HugeiconsIcon icon={icon} />
+        <span>{label}</span>
+        <span className="background-execution-count">{executions.length}</span>
+      </h3>
+      {executions.length === 0 ? (
+        <p className="background-execution-empty">{emptyLabel}</p>
+      ) : (
+        <ul>
+          {executions.map((execution) => (
+            <li key={execution.executionId}>
+              <span className="background-execution-identity">
+                {execution.displayName ? (
+                  <span className="background-execution-name">{execution.displayName}</span>
+                ) : (
+                  <code>{execution.executionId}</code>
+                )}
+              </span>
+              <span className="background-execution-status">{statusLabel(execution.status)}</span>
+              {onStop && execution.status === 'running' && (
+                <Button
+                  className="background-execution-stop"
+                  size="xs"
+                  disabled={stoppingExecutionId === execution.executionId}
+                  onClick={() => onStop(execution)}
+                >
+                  {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}
+                </Button>
               )}
             </li>
           ))}

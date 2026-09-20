@@ -1,7 +1,12 @@
-import { PanelLeftCloseIcon, PanelLeftOpenIcon } from '@hugeicons/core-free-icons';
+import {
+  InformationCircleIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+} from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { PanelImperativeHandle } from 'react-resizable-panels';
 import { Composer, type ComposerProps } from './Composer';
 import { Conversation, type ReadingState } from './Conversation';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
@@ -20,6 +25,7 @@ import { Button } from './ui';
 import { Workbench } from './Workbench';
 
 const SESSION_HEADER_LABEL_LIMIT = 10;
+const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 384 + 28;
 
 function sessionHeaderLabel(label: string): string {
   const characters = Array.from(label);
@@ -50,6 +56,7 @@ export interface SessionPageProps {
   interaction?: ReactNode;
   statusNotice?: ReactNode;
   beforeConversation?: ReactNode;
+  environmentInformation?: ReactNode;
   diagnosticView?: ReactNode;
   historyPanel?: { id: string; labelledBy: string };
   historyError?: { title: string; detail: string; retry: () => void };
@@ -79,21 +86,130 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 600px)').matches,
   );
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
+  const navigationPanel = useRef<PanelImperativeHandle>(null);
+  const detailsPanel = useRef<PanelImperativeHandle>(null);
+  const panelGroupElement = useRef<HTMLDivElement>(null);
+  const navigationPanelFrame = useRef<number | undefined>(undefined);
+  const detailsPanelFrame = useRef<number | undefined>(undefined);
+  const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const [changesKey, setChangesKey] = useState<string>();
   const changesOpen = changesKey === props.readingKey && fileChanges !== undefined;
   const [scheduledEditorOpen, setScheduledEditorOpen] = useState(false);
+  const [sessionViewElement, setSessionViewElement] = useState<HTMLDivElement | null>(null);
+  const [environmentPreference, setEnvironmentPreference] = useState<'default' | 'open' | 'closed'>(
+    'default',
+  );
+  const [environmentFits, setEnvironmentFits] = useState(false);
+  const environmentMode = !props.environmentInformation
+    ? 'closed'
+    : environmentFits
+      ? environmentPreference === 'closed'
+        ? 'closed'
+        : 'docked'
+      : environmentPreference === 'open'
+        ? 'overlay'
+        : 'closed';
+  const environmentVisible = environmentMode !== 'closed';
+  const previousEnvironmentFits = useRef(environmentFits);
+  const previousEnvironmentMode = useRef(environmentMode);
   const rightSidebarOpen = changesOpen || (scheduledEditorOpen && !!props.scheduledTasks);
   const changesToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
     queueMicrotask(() => control.current?.focus());
   }, []);
+  const schedulePanelChange = useCallback(
+    (
+      frame: { current: number | undefined },
+      panel: { current: PanelImperativeHandle | null },
+      open: boolean,
+    ) => {
+      if (frame.current !== undefined) cancelAnimationFrame(frame.current);
+      frame.current = requestAnimationFrame(() => {
+        frame.current = undefined;
+        const group = panelGroupElement.current;
+        if (!group || group.offsetWidth <= 0 || group.getBoundingClientRect().width <= 0) return;
+        if (open) panel.current?.expand();
+        else panel.current?.collapse();
+      });
+    },
+    [],
+  );
+  const setDesktopSidebarOpen = useCallback(
+    (open: boolean) => {
+      setSidebarOpen(open);
+      if (!narrow) schedulePanelChange(navigationPanelFrame, navigationPanel, open);
+    },
+    [narrow, schedulePanelChange],
+  );
+  const expandDetails = useCallback(
+    () => schedulePanelChange(detailsPanelFrame, detailsPanel, true),
+    [schedulePanelChange],
+  );
+  const collapseDetails = useCallback(
+    () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
+    [schedulePanelChange],
+  );
+  useEffect(
+    () => () => {
+      if (navigationPanelFrame.current !== undefined)
+        cancelAnimationFrame(navigationPanelFrame.current);
+      if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+    },
+    [],
+  );
+  useLayoutEffect(() => {
+    if (changesKey !== undefined && changesKey !== props.readingKey) {
+      collapseDetails();
+      setChangesKey(undefined);
+    }
+  }, [changesKey, props.readingKey, collapseDetails]);
   useEffect(() => {
-    if (changesKey !== undefined && changesKey !== props.readingKey) setChangesKey(undefined);
-  }, [changesKey, props.readingKey]);
+    if (!props.scheduledTasks) {
+      collapseDetails();
+      setScheduledEditorOpen(false);
+    }
+  }, [props.scheduledTasks, collapseDetails]);
   useEffect(() => {
-    if (!props.scheduledTasks) setScheduledEditorOpen(false);
-  }, [props.scheduledTasks]);
+    const element = sessionViewElement;
+    if (!element) return;
+    const update = (width: number) => {
+      if (width > 0) setEnvironmentFits(width >= ENVIRONMENT_INFORMATION_MIN_WIDTH);
+    };
+    const measure = () => update(element.getBoundingClientRect().width);
+    let frame: number | undefined;
+    const measureAfterLayout = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        measure();
+      });
+    };
+    measure();
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver((entries) => {
+            const entry = entries[0];
+            if (entry?.contentRect.width) update(entry.contentRect.width);
+            else measureAfterLayout();
+          });
+    observer?.observe(element);
+    window.addEventListener('resize', measureAfterLayout);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureAfterLayout);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [sessionViewElement]);
+  useLayoutEffect(() => {
+    const previouslyFit = previousEnvironmentFits.current;
+    const previousMode = previousEnvironmentMode.current;
+    previousEnvironmentFits.current = environmentFits;
+    previousEnvironmentMode.current = environmentMode;
+    if (!previouslyFit || environmentFits || previousMode !== 'docked') return;
+    setEnvironmentPreference('closed');
+  }, [environmentFits, environmentMode]);
   const readings = useRef<Record<string, ReadingState>>({});
   const toggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -105,34 +221,42 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       )
         return;
       if (rightSidebarOpen) {
+        collapseDetails();
         setChangesKey(undefined);
         setScheduledEditorOpen(false);
         focusControlAfterCommit(changesOpen ? changesToggle : scheduledEditorToggle);
         return;
       }
       if (narrow) {
-        setSidebarOpen(false);
+        setDesktopSidebarOpen(false);
         toggle.current?.focus();
       }
     };
     window.addEventListener('keydown', cancel);
     return () => window.removeEventListener('keydown', cancel);
-  }, [narrow, changesOpen, rightSidebarOpen, focusControlAfterCommit]);
+  }, [
+    narrow,
+    changesOpen,
+    rightSidebarOpen,
+    focusControlAfterCommit,
+    collapseDetails,
+    setDesktopSidebarOpen,
+  ]);
   useEffect(() => {
     if (typeof matchMedia === 'undefined') return;
     const media = matchMedia('(max-width: 600px)');
     const resize = () => {
       setNarrow(media.matches);
-      if (media.matches) setSidebarOpen(false);
+      if (media.matches) setDesktopSidebarOpen(false);
     };
     resize();
     media.addEventListener('change', resize);
     return () => media.removeEventListener('change', resize);
-  }, []);
+  }, [setDesktopSidebarOpen]);
   const open = (id: string) => {
     if (!props.onOpen) return;
     props.onOpen(id);
-    if (narrow) setSidebarOpen(false);
+    if (narrow) setDesktopSidebarOpen(false);
   };
   const handleHeaderMouseDown = (event: React.MouseEvent<HTMLElement>) => {
     if (
@@ -158,7 +282,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           aria-expanded={sidebarOpen}
           aria-label="收起侧栏"
           title="收起侧栏"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setDesktopSidebarOpen(false)}
         >
           <HugeiconsIcon icon={PanelLeftCloseIcon} />
         </Button>
@@ -176,7 +300,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   props.actions.newWorkspaceSession?.(id);
                   if (narrow) {
                     focusComposerOnClose.current = true;
-                    setSidebarOpen(false);
+                    setDesktopSidebarOpen(false);
                   }
                   focusComposerAfterCommit();
                 }
@@ -186,7 +310,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   props.actions.newSession?.();
                   if (narrow) {
                     focusComposerOnClose.current = true;
-                    setSidebarOpen(false);
+                    setDesktopSidebarOpen(false);
                   }
                   focusComposerAfterCommit();
                 }
@@ -215,6 +339,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         },
       ]}
       onClose={() => {
+        collapseDetails();
         setChangesKey(undefined);
         focusControlAfterCommit(changesToggle);
       }}
@@ -224,6 +349,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       label="新建安排任务"
       title="新建"
       onClose={() => {
+        collapseDetails();
         setScheduledEditorOpen(false);
         focusControlAfterCommit(scheduledEditorToggle);
       }}
@@ -231,26 +357,50 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       <ScheduledTaskEditor
         props={props.scheduledTasks}
         onClose={() => {
+          collapseDetails();
           setScheduledEditorOpen(false);
           focusControlAfterCommit(scheduledEditorToggle);
         }}
       />
     </RightSidebar>
   ) : null;
+  if (rightSidebarPanel) retainedRightSidebarPanel.current = rightSidebarPanel;
   return (
     <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
       <ResizablePanelGroup
-        key={`${narrow ? 'narrow' : sidebarOpen ? 'navigation' : 'content'}-${rightSidebarOpen ? 'details' : 'plain'}`}
+        key={narrow ? 'narrow' : 'wide'}
         id="client-layout"
         orientation="horizontal"
+        elementRef={panelGroupElement}
         className="client-panels"
       >
-        {!narrow && sidebarOpen && (
+        {!narrow && (
           <>
-            <ResizablePanel id="navigation" defaultSize="236px" minSize="200px" maxSize="420px">
-              {sidebarPanel}
+            <ResizablePanel
+              id="navigation"
+              className="collapsible-sidebar-viewport"
+              panelRef={navigationPanel}
+              collapsible
+              collapsedSize="0px"
+              defaultSize="236px"
+              minSize="200px"
+              maxSize="420px"
+            >
+              <div
+                className="collapsible-sidebar-content"
+                style={{ minWidth: '200px' }}
+                aria-hidden={!sidebarOpen}
+                inert={!sidebarOpen}
+              >
+                {sidebarPanel}
+              </div>
             </ResizablePanel>
-            <ResizableHandle id="navigation-resize" withHandle />
+            <ResizableHandle
+              id="navigation-resize"
+              className="collapsible-sidebar-handle"
+              data-open={sidebarOpen ? 'true' : 'false'}
+              withHandle
+            />
           </>
         )}
         <ResizablePanel id="content" minSize="360px">
@@ -265,7 +415,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   aria-expanded={sidebarOpen}
                   aria-label="展开侧栏"
                   title="展开侧栏"
-                  onClick={() => setSidebarOpen(true)}
+                  onClick={() => setDesktopSidebarOpen(true)}
                 >
                   <HugeiconsIcon icon={PanelLeftOpenIcon} />
                 </Button>
@@ -284,13 +434,32 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                 )}
               </div>
               {props.headerActions}
+              {props.environmentInformation && (
+                <Button
+                  className="ghost environment-information-toggle"
+                  size="icon-sm"
+                  aria-expanded={environmentVisible}
+                  aria-controls="session-environment-information"
+                  aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+                  title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+                  onClick={() => {
+                    setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
+                  }}
+                >
+                  <HugeiconsIcon icon={InformationCircleIcon} />
+                </Button>
+              )}
               {fileChanges !== undefined && (
                 <Button
                   ref={changesToggle}
                   className="ghost"
                   aria-expanded={changesOpen}
                   aria-controls="session-file-changes"
-                  onClick={() => setChangesKey(changesOpen ? undefined : props.readingKey)}
+                  onClick={() => {
+                    if (changesOpen) collapseDetails();
+                    else expandDetails();
+                    setChangesKey(changesOpen ? undefined : props.readingKey);
+                  }}
                 >
                   {changesOpen ? '收起变更' : '文件变更'}
                 </Button>
@@ -309,13 +478,18 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             >
               {props.notices}
               <div className="session-body">
-                <div className="session-view">
+                <div
+                  className={`session-view environment-information-${environmentMode}`}
+                  ref={setSessionViewElement}
+                >
+                  {props.environmentInformation}
                   {props.beforeConversation}
                   {props.scheduledTasks ? (
                     <ScheduledTasks
                       {...props.scheduledTasks}
                       onNewTask={(trigger) => {
                         scheduledEditorToggle.current = trigger;
+                        expandDetails();
                         setScheduledEditorOpen(true);
                       }}
                     />
@@ -414,20 +588,37 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             </main>
           </div>
         </ResizablePanel>
-        {rightSidebarPanel && (
-          <>
-            <ResizableHandle id="details-resize" withHandle />
-            <ResizablePanel id="details" defaultSize="380px" minSize="300px" maxSize="640px">
-              {rightSidebarPanel}
-            </ResizablePanel>
-          </>
-        )}
+        <ResizableHandle
+          id="details-resize"
+          className="collapsible-sidebar-handle"
+          data-open={rightSidebarOpen ? 'true' : 'false'}
+          withHandle
+        />
+        <ResizablePanel
+          id="details"
+          className="collapsible-sidebar-viewport"
+          panelRef={detailsPanel}
+          collapsible
+          collapsedSize="0px"
+          defaultSize="0px"
+          minSize="300px"
+          maxSize="640px"
+        >
+          <div
+            className="collapsible-sidebar-content"
+            style={{ minWidth: '300px' }}
+            aria-hidden={!rightSidebarOpen}
+            inert={!rightSidebarOpen}
+          >
+            {rightSidebarPanel ?? retainedRightSidebarPanel.current}
+          </div>
+        </ResizablePanel>
       </ResizablePanelGroup>
       {narrow && (
         <Sheet
           open={sidebarOpen}
           onOpenChange={(open) => {
-            setSidebarOpen(open);
+            setDesktopSidebarOpen(open);
             if (open) return;
             if (focusComposerOnClose.current) {
               focusComposerOnClose.current = false;

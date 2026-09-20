@@ -1148,6 +1148,7 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
               z
                 .object({
                   executionId: identifier,
+                  displayName: z.string().min(1).max(256).optional(),
                   sessionId: identifier,
                   sessionRevision: safeRevision,
                   kind: z.enum(['shell', 'service', 'subagent']),
@@ -1178,6 +1179,7 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
       backgroundExecution: z
         .object({
           executionId: identifier,
+          displayName: z.string().min(1).max(256).optional(),
           sessionId: identifier,
           sessionRevision: safeRevision,
           kind: z.enum(['shell', 'service', 'subagent']),

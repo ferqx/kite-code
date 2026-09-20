@@ -418,6 +418,7 @@ describe('Runtime Protocol', () => {
           executions: [
             {
               executionId: 'shell-1',
+              displayName: 'Background preview server',
               sessionId: 'session-1',
               sessionRevision: 11,
               kind: 'service',
@@ -432,7 +433,12 @@ describe('Runtime Protocol', () => {
       }),
     ).toMatchObject({
       queryType: 'list_background_executions',
-      backgroundSnapshot: { aggregateGeneration: 'aggregate-1', sessionRevision: 11, watermark: 2 },
+      backgroundSnapshot: {
+        aggregateGeneration: 'aggregate-1',
+        sessionRevision: 11,
+        watermark: 2,
+        executions: [{ displayName: 'Background preview server' }],
+      },
     });
     expect(
       RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
@@ -1055,7 +1061,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'b9f5cfec:641d2d20';
+    const expectedDigest = 'b738cb8c:641d2d20';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

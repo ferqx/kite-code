@@ -2,6 +2,7 @@ import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { BackgroundExecutions } from '../src/BackgroundExecutions';
+import { Composer } from '../src/Composer';
 import { Conversation, type ReadingState } from '../src/Conversation';
 import { MessageContent } from '../src/MessageContent';
 import { SessionPage } from '../src/SessionPage';
@@ -12,9 +13,44 @@ const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
 });
 class TestResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  static readonly observers = new Set<TestResizeObserver>();
+  private readonly targets = new Set<Element>();
+  private readonly callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    TestResizeObserver.observers.add(this);
+  }
+  static resize(width: number, selector: string) {
+    for (const observer of TestResizeObserver.observers) {
+      const target = [...observer.targets].find((element) => element.matches(selector));
+      if (!target) continue;
+      observer.callback(
+        [{ target, contentRect: { width } } as ResizeObserverEntry],
+        observer as unknown as ResizeObserver,
+      );
+    }
+  }
+  observe(target: Element) {
+    this.targets.add(target);
+    if (target.matches('.session-view')) {
+      this.callback(
+        [{ target, contentRect: { width: 1200 } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+  }
+  disconnect() {
+    this.targets.clear();
+    TestResizeObserver.observers.delete(this);
+  }
+  static observedCount(selector: string) {
+    return [...TestResizeObserver.observers].filter((observer) =>
+      [...observer.targets].some((target) => target.matches(selector)),
+    ).length;
+  }
 }
 Object.defineProperty(dom.window, 'ResizeObserver', {
   configurable: true,
@@ -97,7 +133,69 @@ test('background execution stop is exact and duplicate clicks are disabled while
   expect(document.body.textContent).toContain('清理未确认');
 });
 
-test('directory exposes retained background work for a non-selected session', async () => {
+test('current environment information shows active shells and fresh subagent history', async () => {
+  await render(
+    <BackgroundExecutions
+      currentOnly
+      executions={[
+        { executionId: 'shell-1', kind: 'shell', status: 'running', cleanupConfirmed: false },
+        { executionId: 'child-1', kind: 'subagent', status: 'stopping', cleanupConfirmed: false },
+        { executionId: 'service-1', kind: 'service', status: 'running', cleanupConfirmed: false },
+        { executionId: 'shell-done', kind: 'shell', status: 'completed', cleanupConfirmed: true },
+        {
+          executionId: 'child-done',
+          displayName: '梳理文档和近期 Git 历史',
+          kind: 'subagent',
+          status: 'completed',
+          cleanupConfirmed: true,
+        },
+        { executionId: 'child-failed', kind: 'subagent', status: 'failed', cleanupConfirmed: true },
+        {
+          executionId: 'child-unavailable',
+          kind: 'subagent',
+          status: 'unavailable',
+          cleanupConfirmed: false,
+        },
+      ]}
+    />,
+  );
+  expect(document.body.textContent).toContain('环境信息');
+  expect(document.body.textContent).toContain('当前运行的 Shell');
+  expect(document.body.textContent).toContain('子智能体');
+  expect(document.body.textContent).toContain('shell-1');
+  expect(document.body.textContent).toContain('child-1');
+  expect(document.body.textContent).toContain('梳理文档和近期 Git 历史');
+  expect(document.body.textContent).not.toContain('child-done');
+  expect(document.body.textContent).toContain('child-failed');
+  expect(document.body.textContent).not.toContain('service-1');
+  expect(document.body.textContent).not.toContain('shell-done');
+  expect(document.body.textContent).not.toContain('child-unavailable');
+  expect(document.body.textContent).not.toContain('清理未确认');
+});
+
+test('current environment information stays visible with no fresh running work', async () => {
+  await render(
+    <BackgroundExecutions
+      currentOnly
+      stale
+      executions={[
+        { executionId: 'shell-1', kind: 'shell', status: 'running', cleanupConfirmed: false },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.environment-information')).not.toBeNull();
+  expect(document.body.textContent).toContain('无运行中的 Shell');
+  expect(document.body.textContent).toContain('暂无子智能体记录');
+  expect(document.body.textContent).not.toContain('shell-1');
+});
+
+test('directory does not surface background execution counts', async () => {
+  const legacySession = {
+    sessionId: 'background-session',
+    displayName: 'Background session',
+    status: 'idle',
+    backgroundExecutionCount: 2,
+  } as const;
   await render(
     <Sidebar
       workspaces={[
@@ -106,14 +204,7 @@ test('directory exposes retained background work for a non-selected session', as
           label: 'Workspace',
           state: 'loaded',
           sessionCount: 1,
-          sessions: [
-            {
-              sessionId: 'background-session',
-              displayName: 'Background session',
-              status: 'idle',
-              backgroundExecutionCount: 2,
-            },
-          ],
+          sessions: [legacySession],
         },
       ]}
       defaultExpanded
@@ -122,7 +213,17 @@ test('directory exposes retained background work for a non-selected session', as
       connectionLabel=""
     />,
   );
-  expect(document.body.textContent).toContain('2 个后台任务');
+  expect(document.body.textContent).toContain('Background session');
+  expect(document.body.textContent).not.toContain('后台任务');
+});
+test('sidebar user area keeps one workspace label', async () => {
+  await render(<Sidebar workspaces={[]} actions={{ settings: () => {} }} connectionLabel="" />);
+  const utilities = document.querySelector('.sidebar-utilities')!;
+  const profile = utilities.querySelector('.profile-card')!;
+  expect(profile.textContent).toBe('个人工作区');
+  expect(profile.textContent).not.toContain('本地用户');
+  expect(profile.querySelectorAll('strong')).toHaveLength(1);
+  expect(profile.querySelector('small')).toBeNull();
 });
 const originals = new Map<string, PropertyDescriptor | undefined>();
 for (const [key, value] of Object.entries(globals)) {
@@ -167,6 +268,135 @@ async function click(element: HTMLElement) {
     element.click();
   });
 }
+test('composer empty space focuses the prompt without taking over its controls', async () => {
+  await render(
+    <Composer
+      draft=""
+      onChange={() => {}}
+      onSend={() => {}}
+      active={false}
+      stopping={false}
+      disabled={false}
+      model={{ provider: 'OpenAI', name: 'gpt-5' }}
+      models={[{ provider: 'OpenAI', name: 'gpt-5' }]}
+      onModelChange={() => {}}
+    />,
+  );
+  const textarea = document.querySelector<HTMLTextAreaElement>('textarea')!;
+  const modelTrigger = document.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+
+  modelTrigger.focus();
+  const allowed = document
+    .querySelector<HTMLElement>('.composer-bottom')!
+    .dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+  expect(allowed).toBe(false);
+  expect(document.activeElement).toBe(textarea);
+
+  modelTrigger.focus();
+  modelTrigger.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true }));
+  expect(document.activeElement).toBe(modelTrigger);
+});
+test('composer shows a cache hit rate only after measured cache tokens exist', async () => {
+  const composer = (cacheMetrics?: { cacheHitTokens: number; cacheMissTokens: number }) => (
+    <Composer
+      draft=""
+      onChange={() => {}}
+      onSend={() => {}}
+      active={false}
+      stopping={false}
+      disabled={false}
+      cacheMetrics={cacheMetrics}
+    />
+  );
+  await render(composer());
+  expect(document.querySelector('.composer-cache-rate')).toBeNull();
+
+  await act(() => root!.render(composer({ cacheHitTokens: 0, cacheMissTokens: 0 })));
+  expect(document.querySelector('.composer-cache-rate')).toBeNull();
+
+  await act(() => root!.render(composer({ cacheHitTokens: 75, cacheMissTokens: 25 })));
+  const rate = document.querySelector<HTMLElement>('.composer-cache-rate')!;
+  expect(rate.textContent).toBe('缓存 75%');
+  expect(rate.title).toBe('缓存命中 75 / 100 tokens');
+});
+test('sending shows a busy action and blocks duplicate submit even when a run becomes active', async () => {
+  let sends = 0;
+  await render(
+    <Composer
+      draft="继续"
+      onChange={() => {}}
+      onSend={() => sends++}
+      onCancel={() => {}}
+      active
+      stopping={false}
+      disabled={false}
+      sending
+    />,
+  );
+  const action = document.querySelector<HTMLButtonElement>('.composer-action')!;
+  expect(action.disabled).toBe(true);
+  expect(action.getAttribute('aria-busy')).toBe('true');
+  expect(action.getAttribute('aria-label')).toBe('正在发送消息');
+  expect(document.querySelectorAll('.composer-action')).toHaveLength(1);
+  await act(() =>
+    document
+      .querySelector('form')!
+      .dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })),
+  );
+  expect(sends).toBe(0);
+});
+
+test('composer uses one circular action for running guidance or stopping', async () => {
+  await render(
+    <Composer
+      draft="继续"
+      onChange={() => {}}
+      onSend={() => {}}
+      onCancel={() => {}}
+      active
+      stopping={false}
+      disabled={false}
+    />,
+  );
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
+  expect(document.querySelector('[aria-label="发送运行中引导"]')).not.toBeNull();
+  expect(document.querySelectorAll('.composer-action')).toHaveLength(1);
+
+  await act(() =>
+    root!.render(
+      <Composer
+        draft=""
+        onChange={() => {}}
+        onSend={() => {}}
+        onCancel={() => {}}
+        active
+        stopping={false}
+        disabled={false}
+      />,
+    ),
+  );
+  expect(document.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="发送运行中引导"]')).toBeNull();
+  expect(document.querySelectorAll('.composer-action')).toHaveLength(1);
+
+  await act(() =>
+    root!.render(
+      <Composer
+        draft="继续"
+        onChange={() => {}}
+        onSend={() => {}}
+        onCancel={() => {}}
+        active={false}
+        stopping={false}
+        disabled={false}
+      />,
+    ),
+  );
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
+  expect(document.querySelector('[aria-label="发送消息"]')).not.toBeNull();
+  expect(document.querySelectorAll('.composer-action')).toHaveLength(1);
+});
+
 test('full-height sibling panels move the sidebar toggle into the middle header when closed', async () => {
   const windowClicks: number[] = [];
   await render(
@@ -183,17 +413,36 @@ test('full-height sibling panels move the sidebar toggle into the middle header 
     />,
   );
   expect(document.querySelectorAll('header')).toHaveLength(2);
-  expect(document.querySelectorAll('[data-panel]')).toHaveLength(2);
-  expect(document.querySelectorAll('[role="separator"]')).toHaveLength(1);
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(3);
+  expect(document.querySelectorAll('[role="separator"]')).toHaveLength(2);
   expect(document.querySelector('.session-header')?.textContent).toBe('Session t…');
   expect(document.querySelector('.breadcrumb strong')?.getAttribute('title')).toBe('Session title');
   expect(document.querySelector<HTMLElement>('.sidebar')).not.toBeNull();
+  const sidebarContents = document.querySelectorAll<HTMLElement>('.collapsible-sidebar-content');
+  expect(sidebarContents[0]?.style.minWidth).toBe('200px');
+  expect(sidebarContents[1]?.style.minWidth).toBe('300px');
+  const panelGroup = document.querySelector<HTMLElement>('[data-slot="resizable-panel-group"]')!;
+  Object.defineProperty(panelGroup, 'offsetWidth', { configurable: true, value: 1200 });
+  panelGroup.getBoundingClientRect = () => new DOMRect(0, 0, 1200, 800);
   await click(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!);
-  expect(document.querySelector<HTMLElement>('.sidebar')).toBeNull();
-  expect(document.querySelectorAll('[data-panel]')).toHaveLength(1);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(TestResizeObserver.observedCount('.session-view')).toBe(1);
+  expect(document.querySelector('.collapsible-sidebar-content')?.getAttribute('aria-hidden')).toBe(
+    'true',
+  );
+  expect(document.querySelectorAll('[data-panel]')).toHaveLength(3);
+  expect(
+    document.querySelectorAll('.collapsible-sidebar-handle')[0]?.getAttribute('data-open'),
+  ).toBe('false');
+  expect(document.querySelector<HTMLElement>('#navigation')?.style.flexGrow).toBe('0');
   await click(document.querySelector<HTMLButtonElement>('[aria-label="展开侧栏"]')!);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(document.querySelector<HTMLElement>('.sidebar')).not.toBeNull();
+  expect(document.querySelector('.collapsible-sidebar-content')?.getAttribute('aria-hidden')).toBe(
+    'false',
+  );
   expect(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')).not.toBeNull();
+  expect(document.querySelector<HTMLElement>('#navigation')?.style.flexGrow).not.toBe('0');
   const header = document.querySelector<HTMLElement>('.session-header')!;
   header.dispatchEvent(
     new dom.window.MouseEvent('mousedown', { button: 0, detail: 1, bubbles: true }),
@@ -205,6 +454,123 @@ test('full-height sibling panels move the sidebar toggle into the middle header 
     .querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!
     .dispatchEvent(new dom.window.MouseEvent('mousedown', { button: 0, detail: 2, bubbles: true }));
   expect(windowClicks).toEqual([1, 2]);
+});
+
+test('both sidebars animate their real width without reflowing or unmounting inner content', async () => {
+  await render(
+    <SessionPage
+      workspaces={[]}
+      sessionLabel="Session"
+      readingKey="workspace/session"
+      messages={[]}
+      fileChanges={[]}
+      loading={false}
+      connected
+      connectionLabel=""
+      actions={{}}
+    />,
+  );
+  const panelGroup = document.querySelector<HTMLElement>('[data-slot="resizable-panel-group"]')!;
+  Object.defineProperty(panelGroup, 'offsetWidth', { configurable: true, value: 1200 });
+  panelGroup.getBoundingClientRect = () => new DOMRect(0, 0, 1200, 800);
+
+  await click(button('文件变更'));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector<HTMLElement>('#details')?.style.flexGrow).not.toBe('0');
+  expect(document.querySelector('.right-sidebar')).not.toBeNull();
+
+  await click(button('收起变更'));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector<HTMLElement>('#details')?.style.flexGrow).toBe('0');
+  expect(document.querySelector('.right-sidebar')).not.toBeNull();
+  expect(
+    document.querySelectorAll<HTMLElement>('.collapsible-sidebar-content')[1]?.style.minWidth,
+  ).toBe('300px');
+});
+
+test('the session header toggles environment information without removing the conversation', async () => {
+  await render(
+    <SessionPage
+      workspaces={[]}
+      selected="session-1"
+      sessionLabel="Session"
+      readingKey="workspace/session-1"
+      messages={[]}
+      loading={false}
+      connected
+      connectionLabel=""
+      actions={{}}
+      environmentInformation={<BackgroundExecutions currentOnly executions={[]} />}
+    />,
+  );
+  expect(document.querySelector('.environment-information')).not.toBeNull();
+  const hide = document.querySelector<HTMLButtonElement>('[aria-label="隐藏环境信息"]')!;
+  expect(hide.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-docked',
+  );
+  await click(hide);
+  expect(document.querySelector('.environment-information')).not.toBeNull();
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-closed',
+  );
+  const show = document.querySelector<HTMLButtonElement>('[aria-label="显示环境信息"]')!;
+  expect(show.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('.history-panel')).not.toBeNull();
+  await act(() =>
+    root!.render(
+      <SessionPage
+        workspaces={[]}
+        selected="session-2"
+        sessionLabel="Another session"
+        readingKey="workspace/session-2"
+        messages={[]}
+        loading={false}
+        connected
+        connectionLabel=""
+        actions={{}}
+        environmentInformation={<BackgroundExecutions currentOnly executions={[]} />}
+      />,
+    ),
+  );
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-closed',
+  );
+  await click(show);
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-docked',
+  );
+
+  // Collapsing the navigation keeps the panel subtree mounted while the environment
+  // observer continues following the same session view.
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!);
+  await act(() => TestResizeObserver.resize(1131, '.session-view'));
+  expect(document.querySelector('.environment-information')).not.toBeNull();
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-closed',
+  );
+  expect(
+    document
+      .querySelector<HTMLButtonElement>('[aria-label="显示环境信息"]')
+      ?.getAttribute('aria-expanded'),
+  ).toBe('false');
+
+  await act(() => TestResizeObserver.resize(1132, '.session-view'));
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-closed',
+  );
+
+  await act(() => TestResizeObserver.resize(1131, '.session-view'));
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="显示环境信息"]')!);
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-overlay',
+  );
+  expect(document.querySelector('.conversation-viewport')).not.toBeNull();
+
+  await act(() => TestResizeObserver.resize(1132, '.session-view'));
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-docked',
+  );
 });
 test('select all stays in visible message text and leaves editable fields to the browser', async () => {
   await render(
@@ -433,6 +799,17 @@ test('scrolling history stops live follow; returning restores reading and activi
     root!.render(<Conversation {...props} initialReading={saved} messages={updated} />),
   );
   expect(document.querySelector<HTMLElement>('.conversation-viewport')!.scrollTop).toBe(200);
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'true',
+  );
+  expect(document.querySelector('.tool-activity')?.getAttribute('data-restored-expanded')).toBe(
+    'true',
+  );
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
+  expect(document.querySelector('.tool-activity')?.hasAttribute('data-restored-expanded')).toBe(
+    false,
+  );
+  await click(document.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
   expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
     'true',
   );

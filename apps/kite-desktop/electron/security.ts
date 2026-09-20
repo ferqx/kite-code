@@ -39,6 +39,21 @@ export function noPayload(value: unknown): void {
   if (value !== undefined) throw new Error('桌面 IPC 参数无效。');
 }
 
+export function quitInspectionPayload(value: unknown): {
+  requestId: number;
+  hasActiveTasks: boolean;
+} {
+  const record = exactRecord(value, ['requestId', 'hasActiveTasks']);
+  if (
+    typeof record.requestId !== 'number' ||
+    !Number.isSafeInteger(record.requestId) ||
+    record.requestId <= 0 ||
+    typeof record.hasActiveTasks !== 'boolean'
+  )
+    throw new Error('桌面 IPC 参数无效。');
+  return { requestId: record.requestId, hasActiveTasks: record.hasActiveTasks };
+}
+
 export function themePayload(value: unknown): { theme: DesktopTheme } {
   const record = exactRecord(value, ['theme']);
   if (record.theme !== 'light' && record.theme !== 'dark' && record.theme !== 'system')

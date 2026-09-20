@@ -1,6 +1,6 @@
 import {
   ArrowDown01Icon,
-  ArrowUp01Icon,
+  ArrowUp02Icon,
   BotIcon,
   FlashIcon,
   Loading03Icon,
@@ -129,7 +129,12 @@ export interface ComposerProps {
   permissionDisabled?: boolean;
   permissionPending?: boolean;
   sessionLoading?: boolean;
+  cacheMetrics?: {
+    readonly cacheHitTokens: number;
+    readonly cacheMissTokens: number;
+  };
   submitStatus?: string;
+  sending?: boolean;
   promptHidden?: boolean;
 }
 export function Composer(props: ComposerProps) {
@@ -140,7 +145,15 @@ export function Composer(props: ComposerProps) {
       ? 'zh'
       : 'en';
   const permissionText = permissionCopy[permissionLanguage];
-  const canSend = !!props.onSend && !props.disabled && !!props.draft.trim();
+  const cacheTokenTotal =
+    (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
+  const cacheHitPercentage =
+    cacheTokenTotal > 0
+      ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
+      : undefined;
+  const canSend = !!props.onSend && !props.disabled && !props.sending && !!props.draft.trim();
+  const showStop =
+    !props.sending && props.active && !!props.onCancel && (!props.draft.trim() || props.stopping);
   const selectedModel = props.model
     ? props.models?.find(
         (model) => model.provider === props.model?.provider && model.name === props.model?.name,
@@ -161,6 +174,16 @@ export function Composer(props: ComposerProps) {
         className="composer"
         data-permission-pending={props.permissionPending || undefined}
         data-session-loading={props.sessionLoading || undefined}
+        onMouseDown={(event) => {
+          const target = event.target;
+          if (
+            target instanceof Element &&
+            target.closest('button, textarea, input, a, [role="menuitem"]')
+          )
+            return;
+          event.preventDefault();
+          event.currentTarget.querySelector('textarea')?.focus();
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           if (canSend && !composing.current) props.onSend?.();
@@ -266,11 +289,7 @@ export function Composer(props: ComposerProps) {
                       icon={permissionModes.find((mode) => mode.value === props.permission)!.icon}
                     />
                     <span>{permissionText[props.permission].label}</span>
-                    <HugeiconsIcon
-                      data-icon="inline-end"
-                      className={props.permissionPending ? 'motion-safe:animate-spin' : undefined}
-                      icon={props.permissionPending ? Loading03Icon : ArrowDown01Icon}
-                    />
+                    <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
                   </ShadcnButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
@@ -324,25 +343,17 @@ export function Composer(props: ComposerProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
+            {cacheHitPercentage !== undefined && (
+              <span
+                className="composer-cache-rate"
+                title={`缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`}
+              >
+                缓存 {cacheHitPercentage}%
+              </span>
+            )}
           </div>
           <div className="composer-actions">
-            <Button
-              className="primary composer-action"
-              size="icon-sm"
-              type="submit"
-              aria-label={
-                props.submitStatus
-                  ? `发送消息：${props.submitStatus}`
-                  : props.active
-                    ? '发送运行中引导'
-                    : '发送消息'
-              }
-              title={props.submitStatus || (props.active ? '发送运行中引导' : '发送消息')}
-              disabled={!canSend}
-            >
-              <HugeiconsIcon icon={ArrowUp01Icon} />
-            </Button>
-            {props.active && props.onCancel && (
+            {showStop ? (
               <Button
                 className="primary composer-action stop-action"
                 size="icon-sm"
@@ -352,6 +363,34 @@ export function Composer(props: ComposerProps) {
                 disabled={props.stopping || props.cancelDisabled}
               >
                 <HugeiconsIcon icon={SquareStopIcon} />
+              </Button>
+            ) : (
+              <Button
+                className="primary composer-action"
+                size="icon-sm"
+                type="submit"
+                aria-label={
+                  props.sending
+                    ? '正在发送消息'
+                    : props.submitStatus
+                      ? `发送消息：${props.submitStatus}`
+                      : props.active
+                        ? '发送运行中引导'
+                        : '发送消息'
+                }
+                title={
+                  props.sending
+                    ? '正在发送消息'
+                    : props.submitStatus || (props.active ? '发送运行中引导' : '发送消息')
+                }
+                aria-busy={props.sending || undefined}
+                disabled={!canSend}
+              >
+                <HugeiconsIcon
+                  icon={props.sending ? Loading03Icon : ArrowUp02Icon}
+                  className={props.sending ? 'motion-safe:animate-spin' : undefined}
+                  strokeWidth={2}
+                />
               </Button>
             )}
           </div>

@@ -58,6 +58,21 @@ describe('内置角色定义', () => {
     }
   });
 
+  it('explore 可给出有证据支持的建议', () => {
+    const prompt = getRoleConfig('explore').systemPrompt;
+    expect(prompt).toContain('evidence supports');
+    expect(prompt).toContain('distinguish findings from inference');
+    expect(prompt).not.toContain('Raw findings only');
+  });
+
+  it('code 使用成比例验证并继承工作区内授权', () => {
+    const prompt = getRoleConfig('code').systemPrompt;
+    expect(prompt).toContain('verification proportionate to the change and risk');
+    expect(prompt).toContain('Workspace-local changes within the assigned task');
+    expect(prompt).not.toContain('Run relevant tests after every code change');
+    expect(prompt).not.toContain('Commands that mutate files or VCS need approval');
+  });
+
   it('getRoleConfig 应返回独立的副本（非共享引用）', () => {
     const cfg1 = getRoleConfig('explore');
     const cfg2 = getRoleConfig('explore');

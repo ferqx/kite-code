@@ -7,6 +7,7 @@
 Service 在运行准入时解析模型配置，Builtin 从 State view、项目指令、历史/压缩点、工具声明和当前阶段构造上下文。上下文预算与屏幕消息长度不同；不能从 TUI viewport 重建请求。
 
 compiled model surface 确定 messages、tools 和请求设置，以 digest 绑定 invocation。模型状态、Provider route 与当前 Run identity 一致；运行中修改期望配置只影响后续准入，不能让已发请求换成另一模型。
+主 Agent 的 reasoning effort 由 Provider 类型编译为 provider-owned options，并进入同一冻结 surface 与 digest；显式关闭 reasoning 时不发送该选项。
 
 ## 调用与证据
 

@@ -44,8 +44,7 @@ for (const [key, value] of Object.entries(globals)) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { configurable: true, value, writable: true });
 }
-const { createRoot } = await import('react-dom/client');
-let root: ReturnType<typeof createRoot> | undefined;
+let root: import('react-dom/client').Root | undefined;
 afterEach(async () => {
   if (root) await act(() => root?.unmount());
   root = undefined;
@@ -58,6 +57,7 @@ afterAll(() => {
     else Reflect.deleteProperty(globalThis, key);
   }
 });
+const { createRoot } = await import('react-dom/client');
 
 test('legacy multiagent history rebuilds three owned cards and hides child Tool failures', async () => {
   const sessionId = 'legacy-three-subagents';

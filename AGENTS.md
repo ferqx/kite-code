@@ -4,9 +4,8 @@
 
 1. 用户确认的需求与[产品手册](docs/handbook/README.md)定义预期；源码和运行证据说明实际，测试只证明其断言。冲突必须明确预期、实际、客户端和证据，不能自动以实现覆盖产品承诺。
 2. 修改 TUI/Web 功能先读对应手册专题，再读所属 workspace 文档和测试；共享语义变化再读相关跨包契约。内部重构按 owner 读取，不要求通读手册。
-3. 开工前简述对应产品行为、负责模块、可能跨层影响及验证方式；完成后按实际 diff 说明原来与现在、修改归属理由、受影响功能和客户端、验证结果及剩余未知。普通小修复不要求另建计划或完整报告。
-4. [开发入口](docs/development/README.md)负责定位；文档修改先读 [docs/AGENTS.md](docs/AGENTS.md)。ADR 用于追溯设计取舍，不单独构成当前实施要求；accepted、编号较新或措辞强制均不足以证明适用于本次任务。实施以已确认需求、当前负责文档与相关契约为依据；计划不是当前实现依据，不通过 ADR 替代链推导产品功能。
-5. 引用 ADR 支持实施时，必须说明当前适用范围和现行依据；没有现行依据时仅作为待核实历史信息，不得据此恢复退役机制、扩大任务范围或增加审批门禁。引用与变更处理遵循[文档维护规则](docs/development/documentation.md#adr-使用边界)。
+3. 跨层或用户行为变更开工前简述产品行为、负责模块、影响和验证方式；完成后按实际 diff 说明结果、验证及剩余未知。普通小修复直接实施并报告证据，不另建计划或完整报告。
+4. [开发入口](docs/development/README.md)负责定位。ADR 只记录历史取舍，不单独构成当前要求；引用、新增或更新 ADR 时读[文档维护规则](docs/development/documentation.md#adr-使用边界)，核对现行依据与适用范围。
 
 ## 自主推进与授权
 
@@ -29,8 +28,8 @@
 
 ## 阶段与提交门禁
 
-每阶段完成及最终交付前，显式执行[overengineering-check](.agents/skills/overengineering-check/SKILL.md)。未清除无需求机制时保持 in_progress，不以文档或自身测试为新增抽象辩护。
+当实施新增持久状态、协议操作、兼容层、恢复路径、通用抽象或其他明显机制时，在该实施阶段与最终交付前执行[overengineering-check](.agents/skills/overengineering-check/SKILL.md)。普通小修复和纯文档修改不触发。
 
-已确认且需留作后续实施依据的设计执行 `design_complete`；每个显式实施阶段和迭代完成执行 `iteration_complete`，即使不提交也核对产品、技术及其他受影响文档。工具调用和进度更新不单独构成阶段；普通小修复不强制新建计划或设计标记。
+已确认且需留作后续实施依据的设计执行 `design_complete`。实施改变产品行为、实现边界或文档时，在迭代完成执行 `iteration_complete`；行为和边界不变时只需说明核对依据。工具调用和进度更新不单独构成阶段；普通小修复不强制新建计划或设计标记。
 
-stage、commit、push、PR 前显式执行[document-before-commit](.agents/skills/document-before-commit/SKILL.md)。作用域、证据复用及阻塞范围由该 Skill 定义，现有 hook 和 CI 独立执行强制检查。不得使用 --no-verify 绕过检查。
+当变更需要文档同步，或准备 stage、commit、push、PR 交付时，执行[document-before-commit](.agents/skills/document-before-commit/SKILL.md)中对应 action。现有 hook 和 CI 仍独立执行强制检查；不得使用 --no-verify 绕过检查。

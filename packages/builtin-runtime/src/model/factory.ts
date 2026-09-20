@@ -35,6 +35,30 @@ export interface ChatModelFactoryOptions {
   fetch?: typeof globalThis.fetch;
 }
 
+/**
+ * Compile provider-owned options for the primary Agent request.
+ *
+ * The OpenAI-compatible adapter is registered under the provider type, so the
+ * outer key must match that exact owner for AI SDK to translate
+ * `reasoningEffort` to the wire-level `reasoning_effort` field.
+ */
+export function primaryModelProviderOptions(
+  config: ModelRuntimeConfig,
+): ModelProviderOptions | undefined {
+  const reasoningEffort = config.reasoningEffort?.trim();
+  if (!reasoningEffort || config.reasoningExplicitlyDisabled === true) return undefined;
+
+  switch (config.providerType) {
+    case 'openai':
+      return { openai: { reasoningEffort } };
+    case 'openai-compatible':
+      return { openaiCompatible: { reasoningEffort } };
+    case 'deepseek':
+    case 'ollama':
+      return undefined;
+  }
+}
+
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */
 export function createChatModel(
   config: ModelRuntimeConfig,

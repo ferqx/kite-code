@@ -565,6 +565,7 @@ export async function executePipelineIssuedSubagentStart(
       };
       backgroundRuntime.adopt({
         taskId: grant.childInvocationId,
+        displayName: args.name,
         ownerKey: backgroundSubagentOwnerKey(deps.threadId!, deps.recoveryIdentityKey),
         ...origin,
         observe,

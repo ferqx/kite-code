@@ -431,6 +431,8 @@ export function ToolActivity({
   expandedItems,
   onToggleItem,
   childProcess = false,
+  activityId,
+  restoredExpanded,
 }: {
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
@@ -441,6 +443,8 @@ export function ToolActivity({
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
+  activityId?: string;
+  restoredExpanded?: ReadonlySet<string>;
 }) {
   const message = messages[0]!;
   let ask = message.ask;
@@ -583,6 +587,7 @@ export function ToolActivity({
     <Collapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
       <article
         className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
+        data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
         aria-label={`${label}${status ? ` · ${status}` : ''}`}
       >
         {read && !childIssue ? (
@@ -656,6 +661,8 @@ export function ToolActivity({
                         messages={[item]}
                         expanded={expandedItems?.[item.id]}
                         onToggle={(next) => onToggleItem?.(item.id, next)}
+                        activityId={item.id}
+                        restoredExpanded={restoredExpanded}
                         openFile={openFile}
                         renderChildren={renderChildren}
                       />

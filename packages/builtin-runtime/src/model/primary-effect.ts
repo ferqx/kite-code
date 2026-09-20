@@ -10,7 +10,7 @@ import {
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
 } from './context-projection';
-import type { SupportedChatModel } from './factory';
+import { primaryModelProviderOptions, type SupportedChatModel } from './factory';
 import {
   type BuiltinModelEvent,
   computeModelInvocationPrivateDigest,
@@ -303,6 +303,7 @@ export async function executeBuiltinPrimaryModelEffect<
       modelCapabilities.maxOutputTokens,
     transport: modelCapabilities.streaming ? 'stream' : 'generate',
     estimatedInputTokens: preflight.estimate.totalInputTokens,
+    providerOptions: primaryModelProviderOptions(input.config),
   });
   const pending = await gateway.invoke({
     model: input.model,

@@ -539,7 +539,6 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     4,
     'space switch must neither cancel nor replay either task',
   );
-  const beforeQuit = await page.evaluate(() => window.kiteDesktop!.runtimeStatus());
   await page.screenshot({ path: join(root, 'out/electron-native-smoke.png') });
   const windowId = String(
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getMediaSourceId()'),
@@ -552,15 +551,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   console.log('Native window capture:', capture.status === 0 ? 'saved' : capture.stderr.trim());
   assert.deepEqual(errors, []);
   await main(
-    `__kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false }); __kiteNativeSmoke.app.quit();`,
-  );
-  assert.equal(
-    await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].isDestroyed()'),
-    false,
-  );
-  assert.deepEqual(await page.evaluate(() => window.kiteDesktop!.runtimeStatus()), beforeQuit);
-  await main(
-    `__kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });`,
+    `__kiteNativeSmoke.dialog.showMessageBox = async () => { throw new Error('idle quit must not prompt'); };`,
   );
   model.assertComplete();
   await main('__kiteNativeSmoke.app.quit()');
@@ -569,7 +560,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   browser = undefined;
   assert.equal(await exited, 0);
   console.log(
-    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching with delayed calibration, hide/reopen and confirmed exit passed. Native dialog responses were stubbed; no external Provider was used.',
+    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching with delayed calibration, hide/reopen and idle exit without confirmation passed. No external Provider was used.',
   );
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];

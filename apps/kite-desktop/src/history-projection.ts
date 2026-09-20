@@ -1,6 +1,32 @@
 import type { RuntimeHistorySessionTranscript } from '@kite-ai/runtime-contract';
 import { type Message, projectEventWithIdentity } from './presentation';
 
+export interface DesktopCacheMetrics {
+  readonly cacheHitTokens: number;
+  readonly cacheMissTokens: number;
+}
+
+export function addCacheMetrics(
+  current: DesktopCacheMetrics | undefined,
+  event: RuntimeHistorySessionTranscript['records'][number]['events'][number],
+): DesktopCacheMetrics | undefined {
+  if (event.type !== 'model.cache') return current;
+  return {
+    cacheHitTokens: (current?.cacheHitTokens ?? 0) + event.cacheHitTokens,
+    cacheMissTokens: (current?.cacheMissTokens ?? 0) + event.cacheMissTokens,
+  };
+}
+
+export function projectCacheMetrics(
+  records: RuntimeHistorySessionTranscript['records'],
+): DesktopCacheMetrics | undefined {
+  let metrics: DesktopCacheMetrics | undefined;
+  for (const record of records) {
+    for (const event of record.events) metrics = addCacheMetrics(metrics, event);
+  }
+  return metrics;
+}
+
 /** Yield between bounded batches without publishing partial historical pages. */
 export async function projectHistory(
   records: RuntimeHistorySessionTranscript['records'],

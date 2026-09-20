@@ -82,10 +82,25 @@ describe('buildRuntimeContext', () => {
     expect(snapshot).toContain('version: 2');
     expect(snapshot).toContain('write_plan_allowed: true');
     expect(snapshot).toContain('write_plan_submit_allowed: true');
+    expect(snapshot).toContain('Phase policy: planning is read-only');
+    expect(snapshot).toContain('preserve implementation and executable verification for building');
+    expect(snapshot).not.toContain('tests, builds, installs, formatting, generation');
 
     const cacheable = buildCacheableRuntimeContext({ workspace: 'D:\\workspace' });
     expect(cacheable).not.toContain('Phase:');
     expect(cacheable).not.toContain('Authorization:');
     expect(cacheable).not.toContain('Sandbox backend:');
+  });
+
+  test('keeps building policy concise and delegates authority to tool policy', () => {
+    const snapshot = buildRuntimeModeSnapshot({
+      phase: 'building',
+      interactionMode: 'accept_edits',
+      sandboxBackend: 'seatbelt',
+    });
+
+    expect(snapshot).toContain('Phase policy: building may execute the approved task');
+    expect(snapshot).toContain('tool policy remains authoritative');
+    expect(snapshot).not.toContain('approval and sandbox boundaries');
   });
 });

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { RuntimeClientEvent } from '@kite-ai/runtime-contract';
-import { projectHistory } from '../src/history-projection';
+import { projectCacheMetrics, projectHistory } from '../src/history-projection';
 import { projectEventWithIdentity } from '../src/presentation';
 
 const event = (index: number): RuntimeClientEvent => ({
@@ -46,4 +46,23 @@ test('large historical projection yields and superseding it stops before publica
   ).rejects.toThrow();
   clearTimeout(timer);
   expect(heartbeat).toBe(true);
+});
+
+test('historical projection restores cumulative prompt cache metrics', () => {
+  expect(
+    projectCacheMetrics([
+      {
+        ...record(1),
+        events: [
+          event(1),
+          { type: 'model.cache', inputTokens: 100, cacheHitTokens: 75, cacheMissTokens: 25 },
+        ],
+      },
+      {
+        ...record(2),
+        events: [{ type: 'model.cache', inputTokens: 50, cacheHitTokens: 25, cacheMissTokens: 25 }],
+      },
+    ]),
+  ).toEqual({ cacheHitTokens: 100, cacheMissTokens: 50 });
+  expect(projectCacheMetrics([record(1)])).toBeUndefined();
 });

@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
+import { DESKTOP_QUIT_INSPECTION_CHANNELS } from '../src/bridge';
 import { DesktopHost } from './host';
 import { registerDesktopIpc } from './ipc';
 import { sameRendererDocument } from './security';
@@ -15,9 +16,10 @@ app.setPath('userData', join(app.getPath('appData'), LEGACY_APP_DATA_DIRECTORY))
 
 let mainWindow: BrowserWindow | undefined;
 let exitAllowed = false;
-let exitPromptOpen = false;
 let quitInProgress = false;
 let host: DesktopHost | undefined;
+let quitInspectionId = 0;
+const quitInspections = new Map<number, (hasActiveTasks: boolean) => void>();
 
 void app
   .whenReady()
@@ -39,6 +41,8 @@ void app
       host,
       getWindow: () => mainWindow,
       rendererUrl,
+      completeQuitInspection: (requestId, hasActiveTasks) =>
+        quitInspections.get(requestId)?.(hasActiveTasks),
     });
     if (app.isPackaged) await mainWindow.loadFile(join(appPath, 'dist/index.html'));
     else await mainWindow.loadURL(rendererUrl);
@@ -58,17 +62,19 @@ app.on('activate', () => {
 app.on('before-quit', (event) => {
   if (exitAllowed) return;
   event.preventDefault();
-  if (exitPromptOpen || quitInProgress) return;
-  exitPromptOpen = true;
+  if (quitInProgress) return;
+  quitInProgress = true;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
   }
-  void showQuitConfirmation()
+  void inspectActiveSessionTasks()
+    .then((hasActiveTasks) => (hasActiveTasks ? showQuitConfirmation() : true))
     .then(async (confirmed) => {
-      exitPromptOpen = false;
-      if (!confirmed) return;
-      quitInProgress = true;
+      if (!confirmed) {
+        quitInProgress = false;
+        return;
+      }
       try {
         await host?.quit();
         exitAllowed = true;
@@ -89,11 +95,25 @@ app.on('before-quit', (event) => {
       }
     })
     .catch((error: unknown) => {
-      exitPromptOpen = false;
       quitInProgress = false;
       dialog.showErrorBox('无法确认退出', messageOf(error));
     });
 });
+
+async function inspectActiveSessionTasks(): Promise<boolean> {
+  if (!mainWindow || mainWindow.isDestroyed()) return true;
+  const requestId = ++quitInspectionId;
+  return new Promise<boolean>((resolve) => {
+    const finish = (hasActiveTasks: boolean) => {
+      quitInspections.delete(requestId);
+      clearTimeout(timeout);
+      resolve(hasActiveTasks);
+    };
+    const timeout = setTimeout(() => finish(true), 2_000);
+    quitInspections.set(requestId, finish);
+    mainWindow!.webContents.send(DESKTOP_QUIT_INSPECTION_CHANNELS.request, requestId);
+  });
+}
 
 function createMainWindow(rendererUrl: string, packaged: boolean): BrowserWindow {
   const window = new BrowserWindow({

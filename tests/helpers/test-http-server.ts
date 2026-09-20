@@ -1,18 +1,11 @@
 export function startTestHttpServer(options: {
   fetch(request: Request): Response | Promise<Response>;
 }): ReturnType<typeof Bun.serve> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const port = 30_000 + Math.floor(Math.random() * 30_000);
-    try {
-      return Bun.serve({
-        hostname: '127.0.0.1',
-        port,
-        fetch: options.fetch,
-      });
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError;
+  return Bun.serve({
+    hostname: '127.0.0.1',
+    // Let the OS reserve an available ephemeral port atomically. Picking a random
+    // port first races parallel test processes and can hide non-collision failures.
+    port: 0,
+    fetch: options.fetch,
+  });
 }

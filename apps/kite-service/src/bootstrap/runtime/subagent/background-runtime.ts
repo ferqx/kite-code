@@ -38,6 +38,7 @@ export type BackgroundSubagentStatus =
 
 interface BackgroundSubagentRecord {
   readonly taskId: string;
+  readonly displayName?: string;
   readonly ownerKey: string;
   readonly originRunId: string;
   readonly originTurnId: string;
@@ -56,6 +57,7 @@ interface BackgroundSubagentRecord {
 
 export interface BackgroundSubagentAdoption {
   readonly taskId: string;
+  readonly displayName?: string;
   readonly ownerKey: string;
   readonly originRunId: string;
   readonly originTurnId: string;
@@ -132,6 +134,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     }
     const record = {
       taskId: input.taskId,
+      ...(input.displayName ? { displayName: input.displayName } : {}),
       ownerKey: input.ownerKey,
       originRunId: input.originRunId,
       originTurnId: input.originTurnId,
@@ -229,6 +232,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       const artifact = this.#results.write({
         ownerKey: record.ownerKey,
         taskId: record.taskId,
+        ...(record.displayName ? { displayName: record.displayName } : {}),
         result: durableResult,
       });
       record.resultArtifact = artifact;
@@ -313,6 +317,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       .filter((record) => record.ownerKey === ownerKey)
       .map((record) => ({
         executionId: record.taskId,
+        ...(record.displayName ? { displayName: record.displayName } : {}),
         sessionId,
         kind: 'subagent' as const,
         status:
@@ -330,6 +335,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       .filter((item) => !liveIds.has(item.taskId))
       .map((item) => ({
         executionId: item.taskId,
+        ...(item.displayName ? { displayName: item.displayName } : {}),
         sessionId,
         kind: 'subagent' as const,
         status: this.#hasSettlementProof(ownerKey, item.taskId, item.ref)

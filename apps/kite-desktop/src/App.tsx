@@ -468,10 +468,6 @@ export function App({ client }: { client: DesktopClient }) {
                 : (session.currentRun?.status ?? 'idle'),
             updatedAt: session.updatedAt,
             pendingInteractions: session.interactionQueue?.interactions.length ?? 0,
-            backgroundExecutionCount:
-              view.background?.[session.sessionId]?.snapshot.executions.filter(
-                (execution) => execution.status === 'running' || execution.status === 'stopping',
-              ).length ?? 0,
           })),
       }))}
       defaultExpanded
@@ -519,11 +515,13 @@ export function App({ client }: { client: DesktopClient }) {
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
-      beforeConversation={
-        selected && view.background?.[selected] ? (
+      environmentInformation={
+        !workbenchView && !scheduledTasksView && !preparing && selected ? (
           <BackgroundExecutions
-            executions={view.background[selected]!.snapshot.executions}
-            stale={view.background[selected]!.stale}
+            id="session-environment-information"
+            executions={view.background?.[selected]?.snapshot.executions ?? []}
+            stale={view.background?.[selected]?.stale}
+            currentOnly
             stoppingExecutionId={stoppingBackground}
             onStop={(execution) => {
               if (
@@ -706,6 +704,10 @@ export function App({ client }: { client: DesktopClient }) {
               disabled: false,
               active,
               stopping: !!stopping,
+              sending:
+                submissionVisible &&
+                firstSubmission.phase !== 'failed' &&
+                firstSubmission.phase !== 'unknown',
               cancelDisabled: busy || !ready || loadingSession,
               model,
               models: view.models?.providers.flatMap((provider) =>
@@ -737,8 +739,10 @@ export function App({ client }: { client: DesktopClient }) {
                 (!preparing && busy) ||
                 submitting ||
                 (!preparing && (!selected || !ready || loadingSession)),
-              permissionPending: pendingPermission?.sessionId === selected,
+              permissionPending:
+                !preparing && !!pendingPermission && pendingPermission.sessionId === selected,
               sessionLoading: !preparing && (loadingSession || selectingSession !== undefined),
+              cacheMetrics: preparing ? undefined : view.cacheMetrics,
               onPermissionChange: (permission) => {
                 if (preparing) {
                   setNewConversationPermission(permission);
@@ -1007,10 +1011,15 @@ export function App({ client }: { client: DesktopClient }) {
             <DialogHeader className="desktop-settings-header">
               <DialogTitle>设置</DialogTitle>
               <DialogDescription className="sr-only">配置编辑器与扩展能力</DialogDescription>
-              <button type="button" onClick={() => setSettingsOpen(false)}>
+              <Button
+                type="button"
+                variant="ghost"
+                className="settings-back"
+                onClick={() => setSettingsOpen(false)}
+              >
                 <HugeiconsIcon icon={ArrowLeft01Icon} aria-hidden="true" />
-                返回应用
-              </button>
+                <span>返回应用</span>
+              </Button>
             </DialogHeader>
             <Settings
               client={client}

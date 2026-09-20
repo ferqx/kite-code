@@ -169,8 +169,6 @@ function Workspace({
                       <Badge>待用户输入</Badge>
                     ) : session.status === 'running' ? (
                       <Spinner aria-label="会话运行中" />
-                    ) : session.backgroundExecutionCount ? (
-                      <Badge>{session.backgroundExecutionCount} 个后台任务</Badge>
                     ) : null}
                   </Button>
                 </TooltipTrigger>
@@ -301,8 +299,7 @@ export function Sidebar({
               <Button className="profile-card" aria-label="用户菜单">
                 <HugeiconsIcon className="profile-avatar" icon={UserCircleIcon} />
                 <span>
-                  <strong>本地用户</strong>
-                  <small>个人工作区</small>
+                  <strong>个人工作区</strong>
                 </span>
                 <HugeiconsIcon icon={MoreHorizontalIcon} aria-label="更多操作" />
               </Button>

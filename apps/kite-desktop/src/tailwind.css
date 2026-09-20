@@ -102,8 +102,8 @@ html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-he
   left: 0;
   top: 0;
   width: 236px;
-  height: 106px;
-  padding: 58px 20px 12px;
+  height: 52px;
+  padding: 10px;
   background: var(--sidebar);
 }
 .kite-client .desktop-settings-header h2 {
@@ -116,13 +116,20 @@ html[data-platform="macos"] .kite-client.shell:not(.sidebar-visible) .session-he
 .kite-client .desktop-settings-header button {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  width: fit-content;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 0;
-  background: none;
+  background: transparent;
   color: var(--foreground);
   font-size: 14px;
   cursor: pointer;
+}
+.kite-client .desktop-settings-header button:hover:not(:disabled) {
+  background: var(--sidebar-accent);
 }
 .kite-client .desktop-settings-header button svg {
   width: 16px;
@@ -164,7 +171,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   -webkit-app-region: no-drag;
 }
 .kite-client .settings-sidebar {
-  padding: 106px 10px 24px;
+  padding: 52px 10px 24px;
   background: var(--sidebar);
   overflow-y: auto;
 }
@@ -177,6 +184,9 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
   margin: 20px 10px 5px;
   color: var(--directory-tertiary-foreground);
   font-size: 12px;
+}
+.kite-client .settings-sidebar nav p:first-child {
+  margin-top: 8px;
 }
 .kite-client .settings-sidebar nav button {
   justify-content: flex-start;
@@ -198,37 +208,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
 }
 .kite-client .settings-sidebar nav button:hover {
   background: var(--accent);
-}
-.kite-client .settings-search-empty {
-  padding: 12px 10px;
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-.kite-client .settings-search {
-  display: block;
-  position: relative;
-}
-.kite-client .desktop-settings .settings-search svg {
-  position: absolute;
-  left: 12px;
-  top: 10px;
-  width: 18px;
-  height: 18px;
-  color: var(--muted-foreground);
-  pointer-events: none;
-}
-.kite-client .settings-search input {
-  width: 100%;
-  height: 40px;
-  padding: 6px 12px 6px 40px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 14px;
-}
-.kite-client .settings-search input::placeholder {
-  color: var(--muted-foreground);
 }
 .kite-client .desktop-settings .settings-content {
   height: 100%;
@@ -716,4 +695,12 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-prov
     flex-wrap: wrap;
     padding: 14px 0;
   }
+}
+
+html[data-platform="macos"] .kite-client .desktop-settings-header {
+  height: 88px;
+  padding-top: 46px;
+}
+html[data-platform="macos"] .kite-client .settings-sidebar {
+  padding-top: 88px;
 }

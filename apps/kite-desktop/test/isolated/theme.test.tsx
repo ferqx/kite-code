@@ -20,7 +20,6 @@ for (const [key, value] of Object.entries({
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
-const { createRoot } = await import('react-dom/client');
 
 let dark = false;
 const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -58,7 +57,7 @@ Object.defineProperty(dom.window, 'kiteDesktop', {
   },
 });
 
-let root: ReturnType<typeof createRoot> | undefined;
+let root: import('react-dom/client').Root | undefined;
 let current: ReturnType<typeof useDesktopTheme>;
 function Probe() {
   current = useDesktopTheme();
@@ -98,6 +97,7 @@ afterAll(() => {
     else Reflect.deleteProperty(globalThis, key);
   }
 });
+const { createRoot } = await import('react-dom/client');
 
 test('saved preference is restored after remount and forwarded to native bridge', async () => {
   await mount();

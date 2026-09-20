@@ -178,6 +178,19 @@ body {
     height: 100%;
     min-height: 0;
   }
+  .client-panels > #navigation,
+  .client-panels > #details {
+    transition: flex-grow 180ms ease-out;
+  }
+  .collapsible-sidebar-content {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .collapsible-sidebar-viewport {
+    overflow: hidden !important;
+  }
   .client-sidebar-panel,
   .client-main-panel {
     flex-direction: column;
@@ -205,6 +218,20 @@ body {
     outline: 2px solid var(--ring, var(--input));
     outline-offset: -2px;
   }
+  .collapsible-sidebar-handle {
+    transition:
+      width 180ms ease-out,
+      flex-basis 180ms ease-out,
+      opacity 120ms ease-out,
+      visibility 0s;
+  }
+  .collapsible-sidebar-handle[data-open="false"] {
+    width: 0;
+    flex-basis: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
   .resizable-grip {
     position: absolute;
     top: 50%;
@@ -228,7 +255,7 @@ body {
     width: 100%;
     min-width: 0;
     flex: 1;
-    padding: 0 var(--sidebar-inline-padding) 16px;
+    padding: 0 var(--sidebar-inline-padding);
     background: var(--sidebar);
     font-size: 14px;
     min-height: 0;
@@ -383,7 +410,9 @@ body {
   }
   .sidebar-utilities {
     margin-top: auto;
-    padding-top: 12px;
+    margin-inline: calc(-1 * var(--sidebar-inline-padding));
+    border-top: 1px solid var(--border);
+    padding: 8px;
   }
   .connection {
     display: flex;
@@ -398,9 +427,10 @@ body {
   }
   .profile-card {
     width: 100%;
-    height: 56px;
-    padding: 8px;
-    gap: 10px;
+    height: 36px;
+    min-height: 36px;
+    padding: 4px;
+    gap: 6px;
     border: 0;
     background: transparent;
   }
@@ -411,28 +441,23 @@ body {
     display: flex;
     flex: 1;
     min-width: 0;
-    flex-direction: column;
     align-items: flex-start;
     line-height: 18px;
   }
-  .profile-card strong,
-  .profile-card small {
+  .profile-card strong {
     width: 100%;
     overflow: hidden;
     text-align: left;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .profile-card strong {
     font-size: inherit;
     font-weight: 500;
   }
-  .profile-card small {
-    color: var(--muted-foreground);
-    font-size: inherit;
-  }
   .profile-avatar {
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
     flex: none;
   }
   main {
@@ -482,14 +507,21 @@ body {
     display: flex;
     flex-direction: column;
     flex: 1;
+    width: 100%;
+    min-width: 0;
     min-height: 0;
+    position: relative;
   }
   .conversation-container {
     flex: 1;
+    width: 100%;
+    min-width: 0;
     min-height: 0;
     position: relative;
   }
   .conversation {
+    width: 100%;
+    min-width: 0;
     height: 100%;
   }
   .conversation-loading {
@@ -519,9 +551,16 @@ body {
     }
   }
   .conversation-viewport {
+    width: 100%;
+    min-width: 0;
     padding: 24px 28px 16px;
     overflow-anchor: none;
     scrollbar-gutter: stable;
+  }
+  .conversation-viewport > div {
+    display: block !important;
+    width: 100%;
+    min-width: 0 !important;
   }
   .message,
   input,
@@ -541,6 +580,7 @@ body {
     position: relative;
   }
   .reading-column {
+    min-width: 0;
     overflow: clip;
     overflow-clip-margin: 5px;
     padding-bottom: 24px;
@@ -561,6 +601,8 @@ body {
     margin-bottom: 24px;
   }
   .message {
+    width: 100%;
+    max-width: 100%;
     margin-bottom: 16px;
     line-height: 1.7;
     overflow-wrap: anywhere;
@@ -737,11 +779,13 @@ body {
     flex-shrink: 0;
   }
   .composer {
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--border);
     border-radius: 18px;
     background: var(--card);
-    min-height: 84px;
-    padding: 10px 12px;
+    min-height: 112px;
+    padding: 10px 12px 4px;
     box-shadow: 0 1px 2px #20221e0a;
     transition:
       border-color 120ms,
@@ -756,7 +800,7 @@ body {
   .composer textarea {
     border: 0;
     background: transparent;
-    min-height: 38px;
+    min-height: 52px;
     max-height: 180px;
     padding: 3px 6px 7px;
     resize: none;
@@ -775,6 +819,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    margin-top: auto;
     gap: 8px;
   }
   .composer-options {
@@ -785,9 +830,9 @@ body {
   }
   .model-trigger {
     max-width: 220px;
-    min-height: 28px;
-    padding: 3px 8px;
-    gap: 6px;
+    min-height: 26px;
+    padding: 2px 6px;
+    gap: 4px;
     color: var(--muted-foreground);
     font-size: 12px;
   }
@@ -824,9 +869,9 @@ body {
     font-size: 11px;
   }
   .permission-trigger {
-    min-height: 28px;
-    padding: 3px 8px;
-    gap: 6px;
+    min-height: 26px;
+    padding: 2px 6px;
+    gap: 4px;
     background-color: transparent;
     color: var(--muted-foreground);
     font-size: 12px;
@@ -844,6 +889,13 @@ body {
   }
   .composer[data-session-loading="true"] .permission-trigger:disabled {
     opacity: 1;
+  }
+  .composer-cache-rate {
+    flex: none;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    line-height: 26px;
+    white-space: nowrap;
   }
   .permission-menu {
     min-width: 312px;
@@ -906,8 +958,11 @@ body {
   }
   .composer-action {
     flex: none;
+    width: 26px;
+    height: 26px;
+    min-height: 26px;
     padding: 0;
-    border-radius: 10px;
+    border-radius: 50%;
   }
 
   .composer-actions {
@@ -1496,7 +1551,7 @@ body {
   gap: 12px;
 }
 .kite-client .scheduled-card {
-  padding: 18px 20px;
+  padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
   background: var(--card);
@@ -1657,6 +1712,13 @@ body {
 }
 .kite-client .right-sidebar [data-slot="tabs-content"] {
   margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kite-client .client-panels > #navigation,
+  .kite-client .client-panels > #details,
+  .kite-client .collapsible-sidebar-handle {
+    transition: none;
+  }
 }
 .kite-client .file-change {
   border: 0;
@@ -1834,6 +1896,12 @@ body {
 }
 .kite-client .tool-activity-content[data-state="open"] .tool-activity-reveal {
   animation: tool-activity-expand 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.kite-client
+  .tool-activity[data-restored-expanded="true"]
+  > .tool-activity-content[data-state="open"]
+  .tool-activity-reveal {
+  animation: none;
 }
 .kite-client .tool-activity-content[data-state="closed"] {
   animation: tool-activity-collapse 240ms ease-in-out;
@@ -2562,4 +2630,146 @@ body {
 }
 .background-stale {
   color: var(--muted-foreground);
+}
+.background-executions.environment-information {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  margin: 16px 16px 0 0;
+  width: min(340px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: 18px 20px;
+  border-radius: 18px;
+  background: var(--card);
+  font-size: 14px;
+  line-height: 20px;
+  overflow: auto;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(12px) scale(0.98);
+  transform-origin: top right;
+  transition:
+    opacity 160ms ease,
+    transform 180ms ease,
+    visibility 0s linear 180ms;
+}
+.kite-client .session-view:has(> .environment-information) {
+  --environment-information-safe-area: 28px;
+}
+.kite-client .session-view.environment-information-docked {
+  --environment-information-safe-area: 384px;
+}
+.kite-client
+  .session-view:is(.environment-information-docked, .environment-information-overlay)
+  > .environment-information {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0) scale(1);
+  transition:
+    opacity 160ms ease,
+    transform 180ms ease,
+    visibility 0s;
+}
+.kite-client .environment-information-toggle[aria-expanded="true"] {
+  background: var(--accent);
+}
+.kite-client .session-view:has(> .environment-information) .conversation-viewport {
+  padding-right: var(--environment-information-safe-area);
+  transition: padding-right 180ms ease;
+}
+.kite-client .session-view:has(> .environment-information) .conversation-footer {
+  padding-right: var(--environment-information-safe-area);
+  transition: padding-right 180ms ease;
+}
+.kite-client .session-view.environment-information-docked :is(.reading-column, .bottom-controls) {
+  max-width: 720px;
+}
+.kite-client .session-view:has(> .environment-information) :is(.reading-column, .bottom-controls) {
+  transition: max-width 180ms ease;
+}
+.kite-client .session-view:has(> .environment-information) .history-panel > .notice {
+  margin-right: var(--environment-information-safe-area);
+  transition: margin-right 180ms ease;
+}
+.kite-client .environment-information > header {
+  margin-bottom: 14px;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--muted-foreground);
+}
+.kite-client .environment-information > header strong {
+  font-weight: 500;
+}
+.kite-client .environment-information .background-execution-group + .background-execution-group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.kite-client .environment-information .background-execution-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  min-height: 24px;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 500;
+}
+.kite-client .environment-information .background-execution-group h3 svg {
+  width: 18px;
+  height: 18px;
+  color: var(--muted-foreground);
+}
+.kite-client .environment-information .background-execution-count {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+.kite-client .environment-information .background-execution-group ul {
+  margin-top: 6px;
+}
+.kite-client .environment-information .background-execution-empty {
+  margin: 6px 0 0;
+  padding-left: 26px;
+  color: var(--muted-foreground);
+}
+.kite-client .environment-information .background-execution-group li {
+  min-height: 30px;
+  padding-left: 26px;
+}
+.kite-client .environment-information .background-execution-identity {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.kite-client .environment-information .background-execution-name,
+.kite-client .environment-information .background-execution-group code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .environment-information .background-execution-group code {
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--muted-foreground);
+}
+.kite-client .environment-information .background-execution-status,
+.kite-client .environment-information .background-execution-stop {
+  color: var(--muted-foreground);
+  font-size: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .background-executions.environment-information,
+  .kite-client .session-view:has(> .environment-information) .conversation-viewport,
+  .kite-client .session-view:has(> .environment-information) .conversation-footer,
+  .kite-client .session-view:has(> .environment-information) :is(.reading-column, .bottom-controls),
+  .kite-client .session-view:has(> .environment-information) .history-panel > .notice {
+    transition: none;
+  }
 }

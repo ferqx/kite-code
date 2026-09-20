@@ -54,6 +54,7 @@ export type DesktopIpcResult<T> = { ok: true; value: T } | { ok: false; error: s
 
 /** The complete API exposed to the sandboxed renderer by Electron's preload. */
 export interface KiteDesktopBridge {
+  watchQuitInspection(inspect: () => Promise<boolean>): () => void;
   listProjects(): Promise<DesktopProject[]>;
   runtimeStatus(): Promise<DesktopRuntimeStatus>;
   runtimeStartupStatus(): Promise<DesktopStartupStatus>;
@@ -95,7 +96,12 @@ export const DESKTOP_IPC_CHANNELS = {
   toggleWindowMaximize: 'kite:desktop:toggle-window-maximize',
   setTheme: 'kite:desktop:set-theme',
   showConfirm: 'kite:desktop:show-confirm',
-} as const satisfies Record<keyof KiteDesktopBridge, string>;
+} as const satisfies Record<Exclude<keyof KiteDesktopBridge, 'watchQuitInspection'>, string>;
+
+export const DESKTOP_QUIT_INSPECTION_CHANNELS = {
+  request: 'kite:desktop:quit-inspection-request',
+  result: 'kite:desktop:quit-inspection-result',
+} as const;
 
 export type DesktopIpcChannel = (typeof DESKTOP_IPC_CHANNELS)[keyof typeof DESKTOP_IPC_CHANNELS];
 

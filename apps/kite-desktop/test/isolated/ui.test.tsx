@@ -42,13 +42,14 @@ for (const [key, value] of Object.entries(globals)) {
   originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
   Object.defineProperty(globalThis, key, { configurable: true, value, writable: true });
 }
-// React DOM must observe a DOM when it initializes its input event support.
-const { createRoot } = await import('react-dom/client');
-const { App } = await import('../../src/App');
-const { Settings } = await import('../../src/Settings');
-let root: ReturnType<typeof createRoot> | undefined;
+let root: import('react-dom/client').Root | undefined;
 afterEach(async () => {
-  if (root) await act(() => root?.unmount());
+  if (root) {
+    await act(() => root?.unmount());
+    // Sonner delivers dismiss notifications through requestAnimationFrame. Let that
+    // bounded cleanup settle before this file restores the shared JSDOM globals.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  }
   root = undefined;
   document.body.innerHTML = '';
   window.sessionStorage.clear();
@@ -61,6 +62,10 @@ afterAll(() => {
     else Reflect.deleteProperty(globalThis, key);
   }
 });
+// React DOM must observe a DOM when it initializes its input event support.
+const { createRoot } = await import('react-dom/client');
+const { App } = await import('../../src/App');
+const { Settings } = await import('../../src/Settings');
 
 function session(id: string, name = id): RuntimeSessionProjection {
   return {
@@ -242,6 +247,7 @@ class UiClient extends DesktopClient {
         (item) => item.sessionId === id,
       ) as RuntimeSessionProjection | undefined,
       messages: [],
+      cacheMetrics: undefined,
     });
   }
   override async send(
@@ -464,6 +470,16 @@ test('composer selects a configured model and changes the current session permis
   expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
 });
 
+test('composer shows the selected session cache hit rate without leaking it to another session', async () => {
+  const client = new UiClient();
+  client.update({ cacheMetrics: { cacheHitTokens: 80, cacheMissTokens: 20 } });
+  await render(<App client={client} />);
+  expect(document.querySelector('.composer-cache-rate')?.textContent).toBe('缓存 80%');
+
+  await act(() => client.selectSession('s1'));
+  expect(document.querySelector('.composer-cache-rate')).toBeNull();
+});
+
 test('session switch keeps selectors steady until the target projection loads', async () => {
   const client = new UiClient();
   const target = { ...client.view.sessions[1]!, model: { provider: 'test', name: 'model-fast' } };
@@ -506,13 +522,19 @@ test('the desktop sidebar can be reopened after it is collapsed', async () => {
   await render(<App client={client} />);
 
   await click(button('收起侧栏'));
-  expect(document.querySelector('.client-sidebar-panel')).toBeNull();
+  expect(document.querySelector('.client-sidebar-panel')).not.toBeNull();
+  expect(
+    document.querySelectorAll('.collapsible-sidebar-content')[0]?.getAttribute('aria-hidden'),
+  ).toBe('true');
 
   const reopen = button('展开侧栏');
   expect(reopen.closest('.session-header')).not.toBeNull();
   await click(reopen);
 
   expect(document.querySelector('.client-sidebar-panel')).not.toBeNull();
+  expect(
+    document.querySelectorAll('.collapsible-sidebar-content')[0]?.getAttribute('aria-hidden'),
+  ).toBe('false');
   expect(button('收起侧栏').getAttribute('aria-expanded')).toBe('true');
 });
 
@@ -531,6 +553,9 @@ test('permission submission keeps disabled composer selectors visually steady', 
   await choosePermission('accept_edits');
   const composer = document.querySelector<HTMLFormElement>('.composer')!;
   expect(composer.dataset.permissionPending).toBe('true');
+  expect(
+    document.querySelector('[data-permission-trigger] .motion-safe\\:animate-spin'),
+  ).toBeNull();
   expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
   expect(document.querySelector('[data-permission-trigger]')?.getAttribute('aria-label')).toBe(
     'Permission: Ask, changing',
@@ -1487,6 +1512,7 @@ test('window focus preserves history and never drives service recovery', async (
 
 test('space new conversation icon targets that project without toggling its list or creating a session', async () => {
   const client = new UiClient();
+  client.view.selected = undefined;
   client.view.projects = [
     { path: '/project', lastOpenedAt: 2 },
     { path: '/another', lastOpenedAt: 1 },
@@ -1509,6 +1535,10 @@ test('space new conversation icon targets that project without toggling its list
   ).toBe('true');
   expect(client.created).toBe(0);
   expect(client.sent).toEqual([]);
+  expect(document.querySelector('.composer')?.getAttribute('data-permission-pending')).toBeNull();
+  await click(button('在 project 中新建对话'));
+  expect(document.querySelector('.composer')?.getAttribute('data-permission-pending')).toBeNull();
+  expect(client.selectedModes).toEqual([]);
 });
 
 test('workspace switching keeps the existing session list mounted and visually enabled', async () => {
@@ -2294,7 +2324,9 @@ test('file changes open beside the conversation, keep drafts and close before sw
   expect(document.activeElement).toBe(button('文件变更'));
   await click(button('文件变更'));
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
-  expect(document.querySelector('[aria-label="文件变更"]')).toBeNull();
+  expect(
+    document.querySelectorAll('.collapsible-sidebar-content')[1]?.getAttribute('aria-hidden'),
+  ).toBe('true');
   expect(input().value).toBe('');
 });
 
@@ -2316,18 +2348,16 @@ test('settings shows existing capabilities in the reference layout without inven
   expect(document.querySelector('[aria-label="常规设置"]')).not.toBeNull();
   expect(document.querySelector('.settings-sidebar')?.textContent).toContain('模型服务');
   expect(document.querySelector('.settings-sidebar')?.textContent).toContain('扩展');
-  expect(document.querySelectorAll('.settings-sidebar svg')).toHaveLength(6);
+  expect(document.querySelectorAll('.settings-sidebar svg')).toHaveLength(5);
   await act(async () => {
     const editor = document.querySelector<HTMLSelectElement>('[aria-label="默认编辑器"]')!;
     editor.value = 'zed';
     editor.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
   });
   expect(editorChanges).toEqual(['zed']);
-  await write(document.querySelector<HTMLInputElement>('.settings-search input')!, 'Skills');
-  expect(document.querySelector('.settings-sidebar')?.textContent).not.toContain('提供商');
+  expect(document.querySelector('.settings-search')).toBeNull();
   expect(button('Skills')).not.toBeNull();
   expect(document.body.textContent).not.toContain('默认权限');
-  await write(document.querySelector<HTMLInputElement>('.settings-search input')!, '');
   await click(button('提供商'));
   expect(document.querySelectorAll('.settings-provider-list .settings-row')).toHaveLength(4);
   expect(document.querySelector('.settings-provider-panel')).toBeNull();

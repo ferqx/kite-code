@@ -44,7 +44,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 [展示类型](src/types.ts)只包含页面使用的数据，不导入 Runtime、Public API、Native 或 TUI 类型。端侧投影将真实数据转换为这些字段；缺失数据不能从名称或相邻消息补造。共享组件保留展开和阅读位置；服务状态、订阅与恢复由端侧现有 owner 管理。
 
-[`BackgroundExecutions`](src/BackgroundExecutions.tsx) 只展示端侧提供的后台执行摘要和 stale 状态。只有宿主显式提供 `onStop` 时才显示停止入口；组件不拥有 Session CAS、execution owner、命令回执或恢复状态。Web 使用只读投影，Desktop 仅对当前连接代次的新鲜 running 项提供宿主回调。
+[`BackgroundExecutions`](src/BackgroundExecutions.tsx) 默认展示端侧提供的后台执行摘要和 stale 状态。Desktop 使用常驻的当前环境模式，在会话页右上角按 Shell 与子智能体两组呈现：Shell 只保留新鲜快照中仍在运行或正在停止的项目，子智能体保留新鲜快照中的运行与终态记录，使同一会话已经完成、失败或取消的委派仍可见。子智能体条目有创建时提供的公开名称时只显示名称，不附加执行 ID；旧记录没有名称时才回退显示执行 ID。后台 service、不可用记录、清理状态、游标和 stale 快照不进入这张卡。两组没有项目时仍保留卡片并分别显示空状态。只有宿主显式提供 `onStop` 时才显示停止入口；组件不拥有 Session CAS、execution owner、命令回执或恢复状态。Web 使用默认只读投影，Desktop 仅对当前连接代次的新鲜 running 项提供宿主回调。
 
 子 Agent 在会话内按自身生命周期显示“创建中、运行中、等待中、自动审批中、已完成、已中断、已取消、已失败”。父 task 工具先完成时，标题仍显示子 Agent 的当前状态；子 Agent 的明确失败原因放在展开内容中。只有存在具体子 Agent 终态原因时，才省去父 task 重复的通用失败句；缺少原因仍保留原错误。
 

@@ -50,6 +50,8 @@ Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后�
 
 Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示为可折叠思考活动，不接收或推导私有 reasoning 字段；`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `exhausted` 在 Shell 底部标明已达到输出限制，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
 
+当 Runtime 提供 `model.cache` 样本时，Desktop 按会话累计命中与未命中 token，在 Composer 底栏显示整数缓存命中率。历史读取从已保存事件重建，实时订阅只追加历史水位之后的样本；无样本时不显示，切换会话不沿用上一会话指标。
+
 子代理消息保留服务事实用于恢复，但主会话只渲染工具活动与稳定 stepId 对应的工具步骤，不显示子 Agent 结果段落。可见父 task 的子工具进入父展开区的子 Agent 容器，按确切 toolCallId 去重；没有可见父工具时保留子 Agent 容器入口，内部工具不进入主消息列表。当前没有独立子代理详情或控制。
 
 主工具的 `tool.review` 由 Service 投影真实自动审批请求与完成事实，显示审批中、批准、未通过或转人工；技术异常和无效结果均转人工，不伪装拒绝。`approval.granted` 保留明确 grant，批准与工具执行结果分开保存，停止后不丢批准来源。审批控件只在 `interaction.grants` 包含 same_command 时显示下拉直接批准入口，调用原 `respond_interaction`，不增加本地授权缓存。压缩 requested／completed／failed 更新同一次压缩标记；Ask 回执保留已有安全问题文本与回答摘要，详情可折叠。
@@ -101,6 +103,8 @@ Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示
 
 2026-09-13 补充问题 Questionnaire：桌面 `Interaction` 改用共享 `AskQuestionnaire`，固定选项与允许的自由输入通过同一必答 item 统一提交，保留 Runtime 原始 option id、宿主取消与 interactionId 草稿 owner；共享 UI、桌面 UI、类型检查、桌面完整 100 项测试及生产构建通过。[Figma 计划与问题样例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4208-578)已原位同步标题／说明、两枚单选卡片、A/B 快捷键、自由输入及取消／提交操作；根节点、fieldset、choices、input 与操作节点的语义注释已写入，metadata 和整页截图回读确认无裁切或重叠。此次未改变 Composer、计划审核或 Runtime 回答协议。
 
+2026-09-19 Composer 主控互斥：发送与停止使用同一个 `26×26` 圆形主控位。任务运行且草稿为空或正在停止时显示停止；输入运行中引导后切换为发送；两个按钮不得同时出现。
+
 2026-09-13 活动交互隐藏主输入：审批、补充问题、计划审核或不支持的等待交互存在时，共享页面不渲染整个 Composer，包括主提示词 textarea、模型、权限控件和停止按钮；App 继续持有原草稿，交互结束后恢复。此前“保留会话级停止按钮”的实现与设计记录已经失效，当前交互只提供自身回答、批准、修改或取消操作。Figma [交互示例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4208-578)已移除空 Composer 卡片和停止按钮，高度调整为 `1110` 并回读确认无裁切。
 
 2026-09-13 Questionnaire 紧凑与完整展示：交互区移除绝对定位、固定最大高度和内部滚动，作为 footer 普通布局项完整增高；选项使用 40 px 代码基准、6 px 间距和 12 px 面板内边距。桌面 UI 39 项、共享 UI 19 项、类型检查与生产构建通过。[Figma Questionnaire 样例](https://www.figma.com/design/qr0diiu1SH2prMVmhqMrJ0?node-id=4225-955)已同步无 clipping／overflow 的自动高度结构；两枚选项卡最终为 `756 × 51`，fieldset 为 `780 × 300`，整体为 `780 × 448`，整页截图回读未出现交互区滚动条或裁切。
@@ -139,7 +143,7 @@ Ask 历史沿用 TUI 单题/多题信息结构，使用共享 UI 的有序明细
 
 ## 用户菜单与外观
 
-共享侧栏的用户按钮通过 shadcn DropdownMenu 展示设置入口与主题单选项，设置继续使用原有页面。桌面 [theme.ts](../src/theme.ts) 持有暗、亮、系统跟随偏好，保存在 `kite.desktop.theme`，默认系统跟随；入口挂载前应用已保存主题，系统模式订阅媒体查询并在卸载时移除监听。共享侧栏只消费宿主传入的主题值与回调，不持有存储。Electron 的封闭 `setTheme` IPC 同步原生外观与窗口背景，不涉及 Runtime 或会话配置。Web 保留现有主题入口与行为。
+共享侧栏的用户按钮通过 shadcn DropdownMenu 展示设置入口与主题单选项，设置继续使用原有页面。桌面 [theme.ts](../src/theme.ts) 持有暗、亮、系统跟随偏好，保存在 `kite.desktop.theme`，默认系统跟随；入口挂载前应用已保存主题，系统模式订阅媒体查询并在卸载时移除监听。共享侧栏只消费宿主传入的主题值与回调，不持有存储。Electron 的封闭 `setTheme` IPC 同步原生外观与实色窗口背景，不涉及 Runtime 或会话配置。桌面端不加载侧栏透明或玻璃原生模块，Web 保留现有主题入口与行为。
 
 本次使用隔离数据与真实共享组件在浏览器核对黑灰暗色、亮色、系统跟随菜单、选中标记和刷新后偏好恢复。自动化覆盖 [主题生命周期](../test/isolated/theme.test.tsx)、[设置菜单入口](../test/isolated/ui.test.tsx) 与 [preload 桥接](../test/preload-bridge.test.ts)。Electron 构建和参数边界已验证，未实测原生窗口中的系统外观切换。
 

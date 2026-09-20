@@ -3,7 +3,6 @@ import {
   ArrowDown01Icon,
   Plug01Icon,
   PuzzleIcon,
-  Search01Icon,
   Settings01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -68,7 +67,6 @@ export function Settings({
   const [section, setSection] = useState<'general' | 'providers' | 'models' | 'mcp' | 'skills'>(
     'general',
   );
-  const [search, setSearch] = useState('');
   const [provider, setProvider] = useState<AppModelProviderType>('openai');
   const [editingProvider, setEditingProvider] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -100,8 +98,6 @@ export function Settings({
     setFormErrors({});
     providerButton.current?.focus();
   };
-  const matchesSearch = (label: string) =>
-    label.toLowerCase().includes(search.trim().toLowerCase());
   const personalSections = [['general', '常规', Settings01Icon]] as const;
   const providerSections = [
     ['providers', '提供商', Plug01Icon],
@@ -126,67 +122,49 @@ export function Settings({
       className={`settings settings-layout desktop-settings${editingProvider && section === 'providers' ? ' has-provider-panel' : ''}`}
     >
       <aside className="settings-sidebar">
-        <label className="settings-search">
-          <span className="sr-only">搜索设置</span>
-          <HugeiconsIcon icon={Search01Icon} aria-hidden="true" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索设置…"
-          />
-        </label>
         <nav aria-label="设置分类">
-          {personalSections.some(([, label]) => matchesSearch(label)) && <p>个人</p>}
-          {personalSections
-            .filter(([, label]) => matchesSearch(label))
-            .map(([id, label, icon]) => (
-              <Button
-                key={id}
-                aria-pressed={section === id}
-                onClick={() => {
-                  setSection(id);
-                  setEditingProvider(false);
-                }}
-              >
-                <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
-                {label}
-              </Button>
-            ))}
-          {providerSections.some(([, label]) => matchesSearch(label)) && <p>模型服务</p>}
-          {providerSections
-            .filter(([, label]) => matchesSearch(label))
-            .map(([id, label, icon]) => (
-              <Button
-                key={id}
-                aria-pressed={section === id}
-                onClick={() => {
-                  setSection(id);
-                  setEditingProvider(false);
-                }}
-              >
-                <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
-                {label}
-              </Button>
-            ))}
-          {integrationSections.some(([, label]) => matchesSearch(label)) && <p>扩展</p>}
-          {integrationSections
-            .filter(([, label]) => matchesSearch(label))
-            .map(([id, label, icon]) => (
-              <Button
-                key={id}
-                aria-pressed={section === id}
-                onClick={() => {
-                  setSection(id);
-                  setEditingProvider(false);
-                }}
-              >
-                <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
-                {label}
-              </Button>
-            ))}
-          {![...personalSections, ...providerSections, ...integrationSections].some(([, label]) =>
-            matchesSearch(label),
-          ) && <span className="settings-search-empty">没有匹配的设置分类</span>}
+          <p>个人</p>
+          {personalSections.map(([id, label, icon]) => (
+            <Button
+              key={id}
+              aria-pressed={section === id}
+              onClick={() => {
+                setSection(id);
+                setEditingProvider(false);
+              }}
+            >
+              <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
+              {label}
+            </Button>
+          ))}
+          <p>模型服务</p>
+          {providerSections.map(([id, label, icon]) => (
+            <Button
+              key={id}
+              aria-pressed={section === id}
+              onClick={() => {
+                setSection(id);
+                setEditingProvider(false);
+              }}
+            >
+              <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
+              {label}
+            </Button>
+          ))}
+          <p>扩展</p>
+          {integrationSections.map(([id, label, icon]) => (
+            <Button
+              key={id}
+              aria-pressed={section === id}
+              onClick={() => {
+                setSection(id);
+                setEditingProvider(false);
+              }}
+            >
+              <HugeiconsIcon icon={icon} data-icon="inline-start" aria-hidden="true" />
+              {label}
+            </Button>
+          ))}
         </nav>
       </aside>
       <div className="settings-content">

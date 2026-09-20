@@ -7,7 +7,12 @@ import {
   type IpcMainInvokeEvent,
   nativeTheme,
 } from 'electron';
-import { DESKTOP_IPC_CHANNELS, type DesktopIpcChannel, type DesktopIpcResult } from '../src/bridge';
+import {
+  DESKTOP_IPC_CHANNELS,
+  DESKTOP_QUIT_INSPECTION_CHANNELS,
+  type DesktopIpcChannel,
+  type DesktopIpcResult,
+} from '../src/bridge';
 import type { DesktopHost } from './host';
 import { saveStartupDiagnosticReport } from './runtime/startup-report';
 import {
@@ -18,6 +23,7 @@ import {
   editorPayload,
   noPayload,
   pathPayload,
+  quitInspectionPayload,
   runtimeSendPayload,
   switchPayload,
   themePayload,
@@ -29,6 +35,7 @@ export interface DesktopIpcOptions {
   host: DesktopHost;
   getWindow: () => BrowserWindow | undefined;
   rendererUrl: string;
+  completeQuitInspection?: (requestId: number, hasActiveTasks: boolean) => void;
 }
 
 export function registerDesktopIpc(options: DesktopIpcOptions): void {
@@ -53,6 +60,19 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
     noPayload(payload);
     return options.host.listProjects();
   });
+  options.ipcMain.handle(
+    DESKTOP_QUIT_INSPECTION_CHANNELS.result,
+    async (event, payload: unknown): Promise<DesktopIpcResult<void>> => {
+      try {
+        assertTrustedIpc(event, options.getWindow(), options.rendererUrl);
+        const result = quitInspectionPayload(payload);
+        options.completeQuitInspection?.(result.requestId, result.hasActiveTasks);
+        return { ok: true, value: undefined };
+      } catch (error) {
+        return { ok: false, error: messageOf(error) };
+      }
+    },
+  );
   handle(DESKTOP_IPC_CHANNELS.runtimeStatus, (_event, payload) => {
     noPayload(payload);
     return options.host.runtimeStatus();

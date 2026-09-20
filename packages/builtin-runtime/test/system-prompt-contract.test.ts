@@ -10,4 +10,13 @@ describe('current primary-agent system prompt', () => {
     expect(prompt).toContain('Prefer one simple read-only Git command per call');
     expect(prompt).toContain('avoid `&&`, pipelines, loops');
   });
+
+  test('does not request extra confirmation for assigned workspace work', () => {
+    const prompt = buildStaticSystemPrompt('agent');
+
+    expect(prompt).toContain(
+      'In-scope workspace edits and proportionate verification need no extra confirmation',
+    );
+    expect(prompt).toContain('destructive, external, costly, or scope-expanding actions');
+  });
 });
