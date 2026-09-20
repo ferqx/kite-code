@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { RuntimeState } from '@kite-ai/agent-kernel';
 import { classifyBuiltinShellIntent } from '@kite-ai/builtin-runtime';
+import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-client';
 import {
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_QUERY_SCHEMA_,
@@ -11,9 +12,15 @@ import {
   type RuntimeCommand,
 } from '@kite-ai/runtime-contract';
 import { createRuntimeCommandCommitEvidence } from '@kite-ai/runtime-host';
+import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import type {
+  RuntimeServerAdmissionInput,
+  RuntimeServerAdmissionPort,
+} from '@kite-ai/runtime-server';
 import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteCliRuntimeAccess,
+  createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
@@ -21,6 +28,8 @@ import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-p
 type RestartCommand =
   | Extract<RuntimeCommand, { type: 'create_session' }>
   | Extract<RuntimeCommand, { type: 'start_turn' }>;
+
+const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../..');
 
 test('Store 6 reopens committed create/start receipts after a provider connection loss without redispatching', async () => {
   const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-command-restart-'));
@@ -222,6 +231,146 @@ test('a pending approval stays durable while a crashed execution owner remains f
   }
 }, 30_000);
 
+test('restart recovery interrupts an unfinished required child without replaying its parent Run', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-required-background-restart-'));
+  const workspace = join(root, 'workspace');
+  const databasePath = join(root, 'kite-session.sqlite');
+  const sessionId = 'required-background-restart-session';
+  const model = createMockModelServer();
+  const childRequestStarted = deferred<void>();
+  const childResponseGate = deferred<void>();
+  mkdirSync(workspace, { recursive: true });
+  model.setResponses([
+    {
+      message: {
+        tool_calls: [
+          {
+            id: 'required-background-crash-child',
+            name: 'task',
+            args: {
+              name: 'Crash-bound required child',
+              subagent_type: 'explore',
+              task: 'REQUIRED_BACKGROUND_CRASH_CHILD',
+              background: true,
+              result_disposition: 'required',
+            },
+          },
+        ],
+      },
+      toolContinuation: 'required',
+    },
+    {
+      message: { content: 'The parent must wait for the required child.' },
+      expectedRequest: { toolResults: [{ toolCallId: 'required-background-crash-child' }] },
+    },
+    {
+      response: async () => {
+        childRequestStarted.resolve();
+        await childResponseGate.promise;
+        return { message: { content: 'This child result must never be admitted.' } };
+      },
+    },
+  ]);
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      join(import.meta.dir, '..', 'fixtures', 'runtime-required-background-wait-child.ts'),
+    ],
+    {
+      cwd: REPOSITORY_ROOT,
+      env: {
+        ...process.env,
+        KITE_CODE_HOME: root,
+        KITE_RESTART_TEST_WORKSPACE: workspace,
+        KITE_RESTART_TEST_DATABASE: databasePath,
+        KITE_RESTART_TEST_SESSION: sessionId,
+        KITE_RESTART_TEST_MODEL_URL: model.baseURL,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  let restarted: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined;
+  let runtime: RuntimeClient | undefined;
+  let storage: Awaited<ReturnType<typeof createKiteSessionAppServerStorageComposition>> | undefined;
+  try {
+    const ready = JSON.parse(await readFirstLine(child.stdout, child.stderr)) as { runId: string };
+    expect(ready.runId).toBeString();
+    await bounded(childRequestStarted.promise, 'child Provider request');
+    expect(model.getRequestCount()).toBe(3);
+    child.kill('SIGKILL');
+    expect(await child.exited).not.toBe(0);
+
+    // The dead owner used a 200 ms lease. Waiting beyond that boundary lets the
+    // restarted owner fence it through the production recovery path.
+    await Bun.sleep(250);
+    storage = await createKiteSessionAppServerStorageComposition({
+      databasePath,
+      hostInstanceId: 'required-background-restart-owner',
+      executionLeaseMs: 200,
+      renewIntervalMs: 50,
+    });
+    restarted = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: databasePath,
+      storageOwner: storage,
+      workspaces: [restartRuntimeInput(workspace, model.baseURL)],
+    });
+    runtime = restartClient(restarted, workspace);
+
+    expect(
+      await runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'resume_session',
+        commandId: 'resume-required-background-after-crash',
+        sessionId,
+      }),
+    ).toMatchObject({ status: 'applied' });
+    await waitForRestartCondition(
+      () => storage!.storage.runs?.get(sessionId, ready.runId)?.status !== 'running',
+    );
+
+    const snapshot = storage.loadCurrentSnapshot(sessionId);
+    const run = storage.storage.runs?.get(sessionId, ready.runId);
+    const events = storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event);
+    expect(run).toMatchObject({
+      runId: ready.runId,
+      status: 'failed',
+      terminal: { reasonCode: 'runtime_failed', safeRetry: false },
+    });
+    expect(snapshot?.turn.status).toBe('aborted');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'subagent.failed',
+        subagent: expect.objectContaining({ status: 'interrupted' }),
+      }),
+    );
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
+    expect(model.getRequestCount()).toBe(3);
+
+    await expect(
+      runtime.command({
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'start_turn',
+        commandId: 'required-background-crash-start',
+        sessionId,
+        expectedRevision: 0,
+        input: 'REQUIRED_BACKGROUND_CRASH_PARENT',
+      }),
+    ).resolves.toMatchObject({ status: 'idempotent_replay' });
+    expect(model.getRequestCount()).toBe(3);
+  } finally {
+    childResponseGate.resolve();
+    child.kill('SIGKILL');
+    await child.exited;
+    await runtime?.close();
+    await restarted?.[Symbol.asyncDispose]();
+    storage?.disposeStorage();
+    model.assertComplete({ allowUnconsumedResponses: true });
+    model.stop(true);
+    rmSync(resolve(root), { recursive: true, force: true });
+  }
+}, 30_000);
+
 function createAccess(input: {
   readonly workspace: string;
   readonly checkpointPath: string;
@@ -367,6 +516,86 @@ function receiptLookup(command: RestartCommand) {
     commandId: evidence.commandId,
     requestDigest: evidence.requestDigest,
   };
+}
+
+function restartRuntimeInput(workspace: string, baseURL: string) {
+  return {
+    userId: 'required-background-restart-user',
+    workspace,
+    config: {
+      providerName: 'required-background-restart-model',
+      providerType: 'openai-compatible' as const,
+      apiKey: 'fixture-key',
+      baseURL,
+      modelName: 'mock-model',
+      sandbox: { enabled: false },
+    },
+    shellExecutor: async ({ command }: { command: string }) => ({
+      ok: true as const,
+      command,
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    }),
+    interactionMode: 'accept_edits' as const,
+    sandboxBackend: 'none' as const,
+    skillOptions: {
+      userKiteCodeSkillsDir: join(workspace, 'user-kite-skills'),
+      userAgentsSkillsDir: join(workspace, 'user-agent-skills'),
+      projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),
+      projectAgentsSkillsDir: join(workspace, '.agents', 'skills'),
+    },
+    initialSkillActivations: [],
+  };
+}
+
+function restartClient(
+  server: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer>,
+  workspace: string,
+) {
+  const admission: RuntimeServerAdmissionPort = Object.freeze({
+    authorize: async (_request: RuntimeServerAdmissionInput) => ({
+      allowed: true as const,
+      workspace,
+    }),
+  });
+  const transport: RuntimeClientTransport = Object.freeze({
+    connect: async () => {
+      const pair = server.open({ admission });
+      return Object.freeze({
+        send: (message: RuntimeProtocolMessage) => pair.client.send(message),
+        messages: () => pair.client.messages(),
+        close: (reason?: string) => pair.client.close(reason),
+      });
+    },
+  });
+  return new RuntimeClient({
+    transport,
+    clientInfo: { name: 'required-background-restart', version: '1', instanceId: 'client' },
+  });
+}
+
+async function waitForRestartCondition(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!predicate() && Date.now() < deadline) await Bun.sleep(10);
+  if (!predicate()) throw new Error('Timed out waiting for restart recovery.');
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+async function bounded<T>(promise: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    Bun.sleep(10_000).then(() => {
+      throw new Error(`Timed out waiting for ${label}.`);
+    }),
+  ]);
 }
 
 /** A provider fixture whose request and response are independently gated. */
