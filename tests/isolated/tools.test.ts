@@ -545,11 +545,7 @@ describe('tool safety', () => {
 
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
-    // A POSIX login shell may legitimately report errors from the user's profile.
-    // The product guarantee exercised here is the Windows-specific MSYS2 filter.
-    if (process.platform === 'win32') {
-      expect(result.stderr).toBe('');
-    }
+    expect(result.stderr).toBe('');
   });
 
   test('shellTool aborts child process when signal fires', async () => {

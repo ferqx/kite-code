@@ -153,8 +153,8 @@ export function buildHostShellInvocations(
   }
 
   const bash = deps.which('bash');
-  if (bash) add('bash', [bash, '-lc', command]);
-  if (deps.configuredShell) add('posix', [deps.configuredShell, '-lc', command]);
+  if (bash) add('bash', [bash, '-c', command]);
+  if (deps.configuredShell) add('posix', [deps.configuredShell, '-c', command]);
   const cmd = deps.which('cmd') ?? deps.which('cmd.exe');
   if (cmd) add('cmd', [cmd, '/d', '/c', command]);
   for (const powershell of [deps.which('pwsh'), deps.which('powershell')]) {
@@ -169,7 +169,7 @@ export function buildHostShellInvocations(
       ]);
     }
   }
-  add('posix', ['/bin/sh', '-lc', command]);
+  add('posix', ['/bin/sh', '-c', command]);
   return candidates;
 }
 

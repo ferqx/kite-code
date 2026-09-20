@@ -8,6 +8,8 @@
 
 Shell preparation 决定可执行环境与沙箱能力，实际 dispatch 后输出、退出码和 cleanup 归对应执行 port。执行前拒绝没有退出码；失败不保证没有副作用。Host 丢失或取消后的进程清理由 Host/platform port 承担。
 
+POSIX Host Shell 以非 login 的 `-c` 方式启动，只执行已治理的命令，不隐式读取或执行用户的 `~/.bash_profile`、`~/.bashrc`、`~/.zprofile` 或 `~/.zshrc`。工具链通过宿主进程已投影的环境提供；启动脚本错误不得污染命令的 stderr，也不得在审批内容之外引入额外执行。
+
 平台能力、用户模式、精确审批与工作区信任分别生效。Full 不是配置出任意平台能力的手段，Auto 的不确定结果也不能凭工具说明静默放行。
 
 修改后核对生产 dispatcher、policy 与实际 filesystem/process 测试。规范见[文件边界](../../../docs/active/file-reading-shared-boundary.md)、[执行边界](../../../docs/active/execution-boundary.md)、[Shell 平台](../../../docs/active/shell-platform-compatibility.md)。

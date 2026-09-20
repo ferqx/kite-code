@@ -53,6 +53,35 @@ describe('sandbox executor integration', () => {
     }
   });
 
+  test('does not load user startup files for an ordinary sandboxed command', async () => {
+    const ws = setupWorkspace();
+    const home = mkdtempSync(join(tmpdir(), 'kite-sandbox-non-login-home-'));
+    const previousHome = process.env.HOME;
+    const marker = join(ws, 'profile-executed');
+    try {
+      writeFileSync(
+        join(home, '.bash_profile'),
+        `printf 'unexpected profile output\\n' >&2\ntouch '${marker}'\n`,
+      );
+      writeFileSync(
+        join(home, '.bashrc'),
+        `printf 'unexpected bashrc output\\n' >&2\ntouch '${marker}'\n`,
+      );
+      process.env.HOME = home;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'sleep 0.01; printf command-ok' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toBe('command-ok');
+      expect(result.stderr).toBe('');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      cleanupWorkspace(home);
+      cleanupWorkspace(ws);
+    }
+  });
+
   test('can read files within workspace', async () => {
     const ws = setupWorkspace();
     try {

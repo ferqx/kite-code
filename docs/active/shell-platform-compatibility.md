@@ -91,6 +91,8 @@ macOS/Linux 使用同一候选解析器：优先 Bash 与配置的 POSIX Shell�
 cmd/PowerShell，最后使用 /bin/sh。只有解释器进程无法启动时才尝试下一个候选；解释器已启动后，
 用户命令的非零退出、timeout 或 cancel 不得重放。 Windows 取消使用 Job Object 终止整棵进程树。Job 绑定前已经启动的 descendants 需要单独记录并仅在 Job 强制终止后补扫；Job 绑定后创建的进程已经由 `TerminateJobObject` 处理，不得再次逐个等待确认，否则会把已完成的取消拖入无意义的 per-process 等待。取消结果仍需报告 `processCleanup`，但正常路径应在进程树退出后立即返回，不把清理等待暴露为下一条 prompt 的额外停顿。
 
+macOS/Linux 的 Bash、配置 POSIX Shell 与 `/bin/sh` 均以非 login 的 `-c` 启动。执行器继承已经投影给 Service 的环境，但不读取用户 profile/rc 文件；这些文件中的命令不属于已审批 Shell invocation，读取失败也不得作为 stderr 混入工具结果。
+
 默认命令语言仍为 Bash/POSIX。需要 cmd 或 PowerShell 语义时必须在命令中显式调用解释器；从
 Windows Git Bash 调用 cmd 使用 cmd.exe //d //c ...，PowerShell 使用
 pwsh -NoProfile -Command ... 或 powershell.exe -NoProfile -Command ...。

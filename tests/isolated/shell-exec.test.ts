@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -394,6 +394,8 @@ describe('host Shell candidate resolution', () => {
         'powershell',
         'posix',
       ]);
+      expect(candidates[0]?.argv).toEqual(['/usr/bin/bash', '-c', 'echo ok']);
+      expect(candidates[1]?.argv).toEqual(['/bin/zsh', '-c', 'echo ok']);
       expect(candidates[2]?.argv).toEqual([
         '/usr/local/bin/pwsh',
         '-NoLogo',
@@ -402,6 +404,49 @@ describe('host Shell candidate resolution', () => {
         '-Command',
         'echo ok',
       ]);
+      expect(candidates[3]?.argv).toEqual(['/bin/sh', '-c', 'echo ok']);
+    }
+  });
+
+  test('POSIX host Shell does not execute login startup files', async () => {
+    if (process.platform === 'win32') return;
+    const bash = Bun.which('bash');
+    if (!bash) return;
+    const home = mkdtempSync(join(tmpdir(), 'kite-shell-non-login-home-'));
+    const marker = join(home, 'startup-ran');
+    try {
+      writeFileSync(
+        join(home, '.bash_profile'),
+        `printf 'unexpected profile output\\n' >&2\ntouch '${marker}'\n`,
+      );
+      writeFileSync(
+        join(home, '.bashrc'),
+        `printf 'unexpected bashrc output\\n' >&2\ntouch '${marker}'\n`,
+      );
+      const [candidate] = buildHostShellInvocations('printf command-ok', {
+        platform: process.platform,
+        systemRoot: '',
+        configuredShell: bash,
+        which: (name) => (name === 'bash' ? bash : null),
+      });
+      expect(candidate?.argv).toEqual([bash, '-c', 'printf command-ok']);
+      const proc = Bun.spawn(candidate!.argv, {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: home },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      expect(exitCode).toBe(0);
+      expect(stdout).toBe('command-ok');
+      expect(stderr).toBe('');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
