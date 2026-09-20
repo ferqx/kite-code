@@ -170,6 +170,7 @@ export {
   runtimeHostStateEffectiveInteractionMode,
   runtimeHostStateInteractionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall,
+  runtimeHostStateRequiredBackgroundFinalRefresh,
   runtimeHostStateToolCallBelongsToCurrentWork,
 } from './state-view';
 export type {

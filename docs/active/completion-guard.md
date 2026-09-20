@@ -9,6 +9,14 @@
 在选择 `emit_final` 前、runner 在持久化前、reducer 在接收 `run.completed` 时都按事件绑定的 guard version 重算，
 因此直接注入 `run.completed` 不能把未完成 Task 标为 `completed`。
 
+本轮 required 后台子 Agent 是完成 blocker。它是唯一 blocker 时，CompletionGuard 返回
+`required_background_pending → wait_for_background`：reducer 清除 completion candidate，持久化
+`waitingReason={ kind: required_background, taskIds }`，Runtime 停止模型调用并等待可行动事实。该决定不写普通
+completion correction，也不消耗纠错次数；waiting reason 只关联 required task ID，不复制 child lifecycle。
+只有 Kernel 已接纳的 canonical background result 才解除对应义务，内存终态或 Artifact 单独存在都不能绕过准入。
+存在交互、普通工具、required Shell、unknown invocation、active Skill 或 Plan 等混合 blocker 时，继续按既有优先级处理，
+不能用后台等待遮蔽它们。
+
 V1 只用于无 Plan task。它只使用已有 canonical state：当前完成作用域内的非终结 Tool、pending interaction、suspended subagent、unknown Capability invocation、
 active Skill 与 Plan lifecycle。`building_without_plan` 和 `completed` 可通过；`planning_empty` 要求 save，draft 要求 submit，
 awaiting review 要求等待审核，executing 要求先发 `plan.completed`，cancelled 永远不是成功完成。verification 与
@@ -66,3 +74,5 @@ document 与 revision feedback；不得写 `run.completed`、`task.completed` �
 仍保留一次纠错机会。当前 epoch 的 runner 产生的 `run.completed` 必须绑定实际 decision version；V2 completion 还必须绑定同一完整 Plan identity。普通 reducer 在任何 guard decision 前先要求 `run.completed.turnId === RuntimeState.turn.turnId`，因此上一 turn 的 completion 在新 turn 无效。
 
 首次可纠正的 `completion.blocked` 可单独持久化并进入一次 correction。第二次或其他不可纠正的 V1/V2 blocker 必须在任何对外 yield 前，由 Kernel 单事务按顺序持久化 `[completion.blocked, turn.aborted, run.error]`；durable turn 随即为 aborted，Scheduler 返回 stop，重启不能发起第三次模型调用。Runtime restore 只接受精确 schema version 与 format epoch，不为旧 completion event 建立 migration reducer 或 recovery surface。
+
+`wait_for_background` 是上述纠错规则的专用例外。重进从持久 waiting reason 与 canonical obligation 恢复；终态、失败、取消、需父级处理的交互或新用户输入可恢复同一 Run，纯进度／心跳／日志 revision 不触发模型。owner generation 更替、execution authority 失效、settlement admission 失败、deadline 或取消竞争必须进入既有 unknown／recovery／取消边界，不得永久等待或把未接纳结果视为完成。

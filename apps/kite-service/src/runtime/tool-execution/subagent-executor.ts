@@ -329,7 +329,7 @@ export function isCurrentExactChildToolReservation(
   const parent = budget.reservations[reservation.parentReservationId];
   return Boolean(
     parent?.resourceKind === 'subagent' &&
-      parent.state === 'dispatch_started' &&
+      (parent.state === 'dispatch_started' || parent.state === 'reconciled') &&
       reservation.invocationId.startsWith(`descendant:${parent.invocationId}:`),
   );
 }

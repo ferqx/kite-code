@@ -74,12 +74,30 @@ describe('runtime resource budget admission', () => {
     });
     expect(plan.preparationEvents.map((event) => event.type)).toEqual(['resource_budget.reserved']);
     if (plan.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    expect(plan.preparationEvents[0]).toMatchObject({
+      type: 'resource_budget.reserved',
+      reservation: {
+        executableUpperBound: {
+          estimatorVersion: 'model-surface-v2',
+          counters: { inputTokens: 20 },
+        },
+      },
+    });
     const dispatched = apply(state, [
       ...plan.preparationEvents,
       { type: 'resource_budget.dispatch_started', reservationId: plan.budget.reservationId },
     ]);
-    const terminal = reconciliationEventsForReservations(dispatched, [plan.budget.reservationId]);
-    const reconciled = apply(dispatched, terminal);
+    const actual = createZeroResourceUsage('actual', 'provider-usage');
+    actual.counters.modelRequests = 1;
+    actual.counters.inputTokens = 11;
+    actual.counters.outputTokens = 5;
+    const reconciled = apply(dispatched, [
+      {
+        type: 'resource_budget.reconciled',
+        reservationId: plan.budget.reservationId,
+        actual,
+      },
+    ]);
     expect(reconciled.resourceBudget).toMatchObject({
       status: 'active',
       reconciledUsage: { counters: { modelRequests: 1 } },
@@ -114,12 +132,12 @@ describe('runtime resource budget admission', () => {
     );
     expect(committedResourceUsage(replaced.resourceBudget).counters).toMatchObject({
       modelRequests: 1,
-      inputTokens: 10,
+      inputTokens: 20,
       outputTokens: 20,
     });
   });
 
-  test('reserves the exact main-model projection and clamps Provider output', async () => {
+  test('reserves the main-model projection with bounded tokenizer and wire drift', async () => {
     let state = configuredState({ maxRunOutputTokens: 7 });
     state = reduceRuntimeState(state, {
       type: 'user.message_appended',
@@ -185,7 +203,7 @@ describe('runtime resource budget admission', () => {
       reservation: {
         executableUpperBound: {
           counters: {
-            inputTokens: prepared.resourceEstimate?.inputTokens,
+            inputTokens: (prepared.resourceEstimate?.inputTokens ?? 0) * 2,
             outputTokens: 7,
           },
         },
@@ -376,6 +394,114 @@ describe('runtime resource budget admission', () => {
         counters: { modelRequests: 1, inputTokens: 20, outputTokens: 3 },
       },
     });
+  });
+
+  test('keeps an admitted background Sub-agent attached after its parent Tool settles', async () => {
+    let state = configuredState({ maxModelRequests: 2 });
+    state.tools.calls['task-background'] = {
+      toolCallId: 'task-background',
+      modelMessageId: 'model-background',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect', background: true },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'task-background'];
+    const parentPlan = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-background'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const admission = createDescendantResourceAdmission({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      now: () => new Date('2026-07-30T00:00:02Z'),
+      getState: () => state,
+      persistEvent: async (event) => {
+        state = reduceRuntimeState(state, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        state = apply(state, events);
+        return true;
+      },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: parentPlan.reservationIds[0]!,
+      actual: createZeroResourceUsage('actual', 'background-task-accepted'),
+    });
+
+    const child = await admission.reserveModel({
+      invocationKey: 'model:after-parent-settlement',
+      inputTokens: 20,
+      requestedMaxOutputTokens: 5,
+    });
+    const nextModel = planModelInvocationResource(state, {
+      invocationId: 'background-model-next-round',
+      inputTokens: 20,
+      requestedMaxOutputTokens: 5,
+      resourceKind: 'model',
+      parentReservationId: parentPlan.reservationIds[0],
+    });
+
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      reservations: {
+        [parentPlan.reservationIds[0]!]: { state: 'reconciled' },
+        [child.reservationId]: {
+          state: 'dispatch_started',
+          parentReservationId: parentPlan.reservationIds[0],
+        },
+      },
+    });
+    expect(nextModel.preparationEvents).toHaveLength(1);
+  });
+
+  test('rejects descendant dispatch when its parent reservation becomes unknown', async () => {
+    let state = configuredState({ maxModelRequests: 2 });
+    state.tools.calls['task-background-unknown'] = {
+      toolCallId: 'task-background-unknown',
+      modelMessageId: 'model-background-unknown',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect', background: true },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'task-background-unknown'];
+    const parentPlan = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-background-unknown'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const admission = createDescendantResourceAdmission({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      now: () => new Date('2026-07-30T00:00:02Z'),
+      getState: () => state,
+      persistEvent: async (event) => {
+        state = reduceRuntimeState(state, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        state = apply(state, events);
+        return true;
+      },
+    });
+
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.unknown',
+      reservationId: parentPlan.reservationIds[0]!,
+    });
+    await expect(
+      admission.reserveModel({
+        invocationKey: 'model:after-parent-unknown',
+        inputTokens: 20,
+        requestedMaxOutputTokens: 5,
+      }),
+    ).rejects.toMatchObject({ reason: 'reconciliation_required' });
   });
 
   test('rejects descendant dispatch after the shared run deadline has elapsed', async () => {

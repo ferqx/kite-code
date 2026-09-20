@@ -1,8 +1,41 @@
 import { describe, expect, test } from 'bun:test';
-import { createChatModel } from '@kite-ai/builtin-runtime/model';
+import {
+  createChatModel,
+  providerRouteIdentityFromModelConfig,
+} from '@kite-ai/builtin-runtime/model';
 import type { AgentConfig } from '#kite-service/config/index';
 
 describe('model provider factory', () => {
+  test('recognizes the current official DeepSeek Flash route without widening custom endpoints', () => {
+    const config = {
+      providerName: 'deepseek',
+      providerType: 'deepseek' as const,
+      apiKey: 'synthetic-test-key',
+      baseURL: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-flash',
+      sandbox: { enabled: true },
+    };
+
+    expect(providerRouteIdentityFromModelConfig(config)).toEqual({
+      providerType: 'deepseek',
+      operatorId: 'hangzhou-deepseek-ai',
+      endpointOrigin: 'https://api.deepseek.com',
+      endpointClass: 'official_api',
+      deploymentId: 'deepseek-api',
+      region: 'unspecified',
+    });
+    expect(
+      providerRouteIdentityFromModelConfig({
+        ...config,
+        baseURL: 'https://proxy.example/v1',
+      }),
+    ).toMatchObject({
+      operatorId: 'deepseek',
+      endpointOrigin: 'https://proxy.example/v1',
+      deploymentId: 'deepseek-flash',
+    });
+  });
+
   test('creates a governed transport binding for DeepSeek providers', () => {
     const binding = createChatModel({
       providerName: 'deepseek',

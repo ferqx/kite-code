@@ -16,6 +16,7 @@ import {
   isRuntimeCommand,
   isRuntimeQuery,
   isRuntimeSessionIndexNotification,
+  isRuntimeSessionProjectionEnrichment,
   isRuntimeSubscriptionSpec,
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_CONTRACT_BOUNDARY_,
@@ -28,6 +29,65 @@ import {
 } from '@kite-ai/runtime-contract';
 
 describe('runtime contract package boundary', () => {
+  test('admits only bounded required-background waiting reasons and same-run wait transitions', () => {
+    const base = {
+      schema: RUNTIME_PROJECTION_SCHEMA_,
+      sessionId: 'session-wait',
+      revision: 4,
+      lifecycle: 'open' as const,
+      interactionQueue: { revision: 4, interactions: [] },
+      currentRun: {
+        runId: 'run-wait',
+        initialTurnId: 'turn-wait',
+        activeTurnId: 'turn-wait',
+        status: 'running' as const,
+        revision: 2,
+      },
+    };
+    const waiting = {
+      ...base,
+      currentRun: {
+        ...base.currentRun,
+        status: 'waiting' as const,
+        waitingReason: { kind: 'required_background' as const, taskIds: ['task-a', 'task-b'] },
+      },
+    };
+    const notification = {
+      type: 'session_upsert' as const,
+      serverInstanceId: 'server-1',
+      generation: 1,
+      indexRevision: 1,
+      session: waiting,
+    };
+    expect(isRuntimeSessionIndexNotification(notification)).toBe(true);
+    expect(isRuntimeSessionProjectionEnrichment(base, waiting)).toBe(true);
+    expect(isRuntimeSessionProjectionEnrichment(waiting, base)).toBe(true);
+    expect(
+      isRuntimeSessionIndexNotification({
+        ...notification,
+        session: {
+          ...waiting,
+          currentRun: {
+            ...waiting.currentRun,
+            waitingReason: { kind: 'required_background', taskIds: ['task-a', 'task-a'] },
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isRuntimeSessionIndexNotification({
+        ...notification,
+        session: {
+          ...base,
+          currentRun: {
+            ...base.currentRun,
+            waitingReason: { kind: 'required_background', taskIds: ['task-a'] },
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
   test('classifies typed execution aborts without guessing from human messages', () => {
     const user = createRuntimeAbortReason('user', 'Stopped by client.');
     const shutdown = createRuntimeAbortReason('error', 'Runtime Host shutdown.');

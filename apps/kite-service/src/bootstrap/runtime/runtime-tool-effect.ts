@@ -159,21 +159,31 @@ export async function executeAppRuntimeToolsEffect(
             );
           })
         : undefined;
+      const taskArguments =
+        taskCallId === undefined ? undefined : state.tools.calls[taskCallId]?.args;
+      const backgroundTask =
+        taskArguments !== null &&
+        typeof taskArguments === 'object' &&
+        'background' in taskArguments &&
+        taskArguments.background === true;
+      const descendantPersistence = backgroundTask
+        ? dependencies.backgroundModelInvocationPersistence
+        : executionContext;
       const descendantResourceAdmission =
-        parentReservationId && executionContext
+        parentReservationId && descendantPersistence
           ? createDescendantResourceAdmission({
               state: state as RuntimeState,
               parentReservationId,
-              getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
-              persistEvent: executionContext.persistEvent,
-              persistEvents: executionContext.persistEvents,
-              ...(executionContext.persistLateResourceReconciliation
+              getState: () => (descendantPersistence.getState?.() ?? state) as RuntimeState,
+              persistEvent: (event) => descendantPersistence.persistEvents([event]),
+              persistEvents: descendantPersistence.persistEvents,
+              ...(!backgroundTask && executionContext?.persistLateResourceReconciliation
                 ? {
                     persistLateResourceReconciliation:
                       executionContext.persistLateResourceReconciliation,
                   }
                 : {}),
-              signal: dependencies.signal,
+              ...(backgroundTask ? {} : { signal: dependencies.signal }),
             })
           : undefined;
       const terminalEvents: RuntimeEvent[] = [];

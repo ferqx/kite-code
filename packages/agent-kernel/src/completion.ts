@@ -41,6 +41,7 @@ export function isCompletionBlockerCode(value: unknown): value is CompletionBloc
 export type CompletionNextAction =
   | 'wait_for_interaction'
   | 'wait_for_tool'
+  | 'wait_for_background'
   | 'wait_for_subagent'
   | 'reconcile_invocation'
   | 'complete_skill'
@@ -79,6 +80,7 @@ interface CompletionGuardBlockedBase {
   readonly planning: PlanningState['kind'];
   readonly correctionAttempt: number;
   readonly canCorrect: boolean;
+  readonly backgroundTaskIds: readonly string[];
 }
 export interface UnplannedCompletionGuardBlocked extends CompletionGuardBlockedBase {
   readonly version: typeof COMPLETION_GUARD_UNPLANNED_VERSION;
@@ -319,6 +321,22 @@ function activePlanning(state: AgentState): PlanningState {
 }
 
 function toolCallBelongsToCurrentWork(state: AgentState, call: AgentToolCallState): boolean {
+  // Child Tool rows are durable execution evidence owned by their Subagent card.
+  // The parent task obligation already represents that work for completion.
+  const owner = call.presentationOwner;
+  const parent = owner ? state.tools.calls[owner.parentToolCallId] : undefined;
+  if (
+    owner &&
+    parent?.name === 'task' &&
+    parent.result?.resultMeta?.taskId === owner.subagentId &&
+    parent.result.resultMeta.taskStatus === 'running' &&
+    (parent.args as Readonly<Record<string, unknown>> | undefined)?.background === true &&
+    (parent.taskId != null
+      ? parent.taskId === state.activeTaskId
+      : parent.createdAtTurnId === state.turn.turnId)
+  ) {
+    return false;
+  }
   return call.taskId != null
     ? call.taskId === state.activeTaskId
     : call.createdAtTurnId === state.turn.turnId;
@@ -379,7 +397,7 @@ const SETTLED_BACKGROUND_TASK_STATUSES = new Set([
   'suspended',
 ]);
 
-function hasRequiredBackgroundTask(state: AgentState): boolean {
+export function requiredBackgroundTaskIds(state: AgentState): readonly string[] {
   const settledTasks = new Set(
     Object.values(state.tools.calls)
       .filter((call) => {
@@ -407,17 +425,71 @@ function hasRequiredBackgroundTask(state: AgentState): boolean {
       settledTasks.add(result.taskId);
     }
   }
-  return Object.values(state.tools.calls).some((call) => {
+  return Object.values(state.tools.calls).flatMap((call) => {
     const meta = call.result?.resultMeta;
-    return (
-      call.name === 'task' &&
+    const args =
+      call.args && typeof call.args === 'object' && !Array.isArray(call.args)
+        ? (call.args as Readonly<Record<string, unknown>>)
+        : undefined;
+    const required =
+      args?.background === true &&
+      (args.result_disposition === undefined || args.result_disposition === 'required');
+    return call.name === 'task' &&
       toolCallBelongsToCurrentWork(state, call) &&
       meta?.taskStatus === 'running' &&
-      meta.taskDisposition === 'required' &&
+      required &&
       typeof meta.taskId === 'string' &&
       !settledTasks.has(meta.taskId)
-    );
+      ? [meta.taskId]
+      : [];
   });
+}
+
+export interface RequiredBackgroundFinalRefresh {
+  readonly messageId: string;
+  readonly modelInvocationId: string;
+  readonly taskIds: readonly string[];
+}
+
+export function requiredBackgroundFinalRefresh(
+  state: AgentState,
+): RequiredBackgroundFinalRefresh | undefined {
+  const finalMessage = state.transcript.messages.at(-1);
+  if (
+    finalMessage?.kind !== 'assistant' ||
+    finalMessage.content !== state.transcript.final ||
+    !finalMessage.modelInvocationId
+  ) {
+    return undefined;
+  }
+  const prepared = state.modelInvocations[finalMessage.modelInvocationId]?.preparedStateRevision;
+  if (prepared === undefined) return undefined;
+  const taskIds = Object.values(state.capabilities.invocations).flatMap((invocation) => {
+    const result = invocation.subagentProviderLifecycle?.backgroundResult;
+    const call = result ? state.tools.calls[result.originToolCallId] : undefined;
+    const args =
+      call?.args && typeof call.args === 'object' && !Array.isArray(call.args)
+        ? (call.args as Readonly<Record<string, unknown>>)
+        : undefined;
+    const required =
+      call?.result?.resultMeta?.taskDisposition === 'required' ||
+      (args?.background === true &&
+        (args.result_disposition === undefined || args.result_disposition === 'required'));
+    return result != null &&
+      invocation.toolCallId === result.originToolCallId &&
+      result.originTurnId === state.turn.turnId &&
+      required &&
+      (result.admissionRevision ?? -1) > prepared
+      ? [result.taskId]
+      : [];
+  });
+  return taskIds.length > 0
+    ? {
+        messageId: finalMessage.messageId,
+        modelInvocationId: finalMessage.modelInvocationId,
+        taskIds: [...new Set(taskIds)].sort(),
+      }
+    : undefined;
 }
 
 function hasCurrentSuspendedSubagent(state: AgentState): boolean {
@@ -463,8 +535,12 @@ function blockedUnplannedCompletion(
   planning: PlanningState['kind'],
   code: CompletionBlockerCode,
   nextAction: CompletionNextAction,
+  backgroundTaskIds: readonly string[] = [],
 ): UnplannedCompletionGuardBlocked {
-  const correctionAttempt = unplannedCorrectionAttempt(state);
+  const waitingForBackground = nextAction === 'wait_for_background';
+  const correctionAttempt = waitingForBackground
+    ? state.completionGuard.correctionAttempts
+    : unplannedCorrectionAttempt(state);
   const current = activePlanning(state);
   const reviewedDraftCanPause =
     code === 'plan_draft_pending' &&
@@ -477,7 +553,8 @@ function blockedUnplannedCompletion(
     nextAction,
     planning,
     correctionAttempt,
-    canCorrect: correctionAttempt === 1 && !reviewedDraftCanPause,
+    canCorrect: !waitingForBackground && correctionAttempt === 1 && !reviewedDraftCanPause,
+    backgroundTaskIds,
   };
 }
 
@@ -487,8 +564,12 @@ function blockedPlannedCompletion(
   planIdentity: PlanIdentity,
   code: CompletionBlockerCode,
   nextAction: CompletionNextAction,
+  backgroundTaskIds: readonly string[] = [],
 ): PlannedCompletionGuardBlocked {
-  const correctionAttempt = plannedCorrectionAttempt(state, planIdentity);
+  const waitingForBackground = nextAction === 'wait_for_background';
+  const correctionAttempt = waitingForBackground
+    ? state.completionGuard.correctionAttempts
+    : plannedCorrectionAttempt(state, planIdentity);
   const current = activePlanning(state);
   const reviewedDraftCanPause =
     code === 'plan_draft_pending' &&
@@ -502,7 +583,8 @@ function blockedPlannedCompletion(
     planning,
     planIdentity,
     correctionAttempt,
-    canCorrect: correctionAttempt === 1 && !reviewedDraftCanPause,
+    canCorrect: !waitingForBackground && correctionAttempt === 1 && !reviewedDraftCanPause,
+    backgroundTaskIds,
   };
 }
 
@@ -527,12 +609,17 @@ function commonBlocker(state: AgentState): UnplannedCompletionGuardBlocked | und
       'interaction_pending',
       'wait_for_interaction',
     );
-  if (
-    hasCurrentNonTerminalTool(state) ||
-    hasRequiredManagedShell(state) ||
-    hasRequiredBackgroundTask(state)
-  )
+  if (hasCurrentNonTerminalTool(state) || hasRequiredManagedShell(state))
     return blockedUnplannedCompletion(state, planning, 'tool_pending', 'wait_for_tool');
+  const backgroundTaskIds = requiredBackgroundTaskIds(state);
+  if (backgroundTaskIds.length > 0)
+    return blockedUnplannedCompletion(
+      state,
+      planning,
+      'tool_pending',
+      'wait_for_background',
+      backgroundTaskIds,
+    );
   if (hasCurrentSuspendedSubagent(state))
     return blockedUnplannedCompletion(state, planning, 'subagent_suspended', 'wait_for_subagent');
   if (hasCurrentUnknownInvocation(state))
@@ -774,12 +861,18 @@ export function decidePlannedCompletion(state: AgentState): PlannedCompletionGua
 
   if (state.interactions.kind !== 'idle')
     return block('interaction_pending', 'wait_for_interaction');
-  if (
-    hasCurrentNonTerminalTool(state) ||
-    hasRequiredManagedShell(state) ||
-    hasRequiredBackgroundTask(state)
-  )
+  if (hasCurrentNonTerminalTool(state) || hasRequiredManagedShell(state))
     return block('tool_pending', 'wait_for_tool');
+  const backgroundTaskIds = requiredBackgroundTaskIds(state);
+  if (backgroundTaskIds.length > 0)
+    return blockedPlannedCompletion(
+      state,
+      planning.kind,
+      planIdentity,
+      'tool_pending',
+      'wait_for_background',
+      backgroundTaskIds,
+    );
   if (hasCurrentSuspendedSubagent(state)) return block('subagent_suspended', 'wait_for_subagent');
   if (hasCurrentUnknownInvocation(state))
     return block('unknown_external_invocation', 'reconcile_invocation');

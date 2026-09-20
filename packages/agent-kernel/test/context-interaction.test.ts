@@ -413,6 +413,9 @@ describe('State context and interaction reducer parity', () => {
       invocationId: 'inv-1',
       dispatchCertainty: 'none',
       reasonCode: 'cancelled_before_dispatch',
+      failureClassification: 'provider_rejected',
+      providerStatusCode: 400,
+      timedOut: false,
     } as KernelEvent);
     expect(interrupted.modelInvocations['inv-1']).toMatchObject({
       status: 'interrupted',

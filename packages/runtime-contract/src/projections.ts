@@ -267,6 +267,11 @@ export interface RuntimeSessionRunProjection {
     | 'cancelled'
     | 'recovery_required';
   readonly revision: number;
+  /** Persisted scheduler reason; child lifecycle remains owned by background execution facts. */
+  readonly waitingReason?: {
+    readonly kind: 'required_background';
+    readonly taskIds: readonly string[];
+  };
   readonly activeInteractionId?: string;
   readonly outcome?: RuntimeRunTerminalProjection;
 }

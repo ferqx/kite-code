@@ -791,6 +791,7 @@ function assertCapabilityLifecycleEvidence(
           'originTurnId',
           'originToolCallId',
           'attempt',
+          'admissionRevision',
           ...(afterTurn ? ['afterTurn'] : []),
         ]) &&
         stringValue(backgroundResult, 'taskId') === stringValue(lifecycle, 'childInvocationId') &&
@@ -802,6 +803,8 @@ function assertCapabilityLifecycleEvidence(
         stringValue(backgroundResult, 'originToolCallId') ===
           stringValue(invocation, 'toolCallId') &&
         numberValue(backgroundResult, 'attempt') === numberValue(lifecycle, 'attempt') &&
+        Number.isSafeInteger(numberValue(backgroundResult, 'admissionRevision')) &&
+        Number(numberValue(backgroundResult, 'admissionRevision')) >= 0 &&
         state.tools.calls[stringValue(invocation, 'toolCallId') ?? '']?.createdAtTurnId ===
           stringValue(backgroundResult, 'originTurnId'),
       `governed Subagent invocation ${invocationId} has invalid background result authority.`,
@@ -1723,6 +1726,16 @@ export function assertAgentStateInvariants(state: AgentState): void {
   assert(state.modelInvocations != null, 'model invocation state is required.');
   assert(state.providerReadiness != null, 'provider readiness state is required.');
   assert(state.completionGuard != null, 'completion guard state is required.');
+  if (state.completionGuard.waitingReason) {
+    assert(
+      state.completionGuard.waitingReason.kind === 'required_background' &&
+        state.completionGuard.waitingReason.taskIds.length > 0 &&
+        state.completionGuard.waitingReason.taskIds.every(
+          (taskId, index, values) => taskId.length > 0 && values.indexOf(taskId) === index,
+        ),
+      'completion guard waiting reason is invalid.',
+    );
+  }
   assertResourceBudget(state);
   assertRecoveryJournal(state);
   assertModelInvocations(state);

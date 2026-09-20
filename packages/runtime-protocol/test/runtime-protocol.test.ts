@@ -1059,9 +1059,68 @@ describe('Runtime Protocol', () => {
     expect(RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse(session).success).toBeFalse();
   });
 
+  test('preserves a closed required-background waiting reason', () => {
+    const session = {
+      schema: 'kite.runtime-projection.v2' as const,
+      sessionId: 'session-background-wait',
+      revision: 3,
+      lifecycle: 'open' as const,
+      sessionCommandGrantCount: 0,
+      interactionQueue: { revision: 3, interactions: [] },
+      currentRun: {
+        runId: 'run-1',
+        initialTurnId: 'turn-1',
+        activeTurnId: 'turn-1',
+        status: 'waiting' as const,
+        revision: 2,
+        waitingReason: { kind: 'required_background' as const, taskIds: ['task-a', 'task-b'] },
+      },
+    };
+    expect(RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse(session).success).toBeTrue();
+    const mapped = mapRuntimeQueryResultToProtocol({
+      status: 'ok',
+      queryType: 'list_sessions',
+      sessions: [session],
+    });
+    expect(mapped).toMatchObject({
+      sessions: [{ currentRun: { waitingReason: session.currentRun.waitingReason } }],
+    });
+    const mappedSession = (
+      mapped as {
+        readonly sessions: readonly {
+          readonly currentRun?: {
+            readonly waitingReason?: { readonly taskIds: readonly string[] };
+          };
+        }[];
+      }
+    ).sessions[0];
+    expect(
+      mappedSession?.currentRun?.waitingReason?.taskIds ===
+        session.currentRun.waitingReason.taskIds,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse({
+        ...session,
+        currentRun: {
+          ...session.currentRun,
+          waitingReason: { kind: 'required_background', taskIds: ['task-a', 'task-a'] },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      RUNTIME_PROTOCOL_SESSION_SCHEMA_.safeParse({
+        ...session,
+        currentRun: {
+          ...session.currentRun,
+          status: 'running',
+        },
+      }).success,
+    ).toBeFalse();
+  });
+
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'b738cb8c:641d2d20';
+    const expectedDigest = '0b38fd5f:641d2d20';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

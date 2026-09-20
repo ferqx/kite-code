@@ -468,6 +468,7 @@ export function App({ client }: { client: DesktopClient }) {
                 : (session.currentRun?.status ?? 'idle'),
             updatedAt: session.updatedAt,
             pendingInteractions: session.interactionQueue?.interactions.length ?? 0,
+            waitingReason: session.currentRun?.waitingReason?.kind,
           })),
       }))}
       defaultExpanded
@@ -690,7 +691,8 @@ export function App({ client }: { client: DesktopClient }) {
         !scheduledTasksView &&
         !preparing &&
         !interaction &&
-        projection?.currentRun?.status === 'waiting' ? (
+        projection?.currentRun?.status === 'waiting' &&
+        projection.currentRun.waitingReason?.kind === 'required_background' ? (
           <p className="notice">
             进行中 · 正在等待后台结果。可以继续发送引导、查看 Shell 日志或停止当前任务。
           </p>

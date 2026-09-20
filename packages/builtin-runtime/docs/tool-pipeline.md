@@ -20,7 +20,9 @@ Host coordinator 维护 attempt 和提交身份，Builtin callback 提供实际�
 
 Subagent suspension 的等待事实绑定已解析参数；不能将 raw input 摘要作为第二执行身份。重试要保留正确的已执行/未执行边界，不通过重复调用制造一次成功结果。
 
-Shell 契约区分有限 `shell_execute`、增量 `shell_read`、精确 `shell_stop` 与显式 service；running 结果只发布受管句柄，不伪造 exit code。有限执行默认是本轮 required 义务，匹配的 read/stop 观察到真实终态后才能通过完成守卫。后台 `task` 同样用稳定 task identity 与 `task_read`/`task_cancel` 收敛；唯一 Runtime watcher 先把完整结果写入不可变 Artifact，再发布有界具名报告。`result_disposition=after_turn` 与 `background=true` 独立，缺少结构化授权或正预算预留时在派发前拒绝。
+Shell 契约区分有限 `shell_execute`、增量 `shell_read`、精确 `shell_stop` 与显式 service；running 结果只发布受管句柄，不伪造 exit code。有限执行默认是本轮 required 义务，匹配的 read/stop 观察到真实终态后才能通过完成守卫。后台 `task` 同样用稳定 task identity 与 `task_read`/`task_cancel` 收敛；唯一 Runtime watcher 先把完整结果写入不可变 Artifact，再发布有界具名报告。`background=true` 返回句柄，`result_disposition` 缺省为 `required`；`after_turn` 与后台执行独立，缺少结构化授权或正预算预留时在派发前拒绝。
+
+模型契约要求无依赖 sibling 先异步派发，再继续不重复的独立工作；不得为了等待 child 调用 `sleep`、空循环或固定间隔 `task_read`。`task_read` 是用户主动查询、失败／取消诊断及截断终态报告补读接口，不是等待 primitive。相同 owner generation 和 execution revision 的 `running` 再次被读取时可以返回当前快照，但 Scheduler 随后进入受管等待，不把相同事实再次交给模型。required 义务由 Runtime watcher 与 Kernel 接纳的终态解除，不要求模型额外读取。
 
 ## 新增工具时
 

@@ -1763,6 +1763,8 @@ type StateEventMap = ResourceBudgetEventMap &
       nextAction: CompletionNextAction;
       planning: PlanningStateKind;
       correctionAttempt: number;
+      backgroundTaskIds?: string[];
+      modelInvocationId?: string;
       planIdentity?: RunPlanIdentity;
     };
     'run.error': {

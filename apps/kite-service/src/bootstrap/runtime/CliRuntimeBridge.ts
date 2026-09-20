@@ -283,6 +283,20 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     const coordinator = this.#ensureCoordinator();
     this.#driveBackgroundStopIntents(coordinator);
     if (!this.#created) this.#recoverFailedAfterTurnReservationReleases(coordinator);
+    if (!this.#created) {
+      const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
+      const children =
+        'backgroundSubagentRuntime' in modelRuntime
+          ? (modelRuntime.backgroundSubagentRuntime as BackgroundSubagentControlRuntime)
+          : undefined;
+      const ownerKey = backgroundSubagentOwnerKey(
+        this.#input.sessionId,
+        this.#resolveRecoveryIdentity(this.#input.sessionId),
+      );
+      for (const event of children?.settlementRecoveryEvents?.(ownerKey) ?? [])
+        if (event.type === 'subagent.background_result_persisted')
+          coordinator.control.processEvent(event as RuntimeEvent);
+    }
     if (!this.#created) this.#queuePendingAfterTurnRecoveries(coordinator);
     const recoveryOwnership = this.#input.restartRecoveryOwnership?.();
     if (recoveryOwnership) {
@@ -1900,8 +1914,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           return await enqueueSessionWork(sessionId, () => {
             if (!currentState()) return false;
             try {
-              const applied = coordinator.control.processEventBatch(events);
-              if (applied.length !== events.length) return false;
+              coordinator.control.processEventBatch(events);
               this.#revision = coordinator.getState().revision;
               return true;
             } catch {

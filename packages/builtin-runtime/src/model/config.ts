@@ -93,7 +93,7 @@ export function computeProviderEndpointIdentityDigest(value: ProviderRouteIdenti
 }
 
 function isApprovedDeepSeekFlashRoute(config: ModelRuntimeConfig): boolean {
-  if (config.providerType !== 'deepseek' || config.modelName !== 'deepseek-v4-flash') return false;
+  if (config.providerType !== 'deepseek' || config.modelName !== 'deepseek-flash') return false;
   try {
     const endpoint = new URL(config.baseURL);
     const path = endpoint.pathname.replace(/\/+$/, '');

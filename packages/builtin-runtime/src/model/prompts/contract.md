@@ -9,6 +9,9 @@ System-prompt changes must preserve these enforceable runtime constraints:
   It remains available in full mode, especially while clarifying a plan.
 - Destructive shell and unapproved network/VCS mutation remain policy-gated.
 - Planning cannot run non-read-only shell work, and no prompt can bypass the sandbox.
+- Independent delegated siblings are dispatched together with `background=true`; required results
+  keep the current Run open and Runtime-managed waiting replaces model-driven `sleep` or repeated
+  `task_read` polling. Only separately authorized `after_turn` delivery may outlive the current Run.
 
 Add a rule by documenting the user-observable behavior here and adding a focused test in
 `tests/prompts/`. Prompt prose is not a security boundary; policy tests are authoritative.

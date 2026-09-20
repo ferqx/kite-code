@@ -462,15 +462,24 @@ describe('Runtime Host State session', () => {
       turnId: 'run-background',
       guardVersion: 'completion_guard_v1',
       code: 'tool_pending',
-      nextAction: 'wait_for_tool',
+      nextAction: 'wait_for_background',
       planning: 'building_without_plan',
-      correctionAttempt: 1,
+      correctionAttempt: 0,
+      backgroundTaskIds: ['child-background'],
     });
     expect(f.runs.get('state-session-test\0run-background')).toMatchObject({
       runId: 'run-background',
       status: 'waiting',
     });
     expect(f.runs.get('state-session-test\0run-background')?.finishedAtMs).toBeUndefined();
+    expect(session.getLifecycleProjection().currentRun).toMatchObject({
+      runId: 'run-background',
+      status: 'waiting',
+      waitingReason: {
+        kind: 'required_background',
+        taskIds: ['child-background'],
+      },
+    });
 
     session.processEvent({
       type: 'subagent.background_result_persisted',

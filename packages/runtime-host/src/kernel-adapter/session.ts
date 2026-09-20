@@ -417,6 +417,15 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
               ...(task ? { taskId: task.taskId } : {}),
               status: projectedRunStatus,
               revision: visibleRun ? visibleRun.lastRevision : state.revision,
+              ...(projectedRunStatus === 'waiting' &&
+              state.completionGuard.waitingReason?.kind === 'required_background'
+                ? {
+                    waitingReason: Object.freeze({
+                      kind: 'required_background' as const,
+                      taskIds: Object.freeze([...state.completionGuard.waitingReason.taskIds]),
+                    }),
+                  }
+                : {}),
               ...(activeInteractionId === undefined ? {} : { activeInteractionId }),
               ...(!visibleRun || visibleRun.terminal === undefined
                 ? {}
@@ -1241,7 +1250,7 @@ function projectRunStatus(
       (event) =>
         event.type === 'completion.blocked' &&
         event.code === 'tool_pending' &&
-        event.nextAction === 'wait_for_tool',
+        (event.nextAction === 'wait_for_tool' || event.nextAction === 'wait_for_background'),
     )
   )
     return 'waiting';

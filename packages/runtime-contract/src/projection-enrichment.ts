@@ -25,6 +25,15 @@ function isExecutionLifecycleEnrichment(
   const nextRun = next.currentRun;
   if (!currentRun || !nextRun || currentRun.runId !== nextRun.runId) return false;
   const activation = currentRun.status === 'queued' && nextRun.status === 'running';
+  const backgroundWaiting =
+    currentRun.status === 'running' &&
+    nextRun.status === 'waiting' &&
+    nextRun.waitingReason?.kind === 'required_background';
+  const backgroundWake =
+    currentRun.status === 'waiting' &&
+    currentRun.waitingReason?.kind === 'required_background' &&
+    nextRun.status === 'running' &&
+    nextRun.waitingReason === undefined;
   const cleanup =
     ['queued', 'running', 'waiting'].includes(currentRun.status) &&
     ['completed', 'cancelled', 'failed'].includes(nextRun.status);
@@ -33,14 +42,19 @@ function isExecutionLifecycleEnrichment(
     next.activeTask !== undefined &&
     currentRun.taskId === undefined &&
     nextRun.taskId === next.activeTask.taskId;
-  if (!activation && !cleanup && !taskEnrichment) return false;
+  if (!activation && !backgroundWaiting && !backgroundWake && !cleanup && !taskEnrichment)
+    return false;
   if (
     currentRun.initialTurnId !== nextRun.initialTurnId ||
     currentRun.activeTurnId !== nextRun.activeTurnId ||
     currentRun.activeInteractionId !== nextRun.activeInteractionId ||
     currentRun.revision !== nextRun.revision ||
     (!taskEnrichment && currentRun.taskId !== nextRun.taskId) ||
-    (!activation && !cleanup && currentRun.status !== nextRun.status) ||
+    (!activation &&
+      !backgroundWaiting &&
+      !backgroundWake &&
+      !cleanup &&
+      currentRun.status !== nextRun.status) ||
     (!cleanup &&
       stableSerializeIgnoringUndefined(currentRun.outcome) !==
         stableSerializeIgnoringUndefined(nextRun.outcome))

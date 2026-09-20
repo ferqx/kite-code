@@ -68,6 +68,8 @@ export {
   planCompletionBlocker,
   planCompletionEvidenceMatchesRuntime,
   projectPlanCompletionEvidence,
+  requiredBackgroundFinalRefresh,
+  requiredBackgroundTaskIds,
   requiredManagedShellIds,
 } from './completion';
 export type {

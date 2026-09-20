@@ -81,13 +81,28 @@ export interface BackgroundSubagentControlRuntime {
     sessionId: string,
     ownerKey: string,
   ) => BackgroundSubagentDirectorySnapshot;
+  readonly ownerWatermark: (ownerKey: string) => number;
+  readonly waitForOwnerChange: (
+    ownerKey: string,
+    watermark: number,
+    signal?: AbortSignal,
+  ) => Promise<void>;
   readonly readTask: (
     ownerKey: string,
     taskId: string,
   ) => Promise<Readonly<Record<string, unknown>>>;
   readonly requestCancel: (ownerKey: string, taskId: string, onTerminal: () => void) => boolean;
+  readonly cancelOrigin: (
+    ownerKey: string,
+    originRunId: string,
+    reason?: string,
+    timeoutMs?: number,
+  ) => Promise<void>;
   readonly disposeOwner?: (ownerKey: string, reason?: string, timeoutMs?: number) => Promise<void>;
   readonly settlementRecoveryReservations?: (ownerKey: string) => readonly string[];
+  readonly settlementRecoveryEvents?: (
+    ownerKey: string,
+  ) => readonly Readonly<Record<string, unknown>>[];
   readonly cancelTask: (
     ownerKey: string,
     taskId: string,
@@ -100,6 +115,13 @@ export interface BackgroundSubagentDirectorySnapshot {
   readonly watermark: number;
   readonly executions: readonly Omit<RuntimeBackgroundExecutionProjection, 'sessionRevision'>[];
 }
+export class BackgroundSettlementAdmissionError extends Error {
+  readonly event: Readonly<Record<string, unknown>>;
+  constructor(event: Readonly<Record<string, unknown>>) {
+    super('background_settlement_admission_failed');
+    this.event = event;
+  }
+}
 
 /**
  * Execution-host owner for admitted background children.
@@ -110,6 +132,8 @@ export interface BackgroundSubagentDirectorySnapshot {
 export class BackgroundSubagentRuntime implements BackgroundSubagentControlRuntime {
   readonly #results: SubagentResultArtifactAccess;
   readonly #records = new Map<string, BackgroundSubagentRecord>();
+  readonly #ownerWatermarks = new Map<string, number>();
+  readonly #ownerWaiters = new Map<string, Set<() => void>>();
   readonly #ownerGeneration = `subagent_${randomUUID()}`;
   #watermark = 0;
 
@@ -145,8 +169,9 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       cancelRequested: false,
       cleanupConfirmed: false,
       settlementConfirmed: false,
-      revision: ++this.#watermark,
+      revision: 0,
     } as BackgroundSubagentRecord;
+    this.#bump(record);
     const terminal = this.#watch(
       record,
       input.observe,
@@ -187,13 +212,13 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     if (!isTerminal(record.status) && !record.cancelRequested) {
       record.cancelRequested = true;
       record.status = 'cancelling';
-      record.revision = ++this.#watermark;
+      this.#bump(record);
       try {
         await record.cancel('task_cancel');
       } catch (error) {
         record.status = 'unknown';
         record.terminalError = boundedError(error);
-        record.revision = ++this.#watermark;
+        this.#bump(record);
         return this.#snapshot(record);
       }
     }
@@ -206,11 +231,11 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     if (!record.cancelRequested) {
       record.cancelRequested = true;
       record.status = 'cancelling';
-      record.revision = ++this.#watermark;
+      this.#bump(record);
       void record.cancel('stop_background_execution').catch((error) => {
         record.status = 'unknown';
         record.terminalError = boundedError(error);
-        record.revision = ++this.#watermark;
+        this.#bump(record);
         onTerminal();
       });
     }
@@ -237,7 +262,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       });
       record.resultArtifact = artifact;
       record.status = terminalStatus(result);
-      record.revision = ++this.#watermark;
+      this.#bump(record);
       if (onResultPersisted) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         let callbackSucceeded = false;
@@ -263,10 +288,23 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         } catch (error) {
           record.status = 'unknown';
           record.terminalError = boundedError(error);
-          record.revision = ++this.#watermark;
-          if (settlementRecoveryReservationId) {
-            this.#persistSettlementRecovery(record, artifact, settlementRecoveryReservationId);
+          if (
+            settlementRecoveryReservationId ||
+            (error && typeof error === 'object' && 'event' in error)
+          ) {
+            this.#persistSettlementRecovery(
+              record,
+              artifact,
+              settlementRecoveryReservationId,
+              error && typeof error === 'object' && 'event' in error
+                ? (error as BackgroundSettlementAdmissionError).event
+                : undefined,
+            );
           }
+          // Publish the unavailable owner watermark only after the durable
+          // recovery claim is enumerable. Otherwise the Run waiter can wake
+          // in the gap and fail closed before the claim it must replay exists.
+          this.#bump(record);
           await notifySettlementFailed(onSettlementFailed, error);
         }
         if (callbackSucceeded) {
@@ -278,7 +316,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
             // not release its exact replacement reservation on proof failure.
             record.status = 'unknown';
             record.terminalError = boundedError(error);
-            record.revision = ++this.#watermark;
+            this.#bump(record);
           }
         }
       } else {
@@ -288,7 +326,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     } catch (error) {
       record.status = 'unknown';
       record.terminalError = boundedError(error);
-      record.revision = ++this.#watermark;
+      this.#bump(record);
       if (settlementRecoveryReservationId && record.resultArtifact) {
         this.#persistSettlementRecovery(
           record,
@@ -310,6 +348,40 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         this.#records.delete(record.taskId);
       }
     }
+  }
+
+  ownerWatermark(ownerKey: string): number {
+    return this.#ownerWatermarks.get(ownerKey) ?? 0;
+  }
+
+  waitForOwnerChange(ownerKey: string, watermark: number, signal?: AbortSignal): Promise<void> {
+    if (this.ownerWatermark(ownerKey) !== watermark || signal?.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        const waiters = this.#ownerWaiters.get(ownerKey);
+        waiters?.delete(finish);
+        if (waiters?.size === 0) this.#ownerWaiters.delete(ownerKey);
+        signal?.removeEventListener('abort', finish);
+        resolve();
+      };
+      const waiters = this.#ownerWaiters.get(ownerKey) ?? new Set<() => void>();
+      waiters.add(finish);
+      this.#ownerWaiters.set(ownerKey, waiters);
+      signal?.addEventListener('abort', finish, { once: true });
+      if (this.ownerWatermark(ownerKey) !== watermark || signal?.aborted) finish();
+    });
+  }
+
+  #bump(record: BackgroundSubagentRecord): void {
+    record.revision = ++this.#watermark;
+    this.#ownerWatermarks.set(
+      record.ownerKey,
+      (this.#ownerWatermarks.get(record.ownerKey) ?? 0) + 1,
+    );
+    const waiters = this.#ownerWaiters.get(record.ownerKey);
+    if (!waiters) return;
+    this.#ownerWaiters.delete(record.ownerKey);
+    for (const wake of waiters) wake();
   }
 
   listSnapshot(sessionId: string, ownerKey: string): BackgroundSubagentDirectorySnapshot {
@@ -362,19 +434,39 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     timeoutMs = 10_000,
   ): Promise<void> {
     const records = [...this.#records.values()].filter((record) => record.ownerKey === ownerKey);
+    await this.#cancelRecords(records, reason, timeoutMs);
+  }
+
+  async cancelOrigin(
+    ownerKey: string,
+    originRunId: string,
+    reason = 'origin_run_cancelled',
+    timeoutMs = 10_000,
+  ): Promise<void> {
+    const records = [...this.#records.values()].filter(
+      (record) => record.ownerKey === ownerKey && record.originRunId === originRunId,
+    );
+    await this.#cancelRecords(records, reason, timeoutMs);
+  }
+
+  async #cancelRecords(
+    records: readonly BackgroundSubagentRecord[],
+    reason: string,
+    timeoutMs: number,
+  ): Promise<void> {
     const cancellations: Promise<void>[] = [];
     for (const record of records) {
       if (!record.cleanupConfirmed) {
         record.cancelRequested = true;
         record.status = 'cancelling';
-        record.revision = ++this.#watermark;
+        this.#bump(record);
         cancellations.push(
           Promise.resolve()
             .then(() => record.cancel(reason))
             .catch((error) => {
               record.status = 'unknown';
               record.terminalError = boundedError(error);
-              record.revision = ++this.#watermark;
+              this.#bump(record);
             }),
         );
       }
@@ -389,7 +481,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       } else if (!record.cleanupConfirmed) {
         record.status = 'unknown';
         record.terminalError = 'Background sub-agent cleanup requires recovery.';
-        record.revision = ++this.#watermark;
+        this.#bump(record);
       }
     }
   }
@@ -412,7 +504,8 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   #persistSettlementRecovery(
     record: BackgroundSubagentRecord,
     artifact: SubagentResultArtifactRef,
-    reservationId: string,
+    reservationId?: string,
+    event?: Readonly<Record<string, unknown>>,
   ): void {
     this.#results.write({
       ownerKey: record.ownerKey,
@@ -421,7 +514,8 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         schema: 'kite.background-subagent-settlement-recovery.v1',
         taskId: record.taskId,
         resultIntegrityIdentifier: artifact.integrityIdentifier,
-        reservationId,
+        ...(reservationId ? { reservationId } : {}),
+        ...(event ? { event } : {}),
       }),
     });
   }
@@ -438,6 +532,24 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
             : [],
         ),
     );
+  }
+  settlementRecoveryEvents(ownerKey: string): readonly Readonly<Record<string, unknown>>[] {
+    const events = new Map<string, Readonly<Record<string, unknown>>>();
+    for (const { result } of this.#results.list(ownerKey)) {
+      if (
+        result.schema !== 'kite.background-subagent-settlement-recovery.v1' ||
+        !result.event ||
+        typeof result.event !== 'object' ||
+        Array.isArray(result.event)
+      ) {
+        continue;
+      }
+      const event = result.event as Readonly<Record<string, unknown>>;
+      const identity =
+        typeof event.notificationId === 'string' ? event.notificationId : JSON.stringify(event);
+      events.set(identity, event);
+    }
+    return Object.freeze([...events.values()]);
   }
 
   #hasSettlementProof(

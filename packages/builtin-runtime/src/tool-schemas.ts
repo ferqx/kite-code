@@ -309,7 +309,12 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
       .describe(
         'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
       ),
-    background: z.boolean().optional().describe('Return after the child has been admitted.'),
+    background: z
+      .boolean()
+      .optional()
+      .describe(
+        'Return a stable task identity after admission. Use true for independent siblings so Runtime can execute them concurrently.',
+      ),
     result_disposition: z
       .enum(['required', 'after_turn'])
       .optional()
@@ -354,7 +359,9 @@ const BUILTIN_TASK_ID_SCHEMA_ = z
 
 export const BUILTIN_TASK_READ_SCHEMA_ = z
   .object({
-    task_id: BUILTIN_TASK_ID_SCHEMA_.describe('Stable background task identity returned by task'),
+    task_id: BUILTIN_TASK_ID_SCHEMA_.describe(
+      'Stable background task identity returned by task; reads are on-demand snapshots, not a waiting primitive',
+    ),
   })
   .strict();
 

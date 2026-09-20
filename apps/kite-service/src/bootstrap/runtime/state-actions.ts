@@ -546,9 +546,12 @@ export function hasSettledSubagentHistoryCandidate(state: Readonly<RuntimeState>
       lifecycle.childInvocationId,
       (childCounts.get(lifecycle.childInvocationId) ?? 0) + 1,
     );
+    const recoveredUnknown =
+      invocation.status === 'unknown' && lifecycle.observationStatus !== 'completed';
     if (
       (!terminalTools.has(invocation.toolCallId) &&
-        !provenSuccessfulSubagentParent(state, invocation)) ||
+        !provenSuccessfulSubagentParent(state, invocation) &&
+        !recoveredUnknown) ||
       lifecycle.status !== 'cleanup_completed' ||
       lifecycle.cleanupConfirmed !== true
     )
@@ -564,12 +567,18 @@ export function eventsForSettledSubagentHistory(
   historyEvents: readonly RuntimeEvent[],
   reason = 'The previous Subagent execution ended without a terminal presentation event.',
 ): RuntimeEvent[] {
-  return settledSubagentHistoryEventsForToolIds(
-    state,
-    historyEvents,
-    new Set(failedTerminalToolIds(state)),
-    reason,
-  );
+  const settledToolIds = new Set(failedTerminalToolIds(state));
+  for (const invocation of Object.values(state.capabilities.invocations)) {
+    if (
+      invocation.status === 'unknown' &&
+      invocation.subagentProviderLifecycle?.status === 'cleanup_completed' &&
+      invocation.subagentProviderLifecycle.cleanupConfirmed === true &&
+      invocation.subagentProviderLifecycle.observationStatus !== 'completed'
+    ) {
+      settledToolIds.add(invocation.toolCallId);
+    }
+  }
+  return settledSubagentHistoryEventsForToolIds(state, historyEvents, settledToolIds, reason);
 }
 
 function settledSubagentHistoryEventsForToolIds(

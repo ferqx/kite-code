@@ -140,6 +140,7 @@ export type AgentTranscriptMessage =
   | (AgentTranscriptMessageMeta & { readonly kind: 'runtime'; readonly content: string })
   | (AgentTranscriptMessageMeta & {
       readonly kind: 'assistant';
+      readonly modelInvocationId?: string;
       readonly content?: string;
       readonly reasoningText?: string;
       readonly toolCalls: readonly AgentTranscriptToolCall[];
@@ -336,6 +337,10 @@ export interface AgentCompletionGuardState {
     readonly planId: string;
     readonly version: number;
     readonly structuralDigest: string;
+  };
+  readonly waitingReason?: {
+    readonly kind: 'required_background';
+    readonly taskIds: readonly string[];
   };
 }
 export interface AgentTerminalOutcomeState {
@@ -640,6 +645,7 @@ export interface AgentSubagentProviderLifecycleState {
 }
 
 export interface AgentBackgroundSubagentResultState {
+  readonly admissionRevision?: number;
   readonly taskId: string;
   readonly notificationId: string;
   readonly artifactIntegrityIdentifier: string;

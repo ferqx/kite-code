@@ -800,10 +800,36 @@ const sessionRun = z
       'recovery_required',
     ]),
     revision: safeRevision,
+    waitingReason: z
+      .object({
+        kind: z.literal('required_background'),
+        taskIds: z.array(identifier).min(1).max(256),
+      })
+      .strict()
+      .optional(),
     activeInteractionId: identifier.optional(),
     outcome: sessionRunTerminal.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.waitingReason !== undefined && value.status !== 'waiting') {
+      context.addIssue({
+        code: 'custom',
+        message: 'waiting reason requires waiting run status',
+        path: ['waitingReason'],
+      });
+    }
+    if (
+      value.waitingReason !== undefined &&
+      new Set(value.waitingReason.taskIds).size !== value.waitingReason.taskIds.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'waiting reason task identities must be unique',
+        path: ['waitingReason', 'taskIds'],
+      });
+    }
+  });
 const interactionQueue = z
   .object({
     revision: safeRevision,

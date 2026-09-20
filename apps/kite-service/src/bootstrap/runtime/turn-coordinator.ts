@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { requiredManagedShellIds } from '@kite-ai/agent-kernel';
+import { requiredBackgroundTaskIds, requiredManagedShellIds } from '@kite-ai/agent-kernel';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite-ai/builtin-runtime/model';
 import {
@@ -74,6 +74,10 @@ import type {
   RuntimeState,
   StateRuntimeStorage,
 } from './state-runtime';
+import {
+  type BackgroundSubagentControlRuntime,
+  backgroundSubagentOwnerKey,
+} from './subagent/background-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 import { failedTerminalOutcome } from './terminal-outcome';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
@@ -810,6 +814,25 @@ export async function* executeRuntimeTurn(
         const revision = state.revision;
         const ownerKey = managedShellOwnerKey(input.threadId, input.workspace);
         const shellWatermark = managedShellRuntime.ownerWatermark(ownerKey);
+        const children =
+          'backgroundSubagentRuntime' in modelInvocationRuntime
+            ? (modelInvocationRuntime.backgroundSubagentRuntime as
+                | BackgroundSubagentControlRuntime
+                | undefined)
+            : undefined;
+        const childOwnerKey = backgroundSubagentOwnerKey(input.threadId, input.recoveryIdentityKey);
+        const childWatermark = children?.ownerWatermark(childOwnerKey);
+        const currentShellExecutions = managedShellRuntime.listSnapshot(
+          input.threadId,
+          ownerKey,
+        ).executions;
+        const requiredBackground = new Set(requiredBackgroundTaskIds(state));
+        if (
+          requiredBackground.size === 0 &&
+          hasTerminalRequiredManagedShell(state, currentShellExecutions)
+        ) {
+          return 'managed_shell_terminal' as const;
+        }
         const wake = await Promise.race([
           (
             kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
@@ -817,10 +840,42 @@ export async function* executeRuntimeTurn(
           managedShellRuntime
             .waitForOwnerChange(ownerKey, shellWatermark, waitSignal)
             .then(() => 'managed_shell_changed' as const),
+          ...(children && childWatermark !== undefined
+            ? [
+                children
+                  .waitForOwnerChange(childOwnerKey, childWatermark, waitSignal)
+                  .then(() => 'background_changed' as const),
+              ]
+            : []),
         ]);
         if (wake === 'state_changed') return wake;
+        if (wake === 'background_changed' && children) {
+          const executions = children.listSnapshot(input.threadId, childOwnerKey).executions;
+          if (
+            executions.some(
+              (execution) =>
+                requiredBackground.has(execution.executionId) && execution.status === 'unavailable',
+            )
+          ) {
+            const recoveryEvents =
+              children
+                .settlementRecoveryEvents?.(childOwnerKey)
+                .filter(
+                  (event) =>
+                    event.type === 'subagent.background_result_persisted' &&
+                    typeof event.taskId === 'string' &&
+                    requiredBackground.has(event.taskId),
+                ) ?? [];
+            if (recoveryEvents.length > 0) {
+              for (const event of recoveryEvents) kernel.processEvent(event as RuntimeEvent);
+              return 'state_changed' as const;
+            }
+            throw new Error('Required background sub-agent settlement requires explicit recovery.');
+          }
+          return wake;
+        }
         const executions = managedShellRuntime.listSnapshot(input.threadId, ownerKey).executions;
-        return hasTerminalRequiredManagedShell(state, executions)
+        return requiredBackground.size === 0 && hasTerminalRequiredManagedShell(state, executions)
           ? ('managed_shell_terminal' as const)
           : wake;
       },
@@ -856,6 +911,16 @@ export async function* executeRuntimeTurn(
       // signal; otherwise the outer lifecycle can correctly reject all
       // post-abort events while accidentally hiding the rejection itself.
       if (abortReasonAfterProjection) abortExecution(abortReasonAfterProjection, 'user');
+    }
+    if (runCancelled && 'backgroundSubagentRuntime' in modelInvocationRuntime) {
+      const background = modelInvocationRuntime.backgroundSubagentRuntime as
+        | BackgroundSubagentControlRuntime
+        | undefined;
+      await background?.cancelOrigin(
+        backgroundSubagentOwnerKey(input.threadId, input.recoveryIdentityKey),
+        kernel.getState().turn.turnId,
+        kernel.getState().turn.abortReason ?? 'origin_run_cancelled',
+      );
     }
     // A cancelled concurrent tool batch can exhaust the generic effect
     // cleanup grace while its Subagent Provider handles are still durable.

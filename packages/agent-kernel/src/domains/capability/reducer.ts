@@ -219,6 +219,7 @@ export function reduceCapabilityState(state: AgentState, event: KernelEvent): Ag
     if (!invocation || invocation.subagentProviderLifecycle?.backgroundResult) return state;
     const afterTurn = recordField(payload, 'afterTurn');
     const backgroundResult = {
+      admissionRevision: state.revision + 1,
       taskId,
       notificationId,
       artifactIntegrityIdentifier,

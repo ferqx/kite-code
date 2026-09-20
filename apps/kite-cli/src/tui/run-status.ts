@@ -23,7 +23,7 @@ export interface RunStatusSnapshot {
   elapsedMs: number;
   runTokenDelta: number;
   retry: RetryState | null;
-  waiting: 'approval' | 'input' | 'plan_review' | null;
+  waiting: 'approval' | 'input' | 'plan_review' | 'background' | null;
 }
 
 // ── helpers ──
@@ -222,6 +222,11 @@ function waitingState(state: TuiState): RunStatusSnapshot['waiting'] {
   if (state.interrupt?.kind === 'approval') return 'approval';
   if (state.interrupt?.kind === 'input') return 'input';
   if (state.interrupt?.kind === 'plan_review') return 'plan_review';
+  if (
+    state.runtimeAuthority?.currentRun?.status === 'waiting' &&
+    state.runtimeAuthority.currentRun.waitingReason?.kind === 'required_background'
+  )
+    return 'background';
   return null;
 }
 
@@ -253,6 +258,7 @@ export function deriveRunStatusSnapshot(state: TuiState, now = Date.now()): RunS
       phase,
       verb: waiting === 'input' ? 'Asking' : 'Waiting',
       tone: waiting === 'input' ? 'warning' : 'muted',
+      ...(waiting === 'background' ? { note: 'background results' } : {}),
       elapsedMs,
       runTokenDelta,
       retry: null,
@@ -279,6 +285,11 @@ export function formatRunStatusLine(
   columns: number,
   workingLabel = 'Working',
 ): string {
+  if (snapshot.waiting === 'background') {
+    const suffix = snapshot.note ? ` · ${snapshot.note}` : '';
+    return `${snapshot.verb}…${suffix}`;
+  }
+
   // Detailed tool state already lives in the activity blocks. Keep the footer's
   // Working phase deliberately stable and minimal.
   if (snapshot.phase === 'working' || snapshot.phase === 'finishing') return workingLabel;

@@ -686,6 +686,7 @@ export function reduceContextState(
     }
     case 'model.responded': {
       const messageId = nonEmptyStringField(payload, 'messageId');
+      const modelInvocationId = nonEmptyStringField(payload, 'invocationId');
       const toolCalls = parseModelToolCalls(payload);
       const text = Object.hasOwn(payload, 'text') ? stringField(payload, 'text') : undefined;
       const reasoningText = Object.hasOwn(payload, 'reasoningText')
@@ -713,6 +714,7 @@ export function reduceContextState(
       const message: AgentTranscriptMessage = {
         kind: 'assistant',
         messageId,
+        ...(modelInvocationId ? { modelInvocationId } : {}),
         turnId: state.turn.turnId,
         ordinal: state.transcript.messages.length,
         createdAt,

@@ -48,7 +48,7 @@ import { isTuiRunActive } from '../src/tui/presentation/selectors';
 import { projectOutputBlockTimeline } from '../src/tui/presentation/timeline';
 import { TuiUserInputProvider } from '../src/tui/provider';
 import { type Action, eventReducer as canonicalEventReducer } from '../src/tui/reducers';
-import type { RunStatusSnapshot } from '../src/tui/run-status';
+import { deriveRunStatusSnapshot, type RunStatusSnapshot } from '../src/tui/run-status';
 import StatsLine from '../src/tui/StatsLine';
 import StatusBar from '../src/tui/StatusBar';
 import type {
@@ -673,6 +673,22 @@ describe('StatusBar', () => {
       />,
     );
     expect(lastFrame()).toContain('Cancelling');
+  });
+
+  test('shows required background waiting instead of active model work', () => {
+    const { lastFrame } = render(
+      <StatusBar
+        runStatus={fakeRunStatus({
+          phase: 'working',
+          verb: 'Waiting',
+          note: 'background results',
+          waiting: 'background',
+        })}
+        running
+      />,
+    );
+    expect(lastFrame()).toContain('Waiting · background results');
+    expect(lastFrame()).not.toContain('Working');
   });
 });
 
@@ -5978,6 +5994,63 @@ describe('App', () => {
     expect(lines[firstQueuedLine - 1]?.trim()).toBe('');
     expect(lines[firstQueuedLine + 1]?.trim()).toBe('');
     expect(lines[secondQueuedLine + 1]?.trim()).toBe('');
+  });
+
+  test('background waiting accepts steering input and whole-run cancellation', async () => {
+    const submitted: string[] = [];
+    const actions: Action[] = [];
+    let aborted = 0;
+    const authority = activeRuntimeAuthority(
+      2,
+      'run-required-background',
+      'turn-required-background',
+    );
+    const state = fakeState({
+      activeSessionId: 'session-a',
+      runPromptPresented: true,
+      runtimeAuthority: {
+        ...authority,
+        currentRun: {
+          ...authority.currentRun!,
+          status: 'waiting',
+          waitingReason: { kind: 'required_background', taskIds: ['task-required'] },
+        },
+      },
+    });
+    const view = render(
+      <App
+        state={state}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        onAbort={() => aborted++}
+      >
+        <InputLine mode="prompt" onSubmit={(value) => submitted.push(value)} workspace="/test" />
+      </App>,
+    );
+
+    expect(deriveRunStatusSnapshot(state).waiting).toBe('background');
+    expect(view.lastFrame()).toContain('Waiting · background results');
+    expect(view.lastFrame()).toContain('❯');
+    expect(view.lastFrame()).not.toContain('Waiting for response...');
+    view.stdin.write('check the latest child result');
+    await Promise.resolve();
+    view.stdin.write('\r');
+    await Promise.resolve();
+    expect(submitted).toEqual(['check the latest child result']);
+    expect(state.runtimeAuthority?.currentRun).toEqual(
+      expect.objectContaining({
+        runId: 'run-required-background',
+        status: 'waiting',
+        waitingReason: { kind: 'required_background', taskIds: ['task-required'] },
+      }),
+    );
+
+    view.stdin.write('\u0003');
+    await Promise.resolve();
+    expect(actions).toContainEqual({ type: 'CTRL_C' });
+    expect(aborted).toBe(1);
+    view.unmount();
   });
 
   test('keeps the Working status when a queued prompt appears', async () => {
