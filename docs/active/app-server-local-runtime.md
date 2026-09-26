@@ -97,7 +97,7 @@ alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式
 
 实现依据：[resolveManagedLocalAppServerTarget](../../scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](../../apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](../../apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](../../tests/release/app-server-client.test.ts)断言源码入口使用该位置。
 
-Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 11、`kite-session-lineage-2026-09-24`；启动准备仅对已验证的 Store 9、Store 10 和准确旧 epoch 11 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
+Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 13、`kite-session-cross-followup-2026-09-25`；启动准备仅对已验证的 Store 9、Store 10、准确旧 epoch 11 和 Store 12 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
 
 启动准备检查正式库、已知 `kite.sqlite` 与 `source-profiles/<digest>/kite-session.sqlite` 历史来源及待结算发布意图；合格来源在独占维护期归并为唯一正式库，并在旧会话可读取后才开放业务连接。转换失败或发布不确定时保留原件与恢复资产，不生成替代空库。普通历史查询保持只读，不能触发转换；见[实施方案](../plans/session-store-compatibility-and-continuity.md)。
 

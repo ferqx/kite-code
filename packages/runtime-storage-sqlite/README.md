@@ -67,7 +67,7 @@
 
 ## 验证与维护
 
-`bun run --cwd packages/runtime-storage-sqlite test`。测试分别验证 Session Store、多进程 generation、旧 Home Store、Run 与迁移 profile；某个旧 profile 的测试通过不证明它是当前生产入口。
+`bun run --cwd packages/runtime-storage-sqlite test`。测试分别验证 Session Store、多进程 generation、旧 Home Store、Run 与迁移 profile；某个旧 profile 的测试通过不证明它是当前生产入口。[Store 格式锁](test/kite-session-store-format-lock.test.ts)按 `(schema_version, format_epoch)` 固定所有当前接纳格式的完整 `sqlite_schema` 指纹，Store11 lineage 指纹另与真实旧库只读备份核对。旧格式的表、列、约束或索引不能随共享 DDL 改写；新格式须提升 epoch、增加转换和新的指纹。该小测试也由 pre-commit 门禁执行。
 
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
 
