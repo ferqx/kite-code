@@ -102,6 +102,7 @@ export async function exerciseChildOrchestration(
   duringAcknowledgedChild?: (fixture: CompletedChildOrchestrationFixture) => Promise<void>,
   zeroToolChild = false,
   childDeadlineMs = 120_000,
+  failChildModel = false,
 ): Promise<void> {
   const durableHome = process.env.KITE_D3_SIGKILL_HOME;
   const localModelBaseURL = process.env.KITE_D3_SIGKILL_MOCK_URL;
@@ -150,9 +151,11 @@ export async function exerciseChildOrchestration(
         length:
           duringQueuedChild || duringAcknowledgedChild
             ? 0
-            : afterCompletedChild || duringActiveChild
-              ? 1
-              : 4,
+            : failChildModel
+              ? 5
+              : afterCompletedChild || duringActiveChild
+                ? 1
+                : 4,
       },
       () => ({
         response: async ({ messages }: { messages: readonly unknown[] }) => {
@@ -160,6 +163,7 @@ export async function exerciseChildOrchestration(
           expect(JSON.stringify(messages)).toContain('ORCHESTRATED_CHILD_TASK');
           if (crashAfterAttempt || cancelAfterAttempt || cancelViaTaskControl || duringActiveChild)
             await childGate.promise;
+          if (failChildModel) return { error: 'PRIVATE_PROVIDER_FAILURE' };
           return { message: { content: 'ORCHESTRATED_CHILD_RESULT' } };
         },
       }),
@@ -811,6 +815,32 @@ export async function exerciseChildOrchestration(
         childGate.resolve();
         await pending;
         await Promise.allSettled(childWork);
+        if (failChildModel) {
+          const events = owner.storage.sessions
+            .loadEventsStrict(accepted[0]!.childThreadId)
+            .map(({ event }) => event);
+          expect(events.some((event) => event.type === 'model.retry')).toBe(true);
+          expect(events).toContainEqual(
+            expect.objectContaining({
+              type: 'run.error',
+              outcome: expect.objectContaining({ reasonCode: 'model_retry_exhausted' }),
+            }),
+          );
+          const terminal = await orchestrator.taskControl!.readTask(childInvocationId);
+          expect(terminal).toMatchObject({
+            ok: false,
+            status: 'interrupted',
+            result: { error: 'model_retry_exhausted' },
+            outcome: { reasonCode: 'model_retry_exhausted' },
+          });
+          expect(JSON.stringify(terminal)).not.toContain('PRIVATE_PROVIDER_FAILURE');
+          expect(await orchestrator.taskControl!.waitTasks([childInvocationId], 0)).toMatchObject({
+            ok: true,
+            status: 'interrupted',
+            tasks: [{ ok: false, status: 'interrupted' }],
+          });
+          expect(childModelRequests).toBe(5);
+        }
         return;
       }
       if (cancelViaTaskControl)

@@ -117,4 +117,96 @@ describe('Builtin background task control projection', () => {
     });
     expect(calls).toEqual([[['child-1', 'child-2'], 30_000, controller.signal]]);
   });
+
+  test('an observed child failure is readable without failing task_read or task_wait', async () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    for (const operationId of ['builtin:task_read', 'builtin:task_wait'] as const) {
+      const executor = registry.executor(operationId);
+      if (!executor) throw new Error(`${operationId} executor is unavailable.`);
+      const receipt = await executor.execute(
+        {
+          invocationId: `${operationId}-failed-child`,
+          capabilityId: operationId,
+          capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
+          input:
+            operationId === 'builtin:task_read'
+              ? { task_id: 'child-1' }
+              : { task_ids: ['child-1'], timeout_ms: 10 },
+        },
+        {
+          grant: {
+            grantId: 'grant-1',
+            capabilityId: operationId,
+            capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
+            authority: {},
+          },
+          requestDigest: 'request-digest',
+          signal: new AbortController().signal,
+          environment: {
+            environmentId: 'test',
+            kind: 'in_process',
+            mechanisms: Object.freeze({
+              taskControl: Object.freeze({
+                readTask: async () => ({ ok: false, task_id: 'child-1', status: 'failed' }),
+                waitTasks: async () => ({
+                  ok: false,
+                  status: 'failed',
+                  tasks: [{ ok: false, task_id: 'child-1', status: 'failed' }],
+                }),
+              }),
+            }),
+          },
+          attempt: { invocationId: `${operationId}-failed-child`, attemptId: 'attempt-1' },
+        },
+      );
+      expect(receipt.status).toBe('succeeded');
+      if (receipt.status !== 'succeeded') throw new Error('task control receipt failed');
+      expect(receipt.value).toMatchObject({ ok: true, stderr: '' });
+      const value = receipt.value as { stdout: string };
+      expect(JSON.parse(value.stdout)).toMatchObject({ ok: false, status: 'failed' });
+    }
+  });
+
+  test('a foreign task identity remains a failed status operation', async () => {
+    const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
+    for (const operationId of ['builtin:task_read', 'builtin:task_wait'] as const) {
+      const executor = registry.executor(operationId);
+      if (!executor) throw new Error(`${operationId} executor is unavailable.`);
+      const revision = SUBAGENT_CAPABILITY_REVISIONS_[operationId];
+      const receipt = await executor.execute(
+        {
+          invocationId: `${operationId}-foreign-task`,
+          capabilityId: operationId,
+          capabilityRevision: revision,
+          input:
+            operationId === 'builtin:task_read'
+              ? { task_id: 'foreign' }
+              : { task_ids: ['foreign'], timeout_ms: 0 },
+        },
+        {
+          grant: {
+            grantId: 'grant-1',
+            capabilityId: operationId,
+            capabilityRevision: revision,
+            authority: {},
+          },
+          requestDigest: 'request-digest',
+          signal: new AbortController().signal,
+          environment: {
+            environmentId: 'test',
+            kind: 'in_process',
+            mechanisms: Object.freeze({
+              taskControl: Object.freeze({
+                readTask: async () => ({ ok: false, task_id: 'foreign', status: 'not_found' }),
+                waitTasks: async () => ({ ok: false, status: 'not_found', tasks: [] }),
+              }),
+            }),
+          },
+          attempt: { invocationId: `${operationId}-foreign-task`, attemptId: 'attempt-1' },
+        },
+      );
+      expect(receipt.status).toBe('succeeded');
+      expect(receipt.value).toMatchObject({ ok: false, stdout: '' });
+    }
+  });
 });

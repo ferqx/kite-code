@@ -1,9 +1,82 @@
-import { test } from 'bun:test';
+import { expect, test } from 'bun:test';
+import type { RuntimeState } from '../../src/bootstrap/runtime/state-runtime';
+import { childTerminalResult } from '../../src/bootstrap/runtime/subagent/child-session-orchestrator';
 import { exerciseChildOrchestration } from './child-session-orchestrator-integration-fixture';
+
+test('child terminal result preserves successful output and reports only bounded failure reasons', () => {
+  const state = (
+    reasonCode: 'completed' | 'model_retry_exhausted' | 'provider_unavailable' | 'unknown',
+    outcomeStatus: 'completed' | 'aborted' | 'unknown',
+  ) =>
+    ({
+      terminalOutcome: { status: outcomeStatus, reasonCode },
+      tools: { calls: { 'child-tool': {} } },
+      resourceBudget: { status: 'active', startedAt: new Date(Date.now() - 100).toISOString() },
+      turn: { status: reasonCode === 'completed' ? 'completed' : 'aborted', abortCause: 'error' },
+    }) as unknown as RuntimeState;
+
+  expect(childTerminalResult(state('completed', 'completed'), 'Child answer.')).toMatchObject({
+    ok: true,
+    summary: 'Child answer.',
+    terminalStatus: 'completed',
+    toolCallCount: 1,
+  });
+  for (const [reasonCode, outcomeStatus, terminalStatus] of [
+    ['model_retry_exhausted', 'unknown', 'interrupted'],
+    ['provider_unavailable', 'aborted', 'failed'],
+    ['unknown', 'unknown', 'interrupted'],
+  ] as const) {
+    const result = childTerminalResult(state(reasonCode, outcomeStatus), 'PRIVATE_PROVIDER_BODY');
+    expect(result).toMatchObject({
+      ok: false,
+      error: reasonCode,
+      summary: `Child Session ${terminalStatus}: ${reasonCode}.`,
+      terminalStatus,
+      toolCallCount: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_PROVIDER_BODY');
+  }
+});
 
 test(
   'direct child orchestrator uses real Store and Host authority through terminal import',
   () => exerciseChildOrchestration(false),
+  30_000,
+);
+
+test(
+  'real child Provider retries wake task_wait and settle a classified failure for the parent',
+  () =>
+    exerciseChildOrchestration(
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      false,
+      async ({ orchestrator }, releaseChildResponse) => {
+        const waiting = orchestrator.taskControl!.waitTasks(
+          ['orchestrator-child-invocation'],
+          15_000,
+        );
+        releaseChildResponse();
+        expect(await waiting).toMatchObject({
+          ok: true,
+          status: 'running',
+          reason: 'model_retry',
+          tasks: [{ status: 'running', retry: { attempt: 1, maxAttempts: 5 } }],
+        });
+      },
+      undefined,
+      undefined,
+      false,
+      120_000,
+      true,
+    ),
   30_000,
 );
 

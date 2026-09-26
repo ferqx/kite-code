@@ -409,12 +409,21 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task_read: {
     summary: 'Read the current status or durable terminal report for one background sub-agent.',
     useWhen:
-      'Read the exact task_id for a user-requested status check, failure/cancellation diagnosis, or a full durable report after a truncated terminal result. This is an on-demand snapshot, not a waiting primitive or completion guard.',
+      'Read the exact task_id for a user-requested status check, current model retry progress, failure/cancellation diagnosis, or a full durable report after a truncated terminal result. This is an on-demand snapshot, not a waiting primitive or completion guard.',
     returns: {
       format: 'json',
       description:
-        'The stable task identity, lifecycle status, cleanup facts and terminal report when available.',
-      fields: ['ok', 'task_id', 'status', 'cleanup_confirmed', 'result', 'artifact'],
+        'The stable task identity, lifecycle status, bounded model retry progress, cleanup facts and classified terminal report when available. A failed child is still a successful status read.',
+      fields: [
+        'ok',
+        'task_id',
+        'status',
+        'retry',
+        'cleanup_confirmed',
+        'outcome',
+        'result',
+        'artifact',
+      ],
     },
     constraints:
       'The task must belong to the active Session and Runtime owner. This non-consuming on-demand snapshot is not a waiting primitive or completion guard and does not grant cancellation or execution authority. Do not use sleep, loops, or fixed-interval reads to wait.',
@@ -424,15 +433,15 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task_wait: {
     summary: 'Wait for an actionable update from one or more background sub-agents.',
     useWhen:
-      'Use one bounded wait when an intermediate child result determines the next action, for example which independent result to inspect or which dependent task to start. Pass one to eight exact task_ids. When only required children remain before the final answer, submit the final candidate and let Runtime wait automatically.',
+      'Use one bounded wait when a child result or model retry changes the next action, for example which independent result to inspect or which dependent task to start. Pass one to eight exact task_ids. When only required children remain before the final answer, submit the final candidate and let Runtime wait automatically.',
     returns: {
       format: 'json',
       description:
-        'The wait reason and current task snapshots after a terminal, failed, cancelled, missing, interrupted, or timeout outcome.',
+        'The wait reason and current task snapshots after a model retry, terminal, failed, cancelled, missing, interrupted, or timeout outcome. A failed child remains visible in tasks rather than failing the wait Tool.',
       fields: ['ok', 'reason', 'cursor', 'tasks'],
     },
     constraints:
-      'task_ids must contain one to eight distinct Runtime-owned task identities. timeout_ms is bounded to 0-60000 and defaults to 30000. Do not repeatedly call task_wait after an unchanged timeout, and do not replace it with sleep or task_read polling.',
+      'task_ids must contain one to eight distinct Runtime-owned task identities. timeout_ms is bounded to 0-60000 and defaults to 30000. Do not repeatedly call task_wait after an unchanged timeout or model retry, and do not replace it with sleep or task_read polling.',
     recovery:
       'On timeout, continue meaningful independent work or yield to automatic required-result delivery. Treat missing or foreign task identities as terminal for that invocation; user input or cancellation interrupts the wait.',
   },

@@ -137,6 +137,26 @@ function terminalStatus(state: RuntimeState): NonNullable<SubAgentResult['termin
   return 'failed';
 }
 
+/** Use only the Kernel's bounded reason code in parent-visible child failures. */
+export function childTerminalResult(state: RuntimeState, output: string): SubAgentResult {
+  const status = terminalStatus(state);
+  const reasonCode = status === 'completed' ? undefined : state.terminalOutcome?.reasonCode;
+  return {
+    ok: status === 'completed',
+    summary:
+      status === 'completed'
+        ? output
+        : `Child Session ${status}${reasonCode ? `: ${reasonCode}` : ''}.`,
+    ...(reasonCode ? { error: reasonCode } : {}),
+    toolCallCount: Object.keys(state.tools.calls).length,
+    durationMs:
+      state.resourceBudget.status === 'active'
+        ? Math.max(0, Date.now() - Date.parse(state.resourceBudget.startedAt))
+        : 0,
+    terminalStatus: status,
+  };
+}
+
 const localChildRunners = new WeakMap<
   KiteSessionAppServerStorageOwner,
   {
@@ -3369,17 +3389,7 @@ export function createChildSessionOrchestrator(input: {
         }
         await child.waitForIdle();
         const state = child.getState();
-        const status = terminalStatus(state);
-        const result: SubAgentResult = {
-          ok: status === 'completed',
-          summary: status === 'completed' ? output : `Child Session ${status}.`,
-          toolCallCount: Object.keys(state.tools.calls).length,
-          durationMs:
-            state.resourceBudget.status === 'active'
-              ? Math.max(0, Date.now() - Date.parse(state.resourceBudget.startedAt))
-              : 0,
-          terminalStatus: status,
-        };
+        const result = childTerminalResult(state, output);
         sealChildTerminalResult({
           getChildState: () => child.getState(),
           artifacts: modelRuntime.childResultArtifacts,
@@ -4017,21 +4027,11 @@ export function createChildSessionOrchestrator(input: {
         await child.waitForIdle();
         if (stoppingRecovery || childAbort.signal.aborted) return;
         const state = child.getState();
-        const status = terminalStatus(state);
         sealChildTerminalResult({
           getChildState: () => child.getState(),
           artifacts: runtime.childResultArtifacts,
           parentOwnerKey,
-          result: {
-            ok: status === 'completed',
-            summary: status === 'completed' ? output : `Child Session ${status}.`,
-            toolCallCount: Object.keys(state.tools.calls).length,
-            durationMs:
-              state.resourceBudget.status === 'active'
-                ? Math.max(0, Date.now() - Date.parse(state.resourceBudget.startedAt))
-                : 0,
-            terminalStatus: status,
-          },
+          result: childTerminalResult(state, output),
           cleanupConfirmed: true,
           cancelRequested: state.turn.abortCause === 'user',
           terminalReceiptId: `child-terminal:${intent.childThreadId}:${state.revision}`,
@@ -4371,6 +4371,7 @@ export function createChildSessionOrchestrator(input: {
       getParentState: () => parent.getState(),
       readIntent: input.owner.readChildSessionIntent,
       readChildState: (id) => input.owner.storage.sessions.loadSnapshot<RuntimeState>(id),
+      readChildEvents: (id) => input.owner.storage.sessions.loadEventsStrict(id),
       artifacts: runtime.childResultArtifacts,
       parentArtifactOwnerKey: backgroundSubagentOwnerKey(
         input.parentSessionId,
@@ -4381,6 +4382,8 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Independent child Task wait has no parent revision port.');
         return parent.session.waitForRevisionChange(revision, signal);
       },
+      waitForChildRevisionChange: (id, revision, signal) =>
+        input.coordinators.get(id)?.session.waitForRevisionChange?.(revision, signal) ?? null,
     });
   };
   const schedulePendingInterruptRecovery = (

@@ -693,10 +693,14 @@ async function executeTaskControl(
   if (action === 'wait') {
     const parsed = BUILTIN_TASK_WAIT_SCHEMA_.parse(input);
     const result = await mechanism.waitTasks(parsed.task_ids, parsed.timeout_ms ?? 30_000, signal);
-    const ok = result.ok === true;
     const content = JSON.stringify(result);
     const status = typeof result.status === 'string' ? result.status : 'unknown';
-    return operationResult(ok, ok ? content : '', ok ? '' : content, undefined, {
+    // A child failure is an observed task outcome, not a failure of task_wait.
+    // Preserve the child status in the JSON and Tool metadata so the parent
+    // model can decide how to continue in the same Run.
+    const observed =
+      result.ok === true || (typeof result.status === 'string' && status !== 'not_found');
+    return operationResult(observed, observed ? content : '', observed ? '' : content, undefined, {
       taskIds: parsed.task_ids,
       taskStatus: status,
       ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
@@ -711,10 +715,12 @@ async function executeTaskControl(
       : BUILTIN_TASK_CANCEL_SCHEMA_.parse(input).task_id;
   const result =
     action === 'read' ? await mechanism.readTask(taskId) : await mechanism.cancelTask(taskId);
-  const ok = result.ok === true;
   const content = JSON.stringify(result);
   const status = typeof result.status === 'string' ? result.status : 'unknown';
-  return operationResult(ok, ok ? content : '', ok ? '' : content, undefined, {
+  const observed =
+    result.ok === true ||
+    (action === 'read' && typeof result.status === 'string' && status !== 'not_found');
+  return operationResult(observed, observed ? content : '', observed ? '' : content, undefined, {
     taskId,
     taskStatus: status,
   });

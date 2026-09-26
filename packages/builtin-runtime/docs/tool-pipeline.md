@@ -2,6 +2,8 @@
 
 入口：[catalog contract](../src/catalog-contract.ts)、[tool contracts](../src/tool-contracts.ts)、[schemas](../src/tool-schemas.ts)、[pipeline callbacks](../src/tool-pipeline-callbacks.ts)、[prepared dispatch](../src/builtin-prepared-dispatch-adapter.ts)。
 
+`task_wait` 可因独立子 Agent 的已提交模型重试或终态返回；运行中的重试快照只包含有限分类与次数。`task_read` 是同一状态的按需读取。已验证的失败子任务仍作为成功的读取 Tool 结果进入父模型上下文，JSON 中的子任务 `ok:false` 和安全终态原因保持不变；未知或外来 task ID 继续报读取失败。重试进度不清除 required 义务，也不授权重复调用无变化的等待。
+
 五个普通文件工具由 [filesystem module](../src/filesystem/runtime-module.ts) 注册和执行，保留原 operationId、provider identity 及 revision。registry 不注册 `git_inspect`；专用 Broker／schema 已删除，Git 请求由 Shell 路径治理。
 
 ## 从模型声明到实际执行

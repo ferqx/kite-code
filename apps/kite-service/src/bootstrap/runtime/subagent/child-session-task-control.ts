@@ -1,6 +1,6 @@
 import type { SubagentResultArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
 import type { KiteSessionAppServerStorageOwner } from '../../kite-session-app-server-storage';
-import type { RuntimeState } from '../state-runtime';
+import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 
 type Intent = NonNullable<ReturnType<KiteSessionAppServerStorageOwner['readChildSessionIntent']>>;
 type Snapshot = Readonly<Record<string, unknown>>;
@@ -11,13 +11,65 @@ export interface ChildSessionTaskControlPort {
   readonly getParentState: () => Readonly<RuntimeState>;
   readonly readIntent: (childThreadId: string) => Intent | null;
   readonly readChildState: (childThreadId: string) => Readonly<RuntimeState> | null;
+  /** Committed child events; the control projects only bounded model retry facts. */
+  readonly readChildEvents: (childThreadId: string) => readonly Readonly<{ event: RuntimeEvent }>[];
   readonly artifacts: Pick<SubagentResultArtifactAccess, 'lookup' | 'read'>;
   readonly parentArtifactOwnerKey: string;
   /** Waits for a changed parent revision, resolving immediately if it already changed. */
   readonly waitForParentRevisionChange: (revision: number, signal?: AbortSignal) => Promise<void>;
+  /** Returns null if the child has no live local coordinator. */
+  readonly waitForChildRevisionChange: (
+    childThreadId: string,
+    revision: number,
+    signal?: AbortSignal,
+  ) => Promise<void> | null;
 }
 
 const MAX_WAIT_MS = 60_000;
+
+type TaskRead = Readonly<{
+  snapshot: Snapshot;
+  childThreadId?: string;
+  childRevision?: number;
+}>;
+
+function activeRetry(
+  child: Readonly<RuntimeState>,
+  events: readonly Readonly<{ event: RuntimeEvent }>[],
+): Snapshot | undefined {
+  const active = Object.values(child.modelInvocations ?? {})
+    .filter((model) => model.status === 'dispatching')
+    .sort((a, b) => b.preparedStateRevision - a.preparedStateRevision)[0];
+  if (!active) return undefined;
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index]!.event;
+    if (event.type === 'model.responded' && event.invocationId === active.invocationId)
+      return undefined;
+    if (event.type === 'model.invocation_interrupted' && event.invocationId === active.invocationId)
+      return undefined;
+    if (event.type !== 'model.retry' || event.invocationId !== active.invocationId) continue;
+    return Object.freeze({
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      delayMs: event.delayMs,
+      ...(event.failureClassification
+        ? { failureClassification: event.failureClassification }
+        : {}),
+    });
+  }
+  return undefined;
+}
+
+function terminalOutcome(child: Readonly<RuntimeState>): Snapshot | undefined {
+  const outcome = child.terminalOutcome;
+  if (!outcome) return undefined;
+  return Object.freeze({
+    reasonCode: outcome.reasonCode,
+    safeRetry: outcome.safeRetry,
+    recoveryEntry: outcome.recoveryEntry,
+    knownExternalEffects: outcome.knownExternalEffects,
+  });
+}
 
 function notFound(taskId: string): Snapshot {
   return Object.freeze({
@@ -75,14 +127,15 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
   readTask(taskId: string): Promise<Snapshot>;
   waitTasks(taskIds: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<Snapshot>;
 }> {
-  const readAt = (parent: Readonly<RuntimeState>, taskId: string): Snapshot => {
-    if (!taskId || parent.session.threadId !== input.parentSessionId) return notFound(taskId);
+  const readAt = (parent: Readonly<RuntimeState>, taskId: string): TaskRead => {
+    if (!taskId || parent.session.threadId !== input.parentSessionId)
+      return { snapshot: notFound(taskId) };
     const matches = Object.entries(parent.capabilities.invocations).filter(
       ([, invocation]) =>
         invocation.subagentProviderLifecycle?.childInvocationId === taskId &&
         invocation.subagentProviderLifecycle.childSession,
     );
-    if (matches.length !== 1) return notFound(taskId);
+    if (matches.length !== 1) return { snapshot: notFound(taskId) };
     const [parentInvocationId, invocation] = matches[0]!;
     const lifecycle = invocation.subagentProviderLifecycle!;
     const link = lifecycle.childSession!;
@@ -98,7 +151,7 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
       intent.originToolCallId !== link.originToolCallId ||
       intent.grantDigest !== link.grantDigest
     )
-      return notFound(taskId);
+      return { snapshot: notFound(taskId) };
     if (intent.failureReceiptDigest) {
       const failure = link.terminalImport;
       if (
@@ -108,47 +161,73 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
         lifecycle.backgroundResult?.artifactIntegrityIdentifier !== intent.failureReceiptDigest ||
         parent.revision < (lifecycle.backgroundResult?.admissionRevision ?? Number.MAX_SAFE_INTEGER)
       )
-        return unknown(taskId, 'Background sub-agent creation failure requires recovery.');
+        return {
+          snapshot: unknown(taskId, 'Background sub-agent creation failure requires recovery.'),
+        };
       const owned = input.artifacts.lookup(input.parentArtifactOwnerKey, taskId);
       if (!owned || !sameRef(owned.ref, failure.resultRef))
-        return unknown(taskId, 'Background sub-agent failure Artifact is unavailable.');
+        return {
+          snapshot: unknown(taskId, 'Background sub-agent failure Artifact is unavailable.'),
+        };
       try {
         const result = input.artifacts.read(failure.resultRef, taskId);
         if (result.terminalStatus !== failure.status || result.ok !== false)
-          return unknown(taskId, 'Background sub-agent failure Artifact conflicts.');
-        return Object.freeze({
-          ok: false,
-          task_id: taskId,
-          status: failure.status,
-          cancel_requested: failure.status === 'cancelled',
-          cleanup_confirmed: true,
-          artifact: failure.resultRef,
-          result,
-        });
+          return { snapshot: unknown(taskId, 'Background sub-agent failure Artifact conflicts.') };
+        return {
+          snapshot: Object.freeze({
+            ok: false,
+            task_id: taskId,
+            status: failure.status,
+            cancel_requested: failure.status === 'cancelled',
+            cleanup_confirmed: true,
+            artifact: failure.resultRef,
+            result,
+          }),
+        };
       } catch {
-        return unknown(taskId, 'Background sub-agent failure Artifact is unavailable.');
+        return {
+          snapshot: unknown(taskId, 'Background sub-agent failure Artifact is unavailable.'),
+        };
       }
     }
     if (!link.terminalImport && link.recoveryDiagnostic)
-      return unknown(taskId, 'Background sub-agent requires explicit recovery.');
-    if (!link.terminalImport)
-      return Object.freeze({
-        ok: true,
-        task_id: taskId,
-        status: 'running',
-        cancel_requested: false,
-        cleanup_confirmed: false,
-      });
+      return { snapshot: unknown(taskId, 'Background sub-agent requires explicit recovery.') };
+    const child = input.readChildState(link.childThreadId);
+    const origin = child?.childSessionOrigin;
+    if (
+      child &&
+      (child.session.threadId !== link.childThreadId ||
+        !origin ||
+        origin.parentSessionId !== input.parentSessionId ||
+        origin.parentInvocationId !== parentInvocationId ||
+        origin.childInvocationId !== taskId ||
+        origin.grantDigest !== link.grantDigest)
+    )
+      return { snapshot: unknown(taskId, 'Background sub-agent child identity conflicts.') };
+    if (!link.terminalImport) {
+      const retry = child
+        ? activeRetry(child, input.readChildEvents(link.childThreadId))
+        : undefined;
+      return {
+        snapshot: Object.freeze({
+          ok: true,
+          task_id: taskId,
+          status: 'running',
+          cancel_requested: false,
+          cleanup_confirmed: false,
+          ...(retry ? { retry } : {}),
+        }),
+        ...(child ? { childThreadId: link.childThreadId, childRevision: child.revision } : {}),
+      };
+    }
     if (
       !intent.parentClaimSettledEventId ||
       !intent.parentClaimSettledRevision ||
       parent.revision < intent.parentClaimSettledRevision
     ) {
       // The Store receipt and Kernel result must both exist before a terminal is public.
-      return unknown(taskId, 'Background sub-agent settlement requires recovery.');
+      return { snapshot: unknown(taskId, 'Background sub-agent settlement requires recovery.') };
     }
-    const child = input.readChildState(link.childThreadId);
-    const origin = child?.childSessionOrigin;
     const seal = origin?.terminal;
     const imported = link.terminalImport;
     if (
@@ -164,33 +243,42 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
       seal.sealedRevision !== imported.terminalRevision ||
       !sameRef(seal.resultRef, imported.resultRef)
     )
-      return unknown(taskId, 'Background sub-agent terminal proof is unavailable.');
+      return { snapshot: unknown(taskId, 'Background sub-agent terminal proof is unavailable.') };
     const owned = input.artifacts.lookup(input.parentArtifactOwnerKey, taskId);
     if (!owned || !sameRef(owned.ref, imported.resultRef))
-      return unknown(taskId, 'Background sub-agent result Artifact is unavailable.');
+      return { snapshot: unknown(taskId, 'Background sub-agent result Artifact is unavailable.') };
     let result: Readonly<Record<string, unknown>>;
     try {
       result = input.artifacts.read(imported.resultRef, taskId);
     } catch {
-      return unknown(taskId, 'Background sub-agent result Artifact is unavailable.');
+      return { snapshot: unknown(taskId, 'Background sub-agent result Artifact is unavailable.') };
     }
     if (
       result.terminalStatus !== imported.status ||
       (imported.status === 'completed') !== (result.ok === true)
     )
-      return unknown(taskId, 'Background sub-agent result Artifact conflicts with terminal proof.');
-    return Object.freeze({
-      ok: imported.status !== 'unknown',
-      task_id: taskId,
-      status: imported.status,
-      cancel_requested: seal.cancelRequested,
-      cleanup_confirmed: seal.cleanupConfirmed,
-      artifact: imported.resultRef,
-      result,
-    });
+      return {
+        snapshot: unknown(
+          taskId,
+          'Background sub-agent result Artifact conflicts with terminal proof.',
+        ),
+      };
+    const outcome = terminalOutcome(child);
+    return {
+      snapshot: Object.freeze({
+        ok: imported.status === 'completed',
+        task_id: taskId,
+        status: imported.status,
+        cancel_requested: seal.cancelRequested,
+        cleanup_confirmed: seal.cleanupConfirmed,
+        artifact: imported.resultRef,
+        result,
+        ...(outcome ? { outcome } : {}),
+      }),
+    };
   };
   const readTask = async (taskId: string): Promise<Snapshot> =>
-    readAt(input.getParentState(), taskId);
+    readAt(input.getParentState(), taskId).snapshot;
   const waitTasks = async (
     taskIds: readonly string[],
     timeoutMs: number,
@@ -215,11 +303,13 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
     );
     while (true) {
       const parent = input.getParentState();
-      const tasks = taskIds.map((id) => readAt(parent, id));
+      const reads = taskIds.map((id) => readAt(parent, id));
+      const tasks = reads.map((read) => read.snapshot);
       const actionable = tasks.find(
         (task) => task.status !== 'running' && task.status !== 'cancelling',
       );
-      if (actionable) return waitResult(tasks, String(actionable.status), actionable.ok !== false);
+      if (actionable)
+        return waitResult(tasks, String(actionable.status), actionable.status !== 'not_found');
       if (signal?.aborted) return waitResult(tasks, 'cancelled', false, 'run_cancelled');
       if (
         (parent.transcript?.messages ?? []).some(
@@ -230,6 +320,8 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
         )
       )
         return waitResult(tasks, 'running', true, 'user_input');
+      if (tasks.some((task) => task.retry))
+        return waitResult(tasks, 'running', true, 'model_retry');
       const remaining = deadline - Date.now();
       if (remaining <= 0) return waitResult(tasks, 'timeout', true);
       const waitController = new AbortController();
@@ -237,10 +329,21 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
       signal?.addEventListener('abort', onAbort, { once: true });
       const timer = setTimeout(() => waitController.abort(), remaining);
       try {
-        await input.waitForParentRevisionChange(parent.revision, waitController.signal);
+        const waits = [input.waitForParentRevisionChange(parent.revision, waitController.signal)];
+        for (const read of reads) {
+          if (!read.childThreadId || read.childRevision === undefined) continue;
+          const childWait = input.waitForChildRevisionChange(
+            read.childThreadId,
+            read.childRevision,
+            waitController.signal,
+          );
+          if (childWait) waits.push(childWait);
+        }
+        await Promise.race(waits);
       } catch (error) {
         if (!waitController.signal.aborted) throw error;
       } finally {
+        waitController.abort();
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
       }

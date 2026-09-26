@@ -4,6 +4,8 @@
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
 验证：`bun test apps/kite-service/test/runtime/failures.test.ts apps/kite-service/test/runtime/failure-taxonomy.test.ts apps/kite-service/test/runtime/failure-mode-conformance.test.ts apps/kite-service/test/runtime/resource-budget-admission.test.ts apps/kite-service/test/runtime/tool-outcome-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/subagent-continuation-codec.test.ts apps/kite-service/test/subagent-runner.test.ts`。
 
+独立子 Session 的父作用域 Task 状态只投影已提交 `model.retry` 的尝试次数、上限、延迟和闭集失败分类，不复制 `error` 文本；响应或 invocation 中断后清除运行中重试提示。终态原因来自 Kernel `terminalOutcome.reasonCode`，读取结果可附带 `safeRetry`、`recoveryEntry` 与外部效果确定性，不能从 Provider 消息猜测。子任务失败与 `task_read`／`task_wait` 工具执行失败是两件事：准确且已验证的失败状态作为成功读取返回，外来 task ID 或读取本身失败仍按工具失败处理。外部效果未知仍维持 reconciliation 边界。
+
 Runtime failures use the Agent-Kernel-owned `ClassifiedFailure`; App
 `apps/kite-service/src/bootstrap/runtime/failures.ts` is only the Runtime State type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Auto-review 的 `ask_user` 决定不是失败：它携带 `escalatedToUser`，并在用户批准或拒绝前保持非终态；明确 `reject` 记录 `auto_review_rejected`，技术 reviewer failure 则沿人工审批升级路径处理，不伪造成模型拒绝。
 

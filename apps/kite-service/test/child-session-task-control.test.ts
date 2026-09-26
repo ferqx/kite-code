@@ -42,7 +42,9 @@ function fixture() {
     parentClaimSettledRevision: null,
   };
   const child = {
+    revision: 4,
     session: { threadId: 'child-1' },
+    modelInvocations: {} as Record<string, unknown>,
     childSessionOrigin: {
       parentSessionId: 'parent-1',
       parentInvocationId: 'invocation-1',
@@ -57,11 +59,13 @@ function fixture() {
       },
     },
   };
+  const childEvents: { event: Record<string, unknown> }[] = [];
   const readers: Parameters<typeof createChildSessionTaskControl>[0] = {
     parentSessionId: 'parent-1',
     getParentState: () => parent as never,
     readIntent: (id) => (id === 'child-1' ? (intent as never) : null),
     readChildState: (id) => (id === 'child-1' ? (child as never) : null),
+    readChildEvents: (id) => (id === 'child-1' ? (childEvents as never) : []),
     artifacts: {
       lookup: (owner, taskId) =>
         owner === 'owner-1' && taskId === 'task-1' ? { ref, result } : undefined,
@@ -69,8 +73,9 @@ function fixture() {
     },
     parentArtifactOwnerKey: 'owner-1',
     waitForParentRevisionChange: async () => {},
+    waitForChildRevisionChange: () => null,
   };
-  return { parent, link, intent, child, readers };
+  return { parent, link, intent, child, childEvents, readers };
 }
 
 test('readTask binds parent intent, child terminal and result Artifact before publishing', async () => {
@@ -80,6 +85,158 @@ test('readTask binds parent intent, child terminal and result Artifact before pu
   expect(await control.readTask('task-1')).toMatchObject({ status: 'running', ok: true });
   f.intent.parentSessionId = 'foreign-parent';
   expect(await control.readTask('task-1')).toMatchObject({ status: 'not_found', ok: false });
+});
+
+test('task_wait wakes on a committed child model retry without exposing Provider error text', async () => {
+  const f = fixture();
+  let wakeChild: (() => void) | undefined;
+  let childRevision = -1;
+  const control = createChildSessionTaskControl({
+    ...f.readers,
+    waitForParentRevisionChange: () => new Promise<void>(() => {}),
+    waitForChildRevisionChange: (_id, revision) => {
+      childRevision = revision;
+      return new Promise<void>((resolve) => {
+        wakeChild = resolve;
+      });
+    },
+  });
+  const waiting = control.waitTasks(['task-1'], 1_000);
+  await Promise.resolve();
+  expect(childRevision).toBe(4);
+  f.child.revision = 5;
+  f.child.modelInvocations['model-1'] = {
+    invocationId: 'model-1',
+    status: 'dispatching',
+    preparedStateRevision: 4,
+  };
+  f.childEvents.push({
+    event: {
+      type: 'model.retry',
+      invocationId: 'model-1',
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 200,
+      failureClassification: 'provider_rate_limited',
+      error: 'PRIVATE_PROVIDER_DETAIL',
+    },
+  });
+  wakeChild?.();
+  const result = await waiting;
+  expect(result).toMatchObject({
+    ok: true,
+    status: 'running',
+    reason: 'model_retry',
+    tasks: [
+      {
+        status: 'running',
+        retry: {
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 200,
+          failureClassification: 'provider_rate_limited',
+        },
+      },
+    ],
+  });
+  expect(JSON.stringify(result)).not.toContain('PRIVATE_PROVIDER_DETAIL');
+  expect(await control.readTask('task-1')).toMatchObject({
+    status: 'running',
+    retry: { attempt: 1 },
+  });
+});
+
+test('retry progress clears on model response, interruption, and terminal settlement', async () => {
+  const f = fixture();
+  f.child.modelInvocations['model-1'] = {
+    invocationId: 'model-1',
+    status: 'dispatching',
+    preparedStateRevision: 4,
+  };
+  f.childEvents.push({
+    event: {
+      type: 'model.retry',
+      invocationId: 'model-1',
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 200,
+      error: 'hidden',
+    },
+  });
+  const control = createChildSessionTaskControl(f.readers);
+  expect(await control.readTask('task-1')).toHaveProperty('retry');
+  f.childEvents.push({ event: { type: 'model.responded', invocationId: 'model-1' } });
+  expect(await control.readTask('task-1')).not.toHaveProperty('retry');
+  f.childEvents.push({
+    event: {
+      type: 'model.retry',
+      invocationId: 'model-1',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 400,
+      error: 'hidden',
+    },
+  });
+  expect(await control.readTask('task-1')).toHaveProperty('retry');
+  f.childEvents.push({ event: { type: 'model.invocation_interrupted', invocationId: 'model-1' } });
+  expect(await control.readTask('task-1')).not.toHaveProperty('retry');
+  Object.assign(f.link, {
+    terminalImport: { terminalRevision: 12, status: 'failed', resultRef: ref },
+  });
+  Object.assign(f.intent, {
+    parentClaimSettledEventId: 'settled-1',
+    parentClaimSettledRevision: 5,
+  });
+  f.parent.revision = 5;
+  Object.assign(f.child.childSessionOrigin.terminal, { status: 'failed' });
+  Object.assign(f.child, {
+    terminalOutcome: {
+      reasonCode: 'model_retry_exhausted',
+      safeRetry: false,
+      recoveryEntry: 'new_run',
+      knownExternalEffects: 'none',
+    },
+  });
+  const failed = { ok: false, terminalStatus: 'failed', summary: 'Child Session failed.' };
+  const settled = createChildSessionTaskControl({
+    ...f.readers,
+    artifacts: { lookup: () => ({ ref, result: failed }), read: () => failed },
+  });
+  expect(await settled.waitTasks(['task-1'], 0)).toMatchObject({
+    ok: true,
+    status: 'failed',
+    tasks: [
+      {
+        ok: false,
+        status: 'failed',
+        outcome: {
+          reasonCode: 'model_retry_exhausted',
+          safeRetry: false,
+          recoveryEntry: 'new_run',
+          knownExternalEffects: 'none',
+        },
+      },
+    ],
+  });
+});
+
+test('foreign parent-child lineage never reads child model events', async () => {
+  const f = fixture();
+  f.intent.parentSessionId = 'other-parent';
+  let readCount = 0;
+  const control = createChildSessionTaskControl({
+    ...f.readers,
+    readChildEvents: () => {
+      readCount++;
+      return [];
+    },
+  });
+  expect(await control.readTask('task-1')).toMatchObject({ status: 'not_found' });
+  expect(readCount).toBe(0);
+  f.intent.parentSessionId = 'parent-1';
+  f.child.childSessionOrigin.parentSessionId = 'other-parent';
+  expect(await control.readTask('task-1')).toMatchObject({ status: 'unknown' });
+  expect(readCount).toBe(0);
 });
 
 test('readTask exposes only a parent-settled exact terminal', async () => {
@@ -157,8 +314,8 @@ test('a durable recovery diagnostic wakes task_wait without forging a child term
   });
   expect(await control.waitTasks(['task-1'], 60_000)).toMatchObject({
     status: 'unknown',
-    ok: false,
-    tasks: [{ status: 'unknown' }],
+    ok: true,
+    tasks: [{ status: 'unknown', ok: false }],
   });
   expect(f.link).not.toHaveProperty('terminalImport');
   expect(f.intent.parentClaimSettledEventId).toBeNull();

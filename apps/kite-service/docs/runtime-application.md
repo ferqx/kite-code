@@ -4,6 +4,8 @@
 `src/app-control/**` 的 owner-local current authority。它们同时组合default parent-owned App Server与显式daemon；CLI/TUI
 只通过typed Runtime/App client seam消费结果。
 
+独立子 Session 的 `task_read`／`task_wait` 先核父任务意图、父子血缘与结果封存证明，再从子 Session 已提交事件投影有限的模型重试信息。显式 `task_wait` 同时监听父与当前本机子 Session 的 revision；重试可唤醒这一次等待，但不成为子终态或 required 结算事实。父侧终态结果携带 Kernel 的稳定原因码，已接纳终态快照另给出 `safeRetry`、`recoveryEntry` 和外部效果确定性。原始 Provider 错误和子任务正文不作为诊断字段。子任务失败是读取到的结果，`task_read`／`task_wait` 的 Tool 仍可成功返回结构化 JSON；外部效果未知时保留原恢复限制。
+
 ## 唯一 Host/Store composition
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
