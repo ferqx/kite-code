@@ -152,6 +152,42 @@ export class NotificationProjector {
     }
   }
 
+  /** Observer-only child stream. The child is owned outside this Host's lifecycle registry. */
+  publishExternal(notification: RuntimeNotification): void {
+    if (this.#closed) return;
+    if (notification.schema !== RUNTIME_NOTIFICATION_SCHEMA_) {
+      throw new Error('External Runtime notification schema is inconsistent.');
+    }
+    if (
+      notification.durability === 'durable' &&
+      (notification.sessionId !== notification.projection.session.sessionId ||
+        notification.revision !== notification.projection.session.revision ||
+        !Number.isSafeInteger(notification.revision) ||
+        notification.revision < 0)
+    ) {
+      throw new Error('External durable Runtime notification identity is inconsistent.');
+    }
+    if (notification.durability === 'ephemeral' && !this.#acceptEphemeral(notification)) return;
+    if (notification.durability === 'durable') this.#observeDurableTerminal(notification);
+    for (const subscriber of this.#subscribers) {
+      if (
+        subscriber.closed ||
+        subscriber.scope !== 'session' ||
+        subscriber.sessionId !== notification.sessionId
+      )
+        continue;
+      if (notification.durability === 'ephemeral') {
+        if (subscriber.includeEphemeral) this.#enqueue(subscriber, notification);
+      } else if (
+        subscriber.lastRevision === undefined ||
+        notification.revision > subscriber.lastRevision
+      ) {
+        this.#enqueue(subscriber, notification);
+        subscriber.lastRevision = notification.revision;
+      }
+    }
+  }
+
   /** Explicit tombstone seam for a future Session lifecycle owner. */
   removeSession(sessionId: string): boolean {
     if (this.#closed) return false;

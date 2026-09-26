@@ -15,7 +15,11 @@ import {
   SubagentGrantAuthority,
   SubagentTaskArtifactStore,
 } from '@kite-ai/builtin-runtime/subagent';
-import { createRuntimeAbortReason } from '@kite-ai/runtime-contract';
+import {
+  createRuntimeAbortReason,
+  RUNTIME_PROJECTION_SCHEMA_,
+  type RuntimeNotification,
+} from '@kite-ai/runtime-contract';
 import {
   createRuntimeHostCapabilityExecutionPortFromSnapshot,
   type RuntimeHostExecutionServices,
@@ -76,6 +80,7 @@ export interface CompletedChildOrchestrationFixture {
   readonly parentRunId: string;
   readonly childSessionId: string;
   readonly workspace: string;
+  readonly childNotifications: readonly RuntimeNotification[];
 }
 
 export async function exerciseChildOrchestration(
@@ -137,6 +142,7 @@ export async function exerciseChildOrchestration(
     : createMockModelServer();
   const childGate = deferred();
   const childWork: Promise<void>[] = [];
+  const childNotifications: RuntimeNotification[] = [];
   let childModelRequests = 0;
   model.setResponses(
     Array.from(
@@ -526,6 +532,14 @@ export async function exerciseChildOrchestration(
           builtinToolCatalog,
         }),
         capabilityExecution: capabilities,
+        projectChildSession: (sessionId, state) => ({
+          schema: RUNTIME_PROJECTION_SCHEMA_,
+          sessionId,
+          revision: state.revision,
+          lifecycle: 'open',
+          interactionQueue: { revision: state.revision, interactions: [] },
+        }),
+        publishChildNotification: (notification) => childNotifications.push(notification),
         ...(afterCompletedChild || duringAcknowledgedChild
           ? {
               readCurrentSourceFollowupContext: () => ({
@@ -566,6 +580,7 @@ export async function exerciseChildOrchestration(
       parentRunId,
       childSessionId: accepted[0]!.childThreadId,
       workspace,
+      childNotifications,
     });
     const parentToolEffectLease = parentCoordinator.session.beginEffect({
       type: 'run_tools',

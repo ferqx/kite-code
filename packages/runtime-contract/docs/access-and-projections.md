@@ -25,7 +25,7 @@
 
 开发中的[Agent 邮箱与续轮设计](../../../docs/plans/background-agent-shell-conversation-coordination.md#4-codex-式-agent-通信kite-接线决定)区分稳定 `agent_id`、逐轮 `task_id`、消息已受理、已进入模型输入与续轮结果已结算。`agent.mail_status` 只携带消息、提交与任务身份及对应的持久阶段，不携带正文、Artifact 引用、预算或授权。受理事件来自发送 Session，输入准备与续轮结算事件来自目标 Session；父客户端不能从受理状态推断子线程已读。邮箱投影不替代原任务结果权威，也不赋予只读客户端发送或中断权限。
 
-阶段 D0 另确定内部 `agentThreadId`：它是子 Agent 独立持久 Session 的身份，与稳定 `agent_id` 和逐轮 `task_id` 分开。公开 Space/Workspace 会话页、搜索、最近会话与普通顶层详情只投影根 Session；子线程只通过父 Agent 树或核验父子血缘的内部详情入口访问。Contract 的等待摘要和后台 task 卡仍取父 Run 的准确结果接纳事实，不以子线程终态或邮箱已受理替代父 required claim 结算。Contract 已提供显式 `list_child_sessions`／`get_child_session_projection` 父树查询，Service 按父 Session admission 与 Store 准确血缘返回安全子投影；普通子 ID 查询继续拒绝。客户端父树导航尚未完成，阶段 D 工具仍不开放。
+阶段 D0 另确定内部 `agentThreadId`：它是子 Agent 独立持久 Session 的身份，与稳定 `agent_id` 和逐轮 `task_id` 分开。公开 Space/Workspace 会话页、搜索、最近会话与普通顶层详情只投影根 Session；子线程只通过核验父子血缘的内部详情入口访问。Contract 的等待摘要和后台 task 卡仍取父 Run 的准确结果接纳事实，不以子线程终态或邮箱已受理替代父 required claim 结算。Contract 提供显式 `list_child_sessions`／`get_child_session_projection` 父树查询，Service 按父 Session admission 与 Store 准确血缘返回安全子投影；普通子 ID 查询及订阅继续拒绝。Desktop 的环境信息与子 Agent 工具消息使用同一父作用域列表打开只读详情，实时通知另经父作用域订阅准入；阶段 D 的执行工具权限不因此开放。
 
 
 主工具审批展示使用 `tool.review` 的 toolId／reviewId／status／有界 summary；`approval.granted.grant` 可选地保留 approve_once／same_command。二者经过同一 Protocol allowlist 进入 live 和历史回放，缺失 grant 不推导授权范围，不接收原始 reviewer result 或模型身份。具体字段见 [notifications](../src/notifications.ts)。

@@ -302,6 +302,7 @@ export function generateRuntimeProtocolTypeScript(): string {
     '',
     'export type RuntimeProtocolSubscriptionSpec =',
     "  | { readonly scope: 'session'; readonly sessionId: RuntimeProtocolIdentifier; readonly afterRevision?: RuntimeProtocolRevision; readonly includeEphemeral?: boolean }",
+    "  | { readonly scope: 'child_session'; readonly parentSessionId: RuntimeProtocolIdentifier; readonly childSessionId: RuntimeProtocolIdentifier; readonly afterRevision?: RuntimeProtocolRevision; readonly includeEphemeral?: boolean }",
     "  | { readonly scope: 'sessions' };",
     '',
     'export type RuntimeProtocolRequest =',

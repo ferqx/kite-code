@@ -769,7 +769,7 @@ class ServerConnection implements RuntimeServerConnection {
 export class Subscription {
   readonly id: string;
   readonly generation: number;
-  readonly #spec: RuntimeSubscriptionSpec;
+  readonly #spec: RuntimeProtocolSubscriptionSpec;
   readonly #runtime: RuntimeAccess;
   readonly #publish: (message: RuntimeSubscriptionMessage) => Promise<boolean>;
   readonly #onFailure: () => void;
@@ -786,7 +786,7 @@ export class Subscription {
   constructor(
     id: string,
     generation: number,
-    spec: RuntimeSubscriptionSpec,
+    spec: RuntimeProtocolSubscriptionSpec,
     runtime: RuntimeAccess,
     publish: (message: RuntimeSubscriptionMessage) => Promise<boolean>,
     onFailure: () => void,
@@ -795,7 +795,17 @@ export class Subscription {
     this.id = id;
     this.generation = generation;
     this.#spec = spec;
-    this.#effectiveSpec = spec;
+    this.#effectiveSpec =
+      spec.scope === 'child_session'
+        ? {
+            scope: 'session',
+            sessionId: spec.childSessionId,
+            ...(spec.afterRevision === undefined ? {} : { afterRevision: spec.afterRevision }),
+            ...(spec.includeEphemeral === undefined
+              ? {}
+              : { includeEphemeral: spec.includeEphemeral }),
+          }
+        : spec;
     this.#runtime = runtime;
     this.#publish = publish;
     this.#onFailure = onFailure;
@@ -812,7 +822,7 @@ export class Subscription {
 
   start(): void {
     if (!this.#iterator) throw new Error('Subscription iterator was not acquired.');
-    if (this.#spec.scope === 'session') {
+    if (this.#spec.scope !== 'sessions') {
       void this.#runSession().catch(() => undefined);
       return;
     }
@@ -820,12 +830,21 @@ export class Subscription {
   }
 
   async prepareInitialBoundary(): Promise<void> {
-    if (this.#spec.scope !== 'session') return;
-    const result = await this.#runtime.query({
-      schema: 'kite.runtime-query.v1',
-      type: 'get_session_projection',
-      sessionId: this.#spec.sessionId,
-    });
+    if (this.#spec.scope === 'sessions') return;
+    const result = await this.#runtime.query(
+      this.#spec.scope === 'child_session'
+        ? {
+            schema: 'kite.runtime-query.v1',
+            type: 'get_child_session_projection',
+            sessionId: this.#spec.parentSessionId,
+            childSessionId: this.#spec.childSessionId,
+          }
+        : {
+            schema: 'kite.runtime-query.v1',
+            type: 'get_session_projection',
+            sessionId: this.#spec.sessionId,
+          },
+    );
     if (result.status === 'not_found') return;
     if (result.status !== 'ok') throw new Error('Session projection watermark is unavailable.');
     const revision = result.revision ?? result.session?.revision;
@@ -834,21 +853,29 @@ export class Subscription {
       throw new Error('Session projection watermark is invalid.');
     }
     this.#initialSessionRevision = revision;
-    if (this.#spec.afterRevision !== undefined && this.#spec.afterRevision > revision) {
+    if (
+      this.#spec.scope === 'child_session' ||
+      (this.#spec.afterRevision !== undefined && this.#spec.afterRevision > revision)
+    ) {
       const projection = mapRuntimeQueryResultToProtocol(result);
       if (
         !projection ||
         !('status' in projection) ||
         !('queryType' in projection) ||
         projection.status !== 'ok' ||
-        projection.queryType !== 'get_session_projection'
+        (projection.queryType !== 'get_session_projection' &&
+          projection.queryType !== 'get_child_session_projection')
       ) {
         throw new Error('Session projection reset is unavailable.');
       }
       this.#initialSessionReset = { type: 'reset', sessions: [projection.session] };
-      await this.#iterator?.return?.();
-      this.#effectiveSpec = { ...this.#spec, afterRevision: revision };
-      this.acquire();
+      if (this.#spec.afterRevision !== undefined && this.#spec.afterRevision > revision) {
+        await this.#iterator?.return?.();
+        if (this.#effectiveSpec.scope !== 'session')
+          throw new Error('Child subscription must resolve to a Session stream.');
+        this.#effectiveSpec = { ...this.#effectiveSpec, afterRevision: revision };
+        this.acquire();
+      }
     }
   }
 
@@ -886,8 +913,13 @@ export class Subscription {
   async #runSession(): Promise<void> {
     try {
       const watermark = this.#initialSessionRevision;
-      const afterRevision = this.#spec.scope === 'session' ? this.#spec.afterRevision : undefined;
-      if (watermark === undefined || afterRevision === watermark) {
+      const afterRevision = this.#spec.scope === 'sessions' ? undefined : this.#spec.afterRevision;
+      if (this.#spec.scope === 'child_session') {
+        const reset = this.#initialSessionReset;
+        if (!reset || !(await this.#publish(reset))) return;
+        if (!(await this.#publish({ type: 'ready', scope: 'session' }))) return;
+        this.#phase = 'live';
+      } else if (watermark === undefined || afterRevision === watermark) {
         if (!(await this.#publish({ type: 'ready', scope: 'session' }))) return;
         this.#phase = 'live';
       } else if (afterRevision !== undefined && afterRevision > watermark) {

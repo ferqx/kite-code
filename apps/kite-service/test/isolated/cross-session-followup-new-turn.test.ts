@@ -360,6 +360,7 @@ async function exerciseRealFollowup(
       modelRuntimeFactory,
       builtinToolCatalog,
       capabilities,
+      childNotifications,
     }) => {
       expect(
         owner.runWithSessionExecution(childSessionId, () =>
@@ -395,6 +396,7 @@ async function exerciseRealFollowup(
           modelRuntimeFactory,
           builtinToolCatalog,
           capabilities,
+          childNotifications,
         },
         'Resume the completed child.',
       );
@@ -509,7 +511,7 @@ async function exerciseRealFollowup(
           response: async () => {
             followupResponseServed = true;
             return {
-              message: { content: 'FOLLOWUP_CHILD_RESULT' },
+              message: { content_chunks: ['FOLLOWUP_CHILD_', 'RESULT'] },
               usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 },
             };
           },
@@ -579,6 +581,21 @@ async function exerciseRealFollowup(
           );
         });
       expect(executed).toBe(true);
+      expect(
+        childNotifications
+          .filter((notification) => notification.durability === 'ephemeral')
+          .map((notification) =>
+            notification.event.type === 'model.text_delta' ? notification.event.text : '',
+          )
+          .join(''),
+      ).toContain('FOLLOWUP_CHILD_RESULT');
+      expect(
+        childNotifications.some(
+          (notification) =>
+            notification.durability === 'durable' &&
+            notification.projection.event?.type === 'model.responded',
+        ),
+      ).toBe(true);
       const route = owner.runWithSessionExecution(childSessionId, () =>
         raw.readFollowupRoute(childSessionId, accepted.submissionId),
       );

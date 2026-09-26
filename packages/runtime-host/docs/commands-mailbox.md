@@ -25,6 +25,8 @@ Host 内部的 after-turn 启动保留持久事实中的 canonical command 作�
 
 query 可以读取 Store 中尚未进入本进程 registry 的 Session，并通过 projector hydrate 订阅者。query 不凭空提交业务事件。App 注入 ownsSessionExecution 时，只发布本进程实际拥有的执行投影；不能把能读到的 Session 都视为本进程可取消对象。
 
+独立子 Session 由 App 的子 coordinator 在自己的 Store execution scope 提交，不经过 Host 普通 command activation。App 先核验父子血缘，再将该子 Session 的已提交事件投影和当前执行中的安全 ephemeral 事件交给 Host 通知 projector；此观察入口只向已订阅者发布，不写 Store、取得子执行权或把子线程加入顶层目录。
+
 验证：[mailbox](../test/session-mailbox.test.ts)、[持久命令](../test/persistent-command-host.test.ts)、[crash windows](../test/persistent-command-crash-windows.test.ts)、[notification](../test/notification-projector.test.ts)。
 
 

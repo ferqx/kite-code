@@ -66,6 +66,8 @@ export interface SessionPageProps {
   workbench?: boolean;
   scheduledTasks?: ScheduledTasksProps;
   writeClipboardText?: (text: string) => Promise<void>;
+  childSessionIdsByTaskId?: ReadonlyMap<string, string>;
+  onOpenChildSession?: (childSessionId: string) => void;
 }
 
 /** The single production conversation page for both hosts. No host/protocol imports. */
@@ -550,6 +552,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                             }}
                             openFile={props.actions.openFile}
                             writeClipboardText={props.writeClipboardText}
+                            childSessionIdsByTaskId={props.childSessionIdsByTaskId}
+                            onOpenChildSession={props.onOpenChildSession}
                           />
                         )}
                       </section>

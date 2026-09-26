@@ -433,6 +433,7 @@ export function ToolActivity({
   childProcess = false,
   activityId,
   restoredExpanded,
+  childDetail,
 }: {
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
@@ -445,6 +446,7 @@ export function ToolActivity({
   childProcess?: boolean;
   activityId?: string;
   restoredExpanded?: ReadonlySet<string>;
+  childDetail?: { readonly label: string; readonly onOpen: () => void };
 }) {
   const message = messages[0]!;
   let ask = message.ask;
@@ -590,7 +592,24 @@ export function ToolActivity({
         data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
         aria-label={`${label}${status ? ` · ${status}` : ''}`}
       >
-        {read && !childIssue ? (
+        {childDetail ? (
+          <div className="tool-activity-heading-row">
+            <CollapsibleTrigger asChild>
+              <Marker asChild className="tool-activity-summary">
+                <Button variant="ghost">{heading}</Button>
+              </Marker>
+            </CollapsibleTrigger>
+            <Button
+              className="tool-child-detail"
+              variant="ghost"
+              size="xs"
+              aria-label={`查看子 Agent 详情：${childDetail.label}`}
+              onClick={childDetail.onOpen}
+            >
+              查看详情
+            </Button>
+          </div>
+        ) : read && !childIssue ? (
           <ToolRow message={message} openFile={openFile} />
         ) : edit && !childIssue ? (
           <Marker className="tool-activity-summary tool-edit-heading">

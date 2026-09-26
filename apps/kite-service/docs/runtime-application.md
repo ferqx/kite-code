@@ -86,6 +86,8 @@ Store，不建立第二reader/writer authority。该Store-only list/startup hydr
 投影同revision的完整interaction queue与唯一focus；它不得用空queue占位，也不得为了恢复pending interaction启动
 Workspace context、MCP或Skill扫描。
 
+独立子 Session 的实时详情只接受 `child_session` 父作用域订阅：Service 用持久父子血缘和当前 connection 的工作区身份核验两个 ID，Server 再映射到内部子 Session 事件流。普通子 ID 的 query、History 与 `session` 订阅继续拒绝。父作用域订阅的初始投影和后续通知只读，不取得子 Session 的执行或交互权。
+
 Store-only批量投影按Session隔离当前格式的不兼容snapshot：单个`invalid_configuration`会话保持原Store与History可读，
 但不进入Host预热列表，不能阻断其他会话投影或新会话创建；非该类Store错误仍整体失败。已知的旧后台结果若缺少后来新增的
 admission revision，State codec只丢弃这条无法验证的background authority，不补造revision，其他会话State与历史保持不变。

@@ -1786,6 +1786,21 @@ body {
   white-space: nowrap;
   overflow: hidden;
 }
+.kite-client .tool-activity-heading-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.kite-client .tool-activity-heading-row > .tool-activity-summary {
+  min-width: 0;
+}
+.kite-client .tool-child-detail {
+  flex: none;
+  min-height: 28px;
+  padding-inline: 8px;
+  color: var(--muted-foreground);
+}
 .kite-client .tool-activity-summary:hover:not(:disabled),
 .kite-client .tool-activity-step:hover,
 .kite-client .tool-activity-summary:focus-visible,
@@ -2096,6 +2111,7 @@ body {
 }
 .kite-client .thinking-activity.is-running .tool-label,
 .kite-client .is-running > .tool-activity-summary .tool-label,
+.kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
 .kite-client .tool-activity-step.running .tool-label,
 .kite-client .context-compacted.running .tool-label {
   background: linear-gradient(100deg, currentColor 35%, var(--background) 50%, currentColor 65%);
@@ -2121,6 +2137,7 @@ body {
   }
   .kite-client .thinking-activity.is-running .tool-label,
   .kite-client .is-running > .tool-activity-summary .tool-label,
+  .kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
   .kite-client .tool-activity-step.running .tool-label,
   .kite-client .context-compacted.running .tool-label {
     animation: none;

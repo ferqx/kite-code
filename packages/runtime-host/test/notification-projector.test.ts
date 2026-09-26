@@ -395,6 +395,41 @@ describe('NotificationProjector session index subscriptions', () => {
 });
 
 describe('NotificationProjector ephemeral streams', () => {
+  test('forwards an external child stream without registering lifecycle ownership', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    const iterator = projector
+      .subscribe({
+        spec: {
+          scope: 'session',
+          sessionId: 'child-1',
+          afterRevision: 4,
+          includeEphemeral: true,
+        },
+      })
+      [Symbol.asyncIterator]();
+    projector.publishExternal({ ...ephemeral(1), sessionId: 'child-1' });
+    projector.publishExternal(durable('child-1', 5));
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'ephemeral',
+      sessionId: 'child-1',
+      sequence: 1,
+    });
+    expect((await iterator.next()).value).toMatchObject({
+      durability: 'durable',
+      sessionId: 'child-1',
+      revision: 5,
+    });
+    expect(registry.projection('child-1')).toBeUndefined();
+    expect(() =>
+      projector.publishExternal({
+        ...durable('child-1', 6),
+        projection: { kind: 'session', session: sessionProjection('different-child', 6) },
+      }),
+    ).toThrow('identity is inconsistent');
+    await iterator.return?.();
+    projector.close();
+  });
   test('does not replay ephemeral notifications to a later subscriber', async () => {
     const registry = new SessionRegistry();
     registry.commitProjection(activeProjection('session-1', 0));

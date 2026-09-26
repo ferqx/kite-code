@@ -26,6 +26,7 @@ import {
   type RuntimeProtocolMessage,
   type RuntimeProtocolMethod,
   type RuntimeProtocolResult,
+  type RuntimeSubscriptionSpec as RuntimeProtocolSubscriptionSpec,
   type RuntimeSubscriptionMessage,
   safeDecodeRuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
@@ -71,7 +72,7 @@ export interface RuntimeClientOptions {
 
 export interface RuntimeClientSubscription {
   readonly id: string;
-  readonly spec: RuntimeSubscriptionSpec;
+  readonly spec: RuntimeProtocolSubscriptionSpec;
   readonly generation: number;
   unsubscribe(): Promise<boolean>;
 }
@@ -187,7 +188,7 @@ interface PendingRequest {
 
 interface SubscriptionState {
   readonly id: string;
-  readonly spec: RuntimeSubscriptionSpec;
+  readonly spec: RuntimeProtocolSubscriptionSpec;
   readonly queue: RuntimeNotificationQueue;
   readonly signal?: AbortSignal;
   readonly ready?: Readonly<{
@@ -598,6 +599,24 @@ export class RuntimeClient implements AsyncDisposable {
     }
   }
 
+  /** A child stream is authorized through its parent Session, then delivered as a read-only Session stream. */
+  async subscribeChildReadyWithGeneration(subscription: {
+    readonly spec: Extract<RuntimeProtocolSubscriptionSpec, { readonly scope: 'child_session' }>;
+    readonly signal?: AbortSignal;
+  }): Promise<AsyncIterable<RuntimeClientNotificationWithGeneration>> {
+    const state = this.#createSubscription(subscription.spec, subscription.signal, true);
+    try {
+      await this.#activateSubscription(state);
+      await this.#waitForReady(state);
+      return state.queue.iterableWithGeneration(() => {
+        void this.#closeSubscription(state, true).catch(() => undefined);
+      });
+    } catch (error) {
+      await this.#closeSubscription(state, false);
+      throw error;
+    }
+  }
+
   /** Optional lifecycle handle for consumers that need the remote subscription identity. */
   async subscribeHandle(spec: RuntimeSubscriptionSpec): Promise<RuntimeClientSubscription> {
     const state = this.#createSubscription(spec);
@@ -617,7 +636,7 @@ export class RuntimeClient implements AsyncDisposable {
   }
 
   #createSubscription(
-    spec: RuntimeSubscriptionSpec,
+    spec: RuntimeProtocolSubscriptionSpec,
     signal?: AbortSignal,
     waitForReady = false,
   ): SubscriptionState {
@@ -1184,7 +1203,7 @@ export class RuntimeClient implements AsyncDisposable {
           connectionGeneration,
           subscriptionGeneration,
           notification,
-          ready: spec.scope === 'session',
+          ready: spec.scope !== 'sessions',
         });
         if (applied === 'resync_required') void this.#resubscribeAfterResync(state);
         if (applied !== 'applied') return;
@@ -1192,11 +1211,11 @@ export class RuntimeClient implements AsyncDisposable {
         return;
       }
       case 'ready':
-        if (spec.scope === 'session') {
+        if (spec.scope !== 'sessions') {
           this.#store.markSessionReady({
             connectionGeneration,
             subscriptionGeneration,
-            sessionId: spec.sessionId,
+            sessionId: spec.scope === 'session' ? spec.sessionId : spec.childSessionId,
           });
         }
         state.ready?.resolve();

@@ -63,6 +63,8 @@ Kite 已有[执行手册](../handbook/features/execution.md)、[Builtin 工具�
 
 子线程是内部 Agent 执行会话，不是空间下的顶层会话。Store 须持久记录根／子线程类型及父线程血缘；旧会话迁移时按已证实的原有顶层会话身份标记为根线程。空间会话列表及其搜索、最近会话等同源查询须在排序、游标和 `LIMIT` 之前过滤子线程，不能仅靠客户端或取页后隐藏。子线程的状态和历史由父线程的 Agent 树入口或授权的 Agent 详情访问；已知子线程 ID 也不绕过父子血缘与权限校验。重启、迁移和分页后均保持这一可见性边界。
 
+开发版 Desktop 已将已创建子 Session 的详情接到父会话“环境信息 → 子智能体”及相应工具消息：两处均从父作用域列表验证 task 身份，详情复用主会话消息和工具投影，并按历史 sequence 衔接经父作用域授权的实时订阅。没有对应子 Session 的旧后台条目不开放详情；子详情保持只读，也不进入顶层目录。客户端与协议的运行证据以本次定向测试和 Electron 验收为准。
+
 父子之间只通过有来源和幂等身份的跨线程协议联系：父工具受理创建意图并建立准确的 required 义务；子线程独立运行，其委派任务从私有 Artifact 读取并作为低权限 Agent 输入准备，不冒充人类 `user.message_appended`；子终态先在自己的线程结算，再以确定性结果通知交给父线程，由父线程单独接纳、解除原 Run 义务并准备低权限模型输入。`send_message` 的成功只证明持久受理，目标读取和模型输入各有独立事实；`followup_task` 为目标线程创建或继续一轮，不复用旧 `task_id`、授权或预算。取消父 Run、停止一个子 Agent、子线程自身结束是不同操作，不暗中停止兄弟线程。
 
 上述 required claim 只适用于 `result_disposition=required`。`after_turn` 已接入独立子 Session：原 `task` Tool 回执同事务保存非必需子创建意图、有界委派额度和一次自动汇报模型后备，不建立 required claim；原父 Run 正常结束后，子凭 retained funding ledger、原 deadline、封存 grant 和 child owner 证据继续派发。子终态先封存，再由父 Session 按原血缘一次导入具名结果，不注入后来的人类 Run。自动汇报仅在原后备及 `human_start_preferred` 条件成立时至多启动一次，抑制时释放后备；原任务仍活动期间，父 Session 的新 Run 可按现行直接子授权与独立资金约束发送 `followup_task`。创建失败、取消、预算 unknown 与重启保留准确意图及释放／恢复事实；正式入口跨 Run 验收见阶段 D。

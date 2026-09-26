@@ -1230,10 +1230,13 @@ function sessionIdFromRequest(input: RuntimeServerAdmissionInput): string | unde
     const subscription = input.subscription as {
       readonly scope?: unknown;
       readonly sessionId?: unknown;
+      readonly parentSessionId?: unknown;
     };
     return subscription.scope === 'session' && typeof subscription.sessionId === 'string'
       ? subscription.sessionId
-      : undefined;
+      : subscription.scope === 'child_session' && typeof subscription.parentSessionId === 'string'
+        ? subscription.parentSessionId
+        : undefined;
   }
   return undefined;
 }

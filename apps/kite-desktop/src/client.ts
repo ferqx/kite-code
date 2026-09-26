@@ -165,7 +165,12 @@ export class DesktopClient {
   #connectionId?: number;
   #selection?: AbortController;
   #childRead?: AbortController;
+  #calibratedChild?: {
+    readonly controller: AbortController;
+    readonly subscriptionGeneration: number;
+  };
   #childListRead = 0;
+  #childListRefreshInFlight?: { readonly sessionId: string; readonly promise: Promise<void> };
   #selectionLoad?: {
     sessionId: string;
     connection: KiteAppServerConnection;
@@ -468,7 +473,22 @@ export class DesktopClient {
         (!session.ready || session.subscriptionGeneration !== calibrated.subscriptionGeneration)
           ? this.#view.selected
           : undefined;
+      const childDetail = this.#view.childDetail;
+      const childSession = childDetail ? snapshot.sessions[childDetail.childSessionId] : undefined;
+      const calibratedChild = this.#calibratedChild;
+      const resyncChild =
+        childDetail &&
+        calibratedChild !== undefined &&
+        calibratedChild.controller === this.#childRead &&
+        (!childSession?.ready ||
+          childSession.subscriptionGeneration !== calibratedChild.subscriptionGeneration)
+          ? {
+              parentSessionId: childDetail.parentSessionId,
+              childSessionId: childDetail.childSessionId,
+            }
+          : undefined;
       if (resyncSession) this.#calibratedSelection = undefined;
+      if (resyncChild) this.#calibratedChild = undefined;
       const runFinished =
         isActiveRun(this.#view.projection) &&
         !!session?.projection &&
@@ -497,8 +517,18 @@ export class DesktopClient {
           ? { directory }
           : {}),
         background: snapshot.background,
+        ...(childDetail &&
+        childSession?.projection &&
+        childSession.projection !== childDetail.projection &&
+        !resyncChild
+          ? { childDetail: { ...childDetail, projection: childSession.projection } }
+          : {}),
       });
       this.#syncBackgroundRefresh(connection, snapshot);
+      if (resyncChild && connection.status === 'active')
+        void this.openChildSession(resyncChild.parentSessionId, resyncChild.childSessionId).catch(
+          (error) => this.report(error),
+        );
       if (resyncSession) {
         // A replacement subscription restores projection, not omitted message events.
         // Retain the body and reuse the existing bounded selection calibration once.
@@ -516,8 +546,13 @@ export class DesktopClient {
           .catch((error) => this.report(error));
       }
       if (connection.status === 'closed' || connection.status === 'disconnected') this.#recover();
-      if (runFinished && connection.status === 'active')
+      if (runFinished && connection.status === 'active') {
+        if (this.#view.selected)
+          void this.refreshChildSessions(this.#view.selected, { silent: true }).catch(
+            () => undefined,
+          );
         void this.refreshSessions().catch((error) => this.report(error));
+      }
     });
     try {
       await connection.prepareAppControl();
@@ -604,6 +639,7 @@ export class DesktopClient {
     this.#selection?.abort();
     this.#childRead?.abort();
     this.#childRead = undefined;
+    this.#calibratedChild = undefined;
     this.#childListRead++;
     this.#selectionLoad = undefined;
     this.#calibratedSelection = undefined;
@@ -661,6 +697,10 @@ export class DesktopClient {
       const promise = connection.runtime
         .query({ schema: 'kite.runtime-query.v1', type: 'list_background_executions', sessionId })
         .catch(() => undefined);
+      // Child creation follows the parent's started event. Read the persisted
+      // parent-scoped list while the Run is active so either detail entry appears
+      // as soon as that child exists, including when creation raced the event.
+      void this.refreshChildSessions(sessionId, { silent: true }).catch(() => undefined);
       this.#backgroundRefreshInFlight = { connection, sessionId, promise };
       void promise.finally(() => {
         if (this.#backgroundRefreshInFlight?.promise === promise)
@@ -1156,6 +1196,7 @@ export class DesktopClient {
     if (sessionId !== this.#view.selected) {
       this.#childRead?.abort();
       this.#childRead = undefined;
+      this.#calibratedChild = undefined;
       this.#childListRead++;
       this.#publish({ childSessions: undefined, childDetail: undefined });
     }
@@ -1177,7 +1218,24 @@ export class DesktopClient {
     return promise;
   }
 
-  async refreshChildSessions(parentSessionId: string): Promise<void> {
+  refreshChildSessions(
+    parentSessionId: string,
+    options?: { readonly silent?: boolean },
+  ): Promise<void> {
+    if (this.#childListRefreshInFlight?.sessionId === parentSessionId)
+      return this.#childListRefreshInFlight.promise;
+    const promise = this.#readChildSessions(parentSessionId, options).finally(() => {
+      if (this.#childListRefreshInFlight?.promise === promise)
+        this.#childListRefreshInFlight = undefined;
+    });
+    this.#childListRefreshInFlight = { sessionId: parentSessionId, promise };
+    return promise;
+  }
+
+  async #readChildSessions(
+    parentSessionId: string,
+    options?: { readonly silent?: boolean },
+  ): Promise<void> {
     const connection = this.#requireConnection();
     if (this.#view.selected !== parentSessionId || !this.#view.ready)
       throw new Error('请先打开父会话。');
@@ -1186,7 +1244,8 @@ export class DesktopClient {
       this.#view.childSessions?.parentSessionId === parentSessionId
         ? this.#view.childSessions.entries
         : [];
-    this.#publish({ childSessions: { parentSessionId, entries: previous, loading: true } });
+    if (!options?.silent)
+      this.#publish({ childSessions: { parentSessionId, entries: previous, loading: true } });
     try {
       const entries: RuntimeChildSessionSummary[] = [];
       let cursor: { updatedAtMs: number; sessionId: string } | undefined;
@@ -1223,13 +1282,27 @@ export class DesktopClient {
           !entries.some((entry) => entry.sessionId === this.#view.childDetail?.childSessionId)
         )
           this.leaveChildSession();
-        this.#publish({ childSessions: { parentSessionId, entries, loading: false } });
+        if (
+          !this.#view.childSessions ||
+          this.#view.childSessions.parentSessionId !== parentSessionId ||
+          this.#view.childSessions.loading ||
+          this.#view.childSessions.error ||
+          entries.length !== previous.length ||
+          entries.some(
+            (entry, index) =>
+              entry.sessionId !== previous[index]?.sessionId ||
+              entry.revision !== previous[index]?.revision ||
+              entry.displayName !== previous[index]?.displayName,
+          )
+        )
+          this.#publish({ childSessions: { parentSessionId, entries, loading: false } });
       }
     } catch (error) {
       if (
         this.#connection === connection &&
         this.#view.selected === parentSessionId &&
-        read === this.#childListRead
+        read === this.#childListRead &&
+        !options?.silent
       )
         this.#publish({
           childSessions: {
@@ -1245,6 +1318,7 @@ export class DesktopClient {
   leaveChildSession() {
     this.#childRead?.abort();
     this.#childRead = undefined;
+    this.#calibratedChild = undefined;
     this.#publish({ childDetail: undefined });
   }
 
@@ -1257,17 +1331,23 @@ export class DesktopClient {
         (entry) => entry.parentSessionId === parentSessionId && entry.sessionId === childSessionId,
       )
     )
-      throw new Error('请先从父会话的环境信息选择子会话。');
+      throw new Error('请先从父会话的环境信息或工具消息选择子会话。');
     const loadChildSession = connection.history.loadChildSession;
     if (!loadChildSession) throw new Error('当前服务不支持子会话历史读取。');
     this.#childRead?.abort();
+    this.#calibratedChild = undefined;
     const controller = new AbortController();
     this.#childRead = controller;
+    const previous =
+      this.#view.childDetail?.parentSessionId === parentSessionId &&
+      this.#view.childDetail.childSessionId === childSessionId
+        ? this.#view.childDetail.messages
+        : [];
     this.#publish({
-      childDetail: { parentSessionId, childSessionId, loading: true, messages: [] },
+      childDetail: { parentSessionId, childSessionId, loading: true, messages: previous },
     });
     try {
-      const [transcript, result] = await Promise.all([
+      let [transcript, result] = await Promise.all([
         loadChildSession(parentSessionId, childSessionId, undefined, { signal: controller.signal }),
         connection.runtime.query({
           schema: 'kite.runtime-query.v1',
@@ -1282,7 +1362,7 @@ export class DesktopClient {
         transcript.session.sessionId !== childSessionId
       )
         throw new Error('子会话详情身份不一致。');
-      const messages = await projectHistory(transcript.records, [], controller.signal);
+      let messages = await projectHistory(transcript.records, previous, controller.signal);
       if (
         !controller.signal.aborted &&
         this.#childRead === controller &&
@@ -1293,11 +1373,74 @@ export class DesktopClient {
           childDetail: {
             parentSessionId,
             childSessionId,
-            loading: false,
+            loading: true,
             messages,
             projection: result.session,
           },
         });
+      const notifications = await connection.runtime.subscribeChildReadyWithGeneration({
+        spec: {
+          scope: 'child_session',
+          parentSessionId,
+          childSessionId,
+          afterRevision: transcript.session.lastSequence,
+          includeEphemeral: true,
+        },
+        signal: controller.signal,
+      });
+      if (
+        controller.signal.aborted ||
+        this.#childRead !== controller ||
+        this.#connection !== connection ||
+        this.#view.selected !== parentSessionId
+      )
+        return;
+      // The subscription starts at a current child projection. History may have
+      // advanced while we were subscribing, so read through that watermark while
+      // the established stream buffers subsequent events.
+      let subscribed = connection.snapshotStore.getSnapshot().sessions[childSessionId];
+      while (
+        subscribed &&
+        (!subscribed.ready || subscribed.projection.revision > transcript.session.lastSequence)
+      ) {
+        transcript = await loadChildSession(parentSessionId, childSessionId, undefined, {
+          signal: controller.signal,
+        });
+        messages = await projectHistory(transcript.records, messages, controller.signal);
+        const current = connection.snapshotStore.getSnapshot().sessions[childSessionId];
+        if (current?.ready && current.subscriptionGeneration === subscribed.subscriptionGeneration)
+          break;
+        subscribed = current;
+      }
+      if (
+        controller.signal.aborted ||
+        this.#childRead !== controller ||
+        this.#connection !== connection ||
+        this.#view.selected !== parentSessionId
+      )
+        return;
+      subscribed = connection.snapshotStore.getSnapshot().sessions[childSessionId];
+      if (!subscribed?.ready) throw new Error('子会话订阅尚未恢复，请刷新详情。');
+      this.#calibratedChild = {
+        controller,
+        subscriptionGeneration: subscribed.subscriptionGeneration,
+      };
+      this.#publish({
+        childDetail: {
+          ...this.#view.childDetail!,
+          loading: false,
+          messages,
+          projection: subscribed.projection,
+        },
+      });
+      void this.#followChildSession(
+        connection,
+        controller,
+        parentSessionId,
+        childSessionId,
+        notifications,
+        transcript.session.lastSequence,
+      );
     } catch (error) {
       if (
         !controller.signal.aborted &&
@@ -1310,10 +1453,71 @@ export class DesktopClient {
             parentSessionId,
             childSessionId,
             loading: false,
-            messages: [],
+            messages:
+              this.#view.childDetail?.childSessionId === childSessionId
+                ? this.#view.childDetail.messages
+                : previous,
             error: messageOf(error),
           },
         });
+    }
+  }
+
+  async #followChildSession(
+    connection: KiteAppServerConnection,
+    controller: AbortController,
+    parentSessionId: string,
+    childSessionId: string,
+    notifications: AsyncIterable<RuntimeClientNotificationWithGeneration>,
+    throughSequence: number,
+  ) {
+    try {
+      for await (const { notification, connectionGeneration } of notifications) {
+        if (
+          controller.signal.aborted ||
+          this.#childRead !== controller ||
+          this.#connection !== connection ||
+          this.#view.selected !== parentSessionId
+        )
+          return;
+        if (
+          connectionGeneration !== connection.generation ||
+          !('durability' in notification) ||
+          notification.sessionId !== childSessionId
+        )
+          continue;
+        if (notification.durability === 'durable' && notification.revision <= throughSequence)
+          continue;
+        const event =
+          notification.durability === 'ephemeral'
+            ? notification.event
+            : notification.projection.event;
+        if (!event) continue;
+        const detail = this.#view.childDetail;
+        if (detail?.childSessionId !== childSessionId) return;
+        this.#publish({
+          childDetail: {
+            ...detail,
+            messages: projectEventWithIdentity(detail.messages, event, {
+              turnId: notification.turnId,
+              observedAt: Date.now(),
+            }),
+          },
+        });
+      }
+      if (!controller.signal.aborted) throw new Error('子会话订阅已结束，请刷新详情。');
+    } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        this.#childRead === controller &&
+        this.#connection === connection &&
+        this.#view.childDetail?.childSessionId === childSessionId
+      ) {
+        this.#calibratedChild = undefined;
+        this.#publish({
+          childDetail: { ...this.#view.childDetail, error: messageOf(error) },
+        });
+      }
     }
   }
 

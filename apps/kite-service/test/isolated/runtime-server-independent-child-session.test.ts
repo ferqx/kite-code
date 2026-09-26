@@ -59,6 +59,9 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
     process.env.KITE_CODE_HOME = home;
     const model = createMockModelServer();
     const childGate = deferred();
+    let childLiveNotifications:
+      | AsyncIterator<{ notification: RuntimeAccessNotification; connectionGeneration: number }>
+      | undefined;
     let childModelRequests = 0;
     let parentModelRequests = 0;
     model.setResponses(
@@ -85,7 +88,7 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
               };
             if (terminalAction !== 'approve') await childGate.promise;
             return {
-              message: { content: 'ISOLATED_CHILD_RESULT' },
+              message: { content_chunks: ['ISOLATED_CHILD_', 'RESULT'] },
               ...(terminalAction === 'approve'
                 ? {
                     expectedRequest: {
@@ -284,6 +287,44 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
         queryType: 'get_child_session_projection',
         session: { sessionId: childThreadId },
       });
+      if (childDetail.status !== 'ok' || !childDetail.session)
+        throw new Error('Child projection is unavailable.');
+      if (terminalAction === 'complete') {
+        await expect(
+          client.subscribeChildReadyWithGeneration({
+            spec: {
+              scope: 'child_session',
+              parentSessionId: 'wrong-parent',
+              childSessionId: childThreadId,
+            },
+          }),
+        ).rejects.toMatchObject({
+          code: 'protocol_error',
+          protocol: { data: { code: 'unauthorized' } },
+        });
+        await expect(
+          client.subscribeReadyWithGeneration({
+            spec: { scope: 'session', sessionId: childThreadId },
+          }),
+        ).rejects.toMatchObject({
+          code: 'protocol_error',
+          protocol: { data: { code: 'unauthorized' } },
+        });
+        const childStreamController = new AbortController();
+        const childStream = await client.subscribeChildReadyWithGeneration({
+          spec: {
+            scope: 'child_session',
+            parentSessionId,
+            childSessionId: childThreadId,
+            afterRevision: childDetail.session.revision,
+            includeEphemeral: true,
+          },
+          signal: childStreamController.signal,
+        });
+        expect(client.snapshotStore.getSnapshot().sessions[childThreadId]?.ready).toBe(true);
+        expect(childStream[Symbol.asyncIterator]).toBeDefined();
+        childLiveNotifications = childStream[Symbol.asyncIterator]();
+      }
       const childHistory = createKiteRuntimeObserverHistoryClient(
         () => storage.openHistoryLogs(runtimeHostCurrentStateEventTypes()),
         (parent, child) =>
@@ -489,6 +530,35 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
         expect(stop.status).toBe('applied');
       } else {
         childGate.resolve();
+      }
+      if (terminalAction === 'complete' && childLiveNotifications) {
+        const observed: string[] = [];
+        let streamedText = '';
+        let receivedChildAnswer = false;
+        for (let index = 0; index < 100; index += 1) {
+          const next = await Promise.race([
+            childLiveNotifications.next(),
+            Bun.sleep(4_000).then(() => {
+              throw new Error(`Child live notification did not arrive: ${observed.join(', ')}`);
+            }),
+          ]);
+          if (next.done) throw new Error(`Child live stream closed: ${observed.join(', ')}`);
+          const notification = next.value.notification;
+          if (!('durability' in notification)) continue;
+          const event =
+            notification.durability === 'ephemeral'
+              ? notification.event
+              : notification.projection.event;
+          if (!event) continue;
+          observed.push(event.type);
+          if (event.type === 'model.text_delta') streamedText += event.text;
+          if (streamedText.includes('ISOLATED_CHILD_RESULT')) {
+            receivedChildAnswer = true;
+            break;
+          }
+        }
+        expect(receivedChildAnswer, `Child live events: ${observed.join(', ')}`).toBe(true);
+        expect(observed).toContain('model.text_delta');
       }
       stage = 'wait_child_terminal_import';
       await until(() =>

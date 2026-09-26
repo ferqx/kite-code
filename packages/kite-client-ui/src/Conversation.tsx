@@ -70,6 +70,7 @@ const MessageItem = memo(function MessageItem({
   childTools = [],
   expandedItems = {},
   restoredExpanded,
+  childDetail,
 }: {
   message: Message;
   expanded?: boolean;
@@ -83,6 +84,7 @@ const MessageItem = memo(function MessageItem({
   copyText?: string;
   copyRole?: 'user' | 'assistant';
   writeClipboardText?: (text: string) => Promise<void>;
+  childDetail?: { readonly label: string; readonly onOpen: () => void };
 }) {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -240,6 +242,7 @@ const MessageItem = memo(function MessageItem({
         restoredExpanded={restoredExpanded}
         onToggle={(open) => onToggle(message.id, open)}
         openFile={openFile}
+        childDetail={childDetail}
         renderChildren={() => process}
       />
     );
@@ -347,6 +350,8 @@ export function Conversation({
   openFile,
   writeClipboardText,
   emptyState,
+  childSessionIdsByTaskId,
+  onOpenChildSession,
 }: {
   messages: readonly Message[];
   loading: boolean;
@@ -357,6 +362,8 @@ export function Conversation({
   openFile?: (path: string) => void;
   writeClipboardText?: (text: string) => Promise<void>;
   emptyState?: { title: string; detail: string };
+  childSessionIdsByTaskId?: ReadonlyMap<string, string>;
+  onOpenChildSession?: (childSessionId: string) => void;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
@@ -507,6 +514,20 @@ export function Conversation({
         return message;
     }
   };
+  const childDetail = (child: Message) => {
+    if (child.role !== 'subagent' || !child.id.startsWith('subagent:')) return undefined;
+    const childSessionId = childSessionIdsByTaskId?.get(child.id.slice('subagent:'.length));
+    if (!childSessionId || !onOpenChildSession) return undefined;
+    return {
+      label: child.title || '子 Agent',
+      onOpen: () => onOpenChildSession(childSessionId),
+    };
+  };
+  const parentTaskDetail = (message: Message, groupSize: number) => {
+    if (message.toolName !== 'task' || groupSize !== 1) return undefined;
+    const candidates = children.get(message.id.slice(5));
+    return candidates?.length === 1 ? childDetail(candidates[0]!) : undefined;
+  };
   const askToolIds = new Set(
     messages
       .filter((message) => message.systemKind === 'ask')
@@ -624,6 +645,7 @@ export function Conversation({
                     onToggleItem={onToggle}
                     onToggle={(open) => onToggle(activityKey, open)}
                     openFile={openFile}
+                    childDetail={parentTaskDetail(message, group.length)}
                     renderChildren={(toolCallId, taskExpanded) =>
                       children
                         .get(toolCallId)
@@ -649,6 +671,7 @@ export function Conversation({
                   <div key={message.id} className="message-group">
                     <MessageItem
                       message={childWithUniqueSteps(message)}
+                      childDetail={childDetail(message)}
                       childTools={
                         message.role === 'subagent'
                           ? childTools.get(message.id.slice(9))

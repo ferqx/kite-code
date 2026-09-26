@@ -81,6 +81,8 @@ case-folded path 再次哈希成第二个 Project identity。二者仍指向同�
 
 `RuntimeAccess` 是唯一 execution backend seam，Host 是其唯一 owner：拥有 Session mailbox、lifecycle、revision fence、recovery、notification routing 与 persistent receipt lookup/commit。`runtime-server` 只接收 `RuntimeAccess` 加 App-owned admission port；它拥有 connection resources 与 bounded delivery，绝不拥有 domain waiter、Session reducer、Host、Store、Kernel、Builtin module、SQLite reader 或 history authority。`runtime-client` 是 transport-neutral 的，只拥有 correlation、explicit reconnect/resubscribe 与 generation/snapshot state，不拥有 execution authority。
 
+内部子 Session 的详情订阅须携带已授权父 Session 与子 Session 的准确 ID。Service 以持久父子血缘及连接 Workspace 核验后，Server 才将其映射为子 Session 通知流；普通子 ID 的 query、History 和 Session 订阅仍拒绝。独立子 coordinator 提交后的通知可进入 Host 的观察 projector 供此流读取，观察发布不取得或更换子 Session writer generation，也不让父客户端取得子命令权限。
+
 Effect lease在Model dispatch前仍绑定exact global revision：旧Surface的prepare/attempt-start不得跨revision执行。Provider已经取得durable attempt acknowledgement后，同一active Turn内的`interaction_mode.changed`等无关user control事实不撤销该exact invocation；Host只允许仍为prepared/dispatching的同一invocation继续投影stream，并提交封闭的retry或terminal批次，逐项限制为Model response、由该response排队的Tool及该invocation reservation终结。Turn aborted/completed、invocation已terminal、identity不匹配或批次混入其他事件时继续fail closed。该窄并发准入不移动lease、不建立第二套revision authority，也不允许stale attempt-start。
 
 App 为Server提供backend default admission，并可为每个logical connection绑定不同的canonical trusted Workspace。

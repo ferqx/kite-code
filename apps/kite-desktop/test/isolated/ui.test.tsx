@@ -374,6 +374,58 @@ test('environment information opens three private child details without selectin
   expect(client.view.selected).toBe('s0');
 });
 
+test('parent task tool gains a child detail entry when its exact session is listed', async () => {
+  const client = new UiClient();
+  client.update({
+    messages: [
+      {
+        id: 'tool:parent-task',
+        role: 'tool',
+        toolName: 'task',
+        title: '检查仓库',
+        arguments: { task_id: 'other-task' },
+        text: '',
+        settled: false,
+        status: 'running',
+        presentation: 'standalone',
+      },
+      {
+        id: 'subagent:real-task',
+        role: 'subagent',
+        title: '检查仓库',
+        parentToolCallId: 'parent-task',
+        text: '',
+        settled: false,
+        status: 'running',
+      },
+    ],
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('[aria-label="查看子 Agent 详情：检查仓库"]')).toBeNull();
+  await act(() =>
+    client.update({
+      childSessions: {
+        parentSessionId: 's0',
+        loading: false,
+        entries: [
+          {
+            sessionId: 'private-real',
+            parentSessionId: 's0',
+            agentId: 'agent-real',
+            taskId: 'real-task',
+            displayName: '检查仓库',
+            revision: 1,
+            updatedAtMs: 1,
+          },
+        ],
+      },
+    }),
+  );
+  await click(button('查看子 Agent 详情：检查仓库'));
+  expect(document.body.textContent).toContain('答复 private-real');
+  expect(client.selectedIds).toEqual([]);
+});
+
 test('private child read error stays in parent tree and switching roots removes its detail', async () => {
   const client = new UiClient();
   client.update({

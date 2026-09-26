@@ -23,6 +23,8 @@ generation天然不同而丢弃刷新。
 
 Store11 App Server 可选提供 `loadChildSession(parentSessionId, childSessionId, throughSequence?, { signal }?)`。客户端逐页核验子 Session ID 和固定 source sequence；父子血缘由服务端每页核对。普通 `loadSession(childSessionId)` 继续拒绝，知道子 ID 不取得子 History 的读取权。未组合该能力的 RuntimeHistoryClient 不提供此方法。
 
+`subscribeChildReadyWithGeneration` 使用父、子 ID 的专用 wire 选择器，等待初始 ready 后返回与普通会话相同的安全通知及连接代际。Desktop 先读子 History，再从该 source sequence 订阅并按消息 identity 投影后续事件；重连或离开详情时取消旧订阅并重读历史。此入口不把子 Session ID 转成普通顶层会话授权。
+
 `loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。已经发送到服务的单页读取仍可能完成，不新增远端取消方法、不改变协议 DTO 或命令重放语义。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
 
 `recoverSessionIfSafe` 仅供用户继续时处理明确的恢复拒绝：先读摘要，安全时提交独立恢复命令；不自动重跑任务或未知副作用。恢复丢回执和客户端命令结果未知时，`readCommandReceipt` 查询原命令身份，查不到则保留未知。原始发送重试只发生在服务明确拒绝且安全恢复成功之后，使用同一命令身份。

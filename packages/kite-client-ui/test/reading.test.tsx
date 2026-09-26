@@ -1440,6 +1440,57 @@ test('completed subagents show their stable task id without exposing hidden pros
   expect(document.querySelector('.tool-activity.is-running')).toBeNull();
 });
 
+test('task tool detail opens only the matching child session without toggling the task', async () => {
+  const opened: string[] = [];
+  const messages: Message[] = [
+    {
+      id: 'tool:parent',
+      role: 'tool',
+      toolName: 'task',
+      title: '检查仓库',
+      arguments: { task_id: 'untrusted-other-task' },
+      text: '',
+      settled: false,
+      status: 'running',
+      presentation: 'standalone',
+    },
+    {
+      id: 'subagent:task-42',
+      role: 'subagent',
+      parentToolCallId: 'parent',
+      title: '检查仓库',
+      text: '',
+      settled: false,
+      status: 'running',
+    },
+  ];
+  const props = {
+    messages,
+    selected: true,
+    connected: true,
+    loading: false,
+    saveReading: () => {},
+    onOpenChildSession: (id: string) => opened.push(id),
+  };
+  await render(<Conversation {...props} childSessionIdsByTaskId={new Map()} />);
+  expect(document.querySelector('[aria-label="查看子 Agent 详情：检查仓库"]')).toBeNull();
+  await act(() =>
+    root!.render(
+      <Conversation {...props} childSessionIdsByTaskId={new Map([['task-42', 'child-session']])} />,
+    ),
+  );
+  const detail = document.querySelector<HTMLButtonElement>(
+    '[aria-label="查看子 Agent 详情：检查仓库"]',
+  )!;
+  expect(detail.closest('.tool-activity-heading-row')).not.toBeNull();
+  expect(detail.closest('.tool-activity-summary')).toBeNull();
+  await click(detail);
+  expect(opened).toEqual(['child-session']);
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+});
+
 test('finished subagents stop unfinished child tool animations without inventing tool results', async () => {
   const child: Message = {
     id: 'subagent:child',

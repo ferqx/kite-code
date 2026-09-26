@@ -11,7 +11,13 @@ import {
   resumeBuiltinPreparedPrimaryModelEffect,
   verifyCompletedModelInvocationEvidence,
 } from '@kite-ai/builtin-runtime/model';
-import { createRuntimeAbortReason, getAgentPhase } from '@kite-ai/runtime-contract';
+import {
+  createRuntimeAbortReason,
+  getAgentPhase,
+  RUNTIME_NOTIFICATION_SCHEMA_,
+  type RuntimeNotification,
+  type RuntimeSessionProjection,
+} from '@kite-ai/runtime-contract';
 import type { RuntimeHostLeasePort } from '@kite-ai/runtime-host';
 import {
   type CrossSessionFollowupAdmission,
@@ -30,8 +36,10 @@ import { CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED } from '@kite-ai/runtime-ho
 import type { RuntimeJsonValue, SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { appSandboxBackendAvailable } from '#kite-service/sandbox/types';
+import { projectRuntimeClientEvent } from '../../../runtime-client/event-projector';
 import type { KiteSessionAppServerStorageOwner } from '../../kite-session-app-server-storage';
 import type { InstalledKiteRuntimeComposition } from '../../model-runtime-composition';
+import { projectRuntimeEphemeralNotification } from '../../presentation-notification';
 import type { RootFollowupPolicyEvidence } from '../agent-mailbox-port';
 import type { CliRuntimeBridgeInput } from '../CliRuntimeBridge';
 import { classifyFailure } from '../failures';
@@ -164,6 +172,11 @@ export function createChildSessionOrchestrator(input: {
   ) => InstalledKiteRuntimeComposition & RuntimeTurnInput['modelInvocationRuntime'];
   readonly capabilityExecution: RuntimeTurnInput['capabilityExecution'];
   readonly enqueueSessionWork: <T>(sessionId: string, work: () => Promise<T>) => Promise<T>;
+  readonly projectChildSession?: (
+    childSessionId: string,
+    state: Readonly<RuntimeState>,
+  ) => RuntimeSessionProjection | undefined;
+  readonly publishChildNotification?: (notification: RuntimeNotification) => void;
   /** The Store outbox is durable before this best-effort online delivery wake. */
   readonly scheduleTerminalReplyDelivery?: (
     childSessionId: string,
@@ -297,6 +310,98 @@ export function createChildSessionOrchestrator(input: {
       ...(preparedFollowupProof ? { preservePreparedFollowupModels: [preparedFollowupProof] } : {}),
       ...(currentTurnProof ? { preservePreparedCurrentTurnModels: [currentTurnProof] } : {}),
     });
+  };
+  const childStreamSequences = new Map<string, number>();
+  const publishChildNotification = (notification: RuntimeNotification): void => {
+    try {
+      input.publishChildNotification?.(notification);
+    } catch (error) {
+      console.error(
+        'Independent child live notification failed; durable History remains readable.',
+        {
+          sessionId: notification.sessionId,
+          revision:
+            notification.durability === 'durable' ? notification.revision : notification.sequence,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        },
+      );
+    }
+  };
+  const clearSettledChildStream = (
+    child: ReturnType<typeof ensureChild>,
+    fallbackRunId: string,
+  ): void => {
+    const state = child.getState();
+    if (state.turn.status !== 'active')
+      childStreamSequences.delete(`${child.sessionId}\0${state.turn.turnId ?? fallbackRunId}`);
+  };
+  const publishChildPresentation = (
+    child: ReturnType<typeof ensureChild>,
+    event: RuntimeEvent,
+    identity: { readonly runId: string; readonly taskId: string },
+  ): void => {
+    if (!input.publishChildNotification) return;
+    const state = child.getState();
+    const streamId = state.turn.turnId ?? identity.runId;
+    const key = `${child.sessionId}\0${streamId}`;
+    const sequence = (childStreamSequences.get(key) ?? 0) + 1;
+    const notification = projectRuntimeEphemeralNotification(event, {
+      sessionId: child.sessionId,
+      workId: identity.taskId,
+      runId: identity.runId,
+      taskId: identity.taskId,
+      turnId: streamId,
+      actorId: 'runtime-agent',
+      attemptId: streamId,
+      streamId,
+      sequence,
+    });
+    if (!notification) return;
+    childStreamSequences.set(key, sequence);
+    publishChildNotification(notification);
+  };
+  const publishChildCommittedThrough = (
+    child: ReturnType<typeof ensureChild>,
+    revision: number,
+    identity: { readonly runId: string; readonly taskId: string },
+  ): void => {
+    if (!input.publishChildNotification) return;
+    for (const committed of child.takeCommittedEventsThrough?.(revision) ?? []) {
+      try {
+        const committedRevision = child.revisionForEvent?.(committed);
+        const state = child.stateForEvent?.(committed);
+        if (committedRevision === undefined || !state || state.revision !== committedRevision)
+          throw new Error('Child committed event State projection is unavailable.');
+        const session = input.projectChildSession?.(child.sessionId, state);
+        if (!session) throw new Error('Child committed event projection is unavailable.');
+        const projected = projectRuntimeClientEvent(committed, {
+          sessionRevision: committedRevision,
+        });
+        publishChildNotification({
+          schema: RUNTIME_NOTIFICATION_SCHEMA_,
+          durability: 'durable',
+          sessionId: child.sessionId,
+          revision: committedRevision,
+          runId: identity.runId,
+          taskId: identity.taskId,
+          ...(state.turn.turnId ? { turnId: state.turn.turnId } : {}),
+          projection: {
+            kind: 'turn',
+            session,
+            ...(projected === undefined ? {} : { event: projected }),
+          },
+        });
+      } catch (error) {
+        console.error(
+          'Independent child committed projection failed; durable History remains readable.',
+          {
+            sessionId: child.sessionId,
+            revision: child.revisionForEvent?.(committed),
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          },
+        );
+      }
+    }
   };
   const targetModelConfig = (targetSessionId: string): CliRuntimeBridgeInput['config'] | null => {
     const route = input.owner.storage.sessions.getSessionModelRoute(targetSessionId);
@@ -908,6 +1013,8 @@ export function createChildSessionOrchestrator(input: {
         const state = child.getState();
         const followup = state.activeFollowupTurn;
         if (!followup || followup.submissionId !== submissionId) return false;
+        const taskId = state.childSessionOrigin?.childInvocationId;
+        if (!taskId) throw new Error('Child followup has no origin identity.');
         const storedGrant = mail.readFollowupGrantForTarget(
           targetSessionId,
           followup.grantRef.artifactId,
@@ -1021,15 +1128,23 @@ export function createChildSessionOrchestrator(input: {
                 event.type === 'model.text_delta' ||
                 event.type === 'model.reasoning_delta' ||
                 event.type === 'model.reasoning_completed'
-              )
+              ) {
+                publishChildPresentation(child, event, { runId: followup.targetRunId, taskId });
                 return;
+              }
               throw new Error('Child followup first Model catalog changed before its Surface.');
             },
             signal,
           });
           if (modeled.length !== 0)
             throw new Error('Child followup first Model returned an uncommitted result.');
-          return completeFollowupTurn(child, followup, targetSessionId, submissionId);
+          const completed = completeFollowupTurn(child, followup, targetSessionId, submissionId);
+          publishChildCommittedThrough(child, child.getState().revision, {
+            runId: followup.targetRunId,
+            taskId,
+          });
+          clearSettledChildStream(child, followup.targetRunId);
+          return completed;
         } catch (error) {
           if (markAttemptedFollowupUnknown(targetSessionId, submissionId)) return false;
           if (!signal?.aborted && markUnattemptedFollowupFailed(targetSessionId, submissionId))
@@ -3224,6 +3339,14 @@ export function createChildSessionOrchestrator(input: {
       throw new Error('Independent child already has a live local runner.');
     activeChildren.set(accepted.childThreadId, childAbort);
     let output = '';
+    const publishChildEvent = (event: RuntimeEvent): void => {
+      const revision = child.revisionForEvent?.(event);
+      if (revision === undefined) {
+        publishChildPresentation(child, event, { runId, taskId: intent.childInvocationId });
+        return;
+      }
+      publishChildCommittedThrough(child, revision, { runId, taskId: intent.childInvocationId });
+    };
     try {
       await input.owner.runWithSessionExecution(accepted.childThreadId, async () => {
         for await (const event of runAcceptedChildSession({
@@ -3241,6 +3364,7 @@ export function createChildSessionOrchestrator(input: {
             onProxyOpened: (proxy) => approvalProxy.publishRequested(proxy),
           }),
         })) {
+          publishChildEvent(event);
           if (event.type === 'run.completed') output = event.output;
         }
         await child.waitForIdle();
@@ -3343,6 +3467,13 @@ export function createChildSessionOrchestrator(input: {
         input.coordinators.release(accepted.childThreadId),
       );
     } finally {
+      try {
+        clearSettledChildStream(child, runId);
+      } catch {
+        // The coordinator may have been released after a sealed terminal.
+        for (const key of childStreamSequences.keys())
+          if (key.startsWith(`${accepted.childThreadId}\0`)) childStreamSequences.delete(key);
+      }
       activeChildren.delete(accepted.childThreadId);
       for (const [invocationId, candidate] of currentTurnCandidates)
         if (candidate.targetSessionId === accepted.childThreadId)
@@ -3848,6 +3979,8 @@ export function createChildSessionOrchestrator(input: {
           input.parentSessionId,
           parent.getState().toolRecovery.identityKey,
         );
+        const recoveryRunId = intent.childBudgetActivatedRunId;
+        if (!recoveryRunId) throw new Error('Recovered child has no active Run identity.');
         let output = '';
         for await (const event of child.executeTurn(
           {
@@ -3875,6 +4008,10 @@ export function createChildSessionOrchestrator(input: {
             onProxyOpened: (opened) => approvalProxy.publishRequested(opened),
           }),
         )) {
+          const revision = child.revisionForEvent?.(event);
+          const identity = { runId: recoveryRunId, taskId: intent.childInvocationId };
+          if (revision === undefined) publishChildPresentation(child, event, identity);
+          else publishChildCommittedThrough(child, revision, identity);
           if (event.type === 'run.completed') output = event.output;
         }
         await child.waitForIdle();
@@ -3903,6 +4040,9 @@ export function createChildSessionOrchestrator(input: {
       });
       if (!stoppingRecovery && !childAbort.signal.aborted) await importSealed(intent.childThreadId);
     } finally {
+      const recoveredChild = input.coordinators.get(intent.childThreadId);
+      if (recoveredChild && intent.childBudgetActivatedRunId)
+        clearSettledChildStream(recoveredChild, intent.childBudgetActivatedRunId);
       activeChildren.delete(intent.childThreadId);
       recoveryActiveChildren.delete(childAbort);
       input.coordinators.release(intent.childThreadId);

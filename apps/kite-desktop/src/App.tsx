@@ -498,6 +498,15 @@ export function App({ client }: { client: DesktopClient }) {
       }
       readingKey={childDetail ? `child:${selected}:${childDetail.childSessionId}` : draftKey}
       messages={readingMessages}
+      childSessionIdsByTaskId={childDetail ? undefined : childSessionIdsByExecutionId}
+      onOpenChildSession={
+        !childDetail && selected && connected && ready
+          ? (childSessionId) =>
+              void client
+                .openChildSession(selected, childSessionId)
+                .catch((error) => client.report(error))
+          : undefined
+      }
       loading={
         childDetail
           ? childDetail.loading

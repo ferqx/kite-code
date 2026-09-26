@@ -961,6 +961,89 @@ describe('Runtime Server', () => {
     });
   });
 
+  test('routes an admitted child subscription through the child stream and parent-scoped watermark', async () => {
+    const runtime = new FakeRuntime();
+    runtime.sessionProjectionRevision = 3;
+    const pair = createPair(runtime);
+    const messages = pair.client.messages()[Symbol.asyncIterator]();
+    await initializePair(pair, messages);
+    await pair.client.send({
+      jsonrpc: '2.0',
+      id: 'subscribe-child',
+      method: 'runtime/subscribe',
+      params: {
+        subscription: {
+          scope: 'child_session',
+          parentSessionId: 'parent-1',
+          childSessionId: 'child-1',
+          afterRevision: 3,
+          includeEphemeral: true,
+        },
+      },
+    });
+    expect(await next(messages)).toMatchObject({ id: 'subscribe-child' });
+    expect(await next(messages)).toMatchObject({
+      params: { message: { type: 'reset', sessions: [{ sessionId: 'child-1', revision: 3 }] } },
+    });
+    expect(await next(messages)).toMatchObject({
+      params: { message: { type: 'ready', scope: 'session' } },
+    });
+    expect(runtime.queries).toContainEqual({
+      schema: 'kite.runtime-query.v1',
+      type: 'get_child_session_projection',
+      sessionId: 'parent-1',
+      childSessionId: 'child-1',
+    });
+    expect(runtime.subscriptions[0]?.spec).toEqual({
+      scope: 'session',
+      sessionId: 'child-1',
+      afterRevision: 3,
+      includeEphemeral: true,
+    });
+    await pair.client.close();
+
+    const replayRuntime = new FakeRuntime();
+    replayRuntime.sessionProjectionRevision = 3;
+    replayRuntime.notifications = [
+      durableNotification(2, 'child-1'),
+      durableNotification(3, 'child-1'),
+      durableNotification(4, 'child-1'),
+    ];
+    const replay = createPair(replayRuntime);
+    const replayMessages = replay.client.messages()[Symbol.asyncIterator]();
+    await initializePair(replay, replayMessages);
+    await replay.client.send({
+      jsonrpc: '2.0',
+      id: 'subscribe-child-replay',
+      method: 'runtime/subscribe',
+      params: {
+        subscription: {
+          scope: 'child_session',
+          parentSessionId: 'parent-1',
+          childSessionId: 'child-1',
+          afterRevision: 1,
+        },
+      },
+    });
+    expect(await next(replayMessages)).toMatchObject({ id: 'subscribe-child-replay' });
+    expect(await next(replayMessages)).toMatchObject({
+      params: { message: { type: 'reset', sessions: [{ sessionId: 'child-1', revision: 3 }] } },
+    });
+    expect(await next(replayMessages)).toMatchObject({
+      params: { message: { type: 'ready', scope: 'session' } },
+    });
+    expect(await next(replayMessages)).toMatchObject({
+      params: { message: { type: 'notification', revision: 2 } },
+    });
+    expect(await next(replayMessages)).toMatchObject({
+      params: { message: { type: 'notification', revision: 3 } },
+    });
+    expect(await next(replayMessages)).toMatchObject({
+      params: { message: { type: 'notification', revision: 4 } },
+    });
+    await replay.client.close();
+  });
+
   test('resets an ahead session cursor to the authoritative watermark before ready', async () => {
     const runtime = new FakeRuntime();
     runtime.sessionProjectionRevision = 3;
@@ -1331,17 +1414,17 @@ function connectionAdmission(workspace: string, persisted: RuntimeServerAdmissio
   return { inputs, port };
 }
 
-function durableNotification(revision: number): RuntimeNotification {
+function durableNotification(revision: number, sessionId = 'session-1'): RuntimeNotification {
   return {
     schema: 'kite.runtime-notification.v2',
     durability: 'durable',
-    sessionId: 'session-1',
+    sessionId,
     revision,
     projection: {
       kind: 'session',
       session: {
         schema: 'kite.runtime-projection.v2',
-        sessionId: 'session-1',
+        sessionId,
         revision,
         lifecycle: 'open',
         interactionQueue: { revision, interactions: [] },
@@ -1392,6 +1475,26 @@ class FakeRuntime implements RuntimeAccess {
 
   async query(query: RuntimeQuery) {
     this.queries.push(query);
+    if (query.type === 'get_child_session_projection') {
+      return this.sessionProjectionRevision === undefined
+        ? {
+            status: 'not_found' as const,
+            queryType: query.type,
+            code: 'session_not_found' as const,
+          }
+        : {
+            status: 'ok' as const,
+            queryType: query.type,
+            revision: this.sessionProjectionRevision,
+            session: {
+              schema: 'kite.runtime-projection.v2' as const,
+              sessionId: query.childSessionId,
+              revision: this.sessionProjectionRevision,
+              lifecycle: 'open' as const,
+              interactionQueue: { revision: this.sessionProjectionRevision, interactions: [] },
+            },
+          };
+    }
     if (query.type === 'get_session_projection') {
       return this.sessionProjectionRevision === undefined
         ? {

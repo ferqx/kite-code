@@ -512,6 +512,15 @@ export const RUNTIME_SUBSCRIPTION_SPEC_SCHEMA_ = z.discriminatedUnion('scope', [
       includeEphemeral: z.boolean().optional(),
     })
     .strict(),
+  z
+    .object({
+      scope: z.literal('child_session'),
+      parentSessionId: identifier,
+      childSessionId: identifier,
+      afterRevision: safeRevision.optional(),
+      includeEphemeral: z.boolean().optional(),
+    })
+    .strict(),
   z.object({ scope: z.literal('sessions') }).strict(),
 ]);
 export type RuntimeSubscriptionSpec = z.infer<typeof RUNTIME_SUBSCRIPTION_SPEC_SCHEMA_>;

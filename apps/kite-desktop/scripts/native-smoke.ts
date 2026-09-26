@@ -68,6 +68,11 @@ model.setResponses([
         ) {
           backgroundStarted[index]!.resolve();
           await backgroundGates[index]!.promise;
+          if (index === 1)
+            return {
+              message: { content_chunks: ['ELECTRON_BACKGROUND_RESULT_1', ' streamed.'] },
+              chunk_delay: 1_200,
+            };
           return { message: { content: `ELECTRON_BACKGROUND_RESULT_${index}` } };
         }
       }
@@ -706,7 +711,25 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
       .length,
     1,
   );
+  // Open a still-running child before releasing its Provider. Its independent
+  // detail must receive the answer through the live child subscription.
+  await childCards.getByRole('button', { name: '查看子 Agent 详情：Electron child 1' }).click();
+  await page.getByRole('button', { name: '返回父会话' }).waitFor();
+  await page.waitForFunction(() => {
+    const refresh = [...document.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('刷新详情'),
+    );
+    return refresh instanceof HTMLButtonElement && !refresh.disabled;
+  });
+  assert.equal(await page.getByRole('textbox', { name: '任务输入' }).count(), 0);
   backgroundGates[1]!.resolve();
+  await page
+    .getByText('ELECTRON_BACKGROUND_RESULT_1', { exact: true })
+    .waitFor({ timeout: 15_000 });
+  await page
+    .getByText('ELECTRON_BACKGROUND_RESULT_1 streamed.', { exact: false })
+    .waitFor({ timeout: 15_000 });
+  await page.getByRole('button', { name: '返回父会话' }).click();
   await childCards
     .locator('li')
     .filter({ hasText: 'Electron child 1' })
@@ -730,7 +753,6 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   );
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.completed').length, 1);
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.error').length, 0);
-  await childCards.getByRole('button', { name: '刷新子 Agent' }).click();
   await childCards.getByRole('button', { name: '查看子 Agent 详情：Electron child 0' }).click();
   await page.getByRole('button', { name: '返回父会话' }).waitFor();
   assert.equal(await page.getByRole('textbox', { name: '任务输入' }).count(), 0);
@@ -757,7 +779,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   browser = undefined;
   assert.equal(await exited, 0);
   console.log(
-    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching, three-child partial completion and child detail navigation, hide/reopen and idle exit passed. No external Provider was used.',
+    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching, three-child partial completion and live child detail, hide/reopen and idle exit passed. No external Provider was used.',
   );
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];

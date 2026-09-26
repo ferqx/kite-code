@@ -10,6 +10,7 @@ import {
   type RuntimeCommand,
   type RuntimeCommandContext,
   type RuntimeCommandReceipt,
+  type RuntimeNotification,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
@@ -102,6 +103,7 @@ export interface RuntimeHost<Event = unknown, State = unknown> extends RuntimeHo
   /** The single frozen registry view shared with Host capability execution. */
   readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
   readonly contextCompilation: RuntimeHostContextCompilationPort;
+  publishExternalNotification(notification: RuntimeNotification): void;
   start(): Promise<void>;
 }
 
@@ -703,6 +705,12 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       void this.#loadProjection(subscription.spec.sessionId).catch(() => undefined);
     }
     return iterable;
+  }
+
+  /** Publish a notification committed by an App-owned independent child coordinator. */
+  publishExternalNotification(notification: RuntimeNotification): void {
+    this.#assertOpen();
+    this.#notifications.publishExternal(notification);
   }
 
   removeSessionProjection(sessionId: string): boolean {

@@ -38,6 +38,37 @@ const initializeRequest = {
 };
 
 describe('Runtime Protocol', () => {
+  test('requires exact parent and child identities for a child live subscription', () => {
+    const request = {
+      jsonrpc: '2.0',
+      id: 'child-stream',
+      method: 'runtime/subscribe',
+      params: {
+        subscription: {
+          scope: 'child_session',
+          parentSessionId: 'parent-1',
+          childSessionId: 'child-1',
+          afterRevision: 4,
+          includeEphemeral: true,
+        },
+      },
+    };
+    expect(safeDecodeRuntimeProtocolMessage(request).success).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        ...request,
+        params: {
+          subscription: { ...request.params.subscription, parentSessionId: undefined },
+        },
+      }).success,
+    ).toBeFalse();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        ...request,
+        params: { subscription: { ...request.params.subscription, write: true } },
+      }).success,
+    ).toBeFalse();
+  });
   test('session directory preserves opaque workspace grouping without exposing a local path', () => {
     const result = mapRuntimeQueryResultToProtocol({
       status: 'ok',
@@ -1198,7 +1229,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'dc6cc2c4:4420db23';
+    const expectedDigest = '89dcc15b:001e8d83';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

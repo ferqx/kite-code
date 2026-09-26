@@ -41,7 +41,6 @@ import {
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
   type RuntimeSubscription,
-  type RuntimeSubscriptionSpec,
 } from '@kite-ai/runtime-contract';
 import {
   createRuntimeHost,
@@ -71,7 +70,11 @@ import type {
   RuntimeStoredRun,
 } from '@kite-ai/runtime-host/storage';
 import { createRuntimeStoredCommandReceipt } from '@kite-ai/runtime-host/storage';
-import { RUNTIME_PROTOCOL_VERSION, type RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
+import {
+  RUNTIME_PROTOCOL_VERSION,
+  type RuntimeProtocolMessage,
+  type RuntimeSubscriptionSpec as RuntimeProtocolSubscriptionSpec,
+} from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
   type RuntimeServer,
@@ -584,8 +587,12 @@ function admissionSessionId(input: RuntimeServerAdmissionInput): string | undefi
     return (input.query as { readonly sessionId?: string }).sessionId;
   }
   if (input.operation === 'runtime/subscribe') {
-    const subscription = input.subscription as RuntimeSubscriptionSpec;
-    return subscription.scope === 'session' ? subscription.sessionId : undefined;
+    const subscription = input.subscription as RuntimeProtocolSubscriptionSpec;
+    return subscription.scope === 'session'
+      ? subscription.sessionId
+      : subscription.scope === 'child_session'
+        ? subscription.parentSessionId
+        : undefined;
   }
   return undefined;
 }
@@ -2328,6 +2335,13 @@ export function createKiteMultiWorkspaceRuntimeServer(
                       modelRuntimeFactory: modelInvocationRuntimeFactory,
                       capabilityExecution: capabilities,
                       enqueueSessionWork: context.enqueueSessionWork,
+                      projectChildSession: (childSessionId, state) =>
+                        projectStoredSessionForOwner(childSessionId, state),
+                      publishChildNotification: (notification) => {
+                        if (!owner.readChildSession?.(sessionId, notification.sessionId))
+                          throw new Error('Child notification has no parent ownership proof.');
+                        host.publishExternalNotification(notification);
+                      },
                       ...(mailBinding
                         ? {
                             scheduleTerminalReplyDelivery: (
@@ -3532,6 +3546,15 @@ export function createKiteMultiWorkspaceRuntimeServer(
           const sessionId = admissionSessionId(request);
           if (sessionId && owner.readSessionLineage?.(sessionId)?.parentSessionId != null) {
             return { allowed: false as const, reason: 'unauthorized' as const };
+          }
+          if (request.operation === 'runtime/subscribe') {
+            const subscription = request.subscription as RuntimeProtocolSubscriptionSpec;
+            if (
+              subscription.scope === 'child_session' &&
+              !owner.readChildSession?.(subscription.parentSessionId, subscription.childSessionId)
+            ) {
+              return { allowed: false as const, reason: 'unauthorized' as const };
+            }
           }
           const persisted =
             sessionId === undefined ? undefined : persistedAdmissionForSession(sessionId);
