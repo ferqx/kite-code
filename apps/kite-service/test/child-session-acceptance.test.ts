@@ -128,6 +128,42 @@ function grant(index: number) {
   });
 }
 
+test('unconfigured parent budget rejects staging before any receipt becomes pending', async () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: 'a'.repeat(64),
+    threadId: 'acceptance-parent',
+    userId: 'user-1',
+    workspace: '/workspace',
+  });
+  let commits = 0;
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => {
+      commits += 1;
+      return true;
+    },
+    onAccepted: () => undefined,
+  });
+  expect(
+    stage.stage({
+      grant: grant(1),
+      name: 'reviewer',
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    }),
+  ).toMatchObject({
+    ok: false,
+    terminalStatus: 'failed',
+    summary: 'Background child Session requires an active Run resource budget.',
+  });
+  expect(await stage.commitReceipt([runningReceipt(1)])).toBeNull();
+  expect(commits).toBe(0);
+});
+
 test('staging does not dispatch; receipt commits one sealed parent batch with exact lease', async () => {
   const state = addTransient(initialState(), 1);
   const originalRevision = state.revision;

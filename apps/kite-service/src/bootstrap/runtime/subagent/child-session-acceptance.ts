@@ -81,6 +81,17 @@ export function createChildSessionAcceptanceStage(input: {
   return Object.freeze({
     stage(child: StagedChildSession): SubAgentResult {
       const { grant } = child;
+      if (input.getState().resourceBudget.status !== 'active') {
+        const reason = 'Background child Session requires an active Run resource budget.';
+        return {
+          ok: false,
+          summary: reason,
+          error: reason,
+          terminalStatus: 'failed',
+          toolCallCount: 0,
+          durationMs: 0,
+        };
+      }
       if (
         grant.purpose !== 'start' ||
         grant.role !== child.role ||
