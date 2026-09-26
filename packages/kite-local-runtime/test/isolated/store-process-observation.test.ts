@@ -3,10 +3,36 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  classifyKiteProcess,
   observeLegacyKiteStoreProcesses,
   readKiteSourceClientParentIdentity,
   readLegacyKiteProcessIdentity,
 } from '../../src/service/legacy-store-processes';
+
+test('Desktop observation recognizes main processes without treating launchers or renderers as writers', () => {
+  const electron = '/checkout/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron';
+  const renderer =
+    '/checkout/node_modules/electron/dist/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)';
+  expect(classifyKiteProcess(electron, ['/checkout/apps/kite-desktop'], [])).toBe('desktop');
+  expect(classifyKiteProcess('/Applications/kite.app/Contents/MacOS/kite', [], [])).toBe('desktop');
+  expect(
+    classifyKiteProcess('/Applications/kite.app/Contents/MacOS/helper', [], []),
+  ).toBeUndefined();
+  expect(
+    classifyKiteProcess(
+      '/usr/local/bin/bun',
+      ['bun', 'run', '--cwd', 'apps/kite-desktop', 'dev'],
+      [],
+    ),
+  ).toBeUndefined();
+  expect(
+    classifyKiteProcess(
+      renderer,
+      ['--type=renderer', '--app-path=/checkout/apps/kite-desktop'],
+      [],
+    ),
+  ).toBeUndefined();
+});
 
 const children: Array<{ kill(signal?: NodeJS.Signals | number): void; exited: Promise<number> }> =
   [];

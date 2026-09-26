@@ -34,6 +34,7 @@ function openDarwinApi() {
     proc_listpids: { args: ['u32', 'u32', 'ptr', 'i32'], returns: 'i32' },
     proc_pidinfo: { args: ['i32', 'i32', 'u64', 'ptr', 'i32'], returns: 'i32' },
     proc_pidpath: { args: ['i32', 'ptr', 'u32'], returns: 'i32' },
+    csops: { args: ['i32', 'u32', 'ptr', 'u64'], returns: 'i32' },
     sysctl: { args: ['ptr', 'u32', 'ptr', 'ptr', 'ptr', 'u64'], returns: 'i32' },
   });
 }
@@ -281,6 +282,11 @@ export function observeLegacyKiteStoreProcesses(
       const executable = readDarwinExecutable(api, pid);
       const argv = readDarwinArgv(api, pid);
       if (!executable || !argv) {
+        if (!executable && argv && isVerifiedUnrelatedHelper(api, pid, identity.commandName)) {
+          const after = readDarwinIdentity(api, pid);
+          if (after?.startIdentity === startIdentity && after.commandName === identity.commandName)
+            continue;
+        }
         if (processIsGone(pid)) continue;
         return { status: 'incomplete', reason: 'process_arguments' };
       }
@@ -305,7 +311,14 @@ export function observeLegacyKiteStoreProcesses(
 function readDarwinIdentity(
   api: DarwinApi,
   pid: number,
-): (LegacyKiteProcessIdentity & { uid: number; ruid: number; ppid: number }) | undefined {
+):
+  | (LegacyKiteProcessIdentity & {
+      uid: number;
+      ruid: number;
+      ppid: number;
+      commandName: string;
+    })
+  | undefined {
   const bytes = new Uint8Array(PROC_BSDINFO_SIZE);
   if (api.symbols.proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, ptr(bytes), bytes.length) !== bytes.length)
     return undefined;
@@ -314,13 +327,58 @@ function readDarwinIdentity(
   const seconds = value.getBigUint64(120, true);
   const microseconds = value.getBigUint64(128, true);
   if (seconds === 0n || microseconds >= 1_000_000n) return undefined;
+  const commandBytes = bytes.subarray(48, 64); // pbi_comm: kernel name set at exec
+  const commandEnd = commandBytes.indexOf(0);
+  let commandName = '';
+  try {
+    commandName = decoder.decode(commandBytes.subarray(0, commandEnd < 0 ? 16 : commandEnd));
+  } catch {
+    // An undecodable name cannot identify an exempt helper.
+  }
   return {
     pid,
     ppid: value.getUint32(16, true),
     uid: value.getUint32(20, true),
     ruid: value.getUint32(28, true),
+    commandName,
     startIdentity: `darwin:${seconds}:${microseconds}`,
   };
+}
+
+/** Only these signed, hardened non-Kite executables may outlive a removed app bundle. */
+function isVerifiedUnrelatedHelper(api: DarwinApi, pid: number, commandName: string): boolean {
+  const expectedIdentity =
+    commandName === 'browser_crashpa'
+      ? 'browser_crashpad_handler'
+      : commandName === 'bare-modifier-m'
+        ? 'bare-modifier-monitor'
+        : undefined;
+  if (!expectedIdentity) return false;
+  const flags = new Uint32Array(1);
+  if (api.symbols.csops(pid, 0, ptr(flags), flags.byteLength) !== 0) return false;
+  const enforcedSignature = 0x1 | 0x100 | 0x200 | 0x10000; // CS_VALID, HARD, KILL, RUNTIME
+  if (((flags[0] ?? 0) & enforcedSignature) !== enforcedSignature) return false;
+  return (
+    readDarwinSigningString(api, pid, 14) === '2DC432GLL2' && // OpenAI Team ID
+    readDarwinSigningString(api, pid, 11) === expectedIdentity
+  );
+}
+
+function readDarwinSigningString(
+  api: DarwinApi,
+  pid: number,
+  operation: number,
+): string | undefined {
+  const bytes = new Uint8Array(128);
+  if (api.symbols.csops(pid, operation, ptr(bytes), bytes.length) !== 0) return undefined;
+  const length = Number(new DataView(bytes.buffer).getBigUint64(0, false));
+  if (!Number.isSafeInteger(length) || length < 10 || length > bytes.length) return undefined;
+  if (bytes[length - 1] !== 0 || bytes.subarray(8, length - 1).includes(0)) return undefined;
+  try {
+    return decoder.decode(bytes.subarray(8, length - 1));
+  } catch {
+    return undefined;
+  }
 }
 
 function readDarwinExecutable(api: DarwinApi, pid: number): string | undefined {
@@ -380,7 +438,7 @@ function isErrno(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
-function classifyKiteProcess(
+export function classifyKiteProcess(
   executable: string,
   argv: readonly string[],
   managedInstallPrefixes: readonly string[],
@@ -431,10 +489,11 @@ function classifyKiteProcess(
     )
   )
     return 'launcher';
-  if (
-    /[/\\]kite\.app[/\\]Contents[/\\]MacOS[/\\]/iu.test(executable) ||
-    argv.some((value) => /(?:^|[/\\])apps[/\\]kite-desktop[/\\]?$/u.test(value))
-  )
+  const sourceDesktopMain =
+    /[/\\]Electron\.app[/\\]Contents[/\\]MacOS[/\\]Electron$/u.test(executable) &&
+    !argv.some((value) => value.startsWith('--type=')) &&
+    argv.some((value) => /(?:^|[/\\])apps[/\\]kite-desktop[/\\]?$/u.test(value));
+  if (/[/\\]kite\.app[/\\]Contents[/\\]MacOS[/\\]kite$/iu.test(executable) || sourceDesktopMain)
     return 'desktop';
   if (
     argv.some((value) =>

@@ -70,6 +70,8 @@ CLI 与 Desktop 共用 canonical config root，不再按 checkout 或 Store epoc
 
 macOS的只读进程观测采用PID与精确OS起始身份，失败不猜测安全。source CLI/TUI准入核对当前构建、同仓库父入口、标准安装位置及PATH；paired Desktop准入核对Host内置manifest摘要、Service自身文件摘要、精确父Electron和其他发行入口。结果只是一项维护前提，必须与Service持有所有Store独占锁和源文件复核组合；不代替Session execution authority，不自动停止未知进程。进程观测也保守识别自定义安装根下符合固定发行布局的同用户Kite进程，并在它们仍活动时阻止维护；路径形状只用于拒绝，不构成父进程豁免或执行授权。此观测不保证任意旧launcher未来不能启动，未参与维护协议的历史入口仍受已声明的资格限制。
 
+Desktop进程识别只匹配应用主程序或明确的source Electron主进程，不把Bun开发启动器和Electron renderer当作旧Store写入者。若macOS无法提供某进程的可执行路径，[观测器](src/service/legacy-store-processes.ts)仅在内核执行名、有效且受强制保护的代码签名、签名团队和可执行身份均精确匹配已知非Kite辅助进程，且PID启动身份复核一致时略过；其他路径缺失仍阻止维护准入。该例外不豁免Kite入口。
+
 Electron Host使用独立纯Node `desktop-manifest` 子入口，不能把含Bun native API的Service barrel导入renderer。固定数据/构建环境不得经manifest.environmentKeys覆盖。Windows、显式daemon及未参与新协议的历史发行组合的支持资格不得从macOS当前路径外推；参见[实施计划](../../docs/plans/session-store-compatibility-and-continuity.md)。
 
 在已验证POSIX入口，准备阶段可以持有维护权异步等待发布前决定。取消不写发布意图；同意提交后重新验证准入和源文件。stdio Service在安全点处理启动期退出信号，已有意图恢复不取消。父客户端预初始化关闭等待Service实际退出，不以计时SIGKILL打断发布；已初始化后的普通运行收尾规则不变。
