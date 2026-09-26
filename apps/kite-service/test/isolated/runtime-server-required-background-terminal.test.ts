@@ -15,45 +15,47 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-test('a durable required-child failure wakes and completes the same parent Run without task_read', async () => {
+test('an exhausted child Provider attempt marks the required parent Run unknown without task_read', async () => {
   const fixture = await createFixture('required-child-failure');
   const { model, runtime, storage, sessionId } = fixture;
-  model.setResponses([
-    {
-      message: {
-        tool_calls: [
-          {
-            id: 'required-failing-child',
-            name: 'task',
-            args: {
-              name: 'Failing child',
-              subagent_type: 'explore',
-              task: 'REQUIRED_CHILD_FAILURE',
-              background: true,
-              result_disposition: 'required',
+  const parentInput = 'Start one required failing child and wait for it.';
+  let parentRequests = 0;
+  model.setResponses(
+    Array.from({ length: 12 }, () => ({
+      response: ({ messages }: { messages: readonly unknown[] }) => {
+        const request = JSON.stringify(messages);
+        if (request.includes('REQUIRED_CHILD_FAILURE') && !request.includes(parentInput))
+          return { error: 'injected child provider failure' };
+        parentRequests += 1;
+        if (parentRequests === 1)
+          return {
+            message: {
+              tool_calls: [
+                {
+                  id: 'required-failing-child',
+                  name: 'task',
+                  args: {
+                    name: 'Failing child',
+                    subagent_type: 'explore',
+                    task: 'REQUIRED_CHILD_FAILURE',
+                    background: true,
+                    result_disposition: 'required',
+                  },
+                },
+              ],
             },
-          },
-        ],
+            toolContinuation: 'required' as const,
+          };
+        return {
+          message: { content: 'The parent must remain waiting for its required child.' },
+          expectedRequest: { toolResults: [{ toolCallId: 'required-failing-child' }] },
+        };
       },
-      toolContinuation: 'required',
-    },
-    {
-      message: { content: 'The parent must remain waiting for its required child.' },
-      expectedRequest: { toolResults: [{ toolCallId: 'required-failing-child' }] },
-    },
-    ...Array.from({ length: 5 }, () => ({ error: 'injected child provider failure' })),
-    {
-      response: ({ messages }) => {
-        const snapshot = JSON.stringify(messages);
-        expect(snapshot).toMatch(/failed|failure|provider/iu);
-        expect(snapshot).not.toContain('"name":"task_read"');
-        return { message: { content: 'Parent handled the durable child failure.' } };
-      },
-    },
-  ]);
+    })),
+  );
 
   try {
-    await createAndStart(runtime, fixture, 'Start one required failing child and wait for it.');
+    await createAndStart(runtime, fixture, parentInput);
     const active = await waitForActiveRun(storage, sessionId);
     const originRunId = active.runId;
     await waitFor(() => storage.loadCurrentSnapshot(sessionId)?.turn.status !== 'active');
@@ -62,19 +64,20 @@ test('a durable required-child failure wakes and completes the same parent Run w
     const events = storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event);
     expect(storage.storage.runs?.get(sessionId, originRunId)).toMatchObject({
       runId: originRunId,
-      status: 'completed',
+      status: 'unknown',
+      terminal: { reasonCode: 'unknown', safeRetry: false, recoveryEntry: 'reconcile' },
     });
-    expect(snapshot?.turn.status).toBe('completed');
+    expect(snapshot?.turn.status).toBe('aborted');
     expect(events).toContainEqual(
       expect.objectContaining({
-        type: 'capability.subagent_observation_recorded',
-        status: 'failed',
+        type: 'subagent.child_terminal_imported',
       }),
     );
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'subagent.background_result_persisted' }),
     );
-    expect(model.getRequestCount()).toBe(8);
+    expect(parentRequests).toBe(2);
+    expect(model.getRequestCount()).toBe(7);
     expect(
       model
         .getRequests()
@@ -97,34 +100,44 @@ test('a durable required-child failure wakes and completes the same parent Run w
 test('cancelling a required-background wait clears its child and late Provider output cannot revive the Run', async () => {
   const fixture = await createFixture('required-child-cancel');
   const { model, runtime, storage, sessionId } = fixture;
-  model.setResponses([
-    {
-      message: {
-        tool_calls: [
-          {
-            id: 'required-cancelled-child',
-            name: 'task',
-            args: {
-              name: 'Cancelled child',
-              subagent_type: 'explore',
-              task: 'REQUIRED_CHILD_LATE_RESULT',
-              background: true,
-              result_disposition: 'required',
+  const parentInput = 'Start one required child and keep waiting.';
+  let parentRequests = 0;
+  model.setResponses(
+    Array.from({ length: 8 }, () => ({
+      response: ({ messages }: { messages: readonly unknown[] }) => {
+        const request = JSON.stringify(messages);
+        if (request.includes('REQUIRED_CHILD_LATE_RESULT') && !request.includes(parentInput))
+          return { delay: 300, message: { content: 'This late child result must be ignored.' } };
+        parentRequests += 1;
+        if (parentRequests === 1)
+          return {
+            message: {
+              tool_calls: [
+                {
+                  id: 'required-cancelled-child',
+                  name: 'task',
+                  args: {
+                    name: 'Cancelled child',
+                    subagent_type: 'explore',
+                    task: 'REQUIRED_CHILD_LATE_RESULT',
+                    background: true,
+                    result_disposition: 'required',
+                  },
+                },
+              ],
             },
-          },
-        ],
+            toolContinuation: 'required' as const,
+          };
+        return {
+          message: { content: 'The parent must remain waiting for its required child.' },
+          expectedRequest: { toolResults: [{ toolCallId: 'required-cancelled-child' }] },
+        };
       },
-      toolContinuation: 'required',
-    },
-    {
-      message: { content: 'The parent must remain waiting for its required child.' },
-      expectedRequest: { toolResults: [{ toolCallId: 'required-cancelled-child' }] },
-    },
-    { delay: 300, message: { content: 'This late child result must be ignored.' } },
-  ]);
+    })),
+  );
 
   try {
-    await createAndStart(runtime, fixture, 'Start one required child and keep waiting.');
+    await createAndStart(runtime, fixture, parentInput);
     await waitFor(() => model.getRequestCount() === 3);
     const before = storage.loadCurrentSnapshot(sessionId);
     const active = storage.storage.runs?.getActive(sessionId);
@@ -156,8 +169,8 @@ test('cancelling a required-background wait clears its child and late Provider o
     expect(events.filter((event) => event.type === 'subagent.completed')).toEqual([]);
     expect(events).toContainEqual(
       expect.objectContaining({
-        type: 'capability.subagent_observation_recorded',
-        status: 'interrupted',
+        type: 'subagent.child_terminal_imported',
+        status: 'cancelled',
       }),
     );
     expect(JSON.stringify(events)).not.toContain('This late child result must be ignored.');
@@ -264,6 +277,9 @@ function runtimeInput(workspace: string, baseURL: string) {
       apiKey: 'fixture-key',
       baseURL,
       modelName: 'mock-model',
+      modelKwargs: { maxOutputTokens: 64 },
+      modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
+      features: { resourceBudget: true },
       sandbox: { enabled: false },
     },
     shellExecutor: async ({ command }: { command: string }) => ({

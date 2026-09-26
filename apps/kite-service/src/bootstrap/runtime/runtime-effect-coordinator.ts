@@ -20,6 +20,7 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#kite-service/config/features';
 import { readPrivateSuspendedSubagent } from '../../runtime/tool-execution/subagent-executor';
+import { createCrossSessionRootAgentMailModelInput } from './agent-mail-model-input';
 import {
   type ContextCompactor,
   executeContextCompaction as runContextCompaction,
@@ -32,6 +33,7 @@ import {
   resolveRuntimeContextProjectionEnvironment,
 } from './runtime-effect-dependencies';
 import { executeAppRuntimeToolsEffect } from './runtime-tool-effect';
+import type { RuntimeCrossSessionQueueMailModelInput } from './state-runner';
 import type {
   RuntimeEffect,
   RuntimeEffectExecutor,
@@ -250,12 +252,85 @@ export function createAppRuntimeEffectExecutor(
     const { modelEffectCoordinator, builtinToolCatalog } =
       requireModelCoordinatorDependencies(dependencies);
 
+    const crossPersist = (
+      executionContext as
+        | (NonNullable<typeof executionContext> & {
+            persistCrossSessionQueueMailModelInput?: (
+              input: RuntimeCrossSessionQueueMailModelInput,
+            ) => Promise<readonly RuntimeEvent[]>;
+          })
+        | undefined
+    )?.persistCrossSessionQueueMailModelInput;
+    const scopedMail =
+      (dependencies.agentMailboxAvailable === true ||
+        dependencies.agentMailboxQueueOnlyAvailable === true) &&
+      executionContext?.currentRunId &&
+      crossPersist &&
+      dependencies.crossSessionQueueMail
+        ? dependencies.crossSessionQueueMail.bindForEffect({
+            prepareModel: async (input) =>
+              (await crossPersist({ events: input.events, mutation: input.mutation })).length > 0,
+          })
+        : undefined;
+    const rootMail =
+      scopedMail && executionContext?.currentRunId
+        ? createCrossSessionRootAgentMailModelInput({
+            storage: scopedMail.modelInput,
+            getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
+            currentRunId: executionContext.currentRunId,
+          })
+        : undefined;
+    const currentTurn = dependencies.currentTurnFollowup;
+    const currentTurnTimeout = currentTurn?.firstAttemptTimeoutMs();
+    const currentTurnSafeTools = currentTurn?.safeToolNames('model');
+    const childToolCeiling =
+      currentTurnSafeTools && dependencies.childToolCeiling
+        ? {
+            ...dependencies.childToolCeiling,
+            allowedTools: dependencies.childToolCeiling.allowedTools.filter((name) =>
+              currentTurnSafeTools.includes(name),
+            ),
+          }
+        : dependencies.childToolCeiling;
     const modelInvocationPersistence = executionContext
       ? {
           getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
-          persistEvents: executionContext.persistEvents,
+          persistEvents: async (events: readonly RuntimeEvent[]) => {
+            if (currentTurn) {
+              const dispatches = events.flatMap((event) =>
+                event.type === 'model.invocation_attempt_started' ? [event.invocationId] : [],
+              );
+              for (const invocationId of dispatches)
+                if (!(await currentTurn.beforeDispatch(invocationId))) return false;
+            }
+            const applied = await executionContext.persistEvents([...events]);
+            if (!applied) return false;
+            if (currentTurn) {
+              const prepared = events.flatMap((event) =>
+                event.type === 'model.invocation_prepared' ? [event.invocationId] : [],
+              );
+              for (const invocationId of prepared)
+                if (
+                  !executionContext.commitCurrentTurnFollowupRoute ||
+                  !(await currentTurn.afterPrepared(
+                    invocationId,
+                    executionContext.commitCurrentTurnFollowupRoute,
+                  ))
+                )
+                  return false;
+            }
+            return true;
+          },
+          ...(rootMail ? { persistAdmission: rootMail.persistAdmission } : {}),
         }
       : undefined;
+    const prepareAgentMail = currentTurn
+      ? async (input: Parameters<typeof currentTurn.prepareAgentMail>[0]) => {
+          const current = await currentTurn.prepareAgentMail(input);
+          if (current.frames.length > 0) return current;
+          return rootMail?.prepareAgentMail(input) ?? current;
+        }
+      : rootMail?.prepareAgentMail;
 
     return projectPrimaryModelEffect({
       model: dependencies.model,
@@ -268,6 +343,13 @@ export function createAppRuntimeEffectExecutor(
       skillOptions: dependencies.skillOptions,
       skillCatalog: currentSkillCatalog(dependencies),
       subagentEventSink,
+      agentMailboxAvailable:
+        dependencies.agentMailboxAvailable === true ||
+        dependencies.agentMailboxPortForCall !== undefined,
+      agentMailboxQueueOnlyAvailable:
+        dependencies.agentMailboxQueueOnlyAvailable === true && scopedMail !== undefined,
+      prepareAgentMail,
+      ...(currentTurnTimeout === undefined ? {} : { firstAttemptTimeoutMs: currentTurnTimeout }),
       signal: dependencies.signal,
       emitRuntimeEvent: emit,
       compactionReporter: dependencies.compactionReporter,
@@ -280,6 +362,8 @@ export function createAppRuntimeEffectExecutor(
       modelEffectCoordinator,
       modelInvocationPersistence,
       subagentTaskRequests: dependencies.subagentTaskRequests,
+      delegatedTaskArtifacts: dependencies.delegatedTaskArtifacts,
+      childToolCeiling,
       builtinToolCatalog,
     });
   };

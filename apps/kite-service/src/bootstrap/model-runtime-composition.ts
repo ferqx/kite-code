@@ -22,10 +22,12 @@ import {
   BuiltinChildRuntimeDriver,
   createGovernedLocalSubagentComposition,
   type GovernedSubagentComposition,
+  SubagentCheckpointArtifactStore,
   type SubagentContinuationArtifactAccess,
   SubagentContinuationArtifactStore,
   type SubagentLifecycleArtifactAccess,
   SubagentLifecycleArtifactStore,
+  type SubagentResultArtifactAccess,
   SubagentResultArtifactStore,
   type SubagentTaskArtifactAccess,
   SubagentTaskArtifactStore,
@@ -59,12 +61,19 @@ type InstalledSubagentComposition = GovernedSubagentComposition<
 interface InstalledSubagentRuntime {
   readonly composition: InstalledSubagentComposition;
   readonly background: BackgroundSubagentRuntime;
+  readonly resultArtifacts: SubagentResultArtifactAccess;
+  readonly checkpointArtifacts?: SubagentCheckpointArtifactStore;
 }
 
 const installedSubagentCompositions = new Map<string, InstalledSubagentRuntime>();
 
-function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends) {
+function installedSubagentComposition(
+  backends?: KiteHomeBuiltinArtifactBackends,
+): InstalledSubagentRuntime {
   if (backends) {
+    const checkpointArtifacts = new SubagentCheckpointArtifactStore({
+      backend: backends.subagentCheckpoint,
+    });
     const composition = createGovernedLocalSubagentComposition({
       driver: new BuiltinChildRuntimeDriver(),
       taskArtifacts: new SubagentTaskArtifactStore({
@@ -74,11 +83,12 @@ function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends
         backend: backends.subagentLifecycle,
       }),
     });
+    const resultArtifacts = new SubagentResultArtifactStore({ backend: backends.subagentTask });
     return {
       composition,
-      background: new BackgroundSubagentRuntime(
-        new SubagentResultArtifactStore({ backend: backends.subagentTask }),
-      ),
+      background: new BackgroundSubagentRuntime(resultArtifacts, checkpointArtifacts),
+      resultArtifacts,
+      checkpointArtifacts,
     };
   }
   const installation = userKiteCodeDir();
@@ -91,9 +101,11 @@ function installedSubagentComposition(backends?: KiteHomeBuiltinArtifactBackends
     taskArtifacts,
     lifecycleArtifacts,
   });
-  const runtime = {
+  const resultArtifacts = new SubagentResultArtifactStore();
+  const runtime: InstalledSubagentRuntime = {
     composition,
-    background: new BackgroundSubagentRuntime(new SubagentResultArtifactStore()),
+    background: new BackgroundSubagentRuntime(resultArtifacts),
+    resultArtifacts,
   };
   installedSubagentCompositions.set(installation, runtime);
   return runtime;
@@ -120,7 +132,15 @@ export type InstalledKiteRuntimeComposition = {
   workspaceFilesystem?: BuiltinWorkspaceFilesystemRuntime;
   sandboxPreparationArtifacts: SandboxPreparationArtifactStore;
   subagentRuntimeFactory: AppSubagentRuntimeFactory;
+  /** Private readback for an independently executing child Session's delegated task. */
+  delegatedTaskArtifacts: Pick<SubagentTaskArtifactAccess, 'read'>;
+  childResultArtifacts: SubagentResultArtifactAccess;
+  inspectChildStartGrant: InstalledSubagentComposition['grants']['inspectStart'];
+  consumeChildStartGrant: ReturnType<
+    InstalledSubagentComposition['grants']['verifier']
+  >['verifyAndConsumeStart'];
   backgroundSubagentRuntime: BackgroundSubagentControlRuntime;
+  checkpointArtifacts?: Pick<SubagentCheckpointArtifactStore, 'write'>;
   afterTurnContinuationRuntime?: AfterTurnContinuationRuntime;
   reconcilePendingSubagents: (
     persistence: Parameters<typeof reconcilePendingSubagentProvidersAfterCrash>[0]['persistence'],
@@ -227,7 +247,15 @@ export function resolveInstalledKiteRuntimeComposition(
     sandboxPreparationArtifacts,
     subagentRuntimeFactory: () =>
       createPipelineSubagentRuntime(() => subagentComposition, installedSubagents.background),
+    delegatedTaskArtifacts: subagentComposition.taskArtifacts,
+    childResultArtifacts: installedSubagents.resultArtifacts,
+    inspectChildStartGrant: (grant) => subagentComposition.grants.inspectStart(grant),
+    consumeChildStartGrant: (grant) =>
+      subagentComposition.grants.verifier().verifyAndConsumeStart(grant),
     backgroundSubagentRuntime: installedSubagents.background,
+    ...(installedSubagents.checkpointArtifacts
+      ? { checkpointArtifacts: installedSubagents.checkpointArtifacts }
+      : {}),
     ...(afterTurnContinuationRuntime ? { afterTurnContinuationRuntime } : {}),
     reconcilePendingSubagents: (persistence, options) =>
       reconcilePendingSubagentProvidersAfterCrash({

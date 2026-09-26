@@ -376,6 +376,36 @@ export function taskBuiltinPolicyRule(
   });
 }
 
+/** Admission of Agent communication stays with the Host mailbox ledger. */
+export function agentMailboxBuiltinPolicyRule(
+  _input: RuntimeJsonValue,
+  _context: CapabilityPolicyContext,
+  declaredEffects: CapabilityEffects,
+  _minimumApproval: CapabilityApproval,
+  operationId: string,
+): BuiltinPolicyRuleResult {
+  const toolName = operationId.slice('builtin:'.length);
+  if (operationId === 'builtin:list_agents' || operationId === 'builtin:wait_agent') {
+    return allowRule({
+      risk: 'read',
+      reason: 'Agent tree and mailbox wait are governed observations.',
+      userVisibleSummary: `Run ${toolName}`,
+      expectedEffects: ['Reads current Session Agent facts without consuming mailbox messages'],
+      effectiveEffects: readOnlyEffects(declaredEffects),
+    });
+  }
+  return allowRule({
+    risk: 'plan',
+    reason: 'Host must admit the exact Agent communication scope and persistent receipt.',
+    userVisibleSummary: `Run ${toolName}`,
+    expectedEffects: [
+      'Submits an Agent command to the Host-owned mailbox',
+      'Host validates caller identity, authorization, budget and target state before admission',
+    ],
+    effectiveEffects: declaredEffects,
+  });
+}
+
 export function activateSkillBuiltinPolicyRule(
   _input: RuntimeJsonValue,
   context: CapabilityPolicyContext,

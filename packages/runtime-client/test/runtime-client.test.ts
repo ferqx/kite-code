@@ -129,6 +129,50 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('pins explicit child History pages to one source sequence and parent scope', async () => {
+    let pages = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('child-history')));
+      } else if (message.method === 'history/load_child_session') {
+        pages++;
+        expect(message.params).toMatchObject({
+          parentSessionId: 'parent',
+          childSessionId: 'child',
+          page: pages === 1 ? {} : { afterSequence: 1, throughSequence: 2 },
+        });
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'child',
+              displayName: 'Child',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 2,
+            },
+            records: [{ sequence: pages, events: [] }],
+            interactionMode: 'auto',
+            recovery: 'normal',
+            ...(pages === 1 ? { nextCursor: 1 } : {}),
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      const transcript = await client.history?.loadChildSession?.('parent', 'child');
+      expect(transcript?.records.map((record) => record.sequence)).toEqual([1, 2]);
+      expect(pages).toBe(2);
+    } finally {
+      await client.close();
+    }
+  });
+
   test.each([
     'valid',
     'stalled',

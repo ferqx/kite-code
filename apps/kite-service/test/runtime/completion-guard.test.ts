@@ -6,6 +6,7 @@ import {
   decideCompletion,
   decidePlannedCompletion,
   decideUnplannedCompletion,
+  requiredBackgroundTaskIds,
 } from '@kite-ai/agent-kernel';
 import { computePlanStructuralDigest } from '@kite-ai/builtin-runtime/planning';
 import { createDeterministicRuntimeIdSource } from '@kite-ai/runtime-host';
@@ -231,6 +232,35 @@ describe('CompletionGuard V1', () => {
     ).toThrow('Required background sub-agent settlement requires explicit recovery.');
   });
 
+  test('inspects only the selected legacy children when other required children use independent Sessions', () => {
+    const current = requiredBackgroundState('legacy-child', 'independent-child');
+    expect(
+      inspectRequiredBackgroundSettlement(
+        new Set(['legacy-child']),
+        current,
+        [{ executionId: 'legacy-child', status: 'running' }],
+        [],
+      ),
+    ).toEqual({ kind: 'none' });
+  });
+
+  test('treats a required child missing from a fresh owner snapshot as recovery, then replays only its exact claim', () => {
+    const current = requiredBackgroundState('child-lost-owner', 'child-running');
+    const awaited = new Set(['child-lost-owner', 'child-running']);
+    const visible = [{ executionId: 'child-running', status: 'running' }];
+    expect(() => inspectRequiredBackgroundSettlement(awaited, current, visible, [])).toThrow(
+      'Required background sub-agent settlement requires explicit recovery.',
+    );
+    const exact = backgroundRecoveryEvent('child-lost-owner', 'recovered-lost-owner');
+    const unrelated = backgroundRecoveryEvent('child-running', 'must-not-replay-running-child');
+    expect(
+      inspectRequiredBackgroundSettlement(awaited, current, visible, [unrelated, exact]),
+    ).toEqual({
+      kind: 'state_changed',
+      events: [exact],
+    });
+  });
+
   test('returns only exact recovery events for unavailable required background children', () => {
     const current = requiredBackgroundState('child-recover', 'child-running');
     const recovery = backgroundRecoveryEvent('child-recover', 'recovered-child');
@@ -443,6 +473,8 @@ describe('CompletionGuard V1', () => {
       code: 'tool_pending',
       nextAction: 'wait_for_tool',
       backgroundTaskIds: [],
+      correctionAttempt: 0,
+      canCorrect: false,
     });
 
     state.tools.calls.read = {
@@ -888,7 +920,7 @@ describe('CompletionGuard V1', () => {
     });
   }
 
-  test('classifies only the current required finite Shell terminal as a model wake', () => {
+  test('requires every current finite Shell to reach terminal cleanup before the model wakes', () => {
     const state = activePlanningState();
     state.tools.calls.shell = {
       toolCallId: 'shell',
@@ -914,6 +946,34 @@ describe('CompletionGuard V1', () => {
       cursor: 0,
     };
     expect(hasTerminalRequiredManagedShell(state, [execution])).toBe(true);
+    state.tools.calls['shell-second'] = {
+      ...state.tools.calls.shell,
+      toolCallId: 'shell-second',
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-required-2', shellStatus: 'running' },
+      },
+    };
+    expect(hasTerminalRequiredManagedShell(state, [execution])).toBe(false);
+    expect(
+      hasTerminalRequiredManagedShell(state, [
+        execution,
+        { ...execution, executionId: 'shell-required-2', status: 'running' },
+      ]),
+    ).toBe(false);
+    expect(
+      hasTerminalRequiredManagedShell(state, [
+        execution,
+        { ...execution, executionId: 'shell-required-2', cleanupConfirmed: false },
+      ]),
+    ).toBe(false);
+    expect(
+      hasTerminalRequiredManagedShell(state, [
+        execution,
+        { ...execution, executionId: 'shell-required-2' },
+      ]),
+    ).toBe(true);
     expect(
       hasTerminalRequiredManagedShell(state, [
         { ...execution, status: 'running', cleanupConfirmed: false },
@@ -924,6 +984,587 @@ describe('CompletionGuard V1', () => {
         { ...execution, executionId: 'other-shell', kind: 'service' },
       ]),
     ).toBe(false);
+  });
+
+  test('a user steer wakes one model call while the required child remains active', async () => {
+    const state = requiredBackgroundState('child-steer');
+    state.transcript.final = 'Premature final.';
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let modelCalls = 0;
+    let waitCalls = 0;
+    const stream = runStateRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls++;
+        return [
+          { type: 'model.responded' as const, messageId: 'after-steer', text: 'I will adapt.' },
+        ];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      10_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        waitCalls++;
+        if (waitCalls === 1) {
+          kernel.processEvent({
+            type: 'user.message_appended',
+            messageId: 'input_steer_while_child_runs',
+            content: 'Use this new constraint.',
+          });
+        }
+        return 'state_changed' as const;
+      },
+    );
+    try {
+      expect((await stream.next()).value).toMatchObject({
+        type: 'completion.blocked',
+        nextAction: 'wait_for_background',
+        correctionAttempt: 0,
+      });
+      expect((await stream.next()).value).toMatchObject({
+        type: 'model.responded',
+        messageId: 'after-steer',
+      });
+      expect(modelCalls).toBe(1);
+      expect(decideCompletion(kernel.getState())).toMatchObject({
+        status: 'blocked',
+        nextAction: 'wait_for_background',
+        backgroundTaskIds: ['child-steer'],
+      });
+    } finally {
+      await stream.return(undefined);
+      kernel.close();
+    }
+  });
+
+  test('a steer committed after the blocked yield wakes from the pre-yield revision', async () => {
+    const state = requiredBackgroundState('child-steer-yield-gap');
+    state.transcript.final = 'Premature final.';
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let modelCalls = 0;
+    let waitCalls = 0;
+    const stream = runStateRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls += 1;
+        return [
+          {
+            type: 'model.responded' as const,
+            messageId: 'after-yield-gap-steer',
+            text: 'Adjusted.',
+          },
+        ];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      10_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (observedState) => {
+        waitCalls += 1;
+        if (observedState.revision === kernel.getState().revision)
+          throw new Error('Completion waiter subscribed after the committed steer.');
+        return 'state_changed' as const;
+      },
+    );
+    try {
+      expect((await stream.next()).value).toMatchObject({
+        type: 'completion.blocked',
+        nextAction: 'wait_for_background',
+        correctionAttempt: 0,
+      });
+      kernel.processEvent({
+        type: 'user.message_appended',
+        messageId: 'input_steer_in_blocked_yield_gap',
+        content: 'Use the new constraint.',
+      });
+      expect((await stream.next()).value).toMatchObject({
+        type: 'model.responded',
+        messageId: 'after-yield-gap-steer',
+      });
+      expect(waitCalls).toBe(1);
+      expect(modelCalls).toBe(1);
+      expect(
+        kernel
+          .getState()
+          .transcript.messages.filter(
+            (message) => message.messageId === 'input_steer_in_blocked_yield_gap',
+          ),
+      ).toHaveLength(1);
+    } finally {
+      await stream.return(undefined);
+      kernel.close();
+    }
+  });
+
+  test('a required Shell without a completion wait port fails with an explicit cause', async () => {
+    const state = activePlanningState();
+    state.transcript.final = 'Premature final.';
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'model-shell',
+      name: 'shell_execute',
+      args: { command: 'bun test', yield_ms: 1 },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-no-wait-port', shellStatus: 'running' },
+      },
+    };
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const stream = runStateRuntimeLoop(
+      kernel,
+      async () => {
+        throw new Error('Model should not run while the Shell is active.');
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    );
+    try {
+      await expect(stream.next()).rejects.toThrow('Runtime completion wait port is unavailable.');
+    } finally {
+      await stream.return(undefined);
+      kernel.close();
+    }
+  });
+
+  test('a final that ignores an already terminal Shell cannot restart the immediate wait', async () => {
+    const state = activePlanningState();
+    state.transcript.final = 'Premature final.';
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'model-shell',
+      name: 'shell_execute',
+      args: { command: 'bun test', yield_ms: 1 },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-terminal-unread', shellStatus: 'running' },
+      },
+    };
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let modelCalls = 0;
+    let terminalWakes = 0;
+    const events: string[] = [];
+    try {
+      for await (const event of runStateRuntimeLoop(
+        kernel,
+        async () => {
+          modelCalls++;
+          return [
+            {
+              type: 'model.responded' as const,
+              messageId: `ignores-shell-read-${modelCalls}`,
+              text: 'Done.',
+            },
+          ];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          terminalWakes++;
+          if (terminalWakes > 1) throw new Error('Terminal Shell was awaited again.');
+          return 'managed_shell_terminal' as const;
+        },
+      )) {
+        events.push(event.type);
+      }
+      expect(modelCalls).toBe(2);
+      expect(terminalWakes).toBe(1);
+      expect(events).toContain('run.error');
+    } finally {
+      kernel.close();
+    }
+  });
+
+  test('restores a zero-correction Shell wait and bounds a final that omits shell_read', async () => {
+    const root = mkdtempSync(join(process.cwd(), '.kite-required-shell-restore-'));
+    const storePath = join(root, 'runtime.db');
+    const state = activePlanningState();
+    state.transcript.final = 'Premature final.';
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'model-shell',
+      name: 'shell_execute',
+      args: { command: 'bun test', yield_ms: 1 },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-after-restore', shellStatus: 'running' },
+      },
+    };
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(storePath),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    try {
+      const decision = decideCompletion(kernel.getState());
+      if (decision.status !== 'blocked') throw new Error('Expected a Shell wait decision.');
+      kernel.processEvent({
+        type: 'completion.blocked',
+        turnId: state.turn.turnId,
+        guardVersion: decision.version,
+        code: decision.code,
+        nextAction: decision.nextAction,
+        planning: decision.planning,
+        correctionAttempt: decision.correctionAttempt,
+        backgroundTaskIds: [...decision.backgroundTaskIds],
+      });
+      expect(kernel.getState().completionGuard).toMatchObject({
+        correctionAttempts: 0,
+        waitingReason: { kind: 'required_shell', shellIds: ['shell-after-restore'] },
+      });
+    } finally {
+      kernel.close();
+    }
+
+    const restored = restoreStateKernelCoordinator({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: state.session.threadId,
+      userId: state.session.userId,
+      workspace: state.session.workspace,
+      store: openStateStoreForTest(storePath),
+    });
+    try {
+      expect(restored.getState().completionGuard).toMatchObject({
+        correctionAttempts: 0,
+        waitingReason: { kind: 'required_shell', shellIds: ['shell-after-restore'] },
+      });
+      let terminalWakes = 0;
+      let modelCalls = 0;
+      const events: string[] = [];
+      for await (const event of runStateRuntimeLoop(
+        restored,
+        async () => {
+          modelCalls++;
+          return [
+            {
+              type: 'model.responded' as const,
+              messageId: `restored-final-${modelCalls}`,
+              text: 'Done.',
+            },
+          ];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          terminalWakes++;
+          if (terminalWakes > 1) throw new Error('Restored terminal Shell was awaited again.');
+          return 'managed_shell_terminal' as const;
+        },
+      )) {
+        events.push(event.type);
+      }
+      expect(terminalWakes).toBe(1);
+      expect(modelCalls).toBe(2);
+      expect(events).toContain('run.error');
+      expect(events).not.toContain('run.completed');
+    } finally {
+      restored.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('a child result does not resume the model while a required Shell is still running', async () => {
+    const state = requiredBackgroundState('child-with-shell');
+    state.transcript.final = 'Premature final.';
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'model-shell',
+      name: 'shell_execute',
+      args: { command: 'bun test', yield_ms: 1 },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: true,
+        summary: 'running',
+        resultMeta: { shellId: 'shell-with-child', shellStatus: 'running' },
+      },
+    };
+    state.capabilities.invocations['child-with-shell'] = {
+      invocationId: 'child-with-shell',
+      toolCallId: 'background-0',
+      capabilityId: 'builtin:task',
+      capabilityRevision: 'v1',
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      admissionDigest: 'admission',
+      effectiveEffectsDigest: 'effects',
+      receiptRequirement: 'observation_receipt',
+      attemptsStarted: 1,
+      status: 'succeeded',
+      reconciliation: 'confirmed_success',
+      recordedAt: '2026-09-20T00:00:00.000Z',
+      subagentProviderLifecycle: {
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: 'child-with-shell',
+        taskArtifact: {
+          artifactId: `pa_${'d'.repeat(64)}`,
+          kind: 'subagent_task',
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+          byteLength: 1,
+        },
+        dispatchIntentDigest: `sha256:${'b'.repeat(64)}`,
+        status: 'cleanup_completed',
+        recordedAt: '2026-09-20T00:00:00.000Z',
+        cleanupAttempt: 1,
+        cleanupKind: 'undispatched',
+        cleanupStartedAt: '2026-09-20T00:00:00.000Z',
+        cleanupConfirmed: true,
+        cleanupCompletedAt: '2026-09-20T00:00:00.000Z',
+      },
+    };
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let waitCalls = 0;
+    let terminalWakeDelivered = false;
+    let modelCalls = 0;
+    const events: string[] = [];
+    try {
+      for await (const event of runStateRuntimeLoop(
+        kernel,
+        async () => {
+          expect(terminalWakeDelivered).toBe(true);
+          modelCalls++;
+          return [
+            {
+              type: 'model.responded' as const,
+              messageId: `mixed-final-${modelCalls}`,
+              text: 'Done.',
+            },
+          ];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          waitCalls++;
+          if (waitCalls === 1) {
+            kernel.processEvent({
+              type: 'subagent.background_result_persisted',
+              taskId: 'child-with-shell',
+              notificationId: `subagent:child-with-shell:sha256:${'c'.repeat(64)}`,
+              artifactIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
+              shortReport: 'Child completed.',
+              source: 'subagent',
+              modelRole: 'user',
+              originRunId: 'run-mixed',
+              originTurnId: state.turn.turnId,
+              originToolCallId: 'background-0',
+              attempt: 1,
+            });
+            expect(requiredBackgroundTaskIds(kernel.getState())).toEqual([]);
+            return 'state_changed' as const;
+          }
+          if (waitCalls > 2) throw new Error('Mixed Shell was awaited again.');
+          terminalWakeDelivered = true;
+          return 'managed_shell_terminal' as const;
+        },
+      )) {
+        events.push(event.type);
+      }
+      expect(waitCalls).toBe(2);
+      expect(modelCalls).toBe(2);
+      expect(events).toContain('run.error');
+    } finally {
+      kernel.close();
+    }
+  });
+
+  test('restores a partial required-child wait without waking the model before all results', async () => {
+    const root = mkdtempSync(join(process.cwd(), '.kite-required-children-restore-'));
+    const storePath = join(root, 'runtime.db');
+    let state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'required-children-restore',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'task.started',
+      taskId: 'parent-task',
+      userGoal: 'Complete the delegated work.',
+      turnId: state.turn.turnId,
+    });
+    state.transcript.final = 'Premature final.';
+    for (const [index, taskId] of ['child-A', 'child-B', 'child-C'].entries()) {
+      const toolCallId = `background-${index}`;
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: `model-background-${index}`,
+        name: 'task',
+        args: { name: taskId, subagent_type: 'explore', task: 'inspect runtime', background: true },
+        status: 'succeeded',
+        createdAtTurnId: state.turn.turnId,
+        result: {
+          ok: true,
+          summary: 'accepted',
+          resultMeta: { taskId, taskStatus: 'running', taskDisposition: 'required' },
+        },
+      };
+      state.capabilities.invocations[taskId] = {
+        invocationId: taskId,
+        toolCallId,
+        capabilityId: 'builtin:task',
+        capabilityRevision: 'v1',
+        argumentsDigest: 'arguments',
+        authorizationDigest: 'authorization',
+        admissionDigest: 'admission',
+        effectiveEffectsDigest: 'effects',
+        receiptRequirement: 'observation_receipt',
+        attemptsStarted: 1,
+        status: 'succeeded',
+        reconciliation: 'confirmed_success',
+        recordedAt: '2026-09-20T00:00:00.000Z',
+        subagentProviderLifecycle: {
+          attempt: 1,
+          purpose: 'start',
+          childInvocationId: taskId,
+          taskArtifact: {
+            artifactId: `pa_${String(index + 1).repeat(64)}`,
+            kind: 'subagent_task',
+            integrityIdentifier: `sha256:${String(index + 4).repeat(64)}`,
+            byteLength: 1,
+          },
+          dispatchIntentDigest: `sha256:${String(index + 7).repeat(64)}`,
+          status: 'cleanup_completed',
+          recordedAt: '2026-09-20T00:00:00.000Z',
+          cleanupAttempt: 1,
+          cleanupKind: 'undispatched',
+          cleanupStartedAt: '2026-09-20T00:00:00.000Z',
+          cleanupConfirmed: true,
+          cleanupCompletedAt: '2026-09-20T00:00:00.000Z',
+        },
+      };
+    }
+    const resultEvent = (taskId: string, index: number): RuntimeEvent => ({
+      type: 'subagent.background_result_persisted',
+      taskId,
+      notificationId: `subagent:${taskId}:sha256:${String(index + 1).repeat(64)}`,
+      artifactIntegrityIdentifier: `sha256:${String(index + 1).repeat(64)}`,
+      shortReport: 'Child completed.',
+      source: 'subagent',
+      modelRole: 'user',
+      originRunId: 'parent-run',
+      originTurnId: state.turn.turnId,
+      originToolCallId: `background-${index}`,
+      attempt: 1,
+    });
+    const kernel = new AgentKernel({
+      store: openStateStoreForTest(storePath),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    try {
+      const decision = decideCompletion(kernel.getState());
+      if (decision.status !== 'blocked') throw new Error('Expected required-child wait.');
+      kernel.processEvent({
+        type: 'completion.blocked',
+        turnId: state.turn.turnId,
+        guardVersion: decision.version,
+        code: decision.code,
+        nextAction: decision.nextAction,
+        planning: decision.planning,
+        correctionAttempt: decision.correctionAttempt,
+        backgroundTaskIds: [...decision.backgroundTaskIds],
+      });
+      kernel.processEvent(resultEvent('child-A', 0));
+      expect(requiredBackgroundTaskIds(kernel.getState())).toEqual(['child-B', 'child-C']);
+      expect(kernel.getState().completionGuard.waitingReason).toMatchObject({
+        kind: 'required_background',
+        taskIds: ['child-A', 'child-B', 'child-C'],
+      });
+    } finally {
+      kernel.close();
+    }
+    const restored = restoreStateKernelCoordinator({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: state.session.threadId,
+      userId: state.session.userId,
+      workspace: state.session.workspace,
+      store: openStateStoreForTest(storePath),
+    });
+    try {
+      let waits = 0;
+      let modelCalls = 0;
+      const events: string[] = [];
+      for await (const event of runStateRuntimeLoop(
+        restored,
+        async () => {
+          expect(requiredBackgroundTaskIds(restored.getState())).toEqual([]);
+          modelCalls++;
+          return [
+            {
+              type: 'model.responded' as const,
+              messageId: `after-all-children-${modelCalls}`,
+              text: 'Done.',
+            },
+          ];
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        10_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        async () => {
+          waits++;
+          if (waits === 1) restored.processEvent(resultEvent('child-B', 1));
+          else if (waits === 2) restored.processEvent(resultEvent('child-C', 2));
+          else throw new Error('Required children were awaited after all results settled.');
+          return 'state_changed' as const;
+        },
+      )) {
+        events.push(event.type);
+      }
+      expect(waits).toBe(2);
+      expect(modelCalls).toBe(1);
+      expect(events).toContain('run.completed');
+    } finally {
+      restored.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('admits an exact auto-review start after unrelated background progress', () => {

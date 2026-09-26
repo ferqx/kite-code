@@ -102,6 +102,11 @@ export type OutputBlockVariant =
       /** Terminal duration retained off-screen so reasoning that arrives after
        *  model.responded can still attach the one canonical Thinking header. */
       modelDurationMs?: number;
+      /** Content-free Agent mailbox fact used to update replayed status in place. */
+      agentMailStatus?: {
+        identity: string;
+        stage: 'accepted' | 'input_prepared' | 'result_settled';
+      };
       /** Recognized structural component whose shell is visible while complete
        * child rows are appended. The hidden source retains the unfinished row. */
       streamingComponent?: 'code' | 'table';

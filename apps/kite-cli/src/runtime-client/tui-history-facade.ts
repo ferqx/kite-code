@@ -121,10 +121,28 @@ function historyEnvelopes(
   });
 }
 
+function sessionDataFromTranscript(transcript: RuntimeHistorySessionTranscript): SessionData {
+  const runtimeEvents = historyEnvelopes(transcript);
+  return {
+    threadId: transcript.session.sessionId,
+    messages: [],
+    runtimeEvents,
+    interrupt:
+      transcript.recovery === 'pending_interaction' ? recoveryInterrupt(runtimeEvents) : null,
+    modelProvider: transcript.session.model?.provider ?? '',
+    modelName: transcript.session.model?.name ?? '',
+    thinkingLevel: null,
+    plan: null,
+    interactionMode: transcript.interactionMode,
+    recovery: transcript.recovery,
+  };
+}
+
 /** TUI-only mapper; history remains display/recovery evidence, never settlement authority. */
 export function createTuiHistoryFacade(history: RuntimeHistoryClient): {
   listPersistedSessions(query?: string): Promise<SessionInfo[]>;
   loadPersistedSession(sessionId: string): Promise<SessionData | null>;
+  loadPersistedChildSession(parentSessionId: string, childSessionId: string): Promise<SessionData>;
 } {
   return Object.freeze({
     async listPersistedSessions(query = ''): Promise<SessionInfo[]> {
@@ -151,20 +169,15 @@ export function createTuiHistoryFacade(history: RuntimeHistoryClient): {
     },
     async loadPersistedSession(sessionId: string): Promise<SessionData | null> {
       const transcript = await history.loadSession(sessionId);
-      const runtimeEvents = historyEnvelopes(transcript);
-      return {
-        threadId: transcript.session.sessionId,
-        messages: [],
-        runtimeEvents,
-        interrupt:
-          transcript.recovery === 'pending_interaction' ? recoveryInterrupt(runtimeEvents) : null,
-        modelProvider: transcript.session.model?.provider ?? '',
-        modelName: transcript.session.model?.name ?? '',
-        thinkingLevel: null,
-        plan: null,
-        interactionMode: transcript.interactionMode,
-        recovery: transcript.recovery,
-      };
+      return sessionDataFromTranscript(transcript);
+    },
+    async loadPersistedChildSession(parentSessionId: string, childSessionId: string) {
+      if (!history.loadChildSession)
+        throw new Error('Child Session History is unavailable in this Runtime.');
+      const transcript = await history.loadChildSession(parentSessionId, childSessionId);
+      if (transcript.session.sessionId !== childSessionId)
+        throw new Error('Child Session History identity changed.');
+      return sessionDataFromTranscript(transcript);
     },
   });
 }

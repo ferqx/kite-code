@@ -1,14 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import {
+  createRuntimeRunStartResourceResult,
   createRuntimeStoredCommandReceipt,
   encodeRuntimeRunTerminal,
+  type RuntimeStoredRun,
 } from '@kite-ai/runtime-host/storage';
 import type { Subprocess } from 'bun';
 import {
+  KITE_SESSION_STORE_FORMAT_EPOCH,
   KiteSessionRuntimeStorageError,
   openKiteSessionRuntimeStorage,
   openKiteSessionStoreDatabase,
@@ -17,7 +27,7 @@ import { KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA } from '../../src/kite-session-
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { checksum } from '../../src/preflight';
 
-type Event = { readonly type: string };
+type Event = { readonly type: string; readonly [key: string]: unknown };
 type State = {
   readonly revision: number;
   readonly recoveryIdentity: string;
@@ -62,6 +72,665 @@ const codec = {
 };
 
 describe('multi-connection Kite Session Runtime storage', () => {
+  test('fences cross-Session QueueOnly acceptance, target receipt and source confirmation', () => {
+    const fixture = createFixture(['parent', 'child']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id='child'")
+        .run();
+      const node =
+        seed.query(`INSERT INTO agent_nodes(session_id,agent_id,current_task_id,status,turn_ordinal,created_at_ms)
+        VALUES (?,?,?,?,1,1)`);
+      node.run('parent', 'parent', 'source-run', 'active');
+      node.run('child', 'child', 'child-run', 'active');
+      seed
+        .query(`INSERT INTO runtime_runs(session_id,run_id,start_command_id,phase,status,
+        created_revision,last_revision,created_at_ms,started_at_ms)
+        VALUES ('parent','source-run','start','building','running',0,0,1,1)`)
+        .run();
+      seed
+        .query(`INSERT INTO runtime_runs(session_id,run_id,origin_session_id,origin_run_id,
+        start_command_id,phase,status,created_revision,last_revision,created_at_ms,started_at_ms)
+        VALUES ('child','child-run','parent','source-run','child-start','building','running',0,0,1,1)`)
+        .run();
+      seed
+        .query(`INSERT INTO subagent_task_artifacts(artifact_id,kind,integrity_identifier,
+        artifact_format_version,canonical_json,byte_length,created_at)
+        VALUES (?,'subagent_task',?,1,'{}',2,1)`)
+        .run(`pa_${'1'.repeat(64)}`, `sha256:${'1'.repeat(64)}`);
+      seed
+        .query(`INSERT INTO child_session_intents(
+        child_thread_id,parent_session_id,parent_invocation_id,origin_run_id,origin_turn_id,
+        origin_tool_call_id,attempt,child_invocation_id,grant_digest,sealed_grant_json,
+        sealed_grant_byte_length,sealed_grant_digest,task_artifact_digest,task_text_digest,
+        task_artifact_id,task_artifact_byte_length,disposition,role,tool_event_id,
+        tool_event_revision,funding_run_id,delegated_reservation_id,
+        delegated_upper_bound_digest,delegated_upper_bound_json,deadline_at,
+        child_budget_activated_run_id,child_budget_activated_event_id,
+        child_budget_activated_revision,dispatch_ack_event_id,dispatch_ack_revision)
+        VALUES ('child','parent','parent-invocation','source-run','source-turn',
+        'spawn-tool',1,'child-invocation','grant','{}',2,'sealed','task-digest','text-digest',
+        ?,2,'required','code','tool-event',1,'source-run','reservation',
+        'budget-digest','{}','2099-01-01T00:00:00.000Z',
+        'child-run','activation-event',1,'dispatch-ack',1)`)
+        .run(`pa_${'1'.repeat(64)}`);
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const parent = owner.bindExecution(acquire(owner, 'parent', 'source-owner'));
+      const child = owner.bindExecution(acquire(owner, 'child', 'target-owner'));
+      const bodyText = 'hello child';
+      const bodyDigest = `sha256:${createHash('sha256').update(bodyText).digest('hex')}`;
+      const source = {
+        runId: 'source-run',
+        turnId: 'source-turn',
+        modelInvocationId: 'source-model',
+        toolCallId: 'source-tool',
+        effectAttemptId: 'source-attempt',
+        sourceTaskId: 'source-task',
+      };
+      const event = {
+        type: 'agent.mail_accepted',
+        messageId: 'mail-1',
+        senderAgentId: 'parent',
+        targetAgentId: 'child',
+        mode: 'queue_only',
+        source,
+        bodyRef: {
+          artifactId: `pa_${bodyDigest.slice(7)}`,
+          kind: 'agent_mail',
+          integrityIdentifier: bodyDigest,
+          byteLength: Buffer.byteLength(bodyText),
+        },
+        bodyDigest,
+        sequence: 1,
+      };
+      owner.runWithExecution(parent, () => {
+        expect(owner.crossSessionQueueMail.nextSourceSequence('parent')).toBe(1);
+        expect(() => owner.crossSessionQueueMail.listQueuedInbox('child', 'child-run', 8)).toThrow(
+          KiteSessionRuntimeStorageError,
+        );
+        expect(
+          owner.storage.effects.tryAcquireEffectLease(
+            'parent',
+            'tool-effect',
+            'source-owner',
+            Date.now() + 60_000,
+          ),
+        ).toBe(true);
+        owner.storage.transactions.commitReceiptEvidence({
+          sessionId: 'parent',
+          events: [event],
+          metadata: [{ eventId: 'source-mail-event', revision: 1 }],
+          snapshot: state(1, 'recovery-0'),
+          commandReceipt: createRuntimeStoredCommandReceipt(
+            {
+              scopeSessionId: 'parent',
+              commandId: 'send-command',
+              requestDigest: 'a'.repeat(64),
+              targetSessionId: 'parent',
+              committedAt: 10,
+            },
+            1,
+          ),
+          requiredEffectLease: {
+            effectId: 'tool-effect',
+            ownerId: 'source-owner',
+            observedAtMs: Date.now(),
+          },
+          crossSessionAgentMailMutation: {
+            kind: 'accept_queue',
+            messageId: 'mail-1',
+            targetSessionId: 'child',
+            commandId: 'send-command',
+            requestDigest: 'a'.repeat(64),
+            sourceRunId: source.runId,
+            sourceTurnId: source.turnId,
+            sourceModelInvocationId: source.modelInvocationId,
+            sourceToolCallId: source.toolCallId,
+            sourceEffectAttemptId: source.effectAttemptId,
+            sourceTaskId: source.sourceTaskId,
+            sourceSequence: 1,
+            bodyText,
+            acceptedAtMs: 10,
+          },
+        });
+        expect(owner.crossSessionQueueMail.listPendingOutbox('parent', 8)).toHaveLength(1);
+      });
+      owner.runWithExecution(child, () => {
+        expect(owner.crossSessionQueueMail.nextTargetSequence('child')).toBe(1);
+        expect(() =>
+          owner.storage.transactions.commitDecision({
+            sessionId: 'child',
+            events: [{ ...event, source: { ...source, toolCallId: 'wrong-tool' } }],
+            metadata: [{ eventId: 'target-mail-event', revision: 1 }],
+            snapshot: state(1, 'recovery-1'),
+            crossSessionAgentMailMutation: {
+              kind: 'receive_queue',
+              sourceSessionId: 'parent',
+              messageId: 'mail-1',
+              receivedAtMs: 11,
+            },
+          }),
+        ).toThrow();
+        expect(owner.crossSessionQueueMail.nextTargetSequence('child')).toBe(1);
+        owner.storage.transactions.commitDecision({
+          sessionId: 'child',
+          events: [event],
+          metadata: [{ eventId: 'target-mail-event', revision: 1 }],
+          snapshot: state(1, 'recovery-1'),
+          crossSessionAgentMailMutation: {
+            kind: 'receive_queue',
+            sourceSessionId: 'parent',
+            messageId: 'mail-1',
+            receivedAtMs: 11,
+          },
+        });
+        expect(owner.crossSessionQueueMail.readInboxReceipt('child', 'mail-1')).toMatchObject({
+          sourceSessionId: 'parent',
+          sequence: 1,
+          targetRevision: 1,
+        });
+        expect(owner.crossSessionQueueMail.listQueuedInbox('child', 'child-run', 8)).toEqual([
+          expect.objectContaining({ messageId: 'mail-1', bodyText, sourceTaskId: 'source-task' }),
+        ]);
+        owner.storage.transactions.commitDecision({
+          sessionId: 'child',
+          events: [
+            {
+              type: 'model.invocation_prepared',
+              invocationId: 'child-model',
+              budget: { kind: 'no_budget' },
+            },
+            {
+              type: 'agent.mail_input_prepared',
+              targetAgentId: 'child',
+              invocationId: 'child-model',
+              modelAdmissionId: 'child-model',
+              fromSequence: 0,
+              throughSequence: 1,
+              messageIds: ['mail-1'],
+            },
+          ],
+          metadata: [
+            { eventId: 'child-model-prepared', revision: 2 },
+            { eventId: 'child-mail-prepared', revision: 3 },
+          ],
+          snapshot: {
+            ...state(3, 'recovery-1'),
+            resourceBudget: { status: 'unconfigured' },
+          } as State,
+          crossSessionAgentMailMutation: {
+            kind: 'prepare_queue_input',
+            modelInvocationId: 'child-model',
+            modelAdmissionId: 'child-model',
+            currentRunId: 'child-run',
+            fromSequence: 0,
+            throughSequence: 1,
+            messageIds: ['mail-1'],
+          },
+        });
+        expect(owner.crossSessionQueueMail.listQueuedInbox('child', 'child-run', 8)).toEqual([]);
+      });
+      owner.runWithExecution(parent, () => {
+        expect(
+          owner.crossSessionQueueMail.confirmDelivered('parent', 'mail-1').deliveredTargetRevision,
+        ).toBe(1);
+        expect(owner.crossSessionQueueMail.listPendingOutbox('parent', 8)).toEqual([]);
+      });
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+  test('scopes child State and History reads to the exact parent with bounded stable pages', () => {
+    const fixture = createFixture([
+      'parent',
+      'other-parent',
+      'child-a',
+      'child-b',
+      'child-c',
+      'root',
+    ]);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query(
+          "UPDATE runtime_sessions SET parent_session_id='parent',updated_at=10 WHERE session_id IN ('child-a','child-b')",
+        )
+        .run();
+      seed
+        .query(
+          "UPDATE runtime_sessions SET parent_session_id='parent',updated_at=9 WHERE session_id='child-c'",
+        )
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const first = owner.listChildSessions('parent', 1);
+      expect(first.entries.map((row) => row.sessionId)).toEqual(['child-b']);
+      expect(first.entries[0]).toMatchObject({
+        parentSessionId: 'parent',
+        updatedAt: 10,
+        revision: 0,
+      });
+      const second = owner.listChildSessions('parent', 1, first.nextCursor);
+      expect(second.entries.map((row) => row.sessionId)).toEqual(['child-a']);
+      const third = owner.listChildSessions('parent', 1, second.nextCursor);
+      expect(third.entries.map((row) => row.sessionId)).toEqual(['child-c']);
+      expect(third.nextCursor).toBeUndefined();
+      expect(owner.listChildSessions('other-parent', 10).entries).toEqual([]);
+      expect(owner.listChildSessions('missing', 10).entries).toEqual([]);
+      expect(() => owner.listChildSessions('parent', 101)).toThrow('page request');
+      expect(owner.readChildSession('parent', 'child-b')).toMatchObject({
+        sessionId: 'child-b',
+        state: { recoveryIdentity: 'recovery-3' },
+      });
+      expect(owner.readChildSession('other-parent', 'child-b')).toBeNull();
+      expect(owner.readChildSession('parent', 'root')).toBeNull();
+      expect(owner.readChildSession('parent', 'missing')).toBeNull();
+      const events = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        events
+          .query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+            VALUES ('child-b','child-event',1,27,'{"type":"child.test"}',1)`)
+          .run();
+      } finally {
+        events.close(false);
+      }
+      const history = owner.openChildSessionHistoryLogs('parent', 'child-b', ['child.test']);
+      expect(history.getSession?.('child-b')?.sessionId).toBe('child-b');
+      expect(history.getSession?.('root')).toBeNull();
+      expect(
+        history.listEvents({ sessionId: 'child-b', direction: 'forward', limit: 10 }).entries,
+      ).toMatchObject([{ sessionId: 'child-b', event: { type: 'child.test' } }]);
+      expect(() =>
+        history.listEvents({ sessionId: 'root', direction: 'forward', limit: 10 }),
+      ).toThrow('not found');
+      const foreign = owner.openChildSessionHistoryLogs('other-parent', 'child-b', ['child.test']);
+      expect(foreign.getSession?.('child-b')).toBeNull();
+      expect(() =>
+        foreign.listEvents({ sessionId: 'child-b', direction: 'forward', limit: 10 }),
+      ).toThrow('not found');
+      foreign.close();
+      const changed = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        changed
+          .query(
+            "UPDATE runtime_sessions SET parent_session_id='other-parent' WHERE session_id='child-b'",
+          )
+          .run();
+      } finally {
+        changed.close(false);
+      }
+      expect(history.getSession?.('child-b')).toBeNull();
+      expect(() =>
+        history.listEvents({ sessionId: 'child-b', direction: 'forward', limit: 10 }),
+      ).toThrow('not found');
+      history.close();
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('binds child turn generation to the active Store execution handle', () => {
+    const fixture = createFixture(['session-1']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query(
+          "INSERT INTO agent_nodes(session_id,agent_id,parent_agent_id,current_task_id,status,turn_ordinal,created_at_ms) VALUES ('session-1','session-1',NULL,NULL,'idle',0,1)",
+        )
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const handle = owner.bindExecution(acquire(owner, 'session-1', 'child-owner'));
+      owner.runWithExecution(handle, () => {
+        const generation = owner.storage.currentExecutionGeneration('session-1');
+        expect(generation).toBe('1');
+        owner.storage.transactions.commitDecision({
+          sessionId: 'session-1',
+          events: [
+            {
+              type: 'agent.created',
+              agentId: 'child-1',
+              parentAgentId: 'session-1',
+              initialTaskId: 'child-1',
+            },
+            {
+              type: 'agent.turn_started',
+              agentId: 'child-1',
+              taskId: 'child-1',
+              turnOrdinal: 1,
+              ownerGeneration: generation,
+              grantDigest: `sha256:${'a'.repeat(64)}`,
+            },
+          ],
+          metadata: [
+            { eventId: 'child-created', revision: 1 },
+            { eventId: 'child-turn-started', revision: 2 },
+          ],
+          snapshot: state(2, 'recovery-0'),
+          agentMailboxMutations: [
+            {
+              kind: 'create_agent',
+              agentId: 'child-1',
+              parentAgentId: 'session-1',
+              initialTaskId: 'child-1',
+              createdAtMs: 2,
+            },
+            { kind: 'turn_started', agentId: 'child-1', taskId: 'child-1', turnOrdinal: 1 },
+          ],
+        });
+        expect(owner.agentMailbox.readAgent('session-1', 'session-1', 'child-1')).toMatchObject({
+          status: 'active',
+          turnOrdinal: 1,
+          currentTaskId: 'child-1',
+        });
+        expect(
+          owner.storage.agentMailbox.readActiveTaskProof(
+            'session-1',
+            'session-1',
+            'child-1',
+            'child-1',
+          ),
+        ).toEqual({
+          ownerGeneration: '1',
+          grantDigest: `sha256:${'a'.repeat(64)}`,
+        });
+        expect(
+          owner.agentMailbox.readActiveTaskProof('session-1', 'session-1', 'child-1', 'other-task'),
+        ).toBeNull();
+      });
+      expect(() =>
+        owner.agentMailbox.readActiveTaskProof('session-1', 'session-1', 'child-1', 'child-1'),
+      ).toThrow('active execution scope');
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+  test('legacy Session gets one root row on first Run and advances across a second Run after reopen', () => {
+    const fixture = createFixture(['session-1']);
+    const owner = openOwner(fixture.path);
+    try {
+      const handle = owner.bindExecution(acquire(owner, 'session-1', 'legacy-root-owner'));
+      owner.runWithExecution(handle, () => {
+        const insertRootMail = (
+          messageId: string,
+          sequence: number,
+          text: string,
+          recipientRunId: string | null,
+        ): void => {
+          const database = openKiteSessionStoreDatabase(fixture.path);
+          try {
+            const digest = createHash('sha256').update(text).digest('hex');
+            const bodyId = `pa_${digest}`;
+            database
+              .query(`INSERT INTO agent_mail_bodies(session_id,body_id,integrity_identifier,byte_length,body_text,created_at_ms)
+              VALUES ('session-1',?,?,?,?,1)`)
+              .run(bodyId, `sha256:${digest}`, Buffer.byteLength(text), text);
+            database
+              .query(`INSERT INTO agent_mail(session_id,message_id,sequence,sender_agent_id,target_agent_id,recipient_run_id,mode,
+              source_run_id,source_turn_id,source_model_invocation_id,source_tool_call_id,source_effect_attempt_id,
+              request_digest,body_id,status,accepted_at_ms)
+              VALUES ('session-1',?,?,'session-1','session-1',?,'queue_only','run-1','run-1','model-1',?,?,?,?,'queued',1)`)
+              .run(
+                messageId,
+                sequence,
+                recipientRunId,
+                `tool-${sequence}`,
+                `attempt-${sequence}`,
+                digest,
+                bodyId,
+              );
+          } finally {
+            database.close(false);
+          }
+        };
+        const start = (runId: string, revision: number): RuntimeStoredRun => {
+          const run: RuntimeStoredRun = {
+            sessionId: 'session-1',
+            runId,
+            startCommandId: `start-${runId}`,
+            phase: 'building',
+            status: 'queued',
+            createdRevision: revision,
+            lastRevision: revision,
+            createdAtMs: revision,
+          };
+          owner.storage.transactions.commitDecision({
+            sessionId: 'session-1',
+            events: [{ type: 'turn.started', turnId: runId }],
+            metadata: [{ eventId: `event-${runId}`, revision }],
+            snapshot: state(revision, 'recovery-0'),
+            commandReceipt: createRuntimeStoredCommandReceipt(
+              {
+                scopeSessionId: 'session-1',
+                targetSessionId: 'session-1',
+                commandId: run.startCommandId,
+                requestDigest: 'a'.repeat(64),
+                committedAt: revision,
+                resourceResult: createRuntimeRunStartResourceResult(run),
+              },
+              revision,
+            ),
+            runMutation: { type: 'insert', run },
+          });
+          return run;
+        };
+        const first = start('run-1', 1);
+        expect(owner.agentMailbox.readAgent('session-1', 'session-1', 'session-1')).toMatchObject({
+          status: 'active',
+          currentTaskId: 'run-1',
+          turnOrdinal: 1,
+        });
+        insertRootMail('mail-run-1', 1, 'same run', 'run-1');
+        expect(
+          owner.agentMailInput
+            .readPendingMailForActiveTask({
+              sessionId: 'session-1',
+              targetAgentId: 'session-1',
+              currentTaskId: 'run-1',
+              modelInvocationId: 'model-run-1',
+              fromSequence: 0,
+            })
+            .map((mail) => mail.bodyText),
+        ).toEqual(['same run']);
+        owner.storage.transactions.commitAttemptStart({
+          sessionId: 'session-1',
+          events: [],
+          snapshot: state(1, 'recovery-0'),
+          runMutation: {
+            type: 'transition',
+            transition: {
+              sessionId: 'session-1',
+              runId: 'run-1',
+              expectedLastRevision: 1,
+              next: { ...first, status: 'running', startedAtMs: 1 },
+            },
+          },
+        });
+        owner.storage.transactions.commitDecision({
+          sessionId: 'session-1',
+          events: [{ type: 'run.completed', turnId: 'run-1', output: '' }],
+          metadata: [{ eventId: 'terminal-run-1', revision: 2 }],
+          snapshot: state(2, 'recovery-0'),
+          runMutation: {
+            type: 'transition',
+            transition: {
+              sessionId: 'session-1',
+              runId: 'run-1',
+              expectedLastRevision: 1,
+              next: {
+                ...first,
+                status: 'completed',
+                lastRevision: 2,
+                startedAtMs: 1,
+                finishedAtMs: 2,
+              },
+            },
+          },
+        });
+        expect(owner.agentMailbox.readAgent('session-1', 'session-1', 'session-1')).toMatchObject({
+          status: 'idle',
+          currentTaskId: null,
+          turnOrdinal: 1,
+        });
+        insertRootMail('mail-after-run-1', 2, 'idle report', null);
+        start('run-2', 3);
+        expect(
+          owner.agentMailInput.readPendingMailForActiveTask({
+            sessionId: 'session-1',
+            targetAgentId: 'session-1',
+            currentTaskId: 'run-2',
+            modelInvocationId: 'model-run-2',
+            fromSequence: 0,
+          }),
+        ).toEqual([]);
+        expect(owner.agentMailbox.readAgent('session-1', 'session-1', 'session-1')).toMatchObject({
+          unreadCount: 2,
+        });
+      });
+    } finally {
+      owner.close();
+    }
+    const reopened = openOwner(fixture.path);
+    try {
+      expect(reopened.agentMailbox.readAgent('session-1', 'session-1', 'session-1')).toMatchObject({
+        status: 'active',
+        currentTaskId: 'run-2',
+        turnOrdinal: 2,
+      });
+    } finally {
+      reopened.close();
+      fixture.remove();
+    }
+  });
+  test('reads private Agent mail only for an exact active task and prepared invocation after reopen', () => {
+    const fixture = createFixture(['session-1']);
+    const database = openKiteSessionStoreDatabase(fixture.path);
+    const rows = [
+      {
+        id: 'mail-1',
+        sequence: 1,
+        text: 'hello',
+        status: 'prepared',
+        invocation: 'model-old',
+        admission: 'reserve-old',
+      },
+      {
+        id: 'mail-2',
+        sequence: 2,
+        text: 'world',
+        status: 'queued',
+        invocation: null,
+        admission: null,
+      },
+    ] as const;
+    try {
+      database
+        .query(
+          "INSERT INTO agent_nodes(session_id,agent_id,parent_agent_id,current_task_id,status,turn_ordinal,created_at_ms) VALUES ('session-1','session-1',NULL,NULL,'idle',0,1)",
+        )
+        .run();
+      database
+        .query(
+          "INSERT INTO agent_nodes(session_id,agent_id,parent_agent_id,current_task_id,status,turn_ordinal,prepared_through_sequence,created_at_ms) VALUES ('session-1','child-1','session-1','child-1','active',1,1,2)",
+        )
+        .run();
+      for (const row of rows) {
+        const digest = createHash('sha256').update(row.text).digest('hex');
+        const bodyId = `pa_${digest}`;
+        database
+          .query(
+            'INSERT INTO agent_mail_bodies(session_id,body_id,integrity_identifier,byte_length,body_text,created_at_ms) VALUES (?,?,?,?,?,1)',
+          )
+          .run('session-1', bodyId, `sha256:${digest}`, Buffer.byteLength(row.text), row.text);
+        database
+          .query(`INSERT INTO agent_mail(session_id,message_id,sequence,sender_agent_id,target_agent_id,mode,source_run_id,source_turn_id,
+          source_model_invocation_id,source_tool_call_id,source_effect_attempt_id,request_digest,body_id,status,prepared_invocation_id,model_admission_id,accepted_at_ms)
+          VALUES ('session-1',?,?,'session-1','child-1','queue_only','run-1','turn-1','model-1',?, ?, ?, ?, ?, ?, ?, 1)`)
+          .run(
+            row.id,
+            row.sequence,
+            `tool-${row.sequence}`,
+            `attempt-${row.sequence}`,
+            digest,
+            bodyId,
+            row.status,
+            row.invocation,
+            row.admission,
+          );
+      }
+    } finally {
+      database.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const request = {
+        sessionId: 'session-1',
+        targetAgentId: 'child-1',
+        currentTaskId: 'child-1',
+        modelInvocationId: 'model-new',
+        fromSequence: 1,
+      };
+      expect(() => owner.agentMailInput.readPendingMailForActiveTask(request)).toThrow(
+        'active execution scope',
+      );
+      expect(() => owner.currentExecutionGeneration('session-1')).toThrow('active execution scope');
+      const handle = owner.bindExecution(acquire(owner, 'session-1', 'mail-owner'));
+      owner.runWithExecution(handle, () => {
+        expect(owner.storage.currentExecutionGeneration('session-1')).toBe('1');
+        expect(() =>
+          owner.agentMailInput.readPendingMailForActiveTask({ ...request, currentTaskId: 'other' }),
+        ).toThrow('not active');
+        expect(
+          owner.agentMailInput.readPendingMailForActiveTask(request).map((mail) => mail.bodyText),
+        ).toEqual(['world']);
+      });
+    } finally {
+      owner.close();
+    }
+    const reopened = openOwner(fixture.path);
+    try {
+      const handle = reopened.bindExecution(reopened.authority.read('session-1'));
+      reopened.runWithExecution(handle, () => {
+        expect(
+          reopened.agentMailInput
+            .readPreparedMailForModel({
+              sessionId: 'session-1',
+              targetAgentId: 'child-1',
+              currentTaskId: 'child-1',
+              modelInvocationId: 'model-old',
+              modelAdmissionId: 'reserve-old',
+            })
+            .map((mail) => mail.bodyText),
+        ).toEqual(['hello']);
+        expect(
+          reopened.agentMailInput.readPreparedMailForModel({
+            sessionId: 'session-1',
+            targetAgentId: 'child-1',
+            currentTaskId: 'child-1',
+            modelInvocationId: 'model-old',
+            modelAdmissionId: 'wrong',
+          }),
+        ).toEqual([]);
+      });
+    } finally {
+      reopened.close();
+      fixture.remove();
+    }
+  });
   test('fences unowned decisions atomically and leaves authority and effects unchanged', () => {
     const fixture = createFixture(['session-1']);
     const first = openOwner(fixture.path);
@@ -882,6 +1551,38 @@ describe('multi-connection Kite Session Runtime storage', () => {
       fixture.remove();
     }
   });
+
+  test('creates the root Agent in the same first Session transaction', () => {
+    const fixture = createFixture([]);
+    const owner = openOwner(fixture.path);
+    try {
+      const input = creationInput('root-session', 'c', Date.now() + 60_000);
+      expect(owner.sessionCreationForWorkspace(WORKSPACE_ID).create(input).status).toBe('applied');
+      expect(owner.readChildSessionIntent('missing-child')).toBeNull();
+      expect(owner.listPendingChildSessionIntents('root-session', 10)).toEqual({ entries: [] });
+      expect(() => owner.readChildSealedGrant('missing-child')).toThrow('execution scope');
+      const rootHandle = owner.bindExecution(owner.authority.read('root-session'));
+      owner.runWithExecution(rootHandle, () => {
+        expect(owner.readChildSealedGrant('missing-child')).toBeNull();
+      });
+      expect(
+        owner.agentMailbox.readAgent('root-session', 'root-session', 'root-session'),
+      ).toMatchObject({
+        agentId: 'root-session',
+        status: 'idle',
+        mailRevision: 0,
+      });
+      const reopened = openOwner(fixture.path);
+      try {
+        expect(reopened.agentMailbox.nextSequence('root-session', 'root-session')).toBe(1);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
 });
 
 function openOwner(
@@ -1236,6 +1937,58 @@ test.skipIf(process.platform === 'win32')(
       maintenance.release();
       const reopened = open();
       reopened.close();
+    } finally {
+      fixture.remove();
+    }
+  },
+);
+
+test.skipIf(process.platform === 'win32')(
+  'first-release session-only reset requires a stopped owner and preserves profile configuration',
+  () => {
+    const fixture = createFixture(['session-1']);
+    const configPath = join(dirname(fixture.path), 'kite-code.jsonc');
+    const config = '{"provider":"configured"}\n';
+    writeFileSync(configPath, config, { mode: 0o600 });
+    const open = () => openOwner(fixture.path);
+    try {
+      const liveOwner = open();
+      expect(() => acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive')).toThrow('busy');
+      liveOwner.close();
+
+      const maintenance = acquireKiteSessionStoreMaintenance(fixture.path, 'exclusive');
+      try {
+        for (const suffix of ['', '-wal', '-shm'])
+          rmSync(`${fixture.path}${suffix}`, { force: true });
+        expect(open).toThrow('busy');
+      } finally {
+        maintenance.release();
+      }
+
+      const freshOwner = open();
+      try {
+        const database = openKiteSessionStoreDatabase(fixture.path);
+        try {
+          expect(
+            database
+              .query<{ count: number }, []>('SELECT count(*) AS count FROM runtime_sessions')
+              .get(),
+          ).toEqual({ count: 0 });
+          expect(
+            database
+              .query<{ value: string }, []>(
+                "SELECT value FROM kite_meta WHERE key = 'format_epoch'",
+              )
+              .get(),
+          ).toEqual({ value: KITE_SESSION_STORE_FORMAT_EPOCH });
+        } finally {
+          database.close(false);
+        }
+      } finally {
+        freshOwner.close();
+      }
+      expect(readFileSync(configPath, 'utf8')).toBe(config);
+      expect(existsSync(`${fixture.path}.maintenance.lock`)).toBe(true);
     } finally {
       fixture.remove();
     }

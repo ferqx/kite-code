@@ -23,10 +23,16 @@ import { pathToFileURL } from 'node:url';
 import { assertCanonicalKiteDatabasePath } from './kite-home-runtime-file';
 import {
   assertKiteHomeStoreSchema,
+  assertKiteSessionStore11Schema as assertKiteLineageStore11Schema,
+  assertKiteSessionStore10Schema,
+  assertKiteSessionStore12Schema,
   assertKiteSessionStoreSchema,
   assertKiteStoreIntegrity,
   KITE_HOME_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE11_TABLE_COLUMNS as KITE_LINEAGE_STORE11_TABLE_COLUMNS,
   KITE_SESSION_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE10_TABLE_COLUMNS,
+  KITE_SESSION_STORE12_TABLE_COLUMNS,
 } from './kite-home-store';
 import {
   acquireKiteSessionStoreMaintenance,
@@ -297,11 +303,24 @@ function captureKnownStore(database: Database): KiteSessionCapture {
       assertKiteHomeStoreSchema(database);
       columns = KITE_HOME_STORE_TABLE_COLUMNS;
     } else if (metadata.schemaVersion === 10) {
+      assertKiteSessionStore10Schema(database);
+      columns = KITE_SESSION_STORE10_TABLE_COLUMNS;
+    } else if (metadata.schemaVersion === 11) {
+      if (metadata.formatEpoch === 'kite-session-accepted-runs-2026-09-15') {
+        assertKiteSessionStore11Schema(database);
+        columns = KITE_SESSION_STORE11_TABLE_COLUMNS;
+      } else if (metadata.formatEpoch === 'kite-session-lineage-2026-09-24') {
+        assertKiteLineageStore11Schema(database);
+        columns = KITE_LINEAGE_STORE11_TABLE_COLUMNS;
+      } else {
+        throw new Error('Kite Session recovery source has an unknown Store 11 epoch.');
+      }
+    } else if (metadata.schemaVersion === 12) {
+      assertKiteSessionStore12Schema(database);
+      columns = KITE_SESSION_STORE12_TABLE_COLUMNS;
+    } else if (metadata.schemaVersion === 13) {
       assertKiteSessionStoreSchema(database);
       columns = KITE_SESSION_STORE_TABLE_COLUMNS;
-    } else if (metadata.schemaVersion === 11) {
-      assertKiteSessionStore11Schema(database);
-      columns = KITE_SESSION_STORE11_TABLE_COLUMNS;
     } else {
       throw new Error('Kite Session recovery backup supports only verified Store formats.');
     }

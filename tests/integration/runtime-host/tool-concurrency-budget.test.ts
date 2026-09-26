@@ -36,7 +36,7 @@ function withQueuedTools(names: string[]): RuntimeState {
 }
 
 describe('tool concurrency budget', () => {
-  test('shrinks a subagent batch to the shared child concurrency ceiling', () => {
+  test('admits Task receipts before child activation acquires the shared child ceiling', () => {
     let state = withQueuedTools(['task', 'task', 'task']);
     state = {
       ...state,
@@ -62,11 +62,11 @@ describe('tool concurrency budget', () => {
     );
 
     expect(plan.status).toBe('admitted');
-    expect(plan.effect).toEqual({ type: 'run_tools', toolCallIds: ['call-0', 'call-1'] });
-    expect(plan.reservationIds).toHaveLength(2);
+    expect(plan.effect).toEqual({ type: 'run_tools', toolCallIds: ['call-0', 'call-1', 'call-2'] });
+    expect(plan.reservationIds).toHaveLength(3);
     expect(
       plan.preparationEvents.filter((event) => event.type === 'resource_budget.waiter_enqueued'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   test('admits every ordinary tool in one model batch without concurrency waiters', () => {

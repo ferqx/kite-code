@@ -65,12 +65,16 @@ export function mergeBuiltinMechanismBundle(
   const keys = [...preparedKeys, ...runnerKeys].sort();
   const requiredKey = REQUIRED_MECHANISM_KEYS_[input.executionMechanism];
   if (requiredKey !== undefined) {
-    if (keys.length !== 1 || keys[0] !== requiredKey) {
+    const acceptedKey =
+      input.executionMechanism === 'task_control' && keys[0] === 'agentMailbox'
+        ? 'agentMailbox'
+        : requiredKey;
+    if (keys.length !== 1 || keys[0] !== acceptedKey) {
       throw new BuiltinMechanismAuthorityError(
-        `Builtin execution mechanism '${input.executionMechanism}' requires only '${requiredKey}'.`,
+        `Builtin execution mechanism '${input.executionMechanism}' requires only '${acceptedKey}'.`,
       );
     }
-    assertMechanismWrapper(requiredKey, prepared[requiredKey] ?? runner[requiredKey]);
+    assertMechanismWrapper(acceptedKey, prepared[acceptedKey] ?? runner[acceptedKey]);
   } else if (keys.length !== 0) {
     throw new BuiltinMechanismAuthorityError(
       `Builtin execution mechanism '${input.executionMechanism}' does not accept mechanism ports.`,
@@ -204,6 +208,18 @@ function assertMechanismWrapper(key: string, value: unknown): void {
       assertFunction(record, 'cancelTask', key);
       assertFunction(record, 'readTask', key);
       assertFunction(record, 'waitTasks', key);
+      return;
+    case 'agentMailbox':
+      assertExactKeys(value, [
+        'caller',
+        'listAgents',
+        'waitAgent',
+        'submitMessage',
+        'interruptAgent',
+      ]);
+      assertFrozenRecord(record.caller, `${key}.caller`);
+      for (const method of ['listAgents', 'waitAgent', 'submitMessage', 'interruptAgent'])
+        assertFunction(record, method, key);
       return;
     case 'verification':
       assertExactKeys(value, ['execute']);

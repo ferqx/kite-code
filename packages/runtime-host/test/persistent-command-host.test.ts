@@ -325,6 +325,46 @@ describe('Host persistent receipt command flow', () => {
     }
   });
 
+  test('stop uses the live bridge revision after an independent child settlement', async () => {
+    const h = harness();
+    let revision = 0;
+    h.bridge.query = async (query) =>
+      query.type === 'get_session_projection'
+        ? {
+            status: 'ok',
+            queryType: query.type,
+            revision,
+            session: { ...projection('session-1'), revision },
+          }
+        : { status: 'ok', queryType: 'list_sessions', sessions: [] };
+    const host = createRuntimeHost({
+      storage: h.storage,
+      modules: testRuntimeModules(() => h.bridge),
+    });
+    const stream = host.subscribe({ spec: { scope: 'session', sessionId: 'session-1' } });
+    const iterator = stream[Symbol.asyncIterator]();
+    try {
+      await iterator.next();
+      revision = 1;
+      expect(
+        await host.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'stop-after-child-settlement',
+          type: 'stop_background_execution',
+          sessionId: 'session-1',
+          expectedRevision: 1,
+          executionId: 'child-task-1',
+          executionKind: 'subagent',
+          expectedOwnerGeneration: 'child:1',
+          expectedExecutionRevision: 0,
+        }),
+      ).toMatchObject({ status: 'applied' });
+      expect(h.bridge.inspections).toHaveLength(1);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
   test('policy receipt races do not swallow activation failures', async () => {
     const h = harness({ activationFailure: new Error('policy publication failed') });
     const host = createRuntimeHost({

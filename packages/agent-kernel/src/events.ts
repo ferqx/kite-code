@@ -34,6 +34,7 @@ import type {
   AgentRunTerminalOutcome as StateRunTerminalOutcome,
   AgentSandboxPreparationArtifactRef as StateSandboxPreparationArtifactRef,
   AgentSkillActivationState as StateSkillActivation,
+  AgentSubagentCheckpointArtifactRef as StateSubagentCheckpointArtifactRef,
   AgentSubagentHandleArtifactRef as StateSubagentHandleArtifactRef,
   AgentSubagentTaskArtifactRef as StateSubagentTaskArtifactRef,
   AgentToolApprovalPayload as StateToolApprovalPayload,
@@ -452,11 +453,61 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'resource_budget.reconciled': ['reservationId', 'actual'],
   'resource_budget.released': ['reservationId'],
   'resource_budget.reserved': ['reservation'],
+  'resource_budget.child_slot_acquired': ['reservationId'],
+  'resource_budget.bounded_replaced': ['reservationId', 'turnReservation', 'replacement'],
   'resource_budget.unknown': ['reservationId'],
   'resource_budget.waiter_cancelled': ['invocationId'],
   'resource_budget.waiter_enqueued': ['waiter'],
   'resource_budget.waiter_promoted': ['invocationId'],
   'resource_budget.waiter_timed_out': ['invocationId'],
+  'agent.created': ['agentId', 'parentAgentId'],
+  'agent.turn_started': ['agentId', 'taskId', 'turnOrdinal', 'ownerGeneration', 'grantDigest'],
+  'agent.followup_turn_prepared': [
+    'sourceSessionId',
+    'submissionId',
+    'targetRunId',
+    'taskId',
+    'checkpointRef',
+    'grantRef',
+    'grantDigest',
+  ],
+  'agent.followup_turn_settled': [
+    'sourceSessionId',
+    'submissionId',
+    'targetRunId',
+    'taskId',
+    'status',
+  ],
+  'agent.mail_accepted': [
+    'messageId',
+    'senderAgentId',
+    'targetAgentId',
+    'mode',
+    'source',
+    'bodyRef',
+    'bodyDigest',
+    'sequence',
+  ],
+  'agent.followup_routed': [
+    'submissionId',
+    'targetAgentId',
+    'route',
+    'taskId',
+    'invocationId',
+    'modelAdmissionId',
+    'reservationId',
+    'fundingRunId',
+    'sequence',
+  ],
+  'agent.mail_input_prepared': [
+    'targetAgentId',
+    'invocationId',
+    'modelAdmissionId',
+    'fromSequence',
+    'throughSequence',
+    'messageIds',
+  ],
+  'agent.task_settled': ['agentId', 'taskId', 'ownerGeneration', 'status', 'resultRef'],
   'run.completed': ['turnId', 'output'],
   'run.error': ['message', 'recoverable'],
   'runtime.action_ignored': ['reason'],
@@ -502,6 +553,89 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'originToolCallId',
     'attempt',
   ],
+  'subagent.child_session_intended': [
+    'parentInvocationId',
+    'parentSessionId',
+    'originRunId',
+    'originTurnId',
+    'originToolCallId',
+    'attempt',
+    'childInvocationId',
+    'childThreadId',
+    'grantDigest',
+    'taskArtifactRef',
+    'taskArtifactDigest',
+    'taskTextDigest',
+    'disposition',
+    'role',
+    'fundingRunId',
+    'delegatedReservationId',
+    'delegatedUpperBoundDigest',
+    'deadlineAt',
+  ],
+  'subagent.child_session_adopted': [
+    'parentSessionId',
+    'parentInvocationId',
+    'parentToolCallId',
+    'attempt',
+    'childInvocationId',
+    'grantDigest',
+    'fundingRunId',
+    'delegatedReservationId',
+    'delegatedUpperBoundDigest',
+    'deadlineAt',
+  ],
+  'subagent.child_approval_proxy_changed': ['proxyInteractionId', 'childInvocationId', 'status'],
+  'subagent.child_recovery_required': [
+    'parentSessionId',
+    'parentInvocationId',
+    'childInvocationId',
+    'childThreadId',
+    'originToolCallId',
+    'attempt',
+    'grantDigest',
+    'diagnosticCode',
+    'observedAt',
+  ],
+  'subagent.child_terminal_sealed': [
+    'status',
+    'resultRef',
+    'cleanupConfirmed',
+    'cancelRequested',
+    'terminalReceiptId',
+  ],
+  'subagent.child_terminal_imported': [
+    'parentInvocationId',
+    'childInvocationId',
+    'childThreadId',
+    'terminalRevision',
+    'terminalReceiptDigest',
+    'status',
+    'resultRef',
+  ],
+  'subagent.child_creation_failed': [
+    'parentInvocationId',
+    'childInvocationId',
+    'childThreadId',
+    'mode',
+    'failureReceiptDigest',
+    'resultRef',
+  ],
+  'subagent.child_pre_dispatch_cancelled': [
+    'parentInvocationId',
+    'childInvocationId',
+    'childThreadId',
+    'mode',
+    'terminalReceiptDigest',
+    'resultRef',
+  ],
+  'subagent.child_task_input_admitted': [
+    'childInvocationId',
+    'taskArtifactRef',
+    'taskDigest',
+    'taskTextDigest',
+    'grantDigest',
+  ],
   'background_execution.stop_requested': [
     'commandId',
     'executionId',
@@ -520,6 +654,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'subagent.tool_result': ['subagent'],
   'task.cancelled': ['taskId', 'reason'],
   'task.completed': ['taskId', 'turnId'],
+  'task.failed': ['taskId', 'reason'],
   'task.started': ['taskId', 'userGoal', 'turnId'],
   'tool.cancelled': ['toolCallId', 'reason'],
   'tool.failed': ['toolCallId', 'failure'],
@@ -557,7 +692,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
 /** Count of current State event discriminants; read-only compatibility remains separate. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 145 as const;
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 165 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -593,6 +728,12 @@ export const STATE_DIAGNOSTIC_EVENT_TYPES = [
 /** Current discriminants intentionally handled by the reducer default branch. */
 export const STATE_DEFAULT_EVENT_TYPES = [
   'background_execution.stop_requested',
+  'agent.created',
+  'agent.turn_started',
+  'agent.mail_accepted',
+  'agent.followup_routed',
+  'agent.mail_input_prepared',
+  'agent.task_settled',
   'background_execution.stop_settled',
   'background_execution.stop_unknown',
   'runtime.cancellation_diagnostic',
@@ -607,12 +748,13 @@ export const STATE_DEFAULT_EVENT_TYPES = [
   'subagent.started',
   'subagent.step',
   'subagent.tool_result',
+  'subagent.child_approval_proxy_changed',
 ] as const satisfies readonly RuntimeEventType[];
 
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 145 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 165 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -887,6 +1029,16 @@ type ResourceBudgetEventMap = {
     type: 'resource_budget.reserved';
     reservation: ResourceReservation;
   };
+  'resource_budget.child_slot_acquired': {
+    type: 'resource_budget.child_slot_acquired';
+    reservationId: string;
+  };
+  'resource_budget.bounded_replaced': {
+    type: 'resource_budget.bounded_replaced';
+    reservationId: string;
+    turnReservation: ResourceReservation;
+    replacement: ResourceReservation;
+  };
   'resource_budget.dispatch_started': {
     type: 'resource_budget.dispatch_started';
     reservationId: string;
@@ -920,7 +1072,117 @@ type ResourceBudgetEventMap = {
   };
 };
 
+export interface AgentSourceScope {
+  runId: string;
+  turnId: string;
+  modelInvocationId: string;
+  toolCallId: string;
+  effectAttemptId: string;
+  sourceTaskId?: string;
+}
+
+export interface AgentMailArtifactRef {
+  artifactId: string;
+  kind: 'agent_mail';
+  integrityIdentifier: string;
+  byteLength: number;
+}
+
+export interface AgentFollowupAdmissionArtifactRef {
+  artifactId: string;
+  kind: 'agent_followup_admission';
+  integrityIdentifier: string;
+  byteLength: number;
+}
+
+type AgentEventMap = {
+  'agent.followup_turn_settled': {
+    type: 'agent.followup_turn_settled';
+    sourceSessionId: string;
+    submissionId: string;
+    targetRunId: string;
+    taskId: string;
+    status: 'completed' | 'failed' | 'cancelled' | 'unknown';
+  };
+  'agent.followup_turn_prepared': {
+    type: 'agent.followup_turn_prepared';
+    sourceSessionId: string;
+    submissionId: string;
+    targetRunId: string;
+    taskId: string;
+    checkpointRef: StateSubagentCheckpointArtifactRef;
+    grantRef: {
+      artifactId: string;
+      kind: 'agent_followup_grant';
+      integrityIdentifier: string;
+      byteLength: number;
+    };
+    grantDigest: string;
+  };
+  'agent.created': {
+    type: 'agent.created';
+    agentId: string;
+    parentAgentId: string | null;
+    initialTaskId?: string;
+  };
+  'agent.turn_started': {
+    type: 'agent.turn_started';
+    agentId: string;
+    taskId: string;
+    turnOrdinal: number;
+    submissionId?: string;
+    ownerGeneration: string;
+    grantDigest: string;
+  };
+  'agent.mail_accepted': {
+    type: 'agent.mail_accepted';
+    messageId: string;
+    submissionId?: string;
+    senderAgentId: string;
+    targetAgentId: string;
+    mode: 'queue_only' | 'trigger_turn' | 'reply';
+    source: AgentSourceScope;
+    bodyRef: AgentMailArtifactRef;
+    bodyDigest: string;
+    followupAdmissionRef?: AgentFollowupAdmissionArtifactRef;
+    followupAdmissionDigest?: string;
+    sequence: number;
+  };
+  'agent.followup_routed': {
+    type: 'agent.followup_routed';
+    submissionId: string;
+    targetAgentId: string;
+    route: 'current_turn' | 'new_turn';
+    taskId: string;
+    invocationId: string;
+    modelAdmissionId: string;
+    reservationId: string;
+    fundingRunId: string;
+    sequence: number;
+  };
+  'agent.mail_input_prepared': {
+    type: 'agent.mail_input_prepared';
+    targetAgentId: string;
+    invocationId: string;
+    modelAdmissionId: string;
+    fromSequence: number;
+    throughSequence: number;
+    messageIds: string[];
+  };
+  'agent.task_settled': {
+    type: 'agent.task_settled';
+    agentId: string;
+    taskId: string;
+    submissionId?: string;
+    ownerGeneration: string;
+    status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
+    resultRef: Mutable<StateSubagentTaskArtifactRef>;
+    checkpointRef?: Mutable<StateSubagentCheckpointArtifactRef>;
+  };
+};
+
 type StateEventMap = ResourceBudgetEventMap &
+  AgentEventMap &
   ContextEventMap &
   VerificationEventMap & {
     'capability.bindings_issued': {
@@ -1363,6 +1625,7 @@ type StateEventMap = ResourceBudgetEventMap &
     };
     'planning.exited': { type: 'planning.exited'; taskId: string; reason?: string };
     'task.completed': { type: 'task.completed'; taskId: string; turnId: string };
+    'task.failed': { type: 'task.failed'; taskId: string; reason: string };
     'task.cancelled': { type: 'task.cancelled'; taskId: string; reason: string };
     'approval.requested': {
       type: 'approval.requested';
@@ -1588,6 +1851,8 @@ type StateEventMap = ResourceBudgetEventMap &
       budget: ModelInvocationBudget;
       limits: ModelInvocationLimits;
       preparedStateRevision: number;
+      /** Frozen local estimate; optional for historical prepared invocations. */
+      estimatedInputTokens?: number;
       parentInvocationId: string | null;
       parentToolCallId: string | null;
     };
@@ -1872,6 +2137,7 @@ type StateEventMap = ResourceBudgetEventMap &
       taskId: string;
       notificationId: string;
       artifactIntegrityIdentifier: string;
+      checkpointRef?: Mutable<StateSubagentCheckpointArtifactRef>;
       shortReport: string;
       source: 'subagent';
       modelRole: 'user';
@@ -1879,6 +2145,15 @@ type StateEventMap = ResourceBudgetEventMap &
       originTurnId: string;
       originToolCallId: string;
       attempt: number;
+      /** Present only when an independently persisted child supplies its sealed terminal. */
+      childTerminalStatus?:
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'interrupted'
+        | 'exhausted'
+        | 'suspended'
+        | 'unknown';
       afterTurn?: {
         reservationId: string;
         admissionRevision: number;
@@ -1889,6 +2164,116 @@ type StateEventMap = ResourceBudgetEventMap &
         status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
         cancelRequested: boolean;
       };
+    };
+    'subagent.child_session_intended': {
+      type: 'subagent.child_session_intended';
+      parentInvocationId: string;
+      parentSessionId: string;
+      originRunId: string;
+      originTurnId: string;
+      originToolCallId: string;
+      attempt: number;
+      childInvocationId: string;
+      childThreadId: string;
+      grantDigest: string;
+      taskArtifactRef: StateSubagentTaskArtifactRef;
+      taskArtifactDigest: string;
+      taskTextDigest: string;
+      disposition: 'required' | 'after_turn';
+      role: 'explore' | 'plan' | 'code' | 'review';
+      fundingRunId: string;
+      delegatedReservationId: string;
+      delegatedUpperBoundDigest: string;
+      deadlineAt: string;
+    };
+    'subagent.child_session_adopted': {
+      type: 'subagent.child_session_adopted';
+      parentSessionId: string;
+      parentInvocationId: string;
+      parentToolCallId: string;
+      attempt: number;
+      childInvocationId: string;
+      grantDigest: string;
+      fundingRunId: string;
+      delegatedReservationId: string;
+      delegatedUpperBoundDigest: string;
+      deadlineAt: string;
+    };
+    'subagent.child_approval_proxy_changed': {
+      type: 'subagent.child_approval_proxy_changed';
+      proxyInteractionId: string;
+      childInvocationId: string;
+      status: 'pending' | 'decided';
+    };
+    'subagent.child_recovery_required': {
+      type: 'subagent.child_recovery_required';
+      parentSessionId: string;
+      parentInvocationId: string;
+      childInvocationId: string;
+      childThreadId: string;
+      originToolCallId: string;
+      attempt: number;
+      grantDigest: string;
+      diagnosticCode: 'recovery_blocked' | 'evidence_inconsistent';
+      observedAt: string;
+    };
+    'subagent.child_terminal_sealed': {
+      type: 'subagent.child_terminal_sealed';
+      status:
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'interrupted'
+        | 'exhausted'
+        | 'suspended'
+        | 'unknown';
+      resultRef: StateSubagentTaskArtifactRef;
+      cleanupConfirmed: boolean;
+      cancelRequested: boolean;
+      terminalReceiptId: string;
+    };
+    'subagent.child_terminal_imported': {
+      type: 'subagent.child_terminal_imported';
+      parentInvocationId: string;
+      childInvocationId: string;
+      childThreadId: string;
+      terminalRevision: number;
+      terminalReceiptDigest: string;
+      status:
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'interrupted'
+        | 'exhausted'
+        | 'suspended'
+        | 'unknown';
+      resultRef: StateSubagentTaskArtifactRef;
+    };
+    'subagent.child_creation_failed': {
+      type: 'subagent.child_creation_failed';
+      parentInvocationId: string;
+      childInvocationId: string;
+      childThreadId: string;
+      mode: 'absent_child' | 'created_unactivated' | 'activated_no_ack';
+      failureReceiptDigest: string;
+      resultRef: StateSubagentTaskArtifactRef;
+    };
+    'subagent.child_pre_dispatch_cancelled': {
+      type: 'subagent.child_pre_dispatch_cancelled';
+      parentInvocationId: string;
+      childInvocationId: string;
+      childThreadId: string;
+      mode: 'absent_child' | 'created_unactivated' | 'activated_no_ack';
+      terminalReceiptDigest: string;
+      resultRef: StateSubagentTaskArtifactRef;
+    };
+    'subagent.child_task_input_admitted': {
+      type: 'subagent.child_task_input_admitted';
+      childInvocationId: string;
+      taskArtifactRef: StateSubagentTaskArtifactRef;
+      taskDigest: string;
+      taskTextDigest: string;
+      grantDigest: string;
     };
     'background_execution.stop_requested': {
       type: 'background_execution.stop_requested';

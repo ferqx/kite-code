@@ -1,6 +1,7 @@
 import type {
   AgentResourceBudgetActiveState,
   AgentResourceBudgetState,
+  AgentState,
   KernelEvent,
   ResourceBudget as KernelResourceBudget,
   ResourceUsage as KernelResourceUsage,
@@ -20,6 +21,73 @@ export type ConcurrencyWaiter = ResourceWaiter;
 export type ActiveResourceBudgetRuntimeState = AgentResourceBudgetActiveState;
 export type ResourceBudgetRuntimeState = AgentResourceBudgetState;
 
+/** Resolve a funding ledger from persisted Kernel State, never from the current Run by assumption. */
+export function fundingBudgetForRun(
+  state: AgentState,
+  runId: string,
+): ActiveResourceBudgetRuntimeState | undefined {
+  if (state.resourceBudget.status === 'active' && state.resourceBudget.runId === runId)
+    return state.resourceBudget;
+  return state.retainedResourceBudgets[runId];
+}
+
+export function fundingBudgetForReservation(
+  state: AgentState,
+  reservationId: string,
+): ActiveResourceBudgetRuntimeState | undefined {
+  const matches = [
+    ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
+    ...Object.values(state.retainedResourceBudgets),
+  ].filter((ledger) => ledger.reservations[reservationId] !== undefined);
+  if (matches.length > 1)
+    throw new Error(`Reservation ${reservationId} has ambiguous funding authority.`);
+  return matches[0];
+}
+
+/** Child Session configuration may only spend the immutable parent allotment. */
+export function assertChildBudgetWithinDelegation(input: {
+  reservation: BudgetReservation;
+  childBudget: ResourceBudget;
+  childStartedAt: string;
+  childDeadlineAt: string;
+  fundingDeadlineAt: string;
+  childMaySpawn: boolean;
+  childMayWrite: boolean;
+}): void {
+  const {
+    reservation,
+    childBudget,
+    childStartedAt,
+    childDeadlineAt,
+    fundingDeadlineAt,
+    childMaySpawn,
+    childMayWrite,
+  } = input;
+  const upper = reservation.executableUpperBound;
+  if (
+    reservation.resourceKind !== 'subagent' ||
+    (reservation.state !== 'reserved' && reservation.state !== 'dispatch_started') ||
+    upper.source !== 'versioned_upper_bound' ||
+    !Number.isFinite(Date.parse(childStartedAt)) ||
+    !Number.isFinite(Date.parse(childDeadlineAt)) ||
+    Date.parse(childDeadlineAt) <= Date.parse(childStartedAt) ||
+    Date.parse(childDeadlineAt) > Date.parse(fundingDeadlineAt) ||
+    childBudget.maxRunDurationMs > Date.parse(childDeadlineAt) - Date.parse(childStartedAt) ||
+    childBudget.maxTurns > upper.counters.turns ||
+    childBudget.maxModelRequests > upper.counters.modelRequests ||
+    childBudget.maxToolInvocations > upper.counters.toolInvocations ||
+    childBudget.maxRunInputTokens > upper.counters.inputTokens ||
+    childBudget.maxRunOutputTokens > upper.counters.outputTokens ||
+    childBudget.maxArtifactBytes > upper.counters.artifactBytes ||
+    upper.gauges.activeSubagents < 1 ||
+    (childMaySpawn && childBudget.maxConcurrentSubagents > upper.gauges.activeSubagents - 1) ||
+    (childMayWrite && childBudget.maxConcurrentWriters > upper.gauges.activeWriters) ||
+    childBudget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
+    childBudget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations
+  )
+    throw new Error('Child Session budget exceeds its parent delegation.');
+}
+
 type MutableResourceUsage = {
   -readonly [K in keyof ResourceUsage]: K extends 'counters' | 'gauges'
     ? { -readonly [P in keyof ResourceUsage[K]]: ResourceUsage[K][P] }
@@ -29,6 +97,10 @@ type MutableResourceUsage = {
 type ResourceBudgetEventOf<T extends KernelEvent['type']> = Extract<KernelEvent, { type: T }>;
 export type ResourceBudgetConfiguredEvent = ResourceBudgetEventOf<'resource_budget.configured'>;
 export type ResourceBudgetReservedEvent = ResourceBudgetEventOf<'resource_budget.reserved'>;
+export type ResourceBudgetChildSlotAcquiredEvent =
+  ResourceBudgetEventOf<'resource_budget.child_slot_acquired'>;
+export type ResourceBudgetBoundedReplacedEvent =
+  ResourceBudgetEventOf<'resource_budget.bounded_replaced'>;
 export type ResourceBudgetDispatchStartedEvent =
   ResourceBudgetEventOf<'resource_budget.dispatch_started'>;
 export type ResourceBudgetReconciledEvent = ResourceBudgetEventOf<'resource_budget.reconciled'>;
@@ -45,6 +117,8 @@ export type ResourceBudgetWaiterTimedOutEvent =
 export type ResourceBudgetEvent =
   | ResourceBudgetConfiguredEvent
   | ResourceBudgetReservedEvent
+  | ResourceBudgetChildSlotAcquiredEvent
+  | ResourceBudgetBoundedReplacedEvent
   | ResourceBudgetDispatchStartedEvent
   | ResourceBudgetReconciledEvent
   | ResourceBudgetReleasedEvent
@@ -127,9 +201,17 @@ function nonEmpty(value: string, field: string): void {
 
 export function assertResourceBudget(value: ResourceBudget): void {
   if (value.version !== 1) throw new Error(`Unsupported ResourceBudget version.`);
+  const zeroAllowed = new Set<keyof ResourceBudget>([
+    'maxToolInvocations',
+    'maxArtifactBytes',
+    'maxConcurrentSubagents',
+    'maxConcurrentWriters',
+    'maxConcurrentToolInvocations',
+    'maxConcurrentShellInvocations',
+  ]);
   for (const field of BUDGET_FIELDS) {
-    if (!Number.isSafeInteger(value[field]) || value[field] <= 0)
-      throw new Error(`${field} must be a positive safe integer.`);
+    if (!Number.isSafeInteger(value[field]) || value[field] < (zeroAllowed.has(field) ? 0 : 1))
+      throw new Error(`${field} must be a safe integer within its capability ceiling.`);
   }
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
@@ -247,6 +329,17 @@ export function committedResourceUsage(state: ActiveResourceBudgetRuntimeState):
   for (const reservation of Object.values(state.reservations)) {
     if (['reserved', 'dispatch_started', 'unknown'].includes(reservation.state))
       usage = addUsage(usage, reservation.executableUpperBound);
+    else if (reservation.state === 'queued')
+      usage = addUsage(usage, {
+        ...reservation.executableUpperBound,
+        gauges: {
+          ...reservation.executableUpperBound.gauges,
+          activeSubagents: 0,
+          activeWriters: 0,
+          activeToolInvocations: 0,
+          activeShellInvocations: 0,
+        },
+      });
   }
   return usage;
 }
@@ -258,9 +351,24 @@ function assertReservation(value: BudgetReservation): void {
   nonEmpty(value.invocationId, 'invocationId');
   if (value.parentReservationId === value.reservationId)
     throw new Error('A reservation cannot be its own parent.');
+  if (value.replacesReservationId === value.reservationId)
+    throw new Error('A reservation cannot replace itself.');
   assertResourceUsage(value.executableUpperBound);
   if (value.executableUpperBound.source !== 'versioned_upper_bound')
     throw new Error('executableUpperBound must use versioned_upper_bound usage.');
+  if (
+    value.state === 'queued' &&
+    (value.resourceKind !== 'subagent' ||
+      !(
+        (value.reservationId.startsWith('child-allotment:') &&
+          value.invocationId === value.reservationId) ||
+        /^backup_[a-f0-9]{64}$/u.test(value.reservationId)
+      ) ||
+      value.parentReservationId !== undefined ||
+      value.actual !== undefined ||
+      value.executableUpperBound.gauges.activeSubagents !== 1)
+  )
+    throw new Error('Only an exact finite child allotment or TriggerTurn backup may be queued.');
   if (value.actual) {
     assertResourceUsage(value.actual);
     if (
@@ -374,7 +482,10 @@ export function reduceResourceBudgetState(
   if (event.type === 'resource_budget.reserved') {
     const candidate = event.reservation;
     assertReservation(candidate);
-    if (candidate.state !== 'reserved') throw new Error('A new reservation must be reserved.');
+    if (candidate.replacesReservationId)
+      throw new Error('Bounded replacements require the atomic replacement event.');
+    if (candidate.state !== 'reserved' && candidate.state !== 'queued')
+      throw new Error('A new reservation must be reserved or queued.');
     if (candidate.runId !== active.runId) throw new Error('Reservation runId mismatch.');
     if (candidate.parentReservationId && !active.reservations[candidate.parentReservationId])
       throw new Error('Parent reservation must exist in the shared ledger.');
@@ -395,9 +506,129 @@ export function reduceResourceBudgetState(
     return next;
   }
 
+  if (event.type === 'resource_budget.bounded_replaced') {
+    const held = active.reservations[event.reservationId];
+    if (!held) throw new Error(`Unknown reservation ${event.reservationId}.`);
+    const turnReservation = event.turnReservation;
+    const replacement = event.replacement;
+    assertReservation(turnReservation);
+    assertReservation(replacement);
+    if (
+      turnReservation.state !== 'reserved' ||
+      turnReservation.resourceKind !== 'subagent' ||
+      turnReservation.actual !== undefined ||
+      turnReservation.parentReservationId !== undefined ||
+      turnReservation.replacesReservationId !== event.reservationId ||
+      turnReservation.runId !== active.runId ||
+      turnReservation.executableUpperBound.counters.turns !== 1 ||
+      turnReservation.executableUpperBound.gauges.activeSubagents !== 1 ||
+      COUNTER_FIELDS.some(
+        (field) => field !== 'turns' && turnReservation.executableUpperBound.counters[field] !== 0,
+      ) ||
+      GAUGE_FIELDS.some(
+        (field) =>
+          field !== 'activeSubagents' && turnReservation.executableUpperBound.gauges[field] !== 0,
+      )
+    )
+      throw new Error('Bounded replacement requires one held child-turn reservation.');
+    if (
+      replacement.state !== 'reserved' ||
+      replacement.resourceKind !== 'model' ||
+      replacement.actual !== undefined
+    )
+      throw new Error('A bounded replacement must be a reserved model invocation.');
+    if (
+      replacement.parentReservationId !== turnReservation.reservationId ||
+      replacement.executableUpperBound.counters.turns !== 0 ||
+      replacement.executableUpperBound.counters.modelRequests !== 1 ||
+      COUNTER_FIELDS.some(
+        (field) =>
+          !['modelRequests', 'inputTokens', 'outputTokens'].includes(field) &&
+          replacement.executableUpperBound.counters[field] !== 0,
+      ) ||
+      GAUGE_FIELDS.some((field) => replacement.executableUpperBound.gauges[field] !== 0)
+    )
+      throw new Error(
+        'Bounded replacement must cover one first model request beneath the child turn.',
+      );
+    if (
+      replacement.runId !== active.runId ||
+      replacement.replacesReservationId !== event.reservationId
+    )
+      throw new Error('Bounded replacement run or backup identity mismatch.');
+    if (
+      replacement.reservationId === event.reservationId ||
+      turnReservation.reservationId === event.reservationId ||
+      replacement.reservationId === turnReservation.reservationId
+    )
+      throw new Error('Bounded replacement must use a new reservation identity.');
+    if (held.runId !== active.runId || held.resourceKind !== 'subagent')
+      throw new Error('Bounded replacement requires a same-run sub-agent backup.');
+    const existing = active.reservations[replacement.reservationId];
+    const existingTurn = active.reservations[turnReservation.reservationId];
+    if (held.state === 'released' && existing && existingTurn) {
+      const { state: _state, actual: _actual, ...existingIdentity } = existing;
+      const {
+        state: _replacementState,
+        actual: _replacementActual,
+        ...replacementIdentity
+      } = replacement;
+      const { state: _turnState, actual: _turnActual, ...existingTurnIdentity } = existingTurn;
+      const { state: _newTurnState, actual: _newTurnActual, ...turnIdentity } = turnReservation;
+      if (
+        JSON.stringify(existingIdentity) === JSON.stringify(replacementIdentity) &&
+        JSON.stringify(existingTurnIdentity) === JSON.stringify(turnIdentity)
+      )
+        return active;
+      throw new Error('Bounded replacement replay conflicts with existing reservation.');
+    }
+    if (held.state !== 'reserved')
+      throw new Error('Only a held same-run sub-agent backup can be replaced.');
+    if (existing || existingTurn) throw new Error('Bounded replacement identity is already used.');
+    if (
+      Object.values(active.reservations).some(
+        (item) =>
+          (item.invocationId === replacement.invocationId ||
+            item.invocationId === turnReservation.invocationId) &&
+          item.state !== 'released',
+      )
+    )
+      throw new Error('Invocation already has a non-released reservation.');
+    if (turnReservation.invocationId === replacement.invocationId)
+      throw new Error('Bounded replacement invocation identities must differ.');
+    if (
+      !withinUpperBound(
+        addUsage(turnReservation.executableUpperBound, replacement.executableUpperBound),
+        held.executableUpperBound,
+      )
+    )
+      throw new Error('Bounded replacement exceeds the held upper bound.');
+    const next = {
+      ...active,
+      reservations: {
+        ...active.reservations,
+        [event.reservationId]: { ...held, state: 'released' as const },
+        [turnReservation.reservationId]: turnReservation,
+        [replacement.reservationId]: replacement,
+      },
+    };
+    if (!withinBudget(committedResourceUsage(next), active.budget))
+      throw new Error('Resource budget exhausted before bounded replacement.');
+    return next;
+  }
+
   const reservation = active.reservations[event.reservationId];
   if (!reservation) throw new Error(`Unknown reservation ${event.reservationId}.`);
   switch (event.type) {
+    case 'resource_budget.child_slot_acquired': {
+      if (reservation.state === 'reserved') return active;
+      if (reservation.state !== 'queued' || reservation.resourceKind !== 'subagent')
+        throw new Error('Only a queued sub-agent reservation can acquire a slot.');
+      const next = replaceReservation(active, { ...reservation, state: 'reserved' });
+      if (!withinBudget(committedResourceUsage(next), active.budget))
+        throw new Error('Child concurrency slot is unavailable.');
+      return next;
+    }
     case 'resource_budget.dispatch_started':
       if (reservation.state === 'dispatch_started') return active;
       if (reservation.state !== 'reserved')
@@ -431,6 +662,7 @@ export function reduceResourceBudgetState(
     case 'resource_budget.released':
       if (reservation.state === 'released') return active;
       if (
+        reservation.state !== 'queued' &&
         reservation.state !== 'reserved' &&
         !(reservation.state === 'dispatch_started' && event.proof === 'local_pre_dispatch_failure')
       ) {

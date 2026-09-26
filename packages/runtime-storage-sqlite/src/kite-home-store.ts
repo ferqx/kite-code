@@ -1,4 +1,34 @@
 import type { Database } from 'bun:sqlite';
+import {
+  KITE_CHILD_APPROVAL_PROXY_COLUMNS,
+  KITE_CHILD_APPROVAL_PROXY_DDL,
+  KITE_CHILD_APPROVAL_PROXY_PARENT_INDEX,
+} from './kite-child-approval-proxy';
+import {
+  KITE_CHILD_SESSION_INTENT_COLUMNS,
+  KITE_CHILD_SESSION_INTENT_DDL,
+  KITE_CHILD_SESSION_INTENT_PENDING_INDEX,
+} from './kite-child-session-intents';
+import {
+  KITE_CROSS_SESSION_INTERRUPT_COLUMNS,
+  KITE_CROSS_SESSION_INTERRUPT_DDL,
+  KITE_CROSS_SESSION_INTERRUPT_PENDING_INDEX,
+} from './kite-cross-session-agent-interrupt';
+import {
+  KITE_CROSS_SESSION_FOLLOWUP_FUNDING_COLUMNS,
+  KITE_CROSS_SESSION_FOLLOWUP_FUNDING_DDL,
+  KITE_CROSS_SESSION_FOLLOWUP_GRANT_COLUMNS,
+  KITE_CROSS_SESSION_FOLLOWUP_GRANT_DDL,
+  KITE_CROSS_SESSION_FOLLOWUP_OUTBOX_COLUMNS,
+  KITE_CROSS_SESSION_FOLLOWUP_OUTBOX_DDL,
+  KITE_CROSS_SESSION_FOLLOWUP_ROUTE_COLUMNS,
+  KITE_CROSS_SESSION_FOLLOWUP_ROUTE_DDL,
+} from './kite-cross-session-followup-schema';
+import {
+  KITE_SESSION_AGENT_DDL,
+  KITE_SESSION_AGENT_INDEXES,
+  KITE_SESSION_AGENT_TABLE_COLUMNS,
+} from './kite-session-agent-schema';
 
 import {
   KITE_SESSION_STORE_FORMAT_EPOCH,
@@ -213,7 +243,7 @@ export const KITE_HOME_STORE_INDEXES = Object.freeze([
   'runtime_session_tombstones_workspace_deleted',
 ] as const);
 
-export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
+export const KITE_SESSION_STORE10_TABLE_COLUMNS = Object.freeze({
   ...KITE_HOME_STORE_TABLE_COLUMNS,
   runtime_effect_leases: [
     'session_id',
@@ -232,6 +262,26 @@ export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
     'updated_at',
   ],
 } as const);
+
+export const KITE_SESSION_STORE11_TABLE_COLUMNS = Object.freeze({
+  ...KITE_SESSION_STORE10_TABLE_COLUMNS,
+  runtime_sessions: [...KITE_SESSION_STORE10_TABLE_COLUMNS.runtime_sessions, 'parent_session_id'],
+  ...KITE_SESSION_AGENT_TABLE_COLUMNS,
+  child_session_intents: KITE_CHILD_SESSION_INTENT_COLUMNS,
+} as const);
+export const KITE_SESSION_STORE12_TABLE_COLUMNS = Object.freeze({
+  ...KITE_SESSION_STORE11_TABLE_COLUMNS,
+  child_approval_proxies: KITE_CHILD_APPROVAL_PROXY_COLUMNS,
+} as const);
+export const KITE_SESSION_STORE13_TABLE_COLUMNS = Object.freeze({
+  ...KITE_SESSION_STORE12_TABLE_COLUMNS,
+  agent_mail_outbox: KITE_CROSS_SESSION_FOLLOWUP_OUTBOX_COLUMNS,
+  agent_followup_routes: KITE_CROSS_SESSION_FOLLOWUP_ROUTE_COLUMNS,
+  agent_followup_funding_receipts: KITE_CROSS_SESSION_FOLLOWUP_FUNDING_COLUMNS,
+  agent_followup_grant_artifacts: KITE_CROSS_SESSION_FOLLOWUP_GRANT_COLUMNS,
+  agent_interrupt_intents: KITE_CROSS_SESSION_INTERRUPT_COLUMNS,
+} as const);
+export const KITE_SESSION_STORE_TABLE_COLUMNS = KITE_SESSION_STORE13_TABLE_COLUMNS;
 
 const DIGEST_CHECK = "length(%s) = 64 AND %s NOT GLOB '*[^a-f0-9]*'";
 const digestCheck = (column: string): string => DIGEST_CHECK.replaceAll('%s', column);
@@ -482,13 +532,45 @@ export const KITE_SESSION_EFFECT_LEASE_DDL = `CREATE TABLE runtime_effect_leases
     (state = 'unknown' AND outcome = 'unknown' AND terminal_digest IS NULL AND certainty = 'uncertain'))
 ) STRICT`;
 
-export const KITE_SESSION_STORE_DDL = Object.freeze(
+export const KITE_SESSION_STORE10_DDL = Object.freeze(
   KITE_HOME_STORE_DDL.map((statement) =>
     statement.startsWith('CREATE TABLE runtime_effect_leases')
       ? KITE_SESSION_EFFECT_LEASE_DDL
       : statement,
   ),
 );
+
+export const KITE_SESSION_STORE11_DDL = Object.freeze([
+  ...KITE_SESSION_STORE10_DDL.map((statement) =>
+    statement.startsWith('CREATE TABLE runtime_sessions ')
+      ? statement.replace(
+          /\n {2}\) STRICT$/u,
+          ',\n    parent_session_id TEXT REFERENCES runtime_sessions(session_id)\n  ) STRICT',
+        )
+      : statement,
+  ),
+  ...KITE_SESSION_AGENT_DDL,
+  KITE_CHILD_SESSION_INTENT_DDL,
+  KITE_CHILD_SESSION_INTENT_PENDING_INDEX,
+]);
+export const KITE_SESSION_STORE12_DDL = Object.freeze([
+  ...KITE_SESSION_STORE11_DDL,
+  KITE_CHILD_APPROVAL_PROXY_DDL,
+  KITE_CHILD_APPROVAL_PROXY_PARENT_INDEX,
+]);
+export const KITE_SESSION_STORE13_DDL = Object.freeze([
+  ...KITE_SESSION_STORE12_DDL.map((statement) =>
+    statement.startsWith('CREATE TABLE agent_mail_outbox (')
+      ? KITE_CROSS_SESSION_FOLLOWUP_OUTBOX_DDL
+      : statement,
+  ),
+  KITE_CROSS_SESSION_FOLLOWUP_ROUTE_DDL,
+  KITE_CROSS_SESSION_FOLLOWUP_FUNDING_DDL,
+  KITE_CROSS_SESSION_FOLLOWUP_GRANT_DDL,
+  KITE_CROSS_SESSION_INTERRUPT_DDL,
+  KITE_CROSS_SESSION_INTERRUPT_PENDING_INDEX,
+]);
+export const KITE_SESSION_STORE_DDL = KITE_SESSION_STORE13_DDL;
 
 interface ExactKiteStoreProfile {
   readonly schemaVersion: number;
@@ -511,6 +593,59 @@ const kiteSessionStoreProfile = (): ExactKiteStoreProfile => ({
   formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
   ddl: KITE_SESSION_STORE_DDL,
   tableColumns: KITE_SESSION_STORE_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+    'child_approval_proxies_parent_pending',
+    'agent_interrupt_intents_target_pending',
+  ],
+});
+
+const kiteSessionStore13Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 13,
+  formatEpoch: 'kite-session-cross-followup-2026-09-25',
+  ddl: KITE_SESSION_STORE13_DDL,
+  tableColumns: KITE_SESSION_STORE13_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+    'child_approval_proxies_parent_pending',
+    'agent_interrupt_intents_target_pending',
+  ],
+});
+
+const kiteSessionStore12Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 12,
+  formatEpoch: 'kite-session-child-approval-2026-09-25',
+  ddl: KITE_SESSION_STORE12_DDL,
+  tableColumns: KITE_SESSION_STORE12_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+    'child_approval_proxies_parent_pending',
+  ],
+});
+
+const kiteSessionStore11Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 11,
+  formatEpoch: 'kite-session-lineage-2026-09-24',
+  ddl: KITE_SESSION_STORE11_DDL,
+  tableColumns: KITE_SESSION_STORE11_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+  ],
+});
+
+const kiteSessionStore10Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 10,
+  formatEpoch: 'kite-session-app-server-2026-09-02',
+  ddl: KITE_SESSION_STORE10_DDL,
+  tableColumns: KITE_SESSION_STORE10_TABLE_COLUMNS,
   indexes: KITE_HOME_STORE_INDEXES,
 });
 
@@ -582,6 +717,81 @@ export function assertKiteHomeStoreSchema(database: Database): void {
 
 export function assertKiteSessionStoreSchema(database: Database): void {
   assertExactKiteStoreSchema(database, kiteSessionStoreProfile());
+  assertKiteSessionLineageForeignKeys(database);
+  const proxyForeignKeys = database
+    .query<{ table: string; from: string; to: string; on_delete: string }, []>(
+      'PRAGMA foreign_key_list(child_approval_proxies)',
+    )
+    .all();
+  for (const from of ['parent_session_id', 'child_thread_id']) {
+    if (
+      proxyForeignKeys.filter(
+        (key) =>
+          key.from === from &&
+          key.table === 'runtime_sessions' &&
+          key.to === 'session_id' &&
+          key.on_delete === 'NO ACTION',
+      ).length !== 1
+    )
+      fail('Kite Session Store child approval FK is incompatible.');
+  }
+}
+
+export function assertKiteSessionStore11Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore11Profile());
+  assertKiteSessionLineageForeignKeys(database);
+}
+
+export function assertKiteSessionStore12Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore12Profile());
+  assertKiteSessionLineageForeignKeys(database);
+}
+
+export function assertKiteSessionStore13Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore13Profile());
+  assertKiteSessionLineageForeignKeys(database);
+}
+
+function assertKiteSessionLineageForeignKeys(database: Database): void {
+  const parentForeignKeys = database
+    .query<{ table: string; from: string; to: string; on_delete: string }, []>(
+      'PRAGMA foreign_key_list(runtime_sessions)',
+    )
+    .all()
+    .filter((key) => key.from === 'parent_session_id');
+  if (
+    parentForeignKeys.length !== 1 ||
+    parentForeignKeys[0]?.table !== 'runtime_sessions' ||
+    parentForeignKeys[0]?.to !== 'session_id' ||
+    parentForeignKeys[0]?.on_delete !== 'NO ACTION'
+  ) {
+    fail('Kite Session Store parent Session FK is incompatible.');
+  }
+  const intentForeignKeys = database
+    .query<{ table: string; from: string; to: string; on_delete: string }, []>(
+      'PRAGMA foreign_key_list(child_session_intents)',
+    )
+    .all();
+  for (const [column, table, target] of [
+    ['parent_session_id', 'runtime_sessions', 'session_id'],
+    ['task_artifact_id', 'subagent_task_artifacts', 'artifact_id'],
+  ] as const) {
+    if (
+      intentForeignKeys.filter(
+        (key) =>
+          key.from === column &&
+          key.table === table &&
+          key.to === target &&
+          key.on_delete === 'NO ACTION',
+      ).length !== 1
+    )
+      fail('Kite Session Store child intent FK is incompatible.');
+  }
+}
+
+/** Source-only assertion for private Store 10 migration candidates. */
+export function assertKiteSessionStore10Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore10Profile());
 }
 
 /** Full physical/FK inspection belongs to file preflight, not each composed reader. */

@@ -32,9 +32,11 @@ export interface KiteHomeBuiltinArtifactBackends {
   >;
   readonly subagentLifecycle: PrivateImmutableArtifactStorageBackend<'subagent_handle'>;
   readonly subagentContinuation: PrivateImmutableArtifactStorageBackend<'subagent_continuation'>;
+  readonly subagentCheckpoint: PrivateImmutableArtifactStorageBackend<'subagent_checkpoint'>;
+  readonly agentFollowupAdmission: PrivateImmutableArtifactStorageBackend<'agent_followup_admission'>;
 }
 
-/** Adapt Builtin's schema-aware readers/writers to the dedicated Store 9 Artifact tables. */
+/** Adapt Builtin's schema-aware readers/writers to dedicated Store Artifact tables. */
 export function createKiteHomeBuiltinArtifactBackends(
   store: KiteHomeArtifactStore,
   now: () => number = Date.now,
@@ -196,6 +198,32 @@ export function createKiteHomeBuiltinArtifactBackends(
       },
       read: (ref) => store.readSubagentContinuation(ref).canonicalJson,
       collect: (input) => store.collectSubagentContinuationGarbage(input),
+    }),
+    subagentCheckpoint: backend<'subagent_checkpoint'>({
+      write(ref, text, value) {
+        if (record(value).artifactFormatVersion !== 1) corrupt();
+        store.writeSubagentCheckpoint({
+          ref,
+          artifactFormatVersion: 1,
+          canonicalJson: text,
+          createdAt: time(now),
+        });
+      },
+      read: (ref) => store.readSubagentCheckpoint(ref).canonicalJson,
+      collect: (input) => store.collectSubagentCheckpointGarbage(input),
+    }),
+    agentFollowupAdmission: backend<'agent_followup_admission'>({
+      write(ref, text, value) {
+        if (record(value).artifactFormatVersion !== 1) corrupt();
+        store.writeAgentFollowupAdmission({
+          ref,
+          artifactFormatVersion: 1,
+          canonicalJson: text,
+          createdAt: time(now),
+        });
+      },
+      read: (ref) => store.readAgentFollowupAdmission(ref).canonicalJson,
+      collect: (input) => store.collectAgentFollowupAdmissionGarbage(input),
     }),
   });
 }

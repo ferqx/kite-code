@@ -557,6 +557,49 @@ function planCompletionEvidenceMatchesRuntime(
 export function reduceLifecycleState(state: AgentState, event: KernelEvent): AgentState {
   const payload = eventRecord(event);
   switch (event.type) {
+    case 'agent.followup_turn_settled': {
+      const followup = state.activeFollowupTurn;
+      if (
+        !followup ||
+        followup.sourceSessionId !== event.sourceSessionId ||
+        followup.submissionId !== event.submissionId ||
+        followup.targetRunId !== event.targetRunId ||
+        followup.taskId !== event.taskId ||
+        state.turn.turnId !== event.targetRunId ||
+        state.turn.status === 'active' ||
+        state.activeTaskId !== null ||
+        (event.status === 'completed') !== (state.terminalOutcome?.status === 'completed')
+      )
+        return state;
+      const { activeFollowupTurn: _settled, ...rest } = state;
+      return rest;
+    }
+    case 'agent.followup_turn_prepared': {
+      const origin = state.childSessionOrigin;
+      if (
+        origin?.terminal?.status !== 'completed' ||
+        origin.parentSessionId !== event.sourceSessionId ||
+        state.activeFollowupTurn ||
+        state.activeTaskId !== null ||
+        state.terminalOutcome?.status !== 'completed' ||
+        state.turn.status !== 'completed' ||
+        state.turn.turnId === event.targetRunId ||
+        state.tasks[event.taskId]
+      )
+        return state;
+      return {
+        ...state,
+        activeFollowupTurn: {
+          sourceSessionId: event.sourceSessionId,
+          submissionId: event.submissionId,
+          targetRunId: event.targetRunId,
+          taskId: event.taskId,
+          checkpointRef: event.checkpointRef,
+          grantRef: event.grantRef,
+          grantDigest: event.grantDigest,
+        },
+      };
+    }
     case 'task.started': {
       const taskId = nonEmptyStringField(payload, 'taskId');
       const turnId = nonEmptyStringField(payload, 'turnId');
@@ -618,6 +661,27 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
         }),
         activeTaskId: null,
         tasks: { ...state.tasks, [taskId]: cancelled },
+      };
+    }
+    case 'task.failed': {
+      const taskId = nonEmptyStringField(payload, 'taskId');
+      const reason = nonEmptyStringField(payload, 'reason');
+      if (!taskId || !reason) return state;
+      const current = state.tasks[taskId];
+      if (!current || state.activeTaskId !== taskId) return state;
+      const failed = {
+        ...current,
+        status: 'failed' as const,
+        executionMode: undefined,
+      };
+      return {
+        ...state,
+        toolRecovery: closeToolRecoveryScope(state.toolRecovery, {
+          kind: 'task',
+          taskId,
+        }),
+        activeTaskId: null,
+        tasks: { ...state.tasks, [taskId]: failed },
       };
     }
     case 'turn.started': {

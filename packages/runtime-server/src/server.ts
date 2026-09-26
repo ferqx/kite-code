@@ -111,6 +111,7 @@ export interface RuntimeServerOptions {
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
   readonly historyMethods?: boolean;
+  readonly childHistoryMethods?: boolean;
   readonly appMethods?: boolean;
   readonly serverControlMethods?: boolean;
 }
@@ -159,6 +160,7 @@ export class RuntimeServer {
       connection,
       this.#options.serverInfo,
       this.#options.historyMethods === true,
+      this.#options.childHistoryMethods === true,
       this.#options.appMethods === true,
       this.#options.serverControlMethods === true,
       this.#limits,
@@ -215,6 +217,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly #historyMethods: boolean;
+  readonly #childHistoryMethods: boolean;
   readonly #appMethods: boolean;
   readonly #serverControlMethods: boolean;
   readonly #limits: RuntimeServerLimits;
@@ -244,6 +247,7 @@ class ServerConnection implements RuntimeServerConnection {
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     historyMethods: boolean,
+    childHistoryMethods: boolean,
     appMethods: boolean,
     serverControlMethods: boolean,
     limits: RuntimeServerLimits,
@@ -259,6 +263,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#connection = connection;
     this.#serverInfo = serverInfo;
     this.#historyMethods = historyMethods;
+    this.#childHistoryMethods = childHistoryMethods;
     this.#appMethods = appMethods;
     this.#serverControlMethods = serverControlMethods;
     this.#limits = limits;
@@ -443,6 +448,7 @@ class ServerConnection implements RuntimeServerConnection {
           ...(this.#historyMethods
             ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
             : []),
+          ...(this.#childHistoryMethods ? (['history/load_child_session'] as const) : []),
           ...(this.#appMethods
             ? ([
                 'app/workspace_trust/query',

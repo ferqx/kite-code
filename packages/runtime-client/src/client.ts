@@ -245,6 +245,7 @@ export class RuntimeClient implements AsyncDisposable {
     if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs <= 0) {
       throw new RangeError('requestTimeoutMs must be a positive integer.');
     }
+    const requestHistory = this.#request.bind(this);
     this.#history =
       options.history === 'protocol'
         ? Object.freeze({
@@ -268,76 +269,82 @@ export class RuntimeClient implements AsyncDisposable {
               }
               return result;
             },
-            loadSession: async (sessionId, throughSequence, options) => {
-              const records: RuntimeHistorySessionTranscript['records'][number][] = [];
-              let afterSequence: number | undefined;
-              let snapshotSequence = throughSequence;
-              let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
-              for (;;) {
-                options?.signal?.throwIfAborted();
-                const result = await this.#request(
-                  'history/load_session',
-                  {
-                    sessionId,
-                    page: {
-                      ...(afterSequence === undefined ? {} : { afterSequence }),
-                      ...(snapshotSequence === undefined
-                        ? {}
-                        : { throughSequence: snapshotSequence }),
-                    },
-                  },
-                  undefined,
-                  options?.signal,
-                );
-                options?.signal?.throwIfAborted();
-                if (
-                  !('type' in result) ||
-                  result.type !== 'history_session_page' ||
-                  result.session.sessionId !== sessionId ||
-                  (snapshotSequence !== undefined &&
-                    result.session.lastSequence !== snapshotSequence)
-                ) {
-                  throw new RuntimeClientError(
-                    'protocol_error',
-                    'Protocol returned invalid History page.',
-                  );
-                }
-                snapshotSequence = result.session.lastSequence;
-                metadata ??= {
-                  session: result.session,
-                  interactionMode: result.interactionMode,
-                  recovery: result.recovery,
-                };
-                let previous = afterSequence ?? 0;
-                for (const record of result.records) {
-                  if (record.sequence <= previous || record.sequence > snapshotSequence)
-                    throw new RuntimeClientError(
-                      'protocol_error',
-                      'History records are out of sequence.',
-                    );
-                  previous = record.sequence;
-                }
-                records.push(...result.records);
-                if (result.nextCursor === undefined)
-                  return {
-                    ...metadata,
-                    records,
-                    events: records.flatMap((record) => record.events),
-                  };
-                if (
-                  result.nextCursor !== previous ||
-                  result.nextCursor <= (afterSequence ?? 0) ||
-                  result.nextCursor >= snapshotSequence
-                )
-                  throw new RuntimeClientError(
-                    'protocol_error',
-                    'History pagination did not advance.',
-                  );
-                afterSequence = result.nextCursor;
-              }
-            },
+            loadSession: (sessionId, throughSequence, options) =>
+              loadTranscript('history/load_session', { sessionId }, throughSequence, options),
+            loadChildSession: (parentSessionId, childSessionId, throughSequence, options) =>
+              loadTranscript(
+                'history/load_child_session',
+                { parentSessionId, childSessionId },
+                throughSequence,
+                options,
+              ),
           } satisfies RuntimeHistoryClient)
         : options.history;
+
+    async function loadTranscript(
+      method: 'history/load_session' | 'history/load_child_session',
+      identity:
+        | { readonly sessionId: string }
+        | { readonly parentSessionId: string; readonly childSessionId: string },
+      throughSequence?: number,
+      options?: { readonly signal?: AbortSignal },
+    ): Promise<RuntimeHistorySessionTranscript> {
+      const sessionId = 'sessionId' in identity ? identity.sessionId : identity.childSessionId;
+      const records: RuntimeHistorySessionTranscript['records'][number][] = [];
+      let afterSequence: number | undefined;
+      let snapshotSequence = throughSequence;
+      let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
+      for (;;) {
+        options?.signal?.throwIfAborted();
+        const result = await requestHistory(
+          method,
+          {
+            ...identity,
+            page: {
+              ...(afterSequence === undefined ? {} : { afterSequence }),
+              ...(snapshotSequence === undefined ? {} : { throughSequence: snapshotSequence }),
+            },
+          },
+          undefined,
+          options?.signal,
+        );
+        options?.signal?.throwIfAborted();
+        if (
+          !('type' in result) ||
+          result.type !== 'history_session_page' ||
+          result.session.sessionId !== sessionId ||
+          (snapshotSequence !== undefined && result.session.lastSequence !== snapshotSequence)
+        ) {
+          throw new RuntimeClientError('protocol_error', 'Protocol returned invalid History page.');
+        }
+        snapshotSequence = result.session.lastSequence;
+        metadata ??= {
+          session: result.session,
+          interactionMode: result.interactionMode,
+          recovery: result.recovery,
+        };
+        let previous = afterSequence ?? 0;
+        for (const record of result.records) {
+          if (record.sequence <= previous || record.sequence > snapshotSequence)
+            throw new RuntimeClientError('protocol_error', 'History records are out of sequence.');
+          previous = record.sequence;
+        }
+        records.push(...result.records);
+        if (result.nextCursor === undefined)
+          return {
+            ...metadata,
+            records,
+            events: records.flatMap((record) => record.events),
+          };
+        if (
+          result.nextCursor !== previous ||
+          result.nextCursor <= (afterSequence ?? 0) ||
+          result.nextCursor >= snapshotSequence
+        )
+          throw new RuntimeClientError('protocol_error', 'History pagination did not advance.');
+        afterSequence = result.nextCursor;
+      }
+    }
   }
 
   get snapshotStore(): RuntimeSnapshotStore {
@@ -871,6 +878,7 @@ export class RuntimeClient implements AsyncDisposable {
       | 'history/list_sessions'
       | 'history/list_events'
       | 'history/load_session'
+      | 'history/load_child_session'
       | RuntimeProtocolAppMethod
       | import('@kite-ai/runtime-protocol').RuntimeProtocolServerControlMethod,
     params: unknown,

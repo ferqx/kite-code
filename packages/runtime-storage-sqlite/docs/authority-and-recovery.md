@@ -28,6 +28,12 @@ recovery.inspect 只读 authority、pending 与 unknown effects；reconcile 绑�
 
 规范见[App Server 与持久会话](../../../docs/active/app-server-local-runtime.md)、[恢复边界](../../../docs/active/runtime-authority-boundary.md)。验证：[authority](../test/isolated/kite-session-execution-authority.test.ts)、[effects](../test/kite-session-effects.test.ts)、[run recovery](../test/run-recovery.test.ts)。
 
+## Agent interrupt 持久边界
+
+未发布的 Store13 专用 `agent_interrupt_intents` 表只保存来源命令回执绑定的停止请求、固定目标身份和目标/父 owner 的处理收据；活任务仍由原 Session State、Run 索引、child intent 和 execution authority 管理。来源受理在同一事务检查直系父子血缘、Workspace/project/digest、准确 Tool lease/Run/attempt 和目标当前 Run/task/generation。目标处理必须在自己的 Session owner 下确认同一 Run/task，清理已确认才可结算为 stopped；Run 或 effect 清理未知保持 unknown。
+
+尚未激活的 revision 0 child 使用原父 child intent 的任务及 tool event，不创建假的目标 Run/generation。该 pending 意图与 child 预算激活/Run insert 在 Store writer 下互斥；父 owner 以原 `task_cancel` 结算事实关闭它。全局目标索引只提供启动恢复候选 ID，不授予执行权。Store12→13 候选转换增加空表并保留旧 Session ID、Event、History；Store10/11 原布局不改。
+
 ## 清理确认与恢复命令
 
 同一服务失权后先等待本地执行清理，再用原 generation 对应的新 authority revision 确认 cleanup；确认后仍保持 recovery_required，普通读取不解除保护。没有完成的 Provider 生命周期或仍 dispatching 的模型不能形成确认。明确恢复使用 commitRecoveryDecision，在同一 writer 事务内核对 authority revision、业务 revision、cleanupConfirmed 和 effect 状态；仅改变执行权并保存命令回执，不改业务快照、事件或旧结果。过期请求拒绝，回执可只读查询。无第二份恢复状态、启动扫描或格式兼容分支。

@@ -81,6 +81,8 @@ function createFixture(options: { operationMismatch?: boolean; rejectCompletion?
   let invocationOrdinal = 0;
   let observedOperationId: string | undefined;
   let observedModel: unknown;
+  let plannedInputTokens: number | undefined;
+  let surfaceMessageCount: number | undefined;
   const source: ModelResponseSource = Object.freeze({
     attempt: async (input: Parameters<ModelResponseSource['attempt']>[0]) => {
       sourceCalls += 1;
@@ -97,7 +99,10 @@ function createFixture(options: { operationMismatch?: boolean; rejectCompletion?
     },
   });
   const artifacts: ModelArtifactWriter = {
-    writeSurface: () => artifactRef('model_surface'),
+    writeSurface: (surface) => {
+      surfaceMessageCount = surface.request.messages.length;
+      return artifactRef('model_surface');
+    },
     writeResponse: () => artifactRef('model_response'),
   };
   const gateway = new ModelInvocationGateway({
@@ -110,11 +115,28 @@ function createFixture(options: { operationMismatch?: boolean; rejectCompletion?
     },
     now: () => 2_000,
     sleep: async () => {},
+    planResource: (_state, input) => {
+      plannedInputTokens = input.inputTokens;
+      return {
+        budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+        preparationEvents: [],
+        ...(input.requestedMaxOutputTokens
+          ? { maxOutputTokens: input.requestedMaxOutputTokens }
+          : {}),
+      };
+    },
   });
   return {
     gateway,
     persistence: persistence({ rejectCompletion: options.rejectCompletion }),
-    counts: () => ({ operationCalls, sourceCalls, observedOperationId, observedModel }),
+    counts: () => ({
+      operationCalls,
+      sourceCalls,
+      observedOperationId,
+      observedModel,
+      plannedInputTokens,
+      surfaceMessageCount,
+    }),
   };
 }
 
@@ -210,5 +232,75 @@ describe('Builtin subagent model effect', () => {
     ).rejects.toThrow('acknowledgement was rejected');
     expect(result).toBeUndefined();
     expect(fixture.counts()).toMatchObject({ operationCalls: 1, sourceCalls: 1 });
+  });
+
+  test('binds prepared Agent mail to the Gateway invocation and budgets the exact compiled Surface', async () => {
+    const fixture = createFixture();
+    const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
+    const admission: Array<{ invocationId: string; preparationId: string; eventTypes: string[] }> =
+      [];
+    let preparedMessages: readonly import('@kite-ai/builtin-runtime/model').BaseMessage[] = [];
+    const result = await coordinator.executeSubagentModelStep({
+      ...baseInput(fixture),
+      persistence: {
+        ...fixture.persistence,
+        persistAdmission: async ({ invocationId, events, mailPreparation }) => {
+          admission.push({
+            invocationId,
+            preparationId: mailPreparation.preparationId,
+            eventTypes: events.map((event) => event.type),
+          });
+          return true;
+        },
+      },
+      childIdentity: { agentId: 'child-agent', taskId: 'child-task' },
+      prepareAgentMail: async ({ invocationId, existingMessages, childIdentity }) => {
+        expect(invocationId).toBe('subagent-invocation-1');
+        expect(existingMessages).toHaveLength(1);
+        expect(childIdentity).toEqual({ agentId: 'child-agent', taskId: 'child-task' });
+        return {
+          frames: [
+            {
+              kind: 'agent_message',
+              trust: 'untrusted_agent',
+              modelRole: 'user',
+              messageId: 'mail-1',
+              content:
+                '<agent_message message_id="mail-1">escaped &lt;guidance&gt;</agent_message>',
+            },
+          ],
+          preparationId: 'batch-1',
+        };
+      },
+      resolvePreparedStep: async (messages) => {
+        preparedMessages = messages;
+        return {
+          provenance: baseInput(fixture).provenance,
+          estimatedInputTokens: 72,
+          maxOutputTokens: 64,
+        };
+      },
+    });
+    expect(admission).toEqual([
+      {
+        invocationId: 'subagent-invocation-1',
+        preparationId: 'batch-1',
+        eventTypes: ['model.invocation_prepared'],
+      },
+    ]);
+    expect(preparedMessages.at(-1)).toMatchObject({
+      type: 'human',
+      id: 'mail-1',
+      name: 'agent_message',
+      response_metadata: { source: 'agent_message', trust: 'untrusted_agent' },
+    });
+    expect(result.appendedAgentMail).toHaveLength(1);
+    expect(result.appendedAgentMail?.[0]?.content).toContain('&lt;guidance&gt;');
+    expect(fixture.counts()).toMatchObject({
+      operationCalls: 1,
+      sourceCalls: 1,
+      plannedInputTokens: 72,
+      surfaceMessageCount: 2,
+    });
   });
 });

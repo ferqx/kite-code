@@ -1,3 +1,4 @@
+import { childThreadIdForToolAttempt, sameChildTaskArtifactRef } from '../../child-session';
 import type { KernelEvent } from '../../events';
 import {
   asJsonObject,
@@ -15,9 +16,28 @@ import type {
   AgentLoadedCapabilityState,
   AgentSandboxPreparationArtifactRef,
   AgentState,
+  AgentSubagentCheckpointArtifactRef,
   AgentSubagentHandleArtifactRef,
   AgentSubagentTaskArtifactRef,
 } from '../../state';
+
+function checkpointRef(value: unknown): AgentSubagentCheckpointArtifactRef | undefined {
+  if (value === undefined) return undefined;
+  const ref = recordField({ ref: value }, 'ref');
+  if (
+    !ref ||
+    Object.keys(ref).sort().join(',') !== 'artifactId,byteLength,integrityIdentifier,kind' ||
+    ref.kind !== 'subagent_checkpoint' ||
+    typeof ref.artifactId !== 'string' ||
+    !/^pa_[a-f0-9]{64}$/u.test(ref.artifactId) ||
+    typeof ref.integrityIdentifier !== 'string' ||
+    !/^sha256:[a-f0-9]{64}$/u.test(ref.integrityIdentifier) ||
+    !Number.isSafeInteger(ref.byteLength) ||
+    Number(ref.byteLength) <= 0
+  )
+    throw new Error('Background sub-agent checkpoint reference is invalid.');
+  return ref as unknown as AgentSubagentCheckpointArtifactRef;
+}
 
 function keyedBindings(value: unknown): Readonly<Record<string, AgentCapabilityBindingState>> {
   const entries = Array.isArray(value)
@@ -114,6 +134,15 @@ function isCapabilityEvent(type: KernelEvent['type']): boolean {
     case 'capability.subagent_observation_recorded':
     case 'capability.subagent_cleanup_started':
     case 'capability.subagent_cleanup_completed':
+    case 'subagent.child_session_intended':
+    case 'subagent.child_session_adopted':
+    case 'subagent.child_approval_proxy_changed':
+    case 'subagent.child_recovery_required':
+    case 'subagent.child_terminal_sealed':
+    case 'subagent.child_terminal_imported':
+    case 'subagent.child_creation_failed':
+    case 'subagent.child_pre_dispatch_cancelled':
+    case 'subagent.child_task_input_admitted':
     case 'subagent.background_result_persisted':
     case 'capability.execution_result_recorded':
     case 'capability.execution_succeeded':
@@ -185,6 +214,252 @@ export function reduceCapabilityState(state: AgentState, event: KernelEvent): Ag
     };
   }
 
+  if (event.type === 'subagent.child_session_intended') {
+    const expected = childThreadIdForToolAttempt({
+      parentSessionId: event.parentSessionId,
+      parentInvocationId: event.parentInvocationId,
+      parentToolCallId: event.originToolCallId,
+      attempt: event.attempt,
+    });
+    if (event.parentSessionId !== state.session.threadId || event.childThreadId !== expected)
+      throw new Error('Child Session intent identity is invalid.');
+    return updateCapabilityInvocation(state, event.parentInvocationId, (invocation) => {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      if (
+        invocation.toolCallId !== event.originToolCallId ||
+        state.tools.calls[event.originToolCallId]?.createdAtTurnId !== event.originTurnId ||
+        lifecycle?.status !== 'intent_recorded' ||
+        lifecycle.attempt !== event.attempt ||
+        lifecycle.childInvocationId !== event.childInvocationId ||
+        lifecycle.taskArtifact.integrityIdentifier !== event.taskArtifactDigest ||
+        !sameChildTaskArtifactRef(lifecycle.taskArtifact, event.taskArtifactRef)
+      )
+        throw new Error('Child Session intent has no exact parent Tool authority.');
+      const childSession = {
+        childThreadId: event.childThreadId,
+        grantDigest: event.grantDigest,
+        taskArtifactRef: event.taskArtifactRef,
+        taskArtifactDigest: event.taskArtifactDigest,
+        taskTextDigest: event.taskTextDigest,
+        originRunId: event.originRunId,
+        originTurnId: event.originTurnId,
+        originToolCallId: event.originToolCallId,
+        disposition: event.disposition,
+        role: event.role,
+        fundingRunId: event.fundingRunId,
+        delegatedReservationId: event.delegatedReservationId,
+        delegatedUpperBoundDigest: event.delegatedUpperBoundDigest,
+        deadlineAt: event.deadlineAt,
+      } as const;
+      if (lifecycle.childSession) {
+        if (JSON.stringify(lifecycle.childSession) === JSON.stringify(childSession))
+          return invocation;
+        throw new Error('Child Session intent replay conflicts.');
+      }
+      return { ...invocation, subagentProviderLifecycle: { ...lifecycle, childSession } };
+    });
+  }
+
+  if (event.type === 'subagent.child_session_adopted') {
+    const expected = childThreadIdForToolAttempt({
+      parentSessionId: event.parentSessionId,
+      parentInvocationId: event.parentInvocationId,
+      parentToolCallId: event.parentToolCallId,
+      attempt: event.attempt,
+    });
+    if (state.session.threadId !== expected)
+      throw new Error('Child Session adoption target is invalid.');
+    const origin = {
+      parentSessionId: event.parentSessionId,
+      parentInvocationId: event.parentInvocationId,
+      parentToolCallId: event.parentToolCallId,
+      attempt: event.attempt,
+      childInvocationId: event.childInvocationId,
+      grantDigest: event.grantDigest,
+      fundingRunId: event.fundingRunId,
+      delegatedReservationId: event.delegatedReservationId,
+      delegatedUpperBoundDigest: event.delegatedUpperBoundDigest,
+      deadlineAt: event.deadlineAt,
+    } as const;
+    const prebound = state.childSessionOrigin;
+    if (!prebound) throw new Error('Child Session adoption has no Store-created origin.');
+    if (
+      Object.entries(origin).some(([key, value]) => prebound[key as keyof typeof origin] !== value)
+    )
+      throw new Error('Child Session adoption conflicts with the Store origin.');
+    return state;
+  }
+
+  if (event.type === 'subagent.child_recovery_required') {
+    if (state.session.threadId !== event.parentSessionId)
+      throw new Error('Child recovery diagnostic parent identity is invalid.');
+    return updateCapabilityInvocation(state, event.parentInvocationId, (invocation) => {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const link = lifecycle?.childSession;
+      if (
+        !link ||
+        lifecycle.childInvocationId !== event.childInvocationId ||
+        lifecycle.attempt !== event.attempt ||
+        invocation.toolCallId !== event.originToolCallId ||
+        link.childThreadId !== event.childThreadId ||
+        link.grantDigest !== event.grantDigest ||
+        link.terminalImport ||
+        lifecycle.backgroundResult
+      )
+        throw new Error('Child recovery diagnostic has no pending exact intent.');
+      const diagnostic = {
+        diagnosticCode: event.diagnosticCode,
+        observedAt: event.observedAt,
+      } as const;
+      if (link.recoveryDiagnostic) {
+        if (link.recoveryDiagnostic.diagnosticCode === diagnostic.diagnosticCode) return invocation;
+        throw new Error('Child recovery diagnostic conflicts with prior evidence.');
+      }
+      return {
+        ...invocation,
+        subagentProviderLifecycle: {
+          ...lifecycle,
+          childSession: { ...link, recoveryDiagnostic: diagnostic },
+        },
+      };
+    });
+  }
+
+  if (event.type === 'subagent.child_task_input_admitted') {
+    const origin = state.childSessionOrigin;
+    if (
+      !origin ||
+      origin.childInvocationId !== event.childInvocationId ||
+      origin.grantDigest !== event.grantDigest ||
+      origin.taskArtifactDigest !== event.taskDigest ||
+      origin.taskTextDigest !== event.taskTextDigest ||
+      !sameChildTaskArtifactRef(origin.taskArtifactRef, event.taskArtifactRef)
+    )
+      throw new Error('Child task input has no exact admitted private Artifact.');
+    if (origin.taskInputAdmitted) return state;
+    return { ...state, childSessionOrigin: { ...origin, taskInputAdmitted: true } };
+  }
+
+  if (event.type === 'subagent.child_terminal_sealed') {
+    const origin = state.childSessionOrigin;
+    const cleanCancellation =
+      event.status === 'cancelled' &&
+      event.cleanupConfirmed === true &&
+      state.turn.status === 'aborted' &&
+      state.turn.abortCause === 'user' &&
+      !state.terminalOutcome;
+    const unknownRecovery =
+      event.status === 'unknown' &&
+      event.cleanupConfirmed === false &&
+      state.terminalOutcome?.status === 'unknown' &&
+      state.terminalOutcome.knownExternalEffects === 'unknown' &&
+      state.turn.status !== 'active' &&
+      (Object.values(state.modelInvocations).some(
+        (invocation) => invocation.dispatchCertainty === 'unknown',
+      ) ||
+        Object.values(state.capabilities.invocations).some(
+          (invocation) => invocation.status === 'unknown',
+        ));
+    if (
+      !origin ||
+      (!state.terminalOutcome && !cleanCancellation) ||
+      (!unknownRecovery && event.cleanupConfirmed !== true) ||
+      (event.status === 'unknown' && !unknownRecovery) ||
+      !event.terminalReceiptId
+    )
+      throw new Error('Child Session terminal seal requires its admitted origin and cleanup.');
+    const terminal = {
+      status: event.status,
+      resultRef: event.resultRef,
+      cleanupConfirmed: event.cleanupConfirmed,
+      cancelRequested: event.cancelRequested,
+      terminalReceiptId: event.terminalReceiptId,
+      sealedRevision: state.revision + 1,
+    } as const;
+    if (origin.terminal) {
+      if (JSON.stringify(origin.terminal) === JSON.stringify(terminal)) return state;
+      throw new Error('Child Session terminal seal conflicts.');
+    }
+    return { ...state, childSessionOrigin: { ...origin, terminal } };
+  }
+
+  if (event.type === 'subagent.child_terminal_imported') {
+    return updateCapabilityInvocation(state, event.parentInvocationId, (invocation) => {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const linked = lifecycle?.childSession;
+      if (
+        !linked ||
+        lifecycle.childInvocationId !== event.childInvocationId ||
+        linked.childThreadId !== event.childThreadId ||
+        state.tools.calls[linked.originToolCallId]?.result?.resultMeta?.taskId !==
+          event.childInvocationId ||
+        state.tools.calls[linked.originToolCallId]?.result?.resultMeta?.taskStatus !== 'running'
+      )
+        throw new Error('Child Session terminal import has no accepted parent Tool claim.');
+      const terminalImport = {
+        terminalRevision: event.terminalRevision,
+        terminalReceiptDigest: event.terminalReceiptDigest,
+        status: event.status,
+        resultRef: event.resultRef,
+      } as const;
+      if (linked.terminalImport) {
+        if (JSON.stringify(linked.terminalImport) === JSON.stringify(terminalImport))
+          return invocation;
+        throw new Error('Child Session terminal import conflicts.');
+      }
+      return {
+        ...invocation,
+        subagentProviderLifecycle: {
+          ...lifecycle,
+          childSession: { ...linked, terminalImport },
+        },
+      };
+    });
+  }
+
+  if (
+    event.type === 'subagent.child_creation_failed' ||
+    event.type === 'subagent.child_pre_dispatch_cancelled'
+  ) {
+    return updateCapabilityInvocation(state, event.parentInvocationId, (invocation) => {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const linked = lifecycle?.childSession;
+      if (
+        !linked ||
+        lifecycle.childInvocationId !== event.childInvocationId ||
+        linked.childThreadId !== event.childThreadId ||
+        state.tools.calls[linked.originToolCallId]?.result?.resultMeta?.taskId !==
+          event.childInvocationId ||
+        state.tools.calls[linked.originToolCallId]?.result?.resultMeta?.taskStatus !== 'running'
+      )
+        throw new Error('Child creation failure has no accepted parent Tool claim.');
+      const terminalImport = {
+        terminalRevision: 0,
+        terminalReceiptDigest:
+          event.type === 'subagent.child_creation_failed'
+            ? event.failureReceiptDigest
+            : event.terminalReceiptDigest,
+        status:
+          event.type === 'subagent.child_creation_failed'
+            ? ('failed' as const)
+            : ('cancelled' as const),
+        resultRef: event.resultRef,
+      };
+      if (linked.terminalImport) {
+        if (JSON.stringify(linked.terminalImport) === JSON.stringify(terminalImport))
+          return invocation;
+        throw new Error('Child creation failure conflicts with prior terminal import.');
+      }
+      return {
+        ...invocation,
+        subagentProviderLifecycle: {
+          ...lifecycle,
+          childSession: { ...linked, terminalImport },
+        },
+      };
+    });
+  }
+
   if (event.type === 'subagent.background_result_persisted') {
     const taskId = nonEmptyStringField(payload, 'taskId');
     const notificationId = nonEmptyStringField(payload, 'notificationId');
@@ -209,20 +484,27 @@ export function reduceCapabilityState(state: AgentState, event: KernelEvent): Ag
       return (
         invocation.toolCallId === originToolCallId &&
         state.tools.calls[originToolCallId]?.createdAtTurnId === originTurnId &&
-        lifecycle?.status === 'cleanup_completed' &&
-        lifecycle.childInvocationId === taskId &&
-        lifecycle.attempt === attempt
+        (lifecycle?.childSession
+          ? lifecycle.childSession.terminalImport?.resultRef.integrityIdentifier ===
+              artifactIntegrityIdentifier &&
+            lifecycle.childSession.originRunId === originRunId &&
+            lifecycle.childSession.terminalImport.status !== undefined
+          : lifecycle?.status === 'cleanup_completed') &&
+        lifecycle?.childInvocationId === taskId &&
+        lifecycle?.attempt === attempt
       );
     });
     if (matches.length !== 1) return state;
     const invocation = matches[0];
     if (!invocation || invocation.subagentProviderLifecycle?.backgroundResult) return state;
     const afterTurn = recordField(payload, 'afterTurn');
+    const admittedCheckpointRef = checkpointRef(payload.checkpointRef);
     const backgroundResult = {
       admissionRevision: state.revision + 1,
       taskId,
       notificationId,
       artifactIntegrityIdentifier,
+      ...(admittedCheckpointRef ? { checkpointRef: admittedCheckpointRef } : {}),
       originRunId,
       originTurnId,
       originToolCallId,

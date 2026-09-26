@@ -720,7 +720,7 @@ function validManifest(value: unknown): value is KiteSessionPreservationManifest
   if (
     !record(value) ||
     !exactKeys(value, ['schema', 'tables']) ||
-    value.schema !== 'kite.session-preservation.schema10.v1' ||
+    value.schema !== 'kite.session-preservation.schema11.v1' ||
     !record(value.tables)
   )
     return false;

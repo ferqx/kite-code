@@ -428,6 +428,24 @@ export const RUNTIME_PROTOCOL_QUERY_SCHEMA_ = z.discriminatedUnion('type', [
   z
     .object({
       schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('list_child_sessions'),
+      sessionId: identifier,
+      limit: safeRevision.min(1).max(100),
+      cursor: z.object({ updatedAtMs: safeRevision, sessionId: identifier }).strict().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
+      type: z.literal('get_child_session_projection'),
+      sessionId: identifier,
+      childSessionId: identifier,
+    })
+    .strict()
+    .refine((value) => value.sessionId !== value.childSessionId),
+  z
+    .object({
+      schema: z.literal('kite.runtime-query.v1'),
       type: z.literal('get_context_status'),
       sessionId: identifier,
     })
@@ -522,6 +540,7 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'history/list_sessions',
   'history/list_events',
   'history/load_session',
+  'history/load_child_session',
   'app/workspace_trust/query',
   'app/workspace_trust/decide',
   'app/provider_model/snapshot',
@@ -644,6 +663,26 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
             .optional(),
         })
         .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('history/load_child_session'),
+      params: z
+        .object({
+          parentSessionId: identifier,
+          childSessionId: identifier,
+          page: z
+            .object({
+              afterSequence: safeRevision.optional(),
+              throughSequence: safeRevision.optional(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict()
+        .refine((value) => value.parentSessionId !== value.childSessionId),
     })
     .strict(),
   ...RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.options.map((method) =>
@@ -1118,6 +1157,39 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
   z
     .object({
       status: z.literal('ok'),
+      queryType: z.literal('list_child_sessions'),
+      childSessions: z
+        .array(
+          z
+            .object({
+              sessionId: identifier,
+              parentSessionId: identifier,
+              agentId: identifier,
+              taskId: identifier,
+              revision: safeRevision,
+              updatedAtMs: safeRevision,
+              displayName: shortText.max(256).optional(),
+            })
+            .strict(),
+        )
+        .max(100),
+      nextChildCursor: z
+        .object({ updatedAtMs: safeRevision, sessionId: identifier })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
+      queryType: z.literal('get_child_session_projection'),
+      revision: safeRevision.optional(),
+      session: RUNTIME_PROTOCOL_SESSION_SCHEMA_,
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('ok'),
       queryType: z.literal('get_context_status'),
       revision: safeRevision.optional(),
       context: contextStatus,
@@ -1231,6 +1303,8 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
       queryType: z.enum([
         'list_sessions',
         'get_session_projection',
+        'list_child_sessions',
+        'get_child_session_projection',
         'get_session_recovery',
         'get_command_receipt',
         'get_context_status',

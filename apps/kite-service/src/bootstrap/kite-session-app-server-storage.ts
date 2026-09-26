@@ -35,7 +35,15 @@ export class KiteAppServerSessionError extends Error {
 }
 
 export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
-  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  /** Exact instance identity that must own internally created child controllers. */
+  readonly hostInstanceId: string;
+  readonly executionClientId: string;
+  readonly executionConnectionGeneration: number;
+  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState> &
+    Pick<
+      KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>['storage'],
+      'agentMailbox' | 'crossSessionQueueMail' | 'currentExecutionGeneration'
+    >;
   readonly artifactStore: KiteSessionRuntimeStorageOwner<
     RuntimeEvent,
     RuntimeState
@@ -45,11 +53,116 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     RuntimeEvent,
     RuntimeState
   >['openHistoryLogs'];
+  readonly readSessionLineage: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readSessionLineage'];
+  readonly listChildSessions: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['listChildSessions'];
+  readonly readChildSession: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readChildSession'];
+  readonly openChildSessionHistoryLogs: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['openChildSessionHistoryLogs'];
+  /** Private D0 admission after the exact parent Tool receipt has committed. */
+  readonly createChildSession: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['createChildSession'];
+  readonly readChildSessionIntent: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readChildSessionIntent'];
+  readonly readPendingAfterTurnChildTerminalSeal: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readPendingAfterTurnChildTerminalSeal'];
+  readonly readChildApprovalProxy: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readChildApprovalProxy'];
+  /** Deterministic Store identity passed through the unique composition root. */
+  readonly childApprovalProxyId: (input: {
+    readonly childThreadId: string;
+    readonly childInteractionId: string;
+    readonly childGeneration: number;
+  }) => string;
+  readonly listPendingChildApprovalProxies: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['listPendingChildApprovalProxies'];
+  readonly listPendingChildSessionIntents: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['listPendingChildSessionIntents'];
+  /** Status-only pre-dispatch proof; Store repeats the full CAS at settlement. */
+  readChildPreDispatchProof(
+    parentSessionId: string,
+    childThreadId: string,
+  ): Readonly<{
+    childRevision: number;
+    ownerStatus: 'idle' | 'active' | 'detached' | 'recovery_required';
+    cleanupConfirmed: boolean;
+  }> | null;
+  readChildExecutionAuthority(
+    parentSessionId: string,
+    childThreadId: string,
+  ): Readonly<{
+    status: 'idle' | 'active' | 'detached' | 'recovery_required';
+    controllerGeneration: number;
+    revision: number;
+    hostInstanceId: string | null;
+    leaseUntilMs: number | null;
+    cleanupConfirmed: boolean;
+  }> | null;
+  readonly readChildSealedGrant: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readChildSealedGrant'];
   admitWorkspace(workspace: AdmittedWorkspace): void;
   listCurrentSessions(
     query?: string,
     limit?: number,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['listSessions']>;
+  /** Startup index only; callers must acquire each source Session before reading mail. */
+  listPendingCrossSessionQueueMailSources(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
+  listPendingCrossSessionTerminalReplyMailSources(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
+  listUnrepliedSettledFollowupTerminalSources(
+    limit: number,
+    after?: { childSessionId: string; submissionId: string },
+  ): ReturnType<
+    KiteSessionRuntimeStorageOwner<
+      RuntimeEvent,
+      RuntimeState
+    >['listUnrepliedSettledFollowupTerminalSources']
+  >;
+  listUnnotifiedAcceptedFollowupReleases(
+    limit: number,
+    after?: { childSessionId: string; submissionId: string },
+  ): ReturnType<
+    KiteSessionRuntimeStorageOwner<
+      RuntimeEvent,
+      RuntimeState
+    >['listUnnotifiedAcceptedFollowupReleases']
+  >;
+  /** TriggerTurn startup index; source owner rechecks each unsettled submission. */
+  listPendingCrossSessionFollowupSources(limit: number, afterSessionId?: string): readonly string[];
+  /** Read-only target index; the target owner rechecks every pending stop intent. */
+  listPendingCrossSessionInterruptTargets(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
   loadCurrentSnapshot(sessionId: string): RuntimeState | null;
   getCurrentSessionModelRoute(
     sessionId: string,
@@ -57,7 +170,10 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
   runWithSessionExecution<Result>(sessionId: string, operation: () => Result): Result;
   reconcileInterruptedSession(
     sessionId: string,
-    recover: (generation: number, assertCurrent: () => boolean) => Promise<void>,
+    recover: (
+      generation: number,
+      assertCurrent: () => boolean,
+    ) => Promise<undefined | 'cleanup_unconfirmed'>,
   ): Promise<void>;
   commitUnownedInteractionMode(
     transaction: RuntimeTransactionInput<RuntimeEvent, RuntimeState>,
@@ -85,6 +201,7 @@ interface OwnedExecution {
 
 export function createKiteSessionAppServerStorage(input: {
   readonly target: KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>;
+  readonly childApprovalProxyId: KiteSessionAppServerStorageOwner['childApprovalProxyId'];
   readonly hostInstanceId: string;
   readonly clientId?: string;
   readonly connectionGeneration?: number;
@@ -263,7 +380,10 @@ export function createKiteSessionAppServerStorage(input: {
   const recovering = new Map<string, Promise<void>>();
   const reconcileInterruptedSession = (
     sessionId: string,
-    recover: (generation: number, assertCurrent: () => boolean) => Promise<void>,
+    recover: (
+      generation: number,
+      assertCurrent: () => boolean,
+    ) => Promise<undefined | 'cleanup_unconfirmed'>,
   ): Promise<void> => {
     const pending = recovering.get(sessionId);
     if (pending) return pending;
@@ -340,7 +460,7 @@ export function createKiteSessionAppServerStorage(input: {
       );
       let cleaned = false;
       try {
-        await target.runWithExecution(execution.handle, () =>
+        const completion = await target.runWithExecution(execution.handle, () =>
           recover(execution.record.controllerGeneration, () => {
             const observed = target.authority.read(sessionId);
             return (
@@ -352,7 +472,7 @@ export function createKiteSessionAppServerStorage(input: {
             );
           }),
         );
-        cleaned = true;
+        cleaned = completion !== 'cleanup_unconfirmed';
       } finally {
         const observed = target.authority.read(sessionId);
         if (
@@ -509,7 +629,7 @@ export function createKiteSessionAppServerStorage(input: {
     },
   } satisfies RuntimeStorage<RuntimeEvent, RuntimeState>['recoveryIdentities']);
 
-  const storage: RuntimeStorage<RuntimeEvent, RuntimeState> = Object.freeze({
+  const storage: KiteSessionAppServerStorageOwner['storage'] = Object.freeze({
     ...target.storage,
     transactions,
     recoveryIdentities,
@@ -588,12 +708,75 @@ export function createKiteSessionAppServerStorage(input: {
   };
 
   return Object.freeze({
+    hostInstanceId: input.hostInstanceId,
+    executionClientId: clientId,
+    executionConnectionGeneration: connectionGeneration,
     storage,
     artifactStore: target.artifactStore,
     directory: target.directory,
     openHistoryLogs: target.openHistoryLogs,
+    readSessionLineage: (sessionId) => target.readSessionLineage(sessionId),
+    listChildSessions: (parentSessionId, limit, cursor) =>
+      target.listChildSessions(parentSessionId, limit, cursor),
+    readChildSession: (parentSessionId, childSessionId) =>
+      target.readChildSession(parentSessionId, childSessionId),
+    openChildSessionHistoryLogs: (parentSessionId, childSessionId, currentEventTypes) =>
+      target.openChildSessionHistoryLogs(parentSessionId, childSessionId, currentEventTypes),
+    createChildSession: (creation) => target.createChildSession(creation),
+    readChildSessionIntent: (childThreadId) => target.readChildSessionIntent(childThreadId),
+    readPendingAfterTurnChildTerminalSeal: (parentSessionId, childThreadId) =>
+      target.readPendingAfterTurnChildTerminalSeal(parentSessionId, childThreadId),
+    readChildApprovalProxy: (parentSessionId, proxyInteractionId) =>
+      target.readChildApprovalProxy(parentSessionId, proxyInteractionId),
+    childApprovalProxyId: input.childApprovalProxyId,
+    listPendingChildApprovalProxies: (parentSessionId, limit, afterProxyInteractionId) =>
+      target.listPendingChildApprovalProxies(parentSessionId, limit, afterProxyInteractionId),
+    listPendingChildSessionIntents: (parentSessionId, limit, cursor) =>
+      target.listPendingChildSessionIntents(parentSessionId, limit, cursor),
+    readChildPreDispatchProof: (parentSessionId, childThreadId) => {
+      const lineage = target.readSessionLineage(childThreadId);
+      if (!lineage) return null;
+      if (lineage.parentSessionId !== parentSessionId)
+        throw new Error('Child pre-dispatch proof belongs to another parent Session.');
+      const state = target.storage.sessions.loadSnapshot<RuntimeState>(childThreadId);
+      if (!state) throw new Error('Child pre-dispatch State is unavailable.');
+      const authority = target.authority.read(childThreadId);
+      return {
+        childRevision: state.revision,
+        ownerStatus: authority.status,
+        cleanupConfirmed: authority.cleanupConfirmed,
+      };
+    },
+    readChildExecutionAuthority: (parentSessionId, childThreadId) => {
+      const lineage = target.readSessionLineage(childThreadId);
+      if (!lineage) return null;
+      if (lineage.parentSessionId !== parentSessionId)
+        throw new Error('Child execution authority belongs to another parent Session.');
+      const authority = target.authority.read(childThreadId);
+      return {
+        status: authority.status,
+        controllerGeneration: authority.controllerGeneration,
+        revision: authority.revision,
+        hostInstanceId: authority.hostInstanceId,
+        leaseUntilMs: authority.leaseUntilMs,
+        cleanupConfirmed: authority.cleanupConfirmed,
+      };
+    },
+    readChildSealedGrant: (childThreadId) => target.readChildSealedGrant(childThreadId),
     admitWorkspace,
     listCurrentSessions: (query = '', limit = 50) => storage.sessions.listSessions(query, limit),
+    listPendingCrossSessionQueueMailSources: (limit, afterSessionId) =>
+      target.listPendingCrossSessionQueueMailSources(limit, afterSessionId),
+    listPendingCrossSessionTerminalReplyMailSources: (limit, afterSessionId) =>
+      target.listPendingCrossSessionTerminalReplyMailSources(limit, afterSessionId),
+    listUnrepliedSettledFollowupTerminalSources: (limit, after) =>
+      target.listUnrepliedSettledFollowupTerminalSources(limit, after),
+    listUnnotifiedAcceptedFollowupReleases: (limit, after) =>
+      target.listUnnotifiedAcceptedFollowupReleases(limit, after),
+    listPendingCrossSessionFollowupSources: (limit, afterSessionId) =>
+      target.listPendingCrossSessionFollowupSources(limit, afterSessionId),
+    listPendingCrossSessionInterruptTargets: (limit, afterSessionId) =>
+      target.listPendingCrossSessionInterruptTargets(limit, afterSessionId),
     loadCurrentSnapshot: (sessionId) => storage.sessions.loadSnapshot<RuntimeState>(sessionId),
     getCurrentSessionModelRoute: (sessionId) => storage.sessions.getSessionModelRoute(sessionId),
     runWithSessionExecution,

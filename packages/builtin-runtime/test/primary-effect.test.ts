@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   BuiltinModelEffectCoordinator,
+  type BuiltinModelEvent,
   type BuiltinModelOperationAttempt,
   type BuiltinModelOperationExecutionPort,
   type BuiltinPrimaryModelCompletion,
   type BuiltinPrimaryModelContextMetrics,
   type BuiltinPrimaryModelState,
   createChatModel,
+  humanMessage,
   type ModelArtifactWriter,
   ModelInvocationGateway,
   type ModelInvocationPersistence,
@@ -119,10 +121,12 @@ function createGatewayFixture() {
   let invocationOrdinal = 0;
   let purpose: string | undefined;
   let providerOptions: unknown;
+  let surfaceMessages: unknown;
   const source: ModelResponseSource = Object.freeze({
     attempt: async (input: ModelResponseSourceAttemptInput) => {
       sourceCalls += 1;
       providerOptions = input.surface.request.providerOptions;
+      surfaceMessages = input.surface.request.messages;
       return successfulOutcome();
     },
   });
@@ -154,6 +158,7 @@ function createGatewayFixture() {
     gateway,
     counts: () => ({ operationCalls, sourceCalls, purpose }),
     providerOptions: () => providerOptions,
+    surfaceMessages: () => surfaceMessages,
   };
 }
 
@@ -188,6 +193,114 @@ function baseInput(state = stateWithHistory()) {
 }
 
 describe('Builtin primary Model effect execution', () => {
+  test('persists the accepted first-attempt timeout before one Provider dispatch', async () => {
+    const fixture = createGatewayFixture();
+    const state = stateWithHistory();
+    const eventBatches: string[][] = [];
+    const limits: Array<{
+      perAttemptTimeoutMs: number;
+      totalTimeBudgetMs: number;
+      maxAttempts: number;
+    }> = [];
+    const boundedPersistence: ModelInvocationPersistence<
+      BuiltinPrimaryModelState,
+      BuiltinModelEvent
+    > = {
+      getState: () => state,
+      persistEvents: async (events) => {
+        eventBatches.push(events.map((event) => event.type));
+        for (const event of events) {
+          if (event.type === 'model.invocation_prepared')
+            limits.push(event.limits as (typeof limits)[number]);
+        }
+        return true;
+      },
+    };
+    const result = await new BuiltinModelEffectCoordinator(
+      fixture.gateway,
+    ).executePrimaryModelEffect({
+      ...baseInput(state),
+      firstAttemptTimeoutMs: 250,
+      persistence: boundedPersistence,
+    });
+    expect(result.kind).toBe('completed');
+    expect(limits).toEqual([{ maxAttempts: 1, perAttemptTimeoutMs: 250, totalTimeBudgetMs: 250 }]);
+    expect(
+      eventBatches.findIndex((batch) => batch.includes('model.invocation_prepared')),
+    ).toBeLessThan(
+      eventBatches.findIndex((batch) => batch.includes('model.invocation_attempt_started')),
+    );
+    expect(fixture.counts().sourceCalls).toBe(1);
+  });
+
+  test('rejects an unbounded funded first attempt before Provider dispatch', async () => {
+    const fixture = createGatewayFixture();
+    const state = stateWithHistory();
+    await expect(
+      new BuiltinModelEffectCoordinator(fixture.gateway).executePrimaryModelEffect({
+        ...baseInput(state),
+        firstAttemptTimeoutMs: 0,
+        persistence: persistence(state),
+      }),
+    ).rejects.toThrow('finite positive timeout');
+    expect(fixture.counts().sourceCalls).toBe(0);
+  });
+
+  test('empty Agent mail keeps the original model projection and budget path', async () => {
+    const fixture = createGatewayFixture();
+    const state = stateWithHistory();
+    const result = await new BuiltinModelEffectCoordinator(
+      fixture.gateway,
+    ).executePrimaryModelEffect({
+      ...baseInput(state),
+      config: {
+        ...CONFIG,
+        modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
+      },
+      persistence: persistence(state),
+      prepareAgentMail: async () => ({ frames: [] }),
+    });
+    expect(result.kind).toBe('completed');
+    expect(fixture.counts().sourceCalls).toBe(1);
+  });
+  test('binds one prepared Agent frame to the exact primary invocation before dispatch', async () => {
+    const fixture = createGatewayFixture();
+    const state = stateWithHistory();
+    let admissions = 0;
+    const result = await new BuiltinModelEffectCoordinator(
+      fixture.gateway,
+    ).executePrimaryModelEffect({
+      ...baseInput(state),
+      persistence: {
+        ...persistence(state),
+        persistAdmission: async ({ invocationId, events, mailPreparation }) => {
+          admissions += 1;
+          expect(invocationId).toBe('primary-invocation-1');
+          expect(mailPreparation.preparationId).toBe('mailprep_test');
+          expect(events.some((event) => event.type === 'model.invocation_prepared')).toBe(true);
+          return true;
+        },
+      },
+      prepareAgentMail: async ({ invocationId }) => {
+        expect(invocationId).toBe('primary-invocation-1');
+        return {
+          frames: [
+            humanMessage({
+              id: 'mail-1',
+              name: 'agent_message',
+              content: '<agent_message>mail marker</agent_message>',
+              response_metadata: { source: 'agent_message' },
+            }),
+          ],
+          preparationId: 'mailprep_test',
+        };
+      },
+    });
+    expect(result.kind).toBe('completed');
+    expect(admissions).toBe(1);
+    expect(fixture.counts().sourceCalls).toBe(1);
+    expect(JSON.stringify(fixture.surfaceMessages())).toContain('mail marker');
+  });
   test('returns automatic compaction before Gateway, operation, or source dispatch', async () => {
     const fixture = createGatewayFixture();
     const coordinator = new BuiltinModelEffectCoordinator(fixture.gateway);
@@ -231,6 +344,14 @@ describe('Builtin primary Model effect execution', () => {
         ...baseInput(),
         resourceAdmission: { inputTokens: 1, maxOutputTokens: 20 },
         persistence: persistence(stateWithHistory()),
+      }),
+    ).rejects.toThrow('projection changed after resource admission');
+    await expect(
+      coordinator.executePrimaryModelEffect({
+        ...baseInput(),
+        resourceAdmission: { inputTokens: 1, maxOutputTokens: 20 },
+        persistence: persistence(stateWithHistory()),
+        prepareAgentMail: async () => ({ frames: [] }),
       }),
     ).rejects.toThrow('projection changed after resource admission');
     expect(fixture.counts()).toEqual({ operationCalls: 0, sourceCalls: 0, purpose: undefined });

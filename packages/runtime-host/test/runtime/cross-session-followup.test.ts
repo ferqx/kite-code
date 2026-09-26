@@ -1,0 +1,624 @@
+import { describe, expect, test } from 'bun:test';
+import { createInitialAgentState } from '@kite-ai/agent-kernel';
+import { getAgentPhase } from '@kite-ai/runtime-contract';
+import {
+  planCrossSessionFirstModelReplacement,
+  planCrossSessionFollowupSlotAcquisition,
+  planCrossSessionTriggerTurnBackup,
+} from '../../src/kernel-adapter/cross-session-followup';
+import { getActivePlanning } from '../../src/kernel-adapter/initial';
+import {
+  committedResourceUsage,
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
+  reduceResourceBudgetState,
+} from '../../src/kernel-adapter/resource-budget';
+
+const startedAt = '2026-09-25T00:00:00.000Z';
+const deadlineAt = '2026-09-25T00:03:00.000Z';
+const nowMs = Date.parse('2026-09-25T00:00:10.000Z');
+
+function initial(threadId: string) {
+  return createInitialAgentState({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId,
+    userId: 'user',
+    workspace: '/workspace',
+    turnId: 'turn',
+    canonicalWorkspaceDigest: `sha256:${'b'.repeat(64)}`,
+  });
+}
+
+function source() {
+  const state = initial('source');
+  return {
+    ...state,
+    resourceBudget: reduceResourceBudgetState(state.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'funding-run',
+      startedAt,
+      deadlineAt,
+      budget: LIMITED_RESOURCE_BUDGET_,
+    }),
+  };
+}
+
+function policy(state = source()) {
+  return {
+    phaseCeiling: getAgentPhase(getActivePlanning(state)),
+    authorizationDigest: 'authorization',
+    admissionDigest: 'admission',
+    effectiveEffectsDigest: 'effects',
+    capabilityDigest: state.capabilities.catalogRevision,
+    workspaceDigest: state.session.canonicalWorkspaceDigest ?? '',
+    policyRevision: 'policy-v1',
+    interactionModeRevision: state.interactionModeRevision,
+    boundedContext: true as const,
+    contextWindowTokens: 100,
+    maxOutputTokens: 50,
+    firstAttemptTimeoutMs: 30_000,
+    interactionMode: state.mode,
+    workspaceAccess: state.workspaceAccess,
+  };
+}
+
+function backupInput() {
+  const state = source();
+  return {
+    sourceState: state,
+    trustedCurrentRunId: 'funding-run',
+    sourceSessionId: 'source',
+    targetSessionId: 'target',
+    submissionId: 'submission',
+    requestDigest: 'digest',
+    receipt: { status: 'missing' as const },
+    policy: policy(state),
+    nowMs,
+  };
+}
+
+function acquireBackup(
+  budget: ReturnType<typeof source>['resourceBudget'],
+  reservationEvent: Extract<
+    import('@kite-ai/agent-kernel').KernelEvent,
+    { type: 'resource_budget.reserved' }
+  >,
+) {
+  const queued = reduceResourceBudgetState(budget, reservationEvent);
+  return reduceResourceBudgetState(queued, {
+    type: 'resource_budget.child_slot_acquired',
+    reservationId: reservationEvent.reservation.reservationId,
+  });
+}
+
+function accepted() {
+  const input = backupInput();
+  const backup = planCrossSessionTriggerTurnBackup(input);
+  if (backup.status !== 'planned') throw new Error('Fixture backup was not planned.');
+  return {
+    backup,
+    fundingState: {
+      ...input.sourceState,
+      resourceBudget: acquireBackup(input.sourceState.resourceBudget, backup.reservationEvent),
+    },
+  };
+}
+
+function replacementInput() {
+  const { backup, fundingState } = accepted();
+  const target = initial('target');
+  const targetRunId = 'followup-run';
+  const targetState = {
+    ...target,
+    activeFollowupTurn: {
+      sourceSessionId: 'source',
+      submissionId: 'submission',
+      targetRunId,
+      taskId: 'followup-task',
+      checkpointRef: {
+        artifactId: `pa_${'c'.repeat(64)}`,
+        kind: 'subagent_checkpoint' as const,
+        integrityIdentifier: `sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      grantRef: {
+        artifactId: `pa_${'d'.repeat(64)}`,
+        kind: 'agent_followup_grant' as const,
+        integrityIdentifier: `sha256:${'d'.repeat(64)}`,
+        byteLength: 1,
+      },
+      grantDigest: `sha256:${'d'.repeat(64)}`,
+    },
+    resourceBudget: reduceResourceBudgetState(target.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: targetRunId,
+      startedAt,
+      deadlineAt,
+      budget: {
+        ...LIMITED_RESOURCE_BUDGET_,
+        maxRunInputTokens: 100,
+        maxRunOutputTokens: 50,
+        maxToolInvocations: 0,
+        maxArtifactBytes: 0,
+        maxConcurrentSubagents: 0,
+        maxConcurrentWriters: 0,
+        maxConcurrentToolInvocations: 0,
+        maxConcurrentShellInvocations: 0,
+      },
+    }),
+  };
+  return {
+    fundingState,
+    targetState,
+    targetPolicyProof: {
+      observedTargetRevision: targetState.revision,
+      grantDigest: targetState.activeFollowupTurn.grantDigest,
+      capabilityDigest: targetState.capabilities.catalogRevision,
+      interactionModeRevision: targetState.interactionModeRevision,
+      phaseCeiling: getAgentPhase(getActivePlanning(targetState)),
+      mode: targetState.mode,
+      workspaceAccess: targetState.workspaceAccess,
+      denyTools: true as const,
+      allowedTools: [] as const,
+    },
+    admission: backup.admission,
+    receipt: { status: 'missing' as const },
+    requestDigest: 'route-digest',
+    frozenSurface: {
+      invocationId: 'first-model',
+      artifactId: `pa_${'a'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+      inputTokens: 50,
+      maxOutputTokens: 50,
+      verified: true as const,
+    },
+    currentPolicy: backup.admission.policy,
+    nowMs,
+  };
+}
+
+describe('pure cross-Session TriggerTurn budget admission', () => {
+  test('plans one deterministic source-funded backup after receipt preflight', () => {
+    const input = backupInput();
+    const first = planCrossSessionTriggerTurnBackup(input);
+    const second = planCrossSessionTriggerTurnBackup(input);
+    expect(first).toEqual(second);
+    if (first.status !== 'planned') throw new Error('Backup was not planned.');
+    expect(first.reservationEvent.reservation).toMatchObject({
+      runId: 'funding-run',
+      resourceKind: 'subagent',
+      state: 'queued',
+      executableUpperBound: {
+        counters: { turns: 1, modelRequests: 1, inputTokens: 100, outputTokens: 50 },
+        gauges: { activeSubagents: 1 },
+      },
+    });
+    expect(first.admission.deadlineAt).toBe(Date.parse(deadlineAt));
+  });
+
+  test('queues finite counters, waits only for occupied child slots, then acquires exactly one', () => {
+    const input = backupInput();
+    const planned = planCrossSessionTriggerTurnBackup(input);
+    if (planned.status !== 'planned') throw new Error('Backup was not planned.');
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'occupied-slot-v1');
+    upper.gauges.activeSubagents = 1;
+    let budget = input.sourceState.resourceBudget;
+    for (const id of ['occupied-1', 'occupied-2']) {
+      budget = reduceResourceBudgetState(budget, {
+        type: 'resource_budget.reserved',
+        reservation: {
+          version: 1,
+          reservationId: id,
+          runId: 'funding-run',
+          invocationId: id,
+          resourceKind: 'subagent',
+          executableUpperBound: upper,
+          state: 'reserved',
+        },
+      });
+    }
+    const occupiedSource = { ...input.sourceState, resourceBudget: budget };
+    const accepted = planCrossSessionTriggerTurnBackup({
+      ...input,
+      sourceState: occupiedSource,
+      policy: policy(occupiedSource),
+    });
+    if (accepted.status !== 'planned')
+      throw new Error('Full slot should still accept bounded work.');
+    budget = reduceResourceBudgetState(budget, accepted.reservationEvent);
+    expect(budget.reservations[accepted.admission.backupReservationId]?.state).toBe('queued');
+    if (budget.status !== 'active') throw new Error('Funding ledger became unavailable.');
+    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(2);
+    expect(committedResourceUsage(budget).counters.turns).toBe(1);
+    const slotInput = {
+      sourceState: { ...occupiedSource, resourceBudget: budget },
+      sourceSessionId: 'source',
+      fundingRunId: 'funding-run',
+      submissionId: 'submission',
+      backupReservationId: accepted.admission.backupReservationId,
+    };
+    expect(planCrossSessionFollowupSlotAcquisition(slotInput)).toEqual({ status: 'waiting' });
+    expect(() =>
+      reduceResourceBudgetState(budget, {
+        type: 'resource_budget.child_slot_acquired',
+        reservationId: accepted.admission.backupReservationId,
+      }),
+    ).toThrow('unavailable');
+    budget = reduceResourceBudgetState(budget, {
+      type: 'resource_budget.released',
+      reservationId: 'occupied-1',
+    });
+    const ready = planCrossSessionFollowupSlotAcquisition({
+      ...slotInput,
+      sourceState: { ...occupiedSource, resourceBudget: budget },
+    });
+    expect(ready.status).toBe('ready');
+    if (ready.status !== 'ready') throw new Error('Slot acquisition was not ready.');
+    budget = reduceResourceBudgetState(budget, ready.event);
+    expect(budget.reservations[accepted.admission.backupReservationId]?.state).toBe('reserved');
+    if (budget.status !== 'active') throw new Error('Funding ledger became unavailable.');
+    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(2);
+    expect(
+      planCrossSessionFollowupSlotAcquisition({
+        ...slotInput,
+        sourceState: { ...occupiedSource, resourceBudget: budget },
+      }),
+    ).toEqual({ status: 'already_acquired' });
+  });
+
+  test('queued backup still rejects exhausted counters before acceptance', () => {
+    const input = backupInput();
+    const consumed = createZeroResourceUsage('versioned_upper_bound', 'used-turns-v1');
+    consumed.counters.turns = LIMITED_RESOURCE_BUDGET_.maxTurns;
+    const budget = reduceResourceBudgetState(input.sourceState.resourceBudget, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        version: 1,
+        reservationId: 'used-turns',
+        runId: 'funding-run',
+        invocationId: 'used-turns',
+        resourceKind: 'subagent',
+        executableUpperBound: consumed,
+        state: 'reserved',
+      },
+    });
+    const sourceState = { ...input.sourceState, resourceBudget: budget };
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        sourceState,
+        policy: policy(sourceState),
+      }),
+    ).toThrow();
+  });
+
+  test('returns exact receipt before stale budget or deadline checks', () => {
+    const input = backupInput();
+    const receipt = { commandId: 'message', committedRevision: 7 };
+    expect(
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        sourceState: initial('foreign'),
+        nowMs: Number.NaN,
+        receipt: { status: 'exact', requestDigest: input.requestDigest, receipt },
+      }),
+    ).toEqual({ status: 'replay', receipt });
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        receipt: { status: 'exact', requestDigest: 'different', receipt },
+      }),
+    ).toThrow('different request digest');
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        receipt: { status: 'conflict' },
+      }),
+    ).toThrow();
+  });
+
+  test('rejects missing source authority, unknown funding and stale policy', () => {
+    const input = backupInput();
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        trustedCurrentRunId: 'other-run',
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        nowMs: Date.parse(deadlineAt),
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionTriggerTurnBackup({
+        ...input,
+        policy: { ...input.policy, policyRevision: '' },
+      }),
+    ).toThrow();
+    const unknown = accepted().fundingState;
+    const poisoned = {
+      ...unknown,
+      resourceBudget: reduceResourceBudgetState(unknown.resourceBudget, {
+        type: 'resource_budget.unknown',
+        reservationId: accepted().backup.admission.backupReservationId,
+      }),
+    };
+    expect(() => planCrossSessionTriggerTurnBackup({ ...input, sourceState: poisoned })).toThrow();
+  });
+
+  test('validates exact first Surface and atomically replaces a retained backup', () => {
+    const input = replacementInput();
+    const current = reduceResourceBudgetState(
+      { status: 'unconfigured', reservations: {} },
+      {
+        type: 'resource_budget.configured',
+        runId: 'new-foreground-run',
+        startedAt: '2026-09-25T00:00:05.000Z',
+        deadlineAt: '2026-09-25T00:04:00.000Z',
+        budget: LIMITED_RESOURCE_BUDGET_,
+      },
+    );
+    if (input.fundingState.resourceBudget.status !== 'active')
+      throw new Error('Fixture funding budget is inactive.');
+    const fundingState = {
+      ...input.fundingState,
+      resourceBudget: current,
+      retainedResourceBudgets: { 'funding-run': input.fundingState.resourceBudget },
+    };
+    const result = planCrossSessionFirstModelReplacement({ ...input, fundingState });
+    if (result.status !== 'planned') throw new Error('Replacement was not planned.');
+    const event = result.plan.preparationEvents[0];
+    expect(event?.type).toBe('resource_budget.bounded_replaced');
+    if (event?.type !== 'resource_budget.bounded_replaced') throw new Error('Wrong event.');
+    const after = reduceResourceBudgetState(
+      fundingState.retainedResourceBudgets['funding-run']!,
+      event,
+    );
+    expect(after.reservations[input.admission.backupReservationId]?.state).toBe('released');
+    expect(
+      after.reservations[result.plan.turnReservationId]?.executableUpperBound.counters.turns,
+    ).toBe(1);
+    expect(
+      after.reservations[
+        result.plan.budget.kind === 'reservation' ? result.plan.budget.reservationId : ''
+      ]?.executableUpperBound.counters.inputTokens,
+    ).toBe(100);
+    expect(fundingState.resourceBudget).toBe(current);
+    const poisonedRetained = reduceResourceBudgetState(
+      fundingState.retainedResourceBudgets['funding-run']!,
+      { type: 'resource_budget.unknown', reservationId: input.admission.backupReservationId },
+    );
+    if (poisonedRetained.status !== 'active') throw new Error('Retained ledger is inactive.');
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        fundingState: {
+          ...fundingState,
+          retainedResourceBudgets: { 'funding-run': poisonedRetained },
+        },
+      }),
+    ).toThrow();
+  });
+
+  test('rejects over-bound, expired, unknown, phase and policy changes', () => {
+    const input = replacementInput();
+    for (const frozenSurface of [
+      { ...input.frozenSurface, inputTokens: 51 },
+      { ...input.frozenSurface, maxOutputTokens: 51 },
+      { ...input.frozenSurface, verified: false as const },
+    ])
+      expect(() =>
+        planCrossSessionFirstModelReplacement({
+          ...input,
+          frozenSurface: frozenSurface as typeof input.frozenSurface,
+        }),
+      ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        nowMs: Date.parse(deadlineAt),
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        currentPolicy: { ...input.currentPolicy, policyRevision: 'changed' },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        currentPolicy: { ...input.currentPolicy, authorizationDigest: 'changed' },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        targetState: {
+          ...input.targetState,
+          interactionModeRevision: input.admission.policy.interactionModeRevision + 1,
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        admission: {
+          ...input.admission,
+          policy: { ...input.admission.policy, phaseCeiling: 'planning' },
+        },
+        currentPolicy: { ...input.currentPolicy, phaseCeiling: 'planning' },
+      }),
+    ).toThrow();
+    const funding = input.fundingState;
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        fundingState: {
+          ...funding,
+          resourceBudget: reduceResourceBudgetState(funding.resourceBudget, {
+            type: 'resource_budget.unknown',
+            reservationId: input.admission.backupReservationId,
+          }),
+        },
+      }),
+    ).toThrow();
+  });
+
+  test('retains the target revision guard for source auto revision 1 and child auto revision 0', () => {
+    const original = source();
+    const sourceAuto = { ...original, mode: 'auto' as const, interactionModeRevision: 1 };
+    const admitted = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState: sourceAuto,
+      policy: policy(sourceAuto),
+    });
+    if (admitted.status !== 'planned') throw new Error('Source admission was not planned.');
+    const fundingState = {
+      ...sourceAuto,
+      resourceBudget: acquireBackup(sourceAuto.resourceBudget, admitted.reservationEvent),
+    };
+    const targetAuto = { ...initial('target'), mode: 'auto' as const };
+    expect(targetAuto.interactionModeRevision).toBe(0);
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...replacementInput(),
+        fundingState,
+        targetState: targetAuto,
+        admission: admitted.admission,
+        currentPolicy: admitted.admission.policy,
+      }),
+    ).toThrow('policy exceeds immutable TriggerTurn authority');
+  });
+
+  test('admits independent target auto revision 0 only with a current zero-Tool grant proof', () => {
+    const original = source();
+    const sourceAuto = { ...original, mode: 'auto' as const, interactionModeRevision: 1 };
+    const acceptedPolicy = {
+      ...policy(sourceAuto),
+      interactionMode: 'auto' as const,
+      workspaceAccess: sourceAuto.workspaceAccess,
+    };
+    const admitted = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState: sourceAuto,
+      policy: acceptedPolicy,
+    });
+    if (admitted.status !== 'planned') throw new Error('Source admission was not planned.');
+    const target = replacementInput().targetState;
+    const targetAuto = { ...target, mode: 'auto' as const };
+    const fundingState = {
+      ...sourceAuto,
+      resourceBudget: acquireBackup(sourceAuto.resourceBudget, admitted.reservationEvent),
+    };
+    const proof = {
+      observedTargetRevision: targetAuto.revision,
+      grantDigest: targetAuto.activeFollowupTurn!.grantDigest,
+      capabilityDigest: targetAuto.capabilities.catalogRevision,
+      interactionModeRevision: targetAuto.interactionModeRevision,
+      phaseCeiling: getAgentPhase(getActivePlanning(targetAuto)),
+      mode: targetAuto.mode,
+      workspaceAccess: targetAuto.workspaceAccess,
+      denyTools: true as const,
+      allowedTools: [] as const,
+    };
+    const input = {
+      ...replacementInput(),
+      fundingState,
+      targetState: targetAuto,
+      admission: admitted.admission,
+      currentPolicy: admitted.admission.policy,
+      targetPolicyProof: proof,
+    };
+    expect(planCrossSessionFirstModelReplacement(input).status).toBe('planned');
+    expect(() =>
+      planCrossSessionFirstModelReplacement({ ...input, targetPolicyProof: undefined }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        targetPolicyProof: { ...proof, observedTargetRevision: proof.observedTargetRevision + 1 },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        targetState: { ...targetAuto, mode: 'accept_edits' as const },
+        targetPolicyProof: { ...proof, mode: 'accept_edits' as const },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        targetPolicyProof: { ...proof, capabilityDigest: 'changed-catalog' },
+      }),
+    ).toThrow();
+    expect(() =>
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        targetPolicyProof: { ...proof, denyTools: false as never },
+      }),
+    ).toThrow();
+  });
+
+  test('compares every immutable ResourceUsage counter and gauge with the held backup', () => {
+    const input = replacementInput();
+    const upper = input.admission.executableUpperBound;
+    for (const field of [
+      'turns',
+      'modelRequests',
+      'toolInvocations',
+      'inputTokens',
+      'outputTokens',
+      'artifactBytes',
+    ] as const) {
+      expect(() =>
+        planCrossSessionFirstModelReplacement({
+          ...input,
+          admission: {
+            ...input.admission,
+            executableUpperBound: {
+              ...upper,
+              counters: { ...upper.counters, [field]: upper.counters[field] + 1 },
+            },
+          },
+        }),
+      ).toThrow();
+    }
+    for (const field of [
+      'elapsedRunMs',
+      'activeSubagents',
+      'activeWriters',
+      'activeToolInvocations',
+      'activeShellInvocations',
+    ] as const) {
+      expect(() =>
+        planCrossSessionFirstModelReplacement({
+          ...input,
+          admission: {
+            ...input.admission,
+            executableUpperBound: {
+              ...upper,
+              gauges: { ...upper.gauges, [field]: upper.gauges[field] + 1 },
+            },
+          },
+        }),
+      ).toThrow();
+    }
+  });
+
+  test('replacement receipt replay returns before funding or Surface validation', () => {
+    const input = replacementInput();
+    const receipt = { routeId: 'routed' };
+    expect(
+      planCrossSessionFirstModelReplacement({
+        ...input,
+        fundingState: initial('foreign'),
+        frozenSurface: { ...input.frozenSurface, verified: false as never },
+        receipt: { status: 'exact', requestDigest: input.requestDigest, receipt },
+      }),
+    ).toEqual({ status: 'replay', receipt });
+  });
+});

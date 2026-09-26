@@ -141,6 +141,8 @@ type PersistedRecord = KiteSessionExecutionAuthorityRecord & {
 export function createKiteSessionExecutionAuthority(input: {
   readonly database: Database;
   readonly writer: KiteHomeWriteTransactionPort;
+  /** Exact retired schema assertion used only inside an offline conversion candidate. */
+  readonly assertStoreSchema?: (database: Database) => void;
   readonly nowMs?: () => number;
 }): KiteSessionExecutionAuthority {
   const now = input.nowMs ?? Date.now;
@@ -187,7 +189,7 @@ export function createKiteSessionExecutionAuthority(input: {
   };
 
   const mutate = <Result>(work: () => Result): Result => {
-    assertKiteSessionStoreSchema(input.database);
+    (input.assertStoreSchema ?? assertKiteSessionStoreSchema)(input.database);
     try {
       return input.writer.run(work);
     } catch (error) {
@@ -203,7 +205,7 @@ export function createKiteSessionExecutionAuthority(input: {
   };
 
   const read = (sessionId: string): KiteSessionExecutionAuthorityRecord => {
-    assertKiteSessionStoreSchema(input.database);
+    (input.assertStoreSchema ?? assertKiteSessionStoreSchema)(input.database);
     return publicRecord(readTx(sessionId));
   };
 
@@ -211,7 +213,7 @@ export function createKiteSessionExecutionAuthority(input: {
     binding: KiteSessionExecutionBinding,
   ): KiteSessionExecutionAuthorityRecord => {
     validateBinding(binding);
-    assertKiteSessionStoreSchema(input.database);
+    (input.assertStoreSchema ?? assertKiteSessionStoreSchema)(input.database);
     const current = readTx(binding.sessionId);
     assertExpectedRevision(current, binding.expectedAuthorityRevision);
     if (

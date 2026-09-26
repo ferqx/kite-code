@@ -108,6 +108,10 @@ export function App({ client }: { client: DesktopClient }) {
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
   const preparing = newConversation || !selected;
+  const childSessions =
+    !preparing && view.childSessions?.parentSessionId === selected ? view.childSessions : undefined;
+  const childDetail =
+    !preparing && view.childDetail?.parentSessionId === selected ? view.childDetail : undefined;
   const conversationWorkspace = newConversationWorkspace ?? workspace;
   const conversationBranch =
     newConversationBranch?.workspace === conversationWorkspace
@@ -189,6 +193,7 @@ export function App({ client }: { client: DesktopClient }) {
   const openSession = (id: string) => {
     if (busyRef.current || !client.getSnapshot().connected) return;
     const revision = ++navigationRevision.current;
+    client.leaveChildSession();
     setWorkbenchView(false);
     setScheduledTasksView(false);
     setNewConversation(false);
@@ -222,6 +227,7 @@ export function App({ client }: { client: DesktopClient }) {
   };
   const newSession = () => {
     if (!busyRef.current) {
+      client.leaveChildSession();
       navigationRevision.current++;
       setWorkbenchView(false);
       setScheduledTasksView(false);
@@ -322,6 +328,11 @@ export function App({ client }: { client: DesktopClient }) {
   useEffect(() => {
     if (!connected) setStopRequest(undefined);
   }, [connected]);
+  useEffect(() => {
+    if (!selected || !connected || !ready || preparing || workbenchView || scheduledTasksView)
+      return;
+    void client.refreshChildSessions(selected).catch((error) => client.report(error));
+  }, [client, selected, connected, ready, preparing, workbenchView, scheduledTasksView]);
   const active = !preparing && isActiveRun(projection);
   const model = preparing
     ? (newConversationModel ?? view.models?.selected)
@@ -338,6 +349,7 @@ export function App({ client }: { client: DesktopClient }) {
       : preparing && firstSubmission.navigation === navigationRevision.current);
   const canSubmit =
     !busy &&
+    !childDetail &&
     !submitting &&
     !submissionInFlight &&
     (preparing || selectingSession === undefined) &&
@@ -387,6 +399,7 @@ export function App({ client }: { client: DesktopClient }) {
     : workbenchView || scheduledTasksView || preparing
       ? []
       : pendingAskMessages;
+  const readingMessages = childDetail ? childDetail.messages : displayedMessages;
   const directory = directorySnapshot ?? view.sessions;
   if (startup !== 'ready')
     return (
@@ -474,16 +487,23 @@ export function App({ client }: { client: DesktopClient }) {
       defaultExpanded
       onExpand={() => void act(() => client.refreshSessions())}
       selected={workbenchView || scheduledTasksView || preparing ? undefined : selected}
-      sessionLabel={selectedSession?.displayName || (selected ? '新会话' : '开始一项工作')}
-      readingKey={draftKey}
-      messages={displayedMessages}
+      sessionLabel={
+        childDetail
+          ? childSessions?.entries.find((entry) => entry.sessionId === childDetail.childSessionId)
+              ?.displayName || '子 Agent 会话'
+          : selectedSession?.displayName || (selected ? '新会话' : '开始一项工作')
+      }
+      readingKey={childDetail ? `child:${selected}:${childDetail.childSessionId}` : draftKey}
+      messages={readingMessages}
       loading={
-        !optimisticMessage &&
-        !workbenchView &&
-        !scheduledTasksView &&
-        !preparing &&
-        loadingSession &&
-        !view.hasLoadedHistory
+        childDetail
+          ? childDetail.loading
+          : !optimisticMessage &&
+            !workbenchView &&
+            !scheduledTasksView &&
+            !preparing &&
+            loadingSession &&
+            !view.hasLoadedHistory
       }
       connected={connected}
       connectionLabel=""
@@ -493,31 +513,121 @@ export function App({ client }: { client: DesktopClient }) {
         void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
       }
       onOpen={connected || busyRef.current ? openSession : undefined}
+      headerActions={
+        childDetail ? (
+          <>
+            <Button
+              className="ghost"
+              disabled={childDetail.loading}
+              onClick={() =>
+                void client
+                  .openChildSession(selected!, childDetail.childSessionId)
+                  .catch((error) => client.report(error))
+              }
+            >
+              刷新详情
+            </Button>
+            <Button className="ghost" onClick={() => client.leaveChildSession()}>
+              <HugeiconsIcon icon={ArrowLeft01Icon} /> 返回父会话
+            </Button>
+          </>
+        ) : undefined
+      }
+      beforeConversation={
+        !workbenchView && !scheduledTasksView && !preparing && selected ? (
+          <section aria-label="父 Agent 树" className="child-session-tree">
+            {(childSessions?.entries.length || isActiveRun(projection)) && (
+              <Button
+                className="ghost"
+                disabled={childSessions?.loading}
+                onClick={() =>
+                  void client.refreshChildSessions(selected).catch((error) => client.report(error))
+                }
+              >
+                刷新子 Agent
+              </Button>
+            )}
+            {childSessions?.entries.length ? (
+              <div className="child-session-list">
+                <strong>子 Agent</strong>
+                {childSessions.entries.map((entry) => (
+                  <Button
+                    key={entry.sessionId}
+                    className="ghost"
+                    aria-current={
+                      childDetail?.childSessionId === entry.sessionId ? 'page' : undefined
+                    }
+                    onClick={() =>
+                      void client
+                        .openChildSession(selected, entry.sessionId)
+                        .catch((error) => client.report(error))
+                    }
+                  >
+                    {entry.displayName || entry.taskId || '子 Agent'}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+            {childSessions?.loading && <p role="status">正在读取子 Agent…</p>}
+            {childSessions?.error && (
+              <p role="alert">
+                {childSessions.error}{' '}
+                <Button
+                  className="ghost"
+                  onClick={() =>
+                    void client
+                      .refreshChildSessions(selected)
+                      .catch((error) => client.report(error))
+                  }
+                >
+                  重试
+                </Button>
+              </p>
+            )}
+          </section>
+        ) : undefined
+      }
+      historyError={
+        childDetail?.error
+          ? {
+              title: '子会话读取失败',
+              detail: childDetail.error,
+              retry: () =>
+                void client
+                  .openChildSession(selected!, childDetail.childSessionId)
+                  .catch((error) => client.report(error)),
+            }
+          : undefined
+      }
+      readOnlyReason={childDetail ? '子 Agent 会话仅供查看。' : undefined}
       actions={{
         newSession,
         newWorkspaceSession: (id) => chooseProject(id),
         workbench: () => {
+          client.leaveChildSession();
           navigationRevision.current++;
           setScheduledTasksView(false);
           setWorkbenchView(true);
         },
         scheduledTasks: () => {
+          client.leaveChildSession();
           navigationRevision.current++;
           setWorkbenchView(false);
           setScheduledTasksView(true);
         },
         settings: () => setSettingsOpen(true),
         theme,
-        openFile: connected && selectedWorkspace === workspace ? openFile : undefined,
+        openFile:
+          !childDetail && connected && selectedWorkspace === workspace ? openFile : undefined,
       }}
       writeClipboardText={(text) => client.copyText(text)}
       fileChanges={
-        !workbenchView && !scheduledTasksView && !preparing && selected
+        !childDetail && !workbenchView && !scheduledTasksView && !preparing && selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
       environmentInformation={
-        !workbenchView && !scheduledTasksView && !preparing && selected ? (
+        !childDetail && !workbenchView && !scheduledTasksView && !preparing && selected ? (
           <BackgroundExecutions
             id="session-environment-information"
             executions={view.background?.[selected]?.snapshot.executions ?? []}
@@ -625,6 +735,7 @@ export function App({ client }: { client: DesktopClient }) {
         </>
       }
       interaction={
+        !childDetail &&
         !workbenchView &&
         !scheduledTasksView &&
         interaction &&
@@ -639,7 +750,8 @@ export function App({ client }: { client: DesktopClient }) {
               void act(() => client.respondApproval(selected!, interaction, decision))
             }
           />
-        ) : !workbenchView &&
+        ) : !childDetail &&
+          !workbenchView &&
           !scheduledTasksView &&
           interaction &&
           (interaction.kind === 'input' || interaction.kind === 'plan_review') &&
@@ -687,6 +799,7 @@ export function App({ client }: { client: DesktopClient }) {
         ) : undefined
       }
       statusNotice={
+        !childDetail &&
         !workbenchView &&
         !scheduledTasksView &&
         !preparing &&
@@ -699,7 +812,7 @@ export function App({ client }: { client: DesktopClient }) {
         ) : undefined
       }
       composer={
-        workbenchView || scheduledTasksView
+        workbenchView || scheduledTasksView || childDetail
           ? undefined
           : {
               draft,

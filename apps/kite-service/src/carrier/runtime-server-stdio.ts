@@ -434,6 +434,10 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       await this.#writeError(request.id, 'method_not_found');
       return true;
     }
+    if (request.method === 'history/load_child_session' && !history.loadChildSession) {
+      await this.#writeError(request.id, 'method_not_found');
+      return true;
+    }
     try {
       const result =
         request.method === 'history/list_sessions'
@@ -445,13 +449,21 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
                   request.params.sessionId,
                   request.params.page?.throughSequence,
                 )
-              : undefined;
+              : request.method === 'history/load_child_session'
+                ? await history.loadChildSession!(
+                    request.params.parentSessionId,
+                    request.params.childSessionId,
+                    request.params.page?.throughSequence,
+                  )
+                : undefined;
       if (result === undefined) {
         await this.#writeError(request.id, 'method_not_found');
         return true;
       }
       const response =
-        request.method === 'history/load_session' && request.params.page
+        (request.method === 'history/load_session' ||
+          request.method === 'history/load_child_session') &&
+        request.params.page
           ? historyTranscriptPage(
               result as RuntimeHistorySessionTranscript,
               request.params.page.afterSequence,

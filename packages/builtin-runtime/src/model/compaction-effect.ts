@@ -236,6 +236,7 @@ export async function executeBuiltinContextCompaction(input: {
       serializedTools: leasedEnvironment?.serializedTools,
       activeSkillInstructions: leasedEnvironment?.activeSkillInstructions,
       workflowSkills: leasedEnvironment?.workflowSkills,
+      delegatedTask: leasedEnvironment?.delegatedTask,
     };
     const expectedBefore = buildContextProjection(projectionInput).estimate.totalInputTokens;
     const expectedAfter = buildContextProjection({

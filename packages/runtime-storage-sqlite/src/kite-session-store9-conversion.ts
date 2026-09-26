@@ -5,7 +5,7 @@ import { createKiteHomeWorkspaceAuthority } from './kite-home-authority';
 import { createKiteHomeRuntimeStorageForConnection } from './kite-home-runtime-storage';
 import {
   assertKiteHomeStoreSchema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore10Schema,
   assertKiteStoreIntegrity,
   KITE_HOME_STORE_TABLE_COLUMNS,
   KITE_SESSION_EFFECT_LEASE_DDL,
@@ -17,16 +17,15 @@ import {
   KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
 } from './kite-session-execution-authority';
 import {
-  KITE_SESSION_STORE_FORMAT_EPOCH,
-  KITE_SESSION_STORE_SCHEMA_VERSION,
-} from './kite-session-store-format';
-import {
   isCanonicalRecoveryIdentity,
   recoveryIdentityMetaKey,
   SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   type SqliteRuntimeSnapshotCodec,
 } from './preflight';
+
+const TARGET_SCHEMA = 10;
+const TARGET_EPOCH = 'kite-session-app-server-2026-09-02';
 
 export class KiteStore9ConversionUnsupported extends Error {
   readonly code = 'store9_conversion_unsupported';
@@ -233,17 +232,16 @@ export function convertKiteStore9ToSessionStore10<Event, State>(input: {
     database.run(KITE_SESSION_EFFECT_LEASE_DDL);
     database
       .query("UPDATE kite_meta SET value = ? WHERE key = 'schema_version'")
-      .run(String(KITE_SESSION_STORE_SCHEMA_VERSION));
-    database
-      .query("UPDATE kite_meta SET value = ? WHERE key = 'format_epoch'")
-      .run(KITE_SESSION_STORE_FORMAT_EPOCH);
-    database.run(`PRAGMA user_version = ${KITE_SESSION_STORE_SCHEMA_VERSION}`);
+      .run(String(TARGET_SCHEMA));
+    database.query("UPDATE kite_meta SET value = ? WHERE key = 'format_epoch'").run(TARGET_EPOCH);
+    database.run(`PRAGMA user_version = ${TARGET_SCHEMA}`);
     const insert = database.query('INSERT INTO kite_meta(key, value) VALUES (?, ?)');
     for (const seed of seeds) insert.run(`session_execution/${seed.sessionId}`, seed.value);
-    assertKiteSessionStoreSchema(database);
+    assertKiteSessionStore10Schema(database);
     const newAuthority = createKiteSessionExecutionAuthority({
       database,
-      writer: createKiteHomeWriteTransactionPort(database, assertKiteSessionStoreSchema),
+      writer: createKiteHomeWriteTransactionPort(database, assertKiteSessionStore10Schema),
+      assertStoreSchema: assertKiteSessionStore10Schema,
     });
     for (const seed of seeds) {
       const read = newAuthority.read(seed.sessionId);

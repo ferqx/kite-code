@@ -427,7 +427,7 @@ test('reentering a killed active Session settles its old Run once and permits a 
     server = createKiteMultiWorkspaceRuntimeServer({
       checkpointPath: databasePath,
       storageOwner: storage,
-      workspaces: [runtimeInput(workspace, model.baseURL)],
+      workspaces: [runtimeInput(workspace, model.baseURL, 'restart-approval-model')],
     });
     runtime = client(server, workspace);
     const first = await runtime.query({
@@ -657,7 +657,7 @@ test('a model attempt interrupted by process death is terminal on reentry withou
     server = createKiteMultiWorkspaceRuntimeServer({
       checkpointPath: databasePath,
       storageOwner: storage,
-      workspaces: [runtimeInput(workspace, model.baseURL)],
+      workspaces: [runtimeInput(workspace, model.baseURL, 'crash-model')],
     });
     runtime = client(server, workspace);
     const projection = await runtime.query({
@@ -1029,12 +1029,12 @@ async function firstLine(stdout: ReadableStream<Uint8Array>): Promise<string> {
   return result.slice(0, result.indexOf('\n'));
 }
 
-function runtimeInput(workspace: string, baseURL: string) {
+function runtimeInput(workspace: string, baseURL: string, providerName = 'reentry-model') {
   return {
     userId: 'reentry-user',
     workspace,
     config: {
-      providerName: 'reentry-model',
+      providerName,
       providerType: 'openai-compatible' as const,
       apiKey: 'fixture-key',
       baseURL,

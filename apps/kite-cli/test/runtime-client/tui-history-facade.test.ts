@@ -4,6 +4,41 @@ import type { RuntimeHistorySessionTranscript } from '@kite-ai/runtime-contract'
 import { createTuiHistoryFacade } from '../../src/runtime-client/tui-history-facade';
 
 describe('TUI history presentation envelopes', () => {
+  test('reads a child only through the parent-scoped History method', async () => {
+    const transcript = {
+      session: {
+        sessionId: 'child-history',
+        displayName: 'Child',
+        needsSmartName: false,
+        updatedAt: 1,
+        lastSequence: 0,
+      },
+      records: [],
+      events: [],
+      interactionMode: 'auto',
+      recovery: 'normal',
+    } satisfies RuntimeHistorySessionTranscript;
+    const calls: string[] = [];
+    const history: RuntimeHistoryReader = {
+      listSessions: async () => ({ entries: [], hasMore: false }),
+      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      loadSession: async () => {
+        throw new Error('Ordinary child History must remain closed.');
+      },
+      loadChildSession: async (parentSessionId, childSessionId) => {
+        calls.push(`${parentSessionId}:${childSessionId}`);
+        return transcript;
+      },
+    };
+    const reader = createTuiHistoryFacade(history);
+    expect((await reader.loadPersistedChildSession('root-history', 'child-history')).threadId).toBe(
+      'child-history',
+    );
+    expect(calls).toEqual(['root-history:child-history']);
+    await expect(reader.loadPersistedChildSession('root-history', 'wrong-child')).rejects.toThrow(
+      'identity changed',
+    );
+  });
   test('preserves deterministic durable revision and source identity', async () => {
     const event = {
       type: 'run.terminal',

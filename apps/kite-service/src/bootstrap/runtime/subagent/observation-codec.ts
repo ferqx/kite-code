@@ -55,6 +55,7 @@ export function subagentResultFromObservation(
   ].sort();
   const expectedKeys = [
     'blocked',
+    ...(Object.hasOwn(payload, 'checkpointRef') ? ['checkpointRef'] : []),
     'durationMs',
     'error',
     'executionJournal',
@@ -107,7 +108,8 @@ export function subagentResultFromObservation(
         payload.resourceAdmissionFailure.parentToolCallId === expectedHandle.parentToolCallId &&
         payload.resourceAdmissionFailure.childInvocationId === expectedHandle.childInvocationId)
     ) ||
-    !(payload.blocked === null || isRecord(payload.blocked))
+    !(payload.blocked === null || isRecord(payload.blocked)) ||
+    !validCheckpointRef(payload.checkpointRef)
   ) {
     throw new Error('Subagent Provider observation payload is malformed or inconsistent.');
   }
@@ -168,6 +170,9 @@ export function subagentResultFromObservation(
     summary: payload.summary as string,
     toolCallCount: payload.toolCallCount as number,
     durationMs: payload.durationMs as number,
+    ...(validCheckpointRef(payload.checkpointRef) && payload.checkpointRef
+      ? { checkpointRef: payload.checkpointRef }
+      : {}),
     ...(typeof payload.terminalStatus === 'string'
       ? { terminalStatus: payload.terminalStatus as SubAgentResult['terminalStatus'] }
       : {}),
@@ -209,6 +214,27 @@ export function subagentResultFromObservation(
         }
       : {}),
   };
+}
+
+function validCheckpointRef(
+  value: unknown,
+): value is
+  | import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactRef
+  | null
+  | undefined {
+  if (value === null || value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return (
+    JSON.stringify(Object.keys(value).sort()) ===
+      JSON.stringify(['artifactId', 'byteLength', 'integrityIdentifier', 'kind'].sort()) &&
+    value.kind === 'subagent_checkpoint' &&
+    typeof value.artifactId === 'string' &&
+    /^pa_[a-f0-9]{64}$/u.test(value.artifactId) &&
+    typeof value.integrityIdentifier === 'string' &&
+    /^sha256:[a-f0-9]{64}$/u.test(value.integrityIdentifier) &&
+    Number.isSafeInteger(value.byteLength) &&
+    (value.byteLength as number) > 0
+  );
 }
 
 function validFailureDiagnostic(

@@ -6,6 +6,91 @@ import {
 } from '../src/runtime-client/event-projector';
 
 describe('Runtime Client event projector', () => {
+  test('projects only mailbox identity and proof stage, never private body references', () => {
+    const accepted = projectRuntimeClientEvent(
+      {
+        type: 'agent.mail_accepted',
+        messageId: 'mail-1',
+        senderAgentId: 'parent',
+        targetAgentId: 'child',
+        mode: 'queue_only',
+        source: {
+          runId: 'run-1',
+          turnId: 'turn-1',
+          modelInvocationId: 'model-1',
+          toolCallId: 'tool-1',
+          effectAttemptId: 'attempt-1',
+        },
+        bodyRef: {
+          kind: 'agent_mail',
+          artifactId: `pa_${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+          byteLength: 14,
+        },
+        bodyDigest: `sha256:${'a'.repeat(64)}`,
+        sequence: 1,
+      },
+      { sessionRevision: 3 },
+    );
+    expect(accepted).toEqual({
+      type: 'agent.mail_status',
+      status: 'accepted',
+      targetAgentId: 'child',
+      messageIds: ['mail-1'],
+    });
+    expect(JSON.stringify(accepted)).not.toContain(`pa_${'a'.repeat(64)}`);
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'agent.mail_input_prepared',
+          targetAgentId: 'child',
+          invocationId: 'model-2',
+          modelAdmissionId: 'reservation-1',
+          fromSequence: 0,
+          throughSequence: 1,
+          messageIds: ['mail-1'],
+        },
+        { sessionRevision: 5 },
+      ),
+    ).toEqual({
+      type: 'agent.mail_status',
+      status: 'input_prepared',
+      targetAgentId: 'child',
+      messageIds: ['mail-1'],
+    });
+    expect(
+      projectRuntimeClientEvent(
+        {
+          type: 'agent.followup_turn_settled',
+          sourceSessionId: 'parent',
+          submissionId: 'submission-1',
+          targetRunId: 'run-2',
+          taskId: 'task-2',
+          status: 'completed',
+        },
+        { sessionRevision: 8 },
+      ),
+    ).toEqual({
+      type: 'agent.mail_status',
+      status: 'result_settled',
+      submissionId: 'submission-1',
+      taskId: 'task-2',
+      resultStatus: 'completed',
+    });
+  });
+  test('shows a failed Task terminal without exposing its private reason', () => {
+    const projected = projectRuntimeClientEvent(
+      { type: 'task.failed', taskId: 'followup-task', reason: 'private provider detail' },
+      { sessionRevision: 9 },
+    );
+    expect(projected).toEqual({
+      type: 'task.terminal',
+      taskId: 'followup-task',
+      status: 'failed',
+    });
+    expect(JSON.stringify(projected)).not.toContain('private provider detail');
+  });
+
   test('preserves an authentication failure behind a blocked outcome without exposing provider text', () => {
     const projected = projectRuntimeClientEvent(
       {
@@ -443,6 +528,36 @@ describe('Runtime Client event projector', () => {
       subagentId: 'child-background',
       summary: 'Background inspection complete.',
     });
+    for (const [childTerminalStatus, status] of [
+      ['failed', 'failed'],
+      ['cancelled', 'cancelled'],
+      ['unknown', 'interrupted'],
+    ] as const) {
+      expect(
+        projectRuntimeClientEvent(
+          {
+            type: 'subagent.background_result_persisted',
+            taskId: 'child-independent',
+            notificationId: `notification-${childTerminalStatus}`,
+            artifactIntegrityIdentifier: `sha256:${'a'.repeat(64)}`,
+            shortReport: 'Independent child did not complete.',
+            source: 'subagent',
+            modelRole: 'user',
+            originRunId: 'run-independent',
+            originTurnId: 'turn-independent',
+            originToolCallId: 'tool-independent',
+            attempt: 1,
+            childTerminalStatus,
+          } as RuntimeEvent,
+          context,
+        ),
+      ).toEqual({
+        type: 'subagent.failed',
+        subagentId: 'child-independent',
+        summary: 'Independent child did not complete.',
+        status,
+      });
+    }
     expect(
       projectRuntimeClientEvent(
         {

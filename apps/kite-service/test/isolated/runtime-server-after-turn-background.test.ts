@@ -271,7 +271,10 @@ test('default App Server preserves after-turn, retained service, stop, and recon
     const originRunId = rootTerminal.projection.session.currentRun?.runId;
     expect(originRunId).toBeString();
     expect(rootTerminal.projection.session.currentRun).toMatchObject({ status: 'completed' });
-    expect(model.getRequestCount()).toBe(4);
+    // The child may finish before this notification is consumed, allowing the
+    // after-turn report to begin while the test reads the completed root Run.
+    expect(model.getRequestCount()).toBeGreaterThanOrEqual(4);
+    expect(model.getRequestCount()).toBeLessThanOrEqual(6);
 
     await waitForAsync(() => Promise.resolve(model.getRequestCount() === 6)).catch(
       async (error) => {
@@ -414,6 +417,7 @@ test('default App Server preserves after-turn, retained service, stop, and recon
     await reconnectedStream.return?.();
     model.assertComplete();
   } finally {
+    finishNaturalService();
     await first.close();
     await second?.close();
     await owner[Symbol.asyncDispose]();

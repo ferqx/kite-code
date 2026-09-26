@@ -32,7 +32,7 @@ import { inspectKiteSessionStoreSources } from './kite-session-store-sources';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 
 /**
- * One bounded startup preparation for the observed Store 9/10/11 paths. It never runs from a
+ * One bounded startup preparation for the observed Store 9/10/11/12 paths. It never runs from a
  * history query. Ordinary current-format startup only inspects metadata and known locations.
  */
 export async function prepareKiteSessionStore<Event, State>(input: {
@@ -126,11 +126,17 @@ async function prepare<Event, State>(
       inspectKiteSessionStoreDatabase(canonicalPath, false);
       return { status: 'current' };
     } catch (error) {
-      // Only the exactly named source 11 epoch reaches its value-level converter.
+      // Only exact retired epochs reach private candidate conversion.
       if (
         !(error instanceof KiteSessionStoreOpenError) ||
-        error.compatibility?.actualSchema !== 11 ||
-        error.compatibility.actualEpoch !== 'kite-session-accepted-runs-2026-09-15'
+        !(
+          (error.compatibility?.actualSchema === 11 &&
+            error.compatibility.actualEpoch === 'kite-session-accepted-runs-2026-09-15') ||
+          (error.compatibility?.actualSchema === 11 &&
+            error.compatibility.actualEpoch === 'kite-session-lineage-2026-09-24') ||
+          (error.compatibility?.actualSchema === 10 &&
+            error.compatibility.actualEpoch === 'kite-session-app-server-2026-09-02')
+        )
       )
         throw error;
     }

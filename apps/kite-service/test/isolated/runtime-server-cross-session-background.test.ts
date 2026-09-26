@@ -193,7 +193,12 @@ function backgroundResponse(request: MockChatRequest, prefix: 'a' | 'b', childMa
       .map((message) => message.tool_call_id),
   );
   if (toolIds.has(`${prefix}-shell`) && toolIds.has(`${prefix}-child`)) {
-    return { message: { content: `${prefix}-background-parent-completed` } };
+    return {
+      expectedRequest: {
+        toolResults: [{ toolCallId: `${prefix}-shell` }, { toolCallId: `${prefix}-child` }],
+      },
+      message: { content: `${prefix}-background-parent-completed` },
+    };
   }
   return {
     toolContinuation: 'required' as const,

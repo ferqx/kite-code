@@ -283,11 +283,11 @@ function verificationValid(
 }
 
 describe('Builtin Tool Pipeline callbacks', () => {
-  test('projects the frozen 32/24/8 catalog and preserves read_file identity', () => {
+  test('projects the frozen 37/29/8 catalog and preserves read_file identity', () => {
     const value = resolveReadFile();
-    expect(value.projection.entries).toHaveLength(32);
+    expect(value.projection.entries).toHaveLength(37);
     expect(value.projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(
-      24,
+      29,
     );
     expect(
       value.projection.entries.filter((entry) => entry.visibility === 'internal'),

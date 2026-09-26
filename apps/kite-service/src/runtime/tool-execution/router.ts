@@ -21,6 +21,8 @@ import type {
 } from '@kite-ai/builtin-runtime/skills';
 import { createCapabilitySnapshot } from '@kite-ai/builtin-runtime/skills';
 import {
+  type BuiltinTaskControlExecutionMechanism,
+  getRoleConfig,
   isBuiltinSubagentTaskToolName,
   normalizeAskUserRequest,
 } from '@kite-ai/builtin-runtime/subagent';
@@ -44,6 +46,7 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite-ai/runtime-host/storage';
 import { type BuiltinMcpRuntimePort, createToolSearchProviderFacts } from '#builtin-runtime';
+import type { CrossSessionPreparedFollowupMailboxPort } from '#kite-service/bootstrap/runtime/agent-mailbox-port';
 import { bindAppApprovalBinding } from '#kite-service/bootstrap/runtime/approval-binding';
 import {
   classifyFailure,
@@ -62,6 +65,7 @@ import {
   type BackgroundSubagentControlRuntime,
   backgroundSubagentOwnerKey,
 } from '#kite-service/bootstrap/runtime/subagent/background-runtime';
+import type { TaskToolDeps } from '#kite-service/bootstrap/runtime/subagent/task-tool';
 import type { SubAgentResult } from '#kite-service/bootstrap/runtime/subagent/types';
 import type { AppToolPipelineComposition } from '#kite-service/bootstrap/runtime/tool-pipeline-composition';
 import {
@@ -153,6 +157,9 @@ export async function executeAppRuntimeTools(params: {
   > & {
     readonly ownerKey: string;
     readonly recoveryIdentityKey: string;
+    readonly commitBackgroundAgentSettlement?: NonNullable<
+      import('#kite-service/bootstrap/runtime/runtime-effect-dependencies').RuntimeExecutorDependencies['backgroundModelInvocationPersistence']
+    >['commitBackgroundAgentSettlement'];
   };
   /** Parent reservation for a task/skill child model step. */
   modelInvocationParentReservationId?: string;
@@ -192,9 +199,33 @@ export async function executeAppRuntimeTools(params: {
   /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
   subagentRuntimeFactory?: import('#kite-service/bootstrap/runtime/subagent/pipeline-runtime').AppSubagentRuntimeFactory;
   backgroundSubagentRuntime?: BackgroundSubagentControlRuntime;
+  /** Parent-scoped Store/Host read-only Task control for independent child Sessions. */
+  independentChildTaskControl?: import('@kite-ai/builtin-runtime/subagent').BuiltinTaskControlExecutionMechanism;
+  /** Task Start staging is available only with an independent child receipt owner. */
+  stageIndependentChild?: NonNullable<TaskToolDeps['stageIndependentChild']>;
+  /** Verified sealed grant ceiling for an independently persisted child Session. */
+  childToolCeiling?: Readonly<{
+    grantDigest: string;
+    role: 'explore' | 'plan' | 'code' | 'review';
+    allowedTools: readonly string[];
+  }>;
+  agentMailboxPortForCall?: (input: {
+    readonly state: Readonly<RuntimeState>;
+    readonly toolCallId: string;
+  }) => import('@kite-ai/builtin-runtime/subagent').AgentMailboxPort | undefined;
+  agentMailboxQueueOnlyAvailable?: boolean;
+  commitAgentMailboxFacts?: (input: {
+    readonly events: readonly RuntimeEvent[];
+    readonly mutations: readonly import('@kite-ai/runtime-host/storage').RuntimeAgentMailboxMutation[];
+  }) => Promise<readonly RuntimeEvent[]>;
+  currentExecutionGeneration?: () => string;
   afterTurnContinuationRuntime?: import('#kite-service/bootstrap/runtime/subagent/after-turn-continuation').AfterTurnContinuationRuntime;
   subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+  checkpointArtifacts?: Pick<
+    import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactStore,
+    'write'
+  >;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** StateRuntimeStorage-backed acknowledgement required before an automatic provider replay. */
@@ -338,6 +369,43 @@ export async function executeAppRuntimeTools(params: {
     };
   }
   const currentState = params.getRuntimeState?.() ?? params.state;
+  const childOrigin = currentState.childSessionOrigin;
+  if (childOrigin) {
+    const ceiling = params.childToolCeiling;
+    const roleTools = getRoleConfig(childOrigin.role).allowedTools;
+    const invalidCeiling =
+      !ceiling ||
+      ceiling.grantDigest !== childOrigin.grantDigest ||
+      ceiling.role !== childOrigin.role ||
+      !Array.isArray(ceiling.allowedTools) ||
+      ceiling.allowedTools.some((name) => typeof name !== 'string' || !name);
+    const denied = params.toolCallIds.some((toolCallId) => {
+      const name = currentState.tools.calls[toolCallId]?.name;
+      return (
+        !name ||
+        name === 'task' ||
+        (roleTools !== undefined && !roleTools.has(name)) ||
+        !(
+          (ceiling?.role === 'code' && ceiling.allowedTools.length === 0) ||
+          ceiling?.allowedTools.includes(name)
+        )
+      );
+    });
+    if (invalidCeiling || denied) {
+      const reason = 'Independent child Tool exceeds its sealed role or grant ceiling.';
+      for (const toolCallId of params.toolCallIds) {
+        const call = currentState.tools.calls[toolCallId];
+        if (!call || !isDispatchableStatus(call.status)) continue;
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason,
+          failure: classifyFailure('policy_denied', reason),
+        });
+      }
+      return events;
+    }
+  }
   if (isToolRecoveryJournalInvalid(currentState.toolRecovery)) {
     const reason = 'Runtime tool recovery journal is invalid; tool dispatch is blocked.';
     for (const toolCallId of params.toolCallIds) {
@@ -685,11 +753,38 @@ export async function executeAppRuntimeTools(params: {
         continue;
       }
       const liveState = (params.getRuntimeState?.() ?? currentState) as RuntimeState;
+      const mailboxOperation =
+        call.name === 'list_agents' ||
+        call.name === 'wait_agent' ||
+        call.name === 'send_message' ||
+        call.name === 'followup_task' ||
+        call.name === 'interrupt_agent';
+      const agentMailboxPort = mailboxOperation
+        ? params.agentMailboxPortForCall?.({ state: liveState, toolCallId })
+        : undefined;
+      const preparedFollowupMailbox = agentMailboxPort as
+        | (typeof agentMailboxPort &
+            Partial<Pick<CrossSessionPreparedFollowupMailboxPort, 'bindPreparedFollowupAuthority'>>)
+        | undefined;
+      // The private followup binding hook is never part of the Builtin mechanism.
+      const publicAgentMailboxPort = agentMailboxPort
+        ? Object.freeze({
+            caller: agentMailboxPort.caller,
+            listAgents: agentMailboxPort.listAgents,
+            waitAgent: agentMailboxPort.waitAgent,
+            submitMessage: agentMailboxPort.submitMessage,
+            interruptAgent: agentMailboxPort.interruptAgent,
+          })
+        : undefined;
       const turnContext = createAppToolTurnContext({
         workspace: liveState.session.workspace,
         threadId: liveState.session.threadId,
         config: params.taskConfig,
         hasTaskAdapter: true,
+        agentMailboxAvailable:
+          agentMailboxPort !== undefined && params.agentMailboxQueueOnlyAvailable !== true,
+        agentMailboxQueueOnlyAvailable:
+          agentMailboxPort !== undefined && params.agentMailboxQueueOnlyAvailable === true,
         toolSearchEnabled: productionFlags?.toolSearch === true,
         skillCatalog: params.skillCatalog,
         activeSkillFrames: activeSkillFramesForCurrentWork(liveState).filter(
@@ -972,6 +1067,12 @@ export async function executeAppRuntimeTools(params: {
             capabilityExecution,
             ...(params.workspaceEffect ? { workspaceEffect: params.workspaceEffect } : {}),
             signal,
+            ...(call.name === 'followup_task'
+              ? {
+                  bindPreparedFollowupAuthority: (identity) =>
+                    preparedFollowupMailbox?.bindPreparedFollowupAuthority?.(identity) === true,
+                }
+              : {}),
             mechanismResources: Object.freeze({
               workspace: liveState.session.workspace,
               ...(cutoverExecutionMechanism === 'shell'
@@ -1060,40 +1161,26 @@ export async function executeAppRuntimeTools(params: {
                     }),
                   }
                 : {}),
-              ...(cutoverExecutionMechanism === 'task_control' && params.backgroundSubagentRuntime
+              ...(cutoverExecutionMechanism === 'task_control' &&
+              (params.backgroundSubagentRuntime ||
+                params.independentChildTaskControl ||
+                agentMailboxPort)
                 ? {
                     preassembledMechanism: Object.freeze({
-                      taskControl: Object.freeze({
-                        readTask: (taskId: string) =>
-                          params.backgroundSubagentRuntime!.readTask(
-                            backgroundSubagentOwnerKey(
-                              liveState.session.threadId,
-                              liveState.toolRecovery.identityKey,
-                            ),
-                            taskId,
-                          ),
-                        waitTasks: (taskIds: string[], timeoutMs: number, signal?: AbortSignal) =>
-                          waitForBackgroundTasks({
-                            runtime: params.backgroundSubagentRuntime!,
-                            ownerKey: backgroundSubagentOwnerKey(
-                              liveState.session.threadId,
-                              liveState.toolRecovery.identityKey,
-                            ),
-                            taskIds,
-                            timeoutMs,
-                            signal: signal ?? params.signal,
-                            getState: params.getRuntimeState,
-                            waitForStateRevisionChange: params.waitForStateRevisionChange,
-                          }),
-                        cancelTask: (taskId: string) =>
-                          params.backgroundSubagentRuntime!.cancelTask(
-                            backgroundSubagentOwnerKey(
-                              liveState.session.threadId,
-                              liveState.toolRecovery.identityKey,
-                            ),
-                            taskId,
-                          ),
-                      }),
+                      ...(!mailboxOperation &&
+                      (params.backgroundSubagentRuntime || params.independentChildTaskControl)
+                        ? {
+                            taskControl: createCombinedTaskControl({
+                              state: liveState,
+                              legacy: params.backgroundSubagentRuntime,
+                              independent: params.independentChildTaskControl,
+                              signal: signal ?? params.signal,
+                              getState: params.getRuntimeState,
+                              waitForStateRevisionChange: params.waitForStateRevisionChange,
+                            }),
+                          }
+                        : {}),
+                      ...(publicAgentMailboxPort ? { agentMailbox: publicAgentMailboxPort } : {}),
                     }),
                   }
                 : {}),
@@ -1579,6 +1666,109 @@ export async function executeAppRuntimeTools(params: {
     });
   }
   return events;
+}
+
+export function createCombinedTaskControl(input: {
+  readonly state: Readonly<RuntimeState>;
+  readonly legacy?: BackgroundSubagentControlRuntime;
+  readonly independent?: BuiltinTaskControlExecutionMechanism;
+  readonly signal?: AbortSignal;
+  readonly getState?: () => Readonly<RuntimeState>;
+  readonly waitForStateRevisionChange?: (revision: number, signal?: AbortSignal) => Promise<void>;
+}): BuiltinTaskControlExecutionMechanism {
+  const ownerKey = backgroundSubagentOwnerKey(
+    input.state.session.threadId,
+    input.state.toolRecovery.identityKey,
+  );
+  const independentIds = new Set(
+    Object.values(input.state.capabilities.invocations)
+      .filter((invocation) => invocation.subagentProviderLifecycle?.childSession)
+      .map((invocation) => invocation.subagentProviderLifecycle!.childInvocationId),
+  );
+  const unavailable = (taskId: string): Readonly<Record<string, unknown>> => ({
+    ok: false,
+    task_id: taskId,
+    status: 'not_found',
+    cleanup_confirmed: false,
+    error: 'Background sub-agent task is unavailable for this Runtime owner.',
+  });
+  const readTask = (taskId: string): Promise<Readonly<Record<string, unknown>>> =>
+    independentIds.has(taskId)
+      ? (input.independent?.readTask(taskId) ?? Promise.resolve(unavailable(taskId)))
+      : (input.legacy?.readTask(ownerKey, taskId) ?? Promise.resolve(unavailable(taskId)));
+  return Object.freeze({
+    readTask,
+    cancelTask: (taskId: string) =>
+      independentIds.has(taskId)
+        ? (input.independent?.cancelTask(taskId) ?? Promise.resolve(unavailable(taskId)))
+        : (input.legacy?.cancelTask(ownerKey, taskId) ?? Promise.resolve(unavailable(taskId))),
+    waitTasks: async (taskIds: readonly string[], timeoutMs: number, signal?: AbortSignal) => {
+      const combinedSignal = signal ?? input.signal;
+      const childIds = taskIds.filter((taskId) => independentIds.has(taskId));
+      const legacyIds = taskIds.filter((taskId) => !independentIds.has(taskId));
+      if (childIds.length === 0 && input.legacy)
+        return waitForBackgroundTasks({
+          runtime: input.legacy,
+          ownerKey,
+          taskIds,
+          timeoutMs,
+          signal: combinedSignal,
+          getState: input.getState,
+          waitForStateRevisionChange: input.waitForStateRevisionChange,
+        });
+      if (legacyIds.length === 0 && input.independent)
+        return input.independent.waitTasks(taskIds, timeoutMs, combinedSignal);
+      const initial = await Promise.all(taskIds.map(readTask));
+      const actionable = initial.find(
+        (task) => task.status !== 'running' && task.status !== 'cancelling',
+      );
+      if (actionable)
+        return { ok: actionable.ok !== false, status: actionable.status, tasks: initial };
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      combinedSignal?.addEventListener('abort', abort, { once: true });
+      if (combinedSignal?.aborted) controller.abort();
+      const waits: Promise<Readonly<Record<string, unknown>>>[] = [];
+      if (childIds.length > 0 && input.independent)
+        waits.push(input.independent.waitTasks(childIds, timeoutMs, controller.signal));
+      if (legacyIds.length > 0 && input.legacy)
+        waits.push(
+          waitForBackgroundTasks({
+            runtime: input.legacy,
+            ownerKey,
+            taskIds: legacyIds,
+            timeoutMs,
+            signal: controller.signal,
+            getState: input.getState,
+            waitForStateRevisionChange: input.waitForStateRevisionChange,
+          }),
+        );
+      let winner: Readonly<Record<string, unknown>>;
+      try {
+        winner = await Promise.race(waits);
+      } catch (error) {
+        if (!combinedSignal?.aborted) throw error;
+        winner = { status: 'cancelled', reason: 'run_cancelled' };
+      } finally {
+        controller.abort();
+        combinedSignal?.removeEventListener('abort', abort);
+      }
+      await Promise.allSettled(waits);
+      const tasks = await Promise.all(taskIds.map(readTask));
+      const settled = tasks.find(
+        (task) => task.status !== 'running' && task.status !== 'cancelling',
+      );
+      if (settled) return { ok: settled.ok !== false, status: settled.status, tasks };
+      if (combinedSignal?.aborted)
+        return { ok: false, status: 'cancelled', reason: 'run_cancelled', tasks };
+      return {
+        ok: true,
+        status: winner.reason === 'user_input' ? 'running' : 'timeout',
+        ...(winner.reason === 'user_input' ? { reason: 'user_input' } : {}),
+        tasks,
+      };
+    },
+  });
 }
 
 async function waitForBackgroundTasks(input: {

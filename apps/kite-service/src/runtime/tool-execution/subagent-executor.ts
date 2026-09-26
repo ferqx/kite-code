@@ -1819,10 +1819,15 @@ export async function executeAppTaskToolPipeline(input: {
       modelEffectCoordinator: params.modelEffectCoordinator,
       modelInvocationPersistence: params.modelInvocationPersistence,
       backgroundModelInvocationPersistence: params.backgroundModelInvocationPersistence,
+      stageIndependentChild: params.stageIndependentChild,
       subagentLifecyclePersistence: {
         getState: params.getRuntimeState!,
         persistEvents: params.persistRuntimeEvents!,
       },
+      commitAgentMailboxFacts: params.commitAgentMailboxFacts,
+      currentExecutionGeneration: params.currentExecutionGeneration,
+      commitBackgroundAgentSettlement:
+        params.backgroundModelInvocationPersistence?.commitBackgroundAgentSettlement,
       modelInvocationParentId: call.modelInvocationId,
       modelInvocationParentToolCallId: toolCallId,
       modelInvocationParentReservationId: params.modelInvocationParentReservationId,
@@ -1838,6 +1843,7 @@ export async function executeAppTaskToolPipeline(input: {
       maxDepth: 0,
       recordFilePreimage: params.recordFilePreimage,
       afterTurnContinuationRuntime: params.afterTurnContinuationRuntime,
+      checkpointArtifacts: params.checkpointArtifacts,
     };
   };
   let capturedSubagentResult: Readonly<SubAgentResult> | undefined;

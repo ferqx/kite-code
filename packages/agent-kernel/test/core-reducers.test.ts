@@ -448,6 +448,12 @@ describe('State core reducers', () => {
       reason: 'stale',
     } as KernelEvent);
     expect(unknownCancelled).toBe(state);
+    const unknownFailed = reduceLifecycleState(state, {
+      type: 'task.failed',
+      taskId: 'missing',
+      reason: 'stale',
+    } as KernelEvent);
+    expect(unknownFailed).toBe(state);
 
     const journal = recordRecoveryFailure(createToolRecoveryJournal(RECOVERY_KEY), {
       toolCallId: 'call-1',
@@ -468,6 +474,15 @@ describe('State core reducers', () => {
     expect(completed.activeTaskId).toBeNull();
     expect(completed.tasks['task-1']?.status).toBe('completed');
     expect(Object.values(completed.toolRecovery.failures)[0]?.resolution).toBe('task_closed');
+    const failed = reduceLifecycleState(withFailure, {
+      type: 'task.failed',
+      taskId: 'task-1',
+      reason: 'Provider usage unknown',
+    } as KernelEvent);
+    expect(failed.turn).toEqual(state.turn);
+    expect(failed.activeTaskId).toBeNull();
+    expect(failed.tasks['task-1']?.status).toBe('failed');
+    expect(Object.values(failed.toolRecovery.failures)[0]?.resolution).toBe('task_closed');
   });
 
   test('task.started replays the root overwrite/activation semantics without changing the turn', () => {

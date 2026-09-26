@@ -146,10 +146,15 @@ export class SubagentGrantAuthority {
     return freeze({ ...unsigned, seal: this.#seal(unsigned) });
   }
 
+  /** Validate a persisted start grant before recovery without authorizing a Provider start. */
+  inspectStart(grant: SubagentDelegationGrant): Readonly<SubagentDelegationGrant> {
+    return this.#verify(grant, 'start', false);
+  }
+
   verifier(): SubagentGrantVerifier {
     return Object.freeze({
-      verifyAndConsumeStart: (grant: SubagentDelegationGrant) => this.#verify(grant, 'start'),
-      verifyAndConsumeResume: (grant: SubagentResumeGrant) => this.#verify(grant, 'resume'),
+      verifyAndConsumeStart: (grant: SubagentDelegationGrant) => this.#verify(grant, 'start', true),
+      verifyAndConsumeResume: (grant: SubagentResumeGrant) => this.#verify(grant, 'resume', true),
       issueHandle: (
         grant: Readonly<SubagentDelegationGrant | SubagentResumeGrant>,
         local: {
@@ -263,10 +268,11 @@ export class SubagentGrantAuthority {
   #verify<T extends SubagentDelegationGrant | SubagentResumeGrant>(
     grant: T,
     purpose: T['purpose'],
+    consume: boolean,
   ): Readonly<T> {
     try {
       const now = this.#effectiveNow();
-      this.#pruneConsumed(now);
+      if (consume) this.#pruneConsumed(now);
       const copy = structuredClone(grant);
       exactKeys(copy, purpose === 'start' ? START_GRANT_KEYS : RESUME_GRANT_KEYS);
       if (copy.schema !== SUBAGENT_PROVIDER_SCHEMA_ || copy.purpose !== purpose) invalid();
@@ -307,7 +313,7 @@ export class SubagentGrantAuthority {
           'Subagent consumed-grant tombstone capacity is exhausted.',
         );
       }
-      this.#consumed.set(copy.grantId, copy.expiresAtMs);
+      if (consume) this.#consumed.set(copy.grantId, copy.expiresAtMs);
       return freeze(copy);
     } catch (error) {
       if (error instanceof SubagentGrantError) throw error;

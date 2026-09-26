@@ -16,17 +16,28 @@ import { getFeatureFlags } from '#kite-service/config/features';
 import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
 import { isConcurrentExploreSubagentBatch } from '../../runtime/tool-execution/subagent-executor';
 import { createAppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
+import {
+  type CrossSessionQueueMailPort,
+  createCrossSessionChildMailboxPort,
+  createCrossSessionRootMailboxPort,
+} from './agent-mailbox-port';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
 import { ProviderReadinessCoordinator } from './provider-readiness';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import type {
+  RuntimeCrossSessionFollowupCommandInput,
+  RuntimeCrossSessionInterruptCommandInput,
+  RuntimeCrossSessionQueueMailCommandInput,
+} from './state-runner';
+import type {
   RuntimeEffect,
   RuntimeEffectExecutor,
   RuntimeEvent,
   RuntimeState,
 } from './state-runtime';
+import { createChildSessionAcceptanceStage } from './subagent/child-session-acceptance';
 import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
@@ -96,6 +107,43 @@ export async function executeAppRuntimeToolsEffect(
         : dependencies.workspaceEffectCompositionFactory(dependencies.commandContext);
   const persistAttemptStartEvents = executionContext?.persistAttemptStartEvents;
   const persistTerminalRecoveryEvents = executionContext?.persistTerminalRecoveryEvents;
+  const childAcceptance =
+    dependencies.childSessionAcceptance && executionContext?.commitBackgroundChildAcceptance
+      ? createChildSessionAcceptanceStage({
+          getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
+          effectLeases: dependencies.childSessionAcceptance.effectLeases,
+          commit: executionContext.commitBackgroundChildAcceptance,
+          onAccepted: dependencies.childSessionAcceptance.onAccepted,
+          parentSignal: dependencies.signal,
+        })
+      : undefined;
+  const crossCommit = (
+    executionContext as
+      | (NonNullable<typeof executionContext> & {
+          commitCrossSessionQueueMailCommand?: (
+            input: RuntimeCrossSessionQueueMailCommandInput,
+          ) => Promise<unknown>;
+        })
+      | undefined
+  )?.commitCrossSessionQueueMailCommand;
+  const crossInterruptCommit = (
+    executionContext as
+      | (NonNullable<typeof executionContext> & {
+          commitCrossSessionInterruptCommand?: (
+            input: RuntimeCrossSessionInterruptCommandInput,
+          ) => Promise<unknown>;
+        })
+      | undefined
+  )?.commitCrossSessionInterruptCommand;
+  const crossFollowupCommit = (
+    executionContext as
+      | (NonNullable<typeof executionContext> & {
+          commitCrossSessionFollowupCommand?: (
+            input: RuntimeCrossSessionFollowupCommandInput,
+          ) => Promise<unknown>;
+        })
+      | undefined
+  )?.commitCrossSessionFollowupCommand;
   const stateToolPipelinePersistence =
     executionContext &&
     persistAttemptStartEvents &&
@@ -105,7 +153,9 @@ export async function executeAppRuntimeToolsEffect(
           getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
           persistAttemptStartEvents: (events) => persistAttemptStartEvents(events),
           persistTerminalRecoveryEvents: (events) => persistTerminalRecoveryEvents(events),
-          persistReceiptEvents: (events) => executionContext.persistEvents(events),
+          persistReceiptEvents: async (events) =>
+            (await childAcceptance?.commitReceipt(events)) ??
+            executionContext.persistEvents(events),
           now: dependencies.now ?? (() => new Date().toISOString()),
           capabilityArtifactWriter: dependencies.capabilityArtifactStore,
           verifyBuiltinWorkspaceFilesystemTerminal: verifyBuiltinWorkspaceFilesystemTerminal,
@@ -142,6 +192,7 @@ export async function executeAppRuntimeToolsEffect(
     const parallelExploreBatch =
       parallelSubagentBatch && isConcurrentExploreSubagentBatch(state, effect.toolCallIds);
     const execute = async (toolCallIds: string[], subagentConcurrencyGroupId?: string) => {
+      const currentTurnSafeTools = dependencies.currentTurnFollowup?.safeToolNames('tool');
       const taskCallId =
         toolCallIds.length === 1 &&
         isBuiltinSubagentTaskToolName(state.tools.calls[toolCallIds[0]!]?.name)
@@ -247,9 +298,127 @@ export async function executeAppRuntimeToolsEffect(
           authorizationObservedAt: Date.now(),
           subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
           backgroundSubagentRuntime: dependencies.backgroundSubagentRuntime,
+          independentChildTaskControl: dependencies.childSessionAcceptance?.taskControl,
+          stageIndependentChild: childAcceptance?.stage,
+          childToolCeiling:
+            currentTurnSafeTools && dependencies.childToolCeiling
+              ? {
+                  ...dependencies.childToolCeiling,
+                  allowedTools: dependencies.childToolCeiling.allowedTools.filter((name) =>
+                    currentTurnSafeTools.includes(name),
+                  ),
+                }
+              : dependencies.childToolCeiling,
+          agentMailboxPortForCall:
+            dependencies.agentMailboxAvailable === true ||
+            dependencies.agentMailboxQueueOnlyAvailable === true
+              ? (dependencies.agentMailboxPortForCall ??
+                (executionContext &&
+                crossCommit &&
+                executionContext.currentRunId &&
+                dependencies.crossSessionQueueMail &&
+                dependencies.signal
+                  ? ({ toolCallId }) => {
+                      const scoped = dependencies.crossSessionQueueMail!.bindForEffect({
+                        acceptSource: async (input) => {
+                          await crossCommit({
+                            event: input.event,
+                            mutation: input.mutation,
+                            evidence: input.receipt,
+                          });
+                        },
+                        ...(crossInterruptCommit
+                          ? {
+                              acceptInterruptSource: async (input) => {
+                                await crossInterruptCommit({
+                                  event: input.event,
+                                  mutation: input.mutation,
+                                  evidence: input.receipt,
+                                });
+                              },
+                            }
+                          : {}),
+                      });
+                      const bound = {
+                        getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
+                        currentRunId: executionContext.currentRunId!,
+                        storage:
+                          dependencies.crossSessionChildIdentity || !crossFollowupCommit
+                            ? scoped.mailbox
+                            : {
+                                ...scoped.mailbox,
+                                acceptFollowupCommand: async (
+                                  value: Parameters<
+                                    NonNullable<CrossSessionQueueMailPort['acceptFollowupCommand']>
+                                  >[0],
+                                ) => {
+                                  await crossFollowupCommit({
+                                    reservationEvent: value.reservationEvent,
+                                    event: value.event,
+                                    mutation: {
+                                      kind: 'accept_followup',
+                                      messageId: value.event.messageId,
+                                      targetSessionId: value.intent.targetSessionId,
+                                      commandId: value.receipt.commandId,
+                                      requestDigest: value.receipt.requestDigest,
+                                      sourceRunId: value.intent.sourceRunId,
+                                      sourceTurnId: value.intent.sourceTurnId,
+                                      sourceModelInvocationId: value.intent.sourceModelInvocationId,
+                                      sourceToolCallId: value.intent.sourceToolCallId,
+                                      sourceEffectAttemptId: value.intent.sourceEffectAttemptId,
+                                      sourceSequence: value.intent.sourceSequence,
+                                      bodyText: value.intent.bodyText,
+                                      acceptedAtMs: value.intent.acceptedAtMs,
+                                      submissionId: value.intent.submissionId,
+                                      admission: value.intent.admission,
+                                    },
+                                    evidence: value.receipt,
+                                  });
+                                },
+                              },
+                        toolCallId,
+                        signal: dependencies.signal!,
+                        ...(scoped.scheduleDelivery
+                          ? { scheduleDelivery: scoped.scheduleDelivery }
+                          : {}),
+                        ...(scoped.scheduleFollowup
+                          ? { scheduleFollowup: scoped.scheduleFollowup }
+                          : {}),
+                        ...(scoped.scheduleInterrupt
+                          ? { scheduleInterrupt: scoped.scheduleInterrupt }
+                          : {}),
+                      };
+                      return dependencies.crossSessionChildIdentity
+                        ? createCrossSessionChildMailboxPort({
+                            ...bound,
+                            child: dependencies.crossSessionChildIdentity,
+                          })
+                        : createCrossSessionRootMailboxPort({
+                            ...bound,
+                            ...(dependencies.followupPolicyForPreparedTool
+                              ? { authorizeFollowup: dependencies.followupPolicyForPreparedTool }
+                              : {}),
+                          });
+                    }
+                  : undefined))
+              : undefined,
+          ...(dependencies.agentMailboxAvailable === true &&
+          dependencies.crossSessionQueueMail === undefined &&
+          executionContext?.commitAgentMailboxFacts &&
+          dependencies.runtimeStore?.currentExecutionGeneration
+            ? {
+                commitAgentMailboxFacts: executionContext.commitAgentMailboxFacts,
+                currentExecutionGeneration: () =>
+                  dependencies.runtimeStore!.currentExecutionGeneration!(state.session.threadId),
+              }
+            : {}),
           afterTurnContinuationRuntime: dependencies.afterTurnContinuationRuntime,
+          agentMailboxQueueOnlyAvailable:
+            dependencies.agentMailboxQueueOnlyAvailable === true &&
+            dependencies.crossSessionQueueMail !== undefined,
           subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
           subagentTaskRequests: dependencies.subagentTaskRequests,
+          checkpointArtifacts: dependencies.checkpointArtifacts,
           modelInvocationPersistence: executionContext
             ? {
                 getState: () => (executionContext.getState?.() ?? state) as RuntimeState,

@@ -1,3 +1,4 @@
+import { AsyncResource } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -8,6 +9,10 @@ import {
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
 import { canonicalModelJson, ModelArtifactStore } from '@kite-ai/builtin-runtime/model';
+import {
+  createSkillCapabilityResolver,
+  refreshSkillCatalog,
+} from '@kite-ai/builtin-runtime/skills';
 import type { KiteWorkspaceIdentity } from '@kite-ai/kite-app-contract';
 import {
   ensureKiteProfileHome,
@@ -22,6 +27,7 @@ import {
 import {
   assertListRuntimeLogEventsRequest,
   assertListRuntimeLogSessionsRequest,
+  getAgentPhase,
   type ListRuntimeLogEventsRequest,
   type ListRuntimeLogSessionsRequest,
   RUNTIME_CONTRACT_BOUNDARY_,
@@ -52,7 +58,10 @@ import {
   resolveProjectIdentity,
   runtimeHostCurrentStateEventTypes,
 } from '@kite-ai/runtime-host';
-import { createRuntimeHostStateSession } from '@kite-ai/runtime-host/kernel-adapter';
+import {
+  createRuntimeHostStateSession,
+  runtimeHostStateActivePlanning,
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeLogEventReadPage,
   RuntimeLogQueryPort,
@@ -74,6 +83,7 @@ import {
 import { defineRuntimeModule, type RuntimeModule } from '@kite-ai/runtime-spi';
 import {
   assertSqliteRuntimeRunStoreActive,
+  childApprovalProxyId,
   createSqliteRuntimeCompatibilityWriter,
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
@@ -129,6 +139,7 @@ import {
   readBackgroundExecutionSnapshot,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { commitInteractionModeCommand } from './bootstrap/runtime/command-control-decision';
+import { createCrossSessionAgentMailBinding } from './bootstrap/runtime/cross-session-agent-mail-composition';
 import { previewFilesToCheckpoint } from './bootstrap/runtime/file-checkpoints';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
 import { createRuntimeSessionCoordinatorBinding } from './bootstrap/runtime/RuntimeSessionCoordinator';
@@ -138,8 +149,12 @@ import type {
   StateRuntimeStorage,
 } from './bootstrap/runtime/state-runtime';
 import { createKiteRuntimeCompatibilityMigrator } from './bootstrap/runtime/state-store-compatibility';
+import { projectStoredChildApprovals } from './bootstrap/runtime/subagent/child-approval-proxy';
+import { projectIndependentChildExecutions } from './bootstrap/runtime/subagent/child-session-background-projection';
+import { createChildSessionOrchestrator } from './bootstrap/runtime/subagent/child-session-orchestrator';
 import { createAppToolPipelineComposition } from './bootstrap/runtime/tool-pipeline-composition';
 import type { AgentConfig } from './config';
+import { getFeatureFlags } from './config/features';
 import { persistedWorkspaceIdentity } from './config/persisted-workspace-identity';
 import {
   type AdmittedWorkspace,
@@ -153,6 +168,7 @@ import {
 import { createKiteRuntimeHistoryClient } from './runtime-client/history-adapter';
 import { projectRuntimeClientInteractionQueue } from './runtime-client/interaction-projector';
 import { projectRuntimeClientText } from './runtime-client/safe-text';
+import { appSandboxBackendAvailable } from './sandbox/types';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
 
@@ -170,17 +186,11 @@ function resolveStoredSessionRun(
   const active = runs.getActive(sessionId);
   if (active) return active;
 
-  // Unknown rows are not returned by getActive().  One unambiguous recovery
-  // candidate remains visible as recovery_required; multiple candidates stay
-  // hidden until an operator reconciliation resolves the ambiguity.
-  const unknown = runs.list({ sessionId, status: 'unknown', limit: 2 }).entries;
-  if (unknown.length === 1) return unknown[0];
-  if (unknown.length > 1) return undefined;
-
   // The Store orders pages by (createdRevision, runId). Walk all pages so a
-  // long-lived Session does not accidentally hydrate an older settled Run
-  // merely because the first page reached the 200-row storage limit.
-  let latest: RuntimeStoredRun | undefined;
+  // long-lived Session does not hydrate an older Run. Historical unknown
+  // outcomes must not replace a later settled Run at the same State revision.
+  let latestSettled: RuntimeStoredRun | undefined;
+  const unknown: RuntimeStoredRun[] = [];
   let cursor: { readonly createdRevision: number; readonly runId: string } | undefined;
   do {
     const page = runs.list({
@@ -189,11 +199,18 @@ function resolveStoredSessionRun(
       ...(cursor === undefined ? {} : { cursor }),
     });
     for (const candidate of page.entries) {
-      if (isSettledStoredRun(candidate)) latest = candidate;
+      if (isSettledStoredRun(candidate)) latestSettled = candidate;
+      if (candidate.status === 'unknown') unknown.push(candidate);
     }
     cursor = page.hasMore ? page.nextCursor : undefined;
   } while (cursor !== undefined);
-  return latest;
+  // Only unknown Runs newer than the latest settled Run can describe the
+  // current recovery candidate. Multiple such Runs remain ambiguous.
+  const unresolved = unknown.filter(
+    (candidate) => candidate.createdRevision > (latestSettled?.createdRevision ?? -1),
+  );
+  if (unresolved.length > 1) return undefined;
+  return unresolved[0] ?? latestSettled;
 }
 
 function isSettledStoredRun(run: RuntimeStoredRun): boolean {
@@ -370,6 +387,8 @@ export interface KiteMultiWorkspaceRuntimeServerOwner extends AsyncDisposable {
   readonly runtime: RuntimeAccess;
   readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
   readonly cancelAllSessions: (reason: string) => Promise<void>;
+  /** Replays durable source outboxes after the Host starts; failures remain pending. */
+  readonly recoverPendingAgentMail: () => Promise<void>;
   /** Bindings used by native carriers; disconnect only releases this client identity. */
   readonly bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => void;
   readonly releaseConnection: (connectionId: string) => void;
@@ -385,6 +404,8 @@ export interface KiteMultiWorkspaceRuntimeServerInput {
   readonly serverVersion?: string;
   /** Only the parent-owned App Server carrier may advertise App-owned protocol methods. */
   readonly appServerProtocol?: boolean;
+  /** Advertise child History only when the composition supplies its scoped reader. */
+  readonly childHistoryMethods?: boolean;
   /** Explicit daemon lifecycle methods; absent from parent-owned stdio children. */
   readonly appServerDaemonProtocol?: boolean;
   /** Optional shared gate for Runtime and App Control mutations. */
@@ -895,7 +916,31 @@ export interface KiteRuntimeStorageOwner {
   readonly openHistoryLogs?: (
     currentEventTypes: readonly string[],
   ) => RuntimeLogQueryPort<RuntimeEvent>;
-  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
+  /** Present on the Session Store owner; old Store profiles contain roots only. */
+  readonly readSessionLineage?: (
+    sessionId: string,
+  ) => Readonly<{ parentSessionId: string | null }> | null;
+  readonly listChildSessions?: KiteSessionAppServerStorageOwner['listChildSessions'];
+  readonly readChildSession?: KiteSessionAppServerStorageOwner['readChildSession'];
+  readonly openChildSessionHistoryLogs?: KiteSessionAppServerStorageOwner['openChildSessionHistoryLogs'];
+  readonly listPendingCrossSessionQueueMailSources?: KiteSessionAppServerStorageOwner['listPendingCrossSessionQueueMailSources'];
+  readonly listPendingCrossSessionTerminalReplyMailSources?: KiteSessionAppServerStorageOwner['listPendingCrossSessionTerminalReplyMailSources'];
+  readonly listUnrepliedSettledFollowupTerminalSources?: KiteSessionAppServerStorageOwner['listUnrepliedSettledFollowupTerminalSources'];
+  readonly listUnnotifiedAcceptedFollowupReleases?: KiteSessionAppServerStorageOwner['listUnnotifiedAcceptedFollowupReleases'];
+  readonly listPendingCrossSessionFollowupSources?: KiteSessionAppServerStorageOwner['listPendingCrossSessionFollowupSources'];
+  readonly listPendingCrossSessionInterruptTargets?: KiteSessionAppServerStorageOwner['listPendingCrossSessionInterruptTargets'];
+  readonly createChildSession?: KiteSessionAppServerStorageOwner['createChildSession'];
+  readonly readChildSessionIntent?: KiteSessionAppServerStorageOwner['readChildSessionIntent'];
+  readonly readChildApprovalProxy?: KiteSessionAppServerStorageOwner['readChildApprovalProxy'];
+  readonly listPendingChildApprovalProxies?: KiteSessionAppServerStorageOwner['listPendingChildApprovalProxies'];
+  readonly listPendingChildSessionIntents?: KiteSessionAppServerStorageOwner['listPendingChildSessionIntents'];
+  readonly readChildSealedGrant?: KiteSessionAppServerStorageOwner['readChildSealedGrant'];
+  readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState> & {
+    readonly agentMailbox?: import('@kite-ai/runtime-storage-sqlite').KiteSessionAgentMailboxPort;
+    readonly agentMailInput?: import('@kite-ai/runtime-storage-sqlite').KiteSessionAgentMailInputPort;
+    readonly crossSessionQueueMail?: import('@kite-ai/runtime-storage-sqlite').KiteCrossSessionQueueMailPort;
+    readonly currentExecutionGeneration?: (sessionId: string) => string;
+  };
   /** Store 9-only dedicated Artifact tables; legacy owners omit this port. */
   readonly artifactStore?: KiteHomeArtifactStore;
   /** Store 9 durable Controller/effect/resource authority for one admitted Workspace. */
@@ -1046,6 +1091,7 @@ function openCurrentKiteSessionAppServerStorageComposition(
     return createKiteSessionAppServerStorage({
       ...input,
       target,
+      childApprovalProxyId,
     });
   } catch (error) {
     target.close();
@@ -1103,7 +1149,9 @@ function createInjectedStoreLogQueryPort(
     return rows;
   };
   const sessionExists = (sessionId: string): boolean => {
-    if (storage.sessions.loadSnapshotRecord(sessionId) !== null) return true;
+    // This fallback is used by older injected Stores. Its bounded directory is
+    // the only public Session scope; a direct snapshot lookup must not turn an
+    // internal child ID into an observer History read.
     return readSessionRows('').some((entry) => entry.threadId === sessionId);
   };
 
@@ -1157,14 +1205,14 @@ function createInjectedStoreLogQueryPort(
     listEvents(request: ListRuntimeLogEventsRequest): RuntimeLogEventReadPage<RuntimeEvent> {
       assertOpen();
       assertListRuntimeLogEventsRequest(request);
+      if (!sessionExists(request.sessionId)) {
+        throw new Error(`Runtime session was not found: ${request.sessionId}`);
+      }
       const requestedTypes = request.eventTypes ? new Set(request.eventTypes) : undefined;
       if (requestedTypes && [...requestedTypes].some((type) => !currentEventTypes.has(type))) {
         throw new Error('Runtime observer event filter contains an unknown current event type.');
       }
       const stored = storage.sessions.loadEventsStrict(request.sessionId);
-      if (stored.length === 0 && !sessionExists(request.sessionId)) {
-        throw new Error(`Runtime session was not found: ${request.sessionId}`);
-      }
       const candidates = stored
         .map((record) => ({
           sessionId: request.sessionId,
@@ -1385,6 +1433,7 @@ function createKiteRuntimeModules(
 /** Non-owning nested access to the Host-owned storage ports. */
 function createRuntimeStorageAccess(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
+  storage: KiteRuntimeStorageOwner['storage'],
 ): StateRuntimeStorage {
   return Object.freeze({
     sessions: services.sessions,
@@ -1392,6 +1441,12 @@ function createRuntimeStorageAccess(
     effects: services.leases,
     checkpoints: services.checkpoints,
     recoveryIdentities: services.recoveryIdentities,
+    commandReceipts: storage.commandReceipts,
+    ...(storage.agentMailbox ? { agentMailbox: storage.agentMailbox } : {}),
+    ...(storage.agentMailInput ? { agentMailInput: storage.agentMailInput } : {}),
+    ...(storage.currentExecutionGeneration
+      ? { currentExecutionGeneration: storage.currentExecutionGeneration }
+      : {}),
     close: () => undefined,
   });
 }
@@ -1408,6 +1463,28 @@ export function createKiteRuntimeBoundary(): RuntimeHostBoundary {
   });
 }
 
+function projectParentInteractionQueue(
+  owner: KiteRuntimeStorageOwner,
+  snapshot: Readonly<RuntimeState>,
+  rootInteractionQueue: ReturnType<typeof projectRuntimeClientInteractionQueue>,
+): ReturnType<typeof projectRuntimeClientInteractionQueue> {
+  const childApprovals = owner.listPendingChildApprovalProxies
+    ? projectStoredChildApprovals({
+        parentState: snapshot,
+        listPending: owner.listPendingChildApprovalProxies,
+        readChildState: (childThreadId) => owner.loadCurrentSnapshot(childThreadId),
+      })
+    : [];
+  const present = new Set(rootInteractionQueue.interactions.map((entry) => entry.interactionId));
+  const added = childApprovals.filter((entry) => !present.has(entry.interactionId));
+  if (added.length === 0) return rootInteractionQueue;
+  return Object.freeze({
+    revision: rootInteractionQueue.revision,
+    activeInteractionId: rootInteractionQueue.activeInteractionId ?? added[0]!.interactionId,
+    interactions: Object.freeze([...rootInteractionQueue.interactions, ...added]),
+  });
+}
+
 function projectStoredSession(
   owner: KiteRuntimeStorageOwner,
   threadId: string,
@@ -1415,9 +1492,11 @@ function projectStoredSession(
 ): RuntimeSessionProjection | undefined {
   if (!snapshot || snapshot.session.threadId !== threadId) return undefined;
   const model = owner.getCurrentSessionModelRoute(threadId);
-  const interactionQueue = projectRuntimeClientInteractionQueue(snapshot, {
-    sessionRevision: snapshot.revision,
-  });
+  const interactionQueue = projectParentInteractionQueue(
+    owner,
+    snapshot,
+    projectRuntimeClientInteractionQueue(snapshot, { sessionRevision: snapshot.revision }),
+  );
   const activeInteraction =
     interactionQueue.activeInteractionId === undefined
       ? undefined
@@ -1472,6 +1551,16 @@ function projectStoredSession(
                 : storedRun.status
               : ('recovery_required' as const),
             revision: storedRun.lastRevision,
+            ...(preserveRunStatus &&
+            storedRun.status === 'waiting' &&
+            snapshot.completionGuard.waitingReason?.kind === 'required_background'
+              ? {
+                  waitingReason: {
+                    kind: 'required_background' as const,
+                    taskIds: [...snapshot.completionGuard.waitingReason.taskIds],
+                  },
+                }
+              : {}),
             ...(activeInteraction === undefined
               ? {}
               : { activeInteractionId: activeInteraction.interactionId }),
@@ -1536,7 +1625,7 @@ function createKiteCliRuntimeHost(
         builtinToolCatalog,
         toolPipelineComposition,
       });
-      const runtimeStorageView = createRuntimeStorageAccess(services);
+      const runtimeStorageView = createRuntimeStorageAccess(services, owner.storage);
       runtimeCoordinatorBinding.bind({
         services,
         capabilities,
@@ -1584,6 +1673,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
   if ((!input.workspaces || input.workspaces.length === 0) && !input.workspaceTemplateFor) {
     throw new TypeError('Multi-Workspace Runtime requires a Workspace template factory.');
   }
+  const independentChildDetachedScope = new AsyncResource('KiteIndependentChildSession');
+  const mailDetachedScope = new AsyncResource('KiteCrossSessionMailDelivery');
   const bySession = new Map<string, AdmittedWorkspace>();
   const byWorkspace = new Map<
     string,
@@ -1638,6 +1729,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     left.projectId === right.projectId &&
     left.workspaceDigest === right.workspaceDigest;
   const readPersistedAdmissionForSession = (sessionId: string): AdmittedWorkspace | undefined => {
+    if (owner.readSessionLineage?.(sessionId)?.parentSessionId != null) return undefined;
     const snapshot = owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId);
     if (!snapshot) return undefined;
     const projectId = snapshot.session.projectId;
@@ -1686,6 +1778,14 @@ export function createKiteMultiWorkspaceRuntimeServer(
     }
   };
   const bridges = new Map<string, ConfigurableCliRuntimeBridge>();
+  const ensureFollowupRecoveryForWorkspace = new Map<
+    string,
+    (sourceSessionId: string) => Promise<void>
+  >();
+  const ensureInterruptRecoveryForWorkspace = new Map<
+    string,
+    (sourceSessionId: string, targetSessionId: string) => Promise<void>
+  >();
   const desiredConfigs = new Map<string, AgentConfig>();
   const recoveryGenerations = new Map<
     string,
@@ -1706,6 +1806,10 @@ export function createKiteMultiWorkspaceRuntimeServer(
         >,
       ) => RuntimeQueryResult)
     | undefined;
+  let scanPendingAgentMail: (() => Promise<void>) | undefined;
+  let scanPendingTerminalReplies: (() => Promise<void>) | undefined;
+  let scanPendingFollowups: (() => Promise<void>) | undefined;
+  let scanPendingInterrupts: (() => Promise<void>) | undefined;
   let host!: RuntimeHost<RuntimeEvent, RuntimeState>;
   host = createKiteRuntimeHost(
     owner.storage,
@@ -1755,12 +1859,23 @@ export function createKiteMultiWorkspaceRuntimeServer(
             code: 'session_unavailable',
           };
         }
+        const independentChildSnapshot =
+          'readChildExecutionAuthority' in owner && owner.readChildSessionIntent
+            ? projectIndependentChildExecutions({
+                parentState: state,
+                readIntent: owner.readChildSessionIntent,
+                readChildState: (id) => owner.storage.sessions.loadSnapshot<RuntimeState>(id),
+                readAuthority: owner.readChildExecutionAuthority,
+                nowMs: Date.now(),
+              })
+            : undefined;
         const snapshot = readBackgroundExecutionSnapshot({
           sessionId: query.sessionId,
           sessionRevision: state.revision,
           workspace: admission.canonicalPath,
           modelInvocationRuntimeFactory,
           recoveryIdentityKey,
+          ...(independentChildSnapshot ? { independentChildSnapshot } : {}),
         });
         if (query.type === 'list_background_executions') {
           return {
@@ -1783,8 +1898,9 @@ export function createKiteMultiWorkspaceRuntimeServer(
         builtinToolCatalog,
         toolPipelineComposition,
         modelRuntimeFactory: modelRuntime,
-        store: createRuntimeStorageAccess(services),
+        store: createRuntimeStorageAccess(services, owner.storage),
       });
+      const mailBindings = new Map<string, ReturnType<typeof createCrossSessionAgentMailBinding>>();
       const contexts = createRuntimeWorkspaceContextFactory({
         create: async (admission) => {
           input.storageOwner?.admitWorkspace?.(admission);
@@ -1805,6 +1921,286 @@ export function createKiteMultiWorkspaceRuntimeServer(
           byWorkspace.set(key, registered);
           const sessionBridges = new Map<string, ConfigurableCliRuntimeBridge>();
           const pendingSessionBridges = new Map<string, Promise<ConfigurableCliRuntimeBridge>>();
+          const childRecoveryOrchestrators = new Set<
+            ReturnType<typeof createChildSessionOrchestrator>
+          >();
+          const followupRecoveryOrchestrators = new Map<
+            string,
+            ReturnType<typeof createChildSessionOrchestrator>
+          >();
+          const pendingChildRecoveryScans = new Set<Promise<void>>();
+          const pendingFollowupRecoveryScans = new Set<Promise<void>>();
+          const pendingInterruptRecoveryScans = new Set<Promise<void>>();
+          const pendingMailDeliveries = new Set<Promise<void>>();
+          let contextClosing = false;
+          const scheduleInterruptRecovery = (
+            sourceSessionId: string,
+            targetSessionId: string,
+          ): void => {
+            if (contextClosing) return;
+            const orchestrator = followupRecoveryOrchestrators.get(sourceSessionId);
+            if (!orchestrator) throw new Error('Interrupt source Session runtime is unavailable.');
+            const page = orchestrator.schedulePendingInterruptRecovery(targetSessionId);
+            if (page.scheduled === 0) return;
+            const completion = page.completion
+              .then((result) => {
+                if (result.recoveryRequired.length > 0)
+                  console.error('Independent child interrupt recovery requires attention.', {
+                    targetSessionId,
+                    intents: result.recoveryRequired,
+                  });
+                if (!contextClosing && result.observed === 64 && result.processed > 0)
+                  scheduleInterruptRecovery(sourceSessionId, targetSessionId);
+              })
+              .catch((error) =>
+                console.error('Independent child interrupt recovery scan failed.', {
+                  targetSessionId,
+                  errorName: error instanceof Error ? error.name : 'UnknownError',
+                }),
+              );
+            pendingInterruptRecoveryScans.add(completion);
+            void completion.finally(() => pendingInterruptRecoveryScans.delete(completion));
+          };
+          const scheduleFollowupRecovery = (sourceSessionId: string, cursor?: string): void => {
+            if (contextClosing) return;
+            const orchestrator = followupRecoveryOrchestrators.get(sourceSessionId);
+            if (!orchestrator) throw new Error('Followup source Session runtime is unavailable.');
+            const page = orchestrator.schedulePendingFollowupRecovery(cursor);
+            const completion = page.completion
+              .then((result) => {
+                if (result.recoveryRequired.length > 0)
+                  console.error('Independent child followup recovery requires attention.', {
+                    sessionId: sourceSessionId,
+                    followups: result.recoveryRequired,
+                  });
+                if (!contextClosing && result.nextCursor)
+                  scheduleFollowupRecovery(sourceSessionId, result.nextCursor);
+              })
+              .catch((error) =>
+                console.error('Independent child followup recovery scan failed.', {
+                  sessionId: sourceSessionId,
+                  errorName: error instanceof Error ? error.name : 'UnknownError',
+                }),
+              );
+            pendingFollowupRecoveryScans.add(completion);
+            void completion.finally(() => pendingFollowupRecoveryScans.delete(completion));
+          };
+          const crossSessionMailOwner =
+            owner.runWithSessionExecution &&
+            owner.listPendingCrossSessionQueueMailSources &&
+            owner.storage.crossSessionQueueMail &&
+            owner.readSessionLineage &&
+            owner.readChildSealedGrant &&
+            'readChildExecutionAuthority' in owner
+              ? (owner as KiteSessionAppServerStorageOwner)
+              : undefined;
+          let mailBinding: ReturnType<typeof createCrossSessionAgentMailBinding> | undefined;
+          const dispatchedChildProofsFor = (sourceSessionId: string) => {
+            const mailOwner = crossSessionMailOwner;
+            if (!mailOwner) return [];
+            if (!mailOwner.storage.sessions.loadSnapshot<RuntimeState>(sourceSessionId)) return [];
+            return mailOwner.runWithSessionExecution(sourceSessionId, () => {
+              const pending = new Set<string>();
+              let cursor: string | undefined;
+              do {
+                const page = mailOwner.listPendingChildSessionIntents(sourceSessionId, 100, cursor);
+                for (const intent of page.entries)
+                  if (
+                    intent.parentSessionId === sourceSessionId &&
+                    !intent.failureReceiptDigest &&
+                    !intent.parentClaimSettledEventId
+                  )
+                    pending.add(intent.childThreadId);
+                cursor = page.nextCursor;
+              } while (cursor);
+              const proofs = mailOwner.storage.sessions
+                .loadEventsStrict(sourceSessionId)
+                .flatMap(({ event }) => {
+                  if (
+                    event.type !== 'agent.mail_accepted' ||
+                    event.mode !== 'trigger_turn' ||
+                    event.senderAgentId !== sourceSessionId ||
+                    !event.submissionId ||
+                    !pending.has(event.targetAgentId)
+                  )
+                    return [];
+                  const proof =
+                    mailOwner.storage.crossSessionQueueMail.readCurrentTurnDispatchedChildProofForSource(
+                      sourceSessionId,
+                      event.targetAgentId,
+                      event.submissionId,
+                    ) ??
+                    mailOwner.storage.crossSessionQueueMail.readCurrentTurnRoutedNoAttemptChildProofForSource(
+                      sourceSessionId,
+                      event.targetAgentId,
+                      event.submissionId,
+                    );
+                  return proof ? [proof] : [];
+                });
+              return proofs;
+            });
+          };
+          const pendingFollowupFundingFor = (sourceSessionId: string) => {
+            const mailOwner = crossSessionMailOwner;
+            if (!mailOwner) return [];
+            if (!mailOwner.storage.sessions.loadSnapshot<RuntimeState>(sourceSessionId)) return [];
+            return mailOwner.runWithSessionExecution(sourceSessionId, () => {
+              const pending = mailOwner.storage.crossSessionQueueMail.listPendingFollowupFunding(
+                sourceSessionId,
+                100,
+              );
+              if (pending.length === 100)
+                throw new Error('Followup restart funding index is incomplete.');
+              return pending.map((entry) => {
+                const targetProof =
+                  entry.stage === 'activated' &&
+                  entry.targetRunId &&
+                  entry.modelInvocationId &&
+                  mailOwner.storage.sessions.loadSnapshot<RuntimeState>(entry.targetSessionId)
+                    ? mailOwner.storage.crossSessionQueueMail.readActivatedNoAttemptTargetProofForSource(
+                        sourceSessionId,
+                        entry.targetSessionId,
+                        entry.submissionId,
+                      )
+                    : null;
+                return {
+                  fundingRunId: entry.fundingRunId,
+                  submissionId: entry.submissionId,
+                  stage: entry.stage,
+                  backupReservationId: entry.backupReservationId,
+                  turnReservationId: entry.turnReservationId,
+                  modelReservationId: entry.modelReservationId,
+                  modelInvocationId: entry.modelInvocationId,
+                  ...(targetProof &&
+                  targetProof.submissionId === entry.submissionId &&
+                  targetProof.targetRunId === entry.targetRunId &&
+                  targetProof.invocationId === entry.modelInvocationId
+                    ? { targetPreparedNoAttempt: targetProof }
+                    : {}),
+                };
+              });
+            });
+          };
+          const preparedFollowupProofsFor = (targetSessionId: string) => {
+            const mailOwner = crossSessionMailOwner;
+            if (!mailOwner) return [];
+            if (!mailOwner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId)) return [];
+            return mailOwner.runWithSessionExecution(targetSessionId, () => {
+              const state = mailOwner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+              const active = state?.activeFollowupTurn;
+              if (!active) return [];
+              const proof =
+                mailOwner.storage.crossSessionQueueMail.readPreparedFollowupRecoveryProof(
+                  targetSessionId,
+                  active.sourceSessionId,
+                  active.submissionId,
+                );
+              return proof && proof.targetRunId === active.targetRunId ? [proof] : [];
+            });
+          };
+          const preparedCurrentTurnProofsFor = (targetSessionId: string) => {
+            const mailOwner = crossSessionMailOwner;
+            if (!mailOwner) return [];
+            const state = mailOwner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+            const sourceSessionId = state?.childSessionOrigin?.parentSessionId;
+            if (!state || !sourceSessionId) return [];
+            return mailOwner.runWithSessionExecution(targetSessionId, () => {
+              const routed = mailOwner.storage.sessions
+                .loadEventsStrict(targetSessionId)
+                .filter(
+                  ({ event }) =>
+                    event.type === 'agent.followup_routed' &&
+                    event.route === 'current_turn' &&
+                    event.targetAgentId === targetSessionId,
+                );
+              const proofs = routed.flatMap(({ event }) => {
+                if (event.type !== 'agent.followup_routed') return [];
+                const proof =
+                  mailOwner.storage.crossSessionQueueMail.readCurrentTurnPreparedNoAttemptProof(
+                    targetSessionId,
+                    sourceSessionId,
+                    event.submissionId,
+                  );
+                return proof && proof.invocationId === event.invocationId ? [proof] : [];
+              });
+              if (proofs.length > 1)
+                throw new Error('Prepared current-turn recovery proof is ambiguous.');
+              return proofs;
+            });
+          };
+          if (crossSessionMailOwner) {
+            const ensureTargetCoordinator = (targetSessionId: string) => {
+              const state = owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+              if (
+                !state ||
+                state.session.threadId !== targetSessionId ||
+                state.session.workspace !== admission.canonicalPath ||
+                state.session.projectId !== admission.projectId ||
+                state.session.canonicalWorkspaceDigest !== admission.workspaceDigest ||
+                !/^sha256:[a-f0-9]{64}$/u.test(state.session.canonicalWorkspaceDigest)
+              )
+                throw new Error('Cross-Session mail target Workspace identity is unavailable.');
+              const runtime = modelInvocationRuntimeFactory(admission.canonicalPath);
+              return runtimeCoordinatorBinding.access().ensure({
+                sessionId: targetSessionId,
+                userId: state.session.userId,
+                workspace: state.session.workspace,
+                projectId: state.session.projectId,
+                canonicalWorkspaceDigest: state.session
+                  .canonicalWorkspaceDigest as `sha256:${string}`,
+                interactionMode: state.mode,
+                recoveryIdentityKey: state.toolRecovery.identityKey,
+                sandboxAvailable: appSandboxBackendAvailable(registered.input.sandboxBackend),
+                modelArtifactEvidence: runtime.evidence,
+                capabilityArtifactEvidence: runtime.capabilityArtifacts,
+                preservePendingFollowupFunding: pendingFollowupFundingFor(targetSessionId),
+                preservePreparedFollowupModels: preparedFollowupProofsFor(targetSessionId),
+                preservePreparedCurrentTurnModels: preparedCurrentTurnProofsFor(targetSessionId),
+              });
+            };
+            mailBinding = createCrossSessionAgentMailBinding({
+              owner: crossSessionMailOwner,
+              runTargetDelivery: (targetSessionId, operation) =>
+                context.enqueueSessionWork(targetSessionId, async () => {
+                  if (contextClosing)
+                    throw new Error('Cross-Session mail target delivery owner is closing.');
+                  await operation();
+                }),
+              receiveTarget: async ({ targetSessionId, event, mutation }) => {
+                crossSessionMailOwner.runWithSessionExecution(targetSessionId, () => {
+                  ensureTargetCoordinator(targetSessionId).commitCrossSessionQueueMailReceive(
+                    event,
+                    mutation,
+                  );
+                });
+              },
+              scheduleDelivery: (sourceSessionId, messageId) => {
+                if (contextClosing) return;
+                const delivery = mailDetachedScope
+                  .runInAsyncScope(() => mailBinding!.recoverPending(sourceSessionId))
+                  .then(
+                    () => undefined,
+                    (error) => {
+                      console.error('Cross-Session mail delivery remains pending.', {
+                        sourceSessionId,
+                        messageId,
+                        errorName: error instanceof Error ? error.name : 'UnknownError',
+                      });
+                    },
+                  );
+                pendingMailDeliveries.add(delivery);
+                void delivery.finally(() => pendingMailDeliveries.delete(delivery));
+                return delivery;
+              },
+              scheduleFollowup: (sourceSessionId) => {
+                if (!contextClosing) scheduleFollowupRecovery(sourceSessionId);
+              },
+              scheduleInterrupt: (targetSessionId, sourceSessionId) => {
+                if (!contextClosing) scheduleInterruptRecovery(sourceSessionId, targetSessionId);
+              },
+            });
+            mailBindings.set(key, mailBinding);
+          }
           const bridgeForSession = async (
             sessionId: string,
             requestedModel?: { readonly provider: string; readonly name: string },
@@ -1841,14 +2237,213 @@ export function createKiteMultiWorkspaceRuntimeServer(
               ) {
                 throw new Error('Runtime Session Workspace identity changed.');
               }
+              const bridgeInput = {
+                ...registered.input,
+                config: sessionConfig,
+                sessionId,
+                followupPolicyForPreparedTool: (
+                  {
+                    state,
+                    scope,
+                    targetSessionId,
+                    preparedPolicyDigest,
+                  }: Parameters<
+                    NonNullable<CliRuntimeBridgeInput['followupPolicyForPreparedTool']>
+                  >[0],
+                  activeRunConfig: Readonly<AgentConfig>,
+                ) => {
+                  const route = owner.storage.sessions.getSessionModelRoute(sessionId);
+                  const caps = activeRunConfig.modelCapabilities;
+                  const running = Object.values(state.capabilities.invocations).filter(
+                    (invocation) =>
+                      invocation.toolCallId === scope.toolCallId && invocation.status === 'running',
+                  );
+                  const invocation = running[0];
+                  const call = state.tools.calls[scope.toolCallId];
+                  if (
+                    !mailBinding ||
+                    !targetSessionId ||
+                    targetSessionId === sessionId ||
+                    state.session.threadId !== sessionId ||
+                    scope.sessionId !== sessionId ||
+                    scope.sourceAgentId !== sessionId ||
+                    route?.provider !== activeRunConfig.providerName ||
+                    route.name !== activeRunConfig.modelName ||
+                    state.turn.status !== 'active' ||
+                    call?.name !== 'followup_task' ||
+                    call.createdAtTurnId !== scope.turnId ||
+                    call.modelInvocationId !== scope.modelInvocationId ||
+                    running.length !== 1 ||
+                    !invocation?.admissionDigest ||
+                    !Number.isSafeInteger(invocation.attemptsStarted) ||
+                    `${invocation.invocationId}:attempt:${invocation.attemptsStarted}` !==
+                      scope.effectAttemptId ||
+                    !preparedPolicyDigest ||
+                    !/^sha256:[a-f0-9]{64}$/u.test(state.session.canonicalWorkspaceDigest ?? '') ||
+                    !state.capabilities.catalogRevision ||
+                    !Number.isSafeInteger(caps?.contextWindowTokens) ||
+                    !Number.isSafeInteger(caps?.maxOutputTokens) ||
+                    (caps?.contextWindowTokens ?? 0) <= (caps?.maxOutputTokens ?? 0) ||
+                    (caps?.maxOutputTokens ?? 0) < 1
+                  )
+                    return null;
+                  return {
+                    phaseCeiling: getAgentPhase(runtimeHostStateActivePlanning(state)),
+                    authorizationDigest: invocation.authorizationDigest,
+                    admissionDigest: invocation.admissionDigest,
+                    effectiveEffectsDigest: invocation.effectiveEffectsDigest,
+                    capabilityDigest: state.capabilities.catalogRevision,
+                    policyRevision: preparedPolicyDigest,
+                    workspaceDigest: state.session.canonicalWorkspaceDigest!,
+                    interactionModeRevision: state.interactionModeRevision,
+                    contextWindowTokens: caps!.contextWindowTokens!,
+                    maxOutputTokens: caps!.maxOutputTokens!,
+                    firstAttemptTimeoutMs: 60_000,
+                    boundedContext: true as const,
+                  };
+                },
+                ...(mailBinding ? { crossSessionQueueMail: mailBinding } : {}),
+                ...(crossSessionMailOwner
+                  ? {
+                      dispatchedChildRecoveryProofs: () => dispatchedChildProofsFor(sessionId),
+                      pendingFollowupFunding: () => pendingFollowupFundingFor(sessionId),
+                      preparedFollowupRecoveryProofs: () => preparedFollowupProofsFor(sessionId),
+                      preparedCurrentTurnRecoveryProofs: () =>
+                        preparedCurrentTurnProofsFor(sessionId),
+                    }
+                  : {}),
+                restartRecoveryOwnership: () => recoveryGenerations.get(sessionId),
+                enqueueSessionWork: context.enqueueSessionWork,
+                projectIdentity: bridgeIdentity,
+              };
+              const independentChildren =
+                'readChildExecutionAuthority' in owner
+                  ? createChildSessionOrchestrator({
+                      detachedScope: independentChildDetachedScope,
+                      owner,
+                      effectLeases: services.leases,
+                      parentSessionId: sessionId,
+                      bridgeInput,
+                      coordinators: runtimeCoordinatorBinding.access(),
+                      modelRuntimeFactory: modelInvocationRuntimeFactory,
+                      capabilityExecution: capabilities,
+                      enqueueSessionWork: context.enqueueSessionWork,
+                      ...(mailBinding
+                        ? {
+                            scheduleTerminalReplyDelivery: (
+                              childSessionId: string,
+                              messageId: string,
+                            ) => {
+                              if (contextClosing) return;
+                              const delivery = mailDetachedScope
+                                .runInAsyncScope(() =>
+                                  mailBinding!.recoverPendingReplies(childSessionId),
+                                )
+                                .then(
+                                  () => undefined,
+                                  (error) => {
+                                    console.error('Terminal Agent reply remains pending.', {
+                                      childSessionId,
+                                      messageId,
+                                      errorName:
+                                        error instanceof Error ? error.name : 'UnknownError',
+                                    });
+                                  },
+                                );
+                              pendingMailDeliveries.add(delivery);
+                              void delivery.finally(() => pendingMailDeliveries.delete(delivery));
+                              return delivery;
+                            },
+                          }
+                        : {}),
+                      readCurrentSourceFollowupContext: ({ sourceState }) => {
+                        if (sourceState.session.threadId !== sessionId) return null;
+                        const manager = registered.input.mcpManager;
+                        let mcpSnapshot: ReturnType<
+                          NonNullable<typeof manager>['getCapabilitySnapshot']
+                        > | null;
+                        try {
+                          mcpSnapshot = manager ? manager.getCapabilitySnapshot() : null;
+                        } catch {
+                          return null;
+                        }
+                        if (manager && !mcpSnapshot) return null;
+                        let skillCatalog = null;
+                        const flags = getFeatureFlags(sessionConfig);
+                        if (flags.skillWorkflow && flags.skillActivation) {
+                          try {
+                            skillCatalog = refreshSkillCatalog(registered.input.skillOptions, {
+                              resolveCapability: createSkillCapabilityResolver(manager),
+                            });
+                          } catch {
+                            return null;
+                          }
+                        }
+                        return {
+                          mcpSnapshot,
+                          skillCatalog,
+                          agentMailboxPortAvailable: Boolean(mailBinding),
+                          agentMailboxQueueOnlyAvailable: false,
+                          interactionModeOverride: null,
+                        };
+                      },
+                      readCurrentTargetPolicyContext: ({ targetState }) => {
+                        const targetRoute = owner.storage.sessions.getSessionModelRoute(
+                          targetState.session.threadId,
+                        );
+                        if (!targetRoute) return null;
+                        const targetConfig =
+                          registered.input.resolveModelConfig?.(targetRoute) ??
+                          (targetRoute.provider === sessionConfig.providerName &&
+                          targetRoute.name === sessionConfig.modelName
+                            ? sessionConfig
+                            : null);
+                        if (!targetConfig) return null;
+                        const manager = registered.input.mcpManager;
+                        let mcpSnapshot: ReturnType<
+                          NonNullable<typeof manager>['getCapabilitySnapshot']
+                        > | null;
+                        try {
+                          mcpSnapshot = manager ? manager.getCapabilitySnapshot() : null;
+                        } catch {
+                          return null;
+                        }
+                        if (manager && !mcpSnapshot) return null;
+                        let skillCatalog = null;
+                        const flags = getFeatureFlags(targetConfig);
+                        if (flags.skillWorkflow && flags.skillActivation) {
+                          try {
+                            skillCatalog = refreshSkillCatalog(registered.input.skillOptions, {
+                              resolveCapability: createSkillCapabilityResolver(manager),
+                            });
+                          } catch {
+                            return null;
+                          }
+                        }
+                        return {
+                          observedTargetRevision: targetState.revision,
+                          mcpSnapshot,
+                          skillCatalog,
+                        };
+                      },
+                    })
+                  : undefined;
               const bridge = createCliRuntimeBridge(
                 {
-                  ...registered.input,
-                  config: sessionConfig,
-                  sessionId,
-                  restartRecoveryOwnership: () => recoveryGenerations.get(sessionId),
-                  enqueueSessionWork: context.enqueueSessionWork,
-                  projectIdentity: bridgeIdentity,
+                  ...bridgeInput,
+                  ...(independentChildren ? { childSessionAcceptance: independentChildren } : {}),
+                  onCommittedCancel: () => {
+                    if (mailRecoveryClosing || !scanPendingTerminalReplies) return;
+                    void Promise.resolve()
+                      .then(() =>
+                        mailDetachedScope.runInAsyncScope(() => scanPendingTerminalReplies!()),
+                      )
+                      .catch((error) => {
+                        console.error('Cancelled followup notice remains pending.', {
+                          errorName: error instanceof Error ? error.name : 'UnknownError',
+                        });
+                      });
+                  },
                 },
                 capabilities,
                 modelInvocationRuntimeFactory,
@@ -1863,10 +2458,59 @@ export function createKiteMultiWorkspaceRuntimeServer(
                     .map(([connectionId]) => connectionId);
                 },
               );
+              if (independentChildren)
+                independentChildren.bindParentApprovalWake((event) =>
+                  bridge.publishChildApprovalWake(event),
+                );
+              if (independentChildren) {
+                childRecoveryOrchestrators.add(independentChildren);
+                followupRecoveryOrchestrators.set(sessionId, independentChildren);
+              }
               if (owner.storage.sessions.loadSnapshot<RuntimeState>(sessionId)) {
                 await bridge.recoverSession(sessionId, () => undefined);
+                if (independentChildren) {
+                  const schedulePage = async (cursor?: string): Promise<void> => {
+                    if (contextClosing) return;
+                    const page = await independentChildren.schedulePendingRecovery(cursor);
+                    const completion = page.completion
+                      .then(async (result) => {
+                        if (result.recoveryRequired.length > 0)
+                          console.error('Independent child Session recovery requires attention.', {
+                            sessionId,
+                            children: result.recoveryRequired,
+                          });
+                        if (!contextClosing && result.nextCursor)
+                          await schedulePage(result.nextCursor);
+                      })
+                      .catch((error) =>
+                        console.error('Independent child Session recovery scan failed.', {
+                          sessionId,
+                          error,
+                        }),
+                      );
+                    pendingChildRecoveryScans.add(completion);
+                    void completion.finally(() => pendingChildRecoveryScans.delete(completion));
+                  };
+                  await schedulePage();
+                  scheduleFollowupRecovery(sessionId);
+                }
               }
               sessionBridges.set(sessionId, bridge);
+              // A cold scan may have observed this source while its previous
+              // execution still required reconciliation. Once the source bridge
+              // exists, revisit durable Stop rows without replaying the Tool.
+              if (!contextClosing && owner.listPendingCrossSessionInterruptTargets) {
+                const scan = mailDetachedScope
+                  .runInAsyncScope(() => scanPendingInterrupts?.() ?? Promise.resolve())
+                  .catch((error) =>
+                    console.error('Independent child interrupt retry scan failed.', {
+                      sessionId,
+                      errorName: error instanceof Error ? error.name : 'UnknownError',
+                    }),
+                  );
+                pendingInterruptRecoveryScans.add(scan);
+                void scan.finally(() => pendingInterruptRecoveryScans.delete(scan));
+              }
               return bridge;
             })();
             pendingSessionBridges.set(sessionId, creation);
@@ -1878,7 +2522,17 @@ export function createKiteMultiWorkspaceRuntimeServer(
               }
             }
           };
+          ensureFollowupRecoveryForWorkspace.set(key, async (sourceSessionId) => {
+            await bridgeForSession(sourceSessionId);
+          });
+          ensureInterruptRecoveryForWorkspace.set(key, async (sourceSessionId, targetSessionId) => {
+            await bridgeForSession(sourceSessionId);
+            scheduleInterruptRecovery(sourceSessionId, targetSessionId);
+          });
           const bridge: ConfigurableCliRuntimeBridge = Object.freeze({
+            publishChildApprovalWake: () => {
+              throw new Error('Child approval wake requires one parent Session bridge.');
+            },
             applySelectedConfig: (config: AgentConfig) => {
               desiredConfigs.set(key, config);
               for (const [sessionId, sessionBridge] of sessionBridges) {
@@ -1958,8 +2612,24 @@ export function createKiteMultiWorkspaceRuntimeServer(
               publish: Parameters<RuntimeHostExecutionBridge['shutdownSession']>[2],
             ) => (await bridgeForSession(sessionId)).shutdownSession(sessionId, reason, publish),
             close: async () => {
+              contextClosing = true;
               await Promise.allSettled(pendingSessionBridges.values());
               pendingSessionBridges.clear();
+              await Promise.all(
+                [...childRecoveryOrchestrators].map((orchestrator) =>
+                  orchestrator.stopPendingRecovery(),
+                ),
+              );
+              await Promise.all(pendingChildRecoveryScans);
+              await Promise.all(pendingFollowupRecoveryScans);
+              await Promise.all(pendingInterruptRecoveryScans);
+              await Promise.all(pendingMailDeliveries);
+              childRecoveryOrchestrators.clear();
+              followupRecoveryOrchestrators.clear();
+              pendingChildRecoveryScans.clear();
+              pendingFollowupRecoveryScans.clear();
+              pendingInterruptRecoveryScans.clear();
+              pendingMailDeliveries.clear();
               sessionBridges.clear();
             },
           });
@@ -1968,12 +2638,246 @@ export function createKiteMultiWorkspaceRuntimeServer(
             admission,
             bridge,
             close: async () => {
-              bridges.delete(key);
+              try {
+                await bridge.close();
+              } finally {
+                mailBindings.delete(key);
+                ensureFollowupRecoveryForWorkspace.delete(key);
+                ensureInterruptRecoveryForWorkspace.delete(key);
+                bridges.delete(key);
+              }
             },
           };
         },
         resolveWorkspaceForSession: async (sessionId) => persistedAdmissionForSession(sessionId),
       });
+      scanPendingAgentMail = async () => {
+        if (!owner.listPendingCrossSessionQueueMailSources) return;
+        let cursor: string | undefined;
+        do {
+          if (mailRecoveryClosing) return;
+          const sources = owner.listPendingCrossSessionQueueMailSources(100, cursor);
+          for (const sourceSessionId of sources) {
+            if (mailRecoveryClosing) return;
+            try {
+              const lineage = owner.readSessionLineage?.(sourceSessionId);
+              if (!lineage) throw new Error('Cross-Session mail source lineage is unavailable.');
+              const rootSessionId = lineage.parentSessionId ?? sourceSessionId;
+              const sourceAdmission = persistedAdmissionForSession(rootSessionId);
+              if (!sourceAdmission)
+                throw new Error('Cross-Session mail source Workspace is not admitted.');
+              await contexts.create(sourceAdmission);
+              const key = `${sourceAdmission.workspaceDigest}\0${sourceAdmission.projectId}\0${sourceAdmission.canonicalPath}`;
+              const binding = mailBindings.get(key);
+              if (!binding) throw new Error('Cross-Session mail Store owner is unavailable.');
+              let messageCursor: string | undefined;
+              do {
+                if (mailRecoveryClosing) return;
+                const page = await binding.recoverPending(sourceSessionId, 100, messageCursor);
+                messageCursor = page.nextCursor;
+              } while (messageCursor);
+            } catch (error) {
+              // The source outbox is still durable; another admitted owner may retry it.
+              console.error('Cross-Session mail recovery requires attention.', {
+                sourceSessionId,
+                error,
+              });
+            }
+          }
+          cursor = sources.length === 100 ? sources.at(-1) : undefined;
+        } while (cursor);
+      };
+      scanPendingTerminalReplies = async () => {
+        const replyMail = owner.storage.crossSessionQueueMail;
+        const runWithSessionExecution = owner.runWithSessionExecution;
+        const listMissingFollowup = owner.listUnrepliedSettledFollowupTerminalSources;
+        const listUnnotifiedRelease = owner.listUnnotifiedAcceptedFollowupReleases;
+        const listPending = owner.listPendingCrossSessionTerminalReplyMailSources;
+        if (!replyMail || !runWithSessionExecution || !listPending) return;
+        const recoverSource = async (
+          childSessionId: string,
+          parentSessionId: string,
+        ): Promise<void> => {
+          const admission = persistedAdmissionForSession(parentSessionId);
+          if (!admission) throw new Error('Terminal reply parent Workspace is not admitted.');
+          await contexts.create(admission);
+          const key = `${admission.workspaceDigest}\0${admission.projectId}\0${admission.canonicalPath}`;
+          const binding = mailBindings.get(key);
+          if (!binding) throw new Error('Terminal reply Store owner is unavailable.');
+          let messageCursor: string | undefined;
+          do {
+            if (mailRecoveryClosing) return;
+            const page = await binding.recoverPendingReplies(childSessionId, 100, messageCursor);
+            messageCursor = page.nextCursor;
+          } while (messageCursor);
+        };
+        let followupCursor: { childSessionId: string; submissionId: string } | undefined;
+        do {
+          if (mailRecoveryClosing || !listMissingFollowup) break;
+          const missing = listMissingFollowup(100, followupCursor);
+          for (const row of missing) {
+            if (mailRecoveryClosing) return;
+            try {
+              const admission = persistedAdmissionForSession(row.parentSessionId);
+              if (!admission) throw new Error('Followup reply parent Workspace is not admitted.');
+              await contexts.create(admission);
+              runWithSessionExecution(row.childSessionId, () =>
+                replyMail.acceptFollowupTerminalReply(
+                  row.childSessionId,
+                  row.parentSessionId,
+                  row.submissionId,
+                  Date.now(),
+                ),
+              );
+              await recoverSource(row.childSessionId, row.parentSessionId);
+            } catch (error) {
+              console.error('Followup terminal reply recovery requires attention.', {
+                childSessionId: row.childSessionId,
+                submissionId: row.submissionId,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+            }
+          }
+          followupCursor =
+            missing.length === 100
+              ? {
+                  childSessionId: missing[missing.length - 1]!.childSessionId,
+                  submissionId: missing[missing.length - 1]!.submissionId,
+                }
+              : undefined;
+        } while (followupCursor);
+        let releaseCursor: { childSessionId: string; submissionId: string } | undefined;
+        do {
+          if (mailRecoveryClosing || !listUnnotifiedRelease) break;
+          const missing = listUnnotifiedRelease(100, releaseCursor);
+          for (const row of missing) {
+            if (mailRecoveryClosing) return;
+            try {
+              const admission = persistedAdmissionForSession(row.parentSessionId);
+              if (!admission)
+                throw new Error('Accepted release notice parent Workspace is not admitted.');
+              await contexts.create(admission);
+              runWithSessionExecution(row.childSessionId, () =>
+                replyMail.acceptAcceptedReleaseNotice(
+                  row.childSessionId,
+                  row.parentSessionId,
+                  row.submissionId,
+                  Date.now(),
+                ),
+              );
+              await recoverSource(row.childSessionId, row.parentSessionId);
+            } catch (error) {
+              console.error('Accepted followup release notice recovery requires attention.', {
+                childSessionId: row.childSessionId,
+                submissionId: row.submissionId,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+            }
+          }
+          releaseCursor =
+            missing.length === 100
+              ? {
+                  childSessionId: missing[missing.length - 1]!.childSessionId,
+                  submissionId: missing[missing.length - 1]!.submissionId,
+                }
+              : undefined;
+        } while (releaseCursor);
+        let pendingCursor: string | undefined;
+        do {
+          if (mailRecoveryClosing) return;
+          const sources = listPending(100, pendingCursor);
+          for (const childSessionId of sources) {
+            if (mailRecoveryClosing) return;
+            try {
+              const parentSessionId = owner.readSessionLineage?.(childSessionId)?.parentSessionId;
+              if (!parentSessionId) throw new Error('Terminal reply source has no parent Session.');
+              await recoverSource(childSessionId, parentSessionId);
+            } catch (error) {
+              console.error('Terminal Agent reply delivery requires attention.', {
+                childSessionId,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+            }
+          }
+          pendingCursor = sources.length === 100 ? sources.at(-1) : undefined;
+        } while (pendingCursor);
+      };
+      scanPendingFollowups = async () => {
+        if (!owner.listPendingCrossSessionFollowupSources) return;
+        let cursor: string | undefined;
+        do {
+          if (mailRecoveryClosing) return;
+          const sources = owner.listPendingCrossSessionFollowupSources(100, cursor);
+          for (const sourceSessionId of sources) {
+            if (mailRecoveryClosing) return;
+            try {
+              const lineage = owner.readSessionLineage?.(sourceSessionId);
+              if (!lineage) throw new Error('Followup source lineage is unavailable.');
+              const rootSessionId = lineage.parentSessionId ?? sourceSessionId;
+              const sourceAdmission = persistedAdmissionForSession(rootSessionId);
+              if (!sourceAdmission) throw new Error('Followup source Workspace is not admitted.');
+              await contexts.create(sourceAdmission);
+              const key = `${sourceAdmission.workspaceDigest}\0${sourceAdmission.projectId}\0${sourceAdmission.canonicalPath}`;
+              const ensure = ensureFollowupRecoveryForWorkspace.get(key);
+              if (!ensure) throw new Error('Followup source runtime is unavailable.');
+              // The source bridge schedules bounded target recovery without awaiting Provider work.
+              await ensure(sourceSessionId);
+            } catch (error) {
+              console.error('Independent child followup startup recovery requires attention.', {
+                sourceSessionId,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+            }
+          }
+          cursor = sources.length === 100 ? sources.at(-1) : undefined;
+        } while (cursor);
+      };
+      scanPendingInterrupts = async () => {
+        if (!owner.listPendingCrossSessionInterruptTargets) return;
+        let cursor: string | undefined;
+        do {
+          if (mailRecoveryClosing) return;
+          const targets = owner.listPendingCrossSessionInterruptTargets(100, cursor);
+          for (const targetSessionId of targets) {
+            if (mailRecoveryClosing) return;
+            try {
+              const sourceSessionId = owner.readSessionLineage?.(targetSessionId)?.parentSessionId;
+              if (!sourceSessionId)
+                throw new Error('Interrupt target has no direct parent Session.');
+              const sourceAdmission = persistedAdmissionForSession(sourceSessionId);
+              if (!sourceAdmission) throw new Error('Interrupt source Workspace is not admitted.');
+              await contexts.create(sourceAdmission);
+              const key = `${sourceAdmission.workspaceDigest}\0${sourceAdmission.projectId}\0${sourceAdmission.canonicalPath}`;
+              const ensure = ensureInterruptRecoveryForWorkspace.get(key);
+              if (!ensure) throw new Error('Interrupt target runtime is unavailable.');
+              // After SIGKILL the old source owner can still hold an unexpired lease.
+              // Wait for that lease to become fenceable; never seize a live owner.
+              const retryUntil = Date.now() + 35_000;
+              for (;;) {
+                try {
+                  await ensure(sourceSessionId, targetSessionId);
+                  break;
+                } catch (error) {
+                  if (
+                    !(error instanceof KiteAppServerSessionError) ||
+                    error.code !== 'session_busy' ||
+                    Date.now() >= retryUntil
+                  )
+                    throw error;
+                  await new Promise<void>((resolve) => setTimeout(resolve, 500));
+                  if (mailRecoveryClosing) return;
+                }
+              }
+            } catch (error) {
+              console.error('Independent child interrupt startup recovery requires attention.', {
+                targetSessionId,
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+            }
+          }
+          cursor = targets.length === 100 ? targets.at(-1) : undefined;
+        } while (cursor);
+      };
       const admission = createRuntimeWorkspaceAdmission({
         admitForCreate: async (workspace) => {
           const registered = [...byWorkspace.values()].find(
@@ -2240,6 +3144,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     await owner.reconcileInterruptedSession(sessionId, async (generation, assertCurrent) => {
       if (!recoverInterruptedSession) throw new Error('Session recovery adapter is unavailable.');
       await recoverInterruptedSession(sessionId, generation, assertCurrent);
+      return undefined;
     });
   };
   const runHostCommand = async (
@@ -2273,6 +3178,107 @@ export function createKiteMultiWorkspaceRuntimeServer(
       : { status: 'not_found', queryType: 'get_session_projection', code: 'session_not_found' };
   }
   const runHostQuery = async (query: RuntimeQuery): Promise<RuntimeQueryResult> => {
+    // The protocol admission already rejects internal child IDs. Keep the
+    // implementation boundary closed for direct RuntimeAccess callers too.
+    if (
+      'sessionId' in query &&
+      owner.readSessionLineage?.(query.sessionId)?.parentSessionId != null
+    ) {
+      return { status: 'not_found', queryType: query.type, code: 'session_not_found' };
+    }
+    if (query.type === 'list_child_sessions' || query.type === 'get_child_session_projection') {
+      const listChildSessions = owner.listChildSessions;
+      const readChildSession = owner.readChildSession;
+      if (!listChildSessions || !readChildSession)
+        return { status: 'unavailable', queryType: query.type, code: 'unsupported' };
+      if (!owner.loadCurrentSnapshot(query.sessionId))
+        return { status: 'not_found', queryType: query.type, code: 'session_not_found' };
+      if (query.type === 'get_child_session_projection') {
+        const child = readChildSession(query.sessionId, query.childSessionId);
+        if (!child)
+          return { status: 'not_found', queryType: query.type, code: 'session_not_found' };
+        const projection = projectStoredSessionForOwner(child.sessionId, child.state);
+        return projection
+          ? {
+              status: 'ok',
+              queryType: query.type,
+              revision: projection.revision,
+              session: projection,
+            }
+          : { status: 'unavailable', queryType: query.type, code: 'session_unavailable' };
+      }
+      const page = listChildSessions(
+        query.sessionId,
+        query.limit,
+        query.cursor
+          ? { updatedAt: query.cursor.updatedAtMs, sessionId: query.cursor.sessionId }
+          : undefined,
+      );
+      const children = page.entries.map((entry) => {
+        const child = readChildSession(query.sessionId, entry.sessionId);
+        const origin = child?.state.childSessionOrigin;
+        if (
+          !child ||
+          !origin ||
+          origin.parentSessionId !== query.sessionId ||
+          child.state.session.threadId !== entry.sessionId
+        )
+          return null;
+        return {
+          sessionId: entry.sessionId,
+          parentSessionId: query.sessionId,
+          agentId: origin.childInvocationId,
+          taskId: origin.childInvocationId,
+          revision: child.state.revision,
+          updatedAtMs: entry.updatedAt,
+          displayName: projectRuntimeClientText(entry.name || entry.sessionId, 256),
+        };
+      });
+      if (children.some((child) => child === null))
+        return { status: 'unavailable', queryType: query.type, code: 'session_unavailable' };
+      return {
+        status: 'ok',
+        queryType: query.type,
+        childSessions: children.filter((child) => child !== null),
+        ...(page.nextCursor
+          ? {
+              nextChildCursor: {
+                updatedAtMs: page.nextCursor.updatedAt,
+                sessionId: page.nextCursor.sessionId,
+              },
+            }
+          : {}),
+      };
+    }
+    if (query.type === 'get_session_projection' && owner.readSnapshot) {
+      const result = await host.query(query);
+      if (result.status !== 'ok' || !result.session) return result;
+      const interactionQueue = owner.readSnapshot(() => {
+        const state = owner.loadCurrentSnapshot(query.sessionId);
+        return state && state.revision === result.session!.revision
+          ? projectParentInteractionQueue(owner, state, result.session!.interactionQueue)
+          : result.session!.interactionQueue;
+      });
+      return interactionQueue === result.session.interactionQueue
+        ? result
+        : {
+            ...result,
+            session: {
+              ...result.session,
+              interactionQueue,
+              ...(result.session.currentRun
+                ? {
+                    currentRun: {
+                      ...result.session.currentRun,
+                      ...(interactionQueue.activeInteractionId
+                        ? { activeInteractionId: interactionQueue.activeInteractionId }
+                        : {}),
+                    },
+                  }
+                : {}),
+            },
+          };
+    }
     // Projection queries refresh the Host subscriber registry from the Store.
     // Recovery and resource cleanup are admitted only by execution commands.
     if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
@@ -2442,7 +3448,11 @@ export function createKiteMultiWorkspaceRuntimeServer(
     await Promise.all(
       owner
         .ownedSessionIds()
-        .filter((sessionId) => owner.storage.sessions.loadSnapshotRecord(sessionId) !== null)
+        .filter(
+          (sessionId) =>
+            owner.readSessionLineage?.(sessionId)?.parentSessionId == null &&
+            owner.storage.sessions.loadSnapshotRecord(sessionId) !== null,
+        )
         .map((sessionId) =>
           owner.runWithSessionExecution!(sessionId, () => host.cancelSession(sessionId, reason)),
         ),
@@ -2467,17 +3477,40 @@ export function createKiteMultiWorkspaceRuntimeServer(
         version: input.serverVersion ?? `protocol-${RUNTIME_PROTOCOL_VERSION}`,
         instanceId: input.serverInstanceId ?? `server_${randomBytes(16).toString('hex')}`,
       },
-      ...(input.appServerProtocol ? { historyMethods: true, appMethods: true } : {}),
+      ...(input.appServerProtocol
+        ? {
+            historyMethods: true,
+            childHistoryMethods: input.childHistoryMethods === true,
+            appMethods: true,
+          }
+        : {}),
       ...(input.appServerDaemonProtocol ? { serverControlMethods: true } : {}),
     },
   );
   let disposePromise: Promise<void> | undefined;
+  let pendingMailRecovery: Promise<void> | undefined;
+  let mailRecoveryClosing = false;
   return Object.freeze({
     server: hub.server,
     host,
     runtime,
     storage: owner.storage,
     cancelAllSessions,
+    recoverPendingAgentMail: () => {
+      if (mailRecoveryClosing) return Promise.resolve();
+      pendingMailRecovery ??= mailDetachedScope
+        .runInAsyncScope(async () => {
+          await host.start();
+          await scanPendingAgentMail?.();
+          await scanPendingTerminalReplies?.();
+          await scanPendingFollowups?.();
+          await scanPendingInterrupts?.();
+        })
+        .finally(() => {
+          pendingMailRecovery = undefined;
+        });
+      return pendingMailRecovery;
+    },
     bindConnection: (connectionId: string, workspace: AdmittedWorkspace) => {
       connectionWorkspaces.set(connectionId, workspace);
     },
@@ -2497,6 +3530,9 @@ export function createKiteMultiWorkspaceRuntimeServer(
           const decision = await requestedAdmission.authorize(request);
           if (!decision.allowed) return decision;
           const sessionId = admissionSessionId(request);
+          if (sessionId && owner.readSessionLineage?.(sessionId)?.parentSessionId != null) {
+            return { allowed: false as const, reason: 'unauthorized' as const };
+          }
           const persisted =
             sessionId === undefined ? undefined : persistedAdmissionForSession(sessionId);
           const admitted =
@@ -2549,6 +3585,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     },
     [Symbol.asyncDispose]: () => {
       disposePromise ??= (async () => {
+        mailRecoveryClosing = true;
         const failures: unknown[] = [];
         let cleanupConfirmed = true;
         try {
@@ -2560,6 +3597,11 @@ export function createKiteMultiWorkspaceRuntimeServer(
           await cancelAllSessions('Runtime App Server disposed.');
         } catch (error) {
           cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
+          await pendingMailRecovery;
+        } catch (error) {
           failures.push(error);
         }
         try {

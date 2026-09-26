@@ -10,6 +10,15 @@ export const AGENT_KERNEL_BOUNDARY_: AgentKernelBoundary = Object.freeze({
   revision: 'agent-kernel-current',
 });
 
+export type {
+  AgentMailAcceptedEvent,
+  AgentMailInputPreparedEvent,
+  AgentMessageContextFrame,
+} from './agent-mail';
+export {
+  createAgentMessageContextFrame,
+  validateAgentMailInputPreparation,
+} from './agent-mail';
 export {
   approvalCommandGrantKey,
   chooseApprovalFocus,
@@ -34,6 +43,11 @@ export {
   evaluateAutoReviewCircuitBreaker,
   isValidAutoReviewFacts,
 } from './auto-review';
+export {
+  childDelegatedUpperBoundDigest,
+  childThreadIdForToolAttempt,
+  sameChildTaskArtifactRef,
+} from './child-session';
 export {
   assertCurrentRuntimeEvent,
   assertCurrentRuntimeEventForWrite,
@@ -155,6 +169,9 @@ export { isInterruptEffect, isTerminalEffect } from './effects';
 export type { StateReducerOwner } from './event-coverage';
 export { STATE_EVENT_REDUCER_COVERAGE } from './event-coverage';
 export type {
+  AgentFollowupAdmissionArtifactRef,
+  AgentMailArtifactRef,
+  AgentSourceScope,
   ContextCompactionCompletedEvent,
   ContextCompactionFailedEvent,
   ContextCompactionRequestedEvent,
@@ -333,12 +350,26 @@ export {
   reduceAgentState,
 } from './reducer';
 export type {
+  StateDispatchedChildDelegationProof,
+  StateLiveAfterTurnDelegationProof,
   StateModelEvidenceFailure,
+  StatePendingAfterTurnDelegationProof,
+  StatePendingFollowupFundingProof,
+  StatePreparedCurrentTurnModelProof,
+  StatePreparedFollowupModelProof,
   StateRestartRecoveryFacts,
+  StateSealedAfterTurnReportProof,
 } from './restart-recovery';
 export {
   projectStateRestartRecoveryEvents,
   stateRestartRecoveryCapabilityInvocationIds,
+  verifiedDispatchedChildDelegationIds,
+  verifiedLiveAfterTurnReservationIds,
+  verifiedPendingAfterTurnReservationIds,
+  verifiedPendingFollowupReservationIds,
+  verifiedPreparedCurrentTurnModelReservationIds,
+  verifiedPreparedFollowupModelReservationIds,
+  verifiedSealedAfterTurnReportReservationIds,
 } from './restart-recovery';
 export type { RuntimeSchedulingPolicy } from './runtime-scheduling-policy';
 export {

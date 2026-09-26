@@ -336,6 +336,73 @@ describe('SubagentProvider grant and Local Provider', () => {
     }
   });
 
+  test('carries only a private checkpoint ref through the child observation', () => {
+    const expected = handle({
+      ...new SubagentGrantAuthority({ idSource: () => 'checkpoint-grant' }).issueStart(binding()),
+    });
+    const checkpointRef = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_checkpoint' as const,
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      byteLength: 512,
+    };
+    const privatePayload = JSON.parse(
+      JSON.stringify({
+        ok: true,
+        summary: 'done',
+        toolCallCount: 0,
+        durationMs: 1,
+        checkpointRef,
+        terminalStatus: 'completed',
+        error: null,
+        failureDiagnostic: null,
+        resourceAdmissionFailure: null,
+        steps: [],
+        executionJournal: [],
+        exhaustedFingerprints: {},
+        toolRecovery: createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY),
+        blocked: null,
+      }),
+    ) as import('@kite-ai/runtime-spi').JsonObject;
+    const body = {
+      schema: SUBAGENT_PROVIDER_SCHEMA_,
+      handleId: expected.handleId,
+      childInvocationId: expected.childInvocationId,
+      status: 'completed' as const,
+      summary: 'done',
+      toolCallCount: 0,
+      durationMs: 1,
+      privatePayload,
+    };
+    expect(
+      subagentResultFromObservation(
+        {
+          ...body,
+          observationDigest: `sha256:${createHash('sha256').update(JSON.stringify(body)).digest('hex')}`,
+        },
+        expected,
+        TEST_RECOVERY_IDENTITY_KEY,
+      ),
+    ).toMatchObject({ checkpointRef });
+    const forged = {
+      ...body,
+      privatePayload: {
+        ...privatePayload,
+        checkpointRef: { ...checkpointRef, kind: 'subagent_task' },
+      },
+    };
+    expect(() =>
+      subagentResultFromObservation(
+        {
+          ...forged,
+          observationDigest: `sha256:${createHash('sha256').update(JSON.stringify(forged)).digest('hex')}`,
+        },
+        expected,
+        TEST_RECOVERY_IDENTITY_KEY,
+      ),
+    ).toThrow('malformed or inconsistent');
+  });
+
   test.each([
     'failed',
     'interrupted',

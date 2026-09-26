@@ -7,6 +7,9 @@ export type RuntimeClientEventCoverageDecision =
   | 'normalized_by';
 
 const CLIENT_VISIBLE = [
+  'agent.followup_turn_settled',
+  'agent.mail_accepted',
+  'agent.mail_input_prepared',
   'approval.granted',
   'approval.batch_released',
   'approval.rejected',
@@ -55,6 +58,7 @@ const CLIENT_VISIBLE = [
   'subagent.tool_result',
   'task.cancelled',
   'task.completed',
+  'task.failed',
   'tool.cancelled',
   'tool.failed',
   'tool.file_change',
@@ -76,6 +80,19 @@ const CLIENT_VISIBLE = [
 ] as const satisfies readonly RuntimeEvent['type'][];
 
 const INTERNAL_ONLY = [
+  'subagent.child_session_intended',
+  'subagent.child_session_adopted',
+  'subagent.child_approval_proxy_changed',
+  'subagent.child_terminal_sealed',
+  'subagent.child_terminal_imported',
+  'subagent.child_creation_failed',
+  'subagent.child_pre_dispatch_cancelled',
+  'subagent.child_task_input_admitted',
+  'agent.created',
+  'agent.turn_started',
+  'agent.followup_turn_prepared',
+  'agent.followup_routed',
+  'agent.task_settled',
   'approval.command_replaced',
   'approval.session_grants_cleared',
   'capability.bindings_issued',
@@ -120,10 +137,12 @@ const INTERNAL_ONLY = [
   'provider.readiness_succeeded',
   'provider.readiness_waiter_registered',
   'resource_budget.configured',
+  'resource_budget.bounded_replaced',
   'resource_budget.dispatch_started',
   'resource_budget.reconciled',
   'resource_budget.released',
   'resource_budget.reserved',
+  'resource_budget.child_slot_acquired',
   'resource_budget.unknown',
   'resource_budget.waiter_cancelled',
   'resource_budget.waiter_enqueued',
@@ -138,6 +157,7 @@ const INTERNAL_ONLY = [
   'skill.catalog_refreshed',
   'skill.frame_closed',
   'subagent.cache_metrics',
+  'subagent.child_recovery_required',
   'subagent.recovery_journal_merged',
   'tool.retry_recorded',
   'user.command_invoked',

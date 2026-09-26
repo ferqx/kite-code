@@ -15,3 +15,8 @@ export function subagentLifecycleArtifactRoot(): string {
 export function subagentContinuationArtifactRoot(): string {
   return join(userKiteCodeDir(), 'subagent-continuations');
 }
+
+/** Private terminal transcript used only for an explicitly admitted later child turn. */
+export function subagentCheckpointArtifactRoot(): string {
+  return join(userKiteCodeDir(), 'subagent-checkpoints');
+}

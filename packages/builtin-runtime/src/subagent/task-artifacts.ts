@@ -1,4 +1,5 @@
 import type { SubagentTaskArtifact, SubagentTaskRequestArtifact } from '@kite-ai/runtime-spi';
+import { SUBAGENT_TASK_ARTIFACT_MAX_BYTES } from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,
@@ -9,7 +10,7 @@ import {
 import { subagentTaskArtifactRoot } from './artifact-paths';
 import { subagentTaskDigest } from './continuation-codec';
 
-const DEFAULT_MAX_BYTES = 1024 * 1024;
+const DEFAULT_MAX_BYTES = SUBAGENT_TASK_ARTIFACT_MAX_BYTES;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u;
 

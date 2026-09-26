@@ -145,3 +145,9 @@ Electron 44.3.0／macOS arm64 隔离包，配套 Service candidate `5acc17089999
 `bun run apps/kite-desktop/scripts/native-smoke.ts --execution-recovery` 已通过实际打包宿主、sandboxed preload、IPC／Service、流式刷新、隐藏再打开、两空间并发与确认退出。A 流式运行时创建 B 并执行，再切回 A；B 完成时通过只读隔离 Store 确认 A 仍为 active，随后两者完整结束；包含前置两轮的模型请求总数恰为 4，不取消或重放。最终原生窗口截图已人工检查。该场景不证明正式签名、公证或所有平台资格。
 
 默认完整视觉 smoke 另外发现复制按钮 hover 可见性及文件面板开启后阅读区几何断言失败，尚未解决；专用执行场景明确排除这些无关视觉断言，不把默认 smoke 报告成通过。复制按钮预期尺寸按当前 20px 组件修正，未改变组件视觉。恢复弹窗保留草稿且不发送任务由 UI 回归证明；安全恢复、缺清理证据拒绝、过期 authority CAS、未知外部结果和失权取消由 Service／Host／Store 回归证明，不将这部分单元证据称为原生恢复故障注入。
+
+## 多后台子 Agent 局部完成（2026-09-23）
+
+本次隔离打包的 `app.asar` SHA-256 为 `dcfaa0e6cdb03194de1e3e78730a045ce35baab231ceffed98b5422ae05b1aaf`，配套 Service build ID 为 `5da70d59f11b04911a970bc3`。`bun run --cwd apps/kite-desktop scripts/native-smoke.ts --execution-recovery` 在真实 Electron 窗口、sandboxed preload、原生 IPC 和配套 Service 下通过；仅使用临时 HOME 与本地模拟 Provider，没有读取用户 Provider 凭据或调用外部模型。三个 required child 的模型回复由测试门分别控制，父 Run 提交完成候选后保持同一 Run 和最初三个 task ID。A 先完成时打开“环境信息”面板可见 A 已完成、B/C 运行中，持久库只有 A 的一条结果事件且无 `run.error`，父模型没有提前重试；B 完成后亦然。C 完成后父模型只恢复一次，三条结果各持久一次，Run 唯一完成且无错误。
+
+父 Turn 自动等待期间，局部结果可以先持久提交而不立即产生客户端订阅事件。DesktopClient 对选中且活动的 Run 读取后台快照，并由 RuntimeClient 的 generation 和 watermark 规则合并；Run 终态或断连后停止读取。窗口宽度下“环境信息”默认收起，测试先显式打开面板再核对卡片。默认视觉 smoke 仍有既有复制按钮尺寸断言（预期 20×20，实际 24×24）失败；本节通过的是 `--execution-recovery` 功能路径，不能据此宣称默认视觉 smoke 或真实外部 Provider 通过。

@@ -121,6 +121,28 @@ class UiClient extends DesktopClient {
     return true;
   }
   override async refreshDirectory() {}
+  override async refreshChildSessions() {}
+  override leaveChildSession() {
+    this.update({ childDetail: undefined });
+  }
+  override async openChildSession(parentSessionId: string, childSessionId: string) {
+    this.update({
+      childDetail: {
+        parentSessionId,
+        childSessionId,
+        loading: false,
+        messages: [
+          {
+            id: `${childSessionId}:answer`,
+            role: 'assistant',
+            text: `答复 ${childSessionId}`,
+            settled: true,
+          },
+        ],
+        projection: session(childSessionId),
+      },
+    });
+  }
   override async prepareNewConversation() {}
   override async checkProject() {}
   override async queryProjectBranch(workspace: string) {
@@ -243,6 +265,8 @@ class UiClient extends DesktopClient {
     this.selectedIds.push(id);
     this.update({
       selected: id,
+      childSessions: undefined,
+      childDetail: undefined,
       projection: (this.view.directory ?? this.view.sessions).find(
         (item) => item.sessionId === id,
       ) as RuntimeSessionProjection | undefined,
@@ -289,6 +313,75 @@ class UiClient extends DesktopClient {
     this.approvals++;
   }
 }
+
+test('parent Agent tree reads three private children without selecting or mutating them', async () => {
+  const client = new UiClient();
+  client.update({
+    childSessions: {
+      parentSessionId: 's0',
+      loading: false,
+      entries: ['a', 'b', 'c'].map((label) => ({
+        sessionId: `private-${label}`,
+        parentSessionId: 's0',
+        agentId: `agent-${label}`,
+        taskId: `task-${label}`,
+        displayName: `子任务 ${label}`,
+        revision: 1,
+        updatedAtMs: 1,
+      })),
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelectorAll('.session-row')).toHaveLength(2);
+  await click(button('子任务 a'));
+  expect(document.body.textContent).toContain('答复 private-a');
+  expect(input()).toBeNull();
+  expect(document.querySelector('.interaction-area')).toBeNull();
+  await click(button('子任务 c'));
+  expect(document.body.textContent).toContain('答复 private-c');
+  expect(document.body.textContent).not.toContain('答复 private-a');
+  expect(client.selectedIds).toEqual([]);
+  expect(client.sent).toEqual([]);
+  expect(client.cancelled).toBe(0);
+  await click(button('返回父会话'));
+  expect(input()).not.toBeNull();
+  expect(client.view.selected).toBe('s0');
+});
+
+test('private child read error stays in parent tree and switching roots removes its detail', async () => {
+  const client = new UiClient();
+  client.update({
+    childSessions: {
+      parentSessionId: 's0',
+      loading: false,
+      entries: [
+        {
+          sessionId: 'private-a',
+          parentSessionId: 's0',
+          agentId: 'agent-a',
+          taskId: 'task-a',
+          displayName: '子任务 a',
+          revision: 1,
+          updatedAtMs: 1,
+        },
+      ],
+    },
+    childDetail: {
+      parentSessionId: 's0',
+      childSessionId: 'private-a',
+      loading: false,
+      messages: [],
+      error: '无法读取',
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.body.textContent).toContain('子会话读取失败');
+  expect(input()).toBeNull();
+  await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
+  expect(client.selectedIds).toEqual(['s1']);
+  expect(client.view.childDetail).toBeUndefined();
+  expect(document.body.textContent).not.toContain('子会话读取失败');
+});
 
 async function render(element: React.ReactNode) {
   const container = document.createElement('div');
@@ -1898,6 +1991,61 @@ test('waiting for background results keeps steering and stop controls available'
 
   await click(button('停止任务'));
   expect(client.cancelled).toBe(1);
+});
+
+test('three child cards retain their initial waiting Run while one result settles', async () => {
+  const client = new UiClient();
+  const waiting = {
+    ...session('s0'),
+    currentRun: {
+      runId: 'run-three-children',
+      initialTurnId: 'turn-three-children',
+      activeTurnId: 'turn-three-children',
+      status: 'waiting' as const,
+      revision: 2,
+      waitingReason: {
+        kind: 'required_background' as const,
+        taskIds: ['child-a', 'child-b', 'child-c'],
+      },
+    },
+  };
+  const cards = (aStatus: 'running' | 'completed') => ({
+    snapshot: {
+      sessionId: 's0',
+      sessionRevision: 2,
+      aggregateGeneration: 'three-child-owner',
+      watermark: aStatus === 'completed' ? 2 : 1,
+      executions: (['a', 'b', 'c'] as const).map((label) => ({
+        executionId: `child-${label}`,
+        displayName: `Child ${label.toUpperCase()}`,
+        sessionId: 's0',
+        sessionRevision: 2,
+        kind: 'subagent' as const,
+        status: label === 'a' ? aStatus : ('running' as const),
+        ownerGeneration: 'three-child-owner',
+        revision: aStatus === 'completed' && label === 'a' ? 2 : 1,
+        cleanupConfirmed: aStatus === 'completed' && label === 'a',
+      })),
+    },
+    connectionGeneration: 1,
+    stale: false,
+  });
+  client.view = { ...client.view, projection: waiting, background: { s0: cards('running') } };
+  await render(<App client={client} />);
+
+  await act(() => client.update({ background: { s0: cards('completed') } }));
+  expect(client.getSnapshot().projection?.currentRun).toMatchObject({
+    runId: 'run-three-children',
+    status: 'waiting',
+    waitingReason: { kind: 'required_background', taskIds: ['child-a', 'child-b', 'child-c'] },
+  });
+  const group = document.querySelector('[aria-label="子智能体"]');
+  expect(group?.querySelectorAll('li')).toHaveLength(3);
+  expect(group?.textContent).toContain('Child A已完成');
+  expect(group?.textContent).toContain('Child B运行中');
+  expect(group?.textContent).toContain('Child C运行中');
+  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.body.textContent).not.toContain('运行失败');
 });
 
 test('background waiting survives a second conversation and keeps both drafts isolated', async () => {

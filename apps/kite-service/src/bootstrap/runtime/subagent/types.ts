@@ -113,6 +113,8 @@ export interface SubAgentRunnerInput {
     import('@kite-ai/runtime-host/kernel-adapter').RuntimeState,
     import('@kite-ai/runtime-host').StateRuntimeEvent
   >;
+  /** Store-proven private mail input for an exact registered background child task. */
+  agentMail?: import('../agent-mail-child-input').ChildAgentMailModelInput['agentMail'];
   /** Durable model invocation that produced the parent Task/Skill tool call. */
   modelInvocationParentId?: string;
   /** Parent Task/Skill tool call that owns each child model step. */
@@ -121,6 +123,11 @@ export interface SubAgentRunnerInput {
   modelInvocationParentReservationId?: string;
   /** Runtime-issued child identity, created before the delegation grant is sealed. */
   childInvocationId?: string;
+  /** App-injected private checkpoint writer; absent means ordinary continuation unavailable. */
+  checkpointArtifacts?: Pick<
+    import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactStore,
+    'write'
+  >;
   /** Exact Pipeline-owned grant facts used for driver cross-checks. */
   subagentGrantContext?: {
     parentInvocationId: string;
@@ -203,9 +210,18 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
+  /** Private terminal transcript ref; never projected into the task Tool result or canonical event. */
+  checkpointRef?: import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactRef;
   /** Stable handle returned only by a successfully adopted background start. */
   backgroundTaskId?: string;
-  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'exhausted' | 'suspended';
+  terminalStatus?:
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'interrupted'
+    | 'exhausted'
+    | 'suspended'
+    | 'unknown';
   error?: string;
   /** Content-free reason retained across the private Provider observation seam. */
   failureDiagnostic?: SubAgentFailureDiagnostic;

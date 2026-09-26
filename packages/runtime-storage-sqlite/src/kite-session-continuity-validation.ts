@@ -1,9 +1,14 @@
 import type { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
+import { validateChildApprovalProxyContinuity } from './kite-child-approval-proxy';
+import { validateCrossSessionInterruptContinuity } from './kite-cross-session-agent-interrupt';
+import { readCrossSessionFollowupGrant } from './kite-cross-session-followup';
 import { createKiteHomeArtifactStore, type KiteHomeArtifactStore } from './kite-home-artifacts';
 import { createKiteHomeRuntimeStorageForConnection } from './kite-home-runtime-storage';
 import { assertKiteSessionStoreSchema, assertKiteStoreIntegrity } from './kite-home-store';
 import { createKiteHomeWriteTransactionPort } from './kite-home-write';
 import { createKiteSessionExecutionAuthority } from './kite-session-execution-authority';
+import { KITE_SESSION_STORE_SCHEMA_VERSION } from './kite-session-store-format';
 import {
   SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
@@ -30,10 +35,12 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
   return database.transaction(() => {
     assertKiteSessionStoreSchema(database);
     assertKiteStoreIntegrity(database);
+    validateChildApprovalProxyContinuity(database);
+    validateCrossSessionInterruptContinuity(database);
     const owner = createKiteHomeRuntimeStorageForConnection({
       database,
       assertStoreSchema: assertKiteSessionStoreSchema,
-      storeSchemaVersion: 10,
+      storeSchemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
       codec,
       stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
       formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
@@ -49,6 +56,12 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
       )
       .all()
       .map((row) => row.session_id);
+    const rootSessionIds = database
+      .query<{ session_id: string }, []>(
+        'SELECT session_id FROM runtime_sessions WHERE parent_session_id IS NULL ORDER BY session_id',
+      )
+      .all()
+      .map((row) => row.session_id);
     let runs = 0;
     let namedSnapshots = 0;
     let recoveryRequired = 0;
@@ -57,9 +70,9 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
       for (const sessionId of sessionIds) {
         const state = owner.storage.sessions.loadSnapshot(sessionId);
         if (state === null) throw new Error('Session continuity snapshot is missing.');
-        validateStateReferences(state, artifacts);
+        validateStateReferences(state, artifacts, database);
         for (const entry of owner.storage.sessions.loadEventsStrict(sessionId))
-          validateEventReferences(entry.event, artifacts);
+          validateEventReferences(entry.event, artifacts, database);
         const named = owner.storage.checkpoints.listNamedSnapshots(sessionId);
         for (const snapshot of named) {
           const namedState = owner.storage.checkpoints.loadNamedSnapshot(
@@ -67,7 +80,7 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
             snapshot.snapshotId,
           );
           if (!namedState) throw new Error('Session continuity named snapshot is missing.');
-          validateStateReferences(namedState, artifacts);
+          validateStateReferences(namedState, artifacts, database);
         }
         namedSnapshots += named.length;
         let cursor: { createdRevision: number; runId: string } | undefined;
@@ -109,8 +122,8 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
         if (!page.hasMore || !page.nextCursor) break;
         directoryCursor = page.nextCursor;
       }
-      if (listed.size !== sessionIds.length || sessionIds.some((id) => !listed.has(id)))
-        throw new Error('Session continuity directory omits a persisted Session.');
+      if (listed.size !== rootSessionIds.length || rootSessionIds.some((id) => !listed.has(id)))
+        throw new Error('Session continuity directory differs from persisted root Sessions.');
       const tombstoneRows = database
         .query<{ session_id: string }, []>('SELECT session_id FROM runtime_session_tombstones')
         .all();
@@ -167,8 +180,14 @@ function entries(value: unknown): unknown[] {
   return Object.values(object(value));
 }
 
-function validateStateReferences(state: unknown, artifacts: KiteHomeArtifactStore): void {
+function validateStateReferences(
+  state: unknown,
+  artifacts: KiteHomeArtifactStore,
+  database: Database,
+): void {
   const root = object(state);
+  if (object(root.activeFollowupTurn).grantRef)
+    validateFollowupGrantRef(object(root.activeFollowupTurn).grantRef, database);
   for (const invocation of entries(root.modelInvocations)) {
     const model = object(invocation);
     readArtifactRef(model.surfaceArtifact, artifacts);
@@ -203,8 +222,13 @@ function validateStateReferences(state: unknown, artifacts: KiteHomeArtifactStor
   }
 }
 
-function validateEventReferences(event: unknown, artifacts: KiteHomeArtifactStore): void {
+function validateEventReferences(
+  event: unknown,
+  artifacts: KiteHomeArtifactStore,
+  database: Database,
+): void {
   const value = object(event);
+  if (value.grantRef) validateFollowupGrantRef(value.grantRef, database);
   for (const field of [
     'surfaceArtifact',
     'responseArtifact',
@@ -218,6 +242,16 @@ function validateEventReferences(event: unknown, artifacts: KiteHomeArtifactStor
   }
   const continuation = object(value.snapshot).continuationArtifact;
   if (continuation) readArtifactRef(continuation, artifacts);
+}
+
+function validateFollowupGrantRef(value: unknown, database: Database): void {
+  const ref = object(value);
+  const stored =
+    typeof ref.artifactId === 'string'
+      ? readCrossSessionFollowupGrant(database, ref.artifactId)
+      : null;
+  if (!stored || JSON.stringify(stored.ref) !== JSON.stringify(ref))
+    throw new Error('Session continuity followup grant reference is invalid.');
 }
 
 function readArtifactRef(value: unknown, artifacts: KiteHomeArtifactStore): void {
@@ -357,6 +391,176 @@ function validateArtifacts(database: Database): Record<string, number> {
   for (const row of privateRefs(database, 'subagent_continuation_artifacts'))
     store.readSubagentContinuation({ ...row, kind: 'subagent_continuation' });
   counts.subagentContinuation = count(database, 'subagent_continuation_artifacts');
+  for (const row of privateRefs(database, 'subagent_checkpoint_artifacts'))
+    store.readSubagentCheckpoint({ ...row, kind: 'subagent_checkpoint' });
+  counts.subagentCheckpoint = count(database, 'subagent_checkpoint_artifacts');
+  for (const row of privateRefs(database, 'agent_followup_admission_artifacts'))
+    store.readAgentFollowupAdmission({ ...row, kind: 'agent_followup_admission' });
+  counts.agentFollowupAdmission = count(database, 'agent_followup_admission_artifacts');
+  for (const row of database
+    .query<{ artifact_id: string }, []>('SELECT artifact_id FROM agent_followup_grant_artifacts')
+    .iterate())
+    readCrossSessionFollowupGrant(database, row.artifact_id);
+  counts.agentFollowupGrant = count(database, 'agent_followup_grant_artifacts');
+  for (const row of database
+    .query<
+      {
+        session_id: string;
+        body_id: string;
+        integrity_identifier: string;
+        byte_length: number;
+        body_text: string;
+      },
+      []
+    >(`SELECT session_id,body_id,integrity_identifier,byte_length,body_text FROM agent_mail_bodies`)
+    .iterate()) {
+    if (
+      Buffer.byteLength(row.body_text, 'utf8') !== row.byte_length ||
+      `sha256:${createHash('sha256').update(row.body_text).digest('hex')}` !==
+        row.integrity_identifier
+    )
+      throw new Error('Agent mail body failed offline integrity validation.');
+  }
+  counts.agentMailBody = count(database, 'agent_mail_bodies');
+  const invalidCrossSessionOutbox = database
+    .query<{ count: number }, []>(
+      `SELECT count(*) AS count FROM agent_mail_outbox o
+       LEFT JOIN runtime_sessions s ON s.session_id=o.source_session_id
+       LEFT JOIN runtime_sessions t ON t.session_id=o.target_session_id
+       LEFT JOIN runtime_command_receipts r
+         ON r.scope_session_id=o.source_session_id AND r.command_id=o.command_id
+       LEFT JOIN runtime_runs tr
+         ON tr.session_id=o.target_session_id AND tr.run_id=o.target_run_id
+       LEFT JOIN child_session_intents child
+         ON child.child_thread_id=o.source_session_id
+       WHERE s.session_id IS NULL OR t.session_id IS NULL
+         OR s.workspace_id<>t.workspace_id OR s.project_id<>t.project_id
+         OR s.workspace_digest<>t.workspace_digest
+         OR NOT (s.parent_session_id=t.session_id OR t.parent_session_id=s.session_id)
+         OR o.source_revision>s.revision OR r.request_digest<>o.request_digest
+         OR r.committed_revision<>o.source_revision OR r.target_session_id<>o.source_session_id
+         OR r.command_id IS NULL
+         OR (o.target_run_id IS NOT NULL AND tr.run_id IS NULL)
+         OR (s.parent_session_id IS NULL AND o.source_grant_id IS NOT NULL)
+         OR (s.parent_session_id IS NOT NULL AND
+           (o.source_grant_id IS NULL OR child.child_thread_id IS NULL
+            OR child.grant_digest<>o.source_grant_digest
+            OR json_extract(child.sealed_grant_json,'$.grantId')<>o.source_grant_id))`,
+    )
+    .get()?.count;
+  if (invalidCrossSessionOutbox)
+    throw new Error('Cross-Session Agent mail outbox continuity is invalid.');
+  const invalidCrossSessionInbox = database
+    .query<{ count: number }, []>(
+      `SELECT count(*) AS count FROM agent_mail_inbox i
+       LEFT JOIN agent_mail_outbox o
+         ON o.source_session_id=i.source_session_id AND o.message_id=i.message_id
+       LEFT JOIN agent_followup_routes route
+         ON route.target_session_id=i.target_session_id AND route.message_id=i.message_id
+       LEFT JOIN runtime_sessions t ON t.session_id=i.target_session_id
+       WHERE o.message_id IS NULL OR t.session_id IS NULL
+         OR o.target_session_id<>i.target_session_id OR i.target_revision>t.revision
+         OR (o.mode='queue_only' AND NOT (i.target_run_id IS o.target_run_id))
+         OR (o.mode='trigger_turn' AND NOT (i.target_run_id IS o.target_run_id)
+           AND (route.submission_id IS NULL OR route.target_run_id IS NOT i.target_run_id
+             OR route.source_session_id<>i.source_session_id))
+         OR (o.mode='trigger_turn' AND route.submission_id IS NOT NULL AND
+           (i.prepared_invocation_id IS NOT route.invocation_id OR
+            i.prepared_model_admission_id IS NOT route.model_admission_id))
+         OR (i.prepared_invocation_id IS NOT NULL AND i.target_run_id IS NULL)
+         OR (o.delivered_target_revision IS NOT NULL
+           AND o.delivered_target_revision<>i.target_revision)`,
+    )
+    .get()?.count;
+  if (invalidCrossSessionInbox)
+    throw new Error('Cross-Session Agent mail inbox continuity is invalid.');
+  const invalidFollowupOutbox = database
+    .query<{ count: number }, []>(
+      `SELECT count(*) AS count FROM agent_mail_outbox o
+       LEFT JOIN agent_followup_admission_artifacts a
+         ON a.artifact_id=o.followup_admission_artifact_id
+       WHERE (o.mode='trigger_turn')<>
+         (o.submission_id IS NOT NULL AND o.followup_admission_artifact_id IS NOT NULL
+          AND o.followup_admission_digest IS NOT NULL)
+         OR (o.mode='trigger_turn' AND
+           (a.artifact_id IS NULL OR a.integrity_identifier<>o.followup_admission_digest
+            OR json_extract(a.canonical_json,'$.submissionId')<>o.submission_id
+            OR json_extract(a.canonical_json,'$.sourceSessionId')<>o.source_session_id
+            OR json_extract(a.canonical_json,'$.targetSessionId')<>o.target_session_id
+            OR json_extract(a.canonical_json,'$.messageId')<>o.message_id))`,
+    )
+    .get()?.count;
+  if (invalidFollowupOutbox)
+    throw new Error('Cross-Session followup admission continuity is invalid.');
+  const invalidFundingReceipts = database
+    .query<{ count: number }, []>(
+      `SELECT count(*) AS count FROM agent_followup_funding_receipts f
+       LEFT JOIN agent_mail_outbox o
+         ON o.source_session_id=f.source_session_id AND o.message_id=f.message_id
+       LEFT JOIN runtime_sessions source ON source.session_id=f.source_session_id
+       LEFT JOIN runtime_sessions target ON target.session_id=f.target_session_id
+       LEFT JOIN runtime_runs run
+         ON run.session_id=f.target_session_id AND run.run_id=f.target_run_id
+       LEFT JOIN model_artifacts surface ON surface.artifact_id=f.surface_artifact_id
+       WHERE o.message_id IS NULL OR o.mode<>'trigger_turn'
+         OR o.submission_id<>f.submission_id OR o.target_session_id<>f.target_session_id
+         OR o.source_run_id<>f.funding_run_id
+         OR source.session_id IS NULL OR target.session_id IS NULL
+         OR target.parent_session_id<>source.session_id
+         OR source.workspace_id<>target.workspace_id
+         OR source.project_id<>target.project_id
+         OR source.workspace_digest<>target.workspace_digest
+         OR f.source_revision>source.revision OR f.target_revision>target.revision
+         OR run.run_id IS NULL OR surface.artifact_id IS NULL OR surface.kind<>'model_surface'
+         OR surface.integrity_identifier<>f.surface_digest`,
+    )
+    .get()?.count;
+  if (invalidFundingReceipts)
+    throw new Error('Cross-Session followup funding receipt continuity is invalid.');
+  const invalidFollowupRoutes = database
+    .query<{ count: number }, []>(
+      `SELECT count(*) AS count FROM agent_followup_routes r
+       LEFT JOIN agent_mail_outbox o
+         ON o.source_session_id=r.source_session_id AND o.message_id=r.message_id
+       LEFT JOIN agent_mail_inbox i
+         ON i.target_session_id=r.target_session_id AND i.message_id=r.message_id
+       LEFT JOIN runtime_runs run
+         ON run.session_id=r.target_session_id AND run.run_id=r.target_run_id
+       LEFT JOIN runtime_sessions target ON target.session_id=r.target_session_id
+       LEFT JOIN agent_followup_funding_receipts funding
+         ON funding.source_session_id=r.source_session_id AND funding.submission_id=r.submission_id
+       WHERE o.message_id IS NULL OR i.message_id IS NULL OR run.run_id IS NULL
+         OR funding.submission_id IS NULL OR funding.message_id<>r.message_id
+         OR funding.target_run_id<>r.target_run_id
+         OR funding.model_invocation_id<>r.invocation_id
+         OR target.session_id IS NULL OR target.parent_session_id<>r.source_session_id
+         OR o.mode<>'trigger_turn' OR o.target_session_id<>r.target_session_id
+         OR o.submission_id<>r.submission_id OR i.source_session_id<>r.source_session_id
+         OR r.routed_revision>target.revision
+         OR (r.route='current_turn' AND i.target_run_id IS NOT r.target_run_id)
+         OR (r.route='new_turn' AND run.start_command_id<>('followup:' || r.submission_id))`,
+    )
+    .get()?.count;
+  if (invalidFollowupRoutes) throw new Error('Cross-Session followup route continuity is invalid.');
+  counts.agentMailOutbox = count(database, 'agent_mail_outbox');
+  counts.agentMailInbox = count(database, 'agent_mail_inbox');
+  counts.agentFollowupRoutes = count(database, 'agent_followup_routes');
+  for (const row of database
+    .query<
+      {
+        session_id: string;
+        target_agent_id: string;
+        source_run_id: string;
+        recipient_run_id: string | null;
+      },
+      []
+    >(
+      `SELECT session_id,target_agent_id,source_run_id,recipient_run_id FROM agent_mail WHERE recipient_run_id IS NOT NULL`,
+    )
+    .iterate()) {
+    if (row.target_agent_id !== row.session_id || row.recipient_run_id !== row.source_run_id)
+      throw new Error('Agent mail recipient Run binding is invalid.');
+  }
   return counts;
 }
 

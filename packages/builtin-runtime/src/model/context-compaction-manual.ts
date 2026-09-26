@@ -41,6 +41,7 @@ export function currentContextPreflight(
       workflowSkills: environment.workflowSkills,
       projectInstructions: environment.projectInstructions,
       sandboxBackend: environment.sandboxBackend,
+      delegatedTask: environment.delegatedTask,
     }).estimate,
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
@@ -136,6 +137,7 @@ export function buildContextStatusReport(
     workflowSkills: environment.workflowSkills,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
+    delegatedTask: environment.delegatedTask,
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,

@@ -27,6 +27,7 @@ import type {
   CapabilityToolTerminalResult,
   ClassifiedInvocation,
   PreparedToolInvocation,
+  PreparedToolInvocationIdentity,
   RuntimeJsonValue,
   ToolCallSnapshot,
   ToolPipelineDispatchOutcome,
@@ -61,6 +62,7 @@ import { createAppToolPipelineAttemptRouter } from './tool-pipeline-attempt-rout
 import type { AppToolPipelineTurnComposition } from './tool-pipeline-composition';
 import {
   APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
+  type AppToolPipelinePreparedRequest,
   createAppPreparedToolInvocation,
 } from './tool-pipeline-prepared';
 
@@ -95,6 +97,11 @@ export const APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_ = Object.freeze([
   'builtin:task_read',
   'builtin:task_wait',
   'builtin:task_cancel',
+  'builtin:list_agents',
+  'builtin:wait_agent',
+  'builtin:send_message',
+  'builtin:followup_task',
+  'builtin:interrupt_agent',
   'builtin:activate_skill',
 ] as const);
 
@@ -172,6 +179,13 @@ export interface AppOrdinaryToolPipelineAttemptInput {
   readonly capabilityExecution: CapabilityExecutionPort;
   readonly signal: AbortSignal;
   readonly mechanismResources: Readonly<MechanismResources>;
+  /** Binds the already selected mailbox Port to this exact prepared Tool attempt. */
+  readonly bindPreparedFollowupAuthority?: (
+    input: Readonly<{
+      identity: Readonly<PreparedToolInvocationIdentity>;
+      request: Readonly<AppToolPipelinePreparedRequest>;
+    }>,
+  ) => boolean;
   /**
    * Dynamic MCP preflight hook. It runs after Kernel admission but before the
    * Host attempt acknowledgement, so readiness/egress facts cannot be
@@ -360,7 +374,13 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
       authorization.value.kind === 'authorized' && attemptInput.lifecycle?.prepareAdmission
         ? await attemptInput.lifecycle.prepareAdmission(classifiedValue)
         : attemptInput.admission;
-    const facts = turn.governance.project(governanceInput, admission);
+    // Kernel admission canonicalizes reservation identities before returning an
+    // allow decision. Keep the projected evidence in that same deterministic order.
+    const canonicalAdmission = Object.freeze({
+      ...admission,
+      reservationIds: Object.freeze([...new Set(admission.reservationIds)].sort()),
+    });
+    const facts = turn.governance.project(governanceInput, canonicalAdmission);
     if (!facts.ok) {
       return Object.freeze({
         kind: 'governance_failure',
@@ -368,7 +388,11 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
         diagnostic: facts.failure.diagnostic,
       });
     }
-    const decision = turn.governance.admit(governanceInput, authorization.value, admission);
+    const decision = turn.governance.admit(
+      governanceInput,
+      authorization.value,
+      canonicalAdmission,
+    );
     if (!decision.ok) {
       return Object.freeze({
         kind: 'governance_failure',
@@ -427,6 +451,19 @@ export function createAppOrdinaryToolPipelineAttemptRuntime(input: {
       binding: classifiedValue.validated.resolved.target.binding,
     });
     const prepared = attempts.prepare(built.prepared.identity, built.prepared.input);
+    if (
+      attemptInput.bindPreparedFollowupAuthority &&
+      !attemptInput.bindPreparedFollowupAuthority({
+        identity: prepared.identity,
+        request,
+      })
+    ) {
+      return Object.freeze({
+        kind: 'governance_failure',
+        code: 'policy_changed',
+        diagnostic: 'Prepared followup Tool authority did not match the selected mailbox.',
+      });
+    }
     let mechanismResources = attemptInput.mechanismResources;
     if (attemptInput.prepareMechanism && target.isDynamicMcp) {
       mechanismResources = await attemptInput.prepareMechanism({

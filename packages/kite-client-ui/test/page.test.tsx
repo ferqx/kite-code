@@ -46,8 +46,8 @@ test('read-only page permits reading and web links without exposing local or mut
   expect(html.match(/<header/g)).toHaveLength(2);
   expect(html).toContain('data-slot="resizable-panel-group"');
   expect(html).toContain('focus-visible:ring-0');
-  expect(html.match(/ data-panel(?:=|>)/g)).toHaveLength(2);
-  expect(html.match(/role="separator"/g)).toHaveLength(1);
+  expect(html.match(/ data-panel(?:=|>)/g)).toHaveLength(3);
+  expect(html.match(/role="separator"/g)).toHaveLength(2);
 });
 
 test('the session header limits long labels to ten visible characters', () => {

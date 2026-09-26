@@ -82,6 +82,59 @@ function dispatchIntent(invocationId: string, childInvocationId: string): Runtim
 }
 
 describe('Kite Runtime History Client adapter', () => {
+  test('loads an immediate child only through the explicitly scoped History reader', async () => {
+    const childEvent: RuntimeEvent = {
+      type: 'user.message_appended',
+      messageId: 'child-message',
+      content: 'child task',
+    };
+    const scopes: string[] = [];
+    const history = createKiteRuntimeHistoryClient(
+      () => ({
+        listSessions: () => ({ entries: [], hasMore: false }),
+        getSession: () => null,
+        listEvents: () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        close: () => undefined,
+      }),
+      undefined,
+      (parentSessionId, childSessionId) => {
+        scopes.push(`${parentSessionId}/${childSessionId}`);
+        const allowed = parentSessionId === 'parent' && childSessionId === 'child';
+        return {
+          getSession: (sessionId) =>
+            allowed && sessionId === 'child'
+              ? { sessionId, name: 'Child', updatedAt: 1, lastSequence: 1 }
+              : null,
+          listEvents: (request) => ({
+            entries:
+              allowed && request.sessionId === 'child' && !request.afterSequence
+                ? [
+                    {
+                      sessionId: 'child',
+                      sequence: 1,
+                      eventId: 'child-event',
+                      createdAt: 1,
+                      event: childEvent,
+                    },
+                  ]
+                : [],
+            hasMore: false,
+            observedLastSequence: allowed ? 1 : 0,
+          }),
+          close: () => undefined,
+        };
+      },
+    );
+    await expect(history.loadSession('child')).rejects.toMatchObject({ code: 'session_not_found' });
+    await expect(history.loadChildSession?.('parent', 'child')).resolves.toMatchObject({
+      session: { sessionId: 'child' },
+      records: [{ sequence: 1 }],
+    });
+    await expect(history.loadChildSession?.('sibling', 'child')).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+    expect(scopes).toEqual(['parent/child', 'parent/child', 'sibling/child']);
+  });
   test('repairs legacy child ownership from exact lifecycle and step facts within the selected history', async () => {
     const parentToolCallId = 'parent-task-tool';
     const subagentId = 'child-invocation';

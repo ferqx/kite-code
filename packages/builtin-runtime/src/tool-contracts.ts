@@ -77,6 +77,11 @@ export const KNOWN_TOOL_NAMES = [
   'task_read',
   'task_wait',
   'task_cancel',
+  'list_agents',
+  'wait_agent',
+  'send_message',
+  'followup_task',
+  'interrupt_agent',
   'web_fetch',
 ] as const;
 
@@ -164,14 +169,16 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   },
   shell_read: {
     summary: 'Read bounded output or wait for a managed Shell execution.',
-    useWhen: 'Inspect a shell_execute handle; use wait_until terminal when no other work remains.',
+    useWhen:
+      'Inspect a shell_execute handle. Pass the cursor returned by the previous shell_read to receive only later output; use wait_until terminal when a finite command has no independent work left.',
     returns: {
       format: 'json',
       description: 'Current status, cursor, bounded output and terminal cleanup facts.',
     },
     constraints:
-      'The handle must belong to the active Runtime scope. wait_ms and wait_until are mutually exclusive.',
-    recovery: 'A cancelled read ends only the wait; use shell_stop to terminate the execution.',
+      'The handle must belong to the active Runtime scope. Preserve the returned cursor between reads; wait_ms and wait_until are mutually exclusive. Do not poll unchanged output with fixed-interval reads.',
+    recovery:
+      'A cancelled read ends only the wait; use shell_stop to terminate the execution. If still running, continue independent work or use one bounded wait for a needed result.',
   },
   shell_stop: {
     summary: 'Stop one managed Shell execution.',
@@ -397,7 +404,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     constraints:
       'name, subagent_type and task are required. background=true returns a stable task identity; result_disposition controls delivery and defaults to required. required remains part of the current Run; after_turn requires separate Runtime authorization and budget. Child agents cannot call ask_user. Planning permits only explore/plan; other roles never gain writes by implication.',
     recovery:
-      'After background admission, continue meaningful independent work, then yield for Runtime-managed required-result waiting. Do not wait with sleep or task_read polling. Approval/policy denial and exhausted/unknown child effects are not replayed; resume only a Runtime-owned continuation.',
+      'After background admission, continue meaningful independent work. If the first child result determines the next step, use one task_wait for the relevant task_ids; otherwise submit the final answer candidate and let Runtime wait for required children. Do not wait with sleep or task_read polling. Approval/policy denial and exhausted/unknown child effects are not replayed; resume only a Runtime-owned continuation.',
   },
   task_read: {
     summary: 'Read the current status or durable terminal report for one background sub-agent.',
@@ -417,7 +424,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task_wait: {
     summary: 'Wait for an actionable update from one or more background sub-agents.',
     useWhen:
-      'Use sparingly when an explicit blocking wait is needed for one to eight exact task_ids. Required background results normally use automatic Runtime-managed waiting, so task_wait is not needed after every task call.',
+      'Use one bounded wait when an intermediate child result determines the next action, for example which independent result to inspect or which dependent task to start. Pass one to eight exact task_ids. When only required children remain before the final answer, submit the final candidate and let Runtime wait automatically.',
     returns: {
       format: 'json',
       description:
@@ -443,6 +450,84 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'The task must belong to the active Session and Runtime owner. Cancellation affects only that child and its governed descendants.',
     recovery:
       'Repeated cancellation returns the existing terminal fact. If cleanup is unconfirmed, report it and do not claim the child stopped.',
+  },
+  list_agents: {
+    summary: 'List visible Agents in the current Session.',
+    useWhen: 'Inspect the Agent tree, current status, recent task identity or unread update count.',
+    returns: {
+      format: 'json',
+      description:
+        'A bounded same-Session Agent tree snapshot; it does not include private message bodies.',
+      fields: ['ok', 'agents'],
+    },
+    constraints:
+      'Read-only. Listing does not consume mailbox messages or start an Agent turn. agent_id is distinct from task_id.',
+    recovery:
+      'A missing or foreign Agent is not made visible by guessing an ID; use the current Session tree.',
+  },
+  wait_agent: {
+    summary: 'Wait once for an update to the calling Agent mailbox.',
+    useWhen: 'Wait for a response or actionable update after sending a message or followup.',
+    returns: {
+      format: 'json',
+      description:
+        'Only timed_out and the wake reason; full messages enter a later model input as lower-trust Agent frames.',
+      fields: ['timed_out', 'reason'],
+    },
+    constraints:
+      'timeout_ms defaults to 30000 and is bounded to 0–60000. Waiting does not mark messages read, consume the mailbox, or cancel any Agent.',
+    recovery:
+      'After an unchanged timeout, continue independent work or yield; do not poll with repeated short waits.',
+  },
+  send_message: {
+    summary: 'Queue a message to one visible Agent without starting a turn.',
+    useWhen:
+      'Send guidance or a reply to an active or idle Agent when it can be read at a later safe model boundary.',
+    returns: {
+      format: 'text',
+      description:
+        'Empty success after durable acceptance; it does not mean the target read or acted on the message.',
+    },
+    constraints:
+      'agent_id names a direct parent or child Agent Session, not a task_id. message is at most 4096 UTF-8 bytes; the target can have at most eight pending messages. This is QueueOnly and never starts a new turn. An idle target keeps the message queued until an explicit eligible continuation.',
+    recovery:
+      'On a rejected or unknown receipt, inspect the durable Agent state; do not blindly resend or assume delivery.',
+  },
+  followup_task: {
+    summary: 'Submit a message that explicitly requests one Agent to continue.',
+    useWhen:
+      'Resume a visible non-root Agent under an admitted TriggerTurn budget and authorization.',
+    returns: {
+      format: 'text',
+      description:
+        'Empty success after durable admission, without a new task ID or a promise that execution started.',
+    },
+    constraints:
+      'agent_id names a non-root Agent, not a task_id. message is at most 4096 UTF-8 bytes. The Host must admit exact caller scope, authorization, deadline and bounded backup budget before success; old grants are not reused.',
+    recovery:
+      'Use wait_agent or list_agents for progress. Rejection or unknown admission is not safe to replay blindly; inspect the durable receipt first.',
+  },
+  interrupt_agent: {
+    summary: 'Interrupt the current active turn of one visible Agent.',
+    useWhen:
+      'Stop an exact Agent after checking its current state; preserve its identity and settled history.',
+    returns: {
+      format: 'json',
+      description:
+        'Cancellation request and exact active-task cleanup status, or the existing idle state.',
+      fields: [
+        'ok',
+        'agent_id',
+        'status',
+        'current_task_id',
+        'cancel_requested',
+        'cleanup_confirmed',
+      ],
+    },
+    constraints:
+      'agent_id is not task_id. Only the Host resolves the current task and applies accurate stop/cleanup semantics; sibling Agents are unaffected.',
+    recovery:
+      'If cleanup is unknown, do not claim the Agent stopped. Re-read the same Agent state rather than targeting an old task ID.',
   },
   web_fetch: {
     summary: 'Fetch and extract one public HTTP or HTTPS document.',

@@ -43,6 +43,7 @@ test('directory details wait initially, switch immediately while warm, and hide 
               sessionId: 'waiting',
               displayName: '待处理任务',
               status: 'waiting',
+              pendingInteractions: 1,
             },
           ],
         },

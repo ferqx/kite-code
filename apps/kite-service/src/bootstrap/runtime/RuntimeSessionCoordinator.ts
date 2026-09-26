@@ -24,6 +24,7 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeCommandCommitEvidence,
+  RuntimeCrossSessionAgentMailMutation,
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
 import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite-ai/runtime-spi';
@@ -58,7 +59,17 @@ import {
   type RuntimeActionResult,
   type RuntimeUserAction,
 } from './state-actions';
-import type { RuntimeActionProvider, RuntimeStateSessionPort } from './state-runner';
+import type {
+  RuntimeActionProvider,
+  RuntimeAgentMailboxCommandCommitInput,
+  RuntimeAgentMailboxFactsCommitInput,
+  RuntimeAgentMailModelAdmissionInput,
+  RuntimeCrossSessionFollowupCommandInput,
+  RuntimeCrossSessionInterruptCommandInput,
+  RuntimeCrossSessionQueueMailCommandInput,
+  RuntimeCrossSessionQueueMailModelInput,
+  RuntimeStateSessionPort,
+} from './state-runner';
 import type {
   RuntimeEffectExecutor,
   RuntimeEffectLeaseExpectation,
@@ -71,6 +82,7 @@ import {
   commitSteerTurnCommand,
   steerQueueHasCapacity,
 } from './steer-command-decision';
+import { prepareBackgroundAgentTerminalReply } from './subagent/task-tool';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import {
   type CommittedStartTurnCommand,
@@ -104,6 +116,28 @@ export interface RuntimeSessionCoordinatorIdentity {
   readonly sandboxAvailable?: boolean;
   readonly modelArtifactEvidence?: ModelArtifactEvidenceAvailability;
   readonly capabilityArtifactEvidence?: import('@kite-ai/builtin-runtime').CapabilityArtifactReader;
+  readonly preserveReservedChildDelegations?: readonly string[];
+  readonly preservePendingAfterTurnDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePendingAfterTurnDelegations']
+  >;
+  readonly preserveLiveAfterTurnDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveLiveAfterTurnDelegations']
+  >;
+  readonly preserveSealedAfterTurnReports?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveSealedAfterTurnReports']
+  >;
+  readonly preservePendingFollowupFunding?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePendingFollowupFunding']
+  >;
+  readonly preservePreparedFollowupModels?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePreparedFollowupModels']
+  >;
+  readonly preservePreparedCurrentTurnModels?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePreparedCurrentTurnModels']
+  >;
+  readonly preserveDispatchedChildDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveDispatchedChildDelegations']
+  >;
 }
 
 export function projectRuntimeSessionLiveMode(
@@ -136,6 +170,31 @@ export interface RuntimeSessionCoordinator {
   /** Exact post-event State retained for current-process notification projection. */
   stateForEvent?(event: RuntimeEvent): Readonly<RuntimeState> | undefined;
   getStateRuntimeStorage(): StateRuntimeStorage;
+  commitBackgroundAgentSettlement(
+    input: import('./subagent/task-tool').BackgroundAgentSettlementCommitInput,
+  ): ReturnType<StateRuntimeSession['commitBackgroundAgentSettlement']>;
+  commitChildBudgetActivation(
+    events: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[0],
+    mutation: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[1],
+    evidence: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[2],
+  ): ReturnType<StateRuntimeSession['commitChildBudgetActivation']>;
+  commitChildDispatchAck(
+    childThreadId: string,
+  ): ReturnType<StateRuntimeSession['commitChildDispatchAck']>;
+  commitCrossSessionQueueMailReceive(
+    event: Extract<RuntimeEvent, { type: 'agent.mail_accepted' }>,
+    mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'receive_queue' }>,
+  ): readonly RuntimeEvent[];
+  commitChildCreationFailure(
+    input: Parameters<StateRuntimeSession['commitChildCreationFailure']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildCreationFailure']>;
+  commitChildRecoveryRequired(
+    event: Parameters<StateRuntimeSession['commitChildRecoveryRequired']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildRecoveryRequired']>;
+  commitChildSessionTerminalImport(
+    input: Parameters<StateRuntimeSession['commitChildSessionTerminalImport']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildSessionTerminalImport']>;
+  commitChildSlotAcquisition(reservationId: string): void;
   isTurnActive(): boolean;
   beginTurn(): void;
   endTurn(): void;
@@ -191,6 +250,7 @@ export interface RuntimeSessionCoordinator {
     command: Extract<RuntimeCommand, { readonly type: 'start_turn' }>,
     evidence: RuntimeCommandCommitEvidence,
     context?: StartTurnSkillPlanningContext,
+    admittedModelRoute?: { readonly provider: string; readonly name: string },
   ): CommittedStartTurnCommand;
   commitSteerTurnCommand(
     command: Extract<RuntimeCommand, { readonly type: 'steer_turn' }>,
@@ -247,6 +307,76 @@ export interface RuntimeSessionCoordinatorBinding {
     readonly store: StateRuntimeStorage;
   }): void;
   access(): RuntimeSessionCoordinatorAccess;
+}
+
+/** Pure admission check; Store retains the ordered mailbox and watermark authority. */
+export function validateRootAgentMailModelAdmission(input: {
+  readonly events: readonly RuntimeEvent[];
+  readonly mutation: RuntimeAgentMailModelAdmissionInput['mutation'];
+  readonly resourceBudget: RuntimeState['resourceBudget'];
+  readonly sessionId: string;
+}): void {
+  const models = input.events.filter((event) => event.type === 'model.invocation_prepared');
+  const prepared = input.events.filter((event) => event.type === 'agent.mail_input_prepared');
+  const model = models[0];
+  const mail = prepared[0];
+  const sameBatchReservations = input.events.flatMap((event) => {
+    if (event.type === 'resource_budget.reserved') return [event.reservation];
+    if (event.type === 'resource_budget.bounded_replaced') return [event.replacement];
+    return [];
+  });
+  const reservationId =
+    model?.type === 'model.invocation_prepared' && model.budget.kind === 'reservation'
+      ? model.budget.reservationId
+      : undefined;
+  const sameBatch = sameBatchReservations.find(
+    (reservation) => reservation.reservationId === reservationId,
+  );
+  const persisted =
+    input.resourceBudget.status === 'active' && reservationId
+      ? input.resourceBudget.reservations[reservationId]
+      : undefined;
+  const reservation = sameBatch ?? persisted;
+  if (
+    models.length !== 1 ||
+    prepared.length !== 1 ||
+    !model ||
+    !mail ||
+    model.purpose !== 'primary_agent' ||
+    model.parentInvocationId !== null ||
+    model.parentToolCallId !== null ||
+    mail.targetAgentId !== input.sessionId ||
+    mail.invocationId !== model.invocationId ||
+    input.mutation.targetAgentId !== input.sessionId ||
+    input.mutation.modelInvocationId !== model.invocationId ||
+    input.mutation.modelAdmissionId !== mail.modelAdmissionId ||
+    input.mutation.fromSequence !== mail.fromSequence ||
+    input.mutation.throughSequence !== mail.throughSequence ||
+    input.mutation.messageIds.length !== mail.messageIds.length ||
+    input.mutation.messageIds.some((id, index) => id !== mail.messageIds[index]) ||
+    (input.resourceBudget.status === 'active'
+      ? model.budget.kind !== 'reservation' ||
+        !reservationId ||
+        mail.modelAdmissionId !== reservationId ||
+        !reservation ||
+        reservation.runId !== input.resourceBudget.runId ||
+        reservation.resourceKind !== 'model' ||
+        reservation.invocationId !== `model-invocation:${model.invocationId}` ||
+        (persisted !== undefined &&
+          (persisted.runId !== reservation.runId ||
+            persisted.invocationId !== reservation.invocationId ||
+            persisted.resourceKind !== reservation.resourceKind)) ||
+        sameBatchReservations.some(
+          (candidate) =>
+            candidate.resourceKind === 'model' &&
+            candidate.invocationId === `model-invocation:${model.invocationId}` &&
+            candidate.reservationId !== reservationId,
+        )
+      : model.budget.kind !== 'no_budget' ||
+        mail.modelAdmissionId !== model.invocationId ||
+        sameBatchReservations.length > 0)
+  )
+    throw new Error('Agent mail model admission identity is invalid.');
 }
 
 class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
@@ -391,6 +521,14 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     const recoveryEvents =
       restored.state.recoveryState.kind === 'normal'
         ? projectRuntimeHostStateRestartRecoveryEvents(restored.state, {
+            preserveReservedChildDelegations: identity.preserveReservedChildDelegations,
+            preservePendingAfterTurnDelegations: identity.preservePendingAfterTurnDelegations,
+            preserveLiveAfterTurnDelegations: identity.preserveLiveAfterTurnDelegations,
+            preserveSealedAfterTurnReports: identity.preserveSealedAfterTurnReports,
+            preservePendingFollowupFunding: identity.preservePendingFollowupFunding,
+            preservePreparedFollowupModels: identity.preservePreparedFollowupModels,
+            preservePreparedCurrentTurnModels: identity.preservePreparedCurrentTurnModels,
+            preserveDispatchedChildDelegations: identity.preserveDispatchedChildDelegations,
             capabilityFinishedAtByInvocationId: Object.fromEntries(
               runtimeHostStateRestartRecoveryCapabilityInvocationIds(restored.state).map(
                 (invocationId) => [invocationId, new Date().toISOString()],
@@ -479,6 +617,124 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   getStateRuntimeStorage(): StateRuntimeStorage {
     this.#assertOpen();
     return this.#store;
+  }
+
+  commitBackgroundAgentSettlement(
+    input: import('./subagent/task-tool').BackgroundAgentSettlementCommitInput,
+  ): ReturnType<StateRuntimeSession['commitBackgroundAgentSettlement']> {
+    this.#assertOpen();
+    const mailbox = this.#store.agentMailbox;
+    if (!mailbox || input.notification.originRunId.length === 0)
+      throw new Error('Background Agent settlement authority is unavailable.');
+    const agentId = input.notification.taskId;
+    const agent = mailbox.readAgent(this.sessionId, this.sessionId, agentId);
+    if (!agent) throw new Error('Background Agent identity is unavailable.');
+    const activeTaskProof = mailbox.readActiveTaskProof(
+      this.sessionId,
+      this.sessionId,
+      agentId,
+      agentId,
+    );
+    const before = this.session.getState();
+    const call = before.tools.calls[input.notification.originToolCallId];
+    const reply =
+      agent.status === 'active' && call?.modelInvocationId
+        ? prepareBackgroundAgentTerminalReply({
+            sessionId: this.sessionId,
+            notification: input.notification,
+            parentModelInvocationId: call.modelInvocationId,
+            parentCapabilityInvocationId: input.parentCapabilityInvocationId,
+            sequence: mailbox.nextSequence(this.sessionId, this.sessionId),
+            acceptedAtMs: Date.now(),
+          })
+        : undefined;
+    const result = this.session.commitBackgroundAgentSettlement({
+      resultEvent: input.resultEvent,
+      resultRef: input.notification.resultArtifact,
+      readResultArtifact: input.readResultArtifact,
+      grantDigest: input.grantDigest,
+      activeTaskProof,
+      ...(reply ? { reply } : {}),
+      agent: {
+        agentId,
+        currentTaskId: agent.currentTaskId,
+        status: agent.status,
+      },
+    });
+    this.#recordLastAppliedEventRevisions(before);
+    return result;
+  }
+
+  commitChildBudgetActivation(
+    events: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[0],
+    mutation: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[1],
+    evidence: Parameters<StateRuntimeSession['commitChildBudgetActivation']>[2],
+  ): ReturnType<StateRuntimeSession['commitChildBudgetActivation']> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitChildBudgetActivation(events, mutation, evidence);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitChildSlotAcquisition(reservationId: string): void {
+    this.#assertOpen();
+    const before = this.session.getState();
+    this.session.processEventBatch([
+      { type: 'resource_budget.child_slot_acquired', reservationId },
+    ]);
+    this.#recordLastAppliedEventRevisions(before);
+  }
+
+  commitChildDispatchAck(
+    childThreadId: string,
+  ): ReturnType<StateRuntimeSession['commitChildDispatchAck']> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitChildDispatchAck(childThreadId);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitCrossSessionQueueMailReceive(
+    event: Extract<RuntimeEvent, { type: 'agent.mail_accepted' }>,
+    mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'receive_queue' }>,
+  ): readonly RuntimeEvent[] {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitCrossSessionQueueMailReceive(event, mutation);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitChildCreationFailure(
+    input: Parameters<StateRuntimeSession['commitChildCreationFailure']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildCreationFailure']> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitChildCreationFailure(input);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitChildRecoveryRequired(
+    event: Parameters<StateRuntimeSession['commitChildRecoveryRequired']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildRecoveryRequired']> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitChildRecoveryRequired(event);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
+  }
+
+  commitChildSessionTerminalImport(
+    input: Parameters<StateRuntimeSession['commitChildSessionTerminalImport']>[0],
+  ): ReturnType<StateRuntimeSession['commitChildSessionTerminalImport']> {
+    this.#assertOpen();
+    const before = this.session.getState();
+    const committed = this.session.commitChildSessionTerminalImport(input);
+    this.#recordLastAppliedEventRevisions(before);
+    return committed;
   }
 
   isTurnActive(): boolean {
@@ -652,13 +908,20 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     command: Extract<RuntimeCommand, { readonly type: 'start_turn' }>,
     evidence: RuntimeCommandCommitEvidence,
     context?: StartTurnSkillPlanningContext,
+    admittedModelRoute?: { readonly provider: string; readonly name: string },
   ): CommittedStartTurnCommand {
     this.#assertOpen();
     if (this.#activeOperation) {
       throw new Error(`Runtime session is busy with ${this.#activeOperation}.`);
     }
     const before = this.session.getState();
-    const committed = commitStartTurnCommand(this.session, command, evidence, context);
+    const committed = commitStartTurnCommand(
+      this.session,
+      command,
+      evidence,
+      context,
+      admittedModelRoute,
+    );
     this.#recordLastAppliedEventRevisions(before);
     return committed;
   }
@@ -1010,6 +1273,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     } = {
       runtimeStore: this.#store,
       getState: () => this.session.getState(),
+      currentRunId: () => this.session.getLifecycleProjection().currentRun?.runId ?? null,
       waitForRevisionChange: (revision, signal) =>
         this.session.waitForRevisionChange!(revision, signal),
       processEvent: (event: RuntimeEvent) => {
@@ -1063,6 +1327,21 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         this.#recordLastAppliedEventRevisions(before);
         return result;
       },
+      commitBackgroundChildAcceptance: (lease, events, requiredEffectLease, sealedGrant) => {
+        const before = this.session.getState();
+        const result = this.session.commitBackgroundChildAcceptance(
+          lease,
+          events,
+          {
+            sessionId: this.sessionId,
+            effectId: requiredEffectLease.effectId,
+            ownerId: requiredEffectLease.ownerId,
+          },
+          sealedGrant,
+        );
+        this.#recordLastAppliedEventRevisions(before);
+        return result;
+      },
       applyEffectResult: (lease, events, requiredEffectLease) => {
         const before = this.session.getState();
         const result = this.session.applyEffectResult(
@@ -1094,6 +1373,323 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
         return result;
       },
       releaseEffect: (lease) => this.session.releaseEffect(lease),
+      commitAgentMailboxCommand: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeAgentMailboxCommandCommitInput,
+      ) => {
+        const runTools = lease.effect.type === 'run_tools' ? lease.effect : undefined;
+        const state = this.session.getState();
+        if (
+          !runTools ||
+          !this.session.isEffectLeaseCurrent(lease) ||
+          input.events.some((event) => {
+            if (event.type !== 'agent.mail_accepted') return false;
+            const tool = state.tools.calls[event.source.toolCallId];
+            const response = state.transcript.messages.find(
+              (message) =>
+                message.kind === 'assistant' && message.messageId === tool?.modelMessageId,
+            );
+            return (
+              !runTools.toolCallIds.includes(event.source.toolCallId) ||
+              event.source.turnId !== lease.turnId ||
+              tool?.createdAtTurnId !== lease.turnId ||
+              response?.kind !== 'assistant' ||
+              response.modelInvocationId !== event.source.modelInvocationId
+            );
+          })
+        )
+          throw new Error('Agent mailbox command is outside its active Tool effect lease.');
+        const storeEffectId = `agent-mail-command:${input.evidence.commandId}`;
+        const ownerId = `agent_mail_${crypto.randomUUID()}`;
+        const leaseDeadline = () => Date.now() + 30_000;
+        if (
+          !this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+        )
+          throw new Error('Agent mailbox Store effect lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+          )
+            throw new Error('Agent mailbox Tool or Store effect lease became stale.');
+          const before = this.session.getState();
+          const result = this.session.commitAgentMailboxCommand(
+            input.events,
+            input.mutations,
+            input.evidence,
+            { sessionId: this.sessionId, effectId: storeEffectId, ownerId },
+          );
+          this.#recordLastAppliedEventRevisions(before);
+          // The same Tool effect still owns its eventual terminal receipt.
+          // Advance only this in-process lease after the durable mail commit.
+          lease.expectedRevision = this.session.getState().revision;
+          return result;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
+      commitCrossSessionQueueMailCommand: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeCrossSessionQueueMailCommandInput,
+      ) => {
+        if (lease.effect.type !== 'run_tools' || !this.session.isEffectLeaseCurrent(lease))
+          throw new Error('Cross-Session mail requires the current Tool effect.');
+        const storeEffectId = `cross-agent-mail-command:${input.evidence.commandId}`;
+        const ownerId = `cross_mail_${crypto.randomUUID()}`;
+        const deadline = () => Date.now() + 30_000;
+        if (!this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, deadline()))
+          throw new Error('Cross-Session mail Store lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, deadline())
+          )
+            throw new Error('Cross-Session mail Tool or Store lease became stale.');
+          const before = this.session.getState();
+          const committed = this.session.commitCrossSessionQueueMailCommand(
+            lease,
+            input.event,
+            input.mutation,
+            input.evidence,
+            { sessionId: this.sessionId, effectId: storeEffectId, ownerId },
+          );
+          this.#recordLastAppliedEventRevisions(before);
+          return committed;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
+      commitCrossSessionInterruptCommand: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeCrossSessionInterruptCommandInput,
+      ) => {
+        if (lease.effect.type !== 'run_tools' || !this.session.isEffectLeaseCurrent(lease))
+          throw new Error('Cross-Session interrupt requires the current Tool effect.');
+        const storeEffectId = `cross-agent-interrupt-command:${input.evidence.commandId}`;
+        const ownerId = `cross_interrupt_${crypto.randomUUID()}`;
+        const deadline = () => Date.now() + 30_000;
+        if (!this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, deadline()))
+          throw new Error('Cross-Session interrupt Store lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, deadline())
+          )
+            throw new Error('Cross-Session interrupt Tool or Store lease became stale.');
+          const before = this.session.getState();
+          const committed = this.session.commitCrossSessionInterruptCommand(
+            lease,
+            input.event,
+            input.mutation,
+            input.evidence,
+            { sessionId: this.sessionId, effectId: storeEffectId, ownerId },
+          );
+          this.#recordLastAppliedEventRevisions(before);
+          return committed;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
+      commitCrossSessionFollowupCommand: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeCrossSessionFollowupCommandInput,
+      ) => {
+        if (lease.effect.type !== 'run_tools' || !this.session.isEffectLeaseCurrent(lease))
+          throw new Error('Cross-Session followup requires the current Tool effect.');
+        const storeEffectId = `cross-agent-followup-command:${input.evidence.commandId}`;
+        const ownerId = `cross_followup_${crypto.randomUUID()}`;
+        const deadline = () => Date.now() + 30_000;
+        if (!this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, deadline()))
+          throw new Error('Cross-Session followup Store lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, deadline())
+          )
+            throw new Error('Cross-Session followup Tool or Store lease became stale.');
+          const before = this.session.getState();
+          const committed = this.session.commitCrossSessionFollowupCommand(
+            lease,
+            input.reservationEvent,
+            input.event,
+            input.mutation,
+            input.evidence,
+            { sessionId: this.sessionId, effectId: storeEffectId, ownerId },
+          );
+          this.#recordLastAppliedEventRevisions(before);
+          return committed;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
+      commitCurrentTurnFollowupRoute: (
+        lease: StateRuntimeSessionEffectLease,
+        events: readonly [
+          Extract<RuntimeEvent, { type: 'agent.followup_routed' }>,
+          Extract<RuntimeEvent, { type: 'agent.mail_input_prepared' }>,
+        ],
+        mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'route_followup' }>,
+      ) => {
+        const before = this.session.getState();
+        const committed = this.session.commitCrossSessionFollowupRouteForModelEffect(
+          lease,
+          events,
+          mutation,
+        );
+        this.#recordLastAppliedEventRevisions(before);
+        return committed;
+      },
+      persistCrossSessionQueueMailModelInput: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeCrossSessionQueueMailModelInput,
+      ) => {
+        if (lease.effect.type !== 'call_model' || !this.session.isEffectLeaseCurrent(lease))
+          throw new Error('Cross-Session mail requires the current model effect.');
+        const currentRun = this.session.getLifecycleProjection().currentRun;
+        if (
+          !currentRun ||
+          currentRun.runId !== input.mutation.currentRunId ||
+          (currentRun.status !== 'running' && currentRun.status !== 'waiting')
+        )
+          throw new Error('Cross-Session mail model Run changed.');
+        const before = this.session.getState();
+        const committed = this.session.commitCrossSessionQueueMailModelInput(
+          lease,
+          input.events,
+          input.mutation,
+        );
+        this.#recordLastAppliedEventRevisions(before);
+        return committed;
+      },
+      commitAgentMailboxFacts: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeAgentMailboxFactsCommitInput,
+      ) => {
+        const runTools = lease.effect.type === 'run_tools' ? lease.effect : undefined;
+        const starts = input.events.filter((event) => event.type === 'subagent.started');
+        const created = input.events.filter((event) => event.type === 'agent.created');
+        const turns = input.events.filter((event) => event.type === 'agent.turn_started');
+        const dispatches = input.events.filter(
+          (event) => event.type === 'capability.subagent_dispatch_intent_recorded',
+        );
+        const creates = input.mutations.filter((mutation) => mutation.kind === 'create_agent');
+        const mutationsTurn = input.mutations.filter(
+          (mutation) => mutation.kind === 'turn_started',
+        );
+        const started = starts[0];
+        const childId = started?.type === 'subagent.started' ? started.subagent.id : undefined;
+        const parentToolCallId =
+          started?.type === 'subagent.started' && 'parentToolCallId' in started.subagent
+            ? started.subagent.parentToolCallId
+            : undefined;
+        if (
+          !runTools ||
+          !this.session.isEffectLeaseCurrent(lease) ||
+          starts.length !== 1 ||
+          created.length !== 1 ||
+          turns.length !== 1 ||
+          dispatches.length !== 1 ||
+          creates.length !== 1 ||
+          mutationsTurn.length !== 1 ||
+          input.mutations.length !== 2 ||
+          !childId ||
+          !parentToolCallId ||
+          !runTools.toolCallIds.includes(parentToolCallId) ||
+          created[0]?.agentId !== childId ||
+          created[0]?.parentAgentId !== this.sessionId ||
+          created[0]?.initialTaskId !== childId ||
+          turns[0]?.agentId !== childId ||
+          turns[0]?.taskId !== childId ||
+          turns[0]?.turnOrdinal !== 1 ||
+          dispatches[0]?.childInvocationId !== childId ||
+          creates[0]?.agentId !== childId ||
+          creates[0]?.parentAgentId !== this.sessionId ||
+          creates[0]?.initialTaskId !== childId ||
+          mutationsTurn[0]?.agentId !== childId ||
+          mutationsTurn[0]?.taskId !== childId ||
+          mutationsTurn[0]?.turnOrdinal !== 1
+        )
+          throw new Error('Agent child registration is outside its active Tool dispatch.');
+        const storeEffectId = `agent-child-registration:${childId}`;
+        const ownerId = `agent_mail_${crypto.randomUUID()}`;
+        const leaseDeadline = () => Date.now() + 30_000;
+        if (
+          !this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+        )
+          throw new Error('Agent mailbox Store effect lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+          )
+            throw new Error('Agent child registration lease became stale.');
+          const before = this.session.getState();
+          const committed = this.session.commitAgentMailboxFacts(input.events, input.mutations, {
+            sessionId: this.sessionId,
+            effectId: storeEffectId,
+            ownerId,
+          });
+          this.#recordLastAppliedEventRevisions(before);
+          lease.expectedRevision = this.session.getState().revision;
+          return committed;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
+      persistAgentMailModelAdmission: (
+        lease: StateRuntimeSessionEffectLease,
+        input: RuntimeAgentMailModelAdmissionInput,
+      ) => {
+        const state = this.session.getState();
+        const run = this.session.getLifecycleProjection(state).currentRun;
+        const root = this.#store.agentMailbox?.readAgent(
+          this.sessionId,
+          this.sessionId,
+          this.sessionId,
+        );
+        if (
+          lease.effect.type !== 'call_model' ||
+          !this.session.isEffectLeaseCurrent(lease) ||
+          state.turn.status !== 'active' ||
+          !run ||
+          (run.status !== 'running' && run.status !== 'waiting') ||
+          run.activeTurnId !== state.turn.turnId ||
+          root?.currentTaskId !== run.runId ||
+          root.status !== 'active'
+        )
+          throw new Error('Agent mail model admission is outside its active root Run.');
+        validateRootAgentMailModelAdmission({
+          events: input.events,
+          mutation: input.mutation,
+          resourceBudget: state.resourceBudget,
+          sessionId: this.sessionId,
+        });
+        const storeEffectId = `agent-mail-model:${input.mutation.modelInvocationId}`;
+        const ownerId = `agent_mail_${crypto.randomUUID()}`;
+        const leaseDeadline = () => Date.now() + 30_000;
+        if (
+          !this.#services.leases.tryAcquire(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+        )
+          throw new Error('Agent mail model Store lease is unavailable.');
+        try {
+          if (
+            !this.session.isEffectLeaseCurrent(lease) ||
+            !this.#services.leases.renew(this.sessionId, storeEffectId, ownerId, leaseDeadline())
+          )
+            throw new Error('Agent mail model admission lease became stale.');
+          const before = this.session.getState();
+          const committed = this.session.commitAgentMailboxFacts(input.events, [input.mutation], {
+            sessionId: this.sessionId,
+            effectId: storeEffectId,
+            ownerId,
+          });
+          this.#recordLastAppliedEventRevisions(before);
+          lease.expectedRevision = this.session.getState().revision;
+          return committed;
+        } finally {
+          this.#services.leases.release(this.sessionId, storeEffectId, ownerId);
+        }
+      },
     };
     return Object.freeze(port);
   }

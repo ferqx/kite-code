@@ -222,6 +222,7 @@ export function commitStartTurnCommand(
   command: StartTurnCommand,
   evidence: RuntimeCommandCommitEvidence,
   context?: StartTurnSkillPlanningContext,
+  admittedModelRoute?: { readonly provider: string; readonly name: string },
 ): CommittedStartTurnCommand {
   if (evidence.targetSessionId !== command.sessionId || session.sessionId !== command.sessionId) {
     throw new Error('Runtime start command receipt target does not match the State session.');
@@ -243,7 +244,7 @@ export function commitStartTurnCommand(
           }),
         })
       : evidence,
-    command.model,
+    admittedModelRoute ?? command.model,
   );
   return Object.freeze({
     receipt: committed.receipt,

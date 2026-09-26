@@ -52,6 +52,22 @@ export interface RuntimeSessionRecoverySummary {
   readonly action: 'continue' | 'wait' | 'recover' | 'inspect';
 }
 
+/** A child thread is visible only through its verified parent Session. */
+export interface RuntimeChildSessionSummary {
+  readonly sessionId: string;
+  readonly parentSessionId: string;
+  readonly agentId: string;
+  readonly taskId: string;
+  readonly revision: number;
+  readonly updatedAtMs: number;
+  readonly displayName?: string;
+}
+
+export interface RuntimeChildSessionCursor {
+  readonly updatedAtMs: number;
+  readonly sessionId: string;
+}
+
 export type RuntimeQuery =
   | {
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
@@ -69,6 +85,19 @@ export type RuntimeQuery =
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'get_session_projection';
       readonly sessionId: string;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'list_child_sessions';
+      readonly sessionId: string;
+      readonly limit: number;
+      readonly cursor?: RuntimeChildSessionCursor;
+    }
+  | {
+      readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
+      readonly type: 'get_child_session_projection';
+      readonly sessionId: string;
+      readonly childSessionId: string;
     }
   | {
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
@@ -120,6 +149,8 @@ export type RuntimeQueryResult =
       readonly revision?: number;
       readonly sessions?: readonly RuntimeSessionProjection[];
       readonly session?: RuntimeSessionProjection;
+      readonly childSessions?: readonly RuntimeChildSessionSummary[];
+      readonly nextChildCursor?: RuntimeChildSessionCursor;
       readonly recovery?: RuntimeSessionRecoverySummary;
       readonly receipt?: RuntimeCommandReceipt;
       readonly context?: RuntimeContextProjection;
@@ -160,6 +191,28 @@ export function isRuntimeQuery(value: unknown): value is RuntimeQuery {
     case 'list_checkpoints':
     case 'list_background_executions':
       return hasExactKeys(value, ['schema', 'type', 'sessionId']) && isIdentifier(value.sessionId);
+    case 'get_child_session_projection':
+      return (
+        hasExactKeys(value, ['schema', 'type', 'sessionId', 'childSessionId']) &&
+        isIdentifier(value.sessionId) &&
+        isIdentifier(value.childSessionId) &&
+        value.sessionId !== value.childSessionId
+      );
+    case 'list_child_sessions':
+      return (
+        hasExactKeys(value, [
+          'schema',
+          'type',
+          'sessionId',
+          'limit',
+          ...(Object.hasOwn(value, 'cursor') ? ['cursor'] : []),
+        ]) &&
+        isIdentifier(value.sessionId) &&
+        isNonNegativeSafeInteger(value.limit) &&
+        value.limit >= 1 &&
+        value.limit <= 100 &&
+        (!Object.hasOwn(value, 'cursor') || isChildSessionCursor(value.cursor))
+      );
     case 'get_background_execution':
       return (
         hasExactKeys(value, ['schema', 'type', 'sessionId', 'executionId']) &&
@@ -216,6 +269,15 @@ function isRunCursor(value: unknown): value is RuntimeRunPageCursor {
     hasExactKeys(value, ['createdRevision', 'runId']) &&
     isNonNegativeSafeInteger(value.createdRevision) &&
     isIdentifier(value.runId)
+  );
+}
+
+function isChildSessionCursor(value: unknown): value is RuntimeChildSessionCursor {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['updatedAtMs', 'sessionId']) &&
+    isNonNegativeSafeInteger(value.updatedAtMs) &&
+    isIdentifier(value.sessionId)
   );
 }
 

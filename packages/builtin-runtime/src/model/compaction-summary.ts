@@ -278,6 +278,7 @@ export function createNarrativeContextCompactor(options: {
       serializedTools: input.projectionEnvironment?.serializedTools,
       activeSkillInstructions: input.projectionEnvironment?.activeSkillInstructions,
       workflowSkills: input.projectionEnvironment?.workflowSkills,
+      delegatedTask: input.projectionEnvironment?.delegatedTask,
     };
     const before = buildContextProjection(projectionInput).estimate.totalInputTokens;
     // Use the smallest valid narrative to calculate an upper bound on possible

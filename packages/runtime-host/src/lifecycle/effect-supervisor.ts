@@ -27,6 +27,11 @@ export interface RuntimeHostTransactionPort<Event = unknown, State = unknown> {
   ): void;
   /** The sole command path permitted to persist an applied command receipt. */
   commitCommandDecision(input: RuntimeTransactionInput<Event, State>): void;
+  /** A leased Tool command may commit its receipt through receipt_evidence. */
+  commitCommandReceiptEvidence?(
+    input: RuntimeTransactionInput<Event, State>,
+    requiredLease: RuntimeLeaseRequirement,
+  ): void;
 }
 
 export interface RuntimeHostLeasePort {
@@ -79,6 +84,10 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
         ) => this.commit(acknowledgement, input, requiredLease),
         commitCommandDecision: (input: RuntimeTransactionInput<Event, State>) =>
           this.commitCommandDecision(input),
+        commitCommandReceiptEvidence: (
+          input: RuntimeTransactionInput<Event, State>,
+          requiredLease: RuntimeLeaseRequirement,
+        ) => this.commitCommandReceiptEvidence(input, requiredLease),
       }),
       leases: Object.freeze({
         tryAcquire: (sessionId: string, effectId: string, ownerId: string, expiresAtMs: number) =>
@@ -139,6 +148,32 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
       throw new Error('Runtime command receipt does not bind the transaction session.');
     }
     this.#storage.transactions.commitDecision(input);
+  }
+
+  commitCommandReceiptEvidence(
+    input: RuntimeTransactionInput<Event, State>,
+    requiredLease: RuntimeLeaseRequirement,
+  ): void {
+    const receipt = input.commandReceipt;
+    const mutation = input.crossSessionAgentMailMutation;
+    if (
+      !receipt ||
+      (mutation?.kind !== 'accept_queue' &&
+        mutation?.kind !== 'accept_followup' &&
+        mutation?.kind !== 'request_interrupt' &&
+        mutation?.kind !== 'request_queued_interrupt') ||
+      requiredLease.sessionId !== input.sessionId ||
+      receipt.scopeSessionId !== input.sessionId ||
+      receipt.targetSessionId !== input.sessionId ||
+      receipt.commandId !== mutation.commandId ||
+      receipt.requestDigest !== mutation.requestDigest
+    )
+      throw new Error('Leased command receipt is not one cross-Session mail acceptance.');
+    const current = this.#currentLeaseExpectation(requiredLease);
+    this.#storage.transactions.commitReceiptEvidence({
+      ...input,
+      requiredEffectLease: current,
+    });
   }
 
   tryAcquire(sessionId: string, effectId: string, ownerId: string, expiresAtMs: number): boolean {

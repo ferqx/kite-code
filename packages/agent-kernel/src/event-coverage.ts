@@ -1,6 +1,7 @@
 import { CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS, type RuntimeEventType } from './events';
 
 export type StateReducerOwner =
+  | 'store/agent-mailbox'
   | 'core/authorization'
   | 'core/completion'
   | 'core/intent'
@@ -14,13 +15,21 @@ export type StateReducerOwner =
   | 'domains/work';
 
 /**
- * Auditable one-owner classification of all 141 State discriminants. The
+ * Auditable one-owner classification of all current State discriminants. The
  * reducer implementation may observe a fact in a secondary journal reducer,
  * but this table names the single primary state owner for replay review.
  */
 export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
   Record<StateReducerOwner, readonly RuntimeEventType[]>
 > = Object.freeze({
+  'store/agent-mailbox': [
+    'agent.created',
+    'agent.turn_started',
+    'agent.mail_accepted',
+    'agent.followup_routed',
+    'agent.mail_input_prepared',
+    'agent.task_settled',
+  ],
   'core/authorization': [
     'approval.command_replaced',
     'approval.batch_released',
@@ -61,10 +70,12 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'provider.readiness_succeeded',
     'provider.readiness_waiter_registered',
     'resource_budget.configured',
+    'resource_budget.bounded_replaced',
     'resource_budget.dispatch_started',
     'resource_budget.reconciled',
     'resource_budget.released',
     'resource_budget.reserved',
+    'resource_budget.child_slot_acquired',
     'resource_budget.unknown',
     'resource_budget.waiter_cancelled',
     'resource_budget.waiter_enqueued',
@@ -72,6 +83,8 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'resource_budget.waiter_timed_out',
   ],
   'core/lifecycle': [
+    'agent.followup_turn_prepared',
+    'agent.followup_turn_settled',
     'plan.completed',
     'plan.drafted',
     'plan.progress_updated',
@@ -79,6 +92,7 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'planning.exited',
     'task.cancelled',
     'task.completed',
+    'task.failed',
     'task.started',
     'turn.started',
     'user.command_invoked',
@@ -108,6 +122,15 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'capability.subagent_dispatch_intent_recorded',
     'capability.subagent_handle_recorded',
     'capability.subagent_observation_recorded',
+    'subagent.child_session_intended',
+    'subagent.child_session_adopted',
+    'subagent.child_approval_proxy_changed',
+    'subagent.child_recovery_required',
+    'subagent.child_terminal_sealed',
+    'subagent.child_terminal_imported',
+    'subagent.child_creation_failed',
+    'subagent.child_pre_dispatch_cancelled',
+    'subagent.child_task_input_admitted',
   ],
   'domains/context': [
     'context.compaction_completed',

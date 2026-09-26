@@ -36,6 +36,8 @@
 - Resource Budget限制整轮工具总量、Subagent与writer并发，但不把普通Tool或Shell按活动数量分批；一次模型响应中通过traits冲突检查的调用可直接并行。
 - Shell `uncertainEffects`在Auto模式下进入审批模型，其他模式请求真人审批；`risk`只描述风险，不能替代Compiler的
   `allowed/decision/requiresApproval`生成第二个hard deny。
+- 子 Session 首轮激活依次写入 adoption、私有 Task Artifact 输入、预算、Turn、`task.started`；Task 的 `userGoal` 仅用固定通用标签，实际委派内容只在私有 Artifact。父 dispatch ACK 前失败时，父级 `subagent.child_creation_failed` 区分不存在、revision 0 未激活、revision 5 已激活三种证明模式；均只结算原 Task claim，不形成子结果的普通用户消息。
+- 父级 `backgroundResult` 仅接受旧 Provider 的 `cleanup_completed`，或独立子 Session 的精确 `terminalImport`（确定性子 ID、原 Tool/Run/Turn、结果 Artifact 摘要一致）；两种结果权限不可互相替代。
 
 ## 测试
 

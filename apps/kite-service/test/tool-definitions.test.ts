@@ -670,11 +670,11 @@ describe('code agent tool definitions', () => {
     expect(String(task.description)).toContain(
       'plan for read-only architecture or design planning',
     );
-    expect(String(task.description)).toContain('multiple independent sibling task calls');
+    expect(String(task.description)).toContain('Issue independent sibling task calls together');
     expect(String(task.description)).toContain('execute them concurrently');
     expect(String(task.description)).toContain('disjoint write scopes');
-    expect(String(task.description)).toContain('Clarify material ambiguity before dispatch');
-    expect(String(task.description)).toContain('child agents cannot call ask_user');
+    expect(String(task.description)).toContain('Do not delegate trivial or tightly coupled work');
+    expect(String(task.description)).toContain('Child agents cannot call ask_user');
 
     const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
     const jsonSchema = (await schema.jsonSchema) as {

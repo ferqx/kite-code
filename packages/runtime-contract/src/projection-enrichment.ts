@@ -37,12 +37,36 @@ function isExecutionLifecycleEnrichment(
   const cleanup =
     ['queued', 'running', 'waiting'].includes(currentRun.status) &&
     ['completed', 'cancelled', 'failed'].includes(nextRun.status);
+  // Execution authority is a Store fact independent of the message revision.
+  // A released owner projects recovery_required at that same revision; a new
+  // owner can restore the stored Run status without fabricating a message.
+  const authorityLost =
+    ['queued', 'running', 'waiting'].includes(currentRun.status) &&
+    nextRun.status === 'recovery_required' &&
+    nextRun.outcome?.reasonCode === 'recovery_required' &&
+    nextRun.outcome.safeRetry === false &&
+    nextRun.outcome.recoveryEntry === 'reconcile';
+  const authorityRestored =
+    currentRun.status === 'recovery_required' &&
+    currentRun.outcome?.reasonCode === 'recovery_required' &&
+    currentRun.outcome.safeRetry === false &&
+    currentRun.outcome.recoveryEntry === 'reconcile' &&
+    ['queued', 'running', 'waiting'].includes(nextRun.status) &&
+    nextRun.outcome === undefined;
   const taskEnrichment =
     current.activeTask === undefined &&
     next.activeTask !== undefined &&
     currentRun.taskId === undefined &&
     nextRun.taskId === next.activeTask.taskId;
-  if (!activation && !backgroundWaiting && !backgroundWake && !cleanup && !taskEnrichment)
+  if (
+    !activation &&
+    !backgroundWaiting &&
+    !backgroundWake &&
+    !cleanup &&
+    !authorityLost &&
+    !authorityRestored &&
+    !taskEnrichment
+  )
     return false;
   if (
     currentRun.initialTurnId !== nextRun.initialTurnId ||
@@ -54,8 +78,12 @@ function isExecutionLifecycleEnrichment(
       !backgroundWaiting &&
       !backgroundWake &&
       !cleanup &&
+      !authorityLost &&
+      !authorityRestored &&
       currentRun.status !== nextRun.status) ||
     (!cleanup &&
+      !authorityLost &&
+      !authorityRestored &&
       stableSerializeIgnoringUndefined(currentRun.outcome) !==
         stableSerializeIgnoringUndefined(nextRun.outcome))
   )

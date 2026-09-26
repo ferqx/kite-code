@@ -29,6 +29,17 @@ mkdirSync(secondWorkspace);
 for (const directory of [appData, workspace, join(home, '.kite-code')])
   mkdirSync(directory, { mode: 0o700 });
 const model = createMockModelServer();
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+const backgroundGates = [deferred(), deferred(), deferred()];
+const backgroundStarted = [deferred(), deferred(), deferred()];
+const backgroundFinalCandidate = deferred();
+let backgroundParentCalls = 0;
 model.setResponses([
   {
     message: { content_chunks: ['Electron streaming', ' survives reload', ' complete.'] },
@@ -47,6 +58,53 @@ model.setResponses([
     chunk_delay: 2500,
   },
   { message: { content: 'Workspace B independently complete.' } },
+  ...Array.from({ length: 6 }, () => ({
+    response: async ({ messages }: { messages: readonly unknown[] }) => {
+      const snapshot = JSON.stringify(messages);
+      for (let index = 0; index < 3; index += 1) {
+        if (
+          snapshot.includes(`ELECTRON_BACKGROUND_CHILD_${index}`) &&
+          !snapshot.includes('ELECTRON_BACKGROUND_PARENT')
+        ) {
+          backgroundStarted[index]!.resolve();
+          await backgroundGates[index]!.promise;
+          return { message: { content: `ELECTRON_BACKGROUND_RESULT_${index}` } };
+        }
+      }
+      backgroundParentCalls += 1;
+      if (backgroundParentCalls === 1)
+        return {
+          message: {
+            tool_calls: [0, 1, 2].map((index) => ({
+              id: `electron-background-start-${index}`,
+              name: 'task',
+              args: {
+                name: `Electron child ${index}`,
+                subagent_type: 'review',
+                task: `ELECTRON_BACKGROUND_CHILD_${index}`,
+                background: true,
+                result_disposition: 'required',
+              },
+            })),
+          },
+          toolContinuation: 'required' as const,
+        };
+      if (backgroundParentCalls === 2) {
+        backgroundFinalCandidate.resolve();
+        return {
+          message: { content: 'Provisional Electron background final.' },
+          expectedRequest: {
+            toolResults: [0, 1, 2].map((index) => ({
+              toolCallId: `electron-background-start-${index}`,
+            })),
+          },
+        };
+      }
+      for (let index = 0; index < 3; index += 1)
+        assert.ok(snapshot.includes(`ELECTRON_BACKGROUND_RESULT_${index}`));
+      return { message: { content: 'Electron background three-child complete.' } };
+    },
+  })),
 ]);
 writeFileSync(
   join(home, '.kite-code/kite-code.jsonc'),
@@ -539,6 +597,139 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     4,
     'space switch must neither cancel nor replay either task',
   );
+  // Exercise one real packaged renderer/preload/native-host/Service Run with
+  // three gated required children. The waiting reason keeps its initial IDs;
+  // per-child cards carry the current terminal/running facts.
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await input.fill('ELECTRON_BACKGROUND_PARENT');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await Promise.race([
+    Promise.all([
+      backgroundStarted[0]!.promise,
+      backgroundStarted[1]!.promise,
+      backgroundFinalCandidate.promise,
+    ]),
+    Bun.sleep(15_000).then(() => {
+      throw new Error('Electron background children did not start and reach the completion wait.');
+    }),
+  ]);
+  await page.getByText('正在等待后台结果', { exact: false }).waitFor({ timeout: 15_000 });
+  const readBackgroundFacts = () => {
+    const database = new Database(join(home, '.kite-code/kite-session.sqlite'), {
+      readonly: true,
+    });
+    try {
+      const row = database
+        .query<{ session_id: string; state_json: string }, [string]>(
+          'SELECT session_id, state_json FROM runtime_snapshots WHERE state_json LIKE ? ORDER BY revision DESC LIMIT 1',
+        )
+        .get('%ELECTRON_BACKGROUND_PARENT%');
+      assert.ok(row, 'background Session snapshot must be durable');
+      const state = JSON.parse(row.state_json) as {
+        completionGuard?: { waitingReason?: { kind?: string; taskIds?: string[] } };
+      };
+      const run = database
+        .query<{ run_id: string; status: string }, [string]>(
+          'SELECT run_id, status FROM runtime_runs WHERE session_id = ? ORDER BY created_at_ms DESC LIMIT 1',
+        )
+        .get(row.session_id);
+      assert.ok(run, 'background Run must be durable');
+      const eventTypes = database
+        .query<{ event_json: string }, [string]>(
+          'SELECT event_json FROM runtime_events WHERE session_id = ? ORDER BY sequence',
+        )
+        .all(row.session_id)
+        .map((event) => (JSON.parse(event.event_json) as { type: string }).type);
+      return {
+        sessionId: row.session_id,
+        runId: run.run_id,
+        runStatus: run.status,
+        waitingReason: state.completionGuard?.waitingReason,
+        eventTypes,
+      };
+    } finally {
+      database.close();
+    }
+  };
+  const initiallyWaiting = readBackgroundFacts();
+  assert.equal(initiallyWaiting.waitingReason?.kind, 'required_background');
+  assert.equal(initiallyWaiting.waitingReason?.taskIds?.length, 3);
+  const initialTaskIds = initiallyWaiting.waitingReason.taskIds!;
+  backgroundGates[0]!.resolve();
+  await Promise.race([
+    backgroundStarted[2]!.promise,
+    Bun.sleep(15_000).then(() => {
+      throw new Error('Third Electron child did not start after first terminal.');
+    }),
+  ]);
+  const firstSettlementDeadline = Date.now() + 15_000;
+  while (
+    readBackgroundFacts().eventTypes.filter(
+      (type) => type === 'subagent.background_result_persisted',
+    ).length < 1 &&
+    Date.now() < firstSettlementDeadline
+  ) {
+    await Bun.sleep(20);
+  }
+  assert.equal(
+    readBackgroundFacts().eventTypes.filter(
+      (type) => type === 'subagent.background_result_persisted',
+    ).length,
+    1,
+    'first child must have a durable terminal before its card updates',
+  );
+  await page.getByRole('button', { name: '显示环境信息' }).click();
+  const childCards = page.getByRole('region', { name: '子智能体' });
+  await childCards
+    .locator('li')
+    .filter({ hasText: 'Electron child 0' })
+    .getByText('已完成')
+    .waitFor({ timeout: 15_000 });
+  await childCards
+    .locator('li')
+    .filter({ hasText: 'Electron child 1' })
+    .getByText('运行中')
+    .waitFor();
+  await childCards
+    .locator('li')
+    .filter({ hasText: 'Electron child 2' })
+    .getByText('运行中')
+    .waitFor();
+  assert.equal(backgroundParentCalls, 2, 'first child terminal must not reprompt the parent');
+  assert.equal(await page.getByText('正在等待后台结果', { exact: false }).count(), 1);
+  const partiallyWaiting = readBackgroundFacts();
+  assert.equal(partiallyWaiting.runId, initiallyWaiting.runId);
+  assert.deepEqual(partiallyWaiting.waitingReason?.taskIds, initialTaskIds);
+  assert.equal(partiallyWaiting.eventTypes.filter((type) => type === 'run.error').length, 0);
+  assert.equal(
+    partiallyWaiting.eventTypes.filter((type) => type === 'subagent.background_result_persisted')
+      .length,
+    1,
+  );
+  backgroundGates[1]!.resolve();
+  await childCards
+    .locator('li')
+    .filter({ hasText: 'Electron child 1' })
+    .getByText('已完成')
+    .waitFor({
+      timeout: 15_000,
+    });
+  assert.equal(backgroundParentCalls, 2, 'second child terminal must not reprompt the parent');
+  backgroundGates[2]!.resolve();
+  await page.getByText('Electron background three-child complete.', { exact: false }).waitFor({
+    timeout: 15_000,
+  });
+  const backgroundTerminal = readBackgroundFacts();
+  assert.equal(backgroundTerminal.runId, initiallyWaiting.runId);
+  assert.equal(backgroundTerminal.runStatus, 'completed');
+  assert.equal(backgroundParentCalls, 3);
+  assert.equal(
+    backgroundTerminal.eventTypes.filter((type) => type === 'subagent.background_result_persisted')
+      .length,
+    3,
+  );
+  assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.completed').length, 1);
+  assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.error').length, 0);
   await page.screenshot({ path: join(root, 'out/electron-native-smoke.png') });
   const windowId = String(
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getMediaSourceId()'),
@@ -560,7 +751,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   browser = undefined;
   assert.equal(await exited, 0);
   console.log(
-    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching with delayed calibration, hide/reopen and idle exit without confirmation passed. No external Provider was used.',
+    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching, three-child partial completion, hide/reopen and idle exit passed. No external Provider was used.',
   );
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];
@@ -580,6 +771,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   console.error(logs);
   throw error;
 } finally {
+  for (const gate of backgroundGates) gate.resolve();
   if (child.exitCode === null) {
     await main?.(
       `__kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false }); __kiteNativeSmoke.app.quit();`,

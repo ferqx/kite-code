@@ -14,7 +14,7 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 活动 Run 的 Composer 发送纯文本时调用 typed `steer_turn`；首次响应丢失只读查询相同 command receipt，不自动换 commandId 或创建新 Run。错误和草稿绑定提交时的 Session，即使用户已切换导航也不会串到新会话。IME composition、keyCode 229 与 Shift+Enter 不提交也不误触停止。
 
-工作台与侧栏消费 typed background snapshot，非选中会话也显示运行数量；详情卡区分 Shell、service、subagent 的稳定身份、状态、游标、stale 与 cleanup。只有当前 generation 中新鲜的 running 项显示停止入口；提交后显示 stopping 并禁用重复操作。列表读取不取得执行权，Server generation 改变时旧 running 项转为 unavailable，终态不会被迟到快照反转。
+工作台与侧栏消费 typed background snapshot，非选中会话也显示运行数量；详情卡区分 Shell、service、subagent 的稳定身份、状态、游标、stale 与 cleanup。只有当前 generation 中新鲜的 running 项显示停止入口；提交后显示 stopping 并禁用重复操作。列表读取不取得执行权，Server generation 改变时旧 running 项转为 unavailable，终态不会被迟到快照反转。父 Run 自动等待 required 后台工作时，局部 child 结果虽已持久提交，Turn generator 仍可能不向客户端推送事件；DesktopClient 因此只对当前选中且仍活动的 Run 每秒读取一次后台快照、限制为一个在途查询，终态或断连后停止。查询沿 RuntimeClient 的 generation／watermark 规则合并，不从卡片生成新的执行事实或模型轮询。
 
 输入框在尚未打开项目、尚未选择会话及断开期间仍可聚焦和编辑；发送资格独立核对连接、信任、会话就绪与运行状态。[新对话准备页](new-conversation.md)与已创建会话共用“描述你想完成的工作”占位提示；准备页使用独立草稿，跨项目／分支选择保留，首次发送才创建会话；进入已有会话时不把准备草稿混入其输入。首次发送立即清空输入框并在内容区显示本地用户消息，“正在发送”作为气泡外的右对齐附注绝对定位，不增加消息高度；运行时投影到达后接管，确定失败则原位提示并恢复输入供重试，回执未知则保持“待确认”且不允许重复提交，直到新运行时事实或显式会话恢复完成。Agent 回复尚未结束时，正文下方以同样不占消息高度的左对齐附注显示“正在回复”，最终回复落定后移除。用户气泡和 Agent 正文的底部间距为 32 px，为连续轮次和复制操作留出更清晰的分隔；阅读列底部留出按钮空间，避免最后一条回复的悬停按钮被列裁剪。复制操作使用 Runtime 提供的稳定 `turnId`：每条已发送用户输入提供一个复制按钮；单次 `model.responded` 只收敛当前正文，不提前赋予最终回复身份；成功的 turn 终态仅在最后一段 Agent 正文之后没有工具调用时确认最终回复并提供复制按钮。复制内容只是该完整最终回复，不包含同轮工具前说明、思考、工具、子 Agent 或其他非最终文本。按钮为 `24×24`、零内边距的圆角正方形，鼠标移入该消息或按钮获得键盘焦点时才显示；按钮及其与消息之间的透明桥接区始终参与鼠标命中，仅视觉透明，因此移动到按钮时不会因丢失悬停而隐藏。发送状态未定、失败或流式回复不提供复制操作。已有会话仍按项目与会话隔离草稿。输入框上方不展示独立状态文字或预留状态行；运行与停止反馈由对应操作按钮和会话内容表达。本地服务连接管理属于内部逻辑，不提供重连或断开入口。草稿只保留在当前进程，不承诺重启恢复。
 
@@ -126,6 +126,8 @@ Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示
 共享[工具活动](../../../packages/kite-client-ui/src/ToolActivity.tsx)消费 Runtime 的显式展示分类：只有相邻、同 turn、`presentation=exploration` 且 `presentationGroupId` 相同的记录合并；standalone、缺失分组和 Web Public History 的弱事实均保持独立，不从 label 或邻近关系推导。普通探索与文件工具使用轻量状态行；内部工具名仅在没有更具体标题时转换为可读动作。完成态不重复绘制状态，queued、running、waiting、failed、rejected、cancelled 与 unknown 保留文字状态；Shell 使用终端图标，其他工具按类别使用 18 px 图标。工具参数、stdout/stderr、退出码与输出限制不进入会话 UI；失败工具仍显示有界错误摘要。带明确`presentationOwner`的子工具及异常只在所属子 Agent 容器内展示，没有 owner 的历史异常保持可见。子 Agent 摘要独立于父工具折叠，避免父记录收起后失去任务结果。
 
 同步子代理通过原 `task` 工具结果返回主 Agent；客户端保留父工具活动、子代理名称、真实状态与结果摘要，不创建独立发送气泡或推断已消费状态。子代理执行过程只在子 Agent 容器内提供；有可见父 task 时，该容器位于父 task 展开区，所有状态默认收起，只有用户点击才展开；进度更新、失败和完成不改变用户的展开选择；父工具收起时仅保留结果摘要。缺少父工具身份的历史提供带来源的过程入口，不猜测归属；没有独立历史接口时不提供详情导航。文件变更的右侧副层见[文件与编辑器](results-and-editor.md)，MCP／Skills 设置接入见[扩展设置](extensions.md)。
+
+Agent 邮箱以内容为空的系统状态行展示当前 Session 已证明的阶段：发送方的受理事件仅显示“已受理，等待目标读取”；接收方的模型输入准备事件才显示“已准备进入目标模型输入”；子 Agent 续轮结算事件显示结果状态。相同消息的重复投影更新原状态行，迟到的受理事件不能覆盖已准备状态。父会话不会因发送成功而显示子会话已读，私有邮箱正文和 Artifact 引用不进入客户端事件。
 
 2026-09-09 本轮通过共享 UI 7 项、桌面 24 项、Web 13 项及 Service 扩展 owner 5 项回归。HTML 测试数据预览核对桌面 1440 × 960／760 × 540 副层开关、Esc 焦点返回、输入可达与设置分类；Web 390 × 844 无横向溢出，点击即进入且不提供输入、文件副层或扩展管理。窗口改变的初始化监听同步当前媒体查询，避免挂载时遗漏尺寸变化。类型、构建与边界检查通过；本轮没有更新原生窗口、系统输入法或真实 MCP 认证资格。
 

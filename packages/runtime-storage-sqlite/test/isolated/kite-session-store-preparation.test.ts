@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { describe, expect, spyOn, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import {
   chmodSync,
@@ -14,10 +15,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createKiteHomeDirectoryQuery } from '../../src/kite-home-directory';
 import {
+  assertKiteSessionStoreSchema,
+  KITE_SESSION_STORE11_DDL as CURRENT_STORE11_DDL,
   initializeKiteHomeStoreSchema,
-  initializeKiteSessionStoreIfNeeded,
+  KITE_SESSION_STORE10_DDL,
 } from '../../src/kite-home-store';
+import { validateKiteSessionStoreContinuity } from '../../src/kite-session-continuity-validation';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { captureKiteSessionPreservationManifest } from '../../src/kite-session-preservation';
 import { prepareKiteSessionStore } from '../../src/kite-session-store-preparation';
@@ -26,7 +31,12 @@ import {
   publishVerifiedKiteSessionCandidate,
 } from '../../src/kite-session-store-publication';
 import { inspectKiteSessionStoreSources } from '../../src/kite-session-store-sources';
+import { convertKiteSessionStore10CandidateTo11 } from '../../src/kite-session-store10-to11';
 import { KITE_SESSION_STORE11_DDL } from '../../src/kite-session-store11-conversion';
+import { convertKiteSessionStore11CandidateTo12 } from '../../src/kite-session-store11-to12';
+import { convertKiteSessionStore12CandidateTo13 } from '../../src/kite-session-store12-to13';
+import { createSqliteRuntimeLogQueryPortFromDatabase_ } from '../../src/log-query';
+import { checksum, SQLITE_RUNTIME_RUN_FORMAT_EPOCH } from '../../src/preflight';
 
 const codec = {
   encodeEvent: JSON.stringify,
@@ -35,6 +45,8 @@ const codec = {
   decodeState: JSON.parse,
   eventSummary: () => ({ isSessionNameCandidate: false, searchText: '' }),
   snapshotMetadata: () => ({ stateRevision: 0, schemaVersion: 27 }),
+  sessionIdentity: (state: { session: { projectId: string; canonicalWorkspaceDigest: string } }) =>
+    state.session,
   rebindForkState: <T>(state: T) => state,
 };
 function fixture() {
@@ -49,8 +61,13 @@ function fixture() {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     const database = new Database(path);
     chmodSync(path, 0o600);
-    if (index === 0) initializeKiteSessionStoreIfNeeded(database);
-    else if (index === 1) initializeKiteHomeStoreSchema(database);
+    if (index === 0) {
+      for (const sql of KITE_SESSION_STORE10_DDL) database.run(sql);
+      database.run(
+        "INSERT INTO kite_meta VALUES ('schema_version', '10'), ('format_epoch', 'kite-session-app-server-2026-09-02')",
+      );
+      database.run('PRAGMA user_version=10');
+    } else if (index === 1) initializeKiteHomeStoreSchema(database);
     else {
       for (const sql of KITE_SESSION_STORE11_DDL) database.run(sql);
       database.run(
@@ -71,6 +88,206 @@ function fixture() {
 }
 
 describe('known-format startup preparation', () => {
+  test('keeps a Store 10 conversation visible by its original ID after multi-source preparation', async () => {
+    using data = fixture();
+    const old = new Database(data.databasePath);
+    const canonicalPath = '/workspace/legacy';
+    const hex = createHash('sha256').update(canonicalPath).digest('hex');
+    const projectId = `project_${hex}`;
+    const workspaceDigest = `sha256:${hex}`;
+    const workspaceIdentityDigest = `sha256:${createHash('sha256')
+      .update(
+        `kite.workspace-identity.v1\0${JSON.stringify({ canonicalPath, projectId, workspaceDigest })}`,
+      )
+      .digest('hex')}`;
+    const workspaceId = `workspace_${workspaceIdentityDigest.slice(7)}`;
+    const stateJson = JSON.stringify({
+      revision: 1,
+      session: { projectId, canonicalWorkspaceDigest: workspaceDigest },
+    });
+    const event = { type: 'user.message_appended', text: 'Legacy message' };
+    const eventJson = JSON.stringify(event);
+    try {
+      old
+        .query(`INSERT INTO workspaces
+        (workspace_id, canonical_path, workspace_identity_digest, project_id, workspace_digest, display_name, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'Workspace', 1, 1)`)
+        .run(workspaceId, canonicalPath, workspaceIdentityDigest, projectId, workspaceDigest);
+      old
+        .query(`INSERT INTO runtime_sessions
+        (session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch, revision, name, updated_at, run_index_from_revision)
+        VALUES ('legacy-conversation', ?, ?, ?, 27, ?, 1, 'Old conversation', 1, 0)`)
+        .run(workspaceId, projectId, workspaceDigest, SQLITE_RUNTIME_RUN_FORMAT_EPOCH);
+      old
+        .query(`INSERT INTO runtime_events
+        (session_id, event_id, sequence, schema_version, event_json, created_at)
+        VALUES ('legacy-conversation', 'legacy-event-1', 1, 27, ?, 1)`)
+        .run(eventJson);
+      old
+        .query(`INSERT INTO runtime_snapshots
+        (session_id, schema_version, format_epoch, revision, state_json, event_position, state_checksum, created_at)
+        VALUES ('legacy-conversation', 27, ?, 1, ?, 1, ?, 1)`)
+        .run(SQLITE_RUNTIME_RUN_FORMAT_EPOCH, stateJson, checksum(stateJson));
+      old.query('INSERT INTO kite_meta(key, value) VALUES (?, ?)').run(
+        'session_execution/legacy-conversation',
+        JSON.stringify({
+          schema: 'kite.session-execution-authority.v1',
+          sessionId: 'legacy-conversation',
+          status: 'idle',
+          controllerGeneration: 0,
+          hostInstanceId: null,
+          clientId: null,
+          connectionGeneration: 0,
+          interactionGeneration: 0,
+          leaseUntilMs: null,
+          cleanupConfirmed: true,
+          updatedAt: 0,
+          revision: 0,
+        }),
+      );
+    } finally {
+      old.close(false);
+    }
+    rmSync(data.paths[2]!);
+    const old11 = new Database(data.paths[2]!);
+    chmodSync(data.paths[2]!, 0o600);
+    for (const statement of CURRENT_STORE11_DDL) old11.run(statement);
+    old11.query('INSERT INTO kite_meta(key,value) VALUES (?,?)').run('schema_version', '11');
+    old11
+      .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
+      .run('format_epoch', 'kite-session-lineage-2026-09-24');
+    old11.run('PRAGMA user_version=11');
+    const store11StateJson = JSON.stringify({
+      revision: 1,
+      session: { projectId, canonicalWorkspaceDigest: workspaceDigest },
+    });
+    const store11Event = { type: 'user.message_appended', text: 'Store11 message' };
+    try {
+      old11
+        .query(`INSERT INTO workspaces
+        (workspace_id,canonical_path,workspace_identity_digest,project_id,workspace_digest,
+        display_name,created_at,updated_at) VALUES (?,?,?,?,?,'Workspace',1,1)`)
+        .run(workspaceId, canonicalPath, workspaceIdentityDigest, projectId, workspaceDigest);
+      old11
+        .query(`INSERT INTO runtime_sessions
+        (session_id,workspace_id,project_id,workspace_digest,state_schema,format_epoch,
+        revision,name,updated_at,run_index_from_revision,parent_session_id)
+        VALUES ('legacy-store11',?,?,?,?,?,1,'Store11 conversation',2,0,NULL)`)
+        .run(workspaceId, projectId, workspaceDigest, 27, SQLITE_RUNTIME_RUN_FORMAT_EPOCH);
+      old11
+        .query(`INSERT INTO runtime_events
+        (session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('legacy-store11','legacy11-event',1,27,?,2)`)
+        .run(JSON.stringify(store11Event));
+      old11
+        .query(`INSERT INTO runtime_snapshots
+        (session_id,schema_version,format_epoch,revision,state_json,event_position,state_checksum,created_at)
+        VALUES ('legacy-store11',27,?,1,?,1,?,2)`)
+        .run(SQLITE_RUNTIME_RUN_FORMAT_EPOCH, store11StateJson, checksum(store11StateJson));
+      old11.query('INSERT INTO kite_meta(key,value) VALUES (?,?)').run(
+        'session_execution/legacy-store11',
+        JSON.stringify({
+          schema: 'kite.session-execution-authority.v1',
+          sessionId: 'legacy-store11',
+          status: 'idle',
+          controllerGeneration: 0,
+          hostInstanceId: null,
+          clientId: null,
+          connectionGeneration: 0,
+          interactionGeneration: 0,
+          leaseUntilMs: null,
+          cleanupConfirmed: true,
+          updatedAt: 0,
+          revision: 0,
+        }),
+      );
+    } finally {
+      old11.close(false);
+    }
+    expect(
+      await prepareKiteSessionStore({
+        ...data,
+        codec,
+        isSettledState: () => true,
+        assertRetiredWritersStopped() {},
+      }),
+    ).toEqual({ status: 'prepared' });
+    using upgraded = new Database(data.databasePath);
+    upgraded.run('PRAGMA foreign_keys = ON');
+    const childStateJson = JSON.stringify({
+      revision: 0,
+      session: { projectId, canonicalWorkspaceDigest: workspaceDigest },
+    });
+    upgraded
+      .query(`INSERT INTO runtime_sessions
+      (session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch, revision, name, updated_at, run_index_from_revision, parent_session_id)
+      VALUES ('child-conversation', ?, ?, ?, 27, ?, 0, 'Internal child', 100, 0, 'legacy-conversation')`)
+      .run(workspaceId, projectId, workspaceDigest, SQLITE_RUNTIME_RUN_FORMAT_EPOCH);
+    upgraded
+      .query(`INSERT INTO runtime_snapshots
+      (session_id, schema_version, format_epoch, revision, state_json, event_position, state_checksum, created_at)
+      VALUES ('child-conversation', 27, ?, 0, ?, 0, ?, 1)`)
+      .run(SQLITE_RUNTIME_RUN_FORMAT_EPOCH, childStateJson, checksum(childStateJson));
+    const directory = createKiteHomeDirectoryQuery(upgraded, {
+      assertStoreSchema: assertKiteSessionStoreSchema,
+    });
+    expect(
+      directory
+        .listSessions({ limit: 10 })
+        .entries.map((entry) => entry.sessionId)
+        .sort(),
+    ).toEqual(['legacy-conversation', 'legacy-store11']);
+    expect(
+      upgraded
+        .query('SELECT state_json FROM runtime_snapshots WHERE session_id = ?')
+        .get('legacy-conversation'),
+    ).toEqual({ state_json: stateJson });
+    expect(
+      upgraded
+        .query('SELECT event_json FROM runtime_events WHERE session_id = ?')
+        .get('legacy-conversation'),
+    ).toEqual({ event_json: eventJson });
+    expect(
+      upgraded
+        .query('SELECT parent_session_id FROM runtime_sessions WHERE session_id = ?')
+        .get('legacy-conversation'),
+    ).toEqual({ parent_session_id: null });
+    const history = createSqliteRuntimeLogQueryPortFromDatabase_({
+      database: upgraded,
+      codec,
+      currentEventTypes: ['user.message_appended'],
+    });
+    expect(
+      history
+        .listSessions({ limit: 10 })
+        .entries.map((entry) => entry.sessionId)
+        .sort(),
+    ).toEqual(['legacy-conversation', 'legacy-store11']);
+    expect(
+      history.listEvents({ sessionId: 'legacy-conversation', direction: 'forward', limit: 10 }),
+    ).toMatchObject({
+      observedLastSequence: 1,
+      entries: [{ sessionId: 'legacy-conversation', eventId: 'legacy-event-1', event }],
+    });
+    expect(history.getSession?.('child-conversation')).toBeNull();
+    expect(
+      history.listEvents({ sessionId: 'legacy-store11', direction: 'forward', limit: 10 }),
+    ).toMatchObject({
+      observedLastSequence: 1,
+      entries: [{ sessionId: 'legacy-store11', eventId: 'legacy11-event', event: store11Event }],
+    });
+    expect(
+      upgraded
+        .query('SELECT state_json FROM runtime_snapshots WHERE session_id=?')
+        .get('legacy-store11'),
+    ).toEqual({ state_json: store11StateJson });
+    expect(validateKiteSessionStoreContinuity({ database: upgraded, codec })).toMatchObject({
+      sessions: 3,
+      listedSessions: 2,
+      events: 2,
+    });
+  });
+
   test('publishes one canonical Store and retires historical entries before normal startup', async () => {
     using data = fixture();
     let admissions = 0;
@@ -91,7 +308,7 @@ describe('known-format startup preparation', () => {
     expect(admissions).toBe(2);
     using database = new Database(data.databasePath, { readonly: true });
     expect(database.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual({
-      value: '10',
+      value: '13',
     });
   });
   test('writer admission lease spans candidate validation and publication and is released on success', async () => {
@@ -313,6 +530,14 @@ describe('known-format startup preparation', () => {
     const candidatePath = join(candidateDirectory, 'kite-session.sqlite');
     copyFileSync(data.databasePath, candidatePath);
     chmodSync(candidatePath, 0o600);
+    const candidateWriter = new Database(candidatePath);
+    try {
+      convertKiteSessionStore10CandidateTo11({ database: candidateWriter });
+      convertKiteSessionStore11CandidateTo12({ database: candidateWriter });
+      convertKiteSessionStore12CandidateTo13({ database: candidateWriter });
+    } finally {
+      candidateWriter.close(false);
+    }
     using candidate = new Database(candidatePath, { readonly: true });
     const candidateManifest = captureKiteSessionPreservationManifest(candidate);
     const sources = data.paths.map((databasePath) => ({

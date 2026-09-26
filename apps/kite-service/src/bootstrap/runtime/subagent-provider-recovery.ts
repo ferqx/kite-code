@@ -19,6 +19,7 @@ export function hasPendingSubagentProviderRecovery(state: Readonly<RuntimeState>
   return Object.values(state.capabilities.invocations).some(
     (invocation) =>
       invocation.subagentProviderLifecycle !== undefined &&
+      invocation.subagentProviderLifecycle.childSession === undefined &&
       invocation.subagentProviderLifecycle.status !== 'cleanup_completed',
   );
 }
@@ -41,7 +42,7 @@ export async function reconcilePendingSubagentProvidersAfterCrash(input: {
 }): Promise<boolean> {
   for (const initial of Object.values(input.persistence.getState().capabilities.invocations)) {
     const lifecycle = initial.subagentProviderLifecycle;
-    if (!lifecycle || lifecycle.status === 'cleanup_completed') continue;
+    if (!lifecycle || lifecycle.childSession || lifecycle.status === 'cleanup_completed') continue;
     if (input.isLiveBackgroundTask?.(lifecycle.childInvocationId) === true) continue;
     let cleanupAttempt = lifecycle.cleanupAttempt ?? 0;
     if (lifecycle.status !== 'cleanup_pending' || lifecycle.cleanupCompletedAt !== undefined) {

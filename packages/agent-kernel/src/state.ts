@@ -204,6 +204,7 @@ export interface ResourceUsage {
 }
 
 export type ResourceReservationState =
+  | 'queued'
   | 'reserved'
   | 'dispatch_started'
   | 'reconciled'
@@ -215,6 +216,8 @@ export interface ResourceReservation {
   readonly runId: string;
   readonly invocationId: string;
   readonly parentReservationId?: string;
+  /** The held TriggerTurn backup atomically exchanged for this exact model Surface. */
+  readonly replacesReservationId?: string;
   readonly resourceKind:
     | 'model'
     | 'tool'
@@ -281,6 +284,7 @@ export interface AgentModelInvocationState {
   readonly budget: AgentModelBudgetState;
   readonly limits: AgentModelLimitsState;
   readonly preparedStateRevision: number;
+  readonly estimatedInputTokens?: number;
   readonly parentInvocationId: string | null;
   readonly parentToolCallId: string | null;
   readonly attempts: number;
@@ -338,10 +342,16 @@ export interface AgentCompletionGuardState {
     readonly version: number;
     readonly structuralDigest: string;
   };
-  readonly waitingReason?: {
-    readonly kind: 'required_background';
-    readonly taskIds: readonly string[];
-  };
+  readonly waitingReason?:
+    | {
+        readonly kind: 'required_background';
+        readonly taskIds: readonly string[];
+      }
+    | {
+        readonly kind: 'required_shell';
+        readonly shellIds: readonly string[];
+        readonly modelRespondedAfterWait: boolean;
+      };
 }
 export interface AgentTerminalOutcomeState {
   readonly version: 1;
@@ -510,6 +520,12 @@ export interface AgentSubagentTaskArtifactRef {
   readonly integrityIdentifier: string;
   readonly byteLength: number;
 }
+export interface AgentSubagentCheckpointArtifactRef {
+  readonly artifactId: string;
+  readonly kind: 'subagent_checkpoint';
+  readonly integrityIdentifier: string;
+  readonly byteLength: number;
+}
 export interface AgentSubagentHandleArtifactRef {
   readonly artifactId: string;
   readonly kind: 'subagent_handle';
@@ -642,6 +658,75 @@ export interface AgentSubagentProviderLifecycleState {
   readonly cleanupConfirmed?: boolean;
   readonly cleanupCompletedAt?: string;
   readonly backgroundResult?: AgentBackgroundSubagentResultState;
+  /** Parent-side link; only a Task receipt makes its required claim active. */
+  readonly childSession?: AgentChildSessionLinkState;
+}
+
+export interface AgentChildSessionLinkState {
+  readonly childThreadId: string;
+  readonly grantDigest: string;
+  readonly taskArtifactRef: AgentSubagentTaskArtifactRef;
+  readonly taskArtifactDigest: string;
+  readonly taskTextDigest: string;
+  readonly originRunId: string;
+  readonly originTurnId: string;
+  readonly originToolCallId: string;
+  readonly disposition: 'required' | 'after_turn';
+  readonly role: 'explore' | 'plan' | 'code' | 'review';
+  readonly fundingRunId: string;
+  readonly delegatedReservationId: string;
+  readonly delegatedUpperBoundDigest: string;
+  readonly deadlineAt: string;
+  readonly recoveryDiagnostic?: {
+    readonly diagnosticCode: 'recovery_blocked' | 'evidence_inconsistent';
+    readonly observedAt: string;
+  };
+  readonly terminalImport?: {
+    readonly terminalRevision: number;
+    readonly terminalReceiptDigest: string;
+    readonly status:
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted'
+      | 'exhausted'
+      | 'suspended'
+      | 'unknown';
+    readonly resultRef: AgentSubagentTaskArtifactRef;
+  };
+}
+
+export interface AgentChildSessionOriginState {
+  readonly parentSessionId: string;
+  readonly parentInvocationId: string;
+  readonly parentToolCallId: string;
+  readonly attempt: number;
+  readonly childInvocationId: string;
+  readonly grantDigest: string;
+  readonly taskArtifactRef: AgentSubagentTaskArtifactRef;
+  readonly taskArtifactDigest: string;
+  readonly taskTextDigest: string;
+  readonly taskInputAdmitted?: boolean;
+  readonly role: 'explore' | 'plan' | 'code' | 'review';
+  readonly fundingRunId: string;
+  readonly delegatedReservationId: string;
+  readonly delegatedUpperBoundDigest: string;
+  readonly deadlineAt: string;
+  readonly terminal?: {
+    readonly status:
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted'
+      | 'exhausted'
+      | 'suspended'
+      | 'unknown';
+    readonly resultRef: AgentSubagentTaskArtifactRef;
+    readonly cleanupConfirmed: boolean;
+    readonly cancelRequested: boolean;
+    readonly terminalReceiptId: string;
+    readonly sealedRevision: number;
+  };
 }
 
 export interface AgentBackgroundSubagentResultState {
@@ -649,6 +734,7 @@ export interface AgentBackgroundSubagentResultState {
   readonly taskId: string;
   readonly notificationId: string;
   readonly artifactIntegrityIdentifier: string;
+  readonly checkpointRef?: AgentSubagentCheckpointArtifactRef;
   readonly originRunId: string;
   readonly originTurnId: string;
   readonly originToolCallId: string;
@@ -898,7 +984,7 @@ export interface AgentSuspendedSubagentState {
 export interface AgentTaskState {
   readonly taskId: string;
   readonly userGoal: string;
-  readonly status: 'active' | 'completed' | 'cancelled';
+  readonly status: 'active' | 'completed' | 'failed' | 'cancelled';
   readonly startedAtTurnId: string;
   readonly completedAtTurnId?: string;
   readonly sideEffectsStarted: boolean;
@@ -1231,6 +1317,18 @@ export type AgentRecoveryState =
  * and encoded by state-codec as deterministic JSON object entries.
  */
 export interface AgentState {
+  /** Present only in a private child Session created from a sealed parent grant. */
+  readonly childSessionOrigin?: AgentChildSessionOriginState;
+  /** A later child Run; the origin terminal remains the immutable first-Run bridge. */
+  readonly activeFollowupTurn?: Readonly<{
+    sourceSessionId: string;
+    submissionId: string;
+    targetRunId: string;
+    taskId: string;
+    checkpointRef: AgentSubagentCheckpointArtifactRef;
+    grantRef: AgentPrivateArtifactRef & { readonly kind: 'agent_followup_grant' };
+    grantDigest: string;
+  }>;
   readonly activeTaskId: string | null;
   readonly tasks: Readonly<Record<string, AgentTaskState>>;
   readonly schemaVersion: typeof RUNTIME_STATE_SCHEMA_VERSION;
@@ -1244,6 +1342,8 @@ export interface AgentState {
   readonly transcript: AgentTranscriptState;
   readonly context: AgentContextState;
   readonly resourceBudget: AgentResourceBudgetState;
+  /** Older funding Runs with unsettled reservations; disjoint from resourceBudget.runId. */
+  readonly retainedResourceBudgets: Readonly<Record<string, AgentResourceBudgetActiveState>>;
   readonly modelInvocations: Readonly<Record<string, AgentModelInvocationState>>;
   readonly providerReadiness: Readonly<Record<string, AgentProviderReadinessState>>;
   readonly terminalOutcome?: AgentRunTerminalOutcome;
@@ -1381,6 +1481,7 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
       },
     },
     resourceBudget: { status: 'unconfigured', reservations: {} },
+    retainedResourceBudgets: {},
     modelInvocations: {},
     providerReadiness: {},
     completionGuard: { correctionAttempts: 0 },

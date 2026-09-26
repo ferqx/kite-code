@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { requiredBackgroundTaskIds, requiredManagedShellIds } from '@kite-ai/agent-kernel';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite-ai/builtin-runtime/model';
 import {
@@ -29,9 +28,12 @@ import {
   runtimeHostStateActiveTask as getActiveTask,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   LIMITED_RESOURCE_BUDGET_,
+  requiredBackgroundTaskIds,
+  requiredManagedShellIds,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
   type StateRuntimeEffectExecutor,
 } from '@kite-ai/runtime-host/kernel-adapter';
+import { CHILD_SESSION_TASK_USER_GOAL } from '@kite-ai/runtime-host/storage';
 import {
   type AppWorkspaceEffectCompositionFactory,
   prepareRuntimeEffectForBudget,
@@ -91,13 +93,18 @@ export function hasTerminalRequiredManagedShell(
   executions: ReturnType<typeof managedShellRuntime.listSnapshot>['executions'],
 ): boolean {
   const requiredShellIds = requiredManagedShellIds(state);
-  return executions.some(
-    (execution) =>
-      requiredShellIds.has(execution.executionId) &&
-      execution.kind === 'shell' &&
-      execution.status !== 'running' &&
-      execution.status !== 'stopping' &&
-      execution.cleanupConfirmed,
+  return (
+    requiredShellIds.size > 0 &&
+    [...requiredShellIds].every((shellId) =>
+      executions.some(
+        (execution) =>
+          execution.executionId === shellId &&
+          execution.kind === 'shell' &&
+          execution.status !== 'running' &&
+          execution.status !== 'stopping' &&
+          execution.cleanupConfirmed,
+      ),
+    )
   );
 }
 
@@ -110,14 +117,23 @@ export function inspectRequiredBackgroundSettlement(
   | { readonly kind: 'none' }
   | { readonly kind: 'state_changed'; readonly events: readonly RuntimeEvent[] } {
   if (awaitedTaskIds.size === 0) return { kind: 'none' };
-  const currentRequired = new Set(requiredBackgroundTaskIds(currentState));
+  const currentRequired = new Set(
+    requiredBackgroundTaskIds(currentState).filter((taskId) => awaitedTaskIds.has(taskId)),
+  );
   if ([...awaitedTaskIds].every((taskId) => !currentRequired.has(taskId))) {
     return { kind: 'state_changed', events: [] };
   }
-  const unavailable = executions.filter(
-    (execution) => currentRequired.has(execution.executionId) && execution.status === 'unavailable',
-  );
-  if (unavailable.length === 0) return { kind: 'none' };
+  const visibleIds = new Set(executions.map((execution) => execution.executionId));
+  const unavailableIds = [
+    ...executions
+      .filter(
+        (execution) =>
+          currentRequired.has(execution.executionId) && execution.status === 'unavailable',
+      )
+      .map((execution) => execution.executionId),
+    ...[...currentRequired].filter((taskId) => !visibleIds.has(taskId)),
+  ];
+  if (unavailableIds.length === 0) return { kind: 'none' };
   const recoveryByTask = new Map(
     recoveryEvents
       .filter(
@@ -128,14 +144,12 @@ export function inspectRequiredBackgroundSettlement(
       )
       .map((event) => [event.taskId as string, event as RuntimeEvent] as const),
   );
-  if (unavailable.some((execution) => !recoveryByTask.has(execution.executionId))) {
+  if (unavailableIds.some((taskId) => !recoveryByTask.has(taskId))) {
     throw new Error('Required background sub-agent settlement requires explicit recovery.');
   }
   return {
     kind: 'state_changed',
-    events: unavailable.map(
-      (execution) => recoveryByTask.get(execution.executionId) as RuntimeEvent,
-    ),
+    events: unavailableIds.map((taskId) => recoveryByTask.get(taskId) as RuntimeEvent),
   };
 }
 
@@ -209,10 +223,20 @@ export interface RuntimeTurnInput {
    * than appending a second message, task, turn, or skill activation.
    */
   precommittedStart?: PrecommittedStartTurnDescriptor;
+  /** Exact first child Run already activated by the child Session transaction. */
+  precommittedChildActivation?: PrecommittedChildActivationDescriptor;
   /** Continue the already-active durable turn after a recovered interaction receipt commits. */
   resumeCommittedInteraction?: boolean;
   /** Host Session-mailbox authority retained by detached background children. */
   backgroundModelInvocationPersistence?: RuntimeExecutorDependencies['backgroundModelInvocationPersistence'];
+  /** Private parent Task receipt owner for independent child admission. */
+  childSessionAcceptance?: RuntimeExecutorDependencies['childSessionAcceptance'];
+  /** Exact sealed grant ceiling for an independently activated child. */
+  childToolCeiling?: RuntimeExecutorDependencies['childToolCeiling'];
+  crossSessionQueueMail?: RuntimeExecutorDependencies['crossSessionQueueMail'];
+  followupPolicyForPreparedTool?: RuntimeExecutorDependencies['followupPolicyForPreparedTool'];
+  currentTurnFollowup?: RuntimeExecutorDependencies['currentTurnFollowup'];
+  crossSessionChildIdentity?: RuntimeExecutorDependencies['crossSessionChildIdentity'];
   /** App-selected Model/Artifact/Subagent mechanisms; Core never constructs a concrete owner. */
   modelInvocationRuntime: {
     /** App projection of the Host's one frozen Builtin capability snapshot. */
@@ -238,6 +262,10 @@ export interface RuntimeTurnInput {
     ) => Promise<boolean>;
     subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
     subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+    checkpointArtifacts?: Pick<
+      import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactStore,
+      'write'
+    >;
   };
   interactionMode?: InteractionMode;
   /** 初始执行阶段 / Initial execution phase */
@@ -276,6 +304,69 @@ export interface RuntimeTurnInput {
     cancel: RuntimeCommittedCommandCancellation | null,
   ) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+}
+
+/** Contains identities only; the delegated task body remains in its private Artifact. */
+export interface PrecommittedChildActivationDescriptor {
+  readonly sessionId: string;
+  readonly committedRevision: number;
+  readonly childRunId: string;
+  readonly parentSessionId: string;
+  readonly parentInvocationId: string;
+  readonly parentToolCallId: string;
+  readonly attempt: number;
+  readonly childInvocationId: string;
+  readonly grantDigest: string;
+  readonly taskArtifactId: string;
+  readonly taskArtifactByteLength: number;
+  readonly taskArtifactDigest: string;
+  readonly taskTextDigest: string;
+  readonly fundingRunId: string;
+  readonly delegatedReservationId: string;
+  readonly delegatedUpperBoundDigest: string;
+}
+
+export function assertPrecommittedChildActivation(
+  state: Readonly<RuntimeState>,
+  descriptor: PrecommittedChildActivationDescriptor,
+  sessionId: string,
+  currentRunId: string | null | undefined,
+): void {
+  const origin = state.childSessionOrigin;
+  if (
+    descriptor.sessionId !== sessionId ||
+    state.session.threadId !== sessionId ||
+    state.revision !== descriptor.committedRevision ||
+    state.turn.turnId !== descriptor.childRunId ||
+    state.turn.status !== 'active' ||
+    currentRunId !== descriptor.childRunId ||
+    state.resourceBudget.status !== 'active' ||
+    state.resourceBudget.runId !== descriptor.childRunId ||
+    state.transcript.messages.length !== 0 ||
+    state.activeTaskId !== descriptor.childInvocationId ||
+    state.tasks[descriptor.childInvocationId]?.userGoal !== CHILD_SESSION_TASK_USER_GOAL ||
+    state.tasks[descriptor.childInvocationId]?.status !== 'active' ||
+    !origin ||
+    origin.terminal !== undefined ||
+    origin.taskInputAdmitted !== true ||
+    origin.parentSessionId !== descriptor.parentSessionId ||
+    origin.parentInvocationId !== descriptor.parentInvocationId ||
+    origin.parentToolCallId !== descriptor.parentToolCallId ||
+    origin.attempt !== descriptor.attempt ||
+    origin.childInvocationId !== descriptor.childInvocationId ||
+    origin.grantDigest !== descriptor.grantDigest ||
+    origin.taskArtifactRef.artifactId !== descriptor.taskArtifactId ||
+    origin.taskArtifactRef.kind !== 'subagent_task' ||
+    origin.taskArtifactRef.integrityIdentifier !== descriptor.taskArtifactDigest ||
+    origin.taskArtifactRef.byteLength !== descriptor.taskArtifactByteLength ||
+    origin.taskArtifactDigest !== descriptor.taskArtifactDigest ||
+    origin.taskTextDigest !== descriptor.taskTextDigest ||
+    origin.fundingRunId !== descriptor.fundingRunId ||
+    origin.delegatedReservationId !== descriptor.delegatedReservationId ||
+    origin.delegatedUpperBoundDigest !== descriptor.delegatedUpperBoundDigest
+  ) {
+    throw new Error('Runtime precommitted child activation does not match current State and Run.');
+  }
 }
 
 export type RuntimeCommittedCommandCancellation = (
@@ -502,14 +593,34 @@ export async function* executeRuntimeTurn(
       return;
     }
     const precommittedStart = input.precommittedStart;
+    const precommittedChildActivation = input.precommittedChildActivation;
+    if (precommittedStart && precommittedChildActivation) {
+      throw new Error('Runtime turn cannot use two precommitted start identities.');
+    }
     if (precommittedStart) {
       // Validate the exact command commit before budget initialization or
       // recovery appends any runner-owned events and advances State revision.
       assertPrecommittedStartTurn(kernel.getState(), precommittedStart, input.threadId);
     }
+    if (precommittedChildActivation) {
+      if (!getFeatureFlags(input.config).resourceBudget) {
+        throw new Error('Runtime child activation requires resource budgeting.');
+      }
+      assertPrecommittedChildActivation(
+        kernel.getState(),
+        precommittedChildActivation,
+        input.threadId,
+        kernel.currentRunId?.(),
+      );
+    }
     if (getFeatureFlags(input.config).resourceBudget) {
-      if (kernel.getState().resourceBudget.status !== 'unconfigured') {
-        if (kernel.getState().resourceBudget.status !== 'active') {
+      const budgetRunId = precommittedStart?.turnId;
+      const budget = kernel.getState().resourceBudget;
+      const configureForNewRun =
+        budgetRunId !== undefined &&
+        (budget.status === 'unconfigured' || budget.runId !== budgetRunId);
+      if (budget.status !== 'unconfigured' && !configureForNewRun) {
+        if (budget.status !== 'active') {
           const failure = recordRuntimeFailure({
             kind: 'mandatory_policy_unavailable',
             message:
@@ -541,7 +652,7 @@ export async function* executeRuntimeTurn(
         const startedAt = new Date();
         const event: RuntimeEvent = {
           type: 'resource_budget.configured',
-          runId: randomUUID(),
+          runId: budgetRunId ?? randomUUID(),
           startedAt: startedAt.toISOString(),
           deadlineAt: new Date(
             startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
@@ -629,7 +740,7 @@ export async function* executeRuntimeTurn(
         return;
       }
     }
-    if (!precommittedStart) {
+    if (!precommittedStart && !precommittedChildActivation) {
       const resumedInteraction =
         input.resumeCommittedInteraction === true ||
         (getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState()));
@@ -752,6 +863,20 @@ export async function* executeRuntimeTurn(
       }
     }
 
+    // Independent Session TriggerTurn and interrupt require their exact Host
+    // command commits in addition to the QueueOnly delivery authority.
+    const queueOnlyMailboxAvailable = Boolean(
+      input.crossSessionQueueMail &&
+        kernel.commitCrossSessionQueueMailCommand &&
+        kernel.persistCrossSessionQueueMailModelInput,
+    );
+    const agentMailboxAvailable = Boolean(
+      queueOnlyMailboxAvailable &&
+        kernel.commitCrossSessionFollowupCommand &&
+        kernel.commitCrossSessionInterruptCommand &&
+        input.followupPolicyForPreparedTool,
+    );
+    const agentMailboxQueueOnlyAvailable = queueOnlyMailboxAvailable && !agentMailboxAvailable;
     const executorDependencies: RuntimeExecutorDependencies = {
       config: input.config,
       model,
@@ -766,6 +891,14 @@ export async function* executeRuntimeTurn(
           ? modelInvocationRuntime.planArtifacts
           : undefined,
       runtimeStore: kernel.runtimeStore,
+      childSessionAcceptance: input.childSessionAcceptance,
+      childToolCeiling: input.childToolCeiling,
+      crossSessionQueueMail: input.crossSessionQueueMail,
+      followupPolicyForPreparedTool: input.followupPolicyForPreparedTool,
+      currentTurnFollowup: input.currentTurnFollowup,
+      crossSessionChildIdentity: input.crossSessionChildIdentity,
+      agentMailboxAvailable,
+      agentMailboxQueueOnlyAvailable,
       skills: input.skills,
       skillOptions: input.skillOptions,
       signal: executionSignal,
@@ -799,6 +932,10 @@ export async function* executeRuntimeTurn(
         'subagentRuntimeFactory' in modelInvocationRuntime
           ? modelInvocationRuntime.subagentRuntimeFactory
           : undefined,
+      delegatedTaskArtifacts:
+        'delegatedTaskArtifacts' in modelInvocationRuntime
+          ? (modelInvocationRuntime.delegatedTaskArtifacts as RuntimeExecutorDependencies['delegatedTaskArtifacts'])
+          : undefined,
       backgroundSubagentRuntime:
         'backgroundSubagentRuntime' in modelInvocationRuntime
           ? (modelInvocationRuntime.backgroundSubagentRuntime as RuntimeExecutorDependencies['backgroundSubagentRuntime'])
@@ -816,6 +953,10 @@ export async function* executeRuntimeTurn(
         'subagentTaskRequests' in modelInvocationRuntime
           ? modelInvocationRuntime.subagentTaskRequests
           : undefined,
+      checkpointArtifacts:
+        'checkpointArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.checkpointArtifacts
+          : undefined,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
     stateRunner = runStateRuntimeLoop(
@@ -826,15 +967,7 @@ export async function* executeRuntimeTurn(
       (effect, state) =>
         getFeatureFlags(input.config).resourceBudget
           ? prepareRuntimeEffectForBudget(effect, state, {
-              config: input.config,
-              model,
-              shellExecutor: input.shellExecutor,
-              sandboxBackend: input.sandboxBackend,
-              mcpManager: input.mcpManager,
-              builtinToolCatalog: modelInvocationRuntime.builtinToolCatalog,
-              skills: input.skills,
-              skillOptions: input.skillOptions,
-              signal: executionSignal,
+              ...executorDependencies,
               subagentEventSink: () => {},
             })
           : effect,
@@ -860,10 +993,15 @@ export async function* executeRuntimeTurn(
             : undefined;
         const childOwnerKey = backgroundSubagentOwnerKey(input.threadId, input.recoveryIdentityKey);
         const childWatermark = children?.ownerWatermark(childOwnerKey);
-        const currentShellExecutions = managedShellRuntime.listSnapshot(
-          input.threadId,
-          ownerKey,
-        ).executions;
+        const inspectRequiredShells = (currentState: Readonly<RuntimeState>) => {
+          const executions = managedShellRuntime.listSnapshot(input.threadId, ownerKey).executions;
+          for (const shellId of requiredManagedShellIds(currentState)) {
+            if (!executions.some((execution) => execution.executionId === shellId)) {
+              throw new Error(`Required managed Shell owner is unavailable: ${shellId}`);
+            }
+          }
+          return hasTerminalRequiredManagedShell(currentState, executions);
+        };
         const requiredBackground = new Set(requiredBackgroundTaskIds(state));
         const awaitedBackground = new Set(
           state.completionGuard.waitingReason?.kind === 'required_background'
@@ -874,8 +1012,19 @@ export async function* executeRuntimeTurn(
           if (!children || awaitedBackground.size === 0) return undefined;
           const currentState = kernel.getState();
           if (currentState.revision !== revision) return 'state_changed' as const;
+          const independentChildren = new Set(
+            Object.values(currentState.capabilities.invocations)
+              .filter(
+                (invocation) => invocation.subagentProviderLifecycle?.childSession !== undefined,
+              )
+              .map((invocation) => invocation.subagentProviderLifecycle!.childInvocationId),
+          );
+          const legacyAwaited = new Set(
+            [...awaitedBackground].filter((taskId) => !independentChildren.has(taskId)),
+          );
+          if (legacyAwaited.size === 0) return undefined;
           const inspection = inspectRequiredBackgroundSettlement(
-            awaitedBackground,
+            legacyAwaited,
             currentState,
             children.listSnapshot(input.threadId, childOwnerKey).executions,
             children.settlementRecoveryEvents?.(childOwnerKey) ?? [],
@@ -884,10 +1033,7 @@ export async function* executeRuntimeTurn(
           for (const event of inspection.events) kernel.processEvent(event);
           return 'state_changed' as const;
         };
-        if (
-          requiredBackground.size === 0 &&
-          hasTerminalRequiredManagedShell(state, currentShellExecutions)
-        ) {
+        if (requiredBackground.size === 0 && inspectRequiredShells(state)) {
           return 'managed_shell_terminal' as const;
         }
         const existingBackground = inspectRequiredBackground();
@@ -913,8 +1059,9 @@ export async function* executeRuntimeTurn(
           if (settledBackground) return settledBackground;
           return wake;
         }
-        const executions = managedShellRuntime.listSnapshot(input.threadId, ownerKey).executions;
-        return requiredBackground.size === 0 && hasTerminalRequiredManagedShell(state, executions)
+        const currentState = kernel.getState();
+        return requiredBackgroundTaskIds(currentState).length === 0 &&
+          inspectRequiredShells(currentState)
           ? ('managed_shell_terminal' as const)
           : wake;
       },

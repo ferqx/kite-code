@@ -6,6 +6,8 @@
 
 本轮 required 后台子 Agent 的已接纳 `backgroundResult` 是其生命周期终态事实；完成守卫按原始工具、task identity 与当前工作归属核对后直接解除对应等待。`task_read` 的终态结果同样可提供证据，但不是后台结果已经持久化后的第二次确认权威。
 
+独立子 Session 可封存显式 `unknown/cleanupConfirmed=false` 结果：仅限子 Run 的 unknown 终态、外部效果未知、当前 Turn 非活动且已有未知模型／能力尝试。该结果在父线程以准确原 Tool 血缘接纳后解除 required 等待，但未知委派用量仍由 ResourceBudget 保留为 unknown；解除等待不等于父 Run 可正常完成或子执行已清理。
+
 模型 final 只形成完成候选。required background 是唯一 blocker 时，Kernel 返回专用
 `required_background_pending → wait_for_background`，清除候选并持久化仅含 required task ID 的 waiting reason；
 这不是完成纠错，不消耗 correction attempt。交互、普通工具、required Shell、unknown invocation、active Skill 和 Plan
@@ -20,6 +22,8 @@ completed、aborted、blocked、unknown、budget_exhausted 和 resource_saturate
 ## 历史与重启
 
 [state migration](../src/state-migration.ts) 与 [state codec](../src/state-codec.ts) 按受支持格式解码；历史读取不重新授予当前 execution authority。Host 负责重新检查持久 lease 与操作状态，Kernel 根据明确 facts 选择恢复，不能自己读取数据库或杀进程。
+
+TriggerTurn 来源的待结算备付只凭 Store 提供的准确 admission 与 reservation 证明保留。已受理阶段兼容旧 `reserved` 与新 `queued` 备付；后者锁定有限计数但尚未取得活动子位，恢复时不得把它当作已派发，也不能在缺少证明时保留。
 
 当前State epoch早期写入的后台结果可能没有`admissionRevision`。解码时保留其Session、transcript与已结算工具事实，但删除这条无法验证的`backgroundResult` authority；不得推测或补造revision。当前writer产生的后台结果仍必须携带完整revision并通过严格invariant。
 

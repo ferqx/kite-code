@@ -1,0 +1,344 @@
+import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
+import {
+  type BudgetReservation,
+  committedResourceUsage,
+  createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
+  INTERNAL_RESOURCE_BUDGET_,
+  LIMITED_RESOURCE_BUDGET_,
+  type ResourceBudget,
+  reduceResourceBudgetState,
+} from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeEvent, RuntimeState } from '../src/bootstrap/runtime/state-runtime';
+import {
+  childBudgetAtActivation,
+  planChildDelegatedAllotment,
+} from '../src/bootstrap/runtime/subagent/child-delegated-allotment';
+
+const NOW = Date.parse('2026-09-24T00:00:00.000Z');
+const DEADLINE = new Date(NOW + 50 * 60_000).toISOString();
+
+function childId(index: number): string {
+  return `child_${createHash('sha256').update(`child-${index}`).digest('hex')}`;
+}
+
+function transientId(index: number): string {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function initialState(budget: ResourceBudget = INTERNAL_RESOURCE_BUDGET_): RuntimeState {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: 'a'.repeat(64),
+    threadId: 'allotment-parent',
+    userId: 'user-1',
+    workspace: '/workspace',
+  });
+  return {
+    ...state,
+    resourceBudget: {
+      status: 'active',
+      runId: 'parent-run',
+      startedAt: new Date(NOW).toISOString(),
+      deadlineAt: DEADLINE,
+      budget,
+      reconciledUsage: createZeroResourceUsage(),
+      reservations: {},
+      waiters: {},
+      nextWaiterSequence: 0,
+    },
+  };
+}
+
+function transient(index: number): BudgetReservation {
+  const id = transientId(index);
+  const upper = createZeroResourceUsage('versioned_upper_bound', 'task-tool-test-v1');
+  upper.counters.toolInvocations = 1;
+  upper.counters.artifactBytes = 1;
+  return {
+    version: 1,
+    reservationId: id,
+    runId: 'parent-run',
+    invocationId: `tool:task-${index}`,
+    resourceKind: 'subagent',
+    executableUpperBound: upper,
+    state: 'reserved',
+  };
+}
+
+function withTransient(state: RuntimeState, index: number, invocationId?: string): RuntimeState {
+  const held = { ...transient(index), ...(invocationId ? { invocationId } : {}) };
+  const reserved = reduceResourceBudgetState(state.resourceBudget, {
+    type: 'resource_budget.reserved',
+    reservation: held,
+  });
+  const started = reduceResourceBudgetState(reserved, {
+    type: 'resource_budget.dispatch_started',
+    reservationId: held.reservationId,
+  });
+  return { ...state, resourceBudget: started };
+}
+
+function finished(index: number): Extract<RuntimeEvent, { type: 'tool.finished' }> {
+  return {
+    type: 'tool.finished',
+    toolCallId: `task-${index}`,
+    name: 'task',
+    result: {
+      ok: true,
+      command: '',
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+      resultMeta: { taskId: childId(index), taskStatus: 'running', taskDisposition: 'required' },
+    },
+  };
+}
+
+function applyPlanned(
+  state: RuntimeState,
+  events: ReturnType<typeof planChildDelegatedAllotment>['events'],
+): RuntimeState {
+  const first = reduceResourceBudgetState(state.resourceBudget, events[0]);
+  const second = reduceResourceBudgetState(first, events[1]);
+  return { ...state, resourceBudget: second };
+}
+
+test('three read-only child allotments reconcile transient Tools and coexist under INTERNAL budget', () => {
+  let state = initialState();
+  const reservations: BudgetReservation[] = [];
+  for (let index = 1; index <= 3; index += 1) {
+    state = withTransient(state, index);
+    const plan = planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(index),
+      toolFinished: finished(index),
+      childThreadId: childId(index),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: NOW,
+    });
+    expect(plan.events.map((event) => event.type)).toEqual([
+      'resource_budget.reconciled',
+      'resource_budget.reserved',
+    ]);
+    expect(plan.events[0].actual.counters.toolInvocations).toBe(1);
+    expect(plan.events[0].actual.gauges.activeSubagents).toBe(0);
+    expect(plan.reservation.invocationId).toBe(`child-allotment:${childId(index)}`);
+    expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
+    expect(plan.childBudget.maxTurns).toBe(8);
+    expect(Date.parse(plan.deadlineAt)).toBeLessThanOrEqual(Date.parse(DEADLINE));
+    reservations.push(plan.reservation);
+    state = applyPlanned(state, plan.events);
+  }
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  expect(reservations.map((item) => item.reservationId)).toEqual(
+    [1, 2, 3].map((index) => `child-allotment:${childId(index)}`),
+  );
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
+  expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(252);
+});
+
+test('LIMITED budget queues a third finite child allotment and promotes it after one settles', () => {
+  let state = initialState(LIMITED_RESOURCE_BUDGET_);
+  const reservations: BudgetReservation[] = [];
+  for (let index = 1; index <= 2; index += 1) {
+    state = withTransient(state, index);
+    const plan = planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(index),
+      toolFinished: finished(index),
+      childThreadId: childId(index),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: NOW,
+    });
+    expect(plan.childBudget.maxRunDurationMs).toBe(7.5 * 60_000);
+    expect(Date.parse(plan.deadlineAt)).toBe(NOW + plan.childBudget.maxRunDurationMs);
+    expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(
+      plan.childBudget.maxRunDurationMs,
+    );
+    reservations.push(plan.reservation);
+    state = applyPlanned(state, plan.events);
+  }
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
+  state = withTransient(state, 3);
+  const third = planChildDelegatedAllotment({
+    state,
+    transientReservationId: transientId(3),
+    toolFinished: finished(3),
+    childThreadId: childId(3),
+    role: 'review',
+    taskArtifactBytes: 1,
+    now: NOW,
+  });
+  expect(third.reservation.state).toBe('queued');
+  state = applyPlanned(state, third.events);
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
+  expect(() =>
+    reduceResourceBudgetState(
+      state.resourceBudget as Extract<typeof state.resourceBudget, { status: 'active' }>,
+      {
+        type: 'resource_budget.child_slot_acquired',
+        reservationId: third.reservation.reservationId,
+      },
+    ),
+  ).toThrow('Child concurrency slot is unavailable');
+  state = {
+    ...state,
+    resourceBudget: reduceResourceBudgetState(state.resourceBudget, {
+      type: 'resource_budget.released',
+      reservationId: reservations[0]!.reservationId,
+    }),
+  };
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  state = {
+    ...state,
+    resourceBudget: reduceResourceBudgetState(state.resourceBudget, {
+      type: 'resource_budget.child_slot_acquired',
+      reservationId: third.reservation.reservationId,
+    }),
+  };
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  expect(state.resourceBudget.reservations[third.reservation.reservationId]?.state).toBe(
+    'reserved',
+  );
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
+});
+
+test('short remaining parent deadline tightens a positive child share', () => {
+  const base = initialState(LIMITED_RESOURCE_BUDGET_);
+  if (base.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  const deadlineAt = new Date(NOW + 25).toISOString();
+  const state = withTransient(
+    { ...base, resourceBudget: { ...base.resourceBudget, deadlineAt } },
+    1,
+  );
+  const plan = planChildDelegatedAllotment({
+    state,
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'review',
+    taskArtifactBytes: 1,
+    now: NOW + 10,
+  });
+  expect(plan.childBudget.maxRunDurationMs).toBe(15);
+  expect(plan.deadlineAt).toBe(deadlineAt);
+  expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(15);
+});
+
+test('code children consume the parent writer gauge without overbooking', () => {
+  let state = initialState();
+  for (let index = 1; index <= 2; index += 1) {
+    state = withTransient(state, index);
+    const plan = planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(index),
+      toolFinished: finished(index),
+      childThreadId: childId(index),
+      role: 'code',
+      taskArtifactBytes: 1,
+      now: NOW,
+    });
+    expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(1);
+    state = applyPlanned(state, plan.events);
+  }
+  state = withTransient(state, 3);
+  expect(
+    planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(3),
+      toolFinished: finished(3),
+      childThreadId: childId(3),
+      role: 'code',
+      taskArtifactBytes: 1,
+      now: NOW,
+    }).reservation.state,
+  ).toBe('queued');
+});
+
+test('insufficient finite counters and expired deadline reject before child reservation', () => {
+  const low = initialState({ ...INTERNAL_RESOURCE_BUDGET_, maxTurns: 3 });
+  expect(() =>
+    planChildDelegatedAllotment({
+      state: withTransient(low, 1),
+      transientReservationId: transientId(1),
+      toolFinished: finished(1),
+      childThreadId: childId(1),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: NOW,
+    }),
+  ).toThrow('no positive counter budget');
+  expect(() =>
+    planChildDelegatedAllotment({
+      state: withTransient(initialState(), 1),
+      transientReservationId: transientId(1),
+      toolFinished: finished(1),
+      childThreadId: childId(1),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: Date.parse(DEADLINE),
+    }),
+  ).toThrow('deadline has expired');
+});
+
+test('same facts produce the same child allotment identity and stale input is refused', () => {
+  const state = withTransient(initialState(), 1);
+  const input = {
+    state,
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'review' as const,
+    taskArtifactBytes: 1,
+    now: NOW,
+  };
+  const first = planChildDelegatedAllotment(input);
+  expect(planChildDelegatedAllotment(input)).toEqual(first);
+  expect(() =>
+    planChildDelegatedAllotment({ ...input, transientReservationId: transientId(2) }),
+  ).toThrow('transient reservation is not reconcilable');
+  expect(() =>
+    planChildDelegatedAllotment({
+      ...input,
+      state: withTransient(initialState(), 1, 'tool:other-task'),
+    }),
+  ).toThrow('transient reservation is not reconcilable');
+  expect(() =>
+    planChildDelegatedAllotment({ ...input, state: applyPlanned(state, first.events) }),
+  ).toThrow('transient reservation is not reconcilable');
+});
+
+test('delayed child activation tightens duration without changing the parent allotment', () => {
+  const plan = planChildDelegatedAllotment({
+    state: withTransient(initialState(), 1),
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'review',
+    taskArtifactBytes: 1,
+    now: NOW,
+  });
+  const startedAt = NOW + 60_000;
+  const activated = childBudgetAtActivation({
+    childBudget: plan.childBudget,
+    deadlineAt: plan.deadlineAt,
+    startedAt,
+  });
+  expect(activated.maxRunDurationMs).toBe(Date.parse(plan.deadlineAt) - startedAt);
+  expect(activated.maxRunDurationMs).toBeLessThan(plan.childBudget.maxRunDurationMs);
+  expect(plan.childBudget.maxRunDurationMs).toBe(
+    plan.reservation.executableUpperBound.gauges.elapsedRunMs,
+  );
+  expect(() =>
+    childBudgetAtActivation({
+      childBudget: plan.childBudget,
+      deadlineAt: plan.deadlineAt,
+      startedAt: Date.parse(plan.deadlineAt),
+    }),
+  ).toThrow('deadline has expired');
+});

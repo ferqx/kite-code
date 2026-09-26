@@ -7,6 +7,38 @@ import type { RuntimeEvent } from '../../kite-service/src/bootstrap/runtime/stat
 import { projectRuntimeClientEvent } from '../../kite-service/src/runtime-client/event-projector';
 import { projectEvent, projectEventWithIdentity } from '../src/presentation';
 
+test('Agent mailbox statuses use durable metadata and do not confuse acceptance with model input', () => {
+  const accepted = {
+    type: 'agent.mail_status',
+    status: 'accepted',
+    targetAgentId: 'child',
+    messageIds: ['mail-1'],
+    submissionId: 'submission-1',
+  } as const;
+  let messages = projectEvent([], accepted);
+  expect(messages).toMatchObject([{ status: 'queued', text: '已受理，等待目标读取' }]);
+  messages = projectEvent(messages, accepted);
+  expect(messages).toHaveLength(1);
+  messages = projectEvent(messages, {
+    type: 'agent.mail_status',
+    status: 'input_prepared',
+    targetAgentId: 'child',
+    messageIds: ['mail-1'],
+  });
+  expect(messages).toMatchObject([{ status: 'running', text: '已准备进入目标模型输入' }]);
+  messages = projectEvent(messages, accepted);
+  expect(messages[0]?.status).toBe('running');
+  messages = projectEvent(messages, {
+    type: 'agent.mail_status',
+    status: 'result_settled',
+    submissionId: 'submission-1',
+    taskId: 'task-2',
+    resultStatus: 'completed',
+  });
+  expect(messages).toHaveLength(2);
+  expect(messages[1]).toMatchObject({ status: 'completed', text: '结果已结算（completed）' });
+});
+
 test('failed model run is visible without an assistant reply and replay does not duplicate it', () => {
   const user = projectEventWithIdentity(
     [],

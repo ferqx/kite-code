@@ -715,16 +715,19 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   }
 
   async #cancelSession(sessionId: string, reason: string): Promise<void> {
+    let ownsExecution = false;
     try {
-      if (this.#ownsSessionExecution(sessionId)) {
-        await this.#bridge.shutdownSession(sessionId, reason, (notification) => {
-          this.#notifications.publish(notification);
-        });
-      }
+      ownsExecution = this.#ownsSessionExecution(sessionId);
     } finally {
-      // Losing write authority must not leave this process's provider work alive.
-      // Aborting local work is not a durable cancellation or cleanup receipt.
+      // Stop local effects before waiting for child cleanup. A parent Run may be
+      // waiting for those children and must not hold shutdown open indefinitely.
+      // This abort is local; the bridge still owns durable cancellation/cleanup.
       this.#lifecycle.abort(sessionId, createRuntimeAbortReason('error', reason));
+    }
+    if (ownsExecution) {
+      await this.#bridge.shutdownSession(sessionId, reason, (notification) => {
+        this.#notifications.publish(notification);
+      });
     }
   }
 
@@ -783,17 +786,6 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     }
     await this.start();
     const commandId = `after_turn_${input.wakeKey.slice(0, 48)}`;
-    // Do not race the originating Run. Human start commands already admitted to the
-    // same mailbox linearize before this internal start and therefore retain priority.
-    await this.#lifecycle.waitForIdle(input.sessionId);
-    await Promise.resolve();
-    // Detached completion events may have advanced the durable Session after
-    // the originating Run's last published projection. Refresh inside the
-    // same Session mailbox before deriving the successor command CAS.
-    const projection = await this.#loadProjection(input.sessionId);
-    if (!projection) {
-      return Object.freeze({ status: 'suppressed', reason: 'session_not_found' });
-    }
     const command = {
       schema: 'kite.runtime-command.v1',
       type: 'start_turn',
@@ -811,6 +803,21 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     if (prior.status === 'replay') return Object.freeze({ status: 'replayed' });
     if (prior.status === 'digest_mismatch') {
       return Object.freeze({ status: 'suppressed', reason: 'command_identity_collision' });
+    }
+    const beforeWait = await this.#loadProjection(input.sessionId);
+    if (beforeWait?.currentRun && beforeWait.currentRun.runId !== input.originRunId) {
+      return Object.freeze({ status: 'suppressed', reason: 'human_start_preferred' });
+    }
+    // Do not race the originating Run. Human start commands already admitted to the
+    // same mailbox linearize before this internal start and therefore retain priority.
+    await this.#lifecycle.waitForIdle(input.sessionId);
+    await Promise.resolve();
+    // Detached completion events may have advanced the durable Session after
+    // the originating Run's last published projection. Refresh inside the
+    // same Session mailbox before deriving the successor command CAS.
+    const projection = await this.#loadProjection(input.sessionId);
+    if (!projection) {
+      return Object.freeze({ status: 'suppressed', reason: 'session_not_found' });
     }
     if (projection.currentRun && projection.currentRun.runId !== input.originRunId) {
       return Object.freeze({ status: 'suppressed', reason: 'human_start_preferred' });
@@ -1002,22 +1009,26 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     } else {
       return undefined;
     }
-    // Settings can have independent Store writers. Read their current CAS without publishing
-    // a snapshot ahead of an active bridge's still-queued canonical events.
-    const current =
-      command.type === 'set_interaction_mode' || !this.#recoveredSessions.has(sessionId)
-        ? await this.#bridge.query({
-            schema: RUNTIME_QUERY_SCHEMA_,
-            type: 'get_session_projection',
-            sessionId,
-          })
-        : undefined;
-    const projection =
-      command.type === 'set_interaction_mode' || !this.#recoveredSessions.has(sessionId)
-        ? current?.status === 'ok'
-          ? current.session
-          : undefined
-        : (this.#registry.projection(sessionId) ?? (await this.#loadProjection(sessionId)));
+    // Settings and cross-Run mail can have independent Store writers. Read their current CAS
+    // without publishing a snapshot ahead of an active bridge's queued canonical events.
+    const readCurrentProjection =
+      command.type === 'set_interaction_mode' ||
+      command.type === 'start_turn' ||
+      command.type === 'stop_background_execution' ||
+      command.type === 'cancel_turn' ||
+      !this.#recoveredSessions.has(sessionId);
+    const current = readCurrentProjection
+      ? await this.#bridge.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId,
+        })
+      : undefined;
+    const projection = readCurrentProjection
+      ? current?.status === 'ok'
+        ? current.session
+        : undefined
+      : (this.#registry.projection(sessionId) ?? (await this.#loadProjection(sessionId)));
     if (!projection || projection.revision === expected) return undefined;
     return {
       status: 'conflict',

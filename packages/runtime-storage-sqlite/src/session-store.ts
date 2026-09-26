@@ -7,6 +7,7 @@ import {
   SqliteRuntimeStorageOpenError,
   type SqliteRuntimeWorkspaceBinding,
 } from './preflight';
+import { hasSessionLineage } from './session-lineage';
 
 /** Session metadata persistence over the adapter's one database connection. */
 export function createSqliteSessionMetadataStore<State>(input: {
@@ -18,6 +19,7 @@ export function createSqliteSessionMetadataStore<State>(input: {
   readonly beforeWrite?: () => void;
   readonly onDirectoryChange?: (entry: SqliteWorkspaceDirectoryOutboxEntry) => void;
 }) {
+  const rootFilter = hasSessionLineage(input.db) ? ' WHERE parent_session_id IS NULL' : '';
   const upsertSession = input.workspaceBinding
     ? input.db.query(
         'INSERT INTO runtime_sessions (session_id, project_id, workspace_digest, worker_scope_id, workspace_identity_digest, state_schema, format_epoch, revision, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET project_id = excluded.project_id, workspace_digest = excluded.workspace_digest, worker_scope_id = excluded.worker_scope_id, workspace_identity_digest = excluded.workspace_identity_digest, state_schema = excluded.state_schema, format_epoch = excluded.format_epoch, revision = excluded.revision, updated_at = excluded.updated_at',
@@ -41,7 +43,7 @@ export function createSqliteSessionMetadataStore<State>(input: {
     { thread_id: string; name: string; updated_at: number },
     [number]
   >(
-    'SELECT session_id AS thread_id, name, updated_at FROM runtime_sessions ORDER BY updated_at DESC LIMIT ?',
+    `SELECT session_id AS thread_id, name, updated_at FROM runtime_sessions${rootFilter} ORDER BY updated_at DESC LIMIT ?`,
   );
   const selectIdentity = input.workspaceBinding
     ? input.db.query<

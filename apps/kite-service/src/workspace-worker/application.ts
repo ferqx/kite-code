@@ -211,7 +211,14 @@ export async function createWorkspaceWorkerApplication(
       history,
       appControl: appControl.gateway.forWorkspace(admittedWorkspace),
       operationGate,
-      start: () => runtimeOwner!.host.start(),
+      start: async () => {
+        await runtimeOwner!.host.start();
+        void runtimeOwner!.recoverPendingAgentMail().catch((error) =>
+          console.error('Cross-Session startup recovery failed.', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          }),
+        );
+      },
       cancelAll: runtimeOwner.cancelAllSessions,
       dispose: async () => {
         try {

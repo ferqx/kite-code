@@ -5,6 +5,7 @@ import {
   type RuntimeLogSessionPage,
 } from '@kite-ai/runtime-host/storage';
 import { assertKiteHomeStoreSchema } from './kite-home-store';
+import { hasSessionLineage } from './session-lineage';
 
 export interface KiteHomeDirectorySession {
   readonly sessionId: string;
@@ -44,6 +45,7 @@ export function createKiteHomeDirectoryQuery(
   database: Database,
   options: KiteHomeDirectoryQueryOptions = {},
 ): KiteHomeDirectoryQueryPort {
+  const rootFilter = hasSessionLineage(database) ? ' AND s.parent_session_id IS NULL' : '';
   (options.assertStoreSchema ?? assertKiteHomeStoreSchema)(database);
   const maxWorkspaces = positiveBound(
     options.maxWorkspaces,
@@ -91,7 +93,7 @@ export function createKiteHomeDirectoryQuery(
             COALESCE(MAX(e.sequence), 0) AS last_sequence
        FROM runtime_sessions AS s
        LEFT JOIN runtime_events AS e ON e.session_id = s.session_id
-      WHERE s.workspace_id = ?
+      WHERE s.workspace_id = ?${rootFilter}
       GROUP BY s.session_id, s.name, s.updated_at
       ORDER BY s.updated_at DESC, s.session_id ASC
       LIMIT ?`,
@@ -100,7 +102,7 @@ export function createKiteHomeDirectoryQuery(
   return Object.freeze({
     listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionPage {
       assertListRuntimeLogSessionsRequest(request);
-      const filters: string[] = [];
+      const filters: string[] = hasSessionLineage(database) ? ['s.parent_session_id IS NULL'] : [];
       const values: (string | number)[] = [];
       if (request.workspaceDigest) {
         filters.push('s.workspace_digest = ?');

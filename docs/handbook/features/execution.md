@@ -22,14 +22,24 @@
 
 活动 Run 中再次发送纯文本会追加为定向引导，不取消正在进行的模型请求，也不创建第二个 Run。已派发工具继续按原身份收敛；新输入到达后尚未派发的旧工具和对应审批会以 `superseded_by_user_input` 闭合，再由同一 Run 的下一次模型决策处理。目标已经结束时客户端保留草稿，不把输入静默改投新 Run。多客户端输入按服务端受理顺序交付；命令响应丢失后重试读取原持久回执，不重复追加输入。
 
-有限命令可通过 `shell_execute` 的 `yield_ms` 进入受管后台状态，并用 `shell_read` 读取增量输出或等待终态、用 `shell_stop` 精确停止。输出有界且支持独立读取游标；等待可因新引导让出，但不会因此杀死进程或重置原期限。本轮必需的有限 Shell 或子 Agent 尚未收尾时，Run 保持同一身份并显示等待，而不是空转调用模型或先完成再重开。Shell 的 `sleep` 能力没有被全局移除，但不能代替受管后台通知。
+有限命令可通过 `shell_execute` 的 `yield_ms` 进入受管后台状态，并用 `shell_read` 读取增量输出或等待终态、用 `shell_stop` 精确停止。输出有界且支持独立读取游标；等待可因新引导让出，但不会因此杀死进程或重置原期限。本轮必需的有限 Shell 或子 Agent 尚未收尾时，Run 保持同一身份并显示等待，而不是空转调用模型或先完成再重开。多个有限 Shell 与子 Agent 错峰完成时，局部终态只更新对应卡片和结果；其他必需工作继续等待，不消耗模型纠错次数。Shell 的 `sleep` 能力没有被全局移除，但不能代替受管后台通知。
 
-独立子 Agent 默认异步派发；未声明结果处置时仍为本轮 `required`。模型提交完成候选而唯一剩余条件是 required child 时，Runtime 将同一 Run 投影为等待后台结果，并以关联的 task ID 说明原因；该原因不复制 child 生命周期。进度、心跳或日志水位变化只刷新投影，不再次请求模型；终态、失败、取消、需处理的交互或新用户输入等可行动事实才恢复同一 Run。后台子 Agent 的持久终态经 Kernel 接纳后直接解除对应等待；`task_read` 用于用户主动查询、诊断或读取完整报告，不是等待 primitive 或确认生命周期结束的额外门禁。相同执行 revision 的 `running` 快照不会被反复送回模型驱动轮询。
+独立子 Agent 默认异步派发；未声明结果处置时仍为本轮 `required`。模型提交完成候选而唯一剩余条件是 required child 时，Runtime 将同一 Run 投影为等待后台结果，并以关联的 task ID 说明原因；这组 ID 表示进入等待时的必需任务，当前剩余工作以各任务卡的状态为准，该原因不复制 child 生命周期。进度、心跳或日志水位变化只刷新投影，不再次请求模型；终态、失败、取消、需处理的交互或新用户输入等可行动事实才恢复同一 Run。后台子 Agent 的结果 Artifact 写入后，只有 Kernel 接纳并形成 settlement proof，才公开该任务终态并解除对应等待；写入与接纳之间的短暂间隙仍显示为进行中。`task_read` 用于用户主动查询、诊断或读取完整报告，不是等待 primitive 或确认生命周期结束的额外门禁。相同执行 revision 的 `running` 快照不会被反复送回模型驱动轮询。
 
 macOS 与 Linux 上的受管 Shell 不作为 login shell 启动，并移除 `BASH_ENV`、`ENV` 等非交互启动注入，不会在命令之外隐式执行用户的 shell profile、rc 或环境指定的启动文件。命令继承应用已经提供的受控工具链环境；启动文件的权限或内容不会污染本次命令输出，也不会绕过该次工具审批。
 
 显式 service 可跨本宿主中的正常 Run 保留；`running` 不等于业务已经 ready。后台子 Agent 以稳定 task ID 返回：`task_wait` 对 1–8 个当前 owner 的 task 执行一次最长 60 秒的事件驱动 wait-any，任一目标终态、超时、新引导或 Run 取消都会有界返回；超时和新引导不取消 child。`task_read` 按需读取当前状态或持久结果，`task_cancel` 精确取消。正常 required-only 路径仍由 Runtime 自动等待，不要求模型调用 `task_wait`。具名结果以低权限来源进入模型上下文，不视为人类授权。后台子 Agent 即使在发起它的父轮结束后仍使用同一套受管工具管线和会话持久化边界，不会因父轮执行作用域释放而把文件或 Shell 工具误报为不可用。只有结构化授权、正预算预留和原 deadline 都满足时，`after_turn` 结果才会至多触发一次新的汇报 Run；若用户已开始新的活动 Run，`human_start_preferred` 会抑制自动续轮，结果保持持久可读且不会注入这个新 Run。普通 Shell 完成不会触发该路径。
 
-Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，并只允许对新鲜、仍运行的准确执行发起停止。重新进入会话时，历史中已持久化的后台子 Agent 结果会结束对应运行卡片；读取历史不会为了修正展示而写入新事件。TUI 支持运行中引导和准确停止；Web 只读展示后台摘要，不获得 mutation 权限。宿主退出、崩溃或升级后不承诺本地进程续跑；历史结果保留，无法确认的清理保持 unknown。当前进程树清理已在 macOS 验证，Linux 与 Windows 的本次平台资格尚未实跑。
+Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，并只允许对新鲜、仍运行的准确执行发起停止。所选会话的父 Run 正在等待多个子 Agent 时，已结算子 Agent 的卡片会更新为终态，其余卡片继续显示运行；父 Run 保持原身份与等待状态。重新进入会话时，历史中已持久化的后台子 Agent 结果会结束对应运行卡片；读取历史不会为了修正展示而写入新事件。TUI 支持运行中引导和准确停止；Web 只读展示后台摘要，不获得 mutation 权限。宿主退出、崩溃或升级后不承诺本地进程续跑；历史结果保留，无法确认的清理保持 unknown。当前进程树清理已在 macOS 验证，Linux 与 Windows 的本次平台资格尚未实跑。
+
+[后台 Agent 与 Shell 会话协调方案](../../plans/background-agent-shell-conversation-coordination.md)中的多结果等待与工具调用指引已接入独立父子 Session。`send_message` 只把直接父子之间的消息受理进持久邮箱，不启动空闲目标 Run；绑定目标当前 Run 的消息在下一次模型请求作为低信任 Agent 消息输入。`followup_task` 显式请求直接子 Agent 继续：成功的空工具回执表示来源请求已持久受理，目标可能在安全时沿当前 Run 继续，也可能在原 Run 完成后从 checkpoint 开始新 Run；回执不表示目标已读取或完成。`interrupt_agent` 针对直接子 Agent 的当前准确任务提交停止请求，清理确认或 unknown 以服务端持久结果为准，不影响其他子任务。`list_agents` 可读取直接子 Agent、当前 Run 未读计数、已有续轮的最近一次持久终态，以及预派发失败时已结算的具名原因；`wait_agent` 可等待调用者邮箱或该 Run 的 Agent 终态更新，返回 `agent_update` 也不消费邮件。两者不会推进模型已读水位，也不会启动或取消子 Run。`task_id` 仍只代表一次 child 执行，续轮使用新的 task ID。
+
+当前轮续行要求子 Agent 原 Run 仍有准确的未派发模型预算和输入边界；消息在下一次模型请求进入原 Run，已派发的模型请求与工具不会被改写。受限的 `explore`／`plan`／`review` 子 Agent 即使旧 grant 包含工具，也只在可证明的静态只读 `read_file`、`search_content`、`search_files` 模型 Surface 上接纳当前轮消息，之后原 Run 的工具调用继续受这组上界约束；其他情况等待原 Run 终态后尝试新轮。新轮等待并发位时保持已受理状态；在原期限及有界等待内取得执行位才启动目标 Run，等待超期则以 `capacity_timeout` 结算且不派发目标模型。发送方可通过 `list_agents` 或 `wait_agent` 查看具名失败；成功受理本身不承诺目标已经开始执行。
+
+首轮 required 子任务的结果由原父 Run 以具名 `<subagent_result>` 接纳一次；已结算的 `followup_task` 无论沿当前轮还是开启新轮，均向发送方邮箱发送一次来源明确的状态回复，完整结果仍由 `task_read` 读取。当前轮沿用原 task ID，原父 Run 的 required 结果不会因此重复导入。父 Run 已结束时，回复保留为可查邮件，不自动开启父 Run，也不注入以后的人类 Run。回复进入活动父 Run 的模型输入时仍按低信任 Agent 消息处理。
+
+每个子 Agent 拥有自己的持久会话线程和模型上下文，由父 Agent 树访问；内部子线程不出现在空间的普通会话列表、搜索或最近会话。父 Run 的必需子任务仍须等准确结果被父线程接纳才解除义务；子线程自行结束或消息已受理都不足以让父 Run 完成。独立线程的默认 App Server 三子派发、错峰完成、排队子任务精确取消及单子崩溃重启已通过[阶段 D0 的正式入口回归](../../plans/background-agent-shell-conversation-coordination.md)；排队子线程的真实进程重启、审批暂停点的待答与已决定窗口均已验收，不改变本页已交付的 `task_wait`、`task_read`、`task_cancel` 和 Shell 行为。
+
+当前开发版的独立子 Session 工具要求人工审批时，父会话会展示该子工具的待审批卡片；用户只在父会话回答，子工具在父决定持久化并由子 Session 接纳批准后才执行。父会话的订阅更新随真实 revision 推进，批准或拒绝后卡片会结算。子 Session ID 仍不能用于直接回答审批。真实进程重启的待答与父决定已持久化窗口均验证了原子 Session 续轮、子工具恰好一次派发和父结果一次接纳；审批请求、父决定或工具派发证据不完整时仍失败封闭。
 
 [TUI 对话](../clients/tui/guides/conversation.md) · [Web 对话](../clients/web/guides/conversation.md)

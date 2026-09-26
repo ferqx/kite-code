@@ -1,5 +1,5 @@
 import type { ProviderModelRoute, ProviderModelSnapshot } from '@kite-ai/kite-app-contract';
-import { Box, Text, useWindowSize } from 'ink';
+import { Box, Text, useInput, useWindowSize } from 'ink';
 import React, {
   type Dispatch,
   type ReactNode,
@@ -13,6 +13,7 @@ import type { LanguagePreference } from '#kite-cli/preferences';
 import type { SandboxBackend } from './client-types';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
+import ChildSessionPanel from './components/ChildSessionPanel';
 import HelpPanel from './components/HelpPanel';
 import InputBlock from './components/InputBlock';
 import ModelSelector, { type ModelOption } from './components/ModelSelector';
@@ -107,6 +108,8 @@ export interface AppProps {
   ) => Promise<import('./runtime-presentation').RewindFilePreview | null>;
   resizeGeneration?: number;
   loadSessions?: (query: string) => Promise<import('#kite-cli/session-types').SessionInfo[]>;
+  childSessionReader?: import('../adapters/tui/session-adapter').TuiRuntimeClientFacade['childSessionReader'];
+  onChildPanelOpenChange?: (open: boolean) => void;
   children?: ReactNode;
 }
 
@@ -167,12 +170,21 @@ export default function App({
   getRewindPreview,
   resizeGeneration,
   loadSessions = () => Promise.reject(new Error('Session storage is unavailable.')),
+  childSessionReader,
+  onChildPanelOpenChange,
   children,
 }: AppProps) {
   const t = useTheme();
   const { language, t: translate } = useI18n();
   const slashListHeight = useOverlayHeight(7);
   const { columns, rows } = useWindowSize();
+  const [childPanelParent, setChildPanelParent] = useState<string>();
+  const visibleChildPanelParent =
+    childPanelParent === state.activeSessionId && !state.interrupt ? childPanelParent : undefined;
+  React.useEffect(() => {
+    onChildPanelOpenChange?.(!!visibleChildPanelParent);
+    if (childPanelParent && !visibleChildPanelParent) setChildPanelParent(undefined);
+  }, [childPanelParent, visibleChildPanelParent, onChildPanelOpenChange]);
   const modalOverlayActive =
     state.showHelp ||
     state.showModelSelector ||
@@ -182,7 +194,8 @@ export default function App({
     state.showLanguageSelector ||
     state.showSessions ||
     state.showMcp ||
-    state.showRewind;
+    state.showRewind ||
+    !!visibleChildPanelParent;
   const activeApprovalEntry = useMemo(() => {
     if (state.activeApprovalId == null) return undefined;
     const pending = state.pendingApprovals?.get(state.activeApprovalId);
@@ -206,13 +219,36 @@ export default function App({
     readonly interactionId: string;
     readonly failure: InteractionSubmissionFailure;
   }>();
+  const guardedDispatch = useCallback<Dispatch<Action>>(
+    (action) => {
+      if (visibleChildPanelParent) {
+        if (action.type === 'ESCAPE') setChildPanelParent(undefined);
+        return;
+      }
+      dispatch(action);
+    },
+    [dispatch, visibleChildPanelParent],
+  );
+  useInput((input, key) => {
+    if (!key.ctrl || input.toLowerCase() !== 'g') return;
+    if (visibleChildPanelParent) return;
+    if (
+      !state.activeSessionId ||
+      !childSessionReader ||
+      modalOverlayActive ||
+      state.interrupt ||
+      approvalQueueActive
+    )
+      return;
+    setChildPanelParent(state.activeSessionId);
+  });
   useGlobalKeys(
-    dispatch,
+    guardedDispatch,
     overlayOrInterrupt,
     supplementEscRef,
     wizardEscBackRef,
     layeredOverlayEscRef,
-    onTogglePlanMode,
+    visibleChildPanelParent ? undefined : onTogglePlanMode,
     () => {
       const approvalInteractionId = focusedApprovalEntry?.interactionId;
       if (approvalInteractionId) {
@@ -255,7 +291,7 @@ export default function App({
       }
       return false;
     },
-    onAbort,
+    visibleChildPanelParent ? undefined : onAbort,
   );
 
   // Stabilized callbacks for React.memo children
@@ -728,6 +764,15 @@ export default function App({
           onConfirm={executeRewind}
           onClose={hideRewind}
           getRewindPreview={getRewindPreview}
+          layeredEscRef={layeredOverlayEscRef}
+        />
+      )}
+      {visibleChildPanelParent && childSessionReader && (
+        <ChildSessionPanel
+          key={visibleChildPanelParent}
+          parentSessionId={visibleChildPanelParent}
+          reader={childSessionReader}
+          onClose={() => setChildPanelParent(undefined)}
           layeredEscRef={layeredOverlayEscRef}
         />
       )}

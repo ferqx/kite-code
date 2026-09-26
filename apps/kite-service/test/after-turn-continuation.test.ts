@@ -134,6 +134,24 @@ describe('after-turn continuation', () => {
         activeTurnId: 'origin-turn',
         deadlineAt,
       });
+      lifecycleState = {
+        ...lifecycleState,
+        tools: {
+          ...lifecycleState.tools,
+          calls: {
+            ...lifecycleState.tools.calls,
+            'parent-tool': {
+              toolCallId: 'parent-tool',
+              name: 'task',
+              modelMessageId: 'origin-message',
+              args: { task: 'Return a concise result.' },
+              createdAtTurnId: 'origin-turn',
+              status: 'running',
+            },
+          },
+          active: ['parent-tool'],
+        },
+      };
       const capabilityRevision = digestCapabilityValue({ invocationId, field: 'capability' });
       const authorizationDigest = digestCapabilityValue({ invocationId, field: 'authorization' });
       const admissionDigest = digestCapabilityValue({ invocationId, field: 'admission' });

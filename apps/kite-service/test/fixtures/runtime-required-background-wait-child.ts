@@ -74,6 +74,9 @@ function runtimeInput(runtimeWorkspace: string, runtimeBaseURL: string) {
       apiKey: 'fixture-key',
       baseURL: runtimeBaseURL,
       modelName: 'mock-model',
+      modelKwargs: { maxOutputTokens: 64 },
+      modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
+      features: { resourceBudget: true },
       sandbox: { enabled: false },
     },
     shellExecutor: async ({ command }: { command: string }) => ({

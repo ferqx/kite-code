@@ -13,6 +13,10 @@ compiled model surface 确定 messages、tools 和请求设置，以 digest 绑�
 
 Gateway 组织 model invocation identity、resource preparation、attempt 与 response record。Host 完成所需 acknowledgement 后才调用 Provider；attempt 结果、私有证据与 terminal facts 按原 identity 关联。具体超时和重试参数以 gateway 当前代码为准，不从历史文档恢复旧的 per-attempt 定时机制。
 
+阶段 D 的 [Agent 邮箱输入](../src/model/invocation-gateway.ts)使用可选的 `prepareSurface(invocationId)`：Gateway 先分配准确 invocation ID，可信 Service 在当前执行 scope 内读取私有邮件并构造低权限帧，然后以包含邮件的冻结 Surface 计算模型预算。QueueOnly 邮件的 `persistAdmission` 在同一 Host/Store 事务内提交模型准备、预算准入和 `agent.mail_input_prepared` 水位；`followup_task` 的 `new_turn` 由新 grant 与新 Run 准入，受限 `current_turn` 则在准确旧 call_model lease 下把已准备旧 Run Surface 与路由、水位绑定，并待来源后备释放 ACK 后才派发。缺少对应持久事务端口会拒绝调用；普通无邮件调用保持原有 Surface 与持久化路径。默认独立父子 Session 的完整 Host Agent 通信 Port 已开放 `followup_task` 与 `interrupt_agent`，QueueOnly 端口仍只披露列表、等待和发送。
+
+已持久准备但尚未尝试的目标模型请求可由 `resumePrepared` 使用原 invocation ID、原 Surface Artifact 与原预算 reservation 续派发。Gateway 核对准确 Turn／State revision、Surface ref／digest、prepared status／零 attempts、单次硬超时及持久 `estimatedInputTokens`，再调用目标 owner 提供的路由与来源资金 ACK 门禁；门禁确认后才提交同一 invocation 的 dispatch／attempt 事实。该入口不生成新 ID、Surface 或 prepared 事件，已有 attempt、unknown、缺失 Artifact／预算或旧格式缺少准确输入估计时失败封闭。`executeBuiltinPrimaryModelEffect` 的普通路径不改变；D3 的 route-only 与来源已释放两种 SIGKILL 窗口已验证同 ID、单次 Provider 派发。
+
 模型流是累计 reasoning/text 与完成边界。partial tool call 不作为完整工具调用执行，完整响应再交给工具解析。取消、Provider 错误、surface 改变或持久化不可用分别形成明确结果，不用猜测填补缺失证据。
 
 ## 压缩

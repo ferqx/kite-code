@@ -8,7 +8,7 @@ import {
 } from '@kite-ai/runtime-host/storage';
 import {
   assertKiteHomeStoreSchema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore10Schema as assertKiteSessionStoreSchema,
   createKiteHomeRuntimeStorageForConnection,
   createKiteHomeWorkspaceAdmissionPort,
   createKiteHomeWorkspaceAuthority,
@@ -186,6 +186,7 @@ describe('Store 9 to Session Store 10 strict conversion', () => {
       const authority = createKiteSessionExecutionAuthority({
         database,
         writer: createKiteHomeWriteTransactionPort(database, assertKiteSessionStoreSchema),
+        assertStoreSchema: assertKiteSessionStoreSchema,
       });
       expect(authority.read('session-1')).toMatchObject({
         status: nextStatus,

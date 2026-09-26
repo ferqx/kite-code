@@ -62,6 +62,29 @@ describe('runtime contract package boundary', () => {
     expect(isRuntimeSessionIndexNotification(notification)).toBe(true);
     expect(isRuntimeSessionProjectionEnrichment(base, waiting)).toBe(true);
     expect(isRuntimeSessionProjectionEnrichment(waiting, base)).toBe(true);
+    const authorityLost = {
+      ...base,
+      currentRun: {
+        ...base.currentRun,
+        status: 'recovery_required' as const,
+        outcome: {
+          reasonCode: 'recovery_required' as const,
+          safeRetry: false,
+          recoveryEntry: 'reconcile' as const,
+        },
+      },
+    };
+    expect(isRuntimeSessionProjectionEnrichment(base, authorityLost)).toBe(true);
+    expect(isRuntimeSessionProjectionEnrichment(authorityLost, base)).toBe(true);
+    expect(
+      isRuntimeSessionProjectionEnrichment(base, {
+        ...authorityLost,
+        currentRun: {
+          ...authorityLost.currentRun,
+          outcome: { ...authorityLost.currentRun.outcome, safeRetry: true },
+        },
+      }),
+    ).toBe(false);
     expect(
       isRuntimeSessionIndexNotification({
         ...notification,
@@ -981,6 +1004,34 @@ describe('runtime contract package boundary', () => {
       limit: 200,
     };
     expect(isRuntimeQuery(listRuns)).toBe(true);
+    const childList = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_child_sessions' as const,
+      sessionId: 'root-1',
+      limit: 100,
+      cursor: { updatedAtMs: 7, sessionId: 'child-7' },
+    };
+    expect(isRuntimeQuery(childList)).toBe(true);
+    expect(isRuntimeQuery({ ...childList, limit: 101 })).toBe(false);
+    expect(isRuntimeQuery({ ...childList, cursor: { ...childList.cursor, extra: true } })).toBe(
+      false,
+    );
+    expect(
+      isRuntimeQuery({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_child_session_projection',
+        sessionId: 'root-1',
+        childSessionId: 'child-7',
+      }),
+    ).toBe(true);
+    expect(
+      isRuntimeQuery({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_child_session_projection',
+        sessionId: 'root-1',
+        childSessionId: 'root-1',
+      }),
+    ).toBe(false);
     expect(isRuntimeQuery({ ...listRuns, limit: 201 })).toBe(false);
     expect(isRuntimeQuery({ ...listRuns, cursor: { ...listRuns.cursor, extra: true } })).toBe(
       false,

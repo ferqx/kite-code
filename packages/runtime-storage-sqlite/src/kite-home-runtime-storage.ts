@@ -12,6 +12,7 @@ import type {
   RuntimeSessionModelRoute,
   RuntimeSnapshotMetadata,
   RuntimeStorage,
+  RuntimeStoredRun,
   RuntimeTransactionInput,
   SessionStore,
 } from '@kite-ai/runtime-host/storage';
@@ -38,6 +39,7 @@ import {
 } from './kite-home-write';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
+import { hasSessionLineage } from './session-lineage';
 import type {
   InitialControllerTransactionPort,
   SqliteWorkspaceSessionCreationPort,
@@ -56,6 +58,8 @@ export interface KiteHomeRuntimeStorageOwner<Event, State> extends AsyncDisposab
     currentEventTypes: readonly string[],
   ): import('@kite-ai/runtime-host/storage').RuntimeLogQueryPort<Event>;
   readonly artifactStore: KiteHomeArtifactStore;
+  /** Public admission proof: null means unknown; a null parent means top-level root. */
+  readSessionLineage(sessionId: string): { readonly parentSessionId: string | null } | null;
   authorityForWorkspace(workspaceId: string): SqliteWorkspaceAuthority;
   sessionCreationForWorkspace(
     workspaceId: string,
@@ -84,6 +88,11 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   readonly afterPersistInTransaction?: Parameters<
     typeof createKiteHomeWorkspaceRuntimeJournal<Event, State>
   >[0]['afterPersistInTransaction'];
+  readonly authorizeInternalFollowupRunStart?: Parameters<
+    typeof createKiteHomeWorkspaceRuntimeJournal<Event, State>
+  >[0]['authorizeInternalFollowupRunStart'];
+  /** Store13 readback gate for a receipt-free, internally started child followup Run. */
+  readonly verifyInternalFollowupRunStart?: (run: RuntimeStoredRun) => boolean;
   readonly initialController?: InitialControllerTransactionPort;
   readonly runCreateTransaction?: <Result>(write: () => Result) => Result;
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
@@ -195,6 +204,9 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       ...(input.hasEffectLease ? { hasEffectLease: input.hasEffectLease } : {}),
       ...(input.afterPersistInTransaction
         ? { afterPersistInTransaction: input.afterPersistInTransaction }
+        : {}),
+      ...(input.authorizeInternalFollowupRunStart
+        ? { authorizeInternalFollowupRunStart: input.authorizeInternalFollowupRunStart }
         : {}),
       ...(input.initialController ? { initialController: input.initialController } : {}),
       ...(input.runCreateTransaction ? { runCreateTransaction: input.runCreateTransaction } : {}),
@@ -473,6 +485,17 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       };
     },
     artifactStore,
+    readSessionLineage(sessionId) {
+      assertOpen();
+      const row = input.database
+        .query<{ parent_session_id: string | null }, [string]>(
+          hasSessionLineage(input.database)
+            ? 'SELECT parent_session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1'
+            : 'SELECT NULL AS parent_session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+        .get(sessionId);
+      return row ? { parentSessionId: row.parent_session_id } : null;
+    },
     authorityForWorkspace,
     sessionCreationForWorkspace: (workspaceId) =>
       journalForWorkspace(workspaceId).workspaceSessionCreation,
@@ -568,6 +591,12 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       });
       for (const run of page.entries) {
         if (run.originSessionId !== undefined) continue;
+        if (run.startCommandId.startsWith('followup:')) {
+          if (!input.verifyInternalFollowupRunStart?.(run)) {
+            throw new Error('Kite Home Runtime internal followup Run proof is unavailable.');
+          }
+          continue;
+        }
         const lookup = journal.commandReceipts.lookup({
           scopeSessionId: session.session_id,
           commandId: run.startCommandId,
@@ -750,6 +779,30 @@ function transactionalArtifactStore(
     collectSubagentContinuationGarbage(input) {
       assertOpen();
       return writer.run(() => store.collectSubagentContinuationGarbage(input));
+    },
+    writeSubagentCheckpoint(input) {
+      assertOpen();
+      writer.run(() => store.writeSubagentCheckpoint(input));
+    },
+    readSubagentCheckpoint(ref) {
+      assertOpen();
+      return store.readSubagentCheckpoint(ref);
+    },
+    collectSubagentCheckpointGarbage(input) {
+      assertOpen();
+      return writer.run(() => store.collectSubagentCheckpointGarbage(input));
+    },
+    writeAgentFollowupAdmission(input) {
+      assertOpen();
+      writer.run(() => store.writeAgentFollowupAdmission(input));
+    },
+    readAgentFollowupAdmission(ref) {
+      assertOpen();
+      return store.readAgentFollowupAdmission(ref);
+    },
+    collectAgentFollowupAdmissionGarbage(input) {
+      assertOpen();
+      return writer.run(() => store.collectAgentFollowupAdmissionGarbage(input));
     },
   };
   return Object.freeze(transactional);

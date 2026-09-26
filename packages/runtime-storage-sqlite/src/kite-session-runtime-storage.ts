@@ -2,6 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import type {
   ArtifactPort,
+  RuntimeChildSessionIntentMutation,
+  RuntimeLogQueryPort,
   RuntimeStorage,
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
@@ -10,6 +12,104 @@ import {
   type SqliteWorkspaceControllerOperationResult,
   type SqliteWorkspaceInitialControllerInput,
 } from './authority';
+import {
+  decideChildApprovalProxyInTransaction,
+  listPendingChildApprovalProxies,
+  readChildApprovalProxy,
+  synchronizeChildApprovalProxyInTransaction,
+} from './kite-child-approval-proxy';
+import {
+  assertChildRecoveryDiagnosticInTransaction,
+  assertChildRuntimeActivationInTransaction,
+  assertChildUnknownTerminalSealInTransaction,
+  type KiteChildSessionIntentRecord,
+  type KitePendingChildTerminalSeal,
+  listPendingChildSessionIntents,
+  persistChildSessionIntentInTransaction,
+  readChildSealedGrant,
+  readChildSessionIntent,
+  readPendingAfterTurnChildTerminalSeal,
+  recordChildDispatchAckInTransaction,
+  recordChildParentSettlementInTransaction,
+  settleChildCreationFailureInTransaction,
+} from './kite-child-session-intents';
+import {
+  acceptCrossSessionInterruptInTransaction,
+  acknowledgeCrossSessionInterruptInTransaction,
+  assertNoQueuedInterruptBeforeChildActivation,
+  listPendingCrossSessionInterrupts,
+  listPendingCrossSessionInterruptTargets,
+  readCrossSessionInterruptIntent,
+  readCrossSessionInterruptTarget,
+  settleCrossSessionInterruptInTransaction,
+  settleQueuedCrossSessionInterruptInTransaction,
+} from './kite-cross-session-agent-interrupt';
+import {
+  acceptCrossSessionAcceptedReleaseNoticeInTransaction,
+  acceptCrossSessionFollowupTerminalReplyInTransaction,
+  acceptCrossSessionQueueMailInTransaction,
+  type CrossSessionInboxReceipt,
+  type CrossSessionMailOutboxRecord,
+  type CrossSessionQueuedMail,
+  confirmCrossSessionQueueMailInTransaction,
+  listPendingCrossSessionQueueMail,
+  listPendingCrossSessionQueueMailSources,
+  listPendingCrossSessionTerminalReplyMail,
+  listPendingCrossSessionTerminalReplyMailSources,
+  listQueuedCrossSessionInbox,
+  listUnnotifiedAcceptedFollowupReleases,
+  listUnrepliedSettledFollowupTerminalSources,
+  nextCrossSessionSourceSequence,
+  nextCrossSessionTargetSequence,
+  prepareCrossSessionQueueMailInputInTransaction,
+  readCrossSessionInboxReceipt,
+  readCrossSessionMail,
+  readCrossSessionPreparedThrough,
+  readDirectChildInboxWatermark,
+  readUnreadDirectChildMail,
+  receiveCrossSessionQueueMailInTransaction,
+} from './kite-cross-session-agent-mail';
+import {
+  acceptCrossSessionFollowupInTransaction,
+  activateCrossSessionFollowupFundingInTransaction,
+  assertCrossSessionFollowupRunStartInTransaction,
+  type CrossSessionFollowupActivationReceipt,
+  type CrossSessionFollowupFundingReceipt,
+  type CrossSessionFollowupRouteReceipt,
+  type CrossSessionFollowupTerminalReceipt,
+  isAdmittedQueuedChildFollowupTarget,
+  listPendingCrossSessionFollowupFunding,
+  listPendingCrossSessionFollowupSources,
+  type PendingCrossSessionFollowupFunding,
+  readChildTerminalCheckpoint,
+  readCrossSessionCurrentTurnBackupReleaseForTarget,
+  readCrossSessionCurrentTurnPreparedNoAttemptProof,
+  readCrossSessionFollowupActivationReceipt,
+  readCrossSessionFollowupAdmissionBySubmissionForTarget,
+  readCrossSessionFollowupDeliveryForTarget,
+  readCrossSessionFollowupFundingReceipt,
+  readCrossSessionFollowupGrant,
+  readCrossSessionFollowupRoute,
+  readCrossSessionFollowupTerminalReceipt,
+  readCurrentTurnDispatchedChildProofForSource,
+  readCurrentTurnRoutedNoAttemptChildProofForSource,
+  readDirectChildFollowupOutcomeWatermark,
+  readDirectChildFollowupReleaseWatermark,
+  readLastFollowupOutcomeForDirectChild,
+  readLastReleasedFollowupForDirectChild,
+  readPreparedCrossSessionFollowupRecoveryProof,
+  readUnroutedCrossSessionFollowupMessage,
+  receiveCrossSessionFollowupInTransaction,
+  releaseAcceptedCrossSessionFollowupBackupInTransaction,
+  releaseCrossSessionCurrentTurnBackupInTransaction,
+  replaceCrossSessionFollowupBackupInTransaction,
+  routeCrossSessionFollowupInTransaction,
+  sealChildTerminalCheckpointInTransaction,
+  settleCancelledAcceptedFollowupsInTransaction,
+  settleCrossSessionFollowupFundingAfterUnknownRecoveryInTransaction,
+  settleCrossSessionFollowupFundingInTransaction,
+  verifyPersistedCrossSessionFollowupRunStart,
+} from './kite-cross-session-followup';
 import type { KiteHomeArtifactStore } from './kite-home-artifacts';
 import type { KiteHomeDirectoryQueryPort } from './kite-home-directory';
 import {
@@ -22,6 +122,15 @@ import {
   createKiteHomeWriteTransactionPort,
   type KiteHomeWriteTransactionPort,
 } from './kite-home-write';
+import {
+  applyKiteSessionAgentMailboxMutations,
+  assertModelAdmissionForPreparedMail,
+  createKiteSessionAgentMetadataPort,
+  ensureRootAgentOnInitialCreationInTransaction,
+  type KiteSessionAgentMetadataPort,
+  settleRootAgentRunInTransaction,
+  startRootAgentRunInTransaction,
+} from './kite-session-agent-mailbox';
 import { createKiteSessionEffectPort, type KiteSessionEffectRecord } from './kite-session-effects';
 import {
   createKiteSessionExecutionAuthority,
@@ -43,10 +152,19 @@ import {
 } from './kite-session-runtime-file';
 import { inspectKiteSessionPublication } from './kite-session-store-publication';
 import { assertKiteSessionStoreSourcesReconciled } from './kite-session-store-sources';
+import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
+import {
+  type DirectChildSessionCursor,
+  type DirectChildSessionRecord,
+  listDirectChildSessions,
+  readDirectChildSession,
+} from './session-lineage';
 import type {
   InitialControllerTransactionPort,
+  SqliteWorkspaceSessionCreationInput,
   SqliteWorkspaceSessionCreationPort,
+  SqliteWorkspaceSessionCreationResult,
 } from './transaction';
 
 export class KiteSessionRuntimeStorageError extends Error {
@@ -96,6 +214,10 @@ export interface KiteSessionRecoveryPort {
 export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDisposable {
   readonly storage: RuntimeStorage<Event, State> & {
     readonly runs: NonNullable<RuntimeStorage<Event, State>['runs']>;
+    readonly agentMailbox: KiteSessionAgentMailboxPort;
+    readonly agentMailInput: KiteSessionAgentMailInputPort;
+    readonly crossSessionQueueMail: KiteCrossSessionQueueMailPort;
+    readonly currentExecutionGeneration: (sessionId: string) => string;
   };
   readonly admissions: KiteHomeWorkspaceAdmissionPort;
   readonly directory: KiteHomeDirectoryQueryPort;
@@ -103,7 +225,77 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
     Event,
     State
   >['openHistoryLogs'];
+  readonly readSessionLineage: import('./kite-home-runtime-storage').KiteHomeRuntimeStorageOwner<
+    Event,
+    State
+  >['readSessionLineage'];
+  listChildSessions(
+    parentSessionId: string,
+    limit: number,
+    cursor?: DirectChildSessionCursor,
+  ): {
+    readonly entries: readonly DirectChildSessionRecord[];
+    readonly nextCursor?: DirectChildSessionCursor;
+  };
+  readChildSession(
+    parentSessionId: string,
+    childSessionId: string,
+  ): (DirectChildSessionRecord & { readonly state: Readonly<State> }) | null;
+  openChildSessionHistoryLogs(
+    parentSessionId: string,
+    childSessionId: string,
+    currentEventTypes: readonly string[],
+  ): Pick<RuntimeLogQueryPort<Event>, 'getSession' | 'listEvents' | 'close'>;
+  readChildSessionIntent(childThreadId: string): KiteChildSessionIntentRecord | null;
+  readPendingAfterTurnChildTerminalSeal(
+    parentSessionId: string,
+    childThreadId: string,
+  ): KitePendingChildTerminalSeal | null;
+  /** Private bytes require the exact parent execution or recovery handle scope. */
+  readChildSealedGrant(childThreadId: string): ReturnType<typeof readChildSealedGrant>;
+  listPendingChildSessionIntents(
+    parentSessionId: string,
+    limit: number,
+    cursor?: string,
+  ): { readonly entries: readonly KiteChildSessionIntentRecord[]; readonly nextCursor?: string };
+  readChildApprovalProxy(
+    parentSessionId: string,
+    proxyInteractionId: string,
+  ): ReturnType<typeof readChildApprovalProxy>;
+  listPendingChildApprovalProxies(
+    parentSessionId: string,
+    limit: number,
+    afterProxyInteractionId?: string,
+  ): ReturnType<typeof listPendingChildApprovalProxies>;
+  /** Read-only, bounded source index for restart delivery; it grants no execution authority. */
+  listPendingCrossSessionQueueMailSources(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
+  listPendingCrossSessionTerminalReplyMailSources(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
+  listUnrepliedSettledFollowupTerminalSources(
+    limit: number,
+    after?: { readonly childSessionId: string; readonly submissionId: string },
+  ): ReturnType<typeof listUnrepliedSettledFollowupTerminalSources>;
+  listUnnotifiedAcceptedFollowupReleases(
+    limit: number,
+    after?: { readonly childSessionId: string; readonly submissionId: string },
+  ): ReturnType<typeof listUnnotifiedAcceptedFollowupReleases>;
+  /** Global read-only recovery candidate index; it grants no target execution owner. */
+  listPendingCrossSessionInterruptTargets(
+    limit: number,
+    afterSessionId?: string,
+  ): readonly string[];
+  /** Separate TriggerTurn index; QueueOnly recovery never reads these rows. */
+  listPendingCrossSessionFollowupSources(limit: number, afterSessionId?: string): readonly string[];
   readonly artifactStore: KiteHomeArtifactStore;
+  readonly agentMailbox: KiteSessionAgentMailboxPort;
+  readonly agentMailInput: KiteSessionAgentMailInputPort;
+  readonly crossSessionQueueMail: KiteCrossSessionQueueMailPort;
+  readonly currentExecutionGeneration: (sessionId: string) => string;
   readonly authority: KiteSessionExecutionControl;
   readonly recovery: KiteSessionRecoveryPort;
   /** Settle a fenced, fully terminal Session without changing its historical State or Runs. */
@@ -124,6 +316,11 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
   sessionCreationForWorkspace(
     workspaceId: string,
   ): SqliteWorkspaceSessionCreationPort<Event, State>;
+  createChildSession(
+    creation: SqliteWorkspaceSessionCreationInput<Event, State> & {
+      readonly childSessionIntent: RuntimeChildSessionIntentMutation;
+    },
+  ): SqliteWorkspaceSessionCreationResult;
   bindExecution(authority: KiteSessionExecutionAuthorityRecord): KiteSessionExecutionHandle;
   refreshExecution(
     handle: KiteSessionExecutionHandle,
@@ -142,6 +339,211 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
     expectedRevision: number,
   ): void;
   close(): void;
+}
+
+export interface KiteSessionAgentMailboxPort extends KiteSessionAgentMetadataPort {
+  readActiveTaskProof(
+    sessionId: string,
+    sourceAgentId: string,
+    targetAgentId: string,
+    taskId: string,
+  ): Readonly<{ ownerGeneration: string; grantDigest: string }> | null;
+}
+
+/** Every read and confirmation is scoped to the active source or target Session owner. */
+export interface KiteCrossSessionQueueMailPort {
+  acceptAcceptedReleaseNotice(
+    childSessionId: string,
+    parentSessionId: string,
+    submissionId: string,
+    acceptedAtMs: number,
+  ): CrossSessionMailOutboxRecord;
+  acceptFollowupTerminalReply(
+    childSessionId: string,
+    parentSessionId: string,
+    submissionId: string,
+    acceptedAtMs: number,
+  ): CrossSessionMailOutboxRecord;
+  listPendingTerminalReplies(
+    sourceSessionId: string,
+    limit: number,
+    afterMessageId?: string,
+  ): readonly CrossSessionMailOutboxRecord[];
+  readInterruptTarget(
+    sourceSessionId: string,
+    targetSessionId: string,
+  ): ReturnType<typeof readCrossSessionInterruptTarget>;
+  readInterruptIntent(
+    sourceSessionId: string,
+    commandId: string,
+  ): ReturnType<typeof readCrossSessionInterruptIntent>;
+  listPendingInterrupts(
+    targetSessionId: string,
+    limit: number,
+  ): ReturnType<typeof listPendingCrossSessionInterrupts>;
+  readFollowupDeliveryForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCrossSessionFollowupDeliveryForTarget>;
+  readFollowupAdmissionForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCrossSessionFollowupAdmissionBySubmissionForTarget>;
+  readUnroutedFollowupMessage(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+    messageId: string,
+  ): ReturnType<typeof readUnroutedCrossSessionFollowupMessage>;
+  readFollowupTerminalForSource(
+    sourceSessionId: string,
+    submissionId: string,
+  ): CrossSessionFollowupTerminalReceipt | null;
+  readFollowupGrantForTarget(
+    targetSessionId: string,
+    artifactId: string,
+  ): ReturnType<typeof readCrossSessionFollowupGrant>;
+  listPendingFollowupFunding(
+    sourceSessionId: string,
+    limit: number,
+    afterSubmissionId?: string,
+  ): readonly PendingCrossSessionFollowupFunding[];
+  readLastReleasedFollowupForDirectChild(
+    sourceSessionId: string,
+    currentRunId: string,
+    childSessionId: string,
+  ): ReturnType<typeof readLastReleasedFollowupForDirectChild>;
+  readDirectChildFollowupReleaseWatermark(
+    sourceSessionId: string,
+    currentRunId: string,
+  ): ReturnType<typeof readDirectChildFollowupReleaseWatermark>;
+  readLastFollowupOutcomeForDirectChild(
+    sourceSessionId: string,
+    currentRunId: string,
+    childSessionId: string,
+  ): ReturnType<typeof readLastFollowupOutcomeForDirectChild>;
+  readDirectChildFollowupOutcomeWatermark(
+    sourceSessionId: string,
+    currentRunId: string,
+  ): ReturnType<typeof readDirectChildFollowupOutcomeWatermark>;
+  readFollowupTarget(
+    sourceSessionId: string,
+    targetSessionId: string,
+  ): Readonly<{
+    targetSessionId: string;
+    status: 'active' | 'idle' | 'waiting' | 'context_unavailable';
+    targetRunId: string | null;
+    checkpointReady: boolean;
+  }> | null;
+  readChildTerminalCheckpoint(
+    targetSessionId: string,
+  ): ReturnType<typeof readChildTerminalCheckpoint>;
+  readFollowupFundingForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): CrossSessionFollowupFundingReceipt | null;
+  readFollowupActivationForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): CrossSessionFollowupActivationReceipt | null;
+  readCurrentTurnBackupReleaseForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCrossSessionCurrentTurnBackupReleaseForTarget>;
+  readCurrentTurnPreparedNoAttemptProof(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCrossSessionCurrentTurnPreparedNoAttemptProof>;
+  readCurrentTurnDispatchedChildProofForSource(
+    sourceSessionId: string,
+    targetSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCurrentTurnDispatchedChildProofForSource>;
+  readCurrentTurnRoutedNoAttemptChildProofForSource(
+    sourceSessionId: string,
+    targetSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readCurrentTurnRoutedNoAttemptChildProofForSource>;
+  readFollowupRoute(
+    targetSessionId: string,
+    submissionId: string,
+  ): CrossSessionFollowupRouteReceipt | null;
+  /** Source owner may inspect a funded target's immutable prepared/no-attempt proof without acquiring target authority. */
+  readActivatedNoAttemptTargetProofForSource(
+    sourceSessionId: string,
+    targetSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readPreparedCrossSessionFollowupRecoveryProof>;
+  readPreparedFollowupRecoveryProof(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readPreparedCrossSessionFollowupRecoveryProof>;
+  readUnreadDirectChildMail(
+    parentSessionId: string,
+    currentRunId: string,
+    childSessionId: string,
+  ): Readonly<{ count: number; throughSequence: number }>;
+  readDirectChildInboxWatermark(
+    parentSessionId: string,
+    currentRunId: string,
+  ): Readonly<{ unreadCount: number; throughSequence: number }>;
+  nextSourceSequence(sourceSessionId: string): number;
+  nextTargetSequence(targetSessionId: string): number;
+  readOutbox(sourceSessionId: string, messageId: string): CrossSessionMailOutboxRecord | null;
+  listPendingOutbox(
+    sourceSessionId: string,
+    limit: number,
+    afterMessageId?: string,
+  ): readonly CrossSessionMailOutboxRecord[];
+  readInboxReceipt(targetSessionId: string, messageId: string): CrossSessionInboxReceipt | null;
+  listQueuedInbox(
+    targetSessionId: string,
+    currentRunId: string,
+    limit: number,
+  ): readonly CrossSessionQueuedMail[];
+  readPreparedThrough(targetSessionId: string, currentRunId: string): number;
+  confirmDelivered(sourceSessionId: string, messageId: string): CrossSessionMailOutboxRecord;
+}
+
+export interface KiteSessionModelMail {
+  readonly messageId: string;
+  readonly sequence: number;
+  readonly senderAgentId: string;
+  readonly sourceTaskId: string | null;
+  readonly mode: 'queue_only' | 'trigger_turn' | 'reply';
+  readonly bodyRef: {
+    readonly artifactId: string;
+    readonly kind: 'agent_mail';
+    readonly integrityIdentifier: string;
+    readonly byteLength: number;
+  };
+  readonly bodyText: string;
+}
+
+export interface KiteSessionAgentMailInputPort {
+  /** Prospective Surface read; caller must hold the exact active Session execution scope. */
+  readPendingMailForActiveTask(input: {
+    readonly sessionId: string;
+    readonly targetAgentId: string;
+    readonly currentTaskId: string;
+    readonly modelInvocationId: string;
+    readonly fromSequence: number;
+  }): readonly KiteSessionModelMail[];
+  /** Restart read for a previously committed prepared input and admission. */
+  readPreparedMailForModel(input: {
+    readonly sessionId: string;
+    readonly targetAgentId: string;
+    readonly currentTaskId: string;
+    readonly modelInvocationId: string;
+    readonly modelAdmissionId: string;
+  }): readonly KiteSessionModelMail[];
 }
 
 interface ExecutionHandleState {
@@ -423,9 +825,579 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
   };
 
   const afterPersistInTransaction = (
-    channel: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+    channel:
+      | 'session_create'
+      | 'decision'
+      | 'attempt_start'
+      | 'receipt_evidence'
+      | 'terminal_recovery',
     transaction: Parameters<RuntimeStorage<Event, State>['transactions']['commitDecision']>[0],
   ): void => {
+    persistChildSessionIntentInTransaction(database, channel, transaction);
+    assertChildRecoveryDiagnosticInTransaction(database, channel, transaction);
+    settleChildCreationFailureInTransaction(database, channel, transaction);
+    recordChildDispatchAckInTransaction(database, channel, transaction);
+    recordChildParentSettlementInTransaction(database, channel, transaction);
+    if (transaction.childBudgetActivation || transaction.runMutation?.type === 'insert')
+      assertNoQueuedInterruptBeforeChildActivation(database, transaction.sessionId);
+    assertChildRuntimeActivationInTransaction(database, channel, transaction);
+    assertChildUnknownTerminalSealInTransaction(
+      database,
+      channel,
+      transaction,
+      recoveryGenerations.get(transaction.sessionId) ===
+        authority.read(transaction.sessionId).controllerGeneration,
+    );
+    const committedRevision = selectRevision.get(transaction.sessionId)?.revision;
+    if (committedRevision !== undefined)
+      synchronizeChildApprovalProxyInTransaction(database, transaction, committedRevision);
+    if (transaction.childApprovalProxyDecision) {
+      const receipt = transaction.commandReceipt;
+      const decision = transaction.childApprovalProxyDecision;
+      if (
+        channel !== 'decision' ||
+        !receipt ||
+        transaction.requiredEffectLease ||
+        receipt.scopeSessionId !== transaction.sessionId ||
+        receipt.targetSessionId !== transaction.sessionId ||
+        receipt.committedRevision !== committedRevision
+      )
+        unsupported('Child approval decision requires its exact parent command receipt.');
+      decideChildApprovalProxyInTransaction(database, {
+        parentSessionId: transaction.sessionId,
+        proxyInteractionId: decision.proxyInteractionId,
+        childRequestRevision: decision.childRequestRevision,
+        childGeneration: decision.childGeneration,
+        approvalDigest: decision.approvalDigest,
+        decision: decision.decision,
+        parentCommandId: receipt.commandId,
+        parentCommandDigest: receipt.requestDigest,
+        parentDecisionRevision: receipt.committedRevision,
+      });
+    }
+    if (channel === 'session_create') {
+      ensureRootAgentOnInitialCreationInTransaction(database, transaction);
+      return;
+    }
+    const startsAgentTurn = transaction.agentMailboxMutations?.some(
+      (mutation) => mutation.kind === 'turn_started',
+    );
+    applyKiteSessionAgentMailboxMutations(
+      database,
+      transaction,
+      startsAgentTurn ? currentExecutionGeneration(transaction.sessionId) : undefined,
+    );
+    startRootAgentRunInTransaction(database, transaction);
+    settleRootAgentRunInTransaction(database, transaction);
+    const sourceRevision = selectRevision.get(transaction.sessionId)?.revision;
+    if (sourceRevision !== undefined)
+      settleCancelledAcceptedFollowupsInTransaction(database, {
+        sourceSessionId: transaction.sessionId,
+        sourceRevision,
+        sourceSnapshot: transaction.snapshot as Readonly<Record<string, unknown>>,
+        events: transaction.events as readonly Readonly<Record<string, unknown>>[],
+      });
+    if (transaction.followupRunStart) {
+      const handle = currentHandle();
+      const prepared = transaction.events.filter(
+        (event) =>
+          typeof event === 'object' &&
+          event !== null &&
+          (event as { type?: unknown }).type === 'agent.followup_turn_prepared',
+      );
+      if (
+        channel !== 'decision' ||
+        transaction.commandReceipt ||
+        transaction.requiredEffectLease ||
+        handle.current.sessionId !== transaction.sessionId ||
+        handle.recoveryOnly ||
+        transaction.runMutation?.type !== 'insert' ||
+        transaction.runMutation.run.runId !== transaction.followupRunStart.targetRunId ||
+        prepared.length !== 1
+      )
+        unsupported('Followup Run start requires its exact target Session decision.');
+      authority.assertActive(handle.current);
+      assertCrossSessionFollowupRunStartInTransaction(database, {
+        targetSessionId: transaction.sessionId,
+        mutation: transaction.followupRunStart,
+        preparedEvent: prepared[0] as Record<string, unknown>,
+      });
+    }
+    if (transaction.childTerminalCheckpointMutation) {
+      const handle = currentHandle();
+      if (
+        channel !== 'decision' ||
+        transaction.commandReceipt ||
+        transaction.requiredEffectLease ||
+        handle.current.sessionId !== transaction.sessionId ||
+        handle.recoveryOnly ||
+        transaction.events.length !== 1
+      )
+        unsupported('Child terminal checkpoint requires its exact target Session seal decision.');
+      authority.assertActive(handle.current);
+      const event = transaction.events[0] as Record<string, unknown>;
+      const revision = selectRevision.get(transaction.sessionId)?.revision;
+      if (!Number.isSafeInteger(revision) || revision! < 1)
+        unsupported('Child terminal checkpoint Session revision is invalid.');
+      sealChildTerminalCheckpointInTransaction(database, {
+        sessionId: transaction.sessionId,
+        revision: revision!,
+        mutation: transaction.childTerminalCheckpointMutation,
+        terminalEvent: event,
+      });
+    }
+    const crossMail = transaction.crossSessionAgentMailMutation;
+    if (crossMail) {
+      const handle = currentHandle();
+      if (handle.current.sessionId !== transaction.sessionId || handle.recoveryOnly)
+        unsupported('Cross-Session mail requires its active Session execution owner.');
+      authority.assertActive(handle.current);
+      const events = transaction.events.filter(
+        (event): event is Event & Record<string, unknown> =>
+          typeof event === 'object' && event !== null,
+      ) as readonly Record<string, unknown>[];
+      const exactEvent = (type: string): Record<string, unknown> => {
+        const found = events.filter((event) => event.type === type);
+        if (found.length !== 1)
+          unsupported('Cross-Session mail requires one exact canonical Event.');
+        return found[0]!;
+      };
+      const revision = selectRevision.get(transaction.sessionId)?.revision;
+      if (!Number.isSafeInteger(revision) || revision! < 1)
+        unsupported('Cross-Session mail Session revision is invalid.');
+      if (crossMail.kind === 'request_interrupt' || crossMail.kind === 'request_queued_interrupt') {
+        const receipt = transaction.commandReceipt;
+        const lease = transaction.requiredEffectLease;
+        if (
+          channel !== 'receipt_evidence' ||
+          !receipt ||
+          !lease ||
+          events.length !== 1 ||
+          receipt.scopeSessionId !== transaction.sessionId ||
+          receipt.targetSessionId !== transaction.sessionId ||
+          receipt.commandId !== crossMail.commandId ||
+          receipt.requestDigest !== crossMail.requestDigest ||
+          receipt.committedRevision !== revision
+        )
+          unsupported('Cross-Session interrupt requires its exact Tool receipt and lease.');
+        const { revision: leaseRevision } = activeEffect(
+          transaction.sessionId,
+          lease.effectId,
+          lease.ownerId,
+        );
+        if (leaseRevision === undefined)
+          unsupported('Cross-Session interrupt Tool lease is absent.');
+        effectPort.assertDispatchable({
+          ...handle.current,
+          effectId: lease.effectId,
+          ownerId: lease.ownerId,
+          expectedLeaseRevision: leaseRevision,
+        });
+        const event = exactEvent('background_execution.stop_requested');
+        if (
+          event.commandId !== crossMail.commandId ||
+          event.executionId !== crossMail.targetTaskId ||
+          event.executionKind !== 'subagent' ||
+          event.ownerGeneration !==
+            (crossMail.kind === 'request_queued_interrupt'
+              ? `accepted:${crossMail.queuedIntentEventId}`
+              : `child:${crossMail.targetOwnerGeneration}`)
+        )
+          unsupported('Cross-Session interrupt Event differs from its private intent.');
+        const { kind: _kind, ...privateIntent } = crossMail;
+        acceptCrossSessionInterruptInTransaction(database, {
+          ...privateIntent,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+        });
+      } else if (crossMail.kind === 'settle_queued_interrupt') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1
+        )
+          unsupported('Queued interrupt settlement requires its parent Session decision.');
+        const event = events[0]!;
+        if (
+          event.type !== 'background_execution.stop_settled' &&
+          event.type !== 'background_execution.stop_unknown'
+        )
+          unsupported('Queued interrupt has no terminal stop Event.');
+        settleQueuedCrossSessionInterruptInTransaction(database, {
+          sourceSessionId: transaction.sessionId,
+          commandId: crossMail.commandId,
+          targetSessionId: crossMail.targetSessionId,
+          sourceRevision: revision!,
+          event,
+        });
+      } else if (crossMail.kind === 'ack_interrupt' || crossMail.kind === 'settle_interrupt') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1 ||
+          crossMail.targetGeneration !== handle.current.controllerGeneration
+        )
+          unsupported('Cross-Session interrupt target decision lacks owner identity.');
+        const event = events[0]!;
+        const input = {
+          sourceSessionId: crossMail.sourceSessionId,
+          commandId: crossMail.commandId,
+          targetSessionId: transaction.sessionId,
+          targetGeneration: crossMail.targetGeneration,
+          targetRevision: revision!,
+          event,
+        };
+        if (crossMail.kind === 'ack_interrupt')
+          acknowledgeCrossSessionInterruptInTransaction(database, input);
+        else settleCrossSessionInterruptInTransaction(database, input);
+      } else if (crossMail.kind === 'accept_queue' || crossMail.kind === 'accept_followup') {
+        const receipt = transaction.commandReceipt;
+        const lease = transaction.requiredEffectLease;
+        if (
+          channel !== 'receipt_evidence' ||
+          !receipt ||
+          !lease ||
+          receipt.scopeSessionId !== transaction.sessionId ||
+          receipt.targetSessionId !== transaction.sessionId ||
+          receipt.commandId !== crossMail.commandId ||
+          receipt.requestDigest !== crossMail.requestDigest ||
+          receipt.committedRevision !== revision
+        )
+          unsupported('Cross-Session mail source receipt or Tool lease is invalid.');
+        const { revision: leaseRevision } = activeEffect(
+          transaction.sessionId,
+          lease.effectId,
+          lease.ownerId,
+        );
+        if (leaseRevision === undefined)
+          unsupported('Cross-Session mail requires the current Tool effect lease.');
+        effectPort.assertDispatchable({
+          ...handle.current,
+          effectId: lease.effectId,
+          ownerId: lease.ownerId,
+          expectedLeaseRevision: leaseRevision,
+        });
+        const bodyDigest = `sha256:${createHash('sha256').update(crossMail.bodyText).digest('hex')}`;
+        const byteLength = Buffer.byteLength(crossMail.bodyText, 'utf8');
+        const event = exactEvent('agent.mail_accepted');
+        if (
+          !matchesCrossMailEvent(event, {
+            messageId: crossMail.messageId,
+            senderSessionId: transaction.sessionId,
+            targetSessionId: crossMail.targetSessionId,
+            sequence: crossMail.sourceSequence,
+            bodyDigest,
+            byteLength,
+            sourceRunId: crossMail.sourceRunId,
+            sourceTurnId: crossMail.sourceTurnId,
+            sourceModelInvocationId: crossMail.sourceModelInvocationId,
+            sourceToolCallId: crossMail.sourceToolCallId,
+            sourceEffectAttemptId: crossMail.sourceEffectAttemptId,
+            sourceTaskId: crossMail.sourceTaskId ?? null,
+            ...(crossMail.kind === 'accept_followup'
+              ? {
+                  mode: 'trigger_turn' as const,
+                  submissionId: crossMail.submissionId,
+                  followupAdmissionRef: crossMail.admission.ref,
+                  followupAdmissionDigest: crossMail.admission.digest,
+                }
+              : { mode: 'queue_only' as const }),
+          })
+        )
+          unsupported('Cross-Session source Event differs from the private mail intent.');
+        const source = {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot,
+          sourceOwnerGeneration: handle.current.controllerGeneration,
+        };
+        if (crossMail.kind === 'accept_followup') {
+          if (
+            events.length !== 2 ||
+            exactEvent('resource_budget.reserved').type !== 'resource_budget.reserved'
+          )
+            unsupported('Cross-Session followup requires one exact backup reservation Event.');
+          acceptCrossSessionFollowupInTransaction(database, {
+            ...crossMail,
+            sourceSessionId: transaction.sessionId,
+            sourceRevision: revision!,
+            sourceOwnerGeneration: handle.current.controllerGeneration,
+            acceptedEvent: event,
+            reservationEvent: exactEvent('resource_budget.reserved'),
+            sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          });
+        } else {
+          acceptCrossSessionQueueMailInTransaction(database, source);
+        }
+      } else if (crossMail.kind === 'receive_queue') {
+        if (channel !== 'decision' || transaction.commandReceipt || transaction.requiredEffectLease)
+          unsupported('Cross-Session target receipt must be its own Session decision.');
+        const outbox = readCrossSessionMail(
+          database,
+          crossMail.sourceSessionId,
+          crossMail.messageId,
+        );
+        if (
+          !outbox ||
+          outbox.targetSessionId !== transaction.sessionId ||
+          (outbox.mode !== 'queue_only' && outbox.mode !== 'reply')
+        )
+          unsupported('Cross-Session target has no exact source outbox.');
+        const event = exactEvent('agent.mail_accepted');
+        const targetSequence = nextCrossSessionTargetSequence(database, transaction.sessionId);
+        if (
+          !matchesCrossMailEvent(event, {
+            messageId: crossMail.messageId,
+            senderSessionId: outbox.sourceSessionId,
+            targetSessionId: transaction.sessionId,
+            sequence: targetSequence,
+            bodyDigest: outbox.bodyRef.integrityIdentifier,
+            byteLength: outbox.bodyRef.byteLength,
+            sourceRunId: outbox.sourceRunId,
+            sourceTurnId: outbox.sourceTurnId,
+            sourceModelInvocationId: outbox.sourceModelInvocationId,
+            sourceToolCallId: outbox.sourceToolCallId,
+            sourceEffectAttemptId: outbox.sourceEffectAttemptId,
+            sourceTaskId: outbox.sourceTaskId,
+            mode: outbox.mode,
+          })
+        )
+          unsupported('Cross-Session target Event differs from the source outbox.');
+        receiveCrossSessionQueueMailInTransaction(database, {
+          ...crossMail,
+          targetSessionId: transaction.sessionId,
+          targetRevision: revision!,
+        });
+      } else if (crossMail.kind === 'receive_followup') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1
+        )
+          unsupported('Cross-Session followup receipt must be its own target Session decision.');
+        const delivery = readCrossSessionFollowupDeliveryForTarget(
+          database,
+          transaction.sessionId,
+          crossMail.sourceSessionId,
+          crossMail.submissionId,
+        );
+        if (
+          !delivery ||
+          delivery.status !== 'pending' ||
+          delivery.messageId !== crossMail.messageId
+        )
+          unsupported('Cross-Session followup has no pending target delivery.');
+        const event = exactEvent('agent.mail_accepted');
+        if (
+          !matchesCrossMailEvent(event, {
+            messageId: delivery.messageId,
+            senderSessionId: crossMail.sourceSessionId,
+            targetSessionId: transaction.sessionId,
+            sequence: delivery.sequence,
+            bodyDigest: delivery.bodyDigest,
+            byteLength: delivery.bodyRef.byteLength,
+            sourceRunId: delivery.source.runId,
+            sourceTurnId: delivery.source.turnId,
+            sourceModelInvocationId: delivery.source.modelInvocationId,
+            sourceToolCallId: delivery.source.toolCallId,
+            sourceEffectAttemptId: delivery.source.effectAttemptId,
+            sourceTaskId: delivery.source.sourceTaskId ?? null,
+            mode: 'trigger_turn',
+            submissionId: crossMail.submissionId,
+            followupAdmissionRef: delivery.followupAdmissionRef,
+            followupAdmissionDigest: delivery.followupAdmissionDigest,
+          })
+        )
+          unsupported('Cross-Session followup target Event differs from the source admission.');
+        receiveCrossSessionFollowupInTransaction(database, {
+          ...crossMail,
+          targetSessionId: transaction.sessionId,
+          targetRevision: revision!,
+        });
+      } else if (crossMail.kind === 'replace_followup_backup') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1
+        )
+          unsupported('Cross-Session backup replacement requires its own source Session decision.');
+        replaceCrossSessionFollowupBackupInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          replacementEvent: exactEvent('resource_budget.bounded_replaced'),
+        });
+      } else if (crossMail.kind === 'activate_followup_funding') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 2 ||
+          events.some((event) => event.type !== 'resource_budget.dispatch_started')
+        )
+          unsupported(
+            'Followup funding activation requires two exact source budget dispatch events.',
+          );
+        activateCrossSessionFollowupFundingInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          events,
+        });
+      } else if (crossMail.kind === 'settle_followup_funding') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 2 ||
+          events.some(
+            (event) =>
+              ![
+                'resource_budget.reconciled',
+                'resource_budget.unknown',
+                'resource_budget.released',
+              ].includes(String(event.type)),
+          )
+        )
+          unsupported('Followup funding settlement requires two exact source budget events.');
+        settleCrossSessionFollowupFundingInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          events,
+        });
+      } else if (crossMail.kind === 'settle_followup_funding_after_unknown_recovery') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 0
+        )
+          unsupported(
+            'Recovered unknown followup ACK requires one source-only zero-Event decision.',
+          );
+        settleCrossSessionFollowupFundingAfterUnknownRecoveryInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+        });
+      } else if (crossMail.kind === 'release_accepted_followup_backup') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1 ||
+          events[0]?.type !== 'resource_budget.released'
+        )
+          unsupported(
+            'Accepted followup backup release requires one source budget release decision.',
+          );
+        releaseAcceptedCrossSessionFollowupBackupInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          releaseEvent: events[0]!,
+        });
+      } else if (crossMail.kind === 'release_current_turn_backup') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1 ||
+          events[0]?.type !== 'resource_budget.released'
+        )
+          unsupported('Current-turn backup release requires one source budget release decision.');
+        releaseCrossSessionCurrentTurnBackupInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          releaseEvent: events[0]!,
+        });
+      } else if (crossMail.kind === 'route_followup') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 2
+        )
+          unsupported('Cross-Session followup route must be its own target Session decision.');
+        routeCrossSessionFollowupInTransaction(database, {
+          ...crossMail,
+          targetSessionId: transaction.sessionId,
+          routedRevision: revision!,
+          routedEvent: exactEvent('agent.followup_routed'),
+          preparedEvent: exactEvent('agent.mail_input_prepared'),
+          targetSnapshot: transaction.snapshot as Record<string, unknown>,
+        });
+      } else {
+        if (channel !== 'decision' || transaction.commandReceipt || transaction.requiredEffectLease)
+          unsupported('Cross-Session model input must be its own Session decision.');
+        const event = exactEvent('agent.mail_input_prepared');
+        if (
+          event.targetAgentId !== transaction.sessionId ||
+          event.invocationId !== crossMail.modelInvocationId ||
+          event.modelAdmissionId !== crossMail.modelAdmissionId ||
+          event.fromSequence !== crossMail.fromSequence ||
+          event.throughSequence !== crossMail.throughSequence ||
+          JSON.stringify(event.messageIds) !== JSON.stringify(crossMail.messageIds)
+        )
+          unsupported('Cross-Session model input Event differs from the selected inbox batch.');
+        assertModelAdmissionForPreparedMail(events, transaction.snapshot, crossMail);
+        const preparedModel = events.find(
+          (candidate) => candidate.type === 'model.invocation_prepared',
+        );
+        const preparedBudget = preparedModel?.budget as { kind?: unknown } | undefined;
+        const resourceBudget = (transaction.snapshot as { resourceBudget?: { runId?: unknown } })
+          .resourceBudget;
+        if (
+          !crossMail.currentRunId ||
+          (preparedBudget?.kind === 'reservation' &&
+            resourceBudget?.runId !== crossMail.currentRunId)
+        )
+          unsupported('Cross-Session model admission does not belong to the current target Run.');
+        const preparedThrough = readCrossSessionPreparedThrough(
+          database,
+          transaction.sessionId,
+          crossMail.currentRunId,
+        );
+        if (crossMail.messageIds.length < 1 || crossMail.messageIds.length > 8)
+          unsupported('Cross-Session model input batch must contain one to eight messages.');
+        const queued = listQueuedCrossSessionInbox(
+          database,
+          transaction.sessionId,
+          crossMail.currentRunId,
+          crossMail.messageIds.length,
+        );
+        if (
+          preparedThrough !== crossMail.fromSequence ||
+          queued.length !== crossMail.messageIds.length ||
+          JSON.stringify(queued.map((mail) => mail.messageId)) !==
+            JSON.stringify(crossMail.messageIds) ||
+          queued.at(-1)?.sequence !== crossMail.throughSequence
+        )
+          unsupported('Cross-Session model input watermark or ordered batch changed.');
+        const applied = prepareCrossSessionQueueMailInputInTransaction(database, {
+          targetSessionId: transaction.sessionId,
+          targetRevision: revision!,
+          currentRunId: crossMail.currentRunId,
+          modelInvocationId: crossMail.modelInvocationId,
+          modelAdmissionId: crossMail.modelAdmissionId,
+        });
+        if (applied.length !== queued.length)
+          unsupported('Cross-Session model input preparation did not accept its exact batch.');
+      }
+    }
     const lease = transaction.requiredEffectLease;
     if (!lease || (channel !== 'receipt_evidence' && channel !== 'terminal_recovery')) return;
     const { handle, revision } = activeEffect(transaction.sessionId, lease.effectId, lease.ownerId);
@@ -500,6 +1472,21 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       },
       hasEffectLease,
       afterPersistInTransaction,
+      authorizeInternalFollowupRunStart: (transaction) => {
+        const handle = currentHandle();
+        if (
+          handle.recoveryOnly ||
+          handle.current.sessionId !== transaction.sessionId ||
+          !transaction.followupRunStart ||
+          transaction.runMutation?.type !== 'insert' ||
+          transaction.runMutation.run.runId !== transaction.followupRunStart.targetRunId
+        ) {
+          unsupported('Internal followup Run is outside its fenced target owner.');
+        }
+        authority.assertActive(handle.current);
+      },
+      verifyInternalFollowupRunStart: (run) =>
+        verifyPersistedCrossSessionFollowupRunStart(database, run),
       initialController,
       runCreateTransaction: (write) => rawWriter.run(write),
       codec: input.codec,
@@ -615,7 +1602,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
   };
 
   const readSnapshot = <Result>(operation: () => Result): Result => {
-    if (rawWriter.inTransaction) return operation();
+    if (rawWriter.inTransaction || database.inTransaction) return operation();
     database.run('BEGIN');
     try {
       const result = operation();
@@ -631,12 +1618,720 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     }
   };
 
+  const currentExecutionGeneration = (sessionId: string): string => {
+    const handle = currentHandle();
+    if (handle.current.sessionId !== sessionId || handle.recoveryOnly)
+      throw new KiteSessionRuntimeStorageError(
+        'stale_execution_handle',
+        'Agent owner generation is outside the active Session.',
+      );
+    authority.assertActive(handle.current);
+    return String(handle.current.controllerGeneration);
+  };
+
+  const assertCrossMailOwner = (sessionId: string): void => {
+    const handle = currentHandle();
+    if (handle.current.sessionId !== sessionId)
+      throw new KiteSessionRuntimeStorageError(
+        'foreign_execution_handle',
+        'Cross-Session mail is outside the bound Session owner.',
+      );
+    authority.assertActive(handle.current);
+  };
+
+  const crossSessionQueueMail: KiteCrossSessionQueueMailPort = Object.freeze({
+    acceptAcceptedReleaseNotice: (
+      childSessionId: string,
+      parentSessionId: string,
+      submissionId: string,
+      acceptedAtMs: number,
+    ) => {
+      assertCrossMailOwner(childSessionId);
+      return sessionWriter.run(() =>
+        acceptCrossSessionAcceptedReleaseNoticeInTransaction(database, {
+          childSessionId,
+          parentSessionId,
+          submissionId,
+          acceptedAtMs,
+        }),
+      );
+    },
+    acceptFollowupTerminalReply: (
+      childSessionId: string,
+      parentSessionId: string,
+      submissionId: string,
+      acceptedAtMs: number,
+    ) => {
+      assertCrossMailOwner(childSessionId);
+      return sessionWriter.run(() =>
+        acceptCrossSessionFollowupTerminalReplyInTransaction(database, {
+          childSessionId,
+          parentSessionId,
+          submissionId,
+          acceptedAtMs,
+        }),
+      );
+    },
+    listPendingTerminalReplies: (sourceSessionId: string, limit: number, afterMessageId?: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return listPendingCrossSessionTerminalReplyMail(
+          database,
+          sourceSessionId,
+          limit,
+          afterMessageId,
+        );
+      }),
+    readFollowupAdmissionForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readCrossSessionFollowupAdmissionBySubmissionForTarget(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readUnroutedFollowupMessage: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+      messageId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readUnroutedCrossSessionFollowupMessage(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+          messageId,
+        );
+      }),
+    readFollowupTerminalForSource: (sourceSessionId: string, submissionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readCrossSessionFollowupTerminalReceipt(database, sourceSessionId, submissionId);
+      }),
+    readFollowupGrantForTarget: (targetSessionId: string, artifactId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        const stateRow = database
+          .query<{ state_json: string }, [string]>(
+            'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+          )
+          .get(targetSessionId);
+        if (!stateRow) return null;
+        const state = JSON.parse(stateRow.state_json) as {
+          activeFollowupTurn?: { grantRef?: { artifactId?: string } };
+        };
+        if (state.activeFollowupTurn?.grantRef?.artifactId !== artifactId) return null;
+        return readCrossSessionFollowupGrant(database, artifactId);
+      }),
+    listPendingFollowupFunding: (
+      sourceSessionId: string,
+      limit: number,
+      afterSubmissionId?: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return listPendingCrossSessionFollowupFunding(
+          database,
+          sourceSessionId,
+          limit,
+          afterSubmissionId,
+        );
+      }),
+    readLastReleasedFollowupForDirectChild: (
+      sourceSessionId: string,
+      currentRunId: string,
+      childSessionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readLastReleasedFollowupForDirectChild(
+          database,
+          sourceSessionId,
+          currentRunId,
+          childSessionId,
+        );
+      }),
+    readDirectChildFollowupReleaseWatermark: (sourceSessionId: string, currentRunId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readDirectChildFollowupReleaseWatermark(database, sourceSessionId, currentRunId);
+      }),
+    readLastFollowupOutcomeForDirectChild: (
+      sourceSessionId: string,
+      currentRunId: string,
+      childSessionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readLastFollowupOutcomeForDirectChild(
+          database,
+          sourceSessionId,
+          currentRunId,
+          childSessionId,
+        );
+      }),
+    readDirectChildFollowupOutcomeWatermark: (sourceSessionId: string, currentRunId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readDirectChildFollowupOutcomeWatermark(database, sourceSessionId, currentRunId);
+      }),
+    readFollowupTarget: (sourceSessionId: string, targetSessionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        const target = database
+          .query<
+            {
+              target_session_id: string;
+              node_status: string;
+            },
+            [string, string]
+          >(`SELECT child.session_id AS target_session_id,n.status AS node_status
+          FROM runtime_sessions source JOIN runtime_sessions child
+            ON child.parent_session_id=source.session_id
+          JOIN agent_nodes n ON n.session_id=child.session_id AND n.agent_id=child.session_id
+          WHERE source.session_id=? AND child.session_id=?
+            AND source.workspace_id=child.workspace_id AND source.project_id=child.project_id
+            AND source.workspace_digest=child.workspace_digest`)
+          .get(sourceSessionId, targetSessionId);
+        if (!target) return null;
+        const run = database
+          .query<{ run_id: string; status: string }, [string]>(
+            `SELECT run_id,status FROM runtime_runs WHERE session_id=?
+           ORDER BY created_revision DESC LIMIT 1`,
+          )
+          .get(targetSessionId);
+        const active =
+          run?.status === 'running' ||
+          run?.status === 'waiting' ||
+          (run?.status === 'queued' &&
+            isAdmittedQueuedChildFollowupTarget(
+              database,
+              sourceSessionId,
+              targetSessionId,
+              run.run_id,
+            ));
+        const checkpointReady =
+          target.node_status === 'idle' &&
+          readChildTerminalCheckpoint(database, targetSessionId) !== null;
+        return Object.freeze({
+          targetSessionId,
+          status:
+            target.node_status === 'context_unavailable'
+              ? ('context_unavailable' as const)
+              : run?.status === 'waiting'
+                ? ('waiting' as const)
+                : active
+                  ? ('active' as const)
+                  : checkpointReady
+                    ? ('idle' as const)
+                    : ('context_unavailable' as const),
+          targetRunId: active ? run.run_id : null,
+          checkpointReady,
+        });
+      }),
+    readChildTerminalCheckpoint: (targetSessionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readChildTerminalCheckpoint(database, targetSessionId);
+      }),
+    readFollowupFundingForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        const row = readCrossSessionFollowupFundingReceipt(database, sourceSessionId, submissionId);
+        if (row?.targetSessionId !== targetSessionId) return null;
+        const target = database
+          .query<{ parent_session_id: string | null }, [string]>(
+            'SELECT parent_session_id FROM runtime_sessions WHERE session_id=?',
+          )
+          .get(targetSessionId);
+        return target?.parent_session_id === sourceSessionId ? row : null;
+      }),
+    readFollowupActivationForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        const row = readCrossSessionFollowupActivationReceipt(
+          database,
+          sourceSessionId,
+          submissionId,
+        );
+        if (row?.targetSessionId !== targetSessionId) return null;
+        const target = database
+          .query<{ parent_session_id: string | null }, [string]>(
+            'SELECT parent_session_id FROM runtime_sessions WHERE session_id=?',
+          )
+          .get(targetSessionId);
+        return target?.parent_session_id === sourceSessionId ? row : null;
+      }),
+    readCurrentTurnBackupReleaseForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readCrossSessionCurrentTurnBackupReleaseForTarget(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readCurrentTurnPreparedNoAttemptProof: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readCrossSessionCurrentTurnPreparedNoAttemptProof(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readCurrentTurnDispatchedChildProofForSource: (
+      sourceSessionId: string,
+      targetSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readCurrentTurnDispatchedChildProofForSource(
+          database,
+          sourceSessionId,
+          targetSessionId,
+          submissionId,
+        );
+      }),
+    readCurrentTurnRoutedNoAttemptChildProofForSource: (
+      sourceSessionId: string,
+      targetSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readCurrentTurnRoutedNoAttemptChildProofForSource(
+          database,
+          sourceSessionId,
+          targetSessionId,
+          submissionId,
+        );
+      }),
+    readFollowupRoute: (targetSessionId: string, submissionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
+      }),
+    readInterruptTarget: (sourceSessionId: string, targetSessionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readCrossSessionInterruptTarget(database, sourceSessionId, targetSessionId);
+      }),
+    readInterruptIntent: (sourceSessionId: string, commandId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readCrossSessionInterruptIntent(database, sourceSessionId, commandId);
+      }),
+    listPendingInterrupts: (targetSessionId: string, limit: number) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return listPendingCrossSessionInterrupts(database, targetSessionId, limit);
+      }),
+    readFollowupDeliveryForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readCrossSessionFollowupDeliveryForTarget(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readActivatedNoAttemptTargetProofForSource: (
+      sourceSessionId: string,
+      targetSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        if (
+          !sourceSessionId ||
+          !targetSessionId ||
+          !submissionId ||
+          sourceSessionId === targetSessionId
+        )
+          return null;
+        const pair = database
+          .query<
+            {
+              source_revision: number;
+              target_revision: number;
+            },
+            [string, string]
+          >(`SELECT source.revision AS source_revision,target.revision AS target_revision
+        FROM runtime_sessions source JOIN runtime_sessions target
+          ON target.parent_session_id=source.session_id
+          AND target.workspace_id=source.workspace_id
+          AND target.project_id=source.project_id
+          AND target.workspace_digest=source.workspace_digest
+        WHERE source.session_id=? AND target.session_id=?`)
+          .get(sourceSessionId, targetSessionId);
+        const funding = readCrossSessionFollowupFundingReceipt(
+          database,
+          sourceSessionId,
+          submissionId,
+        );
+        const activation = readCrossSessionFollowupActivationReceipt(
+          database,
+          sourceSessionId,
+          submissionId,
+        );
+        const outbox = database
+          .query<
+            {
+              target_session_id: string;
+              mode: string;
+              message_id: string;
+            },
+            [string, string]
+          >(`SELECT target_session_id,mode,message_id FROM agent_mail_outbox
+        WHERE source_session_id=? AND submission_id=?`)
+          .get(sourceSessionId, submissionId);
+        if (
+          !pair ||
+          !funding ||
+          !activation ||
+          !outbox ||
+          funding.targetSessionId !== targetSessionId ||
+          activation.targetSessionId !== targetSessionId ||
+          outbox.target_session_id !== targetSessionId ||
+          outbox.mode !== 'trigger_turn' ||
+          outbox.message_id !== funding.messageId ||
+          funding.sourceRevision > pair.source_revision ||
+          activation.sourceRevision > pair.source_revision ||
+          funding.targetRevision > pair.target_revision
+        )
+          return null;
+        return readPreparedCrossSessionFollowupRecoveryProof(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readPreparedFollowupRecoveryProof: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readPreparedCrossSessionFollowupRecoveryProof(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readUnreadDirectChildMail: (
+      parentSessionId: string,
+      currentRunId: string,
+      childSessionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(parentSessionId);
+        return readUnreadDirectChildMail(database, parentSessionId, currentRunId, childSessionId);
+      }),
+    readDirectChildInboxWatermark: (parentSessionId: string, currentRunId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(parentSessionId);
+        return readDirectChildInboxWatermark(database, parentSessionId, currentRunId);
+      }),
+    nextSourceSequence: (sessionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return nextCrossSessionSourceSequence(database, sessionId);
+      }),
+    nextTargetSequence: (sessionId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return nextCrossSessionTargetSequence(database, sessionId);
+      }),
+    readOutbox: (sessionId: string, messageId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return readCrossSessionMail(database, sessionId, messageId);
+      }),
+    listPendingOutbox: (sessionId: string, limit: number, afterMessageId?: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return listPendingCrossSessionQueueMail(database, sessionId, limit, afterMessageId);
+      }),
+    readInboxReceipt: (sessionId: string, messageId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return readCrossSessionInboxReceipt(database, sessionId, messageId);
+      }),
+    listQueuedInbox: (sessionId: string, currentRunId: string, limit: number) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return listQueuedCrossSessionInbox(database, sessionId, currentRunId, limit);
+      }),
+    readPreparedThrough: (sessionId: string, currentRunId: string) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sessionId);
+        return readCrossSessionPreparedThrough(database, sessionId, currentRunId);
+      }),
+    confirmDelivered: (sessionId: string, messageId: string) => {
+      assertCrossMailOwner(sessionId);
+      return sessionWriter.run(() =>
+        confirmCrossSessionQueueMailInTransaction(database, {
+          sourceSessionId: sessionId,
+          messageId,
+        }),
+      );
+    },
+  });
+
+  const metadataReader = createKiteSessionAgentMetadataPort(database);
+  const agentMailbox: KiteSessionAgentMailboxPort = Object.freeze({
+    readAgent: (sessionId: string, sourceAgentId: string, targetAgentId: string) =>
+      readSnapshot(() => metadataReader.readAgent(sessionId, sourceAgentId, targetAgentId)),
+    listAgents: (sessionId: string, sourceAgentId: string) =>
+      readSnapshot(() => metadataReader.listAgents(sessionId, sourceAgentId)),
+    nextSequence: (sessionId: string, sourceAgentId: string) =>
+      readSnapshot(() => metadataReader.nextSequence(sessionId, sourceAgentId)),
+    readActiveTaskProof: (
+      sessionId: string,
+      sourceAgentId: string,
+      targetAgentId: string,
+      taskId: string,
+    ) =>
+      readSnapshot(() => {
+        const handle = currentHandle();
+        if (handle.current.sessionId !== sessionId)
+          throw new KiteSessionRuntimeStorageError(
+            'foreign_execution_handle',
+            'Agent task proof is outside the active Session.',
+          );
+        authority.assertActive(handle.current);
+        if (!metadataReader.readAgent(sessionId, sourceAgentId, targetAgentId)) return null;
+        const row = database
+          .query<
+            {
+              current_task_id: string | null;
+              status: string;
+              current_owner_generation: string | null;
+              current_grant_digest: string | null;
+            },
+            [string, string]
+          >(`SELECT current_task_id,status,current_owner_generation,current_grant_digest
+        FROM agent_nodes WHERE session_id=? AND agent_id=?`)
+          .get(sessionId, targetAgentId);
+        if (
+          !taskId ||
+          row?.status !== 'active' ||
+          row.current_task_id !== taskId ||
+          !row.current_owner_generation ||
+          !row.current_grant_digest
+        )
+          return null;
+        return Object.freeze({
+          ownerGeneration: row.current_owner_generation,
+          grantDigest: row.current_grant_digest,
+        });
+      }),
+  });
+
+  const agentMailInput: KiteSessionAgentMailInputPort = Object.freeze({
+    readPendingMailForActiveTask: (
+      request: Parameters<KiteSessionAgentMailInputPort['readPendingMailForActiveTask']>[0],
+    ) =>
+      readSnapshot(() => {
+        assertModelMailTask(request.sessionId, request.targetAgentId, request.currentTaskId);
+        if (
+          !request.modelInvocationId ||
+          !Number.isSafeInteger(request.fromSequence) ||
+          request.fromSequence < 0
+        )
+          throw new KiteSessionRuntimeStorageError(
+            'unsupported_mutation',
+            'Agent model input identity is invalid.',
+          );
+        const boundary = database
+          .query<{ prepared_through_sequence: number }, [string, string]>(
+            'SELECT prepared_through_sequence FROM agent_nodes WHERE session_id=? AND agent_id=?',
+          )
+          .get(request.sessionId, request.targetAgentId);
+        if (boundary?.prepared_through_sequence !== request.fromSequence)
+          throw new KiteSessionRuntimeStorageError(
+            'stale_execution_handle',
+            'Agent mail input watermark changed.',
+          );
+        const prior =
+          database
+            .query<{ count: number }, [string, string, string]>(
+              "SELECT count(*) AS count FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='prepared' AND prepared_invocation_id=?",
+            )
+            .get(request.sessionId, request.targetAgentId, request.modelInvocationId)?.count ?? 0;
+        if (prior > 0)
+          throw new KiteSessionRuntimeStorageError(
+            'stale_execution_handle',
+            'Agent model invocation already has a prepared input.',
+          );
+        return readModelMailRows(
+          request.sessionId,
+          request.targetAgentId,
+          request.currentTaskId,
+          "m.status='queued' AND m.sequence>?",
+          request.fromSequence,
+        );
+      }),
+    readPreparedMailForModel: (
+      request: Parameters<KiteSessionAgentMailInputPort['readPreparedMailForModel']>[0],
+    ) =>
+      readSnapshot(() => {
+        assertModelMailTask(request.sessionId, request.targetAgentId, request.currentTaskId);
+        if (!request.modelInvocationId || !request.modelAdmissionId)
+          throw new KiteSessionRuntimeStorageError(
+            'unsupported_mutation',
+            'Agent model admission identity is invalid.',
+          );
+        return readModelMailRows(
+          request.sessionId,
+          request.targetAgentId,
+          request.currentTaskId,
+          "m.status='prepared' AND m.prepared_invocation_id=? AND m.model_admission_id=?",
+          request.modelInvocationId,
+          request.modelAdmissionId,
+        );
+      }),
+  });
+
+  function assertModelMailTask(sessionId: string, targetAgentId: string, taskId: string): void {
+    const handle = currentHandle();
+    if (handle.current.sessionId !== sessionId || handle.recoveryOnly)
+      throw new KiteSessionRuntimeStorageError(
+        'stale_execution_handle',
+        'Agent mail target is outside the active execution scope.',
+      );
+    authority.assertActive(handle.current);
+    const row = database
+      .query<{ current_task_id: string | null; status: string }, [string, string]>(
+        'SELECT current_task_id,status FROM agent_nodes WHERE session_id=? AND agent_id=?',
+      )
+      .get(sessionId, targetAgentId);
+    if (!taskId || row?.status !== 'active' || row.current_task_id !== taskId)
+      throw new KiteSessionRuntimeStorageError(
+        'stale_execution_handle',
+        'Agent mail target task is not active.',
+      );
+  }
+
+  function readModelMailRows(
+    sessionId: string,
+    targetAgentId: string,
+    currentTaskId: string,
+    where: string,
+    ...params: (number | string)[]
+  ): readonly KiteSessionModelMail[] {
+    const recipientClause = targetAgentId === sessionId ? ' AND m.recipient_run_id=?' : '';
+    const rows = database
+      .query<
+        {
+          message_id: string;
+          sequence: number;
+          sender_agent_id: string;
+          source_task_id: string | null;
+          mode: KiteSessionModelMail['mode'];
+          body_id: string;
+          integrity_identifier: string;
+          byte_length: number;
+          body_text: string;
+        },
+        (string | number)[]
+      >(`SELECT m.message_id,m.sequence,m.sender_agent_id,m.source_task_id,m.mode,
+      b.body_id,b.integrity_identifier,b.byte_length,b.body_text FROM agent_mail m
+      JOIN agent_mail_bodies b ON b.session_id=m.session_id AND b.body_id=m.body_id
+      WHERE m.session_id=? AND m.target_agent_id=? AND ${where}${recipientClause} ORDER BY m.sequence LIMIT 9`)
+      .all(
+        sessionId,
+        targetAgentId,
+        ...params,
+        ...(targetAgentId === sessionId ? [currentTaskId] : []),
+      );
+    if (rows.length > 8)
+      throw new KiteSessionRuntimeStorageError(
+        'unsupported_mutation',
+        'Agent model mail batch exceeds eight messages.',
+      );
+    return Object.freeze(
+      rows.map((row) => {
+        if (
+          Buffer.byteLength(row.body_text, 'utf8') !== row.byte_length ||
+          `sha256:${createHash('sha256').update(row.body_text).digest('hex')}` !==
+            row.integrity_identifier
+        )
+          throw new KiteSessionRuntimeStorageError(
+            'unsupported_mutation',
+            'Agent mail body failed integrity validation.',
+          );
+        return Object.freeze({
+          messageId: row.message_id,
+          sequence: row.sequence,
+          senderAgentId: row.sender_agent_id,
+          sourceTaskId: row.source_task_id,
+          mode: row.mode,
+          bodyRef: Object.freeze({
+            artifactId: row.body_id,
+            kind: 'agent_mail' as const,
+            integrityIdentifier: row.integrity_identifier,
+            byteLength: row.byte_length,
+          }),
+          bodyText: row.body_text,
+        });
+      }),
+    );
+  }
+
   const owner: KiteSessionRuntimeStorageOwner<Event, State> = {
-    storage,
+    storage: Object.freeze({
+      ...storage,
+      agentMailbox,
+      agentMailInput,
+      crossSessionQueueMail,
+      currentExecutionGeneration,
+    }),
     admissions: base.admissions,
     directory: base.directory,
     openHistoryLogs: base.openHistoryLogs,
     artifactStore,
+    agentMailbox,
+    agentMailInput,
+    crossSessionQueueMail,
+    currentExecutionGeneration,
     authority: executionControl,
     recovery,
     reconcileSettledSession(request) {
@@ -706,6 +2401,73 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       return acquired;
     },
     sessionCreationForWorkspace: (workspaceId) => base.sessionCreationForWorkspace(workspaceId),
+    createChildSession(creation) {
+      const intent = creation.childSessionIntent;
+      const parent = database
+        .query<{ workspace_id: string }, [string]>(
+          'SELECT workspace_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+        )
+        .get(intent.parentSessionId);
+      if (!parent) throw new Error('Child Session parent has no admitted Store Session.');
+      return base.sessionCreationForWorkspace(parent.workspace_id).create(creation);
+    },
+    readSessionLineage: (sessionId) => base.readSessionLineage(sessionId),
+    listChildSessions: (parentSessionId, limit, cursor) =>
+      readSnapshot(() => listDirectChildSessions(database, parentSessionId, limit, cursor)),
+    readChildSession: (parentSessionId, childSessionId) =>
+      readSnapshot(() => {
+        const child = readDirectChildSession(database, parentSessionId, childSessionId);
+        if (!child) return null;
+        const state = storage.sessions.loadSnapshot<State>(childSessionId);
+        return state === null ? null : { ...child, state };
+      }),
+    openChildSessionHistoryLogs(parentSessionId, childSessionId, currentEventTypes) {
+      const logs = createSqliteRuntimeLogQueryPortFromDatabase_({
+        database,
+        codec: input.codec,
+        currentEventTypes,
+        childScope: { parentSessionId, childSessionId },
+      });
+      return Object.freeze({
+        getSession: (sessionId: string) => logs.getSession!(sessionId),
+        listEvents: (request: Parameters<typeof logs.listEvents>[0]) => logs.listEvents(request),
+        close: () => logs.close(),
+      });
+    },
+    readChildSessionIntent: (childThreadId) =>
+      readSnapshot(() => readChildSessionIntent(database, childThreadId)),
+    readPendingAfterTurnChildTerminalSeal: (parentSessionId, childThreadId) =>
+      readSnapshot(() =>
+        readPendingAfterTurnChildTerminalSeal(database, parentSessionId, childThreadId),
+      ),
+    readChildSealedGrant: (childThreadId) =>
+      readSnapshot(() => {
+        const handle = currentHandle();
+        authority.assertActive(handle.current);
+        return readChildSealedGrant(database, handle.current.sessionId, childThreadId);
+      }),
+    listPendingChildSessionIntents: (parentSessionId, limit, cursor) =>
+      readSnapshot(() => listPendingChildSessionIntents(database, parentSessionId, limit, cursor)),
+    readChildApprovalProxy: (parentSessionId, proxyInteractionId) =>
+      readSnapshot(() => readChildApprovalProxy(database, parentSessionId, proxyInteractionId)),
+    listPendingChildApprovalProxies: (parentSessionId, limit, afterProxyInteractionId) =>
+      readSnapshot(() =>
+        listPendingChildApprovalProxies(database, parentSessionId, limit, afterProxyInteractionId),
+      ),
+    listPendingCrossSessionQueueMailSources: (limit, afterSessionId) =>
+      readSnapshot(() => listPendingCrossSessionQueueMailSources(database, limit, afterSessionId)),
+    listPendingCrossSessionTerminalReplyMailSources: (limit, afterSessionId) =>
+      readSnapshot(() =>
+        listPendingCrossSessionTerminalReplyMailSources(database, limit, afterSessionId),
+      ),
+    listUnrepliedSettledFollowupTerminalSources: (limit, after) =>
+      readSnapshot(() => listUnrepliedSettledFollowupTerminalSources(database, limit, after)),
+    listUnnotifiedAcceptedFollowupReleases: (limit, after) =>
+      readSnapshot(() => listUnnotifiedAcceptedFollowupReleases(database, limit, after)),
+    listPendingCrossSessionInterruptTargets: (limit, afterSessionId) =>
+      readSnapshot(() => listPendingCrossSessionInterruptTargets(database, limit, afterSessionId)),
+    listPendingCrossSessionFollowupSources: (limit, afterSessionId) =>
+      readSnapshot(() => listPendingCrossSessionFollowupSources(database, limit, afterSessionId)),
     bindExecution,
     refreshExecution,
     runWithExecution,
@@ -895,6 +2657,8 @@ function disableArtifactGarbageCollection(store: KiteHomeArtifactStore): KiteHom
     collectSubagentTaskGarbage: disabled,
     collectSubagentLifecycleGarbage: disabled,
     collectSubagentContinuationGarbage: disabled,
+    collectSubagentCheckpointGarbage: disabled,
+    collectAgentFollowupAdmissionGarbage: disabled,
   });
 }
 
@@ -923,6 +2687,64 @@ function effectTerminalDigest<Event, State>(
   }
   digest.update(codec.encodeState(transaction.snapshot));
   return digest.digest('hex');
+}
+
+function matchesCrossMailEvent(
+  event: Readonly<Record<string, unknown>>,
+  expected: {
+    readonly messageId: string;
+    readonly senderSessionId: string;
+    readonly targetSessionId: string;
+    readonly sequence: number;
+    readonly bodyDigest: string;
+    readonly byteLength: number;
+    readonly sourceRunId: string;
+    readonly sourceTurnId: string;
+    readonly sourceModelInvocationId: string;
+    readonly sourceToolCallId: string;
+    readonly sourceEffectAttemptId: string;
+    readonly sourceTaskId: string | null;
+    readonly mode: 'queue_only' | 'trigger_turn' | 'reply';
+    readonly submissionId?: string;
+    readonly followupAdmissionRef?: Readonly<{
+      artifactId: string;
+      kind: string;
+      integrityIdentifier: string;
+      byteLength: number;
+    }>;
+    readonly followupAdmissionDigest?: string;
+  },
+): boolean {
+  const source = event.source as Readonly<Record<string, unknown>> | undefined;
+  const ref = event.bodyRef as Readonly<Record<string, unknown>> | undefined;
+  const admissionRef = event.followupAdmissionRef as Readonly<Record<string, unknown>> | undefined;
+  const expectedAdmissionRef = expected.followupAdmissionRef;
+  return (
+    event.messageId === expected.messageId &&
+    event.senderAgentId === expected.senderSessionId &&
+    event.targetAgentId === expected.targetSessionId &&
+    event.mode === expected.mode &&
+    event.submissionId === expected.submissionId &&
+    event.followupAdmissionDigest === expected.followupAdmissionDigest &&
+    (expectedAdmissionRef
+      ? admissionRef?.artifactId === expectedAdmissionRef.artifactId &&
+        admissionRef.kind === expectedAdmissionRef.kind &&
+        admissionRef.integrityIdentifier === expectedAdmissionRef.integrityIdentifier &&
+        admissionRef.byteLength === expectedAdmissionRef.byteLength
+      : admissionRef === undefined) &&
+    event.sequence === expected.sequence &&
+    event.bodyDigest === expected.bodyDigest &&
+    ref?.artifactId === `pa_${expected.bodyDigest.slice('sha256:'.length)}` &&
+    ref.kind === 'agent_mail' &&
+    ref.integrityIdentifier === expected.bodyDigest &&
+    ref.byteLength === expected.byteLength &&
+    source?.runId === expected.sourceRunId &&
+    source.turnId === expected.sourceTurnId &&
+    source.modelInvocationId === expected.sourceModelInvocationId &&
+    source.toolCallId === expected.sourceToolCallId &&
+    source.effectAttemptId === expected.sourceEffectAttemptId &&
+    (source.sourceTaskId ?? null) === expected.sourceTaskId
+  );
 }
 
 function unsupported(message: string): never {

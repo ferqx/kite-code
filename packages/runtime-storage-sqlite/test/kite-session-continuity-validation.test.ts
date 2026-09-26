@@ -10,6 +10,7 @@ import {
 } from '@kite-ai/runtime-host/storage';
 import {
   assertKiteSessionStoreSchema,
+  createKiteHomeArtifactStore,
   createKiteHomeWorkspaceRuntimeJournal,
   createKiteHomeWriteTransactionPort,
   createKiteSessionExecutionAuthority,
@@ -189,6 +190,52 @@ function fixture(withFork = false) {
 }
 
 describe('Session Store offline continuity validation', () => {
+  test('rejects a private Agent mail body whose bytes no longer match its digest', () => {
+    using data = fixture();
+    const digest = createHash('sha256').update('hello').digest('hex');
+    data.database
+      .query(`INSERT INTO agent_mail_bodies(session_id,body_id,integrity_identifier,byte_length,body_text,created_at_ms)
+      VALUES ('session-1',?,?,5,'hello',1)`)
+      .run(`pa_${digest}`, `sha256:${digest}`);
+    expect(
+      validateKiteSessionStoreContinuity({ database: data.database, codec }).artifacts,
+    ).toMatchObject({ agentMailBody: 1 });
+    data.database.query("UPDATE agent_mail_bodies SET body_text='world'").run();
+    expect(() => validateKiteSessionStoreContinuity({ database: data.database, codec })).toThrow(
+      'mail body',
+    );
+  });
+  test('checks private checkpoint and followup admission artifacts', () => {
+    using data = fixture();
+    const store = createKiteHomeArtifactStore(data.database);
+    const canonicalJson = '{"artifactFormatVersion":1,"messages":[]}';
+    const ref = <Kind extends 'subagent_checkpoint' | 'agent_followup_admission'>(
+      kind: Kind,
+      character: string,
+    ) => ({
+      artifactId: `pa_${character.repeat(64)}`,
+      kind,
+      integrityIdentifier: `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`,
+      byteLength: Buffer.byteLength(canonicalJson),
+    });
+    store.writeSubagentCheckpoint({
+      ref: ref('subagent_checkpoint', 'a'),
+      artifactFormatVersion: 1,
+      canonicalJson,
+      createdAt: 1,
+    });
+    store.writeAgentFollowupAdmission({
+      ref: ref('agent_followup_admission', 'b'),
+      artifactFormatVersion: 1,
+      canonicalJson,
+      createdAt: 1,
+    });
+    expect(
+      validateKiteSessionStoreContinuity({ database: data.database, codec }).artifacts,
+    ).toMatchObject({ subagentCheckpoint: 1, agentFollowupAdmission: 1 });
+    data.database.query("UPDATE subagent_checkpoint_artifacts SET canonical_json='{}'").run();
+    expect(() => validateKiteSessionStoreContinuity({ database: data.database, codec })).toThrow();
+  });
   test('reads every persisted Session through production readers and counts it in the directory', () => {
     using data = fixture();
     const { database } = data;

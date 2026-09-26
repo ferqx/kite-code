@@ -38,6 +38,33 @@ describe('Builtin mechanism authority', () => {
     ).toThrow(BuiltinMechanismAuthorityError);
   });
 
+  test('accepts one Agent mailbox authority for task control and rejects mixed owners', () => {
+    const agentMailbox = Object.freeze({
+      caller: Object.freeze({ sessionId: 'source' }),
+      listAgents: async () => ({ ok: false }),
+      waitAgent: async () => ({ ok: false }),
+      submitMessage: async () => ({ ok: true }),
+      interruptAgent: async () => ({ ok: false }),
+    });
+    const taskControl = Object.freeze({
+      cancelTask: async () => ({}),
+      readTask: async () => ({}),
+      waitTasks: async () => ({}),
+    });
+    expect(
+      mergeBuiltinMechanismBundle({
+        executionMechanism: 'task_control',
+        prepared: Object.freeze({ agentMailbox }),
+      }),
+    ).toEqual({ agentMailbox });
+    expect(() =>
+      mergeBuiltinMechanismBundle({
+        executionMechanism: 'task_control',
+        prepared: Object.freeze({ agentMailbox, taskControl }),
+      }),
+    ).toThrow(BuiltinMechanismAuthorityError);
+  });
+
   test('rejects duplicate or mismatched mechanism owners fail closed', () => {
     const mcp = Object.freeze({
       runtime: Object.freeze({ callCapability: async () => Object.freeze({}) }),

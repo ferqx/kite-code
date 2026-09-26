@@ -68,6 +68,68 @@ function configured() {
 }
 
 describe('ResourceBudget', () => {
+  test('admits a one-model zero-capability child ceiling and rejects Tool, Shell, writer, and child reservations', () => {
+    const childBudget = {
+      ...LIMITED_RESOURCE_BUDGET_,
+      maxTurns: 1,
+      maxModelRequests: 1,
+      maxToolInvocations: 0,
+      maxArtifactBytes: 0,
+      maxConcurrentSubagents: 0,
+      maxConcurrentWriters: 0,
+      maxConcurrentToolInvocations: 0,
+      maxConcurrentShellInvocations: 0,
+    };
+    const initial = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'restricted-child',
+      userId: 'u',
+      workspace: '/',
+    });
+    const active = reduceResourceBudgetState(initial.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: '2026-07-30T00:00:00Z',
+      deadlineAt: '2026-07-30T00:01:00Z',
+      budget: childBudget,
+    });
+    const modelBase = usage({ inputTokens: 1 });
+    const modelUpper: ResourceUsage = {
+      ...modelBase,
+      counters: { ...modelBase.counters, modelRequests: 1 },
+    };
+    expect(() =>
+      reduceResourceBudgetState(active, {
+        type: 'resource_budget.reserved',
+        reservation: {
+          ...reservation('model-1', 'model-invocation:model-1', modelUpper),
+          resourceKind: 'model',
+        },
+      }),
+    ).not.toThrow();
+    for (const [kind, field] of [
+      ['tool', 'activeToolInvocations'],
+      ['shell', 'activeShellInvocations'],
+      ['writer', 'activeWriters'],
+      ['subagent', 'activeSubagents'],
+    ] as const) {
+      const base = usage({ toolInvocations: 1 });
+      const upper: ResourceUsage = {
+        ...base,
+        gauges: { ...base.gauges, [field]: 1 },
+      };
+      expect(() =>
+        reduceResourceBudgetState(active, {
+          type: 'resource_budget.reserved',
+          reservation: {
+            ...reservation(`${kind}-1`, `${kind}-invocation`, upper),
+            resourceKind: kind === 'subagent' ? 'subagent' : 'tool',
+          },
+        }),
+      ).toThrow('Resource budget exhausted');
+    }
+  });
+
   test('freezes the D-11 limited and internal ceilings and allows only tightening', () => {
     expect(LIMITED_RESOURCE_BUDGET_).toMatchObject({
       maxRunDurationMs: 1_800_000,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
@@ -32,6 +33,7 @@ import type {
 } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#kite-service/config/index';
 import { computeExecutionBoundaryDigest } from '#kite-service/config/index';
+import type { ChildAgentMailFactory } from '../agent-mail-child-input';
 import type { ToolExecutionResult } from '../tool-result';
 import {
   type AfterTurnContinuationReservation,
@@ -41,9 +43,11 @@ import {
 } from './after-turn-continuation';
 import {
   BackgroundSettlementAdmissionError,
+  type BackgroundSubagentCompletionNotification,
   type BackgroundSubagentRuntime,
   backgroundSubagentOwnerKey,
 } from './background-runtime';
+import type { StagedChildSession } from './child-session-acceptance';
 import { serializeSubagentContinuation, subagentContinuationCursorId } from './continuation-codec';
 import { subagentResultFromObservation } from './observation-codec';
 import {
@@ -59,6 +63,114 @@ type SubagentStartArguments = {
   background?: boolean;
   result_disposition?: 'required' | 'after_turn';
 };
+
+export interface BackgroundAgentSettlementCommitInput {
+  readonly notification: Readonly<BackgroundSubagentCompletionNotification>;
+  readonly resultEvent: Extract<
+    import('@kite-ai/runtime-host').StateRuntimeEvent,
+    { type: 'subagent.background_result_persisted' }
+  >;
+  readonly grantDigest: string;
+  readonly parentCapabilityInvocationId: string;
+  readonly readResultArtifact: (
+    ref: import('@kite-ai/builtin-runtime/subagent').SubagentResultArtifactRef,
+    taskId: string,
+  ) => Readonly<Record<string, unknown>>;
+  readonly reply?: ReturnType<typeof prepareBackgroundAgentTerminalReply>;
+}
+
+/** Private status notice derived once from the immutable first-turn terminal. */
+export function prepareBackgroundAgentTerminalReply(input: {
+  readonly sessionId: string;
+  readonly notification: Readonly<BackgroundSubagentCompletionNotification>;
+  readonly parentModelInvocationId: string;
+  readonly parentCapabilityInvocationId: string;
+  readonly sequence: number;
+  readonly acceptedAtMs: number;
+}): Readonly<{
+  event: Extract<
+    import('@kite-ai/runtime-host').StateRuntimeEvent,
+    { type: 'agent.mail_accepted' }
+  >;
+  mutation: Extract<
+    import('@kite-ai/runtime-host/storage').RuntimeAgentMailboxMutation,
+    { kind: 'accept_mail' }
+  >;
+}> {
+  const { notification } = input;
+  if (
+    !input.sessionId ||
+    !input.parentModelInvocationId ||
+    !input.parentCapabilityInvocationId ||
+    !Number.isSafeInteger(input.sequence) ||
+    input.sequence < 1 ||
+    !Number.isSafeInteger(input.acceptedAtMs) ||
+    input.acceptedAtMs < 0 ||
+    notification.taskId === input.sessionId ||
+    (notification.status !== 'completed' &&
+      notification.status !== 'failed' &&
+      notification.status !== 'cancelled' &&
+      notification.status !== 'interrupted' &&
+      notification.status !== 'exhausted' &&
+      notification.status !== 'suspended')
+  )
+    throw new Error('Background Agent reply source is invalid.');
+  const hash = (text: string) => createHash('sha256').update(text).digest('hex');
+  const messageId = `mail_${hash(
+    JSON.stringify([
+      'background_terminal_reply_v1',
+      input.sessionId,
+      notification.taskId,
+      notification.notificationId,
+    ]),
+  )}`;
+  const bodyText = `Agent task ${notification.taskId} ${notification.status}. Use task_read with this task_id for the full result.`;
+  const byteLength = Buffer.byteLength(bodyText, 'utf8');
+  if (byteLength < 1 || byteLength > 4_096)
+    throw new Error('Background Agent reply body exceeds its private bound.');
+  const bodyHex = hash(bodyText);
+  const bodyDigest = `sha256:${bodyHex}`;
+  const source = Object.freeze({
+    runId: notification.originRunId,
+    turnId: notification.originTurnId,
+    modelInvocationId: input.parentModelInvocationId,
+    toolCallId: notification.originToolCallId,
+    effectAttemptId: `${input.parentCapabilityInvocationId}:attempt:${notification.attempt}`,
+    sourceTaskId: notification.taskId,
+  });
+  const bodyRef = Object.freeze({
+    artifactId: `pa_${bodyHex}`,
+    kind: 'agent_mail' as const,
+    integrityIdentifier: bodyDigest,
+    byteLength,
+  });
+  const event = Object.freeze({
+    type: 'agent.mail_accepted' as const,
+    messageId,
+    senderAgentId: notification.taskId,
+    targetAgentId: input.sessionId,
+    mode: 'reply' as const,
+    source,
+    bodyRef,
+    bodyDigest,
+    sequence: input.sequence,
+  });
+  const mutation = Object.freeze({
+    kind: 'accept_mail' as const,
+    messageId,
+    senderAgentId: notification.taskId,
+    targetAgentId: input.sessionId,
+    mode: 'reply' as const,
+    source,
+    bodyRef,
+    bodyDigest,
+    sequence: input.sequence,
+    bodyText,
+    requestDigest: hash(JSON.stringify([messageId, input.sessionId, 'reply', bodyDigest, source])),
+    acceptedAtMs: input.acceptedAtMs,
+  });
+  return Object.freeze({ event, mutation });
+}
 
 type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<
   SubagentLifecycleArtifactAccess,
@@ -169,11 +281,27 @@ export interface TaskToolDeps {
     readonly ownerKey: string;
     readonly recoveryIdentityKey: string;
   };
+  /** Exact background grant binding for private child mail at model admission. */
+  childAgentMailFactory?: ChildAgentMailFactory;
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
     getState(): Readonly<import('@kite-ai/runtime-host/kernel-adapter').RuntimeState>;
     persistEvents(events: import('@kite-ai/runtime-host').StateRuntimeEvent[]): Promise<boolean>;
   };
+  /** Active Tool effect only: child tree facts share the dispatch-intent transaction. */
+  commitAgentMailboxFacts?: (input: {
+    readonly events: readonly import('@kite-ai/runtime-host').StateRuntimeEvent[];
+    readonly mutations: readonly import('@kite-ai/runtime-host/storage').RuntimeAgentMailboxMutation[];
+  }) => Promise<readonly import('@kite-ai/runtime-host').StateRuntimeEvent[]>;
+  currentExecutionGeneration?: () => string;
+  /** Host Session mailbox owns atomic result plus Agent terminal settlement. */
+  commitBackgroundAgentSettlement?: (
+    input: BackgroundAgentSettlementCommitInput,
+  ) => Promise<
+    ReturnType<
+      import('@kite-ai/runtime-host/kernel-adapter').StateRuntimeSession['commitBackgroundAgentSettlement']
+    >
+  >;
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
@@ -182,6 +310,13 @@ export interface TaskToolDeps {
   subagentRuntime?: SubagentInvocationRuntime;
   /** Execution-host owner for admitted background children. */
   backgroundSubagentRuntime?: BackgroundSubagentRuntime;
+  /** Independent child admission is staged until the parent Tool receipt commits. */
+  stageIndependentChild?: (child: StagedChildSession) => SubAgentResult;
+  /** App-injected private child checkpoint writer. */
+  checkpointArtifacts?: Pick<
+    import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactStore,
+    'write'
+  >;
   /** Binds eligible terminal reports to the existing Host Session mailbox. */
   afterTurnContinuationRuntime?: AfterTurnContinuationRuntime;
   toolDispatcher?: import('./types').SubAgentToolDispatcher;
@@ -236,6 +371,7 @@ export async function executePipelineIssuedSubagentStart(
   deps: TaskToolDeps,
   args: SubagentStartArguments,
 ): Promise<SubAgentResult> {
+  const independentChild = args.background === true && deps.stageIndependentChild !== undefined;
   if (
     args.result_disposition === 'after_turn' &&
     (args.background !== true || deps.config.features?.afterTurnContinuation !== true)
@@ -248,7 +384,13 @@ export async function executePipelineIssuedSubagentStart(
     !deps.modelInvocationPersistence ||
     !deps.modelInvocationParentId ||
     !deps.modelInvocationParentToolCallId ||
+    (independentChild &&
+      (!deps.threadId ||
+        !deps.subagentLifecyclePersistence ||
+        !deps.afterTurnContinuationRuntime ||
+        (args.result_disposition === 'after_turn' && !deps.model))) ||
     (args.background === true &&
+      !independentChild &&
       (!deps.backgroundSubagentRuntime ||
         !deps.backgroundModelInvocationPersistence ||
         !deps.threadId ||
@@ -359,6 +501,17 @@ export async function executePipelineIssuedSubagentStart(
       parentToolCallId: deps.modelInvocationParentToolCallId,
     },
   });
+  const childAgentMail =
+    args.background === true && !independentChild
+      ? deps.childAgentMailFactory?.({
+          sessionId: deps.threadId!,
+          agentId: grant.childInvocationId,
+          taskId: grant.childInvocationId,
+          grantId: grant.grantId,
+          grantDigest: `sha256:${digestCapabilityValue(grant)}`,
+          persistence: backgroundPersistence ?? deps.modelInvocationPersistence,
+        })
+      : undefined;
   let backgroundOrigin:
     | Readonly<{
         originRunId: string;
@@ -384,6 +537,24 @@ export async function executePipelineIssuedSubagentStart(
       originTurnId: backgroundLifecycleState.turn.turnId,
       originToolCallId: deps.modelInvocationParentToolCallId,
       attempt: deps.subagentInvocationIdentity.attempt,
+    });
+  }
+  if (args.background === true && deps.stageIndependentChild && backgroundOrigin) {
+    return deps.stageIndependentChild({
+      grant,
+      name: args.name,
+      role: args.subagent_type,
+      originRunId: backgroundOrigin.originRunId,
+      originTurnId: backgroundOrigin.originTurnId,
+      disposition: args.result_disposition === 'after_turn' ? 'after_turn' : 'required',
+      ...(args.result_disposition === 'after_turn' && deps.model
+        ? {
+            afterTurn: {
+              config: deps.config,
+              model: deps.model,
+            },
+          }
+        : {}),
     });
   }
   let afterTurnReservation: AfterTurnContinuationReservation | undefined;
@@ -445,11 +616,16 @@ export async function executePipelineIssuedSubagentStart(
         model: deps.model,
         descendantResourceAdmission: deps.descendantResourceAdmission,
         modelEffectCoordinator: deps.modelEffectCoordinator,
-        modelInvocationPersistence: backgroundPersistence ?? deps.modelInvocationPersistence,
+        modelInvocationPersistence:
+          childAgentMail?.modelInvocationPersistence ??
+          backgroundPersistence ??
+          deps.modelInvocationPersistence,
+        ...(childAgentMail ? { agentMail: childAgentMail.agentMail } : {}),
         modelInvocationParentId: deps.modelInvocationParentId,
         modelInvocationParentToolCallId: deps.modelInvocationParentToolCallId,
         modelInvocationParentReservationId: childModelParentReservationId,
         childInvocationId,
+        checkpointArtifacts: deps.checkpointArtifacts,
         subagentGrantContext: {
           parentInvocationId: deps.subagentInvocationIdentity.invocationId,
           authorizationDigest: deps.subagentInvocationIdentity.authorizationDigest,
@@ -594,10 +770,20 @@ export async function executePipelineIssuedSubagentStart(
               'Background sub-agent completion origin does not match its admitted work root.',
             );
           }
+          const settlementState = detachedDeps.modelInvocationPersistence!.getState();
+          const priorResult = Object.values(settlementState.capabilities.invocations)
+            .map((invocation) => invocation.subagentProviderLifecycle?.backgroundResult)
+            .find(
+              (result) =>
+                result?.taskId === notification.taskId &&
+                result.artifactIntegrityIdentifier ===
+                  notification.resultArtifact.integrityIdentifier,
+            );
           const afterTurn = afterTurnReservation
             ? {
                 reservationId: afterTurnReservation.reservationId,
-                admissionRevision: detachedDeps.modelInvocationPersistence!.getState().revision + 1,
+                admissionRevision:
+                  priorResult?.afterTurn?.admissionRevision ?? settlementState.revision + 1,
                 phase: deps.phase === 'planning' ? ('planning' as const) : ('building' as const),
                 status: notification.status as
                   | 'completed'
@@ -620,6 +806,7 @@ export async function executePipelineIssuedSubagentStart(
             taskId: notification.taskId,
             notificationId: notification.notificationId,
             artifactIntegrityIdentifier: notification.resultArtifact.integrityIdentifier,
+            ...(notification.checkpointRef ? { checkpointRef: notification.checkpointRef } : {}),
             shortReport: notification.shortReport,
             source: notification.source,
             modelRole: notification.modelRole,
@@ -631,15 +818,45 @@ export async function executePipelineIssuedSubagentStart(
           } as const;
           let persisted = false;
           try {
-            persisted = await detachedDeps.modelInvocationPersistence!.persistEvents([
-              recoveryEvent,
-            ]);
+            if (detachedDeps.commitBackgroundAgentSettlement) {
+              await detachedDeps.commitBackgroundAgentSettlement({
+                notification,
+                resultEvent: recoveryEvent,
+                grantDigest: `sha256:${digestCapabilityValue(grant)}`,
+                parentCapabilityInvocationId: grant.parentInvocationId,
+                readResultArtifact: (ref, taskId) =>
+                  backgroundRuntime.readResultArtifact(notification.ownerKey, taskId, ref),
+              });
+              persisted = true;
+            } else {
+              persisted = await detachedDeps.modelInvocationPersistence!.persistEvents([
+                recoveryEvent,
+              ]);
+            }
           } catch {
             throw new BackgroundSettlementAdmissionError(recoveryEvent);
           }
           if (!persisted) {
             throw new BackgroundSettlementAdmissionError(recoveryEvent);
           }
+          const admitted = Object.values(
+            detachedDeps.modelInvocationPersistence!.getState().capabilities.invocations,
+          ).filter((invocation) => {
+            const result = invocation.subagentProviderLifecycle?.backgroundResult;
+            return (
+              result?.taskId === notification.taskId &&
+              result.notificationId === notification.notificationId &&
+              result.artifactIntegrityIdentifier ===
+                notification.resultArtifact.integrityIdentifier &&
+              result.originRunId === notification.originRunId &&
+              result.originTurnId === notification.originTurnId &&
+              result.originToolCallId === notification.originToolCallId &&
+              result.attempt === notification.attempt &&
+              JSON.stringify(result.checkpointRef ?? null) ===
+                JSON.stringify(notification.checkpointRef ?? null)
+            );
+          });
+          if (admitted.length !== 1) throw new BackgroundSettlementAdmissionError(recoveryEvent);
           if (afterTurnReservation && afterTurn) {
             await deps.afterTurnContinuationRuntime!.deliver({
               sessionId: deps.threadId!,
@@ -907,6 +1124,7 @@ export async function executePipelineIssuedSubagentResume(
         modelInvocationParentToolCallId: deps.modelInvocationParentToolCallId,
         modelInvocationParentReservationId: deps.modelInvocationParentReservationId,
         childInvocationId: continuation.id,
+        checkpointArtifacts: deps.checkpointArtifacts,
         subagentGrantContext: {
           parentInvocationId: deps.subagentInvocationIdentity.invocationId,
           authorizationDigest: deps.subagentInvocationIdentity.authorizationDigest,
@@ -1071,8 +1289,11 @@ function stableBudgetCeiling(
     : (state ?? null);
 }
 
-async function recordSubagentDispatchIntent(
-  deps: TaskToolDeps,
+export async function recordSubagentDispatchIntent(
+  deps: Pick<
+    TaskToolDeps,
+    'subagentLifecyclePersistence' | 'commitAgentMailboxFacts' | 'currentExecutionGeneration'
+  >,
   grant: Readonly<
     | import('@kite-ai/runtime-spi').SubagentDelegationGrant
     | import('@kite-ai/runtime-spi').SubagentResumeGrant
@@ -1086,8 +1307,13 @@ async function recordSubagentDispatchIntent(
     );
   }
   const dispatchIntentDigest = subagentDispatchIntentDigest(grant);
+  const prior =
+    deps.subagentLifecyclePersistence.getState().capabilities.invocations[grant.parentInvocationId]
+      ?.subagentProviderLifecycle;
+  if (prior?.dispatchIntentDigest === dispatchIntentDigest && prior.status === 'intent_recorded')
+    return dispatchIntentDigest;
   const recordedAt = new Date().toISOString();
-  const ok = await deps.subagentLifecyclePersistence.persistEvents([
+  const events: import('@kite-ai/runtime-host').StateRuntimeEvent[] = [
     ...preparationEvents,
     {
       type: 'capability.subagent_dispatch_intent_recorded',
@@ -1113,7 +1339,50 @@ async function recordSubagentDispatchIntent(
           },
         ]
       : []),
-  ]);
+  ];
+  let ok: boolean;
+  if (
+    creating &&
+    grant.purpose === 'start' &&
+    deps.commitAgentMailboxFacts &&
+    deps.currentExecutionGeneration
+  ) {
+    const state = deps.subagentLifecyclePersistence.getState();
+    const agentId = grant.childInvocationId;
+    const ownerGeneration = deps.currentExecutionGeneration();
+    events.push(
+      {
+        type: 'agent.created',
+        agentId,
+        parentAgentId: state.session.threadId,
+        initialTaskId: agentId,
+      },
+      {
+        type: 'agent.turn_started',
+        agentId,
+        taskId: agentId,
+        turnOrdinal: 1,
+        ownerGeneration,
+        grantDigest: `sha256:${digestCapabilityValue(grant)}`,
+      },
+    );
+    const committed = await deps.commitAgentMailboxFacts({
+      events,
+      mutations: [
+        {
+          kind: 'create_agent',
+          agentId,
+          parentAgentId: state.session.threadId,
+          initialTaskId: agentId,
+          createdAtMs: Date.now(),
+        },
+        { kind: 'turn_started', agentId, taskId: agentId, turnOrdinal: 1 },
+      ],
+    });
+    ok = committed.length === events.length;
+  } else {
+    ok = await deps.subagentLifecyclePersistence.persistEvents(events);
+  }
   const fact =
     deps.subagentLifecyclePersistence.getState().capabilities.invocations[grant.parentInvocationId]
       ?.subagentProviderLifecycle;
@@ -1504,6 +1773,7 @@ function toPrivatePayload(result: SubAgentResult): import('@kite-ai/runtime-spi'
     summary: result.summary,
     toolCallCount: result.toolCallCount,
     durationMs: result.durationMs,
+    checkpointRef: result.checkpointRef ?? null,
     terminalStatus: result.terminalStatus ?? null,
     error: result.error ?? null,
     failureDiagnostic: result.failureDiagnostic ?? null,

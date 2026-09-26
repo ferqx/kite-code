@@ -21,6 +21,9 @@ export interface AppToolTurnContextInput {
   readonly workspaceTrust?: CapabilityTurnContext['workspaceTrust'];
   readonly hasTaskAdapter?: boolean;
   readonly toolSearchEnabled?: boolean;
+  /** True only when this Session has an admitted Host Agent-mailbox port. */
+  readonly agentMailboxAvailable?: boolean;
+  readonly agentMailboxQueueOnlyAvailable?: boolean;
   readonly activeSkillFrames?: readonly { readonly activationId: string }[];
   readonly skillCatalog?: SkillCatalogSnapshot;
 }
@@ -31,7 +34,14 @@ export type AppToolTurnContext = BuiltinCapabilityTurnContext & {
 
 /** App projects ambient configuration into immutable Builtin turn facts once. */
 export function createAppToolTurnContext(input: AppToolTurnContextInput): AppToolTurnContext {
-  const featureFlags = input.config ? getFeatureFlags(input.config) : undefined;
+  const configuredFlags = input.config ? getFeatureFlags(input.config) : undefined;
+  const featureFlags = configuredFlags
+    ? Object.freeze({
+        ...configuredFlags,
+        agentMailbox: input.agentMailboxAvailable === true,
+        agentMailboxQueueOnly: input.agentMailboxQueueOnlyAvailable === true,
+      })
+    : undefined;
   const context = createBuiltinCapabilityTurnContext({
     workspace: input.workspace,
     threadId: input.threadId,

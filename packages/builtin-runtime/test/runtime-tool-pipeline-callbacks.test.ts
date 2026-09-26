@@ -283,8 +283,8 @@ describe('Builtin unified Tool Pipeline callbacks', () => {
     const ordinary = prepareOrdinary(ordinaryFixture(projection, callbacks));
     const dynamic = prepareDynamic(dynamicFixture(projection, callbacks));
 
-    expect(projection.entries).toHaveLength(32);
-    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(24);
+    expect(projection.entries).toHaveLength(37);
+    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(29);
     expect(projection.entries.filter((entry) => entry.visibility === 'internal')).toHaveLength(8);
     expect(Object.isFrozen(projection)).toBe(true);
     expect(Object.isFrozen(callbacks)).toBe(true);

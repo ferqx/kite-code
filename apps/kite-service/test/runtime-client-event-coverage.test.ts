@@ -39,6 +39,33 @@ test('keeps interactive and Subagent lifecycle facts client-visible', () => {
   }
 });
 
+test('Agent mailbox stages are client-visible metadata without private body fields', () => {
+  const entries = runtimeClientEventCoverageEntries();
+  for (const type of [
+    'agent.mail_accepted',
+    'agent.mail_input_prepared',
+    'agent.followup_turn_settled',
+  ] as const)
+    expect(entries.get(type)).toBe('client_visible');
+  const accepted = {
+    type: 'agent.mail_status',
+    status: 'accepted',
+    targetAgentId: 'child',
+    messageIds: ['mail-1'],
+  };
+  expect(isRuntimeClientEvent(accepted)).toBe(true);
+  expect(isRuntimeClientEvent({ ...accepted, bodyText: 'private' })).toBe(false);
+  expect(
+    isRuntimeClientEvent({
+      type: 'agent.mail_status',
+      status: 'result_settled',
+      submissionId: 'submission-1',
+      taskId: 'task-1',
+      resultStatus: 'completed',
+    }),
+  ).toBe(true);
+});
+
 test('projects every ask_user question through the event path', () => {
   const projected = projectRuntimeClientEvent(
     {
@@ -279,6 +306,49 @@ const SUSPENSION_SNAPSHOT = {
 function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], RuntimeEvent> {
   const event = (value: object): RuntimeEvent => value as RuntimeEvent;
   return new Map([
+    [
+      'agent.mail_accepted',
+      event({
+        type: 'agent.mail_accepted',
+        messageId: 'mail-1',
+        senderAgentId: 'parent',
+        targetAgentId: 'child',
+        mode: 'queue_only',
+        source: {
+          runId: 'run-1',
+          turnId: 'turn-1',
+          modelInvocationId: 'model-1',
+          toolCallId: 'tool-1',
+          effectAttemptId: 'attempt-1',
+        },
+        bodyRef: PRIVATE_REF('agent_mail', 'a'),
+        bodyDigest: `sha256:${'a'.repeat(64)}`,
+        sequence: 1,
+      }),
+    ],
+    [
+      'agent.mail_input_prepared',
+      event({
+        type: 'agent.mail_input_prepared',
+        targetAgentId: 'child',
+        invocationId: 'model-2',
+        modelAdmissionId: 'admission-1',
+        fromSequence: 0,
+        throughSequence: 1,
+        messageIds: ['mail-1'],
+      }),
+    ],
+    [
+      'agent.followup_turn_settled',
+      event({
+        type: 'agent.followup_turn_settled',
+        sourceSessionId: 'parent',
+        submissionId: 'submission-1',
+        targetRunId: 'run-2',
+        taskId: 'task-2',
+        status: 'completed',
+      }),
+    ],
     [
       'approval.granted',
       event({
@@ -698,6 +768,7 @@ function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], 
     ],
     ['task.cancelled', event({ type: 'task.cancelled', taskId: 'task-1', reason: 'Cancelled.' })],
     ['task.completed', event({ type: 'task.completed', taskId: 'task-1', turnId: 'turn-1' })],
+    ['task.failed', event({ type: 'task.failed', taskId: 'task-1', reason: 'Failed.' })],
     [
       'tool.cancelled',
       event({ type: 'tool.cancelled', toolCallId: 'tool-1', reason: 'Cancelled.' }),

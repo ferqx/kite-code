@@ -21,6 +21,7 @@ export const STATE_STATE_TOP_LEVEL_FIELDS_ = Object.freeze([
   'sessionCommandGrants',
   'approvalReceipts',
   'recoveryState',
+  'retainedResourceBudgets',
   'resourceBudget',
   'revision',
   'schemaVersion',

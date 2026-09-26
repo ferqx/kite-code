@@ -18,6 +18,13 @@ import {
   type ToolRecoveryJournal,
   toolFailureInstanceId,
   toolInvocationFingerprint,
+  verifiedDispatchedChildDelegationIds,
+  verifiedLiveAfterTurnReservationIds,
+  verifiedPendingAfterTurnReservationIds,
+  verifiedPendingFollowupReservationIds,
+  verifiedPreparedCurrentTurnModelReservationIds,
+  verifiedPreparedFollowupModelReservationIds,
+  verifiedSealedAfterTurnReportReservationIds,
 } from '@kite-ai/agent-kernel';
 
 export const runtimeHostStateAdvanceToolRecoveryResponse = advanceToolRecoveryResponse;
@@ -36,6 +43,20 @@ export const runtimeHostStateHasPendingSubagentCleanupAuthority =
   hasPendingSubagentCleanupAuthority;
 
 export type RuntimeHostStateRestartRecoveryFacts = StateRestartRecoveryFacts;
+export const runtimeHostStateVerifiedPendingAfterTurnReservationIds =
+  verifiedPendingAfterTurnReservationIds;
+export const runtimeHostStateVerifiedLiveAfterTurnReservationIds =
+  verifiedLiveAfterTurnReservationIds;
+export const runtimeHostStateVerifiedPendingFollowupReservationIds =
+  verifiedPendingFollowupReservationIds;
+export const runtimeHostStateVerifiedDispatchedChildDelegationIds =
+  verifiedDispatchedChildDelegationIds;
+export const runtimeHostStateVerifiedPreparedFollowupModelReservationIds =
+  verifiedPreparedFollowupModelReservationIds;
+export const runtimeHostStateVerifiedPreparedCurrentTurnModelReservationIds =
+  verifiedPreparedCurrentTurnModelReservationIds;
+export const runtimeHostStateVerifiedSealedAfterTurnReportReservationIds =
+  verifiedSealedAfterTurnReportReservationIds;
 export type StateToolRecoveryJournal = ToolRecoveryJournal;
 
 /** Host-facing projection of the Kernel-owned State restart policy. */

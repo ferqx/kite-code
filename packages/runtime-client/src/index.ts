@@ -44,4 +44,11 @@ export interface RuntimeHistoryClient {
     throughSequence?: number,
     options?: { readonly signal?: AbortSignal },
   ): Promise<RuntimeHistorySessionTranscript>;
+  /** Explicit parent-authorized read of an immediate private child Session. */
+  loadChildSession?(
+    parentSessionId: string,
+    childSessionId: string,
+    throughSequence?: number,
+    options?: { readonly signal?: AbortSignal },
+  ): Promise<RuntimeHistorySessionTranscript>;
 }

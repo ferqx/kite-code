@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type {
+  RuntimeChildSessionIntentMutation,
   RuntimeEventMetadata,
   RuntimeRunStorePort,
   RuntimeSnapshotMetadata,
@@ -7,7 +8,10 @@ import type {
   RuntimeStoredCommandReceipt,
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
-import { assertRuntimeRunStartResourceResult } from '@kite-ai/runtime-host/storage';
+import {
+  assertRuntimeRunStartResourceResult,
+  CHILD_SESSION_TASK_USER_GOAL,
+} from '@kite-ai/runtime-host/storage';
 import type {
   SqliteWorkspaceControllerOperationResult,
   SqliteWorkspaceInitialControllerInput,
@@ -43,6 +47,8 @@ interface SnapshotBoundaryRow {
 export interface SqliteWorkspaceSessionCreationInput<Event, State> {
   readonly runtime: RuntimeTransactionInput<Event, State>;
   readonly controller: SqliteWorkspaceInitialControllerInput;
+  /** Exact parent receipt intent authorizing an internal child Session. */
+  readonly childSessionIntent?: RuntimeChildSessionIntentMutation;
   /** Store 9-only Host recovery identity committed with the initial Session. */
   readonly recoveryIdentity?: string;
 }
@@ -80,6 +86,11 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   readonly readSnapshotRevision: (sessionId: string) => number | null;
   readonly lastEventPosition: (sessionId: string) => number;
   readonly ensureSession: (sessionId: string, state?: State) => void;
+  readonly admitChildSession?: (
+    intent: RuntimeChildSessionIntentMutation,
+    state: State,
+    mode: 'create' | 'replay',
+  ) => void;
   readonly insertEvents: (
     sessionId: string,
     events: readonly Event[],
@@ -119,7 +130,16 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   readonly runStore?: RuntimeRunStorePort;
   readonly beforeWrite?: () => void;
   readonly afterPersistInTransaction?: (
-    channel: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+    channel:
+      | 'session_create'
+      | 'decision'
+      | 'attempt_start'
+      | 'receipt_evidence'
+      | 'terminal_recovery',
+    transaction: RuntimeTransactionInput<Event, State>,
+  ) => void;
+  /** Only Store13's fenced child owner may authorize a receipt-free internal followup Run. */
+  readonly authorizeInternalFollowupRunStart?: (
     transaction: RuntimeTransactionInput<Event, State>,
   ) => void;
   /** Store 9 injects its first-write-aware transaction owner instead of opening a second BEGIN. */
@@ -134,7 +154,10 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
 } {
   const receiptWriter = input.receiptWriter ?? createSqliteRuntimeCommandReceiptWriter(input.db);
 
-  const persist = (transaction: RuntimeTransactionInput<Event, State>): RuntimeSnapshotMetadata => {
+  const persist = (
+    transaction: RuntimeTransactionInput<Event, State>,
+    channel?: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+  ): RuntimeSnapshotMetadata => {
     if (
       transaction.requiredEffectLease &&
       !input.hasEffectLease(
@@ -220,23 +243,65 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
         const run = transaction.runMutation.run;
         if (run.originSessionId === undefined) {
           const receipt = transaction.commandReceipt;
-          if (
-            !receipt?.resourceResult ||
-            receipt.scopeSessionId !== run.sessionId ||
-            receipt.commandId !== run.startCommandId ||
-            receipt.targetSessionId !== run.sessionId ||
-            receipt.committedRevision !== run.createdRevision
-          ) {
-            throw new SqliteRuntimeCommandReceiptValidationError(
-              'Runtime Run insert requires its exact Store 8 start resource receipt.',
-            );
-          }
-          try {
-            assertRuntimeRunStartResourceResult(receipt.resourceResult, run);
-          } catch (error) {
-            throw new SqliteRuntimeCommandReceiptValidationError(
-              `Runtime Run start resource receipt is invalid: ${error instanceof Error ? error.message : String(error)}`,
-            );
+          const followup = transaction.followupRunStart;
+          const [prepared, configured, task, turn] =
+            transaction.events as unknown as readonly Record<string, unknown>[];
+          const internalFollowupStart = Boolean(
+            channel === 'decision' &&
+              followup &&
+              !receipt &&
+              !transaction.requiredEffectLease &&
+              transaction.events.length === 4 &&
+              transaction.sessionId === run.sessionId &&
+              run.runId === followup.targetRunId &&
+              run.startCommandId === `followup:${followup.submissionId}` &&
+              run.phase === followup.phase &&
+              run.status === 'queued' &&
+              run.createdRevision === encoded.metadata.stateRevision &&
+              run.lastRevision === run.createdRevision &&
+              prepared?.type === 'agent.followup_turn_prepared' &&
+              prepared.sourceSessionId === followup.sourceSessionId &&
+              prepared.submissionId === followup.submissionId &&
+              prepared.targetRunId === followup.targetRunId &&
+              prepared.taskId === followup.taskId &&
+              prepared.grantDigest === followup.grantDigest &&
+              JSON.stringify(prepared.grantRef) === JSON.stringify(followup.grant.ref) &&
+              JSON.stringify(prepared.checkpointRef) === JSON.stringify(followup.checkpointRef) &&
+              configured?.type === 'resource_budget.configured' &&
+              configured.runId === followup.targetRunId &&
+              task?.type === 'task.started' &&
+              task.taskId === followup.taskId &&
+              task.turnId === followup.targetRunId &&
+              task.userGoal === CHILD_SESSION_TASK_USER_GOAL &&
+              turn?.type === 'turn.started' &&
+              turn.turnId === followup.targetRunId,
+          );
+          if (!internalFollowupStart) {
+            if (
+              !receipt?.resourceResult ||
+              receipt.scopeSessionId !== run.sessionId ||
+              receipt.commandId !== run.startCommandId ||
+              receipt.targetSessionId !== run.sessionId ||
+              receipt.committedRevision !== run.createdRevision
+            ) {
+              throw new SqliteRuntimeCommandReceiptValidationError(
+                'Runtime Run insert requires its exact Store 8 start resource receipt.',
+              );
+            }
+            try {
+              assertRuntimeRunStartResourceResult(receipt.resourceResult, run);
+            } catch (error) {
+              throw new SqliteRuntimeCommandReceiptValidationError(
+                `Runtime Run start resource receipt is invalid: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          } else {
+            if (!input.authorizeInternalFollowupRunStart) {
+              throw new SqliteRuntimeCommandReceiptValidationError(
+                'Runtime internal followup Run has no Store13 owner authority.',
+              );
+            }
+            input.authorizeInternalFollowupRunStart(transaction);
           }
         }
         input.runStore.insert(run);
@@ -282,7 +347,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       // persisting the decision, so a duplicate scoped key rolls back all
       // event/session metadata and snapshot writes as one unit.
       inTransaction(() => {
-        persist(transaction);
+        persist(transaction, channel);
         input.afterPersistInTransaction?.(channel, transaction);
       });
     } catch (error) {
@@ -316,6 +381,22 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
             );
           }
           assertSqliteRuntimeCommandReceipt(commandReceipt, runtime.sessionId);
+          if (
+            input.admitChildSession &&
+            runtime.sessionId.startsWith('child_') &&
+            !creation.childSessionIntent
+          )
+            throw new SqliteRuntimeCommandReceiptValidationError(
+              'Child Session creation requires its exact parent intent.',
+            );
+          if (
+            creation.childSessionIntent &&
+            (creation.childSessionIntent.childThreadId !== runtime.sessionId ||
+              !input.admitChildSession)
+          )
+            throw new SqliteRuntimeCommandReceiptValidationError(
+              'Child Session creation requires its exact Store parent intent.',
+            );
           const persistRecoveryIdentity = (): void => {
             if (!input.initialRecoveryIdentity) {
               if (creation.recoveryIdentity !== undefined) {
@@ -338,6 +419,8 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
               const existing = input.readCommandReceipt!(commandReceipt);
               if (existing) {
                 assertSameCommandReceipt(existing, commandReceipt);
+                if (creation.childSessionIntent)
+                  input.admitChildSession!(creation.childSessionIntent, runtime.snapshot, 'replay');
                 persistRecoveryIdentity();
                 const controller = input.initialController!.create(creation.controller, 'replay');
                 if (controller.status === 'rejected') {
@@ -352,7 +435,10 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
                 };
               }
               input.assertSessionAbsent!(runtime.sessionId);
+              if (creation.childSessionIntent)
+                input.admitChildSession!(creation.childSessionIntent, runtime.snapshot, 'create');
               const metadata = persist(runtime);
+              input.afterPersistInTransaction?.('session_create', runtime);
               persistRecoveryIdentity();
               const controller = input.initialController!.create(creation.controller, 'create');
               if (controller.status === 'rejected') {

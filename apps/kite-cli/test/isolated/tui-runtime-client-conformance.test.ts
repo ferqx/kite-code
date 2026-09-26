@@ -24,6 +24,7 @@ test('TUI runtime facade consumes only an injected Native connection and exposes
     'applyPersistedModelRoute',
     'buildContextStatusSnapshot',
     'cancelRuntimeOperations',
+    'childSessionReader',
     'clearSessionCommandGrants',
     'createSession',
     'deletePersistedSession',

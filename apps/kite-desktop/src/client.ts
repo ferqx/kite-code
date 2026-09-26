@@ -20,6 +20,7 @@ import {
 } from '@kite-ai/runtime-client';
 import type {
   RuntimeApprovalInteraction,
+  RuntimeChildSessionSummary,
   RuntimeCommand,
   RuntimeCommandErrorCode,
   RuntimeInputInteraction,
@@ -107,6 +108,20 @@ export interface DesktopView {
   loadingSession: boolean;
   hasLoadedHistory: boolean;
   background?: Readonly<Record<string, RuntimeClientBackgroundState>>;
+  childSessions?: {
+    readonly parentSessionId: string;
+    readonly entries: readonly RuntimeChildSessionSummary[];
+    readonly loading: boolean;
+    readonly error?: string;
+  };
+  childDetail?: {
+    readonly parentSessionId: string;
+    readonly childSessionId: string;
+    readonly loading: boolean;
+    readonly messages: readonly Message[];
+    readonly projection?: RuntimeSessionProjection;
+    readonly error?: string;
+  };
 }
 
 export async function readCompleteSessionDirectory(
@@ -149,6 +164,8 @@ export class DesktopClient {
   #connection?: KiteAppServerConnection;
   #connectionId?: number;
   #selection?: AbortController;
+  #childRead?: AbortController;
+  #childListRead = 0;
   #selectionLoad?: {
     sessionId: string;
     connection: KiteAppServerConnection;
@@ -164,6 +181,13 @@ export class DesktopClient {
   #mcpRead = 0;
   #skillsRead = 0;
   #unsubscribe?: () => void;
+  #backgroundRefreshTimer?: ReturnType<typeof setInterval>;
+  #backgroundRefreshSessionId?: string;
+  #backgroundRefreshInFlight?: {
+    readonly connection: KiteAppServerConnection;
+    readonly sessionId: string;
+    readonly promise: Promise<unknown>;
+  };
   #admitted = new Set<string>();
   #connecting?: Promise<void>;
   #recovering?: Promise<void>;
@@ -474,6 +498,7 @@ export class DesktopClient {
           : {}),
         background: snapshot.background,
       });
+      this.#syncBackgroundRefresh(connection, snapshot);
       if (resyncSession) {
         // A replacement subscription restores projection, not omitted message events.
         // Retain the body and reuse the existing bounded selection calibration once.
@@ -575,7 +600,11 @@ export class DesktopClient {
     });
   }
   async #detach() {
+    this.#stopBackgroundRefresh();
     this.#selection?.abort();
+    this.#childRead?.abort();
+    this.#childRead = undefined;
+    this.#childListRead++;
     this.#selectionLoad = undefined;
     this.#calibratedSelection = undefined;
     this.#historyCache.clear();
@@ -585,8 +614,61 @@ export class DesktopClient {
     const connection = this.#connection;
     this.#connection = undefined;
     this.#admitted.clear();
-    this.#publish({ connected: false, ready: false, loadingSession: false });
+    this.#publish({
+      connected: false,
+      ready: false,
+      loadingSession: false,
+      childSessions: undefined,
+      childDetail: undefined,
+    });
     if (connection) await connection.close();
+  }
+
+  #stopBackgroundRefresh() {
+    if (this.#backgroundRefreshTimer) clearInterval(this.#backgroundRefreshTimer);
+    this.#backgroundRefreshTimer = undefined;
+    this.#backgroundRefreshSessionId = undefined;
+  }
+
+  #syncBackgroundRefresh(
+    connection: KiteAppServerConnection,
+    snapshot: ReturnType<KiteAppServerConnection['snapshotStore']['getSnapshot']>,
+  ) {
+    // A detached child may settle while the parent generator remains in its
+    // completion wait, so no presentation event is pushed for that partial
+    // result. Query only the selected active Run and keep one read in flight.
+    const sessionId = this.#view.selected;
+    const session = sessionId ? snapshot.sessions[sessionId] : undefined;
+    if (
+      !sessionId ||
+      !connection.runtime.features.backgroundQuery ||
+      connection.status !== 'active' ||
+      !isActiveRun(session?.projection)
+    ) {
+      this.#stopBackgroundRefresh();
+      return;
+    }
+    if (this.#backgroundRefreshSessionId === sessionId) return;
+    this.#stopBackgroundRefresh();
+    this.#backgroundRefreshSessionId = sessionId;
+    const refresh = () => {
+      if (this.#connection !== connection || this.#view.selected !== sessionId) return;
+      if (
+        this.#backgroundRefreshInFlight?.connection === connection &&
+        this.#backgroundRefreshInFlight.sessionId === sessionId
+      )
+        return;
+      const promise = connection.runtime
+        .query({ schema: 'kite.runtime-query.v1', type: 'list_background_executions', sessionId })
+        .catch(() => undefined);
+      this.#backgroundRefreshInFlight = { connection, sessionId, promise };
+      void promise.finally(() => {
+        if (this.#backgroundRefreshInFlight?.promise === promise)
+          this.#backgroundRefreshInFlight = undefined;
+      });
+    };
+    refresh();
+    this.#backgroundRefreshTimer = setInterval(refresh, 1_000);
   }
   async disconnect() {
     ++this.#recoveryGeneration;
@@ -1069,6 +1151,14 @@ export class DesktopClient {
     return sessionId;
   }
   selectSession(sessionId: string): Promise<void> {
+    if (this.#view.childSessions?.entries.some((entry) => entry.sessionId === sessionId))
+      return Promise.reject(new Error('子会话只能通过父 Agent 树读取。'));
+    if (sessionId !== this.#view.selected) {
+      this.#childRead?.abort();
+      this.#childRead = undefined;
+      this.#childListRead++;
+      this.#publish({ childSessions: undefined, childDetail: undefined });
+    }
     const connection = this.#connection;
     if (connection?.status !== 'active') {
       return this.connect().then(() => this.selectSession(sessionId));
@@ -1085,6 +1175,146 @@ export class DesktopClient {
     });
     this.#selectionLoad = { sessionId, connection, promise };
     return promise;
+  }
+
+  async refreshChildSessions(parentSessionId: string): Promise<void> {
+    const connection = this.#requireConnection();
+    if (this.#view.selected !== parentSessionId || !this.#view.ready)
+      throw new Error('请先打开父会话。');
+    const read = ++this.#childListRead;
+    const previous =
+      this.#view.childSessions?.parentSessionId === parentSessionId
+        ? this.#view.childSessions.entries
+        : [];
+    this.#publish({ childSessions: { parentSessionId, entries: previous, loading: true } });
+    try {
+      const entries: RuntimeChildSessionSummary[] = [];
+      let cursor: { updatedAtMs: number; sessionId: string } | undefined;
+      for (;;) {
+        const result = await connection.runtime.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'list_child_sessions',
+          sessionId: parentSessionId,
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        });
+        if (result.status !== 'ok' || !result.childSessions)
+          throw new Error('子会话列表暂时不可用。');
+        if (result.childSessions.some((child) => child.parentSessionId !== parentSessionId))
+          throw new Error('子会话归属与父会话不一致。');
+        entries.push(...result.childSessions);
+        if (entries.length > 1000) throw new Error('子会话列表超出读取上限。');
+        if (!result.nextChildCursor) break;
+        if (
+          cursor &&
+          cursor.sessionId === result.nextChildCursor.sessionId &&
+          cursor.updatedAtMs === result.nextChildCursor.updatedAtMs
+        )
+          throw new Error('子会话列表分页未继续前进。');
+        cursor = result.nextChildCursor;
+      }
+      if (
+        this.#connection === connection &&
+        this.#view.selected === parentSessionId &&
+        read === this.#childListRead
+      ) {
+        if (
+          this.#view.childDetail?.parentSessionId === parentSessionId &&
+          !entries.some((entry) => entry.sessionId === this.#view.childDetail?.childSessionId)
+        )
+          this.leaveChildSession();
+        this.#publish({ childSessions: { parentSessionId, entries, loading: false } });
+      }
+    } catch (error) {
+      if (
+        this.#connection === connection &&
+        this.#view.selected === parentSessionId &&
+        read === this.#childListRead
+      )
+        this.#publish({
+          childSessions: {
+            parentSessionId,
+            entries: previous,
+            loading: false,
+            error: messageOf(error),
+          },
+        });
+    }
+  }
+
+  leaveChildSession() {
+    this.#childRead?.abort();
+    this.#childRead = undefined;
+    this.#publish({ childDetail: undefined });
+  }
+
+  async openChildSession(parentSessionId: string, childSessionId: string): Promise<void> {
+    const connection = this.#requireConnection();
+    if (
+      this.#view.selected !== parentSessionId ||
+      !this.#view.ready ||
+      !this.#view.childSessions?.entries.some(
+        (entry) => entry.parentSessionId === parentSessionId && entry.sessionId === childSessionId,
+      )
+    )
+      throw new Error('请先从父 Agent 树选择子会话。');
+    const loadChildSession = connection.history.loadChildSession;
+    if (!loadChildSession) throw new Error('当前服务不支持子会话历史读取。');
+    this.#childRead?.abort();
+    const controller = new AbortController();
+    this.#childRead = controller;
+    this.#publish({
+      childDetail: { parentSessionId, childSessionId, loading: true, messages: [] },
+    });
+    try {
+      const [transcript, result] = await Promise.all([
+        loadChildSession(parentSessionId, childSessionId, undefined, { signal: controller.signal }),
+        connection.runtime.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_child_session_projection',
+          sessionId: parentSessionId,
+          childSessionId,
+        }),
+      ]);
+      if (result.status !== 'ok' || !result.session) throw new Error('子会话详情暂时不可用。');
+      if (
+        result.session.sessionId !== childSessionId ||
+        transcript.session.sessionId !== childSessionId
+      )
+        throw new Error('子会话详情身份不一致。');
+      const messages = await projectHistory(transcript.records, [], controller.signal);
+      if (
+        !controller.signal.aborted &&
+        this.#childRead === controller &&
+        this.#connection === connection &&
+        this.#view.selected === parentSessionId
+      )
+        this.#publish({
+          childDetail: {
+            parentSessionId,
+            childSessionId,
+            loading: false,
+            messages,
+            projection: result.session,
+          },
+        });
+    } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        this.#childRead === controller &&
+        this.#connection === connection &&
+        this.#view.selected === parentSessionId
+      )
+        this.#publish({
+          childDetail: {
+            parentSessionId,
+            childSessionId,
+            loading: false,
+            messages: [],
+            error: messageOf(error),
+          },
+        });
+    }
   }
 
   async #loadSelection(sessionId: string, connection: KiteAppServerConnection) {

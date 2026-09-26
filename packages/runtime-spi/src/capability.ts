@@ -106,6 +106,10 @@ export interface CapabilityFeatureFlags {
   readonly skillActivation?: boolean;
   /** Structured Runtime configuration; a Task cannot self-authorize cross-turn execution. */
   readonly afterTurnContinuation?: boolean;
+  /** Host-backed Agent mailbox is installed for this exact Session; no grant is implied. */
+  readonly agentMailbox?: boolean;
+  /** QueueOnly Agent mail is installed; only send_message may be visible. */
+  readonly agentMailboxQueueOnly?: boolean;
 }
 
 /** Immutable facts available to a Builtin availability/effects callback. */

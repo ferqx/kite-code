@@ -44,6 +44,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         ['Ctrl+T', translate('help.toggleReasoning')],
         ['Ctrl+E', translate('help.expandInput')],
         ['Ctrl+L', translate('help.clearScreen')],
+        ['Ctrl+G', translate('help.childSessions')],
         ['Shift+Enter', translate('help.newline')],
         ['?', translate('help.open')],
         ['Esc', translate('help.cancelInteraction')],

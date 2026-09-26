@@ -306,17 +306,38 @@ function materializeHistoricalStore(home: string, version: 9 | 11): void {
     }
     const tableColumns =
       version === 9 ? KITE_HOME_STORE_TABLE_COLUMNS : KITE_SESSION_STORE_TABLE_COLUMNS;
+    const historicalTables = new Set(
+      target
+        .query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map(({ name }) => name),
+    );
     for (const [table, columns] of Object.entries(tableColumns)) {
-      if (table === 'kite_meta') continue;
+      if (table === 'kite_meta' || !historicalTables.has(table)) continue;
+      const historicalInfo = target
+        .query<{ name: string; notnull: number; dflt_value: string | null }, []>(
+          `PRAGMA table_info(${table})`,
+        )
+        .all();
+      if (
+        historicalInfo.some(
+          ({ name, notnull, dflt_value }) =>
+            !columns.includes(name) && notnull !== 0 && dflt_value === null,
+        )
+      )
+        throw new Error(`Historical ${table} needs a value absent from the current Store.`);
+      const historicalColumns = historicalInfo
+        .map(({ name }) => name)
+        .filter((name) => columns.includes(name));
       const insert = target.query(
-        `INSERT INTO ${table} (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`,
+        `INSERT INTO ${table} (${historicalColumns.join(',')}) VALUES (${historicalColumns.map(() => '?').join(',')})`,
       );
       for (const row of source
         .query<Record<string, string | number | Uint8Array | null>, []>(
-          `SELECT ${columns.join(',')} FROM ${table}`,
+          `SELECT ${historicalColumns.join(',')} FROM ${table}`,
         )
         .iterate()) {
-        insert.run(...columns.map((column: string) => row[column]!));
+        insert.run(...historicalColumns.map((column: string) => row[column]!));
       }
     }
     for (const row of source

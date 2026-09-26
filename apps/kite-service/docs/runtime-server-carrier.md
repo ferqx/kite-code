@@ -71,10 +71,12 @@ App Server执行未sandboxed host Shell时，Runtime Host generic process port�
 `--kite-internal-process-tree-v1`（source使用同源码child）作为POSIX watchdog；App Server意外死亡会关闭watchdog stdin，watchdog终止
 同process group的实际command。正常EOF/signal仍优先走Host cancel/cleanup。该internal mode不接受普通CLI路由或command args。
 
-同一stdio connection完成initialize后还承载三个exact durable History read。carrier在把logical message交给Runtime Server前识别并验证
+同一stdio connection完成initialize后还承载三个根 Session durable History read；Store11 可另组合显式子 History read。carrier在把logical message交给Runtime Server前识别并验证
 `history/list_sessions`、`history/list_events`和`history/load_session`，调用App composition注入的`RuntimeHistoryClient`；每次调用的
 同步Store读取由同一个SQLite read snapshot包围。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知
 `history/*`方法和malformed params不进入Store。Runtime Server只在该composition中声明History capability，不路由或持有History。
+
+`history/load_child_session` 要求同时携带父、子 Session ID；Store 的受限日志端口在每页读取时重新核验直属血缘，并使用与普通 History 相同的安全事件投影和固定 source sequence 分页。普通 `history/load_session(childId)` 仍拒绝；只有组合了该端口的 App Server 宣告新方法。
 
 同一connection还承载九个fixed App Control方法。Protocol只关闭方法名和外层envelope，carrier再用`kite-app-contract`既有的逐方法
 request/response codec验证Workspace Trust、Provider/model、MCP、Skill、execution与release payload；mutation仍只进入既有共享

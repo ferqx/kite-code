@@ -1,4 +1,10 @@
-export { countPendingSteerInputs } from '@kite-ai/agent-kernel';
+export {
+  childThreadIdForToolAttempt,
+  countPendingSteerInputs,
+  createAgentMessageContextFrame,
+  requiredBackgroundTaskIds,
+  requiredManagedShellIds,
+} from '@kite-ai/agent-kernel';
 export type { RuntimeActionEmission } from './action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './action-emission';
 export type {
@@ -11,6 +17,18 @@ export {
   runtimeHostStateVerifyApprovalBindingDigest,
 } from './approval-binding';
 export { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
+export type {
+  CrossSessionFollowupAdmission,
+  CrossSessionFollowupPolicy,
+  CrossSessionReceiptPreflight,
+  CrossSessionTargetFollowupPolicyProof,
+} from './cross-session-followup';
+export {
+  CrossSessionFollowupAdmissionError,
+  planCrossSessionFirstModelReplacement,
+  planCrossSessionFollowupSlotAcquisition,
+  planCrossSessionTriggerTurnBackup,
+} from './cross-session-followup';
 export type {
   StateDoomLoopCheck,
   StateDoomLoopRequest,
@@ -93,8 +111,16 @@ export {
   runtimeHostStateToolFailureInstanceId,
   runtimeHostStateToolInvocationFingerprint,
   runtimeHostStateToolRecoveryJournalInvalid,
+  runtimeHostStateVerifiedDispatchedChildDelegationIds,
+  runtimeHostStateVerifiedLiveAfterTurnReservationIds,
+  runtimeHostStateVerifiedPendingAfterTurnReservationIds,
+  runtimeHostStateVerifiedPendingFollowupReservationIds,
+  runtimeHostStateVerifiedPreparedCurrentTurnModelReservationIds,
+  runtimeHostStateVerifiedPreparedFollowupModelReservationIds,
+  runtimeHostStateVerifiedSealedAfterTurnReportReservationIds,
 } from './recovery';
 export type {
+  BoundedFollowupModelResourcePlan,
   DescendantBudgetReservation,
   DescendantResourceAdmission,
   ModelResourcePreparationPlan,
@@ -105,6 +131,7 @@ export {
   actualUsageForReservation,
   createDescendantResourceAdmission,
   DescendantResourceAdmissionError,
+  planBoundedFollowupModelResource,
   planModelInvocationResource,
   planRuntimeBudgetAdmission,
   reconciliationEventsForReservations,
@@ -130,12 +157,15 @@ export type {
   ResourceUsage,
 } from './resource-budget';
 export {
+  assertChildBudgetWithinDelegation,
   assertResourceBudget,
   assertResourceBudgetRuntimeState,
   assertResourceUsage,
   committedResourceUsage,
   createUnconfiguredResourceBudgetState,
   createZeroResourceUsage,
+  fundingBudgetForReservation,
+  fundingBudgetForRun,
   INTERNAL_RESOURCE_BUDGET_,
   LIMITED_RESOURCE_BUDGET_,
   RESOURCE_BUDGET_VERSION,
@@ -160,7 +190,13 @@ export type {
   StateRuntimeToolTerminalBatchValidator,
   StateRuntimeVerificationAdmission,
 } from './session';
-export { createRuntimeHostStateSession, STATE_RUNTIME_SESSION_FORMAT_ } from './session';
+export {
+  assertPreDispatchChildFailureProof,
+  childSessionAcceptanceEffectId,
+  childTerminalReceiptDigest,
+  createRuntimeHostStateSession,
+  STATE_RUNTIME_SESSION_FORMAT_,
+} from './session';
 export { runtimeHostStateProjectAcceptedEvent } from './state-reducer';
 export {
   runtimeHostStateActivePlanning,

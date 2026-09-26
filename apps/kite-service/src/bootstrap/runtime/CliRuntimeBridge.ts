@@ -2,11 +2,13 @@ import { randomBytes } from 'node:crypto';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
 import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
+import type { SubagentResultArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
 import type { InteractionMode, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
 import {
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeAbortReason,
+  type RuntimeBackgroundExecutionProjection,
   type RuntimeBackgroundExecutionSnapshot,
   type RuntimeClientInteraction,
   type RuntimeCommand,
@@ -27,6 +29,10 @@ import type {
   RuntimeHostExecutionBridge,
   RuntimeHostPreparedExecution,
 } from '@kite-ai/runtime-host';
+import {
+  fundingBudgetForRun,
+  requiredBackgroundTaskIds,
+} from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeCommandCommitEvidence,
   RuntimeStoredCommandReceipt,
@@ -67,6 +73,8 @@ import type {
 import type { AppWorkspaceEffectCompositionFactory } from './runtime-effect-dependencies';
 import { reconcileRuntimeSessionAfterRestart } from './session-restart-recovery';
 import {
+  canContinueAcceptedIndependentChild,
+  canContinueBlockedIndependentChild,
   canContinueSettledGlobalAdmission,
   obsoleteGlobalAdmissionSettlementEvents,
   type RuntimeUserAction,
@@ -127,6 +135,27 @@ export interface CliRuntimeBridgeInput {
   readonly onSessionLoggingDiagnostic?: (message: string) => void;
   /** Worker-owned effect composition factory; it receives only pinned admission context. */
   readonly workspaceEffectCompositionFactory?: AppWorkspaceEffectCompositionFactory;
+  /** Private App Server child admission owner; absent for legacy and CLI paths. */
+  readonly childSessionAcceptance?: RuntimeTurnInput['childSessionAcceptance'];
+  readonly crossSessionQueueMail?: RuntimeTurnInput['crossSessionQueueMail'];
+  /** Best-effort wake for durable Agent notices derived from a committed Run cancellation. */
+  readonly onCommittedCancel?: () => void;
+  readonly followupPolicyForPreparedTool?: (
+    input: Parameters<NonNullable<RuntimeTurnInput['followupPolicyForPreparedTool']>>[0],
+    activeRunConfig: Readonly<AgentConfig>,
+  ) => ReturnType<NonNullable<RuntimeTurnInput['followupPolicyForPreparedTool']>>;
+  readonly pendingFollowupFunding?: () => NonNullable<
+    Parameters<typeof reconcileRuntimeSessionAfterRestart>[0]['preservePendingFollowupFunding']
+  >;
+  readonly preparedFollowupRecoveryProofs?: () => NonNullable<
+    Parameters<typeof reconcileRuntimeSessionAfterRestart>[0]['preservePreparedFollowupModels']
+  >;
+  readonly preparedCurrentTurnRecoveryProofs?: () => NonNullable<
+    Parameters<typeof reconcileRuntimeSessionAfterRestart>[0]['preservePreparedCurrentTurnModels']
+  >;
+  readonly dispatchedChildRecoveryProofs?: () => NonNullable<
+    Parameters<typeof reconcileRuntimeSessionAfterRestart>[0]['preserveDispatchedChildDelegations']
+  >;
 }
 
 export type CliRuntimeInteractionResolution =
@@ -151,10 +180,31 @@ interface CliRuntimeTurnExecutionInput {
   readonly config: AgentConfig;
 }
 
+function canResumeRequiredChildWait(
+  run: RuntimeSessionProjection['currentRun'],
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): boolean {
+  const waiting = state.completionGuard.waitingReason;
+  return (
+    run?.status === 'waiting' &&
+    run.waitingReason?.kind === 'required_background' &&
+    waiting?.kind === 'required_background' &&
+    JSON.stringify([...run.waitingReason.taskIds].sort()) ===
+      JSON.stringify([...waiting.taskIds].sort()) &&
+    canContinueBlockedIndependentChild(state, journal)
+  );
+}
+
 export interface ConfigurableCliRuntimeBridge extends RuntimeHostExecutionBridge {
   recoverCommittedResume: NonNullable<RuntimeHostExecutionBridge['recoverCommittedResume']>;
   /** Changes the desired configuration for the next admitted Run only. */
   applySelectedConfig(config: AgentConfig): void;
+  /** Parent-scoped durable wake for a Store-verified private child approval proxy. */
+  publishChildApprovalWake(
+    event: Extract<RuntimeEvent, { type: 'subagent.child_approval_proxy_changed' }>,
+    publish?: (notification: RuntimeNotification) => void,
+  ): void;
 }
 
 export function createCliRuntimeBridge(
@@ -185,6 +235,11 @@ export function readBackgroundExecutionSnapshot(input: {
     workspace: string,
   ) => RuntimeTurnInput['modelInvocationRuntime'];
   readonly recoveryIdentityKey: string;
+  readonly independentChildSnapshot?: Readonly<{
+    aggregateGeneration: string;
+    watermark: number;
+    executions: readonly RuntimeBackgroundExecutionProjection[];
+  }>;
 }): RuntimeBackgroundExecutionSnapshot {
   const shell = managedShellRuntime.listSnapshot(
     input.sessionId,
@@ -199,17 +254,21 @@ export function readBackgroundExecutionSnapshot(input: {
     input.sessionId,
     backgroundSubagentOwnerKey(input.sessionId, input.recoveryIdentityKey),
   );
+  const independent = input.independentChildSnapshot;
+  const independentIds = new Set(independent?.executions.map((entry) => entry.executionId) ?? []);
   return Object.freeze({
     sessionId: input.sessionId,
     sessionRevision: input.sessionRevision,
-    aggregateGeneration: `${shell.aggregateGeneration}:${children?.aggregateGeneration ?? 'no-subagents'}`,
+    aggregateGeneration: `${shell.aggregateGeneration}:${children?.aggregateGeneration ?? 'no-subagents'}:${independent?.aggregateGeneration ?? 'no-independent-children'}`,
     // Both owner watermarks are monotonic within the combined aggregate
     // generation. Their sum advances whenever either directory changes.
-    watermark: shell.watermark + (children?.watermark ?? 0),
+    watermark: shell.watermark + (children?.watermark ?? 0) + (independent?.watermark ?? 0),
     executions: Object.freeze(
-      [...shell.executions, ...(children?.executions ?? [])].map((item) =>
-        Object.freeze({ ...item, sessionRevision: input.sessionRevision }),
-      ),
+      [
+        ...shell.executions,
+        ...(children?.executions ?? []).filter((item) => !independentIds.has(item.executionId)),
+        ...(independent?.executions ?? []),
+      ].map((item) => Object.freeze({ ...item, sessionRevision: input.sessionRevision })),
     ),
   });
 }
@@ -234,6 +293,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   #activePresentationFrame: RuntimePresentationFrame | undefined;
   #pendingInteraction: PendingCliInteraction | undefined;
   #desiredConfig: AgentConfig;
+  readonly #pendingIndependentStops = new Set<string>();
   #activeRunConfig: AgentConfig | undefined;
   readonly #pendingAfterTurnRecoveries = new Set<string>();
 
@@ -275,6 +335,18 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     this.#desiredConfig = config;
   }
 
+  publishChildApprovalWake(
+    event: Extract<RuntimeEvent, { type: 'subagent.child_approval_proxy_changed' }>,
+    publish?: (notification: RuntimeNotification) => void,
+  ): void {
+    const coordinator = this.#ensureCoordinator();
+    coordinator.control.processEvent(event);
+    const revision = coordinator.getState().revision;
+    this.#revision = revision;
+    const activePublish = publish ?? this.#activePublish;
+    if (activePublish) this.#publishCommittedEvents([event], revision, activePublish, 'session');
+  }
+
   async recoverSession(
     sessionId: string,
     publish: (notification: RuntimeNotification) => void,
@@ -305,6 +377,18 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         modelInvocationRuntime: this.#modelInvocationRuntimeFactory(this.#input.workspace),
         shellExecutor: this.#input.shellExecutor,
         recoveryOwnership,
+        preserveReservedChildDelegations:
+          this.#input.childSessionAcceptance?.pendingDelegationReservations?.(),
+        preservePendingAfterTurnDelegations:
+          this.#input.childSessionAcceptance?.pendingAfterTurnDelegations?.(),
+        preserveLiveAfterTurnDelegations:
+          this.#input.childSessionAcceptance?.liveAfterTurnDelegations?.(),
+        preserveSealedAfterTurnReports:
+          this.#input.childSessionAcceptance?.sealedAfterTurnReports?.(),
+        preservePendingFollowupFunding: this.#input.pendingFollowupFunding?.(),
+        preservePreparedFollowupModels: this.#input.preparedFollowupRecoveryProofs?.(),
+        preservePreparedCurrentTurnModels: this.#input.preparedCurrentTurnRecoveryProofs?.(),
+        preserveDispatchedChildDelegations: this.#input.dispatchedChildRecoveryProofs?.(),
         historyEvents: coordinator
           .getStateRuntimeStorage()
           .sessions.loadEventsStrict(sessionId)
@@ -362,10 +446,18 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       this.#resolveRecoveryIdentity(this.#input.sessionId),
     );
     const childSnapshot = children?.listSnapshot(this.#input.sessionId, childOwner);
+    const independent = this.#input.childSessionAcceptance?.backgroundSnapshot?.();
+    const independentIds = new Set(independent?.executions.map((item) => item.executionId) ?? []);
     for (const intent of events) {
       if (intent.type !== 'background_execution.stop_requested' || done.has(intent.commandId))
         continue;
-      const target = [...shell.executions, ...(childSnapshot?.executions ?? [])].find(
+      const target = [
+        ...shell.executions,
+        ...(childSnapshot?.executions ?? []).filter(
+          (item) => !independentIds.has(item.executionId),
+        ),
+        ...(independent?.executions ?? []),
+      ].find(
         (item) =>
           item.executionId === intent.executionId &&
           item.kind === intent.executionKind &&
@@ -394,7 +486,44 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       };
       const requested =
         intent.executionKind === 'subagent'
-          ? (children?.requestCancel(childOwner, intent.executionId, settled) ?? false)
+          ? independentIds.has(intent.executionId)
+            ? (() => {
+                const taskControl = this.#input.childSessionAcceptance?.taskControl;
+                if (!taskControl) {
+                  this.#settleBackgroundStop(
+                    coordinator,
+                    intent.commandId,
+                    intent.executionId,
+                    false,
+                  );
+                  return true;
+                }
+                if (this.#pendingIndependentStops.has(intent.commandId)) return true;
+                this.#pendingIndependentStops.add(intent.commandId);
+                void taskControl
+                  .cancelTask(intent.executionId)
+                  .then((result) => {
+                    if (result.status === 'unknown' || result.status === 'not_found')
+                      this.#settleBackgroundStop(
+                        coordinator,
+                        intent.commandId,
+                        intent.executionId,
+                        false,
+                      );
+                    else settled();
+                  })
+                  .catch(() =>
+                    this.#settleBackgroundStop(
+                      coordinator,
+                      intent.commandId,
+                      intent.executionId,
+                      false,
+                    ),
+                  )
+                  .finally(() => this.#pendingIndependentStops.delete(intent.commandId));
+                return true;
+              })()
+            : (children?.requestCancel(childOwner, intent.executionId, settled) ?? false)
           : managedShellRuntime.requestStop(intent.executionId, shellOwner, settled);
       // The handle may become terminal after the snapshot above but before the
       // stop request registers its callback. Re-read the directory so every
@@ -415,12 +544,39 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     );
     const state = coordinator.getState();
     if (state.resourceBudget.status !== 'active') return;
+    const pendingIndependentChildAllotments = new Set(
+      this.#input.childSessionAcceptance?.pendingDelegationReservations?.() ?? [],
+    );
     for (const reservationId of children?.settlementRecoveryReservations?.(ownerKey) ?? []) {
+      // Legacy after-turn cleanup cannot release an exact unsettled independent
+      // child intent. Its Store claim remains the authority for cancellation.
+      if (pendingIndependentChildAllotments.has(reservationId)) continue;
       if (state.resourceBudget.reservations[reservationId]?.state !== 'reserved') continue;
       coordinator.control.processEvent({
         type: 'resource_budget.released',
         reservationId,
       });
+    }
+    for (const invocation of Object.values(state.capabilities.invocations)) {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const link = lifecycle?.childSession;
+      if (
+        link?.disposition !== 'after_turn' ||
+        !link.terminalImport ||
+        lifecycle?.backgroundResult?.afterTurn
+      )
+        continue;
+      const funding = fundingBudgetForRun(coordinator.getState(), link.fundingRunId);
+      const report = Object.values(funding?.reservations ?? {}).find(
+        (reservation) =>
+          reservation.invocationId ===
+          `model-invocation:after-turn:${lifecycle?.childInvocationId}`,
+      );
+      if (report?.state === 'reserved')
+        coordinator.control.processEvent({
+          type: 'resource_budget.released',
+          reservationId: report.reservationId,
+        });
     }
   }
 
@@ -436,9 +592,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     for (const event of events) {
       const afterTurn = event.afterTurn!;
       const state = coordinator.getState();
+      const funding = fundingBudgetForRun(state, event.originRunId);
       if (
-        state.resourceBudget.status !== 'active' ||
-        state.resourceBudget.reservations[afterTurn.reservationId]?.state !== 'reserved' ||
+        funding?.reservations[afterTurn.reservationId]?.state !== 'reserved' ||
         this.#pendingAfterTurnRecoveries.has(event.notificationId)
       ) {
         continue;
@@ -449,10 +605,8 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           const current = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
           if (!current) return;
           const currentState = current.getState();
-          if (
-            currentState.resourceBudget.status !== 'active' ||
-            currentState.resourceBudget.reservations[afterTurn.reservationId]?.state !== 'reserved'
-          ) {
+          const funding = fundingBudgetForRun(currentState, event.originRunId);
+          if (funding?.reservations[afterTurn.reservationId]?.state !== 'reserved') {
             return;
           }
           const modelRuntime = this.#modelInvocationRuntimeFactory(this.#input.workspace);
@@ -468,13 +622,39 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
                   | AfterTurnContinuationRuntime
                   | undefined)
               : undefined;
-          if (!children || !continuation) return;
+          if (!continuation) return;
           const ownerKey = backgroundSubagentOwnerKey(
             this.#input.sessionId,
             this.#resolveRecoveryIdentity(this.#input.sessionId),
           );
-          const durable = await children.readTask(ownerKey, event.taskId);
-          const artifact = durable.artifact as
+          const independent = Object.values(currentState.capabilities.invocations)
+            .map((invocation) => invocation.subagentProviderLifecycle?.childSession)
+            .find(
+              (link) =>
+                link?.disposition === 'after_turn' &&
+                link.originToolCallId === event.originToolCallId &&
+                link.originRunId === event.originRunId &&
+                link.terminalImport?.resultRef.integrityIdentifier ===
+                  event.artifactIntegrityIdentifier,
+            );
+          const child = independent
+            ? current.getStateRuntimeStorage().sessions.loadSnapshot(independent.childThreadId)
+            : null;
+          const sealed = child?.childSessionOrigin?.terminal;
+          const independentRef =
+            child?.childSessionOrigin?.childInvocationId === event.taskId &&
+            sealed?.resultRef.integrityIdentifier === event.artifactIntegrityIdentifier &&
+            sealed?.status === afterTurn.status &&
+            'childResultArtifacts' in modelRuntime
+              ? (modelRuntime.childResultArtifacts as SubagentResultArtifactAccess).lookup(
+                  ownerKey,
+                  event.taskId,
+                )?.ref
+              : undefined;
+          const durable = independent
+            ? undefined
+            : await children?.readTask(ownerKey, event.taskId);
+          const artifact = (independentRef ?? durable?.artifact) as
             | Readonly<{
                 artifactId: string;
                 kind: 'subagent_task';
@@ -492,7 +672,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             reservation: {
               reservationId: afterTurn.reservationId,
               originRunId: event.originRunId,
-              deadlineAt: currentState.resourceBudget.deadlineAt,
+              deadlineAt: funding.deadlineAt,
               preparationEvents: [],
             },
             notification: {
@@ -554,9 +734,12 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         this.#resolveRecoveryIdentity(this.#input.sessionId),
       ),
     );
-    return [...shell.executions, ...(childSnapshot?.executions ?? [])].some(
-      (execution) => !execution.cleanupConfirmed,
-    );
+    const independent = this.#input.childSessionAcceptance?.backgroundSnapshot?.();
+    return [
+      ...shell.executions,
+      ...(childSnapshot?.executions ?? []),
+      ...(independent?.executions ?? []),
+    ].some((execution) => !execution.cleanupConfirmed);
   }
 
   #settleBackgroundStop(
@@ -610,13 +793,20 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     const run = coordinator.session.getLifecycleProjection().currentRun;
     if (
       state.revision !== committedRevision ||
-      run?.status !== 'running' ||
+      (run?.status !== 'running' && run?.status !== 'waiting') ||
       run.activeTurnId !== state.turn.turnId ||
       run.taskId !== state.activeTaskId ||
-      !canContinueSettledGlobalAdmission(
-        state,
-        coordinator.getStateRuntimeStorage().sessions.loadEventsStrict(command.sessionId),
-      )
+      !(() => {
+        const journal = coordinator
+          .getStateRuntimeStorage()
+          .sessions.loadEventsStrict(command.sessionId);
+        return run.status === 'waiting'
+          ? this.#input.childSessionAcceptance !== undefined &&
+              canResumeRequiredChildWait(run, state, journal)
+          : canContinueSettledGlobalAdmission(state, journal) ||
+              (this.#input.childSessionAcceptance !== undefined &&
+                canContinueAcceptedIndependentChild(state, journal));
+      })()
     )
       return;
     const prepared = this.#preparedInteractionResume(
@@ -726,9 +916,13 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         this.#resolveRecoveryIdentity(this.#input.sessionId),
       );
       const child = children?.listSnapshot(this.#input.sessionId, childOwner);
-      const target = [...shell.executions, ...(child?.executions ?? [])].find(
-        (item) => item.executionId === command.executionId,
-      );
+      const independent = this.#input.childSessionAcceptance?.backgroundSnapshot?.();
+      const independentIds = new Set(independent?.executions.map((item) => item.executionId) ?? []);
+      const target = [
+        ...shell.executions,
+        ...(child?.executions ?? []).filter((item) => !independentIds.has(item.executionId)),
+        ...(independent?.executions ?? []),
+      ].find((item) => item.executionId === command.executionId);
       if (
         !target ||
         target.kind !== command.executionKind ||
@@ -757,9 +951,16 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
               shellOwner,
             );
             const currentChild = children?.listSnapshot(this.#input.sessionId, childOwner);
+            const currentIndependent = this.#input.childSessionAcceptance?.backgroundSnapshot?.();
+            const currentIndependentIds = new Set(
+              currentIndependent?.executions.map((item) => item.executionId) ?? [],
+            );
             const currentTarget = [
               ...currentShell.executions,
-              ...(currentChild?.executions ?? []),
+              ...(currentChild?.executions ?? []).filter(
+                (item) => !currentIndependentIds.has(item.executionId),
+              ),
+              ...(currentIndependent?.executions ?? []),
             ].find((item) => item.executionId === command.executionId);
             if (
               !currentTarget ||
@@ -805,6 +1006,54 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         return terminal(this.#rejected(command, 'interaction_mismatch'));
       }
       const state = coordinator.getState();
+      const childApproval =
+        command.interaction.kind === 'approval'
+          ? this.#input.childSessionAcceptance?.approvalProxy?.read(
+              command.interaction.interactionId,
+            )
+          : null;
+      if (childApproval) {
+        if (
+          command.interaction.kind !== 'approval' ||
+          command.response.kind !== 'approval' ||
+          command.expectedRevision !== state.revision ||
+          command.sessionId !== this.#input.sessionId ||
+          childApproval.parentSessionId !== this.#input.sessionId ||
+          childApproval.status !== 'pending' ||
+          command.response.decision === 'same_command'
+        )
+          return terminal(this.#rejected(command, 'interaction_mismatch'));
+        const approvalProxy = this.#input.childSessionAcceptance!.approvalProxy!;
+        const childDecision = command.response.decision;
+        return {
+          kind: 'accepted',
+          decision: {
+            targetSessionId: this.#input.sessionId,
+            commit: async (evidence) => {
+              const committed = approvalProxy.decide({
+                parentState: state,
+                interaction: command.interaction as Extract<
+                  RuntimeClientInteraction,
+                  { kind: 'approval' }
+                >,
+                decision: childDecision,
+                evidence,
+              });
+              const receipt = receiptFromStored(committed);
+              return {
+                receipt,
+                activation: async (publish) => {
+                  this.#revision = receipt.revision;
+                  approvalProxy.publishDecided(command.interaction.interactionId, (event) =>
+                    this.publishChildApprovalWake(event, publish),
+                  );
+                  approvalProxy.activateDecision(command.interaction.interactionId);
+                },
+              };
+            },
+          },
+        };
+      }
       const effect = pending?.effect ?? resolveRuntimeInteractionEffect(state, command.interaction);
       if (
         !effect ||
@@ -901,9 +1150,14 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             .sessions.loadEventsStrict(this.#input.sessionId);
           const events =
             run.status === 'waiting' ? obsoleteGlobalAdmissionSettlementEvents(state, journal) : [];
-          const settledBeforeDispatch =
-            run.status === 'running' && canContinueSettledGlobalAdmission(state, journal);
-          if (events.length > 0 || settledBeforeDispatch) {
+          const canResumeOriginalTurn =
+            (run.status === 'running' &&
+              (canContinueSettledGlobalAdmission(state, journal) ||
+                (this.#input.childSessionAcceptance !== undefined &&
+                  canContinueAcceptedIndependentChild(state, journal)))) ||
+            (this.#input.childSessionAcceptance !== undefined &&
+              canResumeRequiredChildWait(run, state, journal));
+          if (events.length > 0 || canResumeOriginalTurn) {
             return {
               kind: 'accepted',
               decision: {
@@ -977,6 +1231,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
               command,
               evidence,
               this.#startSkillPlanningContext(command, admittedConfig),
+              { provider: admittedConfig.providerName, name: admittedConfig.modelName },
             );
             const receipt = receiptFromStored(committed.receipt);
             if (command.model) {
@@ -1260,6 +1515,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
                   ? { runId: command.runId, turnId: command.turnId }
                   : {},
               );
+              if (command.type === 'cancel_turn') this.#input.onCommittedCancel?.();
             },
           };
         },
@@ -1436,8 +1692,10 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         operationId,
         committedRevision: receipt.revision,
         operation: 'turn',
-        run: (signal, requestAbort) =>
-          this.#runTurn(
+        run: async (signal, requestAbort) => {
+          if (this.#input.childSessionAcceptance)
+            await this.#waitForAcceptedIndependentChild(coordinator, signal);
+          return this.#runTurn(
             {
               operationId,
               task: task.userGoal,
@@ -1449,9 +1707,33 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             coordinator,
             signal,
             requestAbort,
-          ),
+          );
+        },
       },
     };
+  }
+
+  async #waitForAcceptedIndependentChild(
+    coordinator: RuntimeSessionCoordinator,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (;;) {
+      if (signal.aborted) throw signal.reason ?? new Error('Parent resume was cancelled.');
+      const state = coordinator.getState();
+      const required = new Set(requiredBackgroundTaskIds(state));
+      const pending = Object.values(state.capabilities.invocations).some((invocation) => {
+        const lifecycle = invocation.subagentProviderLifecycle;
+        return (
+          lifecycle?.childSession !== undefined &&
+          lifecycle.childSession.terminalImport === undefined &&
+          required.has(lifecycle.childInvocationId)
+        );
+      });
+      if (!pending || state.turn.status !== 'active') return;
+      if (!coordinator.session.waitForRevisionChange)
+        throw new Error('Independent child parent revision wait is unavailable.');
+      await coordinator.session.waitForRevisionChange(state.revision, signal);
+    }
   }
 
   #publishCommittedEvents(
@@ -1539,12 +1821,39 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             reason,
           )
         : undefined;
+    const independent = this.#input.childSessionAcceptance?.backgroundSnapshot?.().executions ?? [];
+    const childTaskControl = this.#input.childSessionAcceptance?.taskControl;
+    if (independent.some((execution) => !execution.cleanupConfirmed) && !childTaskControl)
+      throw new Error('Independent child Session cleanup port is unavailable.');
+    const disposeIndependent = Promise.all(
+      independent
+        .filter((execution) => !execution.cleanupConfirmed)
+        .map((execution) =>
+          childTaskControl!.cancelTask(execution.executionId, {
+            waitMs: 2_000,
+            abortCause: 'error',
+          }),
+        ),
+    ).then((results) => {
+      if (
+        results.some(
+          (result) =>
+            result.status === 'running' ||
+            result.status === 'unknown' ||
+            result.status === 'not_found' ||
+            result.cleanup_confirmed !== true,
+        )
+      ) {
+        throw new Error('Independent child Session cleanup is unconfirmed.');
+      }
+    });
     await Promise.all([
       managedShellRuntime.disposeOwner(
         managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
         reason,
       ),
       disposeSubagents,
+      disposeIndependent,
     ]);
     const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
     if (coordinator) this.#driveBackgroundStopIntents(coordinator);
@@ -1571,10 +1880,12 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
     let projection: RuntimeSessionProjection;
     try {
+      const coordinator = this.#runtimeSessionCoordinator.get(this.#input.sessionId);
+      const currentState = coordinator?.getState();
       projection =
-        this.#runtimeSessionCoordinator.get(this.#input.sessionId) === undefined
+        currentState === undefined
           ? (this.#input.storedProjection?.() ?? this.#projection())
-          : this.#projection();
+          : this.#projection(currentState.revision, currentState);
     } catch {
       return Promise.resolve({
         status: 'unavailable',
@@ -1624,6 +1935,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         workspace: this.#input.workspace,
         modelInvocationRuntimeFactory: this.#modelInvocationRuntimeFactory,
         recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
+        independentChildSnapshot: this.#input.childSessionAcceptance?.backgroundSnapshot?.(),
       });
       const executions = snapshot.executions;
       if (query.type === 'list_background_executions') {
@@ -1824,6 +2136,21 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
           ...(backgroundModelInvocationPersistence === undefined
             ? {}
             : { backgroundModelInvocationPersistence }),
+          ...(this.#input.childSessionAcceptance === undefined
+            ? {}
+            : { childSessionAcceptance: this.#input.childSessionAcceptance }),
+          ...(this.#input.crossSessionQueueMail === undefined
+            ? {}
+            : { crossSessionQueueMail: this.#input.crossSessionQueueMail }),
+          ...(this.#input.followupPolicyForPreparedTool === undefined
+            ? {}
+            : {
+                followupPolicyForPreparedTool: (
+                  input: Parameters<
+                    NonNullable<RuntimeTurnInput['followupPolicyForPreparedTool']>
+                  >[0],
+                ) => this.#input.followupPolicyForPreparedTool!(input, execution.config),
+              }),
         },
         this.#createClientActionProvider(publish),
       );
@@ -2020,6 +2347,18 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       modelArtifactEvidence: modelRuntime.evidence,
       capabilityArtifactEvidence:
         'capabilityArtifacts' in modelRuntime ? modelRuntime.capabilityArtifacts : undefined,
+      preserveReservedChildDelegations:
+        this.#input.childSessionAcceptance?.pendingDelegationReservations?.(),
+      preservePendingAfterTurnDelegations:
+        this.#input.childSessionAcceptance?.pendingAfterTurnDelegations?.(),
+      preserveLiveAfterTurnDelegations:
+        this.#input.childSessionAcceptance?.liveAfterTurnDelegations?.(),
+      preserveSealedAfterTurnReports:
+        this.#input.childSessionAcceptance?.sealedAfterTurnReports?.(),
+      preservePendingFollowupFunding: this.#input.pendingFollowupFunding?.(),
+      preservePreparedFollowupModels: this.#input.preparedFollowupRecoveryProofs?.(),
+      preservePreparedCurrentTurnModels: this.#input.preparedCurrentTurnRecoveryProofs?.(),
+      preserveDispatchedChildDelegations: this.#input.dispatchedChildRecoveryProofs?.(),
     });
   }
 
@@ -2120,10 +2459,19 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         'Runtime interaction State is unavailable for the exact projection revision.',
       );
     }
+    const rootInteractions = projectRuntimeClientInteractionQueue(state, {
+      sessionRevision: revision,
+    });
+    const childApprovals = this.#input.childSessionAcceptance?.approvalProxy?.list(state) ?? [];
     const interactionQueue: RuntimeInteractionQueueProjection =
-      projectRuntimeClientInteractionQueue(state, {
-        sessionRevision: revision,
-      });
+      childApprovals.length === 0
+        ? rootInteractions
+        : {
+            ...rootInteractions,
+            interactions: [...rootInteractions.interactions, ...childApprovals],
+            activeInteractionId:
+              rootInteractions.activeInteractionId ?? childApprovals[0]!.interactionId,
+          };
     const lifecycle = coordinator?.session.getLifecycleProjection(state) ?? {};
     const currentRun = lifecycle.currentRun
       ? (() => {

@@ -11,7 +11,11 @@ import {
   BuiltinModelEffectCoordinator,
   resolveProjectInstructionSnapshot,
 } from '@kite-ai/builtin-runtime/model';
-import { DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS, getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
+import {
+  DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
+  getRoleConfig,
+  SubagentCheckpointArtifactStore,
+} from '@kite-ai/builtin-runtime/subagent';
 import {
   type CapabilityBinding,
   type CapabilityDescriptor,
@@ -273,6 +277,91 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test('writes a private terminal transcript checkpoint and returns only its ref', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-terminal-checkpoint-'));
+    const checkpointStore = new SubagentCheckpointArtifactStore({
+      root: join(workspace, 'subagent-checkpoints'),
+    });
+    let checkpointWriteError: unknown;
+    const input: TestSubAgentRunnerInput = {
+      config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+      workspace,
+      threadId: 'checkpoint-parent-session',
+      childInvocationId: 'checkpoint-child-id',
+      checkpointArtifacts: {
+        write: (value) => {
+          try {
+            return checkpointStore.write(value);
+          } catch (error) {
+            checkpointWriteError = error;
+            throw error;
+          }
+        },
+      },
+      role: getRoleConfig('explore'),
+      task: 'Inspect checkpoint.',
+      interactionMode: 'accept_edits',
+      timeoutMs: 5_000,
+      signal: new AbortController().signal,
+      eventSink: mockEventSink().sink,
+      model: new StreamingMockModel({
+        responses: [{ message: aiMessage({ content: 'Checkpoint final.' }) }],
+      }),
+    };
+    try {
+      const result = await runSubAgent(input);
+      expect(result).toMatchObject({ ok: true, terminalStatus: 'completed' });
+      expect(checkpointWriteError).toBeUndefined();
+      expect(result.checkpointRef).toMatchObject({ kind: 'subagent_checkpoint' });
+      const checkpoint = checkpointStore.read(
+        result.checkpointRef!,
+        JSON.stringify(['checkpoint-parent-session', TEST_RECOVERY_IDENTITY_KEY]),
+        'checkpoint-child-id',
+      );
+      expect(checkpoint.modelInvocationOrdinal).toBe(1);
+      expect(checkpoint.messages.at(-1)).toMatchObject({
+        type: 'ai',
+        content: 'Checkpoint final.',
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('checkpoint write failure keeps the ordinary child terminal result', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-checkpoint-write-failure-'));
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        workspace,
+        threadId: 'checkpoint-failure-session',
+        childInvocationId: 'checkpoint-failure-child',
+        checkpointArtifacts: {
+          write: () => {
+            throw new Error('checkpoint storage unavailable');
+          },
+        },
+        role: getRoleConfig('explore'),
+        task: 'Finish despite unavailable checkpoint storage.',
+        interactionMode: 'accept_edits',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: mockEventSink().sink,
+        model: new StreamingMockModel({
+          responses: [{ message: aiMessage({ content: 'Ordinary child result.' }) }],
+        }),
+      });
+      expect(result).toMatchObject({
+        ok: true,
+        terminalStatus: 'completed',
+        summary: 'Ordinary child result.',
+      });
+      expect(result.checkpointRef).toBeUndefined();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('fails closed without a parent Runtime child tool dispatcher', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-no-runtime-dispatcher-'));
     writeFileSync(join(workspace, 'visible.txt'), 'must not be read\n', 'utf8');

@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite-ai/builtin-runtime/model';
 import {
   aiMessage,
@@ -9,6 +12,7 @@ import {
   humanMessage,
   type ModelInvocationStateView,
   type ModelRuntimeConfig,
+  systemMessage,
   toolMessage,
 } from '@kite-ai/builtin-runtime/model';
 import {
@@ -17,6 +21,8 @@ import {
   DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
 } from '@kite-ai/builtin-runtime/subagent';
 import type { ToolSet } from 'ai';
+import { SubagentCheckpointArtifactStore } from '../src/subagent/checkpoint-artifacts';
+import { createBuiltinSubagentFollowupModelLoopEngine } from '../src/subagent/model-loop-engine';
 
 const CONFIG: ModelRuntimeConfig = Object.freeze({
   apiKey: 'model-loop-engine-test-key',
@@ -63,6 +69,9 @@ function coordinatorFor(responses: readonly AIMessage[]): {
     readonly tools: ToolSet;
     readonly estimatedInputTokens: number;
     readonly maxOutputTokens?: number;
+    readonly parentReservationId?: string;
+    readonly parentInvocationId?: string | null;
+    readonly parentToolCallId?: string | null;
   }>;
 } {
   let responseIndex = 0;
@@ -71,6 +80,9 @@ function coordinatorFor(responses: readonly AIMessage[]): {
     readonly tools: ToolSet;
     readonly estimatedInputTokens: number;
     readonly maxOutputTokens?: number;
+    readonly parentReservationId?: string;
+    readonly parentInvocationId?: string | null;
+    readonly parentToolCallId?: string | null;
   }> = [];
   const coordinator: BuiltinSubagentModelLoopCoordinator = {
     executeSubagentModelStep: async <
@@ -85,8 +97,13 @@ function coordinatorFor(responses: readonly AIMessage[]): {
       calls.push({
         messages: input.messages,
         tools: input.tools,
-        estimatedInputTokens: input.estimatedInputTokens,
+        estimatedInputTokens: input.estimatedInputTokens!,
         ...(input.maxOutputTokens === undefined ? {} : { maxOutputTokens: input.maxOutputTokens }),
+        ...(input.parentReservationId === undefined
+          ? {}
+          : { parentReservationId: input.parentReservationId }),
+        parentInvocationId: input.provenance?.parentInvocationId,
+        parentToolCallId: input.provenance?.parentToolCallId,
       });
       return {
         invocationId: `loop-invocation-${responseIndex}`,
@@ -123,6 +140,181 @@ function inputFor(
 }
 
 describe('Builtin subagent model loop engine', () => {
+  test('loads a settled child transcript and adds a source-labelled followup under fresh turn authority', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-child-followup-'));
+    try {
+      const checkpointStore = new SubagentCheckpointArtifactStore({
+        root: join(root, 'subagent-checkpoints'),
+      });
+      const oldToolCall = aiMessage({
+        tool_calls: [{ id: 'old-call', name: 'old_tool', args: {} }],
+      });
+      const historicalMessages = [
+        systemMessage('Old policy allowed old_tool.'),
+        INITIAL_MESSAGE,
+        oldToolCall,
+        toolMessage({ content: 'old result', tool_call_id: 'old-call' }),
+        aiMessage({ content: 'old final' }),
+      ];
+      const checkpointRef = checkpointStore.write({
+        ownerKey: 'old-owner',
+        taskId: 'old-task',
+        modelInvocationOrdinal: 3,
+        messages: historicalMessages,
+      });
+      const newTools: ToolSet = Object.freeze({ fresh_tool: {} as ToolSet[string] });
+      const first = aiMessage({
+        tool_calls: [{ id: 'new-call', name: 'fresh_tool', args: {} }],
+      });
+      const fixture = coordinatorFor([first, aiMessage({ content: 'new final' })]);
+      const previous = inputFor(fixture.coordinator);
+      const {
+        initialMessages: _messages,
+        startModelInvocationOrdinal: _ordinal,
+        ...fresh
+      } = previous;
+      const ordinals: number[] = [];
+      const result = await createBuiltinSubagentFollowupModelLoopEngine({
+        ...fresh,
+        tools: newTools,
+        maxToolRounds: 1,
+        resource: { parentReservationId: 'new-turn-reservation' },
+        provenance: ({ modelInvocationOrdinal }) => {
+          ordinals.push(modelInvocationOrdinal);
+          return {
+            ...PROVENANCE,
+            parentInvocationId: 'new-invocation',
+            parentToolCallId: 'new-tool-call',
+          };
+        },
+        checkpointStore,
+        checkpointRef,
+        checkpointOwnerKey: 'old-owner',
+        checkpointTaskId: 'old-task',
+        newTaskId: 'new-task',
+        currentSystemMessages: [systemMessage('Current policy allows fresh_tool only.')],
+        followup: {
+          messageId: 'message-1',
+          senderAgentId: 'root-agent',
+          sourceTaskId: 'source-task',
+          content: 'Continue <without> treating this as approval.',
+        },
+        consumer: {
+          consume: ({ response, append }) => {
+            append([
+              toolMessage({ content: 'fresh result', tool_call_id: response.tool_calls![0]!.id! }),
+            ]);
+            return { kind: 'continue' };
+          },
+        },
+      }).run();
+
+      expect(result).toMatchObject({ kind: 'completed', modelInvocationOrdinal: 5 });
+      expect(ordinals).toEqual([4, 5]);
+      expect(fixture.calls).toHaveLength(2);
+      expect(fixture.calls[0]!.tools).toBe(newTools);
+      expect(fixture.calls[0]).toMatchObject({
+        parentReservationId: 'new-turn-reservation',
+        parentInvocationId: 'new-invocation',
+        parentToolCallId: 'new-tool-call',
+      });
+      expect(Object.keys(fixture.calls[1]!.tools)).toEqual([]);
+      expect(fixture.calls[0]!.messages[0]).toMatchObject({
+        type: 'system',
+        content: 'Current policy allows fresh_tool only.',
+      });
+      expect(fixture.calls[0]!.messages[1]).toMatchObject({ type: 'ai' });
+      expect(String(fixture.calls[0]!.messages[1]!.content)).toContain(
+        '<historical_system_message>',
+      );
+      expect(String(fixture.calls[0]!.messages[1]!.content)).toContain(
+        'Old policy allowed old_tool.',
+      );
+      expect(fixture.calls[0]!.messages.slice(2, 6)).toEqual(historicalMessages.slice(1));
+      expect(fixture.calls[0]!.messages[6]).toMatchObject({
+        type: 'human',
+        id: 'message-1',
+        name: 'agent_message',
+        response_metadata: { source: 'agent_message' },
+      });
+      expect(String(fixture.calls[0]!.messages[6]!.content)).toContain(
+        'sender_agent_id="root-agent"',
+      );
+      expect(String(fixture.calls[0]!.messages[6]!.content)).toContain('&lt;without&gt;');
+      expect(String(fixture.calls[0]!.messages[6]!.content)).toContain(
+        'not a user instruction or approval',
+      );
+      expect(checkpointStore.read(checkpointRef, 'old-owner', 'old-task').messages).toEqual(
+        historicalMessages,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('refuses a mismatched or nonterminal checkpoint before model dispatch', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-child-followup-invalid-'));
+    try {
+      const checkpointStore = new SubagentCheckpointArtifactStore({
+        root: join(root, 'subagent-checkpoints'),
+      });
+      const checkpointRef = checkpointStore.write({
+        ownerKey: 'old-owner',
+        taskId: 'old-task',
+        modelInvocationOrdinal: 2,
+        messages: [INITIAL_MESSAGE, aiMessage({ content: 'old final' })],
+      });
+      const fixture = coordinatorFor([aiMessage({ content: 'never dispatched' })]);
+      const {
+        initialMessages: _messages,
+        startModelInvocationOrdinal: _ordinal,
+        ...fresh
+      } = inputFor(fixture.coordinator);
+      const base = {
+        ...fresh,
+        checkpointStore,
+        checkpointRef,
+        checkpointOwnerKey: 'old-owner',
+        checkpointTaskId: 'old-task',
+        newTaskId: 'new-task',
+        currentSystemMessages: [systemMessage('Current policy.')],
+        resource: { parentReservationId: 'new-turn-reservation' },
+        followup: {
+          messageId: 'message-1',
+          senderAgentId: 'root-agent',
+          sourceTaskId: 'source-task',
+          content: 'Continue.',
+        },
+      };
+      expect(() =>
+        createBuiltinSubagentFollowupModelLoopEngine({ ...base, checkpointOwnerKey: 'other' }),
+      ).toThrow('owner does not match');
+      expect(() =>
+        createBuiltinSubagentFollowupModelLoopEngine({ ...base, newTaskId: 'old-task' }),
+      ).toThrow('followup input is invalid');
+      expect(() =>
+        createBuiltinSubagentFollowupModelLoopEngine({ ...base, currentSystemMessages: [] }),
+      ).toThrow('followup input is invalid');
+      expect(() => createBuiltinSubagentFollowupModelLoopEngine({ ...base, resource: {} })).toThrow(
+        'followup input is invalid',
+      );
+      const nonterminalRef = checkpointStore.write({
+        ownerKey: 'old-owner',
+        taskId: 'old-task',
+        modelInvocationOrdinal: 2,
+        messages: [
+          INITIAL_MESSAGE,
+          aiMessage({ tool_calls: [{ id: 'pending', name: 'read_file', args: {} }] }),
+        ],
+      });
+      expect(() =>
+        createBuiltinSubagentFollowupModelLoopEngine({ ...base, checkpointRef: nonterminalRef }),
+      ).toThrow('terminal checkpoint');
+      expect(fixture.calls).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   test('retains the exact failed model invocation identity in a bounded loop diagnostic', async () => {
     const coordinator: BuiltinSubagentModelLoopCoordinator = {
       executeSubagentModelStep: async () => {
@@ -290,6 +482,30 @@ describe('Builtin subagent model loop engine', () => {
     expect(fixture.calls).toHaveLength(0);
   });
 
+  test('does not dispatch an unsafe model invocation ordinal', async () => {
+    const fixture = coordinatorFor([
+      aiMessage({ tool_calls: [{ id: 'last-call', name: 'read_file', args: {} }] }),
+    ]);
+    const run = createBuiltinSubagentModelLoopEngine(
+      inputFor(fixture.coordinator, {
+        startModelInvocationOrdinal: Number.MAX_SAFE_INTEGER - 1,
+        startToolRounds: 0,
+        consumer: {
+          consume: ({ response, append }) => {
+            append([toolMessage({ content: 'ok', tool_call_id: response.tool_calls![0]!.id! })]);
+            return { kind: 'continue' };
+          },
+        },
+      }),
+    ).run();
+
+    await expect(run).rejects.toMatchObject({
+      code: 'invalid_input',
+      stage: 'next_round_preparation',
+    });
+    expect(fixture.calls).toHaveLength(1);
+  });
+
   test('returns terminal text and frozen transcript when the model has no tool calls', async () => {
     const response = aiMessage({ content: [{ type: 'text', text: 'terminal text' }] });
     const fixture = coordinatorFor([response]);
@@ -452,5 +668,101 @@ describe('Builtin subagent model loop engine', () => {
     expect(result).toMatchObject({ kind: 'completed', summary: 'after guard' });
     expect(appendRejected).toBe(true);
     expect(fixture.calls[1]!.messages.at(-1)!.content).toBe('source');
+  });
+
+  test('records one prepared Agent mail frame in the exact child checkpoint transcript', async () => {
+    const first = aiMessage({
+      tool_calls: [{ id: 'mail-boundary-tool', name: 'read_file', args: {} }],
+    });
+    const second = aiMessage({ content: 'final after guidance' });
+    const responses = [first, second];
+    const preparedEstimates: number[] = [];
+    const sentTranscripts: BaseMessage[][] = [];
+    let modelCalls = 0;
+    const coordinator: BuiltinSubagentModelLoopCoordinator = {
+      executeSubagentModelStep: async (input) => {
+        const ordinal = ++modelCalls;
+        const prepared = await input.prepareAgentMail!({
+          invocationId: `mail-model-${ordinal}`,
+          existingMessages: input.messages,
+          childIdentity: input.childIdentity!,
+        });
+        const appendedAgentMail = prepared.frames.map((frame) =>
+          humanMessage({
+            id: frame.messageId,
+            name: 'agent_message',
+            content: frame.content,
+            response_metadata: { source: 'agent_message', trust: 'untrusted_agent' },
+          }),
+        );
+        const exact = [...input.messages, ...appendedAgentMail];
+        const resolved = await input.resolvePreparedStep!(exact);
+        preparedEstimates.push(resolved.estimatedInputTokens);
+        sentTranscripts.push(exact);
+        return {
+          invocationId: `mail-model-${ordinal}`,
+          message: responses[ordinal - 1]!,
+          cacheMetrics: null,
+          appendedAgentMail,
+        };
+      },
+    };
+    const result = await createBuiltinSubagentModelLoopEngine(
+      inputFor(coordinator, {
+        agentMail: {
+          childIdentity: { agentId: 'agent-1', taskId: 'task-1' },
+          prepareAgentMail: async ({ invocationId }) => ({
+            frames:
+              invocationId === 'mail-model-2'
+                ? [
+                    {
+                      kind: 'agent_message',
+                      trust: 'untrusted_agent',
+                      modelRole: 'user',
+                      messageId: 'mail-1',
+                      content: '<agent_message message_id="mail-1">guide</agent_message>',
+                    },
+                  ]
+                : [],
+            ...(invocationId === 'mail-model-2' ? { preparationId: 'batch-1' } : {}),
+          }),
+        },
+        resource: { maxOutputTokens: ({ estimatedInputTokens }) => estimatedInputTokens + 10 },
+        consumer: {
+          consume: ({ append }) => {
+            append([toolMessage({ content: 'tool result', tool_call_id: 'mail-boundary-tool' })]);
+            return { kind: 'continue' };
+          },
+        },
+      }),
+    ).run();
+    expect(result.kind).toBe('completed');
+    if (result.kind !== 'completed') return;
+    expect(modelCalls).toBe(2);
+    expect(preparedEstimates[1]).toBeGreaterThan(preparedEstimates[0]!);
+    expect(sentTranscripts[0]!.some((message) => message.name === 'agent_message')).toBe(false);
+    expect(sentTranscripts[1]!.filter((message) => message.id === 'mail-1')).toHaveLength(1);
+    expect(result.messages.filter((message) => message.id === 'mail-1')).toHaveLength(1);
+    expect(result.messages.at(-2)).toMatchObject({ type: 'human', id: 'mail-1' });
+    expect(result.messages.at(-1)).toMatchObject({ type: 'ai', content: 'final after guidance' });
+    const root = mkdtempSync(join(tmpdir(), 'kite-child-mail-checkpoint-'));
+    try {
+      const checkpointStore = new SubagentCheckpointArtifactStore({
+        root: join(root, 'subagent-checkpoints'),
+      });
+      const ref = checkpointStore.write({
+        ownerKey: 'owner-1',
+        taskId: 'task-1',
+        modelInvocationOrdinal: result.modelInvocationOrdinal,
+        messages: result.messages,
+      });
+      expect(
+        checkpointStore
+          .read(ref, 'owner-1', 'task-1')
+          .messages.filter((message) => message.id === 'mail-1'),
+      ).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

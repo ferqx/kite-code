@@ -30,6 +30,7 @@ import type {
   BuiltinRuntimeEventValue,
 } from '../model/runtime-module';
 import {
+  agentMailboxBuiltinPolicyRule,
   askUserBuiltinPolicyRule,
   createBuiltinPolicyCompiler,
   planBuiltinPolicyRule,
@@ -38,12 +39,17 @@ import {
 } from '../policy-compiler';
 import { builtinToolDescription } from '../tool-contracts';
 import {
+  BUILTIN_FOLLOWUP_TASK_SCHEMA_,
+  BUILTIN_INTERRUPT_AGENT_SCHEMA_,
   BUILTIN_JSON_SCHEMAS_,
+  BUILTIN_LIST_AGENTS_SCHEMA_,
   BUILTIN_READ_PLAN_SCHEMA_,
+  BUILTIN_SEND_MESSAGE_SCHEMA_,
   BUILTIN_TASK_CANCEL_SCHEMA_,
   BUILTIN_TASK_READ_SCHEMA_,
   BUILTIN_TASK_WAIT_SCHEMA_,
   BUILTIN_UPDATE_PLAN_SCHEMA_,
+  BUILTIN_WAIT_AGENT_SCHEMA_,
   BUILTIN_WRITE_PLAN_SCHEMA_,
   BUILTIN_ZOD_SCHEMAS_,
 } from '../tool-schemas';
@@ -59,6 +65,11 @@ export const SUBAGENT_OPERATION_IDS_ = Object.freeze([
   'builtin:task_read',
   'builtin:task_wait',
   'builtin:task_cancel',
+  'builtin:list_agents',
+  'builtin:wait_agent',
+  'builtin:send_message',
+  'builtin:followup_task',
+  'builtin:interrupt_agent',
   'subagent:start',
   'subagent:resume',
   'verification:deterministic',
@@ -79,6 +90,11 @@ export const TASK_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task'];
 export const TASK_READ_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_read'];
 export const TASK_WAIT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_wait'];
 export const TASK_CANCEL_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:task_cancel'];
+export const LIST_AGENTS_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:list_agents'];
+export const WAIT_AGENT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:wait_agent'];
+export const SEND_MESSAGE_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:send_message'];
+export const FOLLOWUP_TASK_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:followup_task'];
+export const INTERRUPT_AGENT_INPUT_SCHEMA_ = BUILTIN_JSON_SCHEMAS_['builtin:interrupt_agent'];
 
 /**
  * Normalize the Builtin-owned ask_user input into the Host interrupt payload.
@@ -128,6 +144,11 @@ const INPUT_SCHEMAS_: Readonly<
   'builtin:task_read': TASK_READ_INPUT_SCHEMA_,
   'builtin:task_wait': TASK_WAIT_INPUT_SCHEMA_,
   'builtin:task_cancel': TASK_CANCEL_INPUT_SCHEMA_,
+  'builtin:list_agents': LIST_AGENTS_INPUT_SCHEMA_,
+  'builtin:wait_agent': WAIT_AGENT_INPUT_SCHEMA_,
+  'builtin:send_message': SEND_MESSAGE_INPUT_SCHEMA_,
+  'builtin:followup_task': FOLLOWUP_TASK_INPUT_SCHEMA_,
+  'builtin:interrupt_agent': INTERRUPT_AGENT_INPUT_SCHEMA_,
   'subagent:start': BUILTIN_JSON_SCHEMAS_['subagent:start'],
   'subagent:resume': BUILTIN_JSON_SCHEMAS_['subagent:resume'],
   'verification:deterministic': BUILTIN_JSON_SCHEMAS_['verification:deterministic'],
@@ -170,6 +191,31 @@ const EFFECTS_ = Object.freeze({
     network: 'none',
     externalState: 'none',
   }),
+  'builtin:list_agents': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
+  'builtin:wait_agent': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
+  'builtin:send_message': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
+  'builtin:followup_task': Object.freeze({
+    filesystem: 'unknown',
+    network: 'unknown',
+    externalState: 'none',
+  }),
+  'builtin:interrupt_agent': Object.freeze({
+    filesystem: 'none',
+    network: 'none',
+    externalState: 'none',
+  }),
   'subagent:start': Object.freeze({
     filesystem: 'unknown',
     network: 'unknown',
@@ -197,6 +243,11 @@ const EXECUTION_MECHANISMS_: Readonly<Record<SubagentOperationId, CapabilityExec
     'builtin:task_read': 'task_control',
     'builtin:task_wait': 'task_control',
     'builtin:task_cancel': 'task_control',
+    'builtin:list_agents': 'task_control',
+    'builtin:wait_agent': 'task_control',
+    'builtin:send_message': 'task_control',
+    'builtin:followup_task': 'task_control',
+    'builtin:interrupt_agent': 'task_control',
     'subagent:start': 'subagent',
     'subagent:resume': 'subagent',
     'verification:deterministic': 'verification',
@@ -260,7 +311,66 @@ export interface BuiltinTaskControlExecutionMechanism {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<Readonly<Record<string, unknown>>>;
-  cancelTask(taskId: string): Promise<Readonly<Record<string, unknown>>>;
+  cancelTask(
+    taskId: string,
+    options?: Readonly<{ waitMs?: number; abortCause?: 'user' | 'error' }>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+}
+
+/** Service-supplied caller facts; IDs are checked again by the Host mailbox owner. */
+export interface AgentMailboxCaller {
+  readonly sessionId: string;
+  readonly sourceAgentId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly modelInvocationId: string;
+  readonly sourceTaskId?: string;
+  readonly childGrantId?: string;
+}
+
+export interface AgentMailboxInvocationScope extends AgentMailboxCaller {
+  /** Exact prepared Tool call and attempt, never parsed from model arguments. */
+  readonly toolCallId: string;
+  readonly effectAttemptId: string;
+}
+
+export interface AgentMailboxPort {
+  /** Service binds this base to the exact active model invocation; Host revalidates it. */
+  readonly caller: AgentMailboxCaller;
+  listAgents(input: {
+    readonly scope: AgentMailboxInvocationScope;
+    readonly signal: AbortSignal;
+  }): Promise<
+    Readonly<{ ok: boolean; agents?: readonly Readonly<Record<string, unknown>>[]; code?: string }>
+  >;
+  waitAgent(input: {
+    readonly scope: AgentMailboxInvocationScope;
+    readonly timeoutMs: number;
+    readonly signal: AbortSignal;
+  }): Promise<Readonly<{ ok: boolean; timed_out?: boolean; reason?: string; code?: string }>>;
+  /** `ok: true` means the command and receipt were atomically persisted. */
+  submitMessage(input: {
+    readonly scope: AgentMailboxInvocationScope;
+    readonly agentId: string;
+    readonly message: string;
+    readonly mode: 'queue_only' | 'trigger_turn';
+    readonly signal: AbortSignal;
+  }): Promise<Readonly<{ ok: boolean; code?: string }>>;
+  interruptAgent(input: {
+    readonly scope: AgentMailboxInvocationScope;
+    readonly agentId: string;
+    readonly signal: AbortSignal;
+  }): Promise<
+    Readonly<{
+      ok: boolean;
+      agent_id?: string;
+      status?: string;
+      current_task_id?: string;
+      cancel_requested?: boolean;
+      cleanup_confirmed?: boolean;
+      code?: string;
+    }>
+  >;
 }
 
 export interface BuiltinVerificationExecutionMechanism {
@@ -271,6 +381,7 @@ export interface SubagentExecutionMechanisms extends Readonly<Record<string, unk
   readonly planning?: BuiltinPlanningExecutionMechanism;
   readonly subagent?: BuiltinSubagentExecutionMechanism;
   readonly taskControl?: BuiltinTaskControlExecutionMechanism;
+  readonly agentMailbox?: AgentMailboxPort;
   readonly verification?: BuiltinVerificationExecutionMechanism;
 }
 
@@ -334,8 +445,18 @@ function subagentContractOptions(
     operationId === 'builtin:task_read' ||
     operationId === 'builtin:task_wait' ||
     operationId === 'builtin:task_cancel';
+  const agentMailbox =
+    operationId === 'builtin:list_agents' ||
+    operationId === 'builtin:wait_agent' ||
+    operationId === 'builtin:send_message' ||
+    operationId === 'builtin:followup_task' ||
+    operationId === 'builtin:interrupt_agent';
   const askUser = operationId === 'builtin:ask_user';
-  const readOnly = operationId === 'builtin:read_plan' || taskControl;
+  const readOnly =
+    operationId === 'builtin:read_plan' ||
+    taskControl ||
+    operationId === 'builtin:list_agents' ||
+    operationId === 'builtin:wait_agent';
   const parser = task
     ? taskRuntimeParser(revision)
     : parserForBuiltinOperation(operationId, revision);
@@ -343,9 +464,11 @@ function subagentContractOptions(
     ? askUserBuiltinPolicyRule
     : task
       ? taskBuiltinPolicyRule
-      : taskControl
-        ? readOnlyBuiltinPolicyRule
-        : planBuiltinPolicyRule;
+      : agentMailbox
+        ? agentMailboxBuiltinPolicyRule
+        : taskControl
+          ? readOnlyBuiltinPolicyRule
+          : planBuiltinPolicyRule;
   return {
     parser,
     ...(task
@@ -366,23 +489,33 @@ function subagentContractOptions(
           : ('internal_runtime' as const),
     ...(askUser ? { descriptorRevisionSource: 'content' as const } : {}),
     minimumApproval: task ? ('user' as const) : ('none' as const),
-    ...(task || taskControl ? { availability: taskAvailability } : {}),
+    ...(task || taskControl
+      ? { availability: taskAvailability }
+      : agentMailbox
+        ? { availability: agentMailboxAvailability(operationId) }
+        : {}),
     effectsClassifier: task
       ? taskEffectsClassifier(effects)
       : staticEffectsClassifier(
-          askUser || readOnly ? 'read_only' : planAction ? 'plan_only' : 'unknown',
+          askUser || readOnly
+            ? 'read_only'
+            : planAction || (agentMailbox && operationId !== 'builtin:followup_task')
+              ? 'plan_only'
+              : 'unknown',
           !askUser && !readOnly && !planAction,
           askUser
             ? 'Pauses execution for explicit user input.'
-            : readOnly
-              ? taskControl
-                ? 'Reads, waits for, or stops Runtime-owned background sub-agents.'
-                : 'Reads the active immutable Plan Artifact.'
-              : planAction
-                ? operationId === 'builtin:update_plan'
-                  ? 'Updates progress in the active approved Plan.'
-                  : 'Creates or submits an immutable Plan Artifact.'
-                : 'Internal RM-14 lifecycle operation is Host-routed.',
+            : agentMailbox
+              ? 'Uses the Host-owned Agent mailbox under exact caller scope.'
+              : readOnly
+                ? taskControl
+                  ? 'Reads, waits for, or stops Runtime-owned background sub-agents.'
+                  : 'Reads the active immutable Plan Artifact.'
+                : planAction
+                  ? operationId === 'builtin:update_plan'
+                    ? 'Updates progress in the active approved Plan.'
+                    : 'Creates or submits an immutable Plan Artifact.'
+                  : 'Internal RM-14 lifecycle operation is Host-routed.',
           effects,
         ),
     ...(modelVisible
@@ -416,9 +549,26 @@ function subagentContractOptions(
             }),
           }
         : {}),
-    execution: readOnly ? { retry: 'safe_read' as const } : { retry: 'never' as const },
+    execution:
+      readOnly && !agentMailbox ? { retry: 'safe_read' as const } : { retry: 'never' as const },
   };
 }
+
+const agentMailboxAvailability =
+  (operationId: SubagentOperationId) =>
+  (context: import('@kite-ai/runtime-spi').CapabilityTurnContext) => {
+    // QueueOnly is the tighter cross-Session surface even if a Tool port is
+    // present and the general mailbox flag was also projected for this turn.
+    const available =
+      context.featureFlags?.agentMailboxQueueOnly === true
+        ? operationId === 'builtin:list_agents' ||
+          operationId === 'builtin:wait_agent' ||
+          operationId === 'builtin:send_message'
+        : context.featureFlags?.agentMailbox === true;
+    return available
+      ? Object.freeze({ status: 'available' as const })
+      : Object.freeze({ status: 'hidden' as const, reason: 'agent_mailbox_unavailable' });
+  };
 
 async function executeSubagentOperation(
   operationId: SubagentOperationId,
@@ -465,6 +615,19 @@ async function executeSubagentOperation(
       break;
     case 'builtin:task_cancel':
       value = await executeTaskControl('cancel', input, mechanisms?.taskControl, context.signal);
+      break;
+    case 'builtin:list_agents':
+    case 'builtin:wait_agent':
+    case 'builtin:send_message':
+    case 'builtin:followup_task':
+    case 'builtin:interrupt_agent':
+      value = await executeAgentMailboxOperation(
+        operationId,
+        input,
+        request.facts,
+        context,
+        mechanisms?.agentMailbox,
+      );
       break;
     case 'verification:deterministic':
       value = mechanisms?.verification
@@ -557,6 +720,198 @@ async function executeTaskControl(
   });
 }
 
+async function executeAgentMailboxOperation(
+  operationId: Extract<
+    SubagentOperationId,
+    | 'builtin:list_agents'
+    | 'builtin:wait_agent'
+    | 'builtin:send_message'
+    | 'builtin:followup_task'
+    | 'builtin:interrupt_agent'
+  >,
+  input: Readonly<Record<string, unknown>>,
+  facts: RuntimeJsonValue | undefined,
+  context: CapabilityExecutionContext,
+  port: AgentMailboxPort | undefined,
+): Promise<BuiltinOperationExecutionValue> {
+  if (!port) return operationFailure('Agent mailbox Runtime is unavailable.');
+  const scope = agentMailboxScope(port.caller, facts, context);
+  if (!scope) return operationFailure('Agent mailbox caller identity is unavailable.');
+  if (operationId === 'builtin:list_agents') {
+    BUILTIN_LIST_AGENTS_SCHEMA_.parse(input);
+    const result = await port.listAgents({ scope, signal: context.signal });
+    if (result.ok !== true) return agentMailboxRejection(result.code);
+    if (!Array.isArray(result.agents)) return operationFailure('Agent tree projection is invalid.');
+    const agents = result.agents.slice(0, 64).map((entry) => {
+      const record = asRecord(entry);
+      return record ? projectAgentListEntry(record) : undefined;
+    });
+    if (agents.some((entry) => !entry))
+      return operationFailure('Agent tree projection is invalid.');
+    return operationResult(true, JSON.stringify({ ok: true, agents }), '');
+  }
+  if (operationId === 'builtin:wait_agent') {
+    const parsed = BUILTIN_WAIT_AGENT_SCHEMA_.parse(input);
+    const result = await port.waitAgent({
+      scope,
+      timeoutMs: parsed.timeout_ms ?? 30_000,
+      signal: context.signal,
+    });
+    if (result.ok !== true) return agentMailboxRejection(result.code);
+    if (
+      typeof result.timed_out !== 'boolean' ||
+      (result.reason !== 'mailbox_update' &&
+        result.reason !== 'agent_update' &&
+        result.reason !== 'user_input' &&
+        result.reason !== 'timeout') ||
+      result.timed_out !== (result.reason === 'timeout')
+    ) {
+      return operationFailure('Agent mailbox wait result is invalid.');
+    }
+    return operationResult(
+      true,
+      JSON.stringify({ timed_out: result.timed_out, reason: result.reason }),
+      '',
+    );
+  }
+  if (operationId === 'builtin:send_message' || operationId === 'builtin:followup_task') {
+    const parsed =
+      operationId === 'builtin:send_message'
+        ? BUILTIN_SEND_MESSAGE_SCHEMA_.parse(input)
+        : BUILTIN_FOLLOWUP_TASK_SCHEMA_.parse(input);
+    const result = await port.submitMessage({
+      scope,
+      agentId: parsed.agent_id,
+      message: parsed.message,
+      mode: operationId === 'builtin:send_message' ? 'queue_only' : 'trigger_turn',
+      signal: context.signal,
+    });
+    return result.ok === true ? operationResult(true, '', '') : agentMailboxRejection(result.code);
+  }
+  const parsed = BUILTIN_INTERRUPT_AGENT_SCHEMA_.parse(input);
+  const result = await port.interruptAgent({
+    scope,
+    agentId: parsed.agent_id,
+    signal: context.signal,
+  });
+  if (result.ok !== true) return agentMailboxRejection(result.code);
+  if (
+    result.agent_id !== parsed.agent_id ||
+    typeof result.status !== 'string' ||
+    (result.cancel_requested !== undefined && typeof result.cancel_requested !== 'boolean') ||
+    (result.cleanup_confirmed !== undefined && typeof result.cleanup_confirmed !== 'boolean')
+  ) {
+    return operationFailure('Agent interrupt result is invalid.');
+  }
+  return operationResult(
+    true,
+    JSON.stringify({
+      ok: true,
+      agent_id: result.agent_id,
+      status: result.status,
+      ...(result.current_task_id ? { current_task_id: result.current_task_id } : {}),
+      ...(result.cancel_requested === undefined
+        ? {}
+        : { cancel_requested: result.cancel_requested }),
+      ...(result.cleanup_confirmed === undefined
+        ? {}
+        : { cleanup_confirmed: result.cleanup_confirmed }),
+    }),
+    '',
+  );
+}
+
+function agentMailboxScope(
+  caller: AgentMailboxCaller | undefined,
+  facts: RuntimeJsonValue | undefined,
+  context: CapabilityExecutionContext,
+): AgentMailboxInvocationScope | undefined {
+  const toolCallId = planToolCallId(facts);
+  const effectAttemptId = context.attempt.attemptId;
+  if (
+    !caller ||
+    !toolCallId ||
+    !effectAttemptId ||
+    (caller.sourceTaskId !== undefined &&
+      (typeof caller.sourceTaskId !== 'string' || caller.sourceTaskId.length === 0)) ||
+    (caller.childGrantId !== undefined &&
+      (typeof caller.childGrantId !== 'string' || caller.childGrantId.length === 0)) ||
+    ![
+      caller.sessionId,
+      caller.sourceAgentId,
+      caller.runId,
+      caller.turnId,
+      caller.modelInvocationId,
+    ].every((value) => typeof value === 'string' && value.length > 0)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({ ...caller, toolCallId, effectAttemptId });
+}
+
+function agentMailboxRejection(code: unknown): BuiltinOperationExecutionValue {
+  return operationFailure(
+    JSON.stringify({ ok: false, code: typeof code === 'string' ? code : 'mailbox_rejected' }),
+  );
+}
+
+function projectAgentListEntry(
+  value: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, RuntimeJsonValue>> | undefined {
+  if (typeof value.agent_id !== 'string' || typeof value.status !== 'string') return undefined;
+  const followupReason = value.last_followup_reason;
+  const recent = Array.isArray(value.recent_updates)
+    ? value.recent_updates.slice(0, 4).flatMap((item) => {
+        const update = asRecord(item);
+        if (!update || typeof update.message_id !== 'string' || typeof update.summary !== 'string')
+          return [];
+        return [
+          {
+            message_id: update.message_id,
+            summary: update.summary.slice(0, 400),
+            ...(typeof update.sender_agent_id === 'string'
+              ? { sender_agent_id: update.sender_agent_id }
+              : {}),
+            ...(typeof update.source_task_id === 'string'
+              ? { source_task_id: update.source_task_id }
+              : {}),
+          },
+        ];
+      })
+    : undefined;
+  return Object.freeze({
+    agent_id: value.agent_id,
+    status: value.status,
+    ...(typeof value.parent_agent_id === 'string'
+      ? { parent_agent_id: value.parent_agent_id }
+      : {}),
+    ...(typeof value.current_task_id === 'string'
+      ? { current_task_id: value.current_task_id }
+      : {}),
+    ...(typeof value.unread_count === 'number' && Number.isSafeInteger(value.unread_count)
+      ? { unread_count: value.unread_count }
+      : {}),
+    ...(value.last_followup_status === 'failed' &&
+    typeof value.last_followup_submission_id === 'string'
+      ? {
+          last_followup_status: 'failed',
+          last_followup_submission_id: value.last_followup_submission_id,
+          ...(typeof followupReason === 'string' &&
+          [
+            'tool_failed',
+            'expired',
+            'context_unavailable',
+            'authorization_changed',
+            'source_cancelled',
+          ].includes(followupReason)
+            ? { last_followup_reason: followupReason }
+            : {}),
+        }
+      : {}),
+    ...(recent ? { recent_updates: recent } : {}),
+  });
+}
+
 export function projectSubagentResult(input: {
   readonly input: Readonly<Record<string, unknown>>;
   readonly result: Readonly<Record<string, unknown>>;
@@ -612,6 +967,7 @@ export function projectSubagentResult(input: {
 
 const SUBAGENT_RESULT_KEYS_ = Object.freeze([
   'backgroundTaskId',
+  'checkpointRef',
   'blocked',
   'durationMs',
   'error',
@@ -634,6 +990,7 @@ const SUBAGENT_TERMINAL_STATUSES_ = Object.freeze([
   'interrupted',
   'exhausted',
   'suspended',
+  'unknown',
 ] as const);
 
 const SUBAGENT_BLOCKED_REASONS_ = Object.freeze([
@@ -1238,19 +1595,7 @@ function validateInput(
   operationId: SubagentOperationId,
   input: Readonly<Record<string, unknown>>,
 ): boolean {
-  const schema =
-    operationId === 'builtin:ask_user'
-      ? BUILTIN_ZOD_SCHEMAS_['builtin:ask_user']
-      : operationId === 'builtin:read_plan'
-        ? BUILTIN_ZOD_SCHEMAS_['builtin:read_plan']
-        : operationId === 'builtin:update_plan'
-          ? BUILTIN_ZOD_SCHEMAS_['builtin:update_plan']
-          : operationId === 'builtin:write_plan'
-            ? BUILTIN_ZOD_SCHEMAS_['builtin:write_plan']
-            : operationId === 'builtin:task'
-              ? BUILTIN_ZOD_SCHEMAS_['builtin:task']
-              : BUILTIN_ZOD_SCHEMAS_['subagent:start'];
-  return schema.safeParse(input).success;
+  return BUILTIN_ZOD_SCHEMAS_[operationId].safeParse(input).success;
 }
 
 function succeededReceipt(

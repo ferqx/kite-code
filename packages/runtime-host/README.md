@@ -53,6 +53,7 @@
 - NotificationProjector 对同 revision 的合法 metadata enrichment 向已有 subscriber 发布 event-free snapshot，短期 replay 保留该 revision 已确认的原 event。同一有界 retained revision 的 event 内容漂移在更新 registry 前拒绝，不能使 live 与 replay 看到不同事实；真正 projection 冲突仍拒绝。允许的字段变化由 Runtime Contract 唯一定义，完整消息仍由 History 恢复。
 
 - Provider work 前必须完成 durable attempt acknowledgement。
+- 子 Session 已激活但父 dispatch ACK 尚未落盘时，Host 只接受 cleanup confirmed 的 idle 执行权和精确 revision 5 作为失败结算预检；Store 在父 receipt transaction 内复核完整激活足迹。激活批次第五条必须是绑定子 invocation/Run 的 `task.started`，其 `userGoal` 为固定通用标签；预检不能替代 Store CAS。
 - Effect lease的global revision fence在dispatch前保持严格：stale Model preparation/attempt-start不得执行。精确Model invocation已经dispatch后，同一active Turn内无关的user control revision可以与其stream/retry/terminal evidence并发；Host只接受匹配live invocation的封闭Model/Tool/resource批次，Turn终止、invocation替换或identity漂移后仍拒绝迟到结果。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。
 - Tool/Shell活动数量不再形成Resource Budget permit；`maxToolInvocations`仍限制整轮累计调用，Subagent、writer、deadline与取消继续走原有账本。

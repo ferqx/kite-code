@@ -628,6 +628,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
     expect(coreEvents).toEqual([
       'user.message_appended',
       'turn.started',
+      'capability.bindings_issued',
       'model.invocation_prepared',
       'model.invocation_attempt_started',
       'model.requested',

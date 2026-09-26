@@ -198,8 +198,8 @@ describe('Builtin operation policy compiler', () => {
     const result = projection();
     const model = result.entries.filter((entry) => entry.visibility === 'model');
     const internal = result.entries.filter((entry) => entry.visibility === 'internal');
-    expect(result.entries).toHaveLength(32);
-    expect(model).toHaveLength(24);
+    expect(result.entries).toHaveLength(37);
+    expect(model).toHaveLength(29);
     expect(internal).toHaveLength(8);
     expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
     expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);

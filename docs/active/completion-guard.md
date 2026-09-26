@@ -15,7 +15,10 @@
 completion correction，也不消耗纠错次数；waiting reason 只关联 required task ID，不复制 child lifecycle。
 只有 Kernel 已接纳的 canonical background result 才解除对应义务，内存终态或 Artifact 单独存在都不能绕过准入。
 存在交互、普通工具、required Shell、unknown invocation、active Skill 或 Plan 等混合 blocker 时，继续按既有优先级处理，
-不能用后台等待遮蔽它们。
+不能用后台等待遮蔽它们。准确的 required finite Shell 命中 `wait_for_tool` 时也属于真实在途等待，初次完成候选不增加
+correction attempt；Service 只在所有当前 required Shell 完成清理、且 required child 已接纳后唤醒主模型。用户引导可提前
+唤醒同一 Run，兄弟任务继续。Shell 已终态而模型仍不调用 `shell_read` 时，持久等待事实记录模型已回复过一次，
+后续非法 final 回到原有有界纠错，避免对同一终态立即反复唤醒。
 
 V1 只用于无 Plan task。它只使用已有 canonical state：当前完成作用域内的非终结 Tool、pending interaction、suspended subagent、unknown Capability invocation、
 active Skill 与 Plan lifecycle。`building_without_plan` 和 `completed` 可通过；`planning_empty` 要求 save，draft 要求 submit，
@@ -34,7 +37,7 @@ Subagent 必须通过其 parent `task` Tool 匹配当前工作。旧 Task 的残
 `subagent_suspended`。但 pending interaction 仍由 CompletionGuard fail closed，防止绕过 Agent/Scheduler 的恢复入口
 直接伪造完成事件。
 
-RA-06 后，CompletionGuard runtime state 是 schema v26 / `kite-runtime-modularization-v1-2026-08-19` 的必需事实；
+当前 CompletionGuard runtime state 是 schema v27 / `kite-runtime-saq-v2-2026-09-05` 的必需事实；
 restore 不再把缺失 guard state 解释为零次纠错。缺失或错误 epoch 的 snapshot 在 Guard 判定前即 fail
 closed，且没有兼容 reducer 或在线 migration。
 
@@ -75,6 +78,8 @@ document 与 revision feedback；不得写 `run.completed`、`task.completed` �
 
 首次可纠正的 `completion.blocked` 可单独持久化并进入一次 correction。第二次或其他不可纠正的 V1/V2 blocker 必须在任何对外 yield 前，由 Kernel 单事务按顺序持久化 `[completion.blocked, turn.aborted, run.error]`；durable turn 随即为 aborted，Scheduler 返回 stop，重启不能发起第三次模型调用。Runtime restore 只接受精确 schema version 与 format epoch，不为旧 completion event 建立 migration reducer 或 recovery surface。
 
-`wait_for_background` 是上述纠错规则的专用例外。重进从持久 waiting reason 与 canonical obligation 恢复；终态、失败、取消、需父级处理的交互或新用户输入可恢复同一 Run，纯进度／心跳／日志 revision 不触发模型。owner generation 更替、execution authority 失效、settlement admission 失败、deadline 或取消竞争必须进入既有 unknown／recovery／取消边界，不得永久等待或把未接纳结果视为完成。
+`wait_for_background` 与有证据的 required finite Shell 等待是上述纠错规则的专用例外。重进从持久 waiting reason 与 canonical obligation 恢复；终态、失败、取消、需父级处理的交互或新用户输入可恢复同一 Run，纯进度／心跳／日志 revision 不触发模型。Shell 的 waiting reason 只记录准确 Shell ID 与完成等待后模型是否已回复，不替代 Shell owner 的执行与清理事实。完成等待 port 缺失会明确失败，不能把仍需等待的状态落入通用 `Completion blocked...` 终态。owner generation 更替、execution authority 失效、settlement admission 失败、deadline 或取消竞争必须进入既有 unknown／recovery／取消边界，不得永久等待或把未接纳结果视为完成。
 
 显式 `task_wait` 是普通的有界只读工具调用，不替代该自动等待决定，也不解除 required obligation；其返回只能帮助模型协调，canonical background result 仍是完成守卫接受的唯一 child 终态事实。
+
+已实施的[Codex 式 Agent 通信设计](../plans/background-agent-shell-conversation-coordination.md#4-codex-式-agent-通信kite-接线决定)把 `followup_task` 视为显式 Agent 消息与续轮触发，不在发送方 Run 为每条 followup 建立 required claim；现有 `task(background=true)` 的原 required 义务及本节的结果接纳规则不变。跨 Run 邮箱消息有独立低权限输入身份，不能伪装原 task 的 `subagent.background_result_persisted`。

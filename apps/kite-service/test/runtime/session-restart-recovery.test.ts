@@ -6,8 +6,45 @@ import type { AgentPendingApproval } from '@kite-ai/agent-kernel';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AuthorizedExecutionControl } from '#kite-service/bootstrap/runtime/RuntimeSessionCoordinator';
 import { reconcileRuntimeSessionAfterRestart } from '#kite-service/bootstrap/runtime/session-restart-recovery';
+import { backgroundSubagentOwnerKey } from '#kite-service/bootstrap/runtime/subagent/background-runtime';
 import { StateHostSessionHarness as AgentKernel } from '../../../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../../../scripts/support/runtime-storage';
+
+test('restart repairs only Kernel-admitted background result proofs before presenting the Session', async () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: 'a'.repeat(64),
+    threadId: 'checkpoint-repair-restart',
+    userId: 'user',
+    workspace: '/workspace',
+  });
+  const repairs: Array<{ ownerKey: string; state: unknown }> = [];
+  const result = await reconcileRuntimeSessionAfterRestart({
+    control: {
+      getState: () => state,
+      processEventBatch: () => [],
+    } as unknown as AuthorizedExecutionControl,
+    historyEvents: [],
+    modelInvocationRuntime: {
+      backgroundSubagentRuntime: {
+        repairSettlementProofs: (ownerKey, observed) => {
+          repairs.push({ ownerKey, state: observed });
+        },
+      },
+    },
+    recoveryOwnership: {
+      kind: 'fenced_previous_execution',
+      controllerGeneration: 2,
+      assertCurrent: () => true,
+    },
+  });
+  expect(result.complete).toBe(true);
+  expect(repairs).toEqual([
+    {
+      ownerKey: backgroundSubagentOwnerKey(state.session.threadId, state.toolRecovery.identityKey),
+      state,
+    },
+  ]);
+});
 
 test('restart Provider cleanup preserves only a durable user cancellation', async () => {
   for (const abortCause of ['user', 'error'] as const) {

@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  SubagentCheckpointArtifactRef,
+  SubagentCheckpointArtifactStore,
   SubagentResultArtifactAccess,
   SubagentResultArtifactRef,
 } from '@kite-ai/builtin-runtime/subagent';
 import type { RuntimeBackgroundExecutionProjection } from '@kite-ai/runtime-contract';
+import type { RuntimeState } from '../state-runtime';
 import type { SubAgentResult } from './types';
 
 const MAX_BACKGROUND_SUBAGENTS = 256;
@@ -22,6 +25,7 @@ export interface BackgroundSubagentCompletionNotification {
   readonly status: BackgroundSubagentStatus;
   readonly shortReport: string;
   readonly resultArtifact: SubagentResultArtifactRef;
+  readonly checkpointRef?: SubagentCheckpointArtifactRef;
   readonly cancelRequested: boolean;
 }
 
@@ -91,6 +95,19 @@ export interface BackgroundSubagentControlRuntime {
     ownerKey: string,
     taskId: string,
   ) => Promise<Readonly<Record<string, unknown>>>;
+  /** Exact terminal proof lookup; no transcript or authority is returned. */
+  readonly checkpointRefForTask: (
+    ownerKey: string,
+    taskId: string,
+  ) => SubagentCheckpointArtifactRef | null;
+  /** Read back the exact immutable result under its owner before Host settlement. */
+  readonly readResultArtifact: (
+    ownerKey: string,
+    taskId: string,
+    ref: SubagentResultArtifactRef,
+  ) => Readonly<Record<string, unknown>>;
+  /** Rebuild only proofs backed by an exact Kernel-admitted terminal fact. */
+  readonly repairSettlementProofs: (ownerKey: string, state: Readonly<RuntimeState>) => void;
   readonly waitTasks: (
     ownerKey: string,
     taskIds: readonly string[],
@@ -137,14 +154,93 @@ export class BackgroundSettlementAdmissionError extends Error {
  */
 export class BackgroundSubagentRuntime implements BackgroundSubagentControlRuntime {
   readonly #results: SubagentResultArtifactAccess;
+  readonly #checkpoints?: Pick<SubagentCheckpointArtifactStore, 'read'>;
   readonly #records = new Map<string, BackgroundSubagentRecord>();
   readonly #ownerWatermarks = new Map<string, number>();
   readonly #ownerWaiters = new Map<string, Set<() => void>>();
   readonly #ownerGeneration = `subagent_${randomUUID()}`;
   #watermark = 0;
 
-  constructor(results: SubagentResultArtifactAccess) {
+  constructor(
+    results: SubagentResultArtifactAccess,
+    checkpoints?: Pick<SubagentCheckpointArtifactStore, 'read'>,
+  ) {
     this.#results = results;
+    this.#checkpoints = checkpoints;
+  }
+
+  readResultArtifact(
+    ownerKey: string,
+    taskId: string,
+    ref: SubagentResultArtifactRef,
+  ): Readonly<Record<string, unknown>> {
+    const recorded =
+      this.#results.lookup(ownerKey, taskId) ??
+      this.#results.list(ownerKey).find((entry) => entry.taskId === taskId);
+    const live = this.#records.get(taskId);
+    const liveRef = live?.ownerKey === ownerKey ? live.resultArtifact : undefined;
+    const knownRef = recorded?.ref ?? liveRef;
+    if (
+      !knownRef ||
+      knownRef.artifactId !== ref.artifactId ||
+      knownRef.kind !== ref.kind ||
+      knownRef.integrityIdentifier !== ref.integrityIdentifier ||
+      knownRef.byteLength !== ref.byteLength
+    )
+      throw new Error('Background result Artifact owner or reference is unavailable.');
+    return this.#results.read(ref, taskId);
+  }
+
+  checkpointRefForTask(ownerKey: string, taskId: string): SubagentCheckpointArtifactRef | null {
+    const result = this.#results.lookup(ownerKey, taskId);
+    if (!result || !this.#hasSettlementProof(ownerKey, taskId, result.ref)) return null;
+    const proof = this.#results.lookup(ownerKey, settlementProofTaskId(result.ref))?.result;
+    const ref = proof?.checkpointRef;
+    if (!validCheckpointRef(ref)) return null;
+    try {
+      if (!this.#checkpoints) return null;
+      this.#checkpoints.read(ref, ownerKey, taskId);
+      return ref;
+    } catch {
+      return null;
+    }
+  }
+
+  repairSettlementProofs(ownerKey: string, state: Readonly<RuntimeState>): void {
+    for (const result of this.#results.list(ownerKey)) {
+      if (isInternalProof(result.result)) continue;
+      const matches = Object.values(state.capabilities.invocations).filter((invocation) => {
+        const lifecycle = invocation.subagentProviderLifecycle;
+        const admitted = lifecycle?.backgroundResult;
+        return (
+          admitted?.taskId === result.taskId &&
+          admitted.artifactIntegrityIdentifier === result.ref.integrityIdentifier &&
+          admitted.originToolCallId === invocation.toolCallId &&
+          admitted.originTurnId === state.tools.calls[invocation.toolCallId]?.createdAtTurnId &&
+          admitted.attempt === lifecycle?.attempt &&
+          lifecycle.childInvocationId === result.taskId &&
+          lifecycle.status === 'cleanup_completed'
+        );
+      });
+      if (matches.length === 0) continue;
+      if (matches.length !== 1) throw new Error('Background terminal admission is ambiguous.');
+      const admitted = matches[0]!.subagentProviderLifecycle!.backgroundResult!;
+      const ref = admitted.checkpointRef;
+      let validatedCheckpointRef: SubagentCheckpointArtifactRef | undefined;
+      if (ref && validCheckpointRef(ref) && this.#checkpoints) {
+        try {
+          this.#checkpoints.read(ref, ownerKey, result.taskId);
+          validatedCheckpointRef = ref;
+        } catch {
+          // Result settlement remains valid when its continuation is unavailable.
+        }
+      }
+      this.#persistSettlementProof(
+        { ownerKey, taskId: result.taskId },
+        result.ref,
+        validatedCheckpointRef,
+      );
+    }
   }
 
   hasLiveTask(taskId: string): boolean {
@@ -250,7 +346,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   async cancelTask(ownerKey: string, taskId: string): Promise<Readonly<Record<string, unknown>>> {
     const record = this.#owned(ownerKey, taskId);
     if (!record) return taskNotFound(taskId);
-    if (!isTerminal(record.status) && !record.cancelRequested) {
+    if (!record.cleanupConfirmed && !isTerminal(record.status) && !record.cancelRequested) {
       record.cancelRequested = true;
       record.status = 'cancelling';
       this.#bump(record);
@@ -268,7 +364,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   }
   requestCancel(ownerKey: string, taskId: string, onTerminal: () => void): boolean {
     const record = this.#owned(ownerKey, taskId);
-    if (!record || isTerminal(record.status)) return false;
+    if (!record || record.cleanupConfirmed || isTerminal(record.status)) return false;
     if (!record.cancelRequested) {
       record.cancelRequested = true;
       record.status = 'cancelling';
@@ -294,7 +390,20 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
     try {
       const result = await observe();
       record.cleanupConfirmed = true;
-      const durableResult = jsonRecord(result);
+      // The checkpoint ref is confined to the internal settlement proof. Task
+      // result reads and model-visible summaries retain the original shape.
+      const { checkpointRef, ...publicResult } = result;
+      const durableResult = jsonRecord(publicResult);
+      let validatedCheckpointRef: SubagentCheckpointArtifactRef | undefined;
+      if (checkpointRef && this.#checkpoints) {
+        try {
+          this.#checkpoints.read(checkpointRef, record.ownerKey, record.taskId);
+          validatedCheckpointRef = checkpointRef;
+        } catch {
+          // A missing or corrupt checkpoint must not change the original task
+          // terminal. Its Agent continuation remains unavailable.
+        }
+      }
       const artifact = this.#results.write({
         ownerKey: record.ownerKey,
         taskId: record.taskId,
@@ -302,7 +411,10 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         result: durableResult,
       });
       record.resultArtifact = artifact;
-      record.status = terminalStatus(result);
+      // Observation and Artifact persistence are earlier than Kernel admission.
+      // Keep the live record non-terminal until the callback and settlement
+      // proof agree, or a durable recovery claim makes failure enumerable.
+      const observedStatus = terminalStatus(result);
       if (onResultPersisted) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         let callbackSucceeded = false;
@@ -318,9 +430,10 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
               originTurnId: record.originTurnId,
               originToolCallId: record.originToolCallId,
               attempt: record.attempt,
-              status: record.status,
+              status: observedStatus,
               shortReport: shortReport(result),
               resultArtifact: artifact,
+              ...(validatedCheckpointRef ? { checkpointRef: validatedCheckpointRef } : {}),
               cancelRequested: record.cancelRequested,
             }),
           );
@@ -349,8 +462,9 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         }
         if (callbackSucceeded) {
           try {
-            this.#persistSettlementProof(record, artifact);
+            this.#persistSettlementProof(record, artifact, validatedCheckpointRef);
             record.settlementConfirmed = true;
+            record.status = observedStatus;
             // Publish the terminal owner watermark only after both the result
             // notification and its durable settlement proof are available.
             // Required-run waiters treat an unavailable terminal as a recovery
@@ -366,8 +480,9 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
           }
         }
       } else {
-        this.#persistSettlementProof(record, artifact);
+        this.#persistSettlementProof(record, artifact, validatedCheckpointRef);
         record.settlementConfirmed = true;
+        record.status = observedStatus;
         this.#bump(record);
       }
     } catch (error) {
@@ -541,16 +656,37 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   }
 
   #persistSettlementProof(
-    record: BackgroundSubagentRecord,
+    record: Pick<BackgroundSubagentRecord, 'ownerKey' | 'taskId'>,
     artifact: SubagentResultArtifactRef,
+    checkpointRef?: SubagentCheckpointArtifactRef,
   ): void {
+    const proofTaskId = settlementProofTaskId(artifact);
+    const existing = this.#results.lookup(record.ownerKey, proofTaskId)?.result;
+    if (existing) {
+      if (
+        existing.schema !== 'kite.background-subagent-settlement.v1' ||
+        existing.taskId !== record.taskId ||
+        existing.resultIntegrityIdentifier !== artifact.integrityIdentifier ||
+        (checkpointRef !== undefined &&
+          (!validCheckpointRef(existing.checkpointRef) ||
+            existing.checkpointRef.artifactId !== checkpointRef.artifactId ||
+            existing.checkpointRef.integrityIdentifier !== checkpointRef.integrityIdentifier ||
+            existing.checkpointRef.byteLength !== checkpointRef.byteLength))
+      ) {
+        throw new Error('Background sub-agent settlement proof conflicts with the task result.');
+      }
+      // Replayed callbacks cannot replace a committed checkpoint pointer,
+      // including an intentional no-checkpoint terminal.
+      return;
+    }
     this.#results.write({
       ownerKey: record.ownerKey,
-      taskId: settlementProofTaskId(artifact),
+      taskId: proofTaskId,
       result: Object.freeze({
         schema: 'kite.background-subagent-settlement.v1',
         taskId: record.taskId,
         resultIntegrityIdentifier: artifact.integrityIdentifier,
+        ...(checkpointRef ? { checkpointRef } : {}),
       }),
     });
   }
@@ -625,16 +761,18 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   }
 
   #snapshot(record: BackgroundSubagentRecord): Readonly<Record<string, unknown>> {
-    const result = record.resultArtifact
-      ? this.#results.read(record.resultArtifact, record.taskId)
-      : undefined;
+    const exposeResult = record.settlementConfirmed;
+    const result =
+      exposeResult && record.resultArtifact
+        ? this.#results.read(record.resultArtifact, record.taskId)
+        : undefined;
     return Object.freeze({
       ok: record.status !== 'unknown',
       task_id: record.taskId,
       status: record.status,
       cancel_requested: record.cancelRequested,
       cleanup_confirmed: record.cleanupConfirmed,
-      ...(record.resultArtifact ? { artifact: record.resultArtifact } : {}),
+      ...(exposeResult && record.resultArtifact ? { artifact: record.resultArtifact } : {}),
       ...(result ? { result } : {}),
       ...(record.terminalError ? { error: record.terminalError } : {}),
     });
@@ -699,8 +837,7 @@ function durableTaskSnapshot(
         : 'unknown',
     cancel_requested: false,
     cleanup_confirmed: cleanupConfirmed,
-    artifact: ref,
-    result,
+    ...(settlementConfirmed ? { artifact: ref, result } : {}),
     ...(settlementConfirmed ? {} : { error: 'Background sub-agent settlement requires recovery.' }),
   });
 }
@@ -748,6 +885,20 @@ function jsonRecord(value: Readonly<Record<string, unknown>>): Readonly<Record<s
     throw new Error('Background sub-agent result is not a JSON object.');
   }
   return Object.freeze(parsed as Record<string, unknown>);
+}
+
+function validCheckpointRef(value: unknown): value is SubagentCheckpointArtifactRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const ref = value as Record<string, unknown>;
+  return (
+    ref.kind === 'subagent_checkpoint' &&
+    typeof ref.artifactId === 'string' &&
+    /^pa_[a-f0-9]{64}$/u.test(ref.artifactId) &&
+    typeof ref.integrityIdentifier === 'string' &&
+    /^sha256:[a-f0-9]{64}$/u.test(ref.integrityIdentifier) &&
+    Number.isSafeInteger(ref.byteLength) &&
+    (ref.byteLength as number) > 0
+  );
 }
 
 function boundedError(error: unknown): string {

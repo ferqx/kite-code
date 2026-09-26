@@ -20,6 +20,45 @@ export function projectEventWithIdentity(
   event: RuntimeClientEvent,
   identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
+  if (event.type === 'agent.mail_status') {
+    const entries =
+      event.status === 'result_settled'
+        ? [{ id: `agent-followup:${event.submissionId}`, label: 'Agent 续轮' }]
+        : (event.messageIds ?? []).map((messageId) => ({
+            id: `agent-mail:${messageId}`,
+            label: 'Agent 消息',
+          }));
+    let next = messages;
+    for (const entry of entries) {
+      const previous = next.find((message) => message.id === entry.id);
+      if (previous?.status === 'running' && event.status === 'accepted') continue;
+      const phase =
+        event.status === 'accepted'
+          ? '已受理，等待目标读取'
+          : event.status === 'input_prepared'
+            ? '已准备进入目标模型输入'
+            : `结果已结算（${event.resultStatus}）`;
+      const message: Message = {
+        id: entry.id,
+        role: 'system',
+        title: entry.label,
+        text: phase,
+        status:
+          event.status === 'accepted'
+            ? 'queued'
+            : event.status === 'input_prepared'
+              ? 'running'
+              : event.resultStatus === 'completed'
+                ? 'completed'
+                : 'failed',
+        settled: event.status === 'result_settled',
+      };
+      next = previous
+        ? next.map((item) => (item.id === entry.id ? message : item))
+        : [...next, message];
+    }
+    return next;
+  }
   if (event.type === 'model.response_superseded') {
     return messages.filter((message) => message.id !== `model:${event.requestId}`);
   }

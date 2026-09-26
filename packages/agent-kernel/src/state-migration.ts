@@ -349,6 +349,7 @@ export function migrateState26To27(value: unknown): StateMigrationResult {
     // These are deliberately reset rather than copied from State 26.  They
     // can contain an old effect lease or a pending authority decision.
     resourceBudget: { status: 'unconfigured', reservations: {} },
+    retainedResourceBudgets: {},
     modelInvocations: {},
     providerReadiness: {},
     completionGuard: { correctionAttempts: 0 },
@@ -414,6 +415,7 @@ export function migrateState27ToCurrent(value: unknown): StateMigrationResult {
     ...candidate,
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
+    retainedResourceBudgets: {},
     pendingApprovals,
     sessionCommandGrants: new Map(mapEntries(candidate.sessionCommandGrants)),
     approvalReceipts: new Map(mapEntries(candidate.approvalReceipts)),

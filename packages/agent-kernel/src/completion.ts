@@ -530,6 +530,17 @@ function plannedCorrectionAttempt(state: AgentState, planIdentity: PlanIdentity)
     : 1;
 }
 
+function hasRespondedModelAfterSameShellWait(state: AgentState): boolean {
+  const previous = state.completionGuard.waitingReason;
+  if (previous?.kind !== 'required_shell' || !previous.modelRespondedAfterWait) return false;
+  const shellIds = [...requiredManagedShellIds(state)].sort();
+  return (
+    shellIds.length > 0 &&
+    shellIds.length === previous.shellIds.length &&
+    shellIds.every((shellId, index) => shellId === previous.shellIds[index])
+  );
+}
+
 function blockedUnplannedCompletion(
   state: AgentState,
   planning: PlanningState['kind'],
@@ -537,8 +548,12 @@ function blockedUnplannedCompletion(
   nextAction: CompletionNextAction,
   backgroundTaskIds: readonly string[] = [],
 ): UnplannedCompletionGuardBlocked {
-  const waitingForBackground = nextAction === 'wait_for_background';
-  const correctionAttempt = waitingForBackground
+  const waitingForLiveWork =
+    nextAction === 'wait_for_background' ||
+    (nextAction === 'wait_for_tool' &&
+      hasRequiredManagedShell(state) &&
+      !hasRespondedModelAfterSameShellWait(state));
+  const correctionAttempt = waitingForLiveWork
     ? state.completionGuard.correctionAttempts
     : unplannedCorrectionAttempt(state);
   const current = activePlanning(state);
@@ -553,7 +568,7 @@ function blockedUnplannedCompletion(
     nextAction,
     planning,
     correctionAttempt,
-    canCorrect: !waitingForBackground && correctionAttempt === 1 && !reviewedDraftCanPause,
+    canCorrect: !waitingForLiveWork && correctionAttempt === 1 && !reviewedDraftCanPause,
     backgroundTaskIds,
   };
 }
@@ -566,8 +581,12 @@ function blockedPlannedCompletion(
   nextAction: CompletionNextAction,
   backgroundTaskIds: readonly string[] = [],
 ): PlannedCompletionGuardBlocked {
-  const waitingForBackground = nextAction === 'wait_for_background';
-  const correctionAttempt = waitingForBackground
+  const waitingForLiveWork =
+    nextAction === 'wait_for_background' ||
+    (nextAction === 'wait_for_tool' &&
+      hasRequiredManagedShell(state) &&
+      !hasRespondedModelAfterSameShellWait(state));
+  const correctionAttempt = waitingForLiveWork
     ? state.completionGuard.correctionAttempts
     : plannedCorrectionAttempt(state, planIdentity);
   const current = activePlanning(state);
@@ -583,7 +602,7 @@ function blockedPlannedCompletion(
     planning,
     planIdentity,
     correctionAttempt,
-    canCorrect: !waitingForBackground && correctionAttempt === 1 && !reviewedDraftCanPause,
+    canCorrect: !waitingForLiveWork && correctionAttempt === 1 && !reviewedDraftCanPause,
     backgroundTaskIds,
   };
 }

@@ -7,6 +7,7 @@ import type {
 } from '@kite-ai/runtime-host';
 import {
   DescendantResourceAdmissionError,
+  fundingBudgetForReservation,
   planModelInvocationResource,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
@@ -200,10 +201,9 @@ export class AfterTurnContinuationRuntime {
       return result?.afterTurn?.runId === turnId ? [result.afterTurn.reservationId] : [];
     });
     if (matches.length !== 1) return undefined;
-    const budget = state.resourceBudget;
-    if (budget.status !== 'active') return undefined;
     const reservationId = matches[0]!;
-    return budget.reservations[reservationId]?.state === 'reserved' ? reservationId : undefined;
+    const budget = fundingBudgetForReservation(state, reservationId);
+    return budget?.reservations[reservationId]?.state === 'reserved' ? reservationId : undefined;
   }
 }
 

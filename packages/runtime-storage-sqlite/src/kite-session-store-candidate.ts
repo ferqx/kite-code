@@ -23,7 +23,10 @@ import {
 } from './kite-session-recovery-backup';
 import { mergeKiteSessionStores10 } from './kite-session-store-merge';
 import { convertKiteStore9ToSessionStore10 } from './kite-session-store9-conversion';
+import { convertKiteSessionStore10CandidateTo11 } from './kite-session-store10-to11';
 import { convertKiteSessionStore11To10 } from './kite-session-store11-conversion';
+import { convertKiteSessionStore11CandidateTo12 } from './kite-session-store11-to12';
+import { convertKiteSessionStore12CandidateTo13 } from './kite-session-store12-to13';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 
 export interface KiteSessionStoreCandidate {
@@ -95,11 +98,27 @@ export function createKiteSessionStoreCandidate<Event, State>(input: {
         isSettledState: input.isSettledState,
         nowMs: input.nowMs,
       };
-      if (backup.manifest.capture.schemaVersion === 9)
+      const { schemaVersion, formatEpoch } = backup.manifest.capture;
+      if (schemaVersion === 9) {
         convertKiteStore9ToSessionStore10(conversion);
-      else if (backup.manifest.capture.schemaVersion === 11)
+        convertKiteSessionStore10CandidateTo11({ database });
+        convertKiteSessionStore11CandidateTo12({ database });
+        convertKiteSessionStore12CandidateTo13({ database });
+      } else if (schemaVersion === 10 && formatEpoch === 'kite-session-app-server-2026-09-02') {
+        convertKiteSessionStore10CandidateTo11({ database });
+        convertKiteSessionStore11CandidateTo12({ database });
+        convertKiteSessionStore12CandidateTo13({ database });
+      } else if (schemaVersion === 11 && formatEpoch === 'kite-session-accepted-runs-2026-09-15') {
         convertKiteSessionStore11To10(conversion);
-      else assertKiteSessionStoreSchema(database);
+        convertKiteSessionStore10CandidateTo11({ database });
+        convertKiteSessionStore11CandidateTo12({ database });
+        convertKiteSessionStore12CandidateTo13({ database });
+      } else if (schemaVersion === 11 && formatEpoch === 'kite-session-lineage-2026-09-24') {
+        convertKiteSessionStore11CandidateTo12({ database });
+        convertKiteSessionStore12CandidateTo13({ database });
+      } else if (schemaVersion === 12 && formatEpoch === 'kite-session-child-approval-2026-09-25') {
+        convertKiteSessionStore12CandidateTo13({ database });
+      } else assertKiteSessionStoreSchema(database);
       input.validate(database);
       const mode = database
         .query<{ journal_mode: string }, []>('PRAGMA journal_mode = DELETE')

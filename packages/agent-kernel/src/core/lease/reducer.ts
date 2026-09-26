@@ -73,7 +73,17 @@ function assertResourceBudget(value: ResourceBudget): void {
   if (value == null || typeof value !== 'object' || value.version !== 1)
     throw new Error('Unsupported ResourceBudget version.');
   const candidate = value as unknown as Record<string, unknown>;
-  for (const field of BUDGET_FIELDS) positiveInteger(candidate[field], field);
+  const zeroAllowed = new Set<keyof ResourceBudget>([
+    'maxToolInvocations',
+    'maxArtifactBytes',
+    'maxConcurrentSubagents',
+    'maxConcurrentWriters',
+    'maxConcurrentToolInvocations',
+    'maxConcurrentShellInvocations',
+  ]);
+  for (const field of BUDGET_FIELDS)
+    if (zeroAllowed.has(field)) nonNegativeInteger(candidate[field], field);
+    else positiveInteger(candidate[field], field);
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
   if (value.maxConcurrentWriters > value.maxConcurrentToolInvocations)
@@ -179,6 +189,17 @@ function committedUsage(state: AgentResourceBudgetActiveState): ResourceUsage {
   for (const reservation of Object.values(state.reservations)) {
     if (['reserved', 'dispatch_started', 'unknown'].includes(reservation.state))
       usage = addUsage(usage, reservation.executableUpperBound);
+    else if (reservation.state === 'queued')
+      usage = addUsage(usage, {
+        ...reservation.executableUpperBound,
+        gauges: {
+          ...reservation.executableUpperBound.gauges,
+          activeSubagents: 0,
+          activeWriters: 0,
+          activeToolInvocations: 0,
+          activeShellInvocations: 0,
+        },
+      });
   }
   return usage;
 }
@@ -191,11 +212,26 @@ function assertReservation(value: ResourceReservation): void {
   nonEmpty(value.invocationId, 'invocationId');
   if (value.parentReservationId === value.reservationId)
     throw new Error('A reservation cannot be its own parent.');
+  if (value.replacesReservationId === value.reservationId)
+    throw new Error('A reservation cannot replace itself.');
   if (!RESOURCE_KINDS.includes(value.resourceKind))
     throw new Error('Reservation resource kind is invalid.');
   assertResourceUsage(value.executableUpperBound);
   if (value.executableUpperBound.source !== 'versioned_upper_bound')
     throw new Error('executableUpperBound must use versioned_upper_bound usage.');
+  if (
+    value.state === 'queued' &&
+    (value.resourceKind !== 'subagent' ||
+      !(
+        (value.reservationId.startsWith('child-allotment:') &&
+          value.invocationId === value.reservationId) ||
+        /^backup_[a-f0-9]{64}$/u.test(value.reservationId)
+      ) ||
+      value.parentReservationId !== undefined ||
+      value.actual !== undefined ||
+      value.executableUpperBound.gauges.activeSubagents !== 1)
+  )
+    throw new Error('Only an exact finite child allotment or TriggerTurn backup may be queued.');
   if (value.actual) {
     assertResourceUsage(value.actual);
     if (
@@ -224,6 +260,98 @@ function replaceReservation(
 
 function isResourceBudgetEvent(type: KernelEvent['type']): boolean {
   return type.startsWith('resource_budget.');
+}
+
+function hasUnsettledBudgetAuthority(ledger: AgentResourceBudgetActiveState): boolean {
+  return (
+    Object.values(ledger.reservations).some(
+      (reservation) =>
+        reservation.state === 'queued' ||
+        reservation.state === 'reserved' ||
+        reservation.state === 'dispatch_started' ||
+        reservation.state === 'unknown',
+    ) || Object.values(ledger.waiters).some((waiter) => waiter.state === 'waiting')
+  );
+}
+
+function ledgerForRun(
+  state: AgentState,
+  runId: string,
+): AgentResourceBudgetActiveState | undefined {
+  if (state.resourceBudget.status === 'active' && state.resourceBudget.runId === runId)
+    return state.resourceBudget;
+  return state.retainedResourceBudgets[runId];
+}
+
+function ledgerForReservation(
+  state: AgentState,
+  reservationId: string,
+): AgentResourceBudgetActiveState {
+  if (
+    state.resourceBudget.status === 'unconfigured' &&
+    Object.keys(state.retainedResourceBudgets).length === 0
+  )
+    throw new Error('Resource budget ledger is unconfigured.');
+  const matches = [
+    ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
+    ...Object.values(state.retainedResourceBudgets),
+  ].filter((ledger) => ledger.reservations[reservationId] !== undefined);
+  if (matches.length === 0) throw new Error(`Unknown reservation ${reservationId}.`);
+  if (matches.length > 1)
+    throw new Error(`Reservation ${reservationId} has ambiguous funding Runs.`);
+  return matches[0]!;
+}
+
+function ledgerForWaiter(state: AgentState, invocationId: string): AgentResourceBudgetActiveState {
+  const matches = [
+    ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
+    ...Object.values(state.retainedResourceBudgets),
+  ].filter((ledger) => ledger.waiters[invocationId] !== undefined);
+  if (matches.length === 0) throw new Error(`Unknown concurrency waiter ${invocationId}.`);
+  if (matches.length > 1) throw new Error(`Waiter ${invocationId} has ambiguous funding Runs.`);
+  return matches[0]!;
+}
+
+function budgetLedgerForEvent(
+  state: AgentState,
+  event: KernelEvent,
+): AgentResourceBudgetActiveState {
+  const payload = eventRecord(event);
+  if (event.type === 'resource_budget.reserved') {
+    const candidate = payload.reservation as ResourceReservation;
+    const ledger = ledgerForRun(state, candidate.runId);
+    if (!ledger) throw new Error(`Funding Run ${candidate.runId} has no budget ledger.`);
+    const duplicate = [
+      ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
+      ...Object.values(state.retainedResourceBudgets),
+    ].some((item) => item !== ledger && item.reservations[candidate.reservationId] !== undefined);
+    if (duplicate) throw new Error('Reservation ID is already owned by another funding Run.');
+    return ledger;
+  }
+  if (event.type === 'resource_budget.waiter_enqueued') {
+    const waiter = payload.waiter as ResourceWaiter;
+    const ledger = ledgerForRun(state, waiter.runId);
+    if (!ledger) throw new Error(`Funding Run ${waiter.runId} has no budget ledger.`);
+    return ledger;
+  }
+  if (
+    event.type === 'resource_budget.waiter_promoted' ||
+    event.type === 'resource_budget.waiter_cancelled' ||
+    event.type === 'resource_budget.waiter_timed_out'
+  )
+    return ledgerForWaiter(state, String(payload.invocationId));
+  return ledgerForReservation(state, String(payload.reservationId));
+}
+
+function withBudgetLedger(state: AgentState, ledger: AgentResourceBudgetActiveState): AgentState {
+  if (state.resourceBudget.status === 'active' && state.resourceBudget.runId === ledger.runId)
+    return { ...state, resourceBudget: ledger };
+  if (!state.retainedResourceBudgets[ledger.runId])
+    throw new Error(`Funding Run ${ledger.runId} is no longer retained.`);
+  const retained = { ...state.retainedResourceBudgets };
+  if (hasUnsettledBudgetAuthority(ledger)) retained[ledger.runId] = ledger;
+  else delete retained[ledger.runId];
+  return { ...state, retainedResourceBudgets: retained };
 }
 
 function isReadinessEvent(type: KernelEvent['type']): boolean {
@@ -258,10 +386,17 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
           JSON.stringify(state.resourceBudget.budget) === JSON.stringify(budget)
         )
           return state;
-        throw new Error('An active resource budget cannot be replaced.');
+        if (state.retainedResourceBudgets[runId])
+          throw new Error('A retained funding Run cannot be configured again.');
       }
+      const prior = state.resourceBudget.status === 'active' ? state.resourceBudget : undefined;
+      const retainedResourceBudgets =
+        prior && hasUnsettledBudgetAuthority(prior)
+          ? { ...state.retainedResourceBudgets, [prior.runId]: prior }
+          : state.retainedResourceBudgets;
       return {
         ...state,
+        retainedResourceBudgets,
         resourceBudget: {
           status: 'active',
           runId,
@@ -276,7 +411,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       };
     }
 
-    const active = activeState(state.resourceBudget);
+    const active = activeState(budgetLedgerForEvent(state, event));
     if (event.type === 'resource_budget.waiter_enqueued') {
       const waiter = payload.waiter as ResourceWaiter;
       if (waiter == null || typeof waiter !== 'object')
@@ -293,18 +428,24 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       if (Date.parse(waiter.deadlineAt) > Date.parse(active.deadlineAt))
         throw new Error('Concurrency waiter deadline exceeds the persisted run deadline.');
       const existing = active.waiters[waiter.invocationId];
+      if (
+        Object.values(state.retainedResourceBudgets).some(
+          (ledger) => ledger !== active && ledger.waiters[waiter.invocationId] !== undefined,
+        ) ||
+        (state.resourceBudget.status === 'active' &&
+          state.resourceBudget !== active &&
+          state.resourceBudget.waiters[waiter.invocationId] !== undefined)
+      )
+        throw new Error('Concurrency waiter identity is already owned by another funding Run.');
       if (existing) {
         if (JSON.stringify(existing) === JSON.stringify(waiter)) return state;
         throw new Error('Concurrency waiter invocation was reused with different facts.');
       }
-      return {
-        ...state,
-        resourceBudget: {
-          ...active,
-          waiters: { ...active.waiters, [waiter.invocationId]: waiter },
-          nextWaiterSequence: active.nextWaiterSequence + 1,
-        },
-      };
+      return withBudgetLedger(state, {
+        ...active,
+        waiters: { ...active.waiters, [waiter.invocationId]: waiter },
+        nextWaiterSequence: active.nextWaiterSequence + 1,
+      });
     }
 
     if (
@@ -324,22 +465,24 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
             : 'timed_out';
       if (waiter.state === targetState) return state;
       if (waiter.state !== 'waiting') throw new Error(`Cannot change a ${waiter.state} waiter.`);
-      return {
-        ...state,
-        resourceBudget: {
-          ...active,
-          waiters: {
-            ...active.waiters,
-            [invocationId]: { ...waiter, state: targetState },
-          },
+      return withBudgetLedger(state, {
+        ...active,
+        waiters: {
+          ...active.waiters,
+          [invocationId]: { ...waiter, state: targetState },
         },
-      };
+      });
     }
 
     if (event.type === 'resource_budget.reserved') {
       const candidate = payload.reservation as ResourceReservation;
       assertReservation(candidate);
-      if (candidate.state !== 'reserved') throw new Error('A new reservation must be reserved.');
+      if (candidate.replacesReservationId)
+        throw new Error('Bounded replacements require the atomic replacement event.');
+      if (candidate.state !== 'reserved' && candidate.state !== 'queued')
+        throw new Error('A new reservation must be reserved or queued.');
+      if (candidate.state === 'queued' && candidate.resourceKind !== 'subagent')
+        throw new Error('Only a child allotment may be queued.');
       if (candidate.runId !== active.runId) throw new Error('Reservation runId mismatch.');
       if (candidate.parentReservationId && !active.reservations[candidate.parentReservationId])
         throw new Error('Parent reservation must exist in the shared ledger.');
@@ -357,7 +500,135 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       const next = replaceReservation(active, candidate);
       if (!withinBudget(committedUsage(next), active.budget))
         throw new Error('Resource budget exhausted before dispatch.');
-      return { ...state, resourceBudget: next };
+      return withBudgetLedger(state, next);
+    }
+
+    if (event.type === 'resource_budget.bounded_replaced') {
+      const reservationId = payload.reservationId;
+      nonEmpty(reservationId, 'reservationId');
+      const turnReservation = payload.turnReservation as ResourceReservation;
+      const replacement = payload.replacement as ResourceReservation;
+      const otherLedgers = [
+        ...(state.resourceBudget.status === 'active' && state.resourceBudget !== active
+          ? [state.resourceBudget]
+          : []),
+        ...Object.values(state.retainedResourceBudgets).filter((ledger) => ledger !== active),
+      ];
+      if (
+        otherLedgers.some(
+          (ledger) =>
+            ledger.reservations[turnReservation.reservationId] !== undefined ||
+            ledger.reservations[replacement.reservationId] !== undefined,
+        )
+      )
+        throw new Error('Bounded replacement ID is already owned by another funding Run.');
+      assertReservation(turnReservation);
+      assertReservation(replacement);
+      if (
+        turnReservation.state !== 'reserved' ||
+        turnReservation.resourceKind !== 'subagent' ||
+        turnReservation.actual !== undefined ||
+        turnReservation.parentReservationId !== undefined ||
+        turnReservation.replacesReservationId !== reservationId ||
+        turnReservation.runId !== active.runId ||
+        turnReservation.executableUpperBound.counters.turns !== 1 ||
+        turnReservation.executableUpperBound.gauges.activeSubagents !== 1 ||
+        COUNTER_FIELDS.some(
+          (field) =>
+            field !== 'turns' && turnReservation.executableUpperBound.counters[field] !== 0,
+        ) ||
+        GAUGE_FIELDS.some(
+          (field) =>
+            field !== 'activeSubagents' && turnReservation.executableUpperBound.gauges[field] !== 0,
+        )
+      )
+        throw new Error('Bounded replacement requires one held child-turn reservation.');
+      if (
+        replacement.state !== 'reserved' ||
+        replacement.resourceKind !== 'model' ||
+        replacement.actual !== undefined
+      )
+        throw new Error('A bounded replacement must be a reserved model invocation.');
+      if (
+        replacement.parentReservationId !== turnReservation.reservationId ||
+        replacement.executableUpperBound.counters.turns !== 0 ||
+        replacement.executableUpperBound.counters.modelRequests !== 1 ||
+        COUNTER_FIELDS.some(
+          (field) =>
+            !['modelRequests', 'inputTokens', 'outputTokens'].includes(field) &&
+            replacement.executableUpperBound.counters[field] !== 0,
+        ) ||
+        GAUGE_FIELDS.some((field) => replacement.executableUpperBound.gauges[field] !== 0)
+      )
+        throw new Error(
+          'Bounded replacement must cover one first model request beneath the child turn.',
+        );
+      if (replacement.runId !== active.runId)
+        throw new Error('Bounded replacement runId mismatch.');
+      if (replacement.replacesReservationId !== reservationId)
+        throw new Error('Bounded replacement must identify its held backup.');
+      if (
+        replacement.reservationId === reservationId ||
+        turnReservation.reservationId === reservationId ||
+        replacement.reservationId === turnReservation.reservationId
+      )
+        throw new Error('Bounded replacement must use a new reservation identity.');
+      const held = active.reservations[reservationId];
+      if (!held) throw new Error(`Unknown reservation ${reservationId}.`);
+      if (held.runId !== active.runId || held.resourceKind !== 'subagent')
+        throw new Error('Bounded replacement requires a same-run sub-agent backup.');
+      const existing = active.reservations[replacement.reservationId];
+      const existingTurn = active.reservations[turnReservation.reservationId];
+      if (held.state === 'released' && existing && existingTurn) {
+        const { state: _state, actual: _actual, ...existingIdentity } = existing;
+        const {
+          state: _replacementState,
+          actual: _replacementActual,
+          ...replacementIdentity
+        } = replacement;
+        const { state: _turnState, actual: _turnActual, ...existingTurnIdentity } = existingTurn;
+        const { state: _newTurnState, actual: _newTurnActual, ...turnIdentity } = turnReservation;
+        if (
+          JSON.stringify(existingIdentity) === JSON.stringify(replacementIdentity) &&
+          JSON.stringify(existingTurnIdentity) === JSON.stringify(turnIdentity)
+        )
+          return state;
+        throw new Error('Bounded replacement replay conflicts with existing reservation.');
+      }
+      if (held.state !== 'reserved')
+        throw new Error('Only a held, undispatched reservation can be replaced.');
+      if (existing || existingTurn)
+        throw new Error('Bounded replacement identity is already used.');
+      if (
+        Object.values(active.reservations).some(
+          (item) =>
+            (item.invocationId === replacement.invocationId ||
+              item.invocationId === turnReservation.invocationId) &&
+            item.state !== 'released',
+        )
+      )
+        throw new Error('Invocation already has a non-released reservation.');
+      if (turnReservation.invocationId === replacement.invocationId)
+        throw new Error('Bounded replacement invocation identities must differ.');
+      if (
+        !withinUpperBound(
+          addUsage(turnReservation.executableUpperBound, replacement.executableUpperBound),
+          held.executableUpperBound,
+        )
+      )
+        throw new Error('Bounded replacement exceeds the held upper bound.');
+      const next: AgentResourceBudgetActiveState = {
+        ...active,
+        reservations: {
+          ...active.reservations,
+          [reservationId]: { ...held, state: 'released' },
+          [turnReservation.reservationId]: turnReservation,
+          [replacement.reservationId]: replacement,
+        },
+      };
+      if (!withinBudget(committedUsage(next), active.budget))
+        throw new Error('Resource budget exhausted before bounded replacement.');
+      return withBudgetLedger(state, next);
     }
 
     const reservationId = payload.reservationId;
@@ -366,6 +637,15 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
     if (!reservation) throw new Error(`Unknown reservation ${reservationId}.`);
     let next = active;
     switch (event.type) {
+      case 'resource_budget.child_slot_acquired': {
+        if (reservation.state === 'reserved') return state;
+        if (reservation.state !== 'queued' || reservation.resourceKind !== 'subagent')
+          throw new Error('Only a queued sub-agent reservation can acquire a slot.');
+        next = replaceReservation(active, { ...reservation, state: 'reserved' });
+        if (!withinBudget(committedUsage(next), active.budget))
+          throw new Error('Child concurrency slot is unavailable.');
+        break;
+      }
       case 'resource_budget.dispatch_started':
         if (reservation.state === 'dispatch_started') return state;
         if (reservation.state !== 'reserved')
@@ -398,6 +678,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
         if (reservation.state === 'released') return state;
         const proof = stringField(payload, 'proof');
         if (
+          reservation.state !== 'queued' &&
           reservation.state !== 'reserved' &&
           !(reservation.state === 'dispatch_started' && proof === 'local_pre_dispatch_failure')
         )
@@ -414,7 +695,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       default:
         return state;
     }
-    return { ...state, resourceBudget: next };
+    return withBudgetLedger(state, next);
   }
 
   if (!isReadinessEvent(event.type)) return state;

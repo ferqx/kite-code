@@ -3,11 +3,13 @@ import { createHash } from 'node:crypto';
 import {
   AGENT_KERNEL_BOUNDARY_,
   type AgentState,
+  assertAgentStateInvariants,
   assertCurrentRuntimeEvent,
   authorizeEffect,
   CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
   CURRENT_RUNTIME_EVENT_TYPE_COUNT,
   canForkAgentState,
+  childThreadIdForToolAttempt,
   createInitialAgentState,
   createToolRecoveryJournal,
   type DecisionFacts,
@@ -41,8 +43,131 @@ import {
 } from '@kite-ai/agent-kernel';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+function childProtocolFixture(type: RuntimeEventType): KernelEvent {
+  if (type === 'subagent.child_approval_proxy_changed')
+    return {
+      type,
+      proxyInteractionId: 'proxy-fixture',
+      childInvocationId: 'child-invocation-1',
+      status: 'pending',
+    };
+  const parentSessionId = 'session-1';
+  const parentInvocationId = 'invocation-1';
+  const parentToolCallId = 'tool-1';
+  const childInvocationId = 'child-invocation-1';
+  const childThreadId = childThreadIdForToolAttempt({
+    parentSessionId,
+    parentInvocationId,
+    parentToolCallId,
+    attempt: 1,
+  });
+  const taskArtifactRef = {
+    artifactId: `pa_${'a'.repeat(64)}`,
+    kind: 'subagent_task' as const,
+    integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+    byteLength: 100,
+  };
+  const base = {
+    parentSessionId,
+    parentInvocationId,
+    childInvocationId,
+    grantDigest: `sha256:${'c'.repeat(64)}`,
+    fundingRunId: 'funding-run',
+    delegatedReservationId: 'delegated-1',
+    delegatedUpperBoundDigest: `sha256:${'e'.repeat(64)}`,
+    deadlineAt: '2026-08-20T00:01:00.000Z',
+  };
+  switch (type) {
+    case 'subagent.child_session_intended':
+      return {
+        type,
+        ...base,
+        originRunId: 'run-1',
+        originTurnId: 'turn-1',
+        originToolCallId: parentToolCallId,
+        attempt: 1,
+        childThreadId,
+        taskArtifactRef,
+        taskArtifactDigest: taskArtifactRef.integrityIdentifier,
+        taskTextDigest: `sha256:${'b'.repeat(64)}`,
+        disposition: 'required',
+        role: 'explore',
+      };
+    case 'subagent.child_session_adopted':
+      return {
+        type,
+        ...base,
+        parentToolCallId,
+        attempt: 1,
+      };
+    case 'subagent.child_recovery_required':
+      return {
+        type,
+        parentSessionId,
+        parentInvocationId,
+        childInvocationId,
+        childThreadId,
+        originToolCallId: parentToolCallId,
+        attempt: 1,
+        grantDigest: base.grantDigest,
+        diagnosticCode: 'recovery_blocked',
+        observedAt: '2026-08-20T00:01:00.000Z',
+      };
+    case 'subagent.child_terminal_sealed':
+      return {
+        type,
+        status: 'failed',
+        resultRef: taskArtifactRef,
+        cleanupConfirmed: true,
+        cancelRequested: false,
+        terminalReceiptId: 'terminal-1',
+      };
+    case 'subagent.child_terminal_imported':
+      return {
+        type,
+        parentInvocationId,
+        childInvocationId,
+        childThreadId,
+        terminalRevision: 1,
+        terminalReceiptDigest: `sha256:${'d'.repeat(64)}`,
+        status: 'failed',
+        resultRef: taskArtifactRef,
+      };
+    case 'subagent.child_creation_failed':
+      return {
+        type,
+        parentInvocationId,
+        childInvocationId,
+        childThreadId,
+        mode: 'absent_child',
+        failureReceiptDigest: `sha256:${'d'.repeat(64)}`,
+        resultRef: taskArtifactRef,
+      };
+    case 'subagent.child_pre_dispatch_cancelled':
+      return {
+        type,
+        parentInvocationId,
+        childInvocationId,
+        childThreadId,
+        mode: 'absent_child',
+        terminalReceiptDigest: `sha256:${'d'.repeat(64)}`,
+        resultRef: taskArtifactRef,
+      };
+    case 'subagent.child_task_input_admitted':
+      return {
+        type,
+        childInvocationId,
+        taskArtifactRef,
+        taskDigest: taskArtifactRef.integrityIdentifier,
+        taskTextDigest: `sha256:${'b'.repeat(64)}`,
+        grantDigest: base.grantDigest,
+      };
+    default:
+      throw new Error('Not a child Session event.');
+  }
+}
 const INITIAL_STATE_FIXTURE_JSON =
-  '{"schemaVersion":27,"formatEpoch":"kite-runtime-saq-v2-2026-09-05","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"mode":"accept_edits","interactionModeRevision":0,"workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{},"pendingApprovals":{},"activeApprovalId":null,"nextQueueSequence":0,"approvalGeneration":0,"sessionCommandGrants":{},"approvalReceipts":{}}';
+  '{"schemaVersion":27,"formatEpoch":"kite-runtime-saq-v2-2026-09-05","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"retainedResourceBudgets":{},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"mode":"accept_edits","interactionModeRevision":0,"workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{},"pendingApprovals":{},"activeApprovalId":null,"nextQueueSequence":0,"approvalGeneration":0,"sessionCommandGrants":{},"approvalReceipts":{}}';
 
 function stableFixtureJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -276,6 +401,7 @@ function completeEvidenceFixture(
 }
 
 function minimalEvent(type: RuntimeEventType): KernelEvent {
+  if (type.startsWith('subagent.child_')) return childProtocolFixture(type);
   const valueFor = (field: string): unknown => {
     if (type.startsWith('background_execution.stop_')) {
       if (field === 'executionKind') return 'shell';
@@ -614,6 +740,142 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
     fixture.deadlineAt = '2026-08-20T00:00:30.000Z';
     (fixture.budget as Record<string, unknown>).maxRunDurationMs = 60_000;
   }
+  if (type === 'resource_budget.bounded_replaced') {
+    const backup = minimalEvent('resource_budget.reserved') as Extract<
+      KernelEvent,
+      { type: 'resource_budget.reserved' }
+    >;
+    fixture.turnReservation = {
+      ...backup.reservation,
+      reservationId: 'child-turn-fixture',
+      invocationId: 'child-turn-invocation-fixture',
+      replacesReservationId: 'reservation-fixture',
+      resourceKind: 'subagent',
+      executableUpperBound: {
+        ...backup.reservation.executableUpperBound,
+        counters: {
+          ...backup.reservation.executableUpperBound.counters,
+          turns: 1,
+          toolInvocations: 0,
+        },
+        gauges: {
+          ...backup.reservation.executableUpperBound.gauges,
+          activeSubagents: 1,
+          activeToolInvocations: 0,
+        },
+      },
+    };
+    fixture.replacement = {
+      ...backup.reservation,
+      reservationId: 'replacement-fixture',
+      invocationId: 'replacement-invocation-fixture',
+      resourceKind: 'model',
+      parentReservationId: 'child-turn-fixture',
+      replacesReservationId: 'reservation-fixture',
+      executableUpperBound: {
+        ...backup.reservation.executableUpperBound,
+        counters: {
+          ...backup.reservation.executableUpperBound.counters,
+          modelRequests: 1,
+          toolInvocations: 0,
+        },
+        gauges: {
+          ...backup.reservation.executableUpperBound.gauges,
+          activeSubagents: 0,
+          activeToolInvocations: 0,
+        },
+      },
+    };
+  }
+  if (type === 'agent.created') {
+    fixture.agentId = 'agent-fixture';
+    fixture.parentAgentId = null;
+  }
+  if (type === 'agent.turn_started') {
+    fixture.agentId = 'agent-fixture';
+    fixture.taskId = 'task-fixture';
+    fixture.turnOrdinal = 0;
+    fixture.ownerGeneration = 'owner-fixture';
+    fixture.grantDigest = `sha256:${'a'.repeat(64)}`;
+  }
+  if (type === 'agent.followup_turn_prepared') {
+    fixture.sourceSessionId = 'parent-fixture';
+    fixture.submissionId = 'submission-fixture';
+    fixture.targetRunId = 'run-fixture';
+    fixture.taskId = 'task-fixture';
+    fixture.checkpointRef = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_checkpoint',
+      integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+      byteLength: 1,
+    };
+    fixture.grantRef = {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'agent_followup_grant',
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      byteLength: 1,
+    };
+    fixture.grantDigest = `sha256:${'b'.repeat(64)}`;
+  }
+  if (type === 'agent.followup_turn_settled') {
+    fixture.sourceSessionId = 'parent-fixture';
+    fixture.submissionId = 'submission-fixture';
+    fixture.targetRunId = 'run-fixture';
+    fixture.taskId = 'task-fixture';
+    fixture.status = 'completed';
+  }
+  if (type === 'agent.mail_accepted') {
+    fixture.messageId = 'message-fixture';
+    fixture.senderAgentId = 'sender-fixture';
+    fixture.targetAgentId = 'target-fixture';
+    fixture.mode = 'queue_only';
+    fixture.source = {
+      runId: 'run-fixture',
+      turnId: 'turn-fixture',
+      modelInvocationId: 'model-fixture',
+      toolCallId: 'tool-fixture',
+      effectAttemptId: 'attempt-fixture',
+    };
+    fixture.bodyRef = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'agent_mail',
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      byteLength: 1,
+    };
+    fixture.bodyDigest = `sha256:${'b'.repeat(64)}`;
+    fixture.sequence = 1;
+  }
+  if (type === 'agent.followup_routed') {
+    fixture.submissionId = 'submission-fixture';
+    fixture.targetAgentId = 'target-fixture';
+    fixture.route = 'current_turn';
+    fixture.taskId = 'task-fixture';
+    fixture.invocationId = 'model-fixture';
+    fixture.modelAdmissionId = 'admission-fixture';
+    fixture.reservationId = 'reservation-fixture';
+    fixture.fundingRunId = 'run-fixture';
+    fixture.sequence = 1;
+  }
+  if (type === 'agent.mail_input_prepared') {
+    fixture.targetAgentId = 'target-fixture';
+    fixture.invocationId = 'model-fixture';
+    fixture.modelAdmissionId = 'admission-fixture';
+    fixture.fromSequence = 0;
+    fixture.throughSequence = 1;
+    fixture.messageIds = ['message-fixture'];
+  }
+  if (type === 'agent.task_settled') {
+    fixture.agentId = 'agent-fixture';
+    fixture.taskId = 'task-fixture';
+    fixture.ownerGeneration = 'owner-fixture';
+    fixture.status = 'completed';
+    fixture.resultRef = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_task',
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+      byteLength: 1,
+    };
+  }
   if (
     [
       'user.message_appended',
@@ -691,9 +953,37 @@ function corpusState(type: RuntimeEventType): AgentState {
       type === 'resource_budget.dispatch_started' ||
       type === 'resource_budget.reconciled' ||
       type === 'resource_budget.released' ||
-      type === 'resource_budget.unknown'
+      type === 'resource_budget.unknown' ||
+      type === 'resource_budget.bounded_replaced'
     ) {
-      state = reduceAgentState(state, minimalEvent('resource_budget.reserved'));
+      const reserved = minimalEvent('resource_budget.reserved') as Extract<
+        KernelEvent,
+        { type: 'resource_budget.reserved' }
+      >;
+      state = reduceAgentState(
+        state,
+        type === 'resource_budget.bounded_replaced'
+          ? {
+              ...reserved,
+              reservation: {
+                ...reserved.reservation,
+                resourceKind: 'subagent',
+                executableUpperBound: {
+                  ...reserved.reservation.executableUpperBound,
+                  counters: {
+                    ...reserved.reservation.executableUpperBound.counters,
+                    turns: 1,
+                    modelRequests: 1,
+                  },
+                  gauges: {
+                    ...reserved.reservation.executableUpperBound.gauges,
+                    activeSubagents: 1,
+                  },
+                },
+              },
+            }
+          : reserved,
+      );
       if (type === 'resource_budget.dispatch_started' || type === 'resource_budget.reconciled') {
         state = reduceAgentState(state, minimalEvent('resource_budget.dispatch_started'));
       }
@@ -893,9 +1183,9 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(145);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(165);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
-    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(13);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(20);
   });
 
   test('validates and decodes every current State event discriminant', () => {
@@ -911,6 +1201,8 @@ describe('agent kernel package boundary', () => {
         if (field === 'shortReport') return 'fixture report';
         if (field === 'artifactIntegrityIdentifier') return `sha256:${'a'.repeat(64)}`;
       }
+      if (eventType === 'subagent.child_approval_proxy_changed' && field === 'status')
+        return 'pending';
       if (field === 'fullModeBypassEligible' || field === 'fullModePolicyBypassAllowed') {
         return false;
       }
@@ -1049,6 +1341,18 @@ describe('agent kernel package boundary', () => {
     };
 
     for (const [type, fields] of Object.entries(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS)) {
+      if (type.startsWith('subagent.child_')) {
+        const event = childProtocolFixture(type as RuntimeEventType);
+        assertCurrentRuntimeEvent(event);
+        expect(decodeCurrentRuntimeEventJson(JSON.stringify(event))).toEqual(event);
+        continue;
+      }
+      if (type.startsWith('agent.')) {
+        const event = minimalEvent(type as RuntimeEventType);
+        assertCurrentRuntimeEvent(event);
+        expect(decodeCurrentRuntimeEventJson(JSON.stringify(event))).toEqual(event);
+        continue;
+      }
       const event = completeEvidenceFixture(type as RuntimeEventType, {
         type,
         ...Object.fromEntries(
@@ -1109,18 +1413,37 @@ describe('agent kernel package boundary', () => {
     expect(reduceAgentState(state, diagnostic as KernelEvent)).toEqual(state);
   });
 
-  test('classifies all 145 events into one static owner or an explicit default no-op', () => {
+  test('classifies all current events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(145);
-    expect(new Set(covered).size).toBe(145);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(132);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(145);
+    expect(covered).toHaveLength(165);
+    expect(new Set(covered).size).toBe(165);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(145);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(165);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
         covered.includes(type as never),
       ),
     ).toBe(true);
+  });
+
+  test('child approval proxy wake does not change parent tool or approval State', () => {
+    const state = createInitialAgentState({
+      threadId: 'parent-session',
+      userId: 'user-1',
+      workspace: '/workspace',
+      turnId: 'turn-1',
+      recoveryIdentityKey: IDENTITY_KEY,
+    });
+    const wake: KernelEvent = {
+      type: 'subagent.child_approval_proxy_changed',
+      proxyInteractionId: 'proxy-1',
+      childInvocationId: 'child-1',
+      status: 'pending',
+    };
+    expect(decodeCurrentRuntimeEventJson(JSON.stringify(wake))).toEqual(wake);
+    expect(reduceAgentState(state, wake)).toEqual(state);
+    expect(() => assertCurrentRuntimeEvent({ ...wake, status: 'unverified' } as never)).toThrow();
   });
 
   test('keeps durable rewind evidence outside the unchanged State 27 shape', () => {
@@ -1147,6 +1470,15 @@ describe('agent kernel package boundary', () => {
     const diagnosticSet = new Set<string>(STATE_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
+      if (
+        type === 'resource_budget.child_slot_acquired' ||
+        type === 'subagent.child_session_adopted' ||
+        type === 'subagent.child_terminal_sealed' ||
+        type === 'subagent.child_task_input_admitted'
+      ) {
+        expect(() => reduceAgentState(initial, minimalEvent(type))).toThrow();
+        continue;
+      }
       const before = encodeCurrentAgentStateJson(initial);
       let after: AgentState;
       try {
@@ -1595,6 +1927,79 @@ describe('agent kernel package boundary', () => {
     expect(once.transcript.final).toBeUndefined();
     expect(once.completionGuard).toEqual({ correctionAttempts: 0 });
     expect(decodeCurrentAgentStateJson(encodeCurrentAgentStateJson(once))).toEqual(once);
+    const originalInvocation = once.capabilities.invocations['invocation-1']!;
+    const originalLifecycle = originalInvocation.subagentProviderLifecycle!;
+    const resultRef = {
+      kind: 'subagent_task' as const,
+      artifactId: `pa_${'f'.repeat(64)}`,
+      integrityIdentifier: event.artifactIntegrityIdentifier,
+      byteLength: 1,
+    };
+    const independent: AgentState = {
+      ...once,
+      capabilities: {
+        ...once.capabilities,
+        invocations: {
+          ...once.capabilities.invocations,
+          'invocation-1': {
+            ...originalInvocation,
+            subagentProviderLifecycle: {
+              attempt: originalLifecycle.attempt,
+              purpose: originalLifecycle.purpose,
+              childInvocationId: originalLifecycle.childInvocationId,
+              taskArtifact: originalLifecycle.taskArtifact,
+              dispatchIntentDigest: originalLifecycle.dispatchIntentDigest,
+              recordedAt: originalLifecycle.recordedAt,
+              status: 'intent_recorded',
+              backgroundResult: originalLifecycle.backgroundResult,
+              childSession: {
+                childThreadId: childThreadIdForToolAttempt({
+                  parentSessionId: 'session-1',
+                  parentInvocationId: 'invocation-1',
+                  parentToolCallId: 'tool-1',
+                  attempt: 1,
+                }),
+                grantDigest: `sha256:${'c'.repeat(64)}`,
+                taskArtifactRef: originalLifecycle.taskArtifact,
+                taskArtifactDigest: originalLifecycle.taskArtifact.integrityIdentifier,
+                taskTextDigest: `sha256:${'d'.repeat(64)}`,
+                originRunId: 'run-1',
+                originTurnId: 'turn-1',
+                originToolCallId: 'tool-1',
+                disposition: 'required',
+                role: 'explore',
+                fundingRunId: 'run-1',
+                delegatedReservationId: 'reservation-1',
+                delegatedUpperBoundDigest: `sha256:${'e'.repeat(64)}`,
+                deadlineAt: '2026-08-20T00:01:00.000Z',
+                terminalImport: {
+                  terminalRevision: 10,
+                  terminalReceiptDigest: `sha256:${'f'.repeat(64)}`,
+                  status: 'completed',
+                  resultRef,
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    expect(() => assertAgentStateInvariants(independent)).not.toThrow();
+    const noChildImport = structuredClone(independent);
+    delete (
+      noChildImport.capabilities.invocations['invocation-1']?.subagentProviderLifecycle
+        ?.childSession as { terminalImport?: unknown }
+    ).terminalImport;
+    expect(() => assertAgentStateInvariants(noChildImport)).toThrow(
+      'invalid background result authority',
+    );
+    const mismatchedResult = structuredClone(independent);
+    const imported = mismatchedResult.capabilities.invocations['invocation-1']
+      ?.subagentProviderLifecycle?.childSession?.terminalImport as { resultRef: typeof resultRef };
+    imported.resultRef = { ...resultRef, integrityIdentifier: `sha256:${'0'.repeat(64)}` };
+    expect(() => assertAgentStateInvariants(mismatchedResult)).toThrow(
+      'invalid background result authority',
+    );
     const legacyCurrentState = structuredClone(once);
     const legacyBackgroundResult =
       legacyCurrentState.capabilities.invocations['invocation-1']?.subagentProviderLifecycle
@@ -1848,6 +2253,7 @@ describe('agent kernel package boundary', () => {
       'transcript',
       'context',
       'resourceBudget',
+      'retainedResourceBudgets',
       'modelInvocations',
       'providerReadiness',
       'completionGuard',
@@ -1892,6 +2298,7 @@ describe('agent kernel package boundary', () => {
         },
       },
       resourceBudget: { status: 'unconfigured', reservations: {} },
+      retainedResourceBudgets: {},
       modelInvocations: {},
       providerReadiness: {},
       completionGuard: { correctionAttempts: 0 },

@@ -29,7 +29,12 @@ export function decodeCurrentAgentStateJson(serialized: string): AgentState {
   if (!isCurrentAgentStateSnapshot(value)) {
     throw new Error('Runtime snapshot is not State/current-epoch data.');
   }
-  const hydrated = hydrateApprovalMaps(dropLegacyBackgroundResultAuthority(value));
+  // State27 snapshots written before cross-Run funding carry no retained ledger field.
+  // Normalize only that older serialized shape; current writers always emit the field.
+  const normalized = Object.hasOwn(value, 'retainedResourceBudgets')
+    ? value
+    : { ...value, retainedResourceBudgets: {} };
+  const hydrated = hydrateApprovalMaps(dropLegacyBackgroundResultAuthority(normalized));
   assertAgentStateInvariants(hydrated);
   return hydrated;
 }

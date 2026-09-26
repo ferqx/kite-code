@@ -15,6 +15,7 @@ import { createSqliteWorkspaceInitialControllerTransaction } from './authority';
 import { assertSqliteRuntimeCommandReceipt } from './command-receipts';
 import { createSqliteEffectLeaseStore } from './effect-leases';
 import { createSqliteEventStore } from './event-store';
+import { assertChildSessionIntent } from './kite-child-session-intents';
 import { removeKiteHomeWorkspaceAuthoritySessionInTransaction } from './kite-home-authority';
 import { createKiteHomeCheckpointStore } from './kite-home-checkpoints';
 import { createKiteHomeCommandReceiptStore } from './kite-home-command-receipts';
@@ -31,6 +32,7 @@ import {
   type SqliteRuntimeSessionBinding,
   type SqliteRuntimeSnapshotCodec,
 } from './preflight';
+import { hasSessionLineage } from './session-lineage';
 import { createSqliteSnapshotStore } from './snapshot-store';
 import type {
   InitialControllerTransactionPort,
@@ -70,6 +72,9 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   readonly afterPersistInTransaction?: Parameters<
     typeof createSqliteRuntimeTransactionPort<Event, State>
   >[0]['afterPersistInTransaction'];
+  readonly authorizeInternalFollowupRunStart?: Parameters<
+    typeof createSqliteRuntimeTransactionPort<Event, State>
+  >[0]['authorizeInternalFollowupRunStart'];
   readonly initialController?: InitialControllerTransactionPort;
   readonly runCreateTransaction?: <Result>(write: () => Result) => Result;
   readonly workspace: KiteHomeWorkspaceAdmission;
@@ -282,7 +287,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     },
   });
 
-  const transactions = createSqliteRuntimeTransactionPort({
+  const transactions = createSqliteRuntimeTransactionPort<Event, State>({
     db: input.database,
     isClosed,
     hasEffectLease:
@@ -293,6 +298,28 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     readSnapshotRevision: snapshotStore.getRevision,
     lastEventPosition: eventStore.lastEventPosition,
     ensureSession: sessionMetadata.ensureInTransaction,
+    ...(hasSessionLineage(input.database)
+      ? {
+          admitChildSession(intent, state, mode) {
+            assertChildSessionIntent(input.database, intent, state);
+            if (mode === 'create') {
+              sessionMetadata.ensureChildInTransaction(
+                intent.childThreadId,
+                intent.parentSessionId,
+                state,
+              );
+              return;
+            }
+            const row = input.database
+              .query<{ parent_session_id: string | null }, [string]>(
+                'SELECT parent_session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+              )
+              .get(intent.childThreadId);
+            if (row?.parent_session_id !== intent.parentSessionId)
+              throw new Error('Child Session replay lineage conflicts with its parent intent.');
+          },
+        }
+      : {}),
     insertEvents: eventStore.insertEvents,
     encodeSnapshot: snapshotStore.encode,
     persistSnapshot: snapshotStore.persist,
@@ -359,6 +386,9 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     ...(input.runCreateTransaction ? { runCreateTransaction: input.runCreateTransaction } : {}),
     ...(input.afterPersistInTransaction
       ? { afterPersistInTransaction: input.afterPersistInTransaction }
+      : {}),
+    ...(input.authorizeInternalFollowupRunStart
+      ? { authorizeInternalFollowupRunStart: input.authorizeInternalFollowupRunStart }
       : {}),
   });
   if (!transactions.createSessionWithInitialController) {

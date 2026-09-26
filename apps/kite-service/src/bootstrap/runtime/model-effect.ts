@@ -40,7 +40,11 @@ import {
   canonicalizeCapabilityArguments,
   skillFrameInvalidationReason,
 } from '@kite-ai/builtin-runtime/skills';
-import { createBuiltinModelToolSurfaceFromProjection } from '@kite-ai/builtin-runtime/subagent';
+import type { SubagentTaskArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
+import {
+  createBuiltinModelToolSurfaceFromProjection,
+  getRoleConfig,
+} from '@kite-ai/builtin-runtime/subagent';
 import { getAgentPhase, type SubAgentEventSink } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
@@ -80,6 +84,44 @@ function boundedCancellationTools<T extends Record<string, unknown>>(
       .map((entry) => entry.name),
   );
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !boundedNames.has(name))) as T;
+}
+
+type DelegatedToolCeiling = Readonly<{
+  grantDigest: string;
+  role: 'explore' | 'plan' | 'code' | 'review';
+  allowedTools: readonly string[];
+  denyTools?: true;
+}>;
+
+export function delegatedToolSurface<T extends Record<string, unknown>>(
+  tools: T,
+  state: RuntimeState,
+  ceiling?: DelegatedToolCeiling,
+): T {
+  const origin = state.childSessionOrigin;
+  if (!origin) return tools;
+  const followup = state.activeFollowupTurn;
+  if (
+    !ceiling ||
+    ceiling.grantDigest !== (followup?.grantDigest ?? origin.grantDigest) ||
+    ceiling.role !== origin.role
+  )
+    throw new Error('Child Session model surface lacks its exact sealed grant ceiling.');
+  if (followup) {
+    if (ceiling.denyTools !== true || ceiling.allowedTools.length !== 0)
+      throw new Error('Child followup Model surface must deny every Tool.');
+    return {} as T;
+  }
+  const allowed = getRoleConfig(origin.role).allowedTools;
+  const unrestrictedCode = origin.role === 'code' && ceiling.allowedTools.length === 0;
+  return Object.fromEntries(
+    Object.entries(tools).filter(
+      ([name]) =>
+        name !== 'task' &&
+        (!allowed || allowed.has(name)) &&
+        (unrestrictedCode || ceiling.allowedTools.includes(name)),
+    ),
+  ) as T;
 }
 
 function projectBuiltinUnknownFields(
@@ -207,6 +249,10 @@ export function resolveContextProjectionEnvironment(input: {
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   subagentEventSink?: SubAgentEventSink;
+  agentMailboxAvailable?: boolean;
+  agentMailboxQueueOnlyAvailable?: boolean;
+  delegatedTaskArtifacts?: Pick<SubagentTaskArtifactAccess, 'read'>;
+  childToolCeiling?: DelegatedToolCeiling;
   signal?: AbortSignal;
   mcpBindings?: Array<{
     binding: import('@kite-ai/runtime-contract').CapabilityBinding;
@@ -217,6 +263,26 @@ export function resolveContextProjectionEnvironment(input: {
   builtinToolCatalog: BuiltinToolCatalogProjection;
   projectedTools?: BuiltinModelToolSet;
 }): ContextProjectionEnvironment {
+  const delegatedTask = (() => {
+    const origin = input.state.childSessionOrigin;
+    if (!origin) return undefined;
+    if (!origin.taskInputAdmitted || !input.delegatedTaskArtifacts) {
+      throw new Error('Child Session task input is not durably admitted.');
+    }
+    const payload = input.delegatedTaskArtifacts.read(origin.taskArtifactRef, {
+      parentInvocationId: origin.parentInvocationId,
+      parentAttempt: origin.attempt,
+      parentToolCallId: origin.parentToolCallId,
+      childInvocationId: origin.childInvocationId,
+      taskDigest: origin.taskTextDigest,
+    });
+    return Object.freeze({
+      childInvocationId: origin.childInvocationId,
+      role: origin.role,
+      task: payload.task,
+      taskTextDigest: origin.taskTextDigest,
+    });
+  })();
   const descriptors = [
     ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
     ...(input.skillCatalog?.capabilities.descriptors ?? []),
@@ -270,27 +336,32 @@ export function resolveContextProjectionEnvironment(input: {
     phase: toolInput.phase,
     interactionMode: toolInput.interactionMode,
     hasTaskAdapter: Boolean(toolInput.subagentEventSink && toolInput.config),
+    agentMailboxAvailable: input.agentMailboxAvailable,
+    agentMailboxQueueOnlyAvailable: input.agentMailboxQueueOnlyAvailable,
     toolSearchEnabled: toolInput.toolSearch,
     activeSkillFrames: toolInput.activeSkillFrames,
     skillCatalog: toolInput.skillCatalog,
   });
   const builtinProjection = input.builtinToolCatalog.forTurn(builtinTurnContext);
-  const tools =
+  const tools = delegatedToolSurface(
     input.projectedTools ??
-    boundedCancellationTools(
-      createBuiltinModelToolSurfaceFromProjection({
-        projection: builtinProjection,
-        turnContext: builtinTurnContext,
-        executionCapabilitySurface: input.config.executionCapabilitySurface,
-        canSpawnSubagents: true,
-        exposeInterrupts: true,
-        dynamicMcpBindings: persistedBindings,
-      }).tools,
-      input.config,
-      builtinProjection.entries.filter(
-        (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
+      boundedCancellationTools(
+        createBuiltinModelToolSurfaceFromProjection({
+          projection: builtinProjection,
+          turnContext: builtinTurnContext,
+          executionCapabilitySurface: input.config.executionCapabilitySurface,
+          canSpawnSubagents: input.state.childSessionOrigin === undefined,
+          exposeInterrupts: true,
+          dynamicMcpBindings: persistedBindings,
+        }).tools,
+        input.config,
+        builtinProjection.entries.filter(
+          (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
+        ),
       ),
-    );
+    input.state,
+    input.childToolCeiling,
+  );
   return {
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
     activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
@@ -306,6 +377,7 @@ export function resolveContextProjectionEnvironment(input: {
       state: input.state,
     }),
     sandboxBackend: input.sandboxBackend ?? 'unknown',
+    ...(delegatedTask ? { delegatedTask } : {}),
     leaseMetadata: {
       providerName: input.config.providerName,
       modelName: input.config.modelName,
@@ -341,11 +413,21 @@ export async function projectPrimaryModelEffect(params: {
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   subagentEventSink?: SubAgentEventSink;
+  agentMailboxAvailable?: boolean;
+  agentMailboxQueueOnlyAvailable?: boolean;
+  delegatedTaskArtifacts?: Pick<SubagentTaskArtifactAccess, 'read'>;
+  childToolCeiling?: DelegatedToolCeiling;
+  prepareAgentMail?: import('@kite-ai/builtin-runtime/model').BuiltinPrimaryModelEffectInput<
+    RuntimeState,
+    RuntimeEvent,
+    RuntimeEvent[]
+  >['prepareAgentMail'];
   signal?: AbortSignal;
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  firstAttemptTimeoutMs?: number;
   replaceReservationId?: string;
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
   modelEffectCoordinator: BuiltinModelEffectCoordinator;
@@ -483,7 +565,13 @@ export async function projectPrimaryModelEffect(params: {
         issuedForTurnId: state.turn.turnId,
       }))
     : [];
+  const firstCatalogSnapshot =
+    state.capabilities.catalogRevision === '' &&
+    Object.keys(state.capabilities.bindings).length === 0 &&
+    Object.keys(state.capabilities.disclosures).length === 0 &&
+    Object.keys(state.capabilities.loadedCapabilities).length === 0;
   if (
+    firstCatalogSnapshot ||
     mcpBindings.length > 0 ||
     capabilityDisclosures.length > 0 ||
     searchToConsume ||
@@ -531,24 +619,30 @@ export async function projectPrimaryModelEffect(params: {
     phase: toolInput.phase,
     interactionMode: toolInput.interactionMode,
     hasTaskAdapter: Boolean(toolInput.subagentEventSink && toolInput.config),
+    agentMailboxAvailable: params.agentMailboxAvailable,
+    agentMailboxQueueOnlyAvailable: params.agentMailboxQueueOnlyAvailable,
     toolSearchEnabled: toolInput.toolSearch,
     activeSkillFrames: toolInput.activeSkillFrames,
     skillCatalog: toolInput.skillCatalog,
   });
   const builtinProjection = params.builtinToolCatalog.forTurn(builtinTurnContext);
-  const tools = boundedCancellationTools(
-    createBuiltinModelToolSurfaceFromProjection({
-      projection: builtinProjection,
-      turnContext: builtinTurnContext,
-      executionCapabilitySurface: params.config.executionCapabilitySurface,
-      canSpawnSubagents: true,
-      exposeInterrupts: true,
-      dynamicMcpBindings: mcpBindings,
-    }).tools,
-    params.config,
-    builtinProjection.entries.filter(
-      (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
+  const tools = delegatedToolSurface(
+    boundedCancellationTools(
+      createBuiltinModelToolSurfaceFromProjection({
+        projection: builtinProjection,
+        turnContext: builtinTurnContext,
+        executionCapabilitySurface: params.config.executionCapabilitySurface,
+        canSpawnSubagents: state.childSessionOrigin === undefined,
+        exposeInterrupts: true,
+        dynamicMcpBindings: mcpBindings,
+      }).tools,
+      params.config,
+      builtinProjection.entries.filter(
+        (entry): entry is BuiltinModelToolCatalogEntry => entry.visibility === 'model',
+      ),
     ),
+    state,
+    params.childToolCeiling,
   );
   const builtinEntriesByName = new Map<string, BuiltinModelToolCatalogEntry>(
     builtinProjection.entries.flatMap((entry) =>
@@ -571,6 +665,8 @@ export async function projectPrimaryModelEffect(params: {
     sandboxBackend: params.sandboxBackend,
     builtinToolCatalog: params.builtinToolCatalog,
     projectedTools: tools,
+    delegatedTaskArtifacts: params.delegatedTaskArtifacts,
+    childToolCeiling: params.childToolCeiling,
   });
   const result = await params.modelEffectCoordinator.executePrimaryModelEffect({
     state,
@@ -587,8 +683,12 @@ export async function projectPrimaryModelEffect(params: {
       masterEnabled: flags.contextCompaction && flags.contextCompactionAuto,
     },
     resourceAdmission: params.resourceAdmission,
+    ...(params.firstAttemptTimeoutMs === undefined
+      ? {}
+      : { firstAttemptTimeoutMs: params.firstAttemptTimeoutMs }),
     ...(params.replaceReservationId ? { replaceReservationId: params.replaceReservationId } : {}),
     persistence: params.modelInvocationPersistence,
+    prepareAgentMail: params.prepareAgentMail,
     compactionReporter: params.compactionReporter,
     signal: params.signal,
     emitEphemeral: params.emitRuntimeEvent,

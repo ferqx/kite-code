@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   acquireKiteSessionStoreMaintenance,
+  KITE_SESSION_STORE_FORMAT_EPOCH,
   type KiteSessionMaintenanceLock,
 } from '@kite-ai/runtime-storage-sqlite';
 import { KITE_SESSION_STORE11_DDL } from '../../../../packages/runtime-storage-sqlite/src/kite-session-store11-conversion';
@@ -112,7 +113,7 @@ test('Service stops waiting on startup cancellation and leaves no maintenance ow
   }
 });
 
-test('a stop after an earlier busy wait and publication does not replay stale busy', async () => {
+test('a qualified older Store publishes after a busy wait and remains open after post-publication cancellation', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-store-published-stop-'));
   const databasePath = join(root, 'kite-session.sqlite');
   const oldStore = new Database(databasePath);
@@ -142,22 +143,22 @@ test('a stop after an earlier busy wait and publication does not replay stale bu
         },
       }),
     });
+    owner.disposeStorage();
+    expect(stopRequested).toBe(true);
+    expect(stages).toContain('waiting_for_store');
+    expect(stages.at(-1)).toBe('ready');
+    const current = new Database(databasePath, { readonly: true });
     try {
-      expect(stopRequested).toBe(true);
-      expect(stages).toContain('waiting_for_store');
-      expect(stages.at(-1)).toBe('ready');
-      const current = new Database(databasePath, { readonly: true });
-      try {
-        expect(
-          current.query("SELECT value FROM kite_meta WHERE key='schema_version'").get(),
-        ).toEqual({
-          value: '10',
-        });
-      } finally {
-        current.close(false);
-      }
+      expect(current.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual(
+        {
+          value: '13',
+        },
+      );
+      expect(current.query("SELECT value FROM kite_meta WHERE key='format_epoch'").get()).toEqual({
+        value: KITE_SESSION_STORE_FORMAT_EPOCH,
+      });
     } finally {
-      owner.disposeStorage();
+      current.close(false);
     }
   } finally {
     clearTimeout(release);

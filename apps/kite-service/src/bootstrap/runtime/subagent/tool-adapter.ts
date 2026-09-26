@@ -41,6 +41,7 @@ import {
   runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   DescendantResourceAdmissionError,
   runtimeHostStateFailureKindForToolParseFailure as failureKindForToolParseFailure,
+  fundingBudgetForReservation,
   runtimeHostStateRecordRecoveryFailure as recordRecoveryFailure,
   runtimeHostStateRecordRecoveryInvocation as recordRecoveryInvocation,
   runtimeHostStateRecordToolOwnedProgress as recordToolOwnedProgress,
@@ -51,6 +52,7 @@ import type { PersistedExecutionJournalEntry } from '@kite-ai/runtime-spi';
 import { getFeatureFlags } from '#kite-service/config/features';
 import type { AppApprovalBinding } from '../approval-binding';
 import type { ToolExecutionResult } from '../tool-result';
+import { backgroundSubagentOwnerKey } from './background-runtime';
 import type {
   SubAgentContinuation,
   SubAgentResult,
@@ -257,7 +259,13 @@ function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number |
 
 function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
   const configured = configuredSubagentMaxOutputTokens(input);
-  const budget = input.modelInvocationPersistence?.getState().resourceBudget;
+  const state = input.modelInvocationPersistence?.getState();
+  const budget =
+    state && input.modelInvocationParentReservationId
+      ? fundingBudgetForReservation(state, input.modelInvocationParentReservationId)
+      : state?.resourceBudget;
+  if (state && input.modelInvocationParentReservationId && !budget)
+    throw new DescendantResourceAdmissionError('reconciliation_required');
   if (budget?.status !== 'active') return configured;
   const remaining =
     budget.budget.maxRunOutputTokens - committedResourceUsage(budget).counters.outputTokens;
@@ -592,6 +600,7 @@ async function executeCoreSubagentToolAdapter(
       config: input.config,
       tools,
       persistence: input.modelInvocationPersistence,
+      ...(input.agentMail ? { agentMail: input.agentMail } : {}),
       provenance: {
         parentInvocationId: input.modelInvocationParentId ?? null,
         parentToolCallId: input.modelInvocationParentToolCallId ?? null,
@@ -1390,6 +1399,20 @@ async function executeCoreSubagentToolAdapter(
     clearTimeout(timeoutId);
     modelInvocationOrdinal = modelLoopResult.modelInvocationOrdinal;
     const durationMs = Date.now() - startTime;
+    let checkpointRef: SubAgentResult['checkpointRef'];
+    if (input.threadId && input.childInvocationId && input.checkpointArtifacts) {
+      try {
+        checkpointRef = input.checkpointArtifacts.write({
+          ownerKey: backgroundSubagentOwnerKey(input.threadId, input.recoveryIdentityKey),
+          taskId: input.childInvocationId,
+          modelInvocationOrdinal,
+          messages: modelLoopResult.messages,
+        });
+      } catch {
+        // The original task result must still settle. A missing checkpoint
+        // makes this Agent unavailable for a later ordinary continuation.
+      }
+    }
     // Step failures remain in toolRecovery for parent-level recovery and
     // observability, but a child that returns a final model response has
     // completed its own lifecycle successfully.
@@ -1409,6 +1432,7 @@ async function executeCoreSubagentToolAdapter(
       toolCallCount,
       durationMs,
       terminalStatus: 'completed',
+      ...(checkpointRef ? { checkpointRef } : {}),
       steps,
       executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
       exhaustedFingerprints:

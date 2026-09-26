@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -126,6 +127,92 @@ function effect(database: Database, sessionId: string, state: 'unknown' | 'prepa
 }
 
 describe('strict Session Store 10 merge', () => {
+  test('copies cross-Session outbox and inbox after both Session identities', () => {
+    using target = store();
+    using source = store();
+    workspace(source.database, 1, 1);
+    session(source.database, 'parent');
+    session(source.database, 'child');
+    source.database
+      .query(
+        "UPDATE runtime_sessions SET parent_session_id='parent',revision=1 WHERE session_id='child'",
+      )
+      .run();
+    source.database.query("UPDATE runtime_sessions SET revision=1 WHERE session_id='parent'").run();
+    const digest = createHash('sha256').update('hello').digest('hex');
+    source.database
+      .query(`INSERT INTO agent_mail_bodies(session_id,body_id,integrity_identifier,byte_length,body_text,created_at_ms)
+      VALUES ('parent',?,?,5,'hello',3)`)
+      .run(`pa_${digest}`, `sha256:${digest}`);
+    source.database
+      .query(`INSERT INTO agent_mail_outbox(source_session_id,message_id,target_session_id,command_id,
+      request_digest,source_run_id,source_turn_id,source_model_invocation_id,source_tool_call_id,
+      source_effect_attempt_id,mode,body_id,source_sequence,source_revision,accepted_at_ms,delivered_target_revision)
+      VALUES ('parent','mail-1','child','send-1',?,'run-1','turn-1','model-1','tool-1',
+      'attempt-1','queue_only',?,1,1,3,1)`)
+      .run(digest, `pa_${digest}`);
+    source.database
+      .query(`INSERT INTO agent_mail_inbox(target_session_id,message_id,source_session_id,
+      sequence,target_revision,received_at_ms) VALUES ('child','mail-1','parent',1,1,4)`)
+      .run();
+    const result = mergeKiteSessionStores10({ target: target.database, source: source.database });
+    expect(result.insertedRows).toMatchObject({ agent_mail_outbox: 1, agent_mail_inbox: 1 });
+    expect(
+      target.database
+        .query<{ target_session_id: string }, []>(
+          "SELECT target_session_id FROM agent_mail_inbox WHERE message_id='mail-1'",
+        )
+        .get()?.target_session_id,
+    ).toBe('child');
+  });
+
+  test('copies Store11 Agent tree, private mail and checkpoint rows in parent-first order', () => {
+    using target = store();
+    using source = store();
+    workspace(source.database, 1, 1);
+    session(source.database, 'session-a');
+    const body = 'hello';
+    const hash = createHash('sha256').update(body).digest('hex');
+    const bodyId = `pa_${hash}`;
+    source.database
+      .query(
+        "INSERT INTO agent_nodes(session_id,agent_id,parent_agent_id,current_task_id,status,turn_ordinal,created_at_ms) VALUES ('session-a','session-a',NULL,NULL,'idle',0,1)",
+      )
+      .run();
+    source.database
+      .query(
+        "INSERT INTO agent_nodes(session_id,agent_id,parent_agent_id,current_task_id,status,turn_ordinal,created_at_ms) VALUES ('session-a','child-a','session-a','child-a','active',1,2)",
+      )
+      .run();
+    source.database
+      .query(
+        `INSERT INTO agent_mail_bodies(session_id,body_id,integrity_identifier,byte_length,body_text,created_at_ms) VALUES ('session-a',?, ?, 5, 'hello',3)`,
+      )
+      .run(bodyId, `sha256:${hash}`);
+    source.database
+      .query(`INSERT INTO agent_mail(session_id,message_id,sequence,sender_agent_id,target_agent_id,mode,source_run_id,source_turn_id,source_model_invocation_id,source_tool_call_id,source_effect_attempt_id,request_digest,body_id,status,accepted_at_ms)
+      VALUES ('session-a','mail-1',1,'session-a','child-a','queue_only','run-1','turn-1','model-1','tool-1','attempt-1',?,?,'queued',3)`)
+      .run(hash, bodyId);
+    const checkpoint = '{"artifactFormatVersion":1,"messages":[]}';
+    source.database
+      .query(`INSERT INTO subagent_checkpoint_artifacts(artifact_id,integrity_identifier,artifact_format_version,canonical_json,byte_length,created_at)
+      VALUES ('pa_${'c'.repeat(64)}','sha256:${'c'.repeat(64)}',1,?,?,3)`)
+      .run(checkpoint, Buffer.byteLength(checkpoint));
+    const result = mergeKiteSessionStores10({ target: target.database, source: source.database });
+    expect(result.insertedRows).toMatchObject({
+      agent_nodes: 2,
+      agent_mail_bodies: 1,
+      agent_mail: 1,
+      subagent_checkpoint_artifacts: 1,
+    });
+    expect(
+      target.database
+        .query<{ body_text: string }, []>(
+          "SELECT body_text FROM agent_mail_bodies WHERE session_id='session-a'",
+        )
+        .get()?.body_text,
+    ).toBe(body);
+  });
   test('preserves independent Sessions, metadata and Artifact with shared Workspace identity', () => {
     using target = store();
     using source = store();

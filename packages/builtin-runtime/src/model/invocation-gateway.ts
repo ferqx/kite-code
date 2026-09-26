@@ -2,7 +2,9 @@ import {
   MODEL_INVOCATION_ENVELOPE_SCHEMA_,
   MODEL_RESPONSE_RECORD_SCHEMA_,
   type ModelInvocationEnvelope,
+  type ModelInvocationPurpose,
   type ModelResponseRecord,
+  type PrivateArtifactRef,
   type Sha256Digest,
 } from '@kite-ai/runtime-spi';
 import type { ModelArtifactStore } from './artifacts';
@@ -12,8 +14,10 @@ import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type BuiltinModelOperationExecutionPort,
 } from './operation';
+import { derivePrivateImmutableArtifactReference } from './private-immutable-artifacts';
 import { ModelAttemptFailureError, type ModelResponseSource } from './response-source';
 import {
+  canonicalModelJson,
   computeModelSurfaceDigest,
   computePrivateModelEvidenceDigest,
 } from './surface-canonicalizer';
@@ -38,6 +42,57 @@ export interface ModelInvocationStateView {
   readonly session: { readonly threadId: string; readonly projectId?: string };
   readonly turn: { readonly turnId: string };
   readonly resourceBudget?: { readonly status: string };
+}
+
+/** Minimum durable facts required to resume one prepared, unattempted request. */
+export interface ModelPreparedResumeStateView extends ModelInvocationStateView {
+  readonly turn: { readonly turnId: string; readonly status: string };
+  readonly modelInvocations: Readonly<
+    Record<
+      string,
+      Readonly<{
+        invocationId: string;
+        purpose: ModelInvocationPurpose | 'verification_review';
+        status: string;
+        attempts: number;
+        surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+        surfaceIntegrityIdentifier: string;
+        routeFingerprint: string;
+        estimatedInputTokens?: number;
+        preparedStateRevision: number;
+        budget: ModelInvocationEnvelope['resource']['budget'];
+        limits: ModelInvocationEnvelope['resource']['limits'];
+        parentInvocationId: string | null;
+        parentToolCallId: string | null;
+        dispatchCertainty?: string;
+        responseArtifact?: PrivateArtifactRef;
+      }>
+    >
+  >;
+  readonly resourceBudget: Readonly<{
+    status: string;
+    runId?: string;
+    reservations?: Readonly<
+      Record<
+        string,
+        Readonly<{
+          reservationId: string;
+          runId: string;
+          invocationId: string;
+          resourceKind: string;
+          state: string;
+          parentReservationId?: string;
+          executableUpperBound: Readonly<{
+            counters: Readonly<{
+              modelRequests: number;
+              inputTokens: number;
+              outputTokens: number;
+            }>;
+          }>;
+        }>
+      >
+    >;
+  }>;
 }
 
 export interface ModelRuntimeIdSource {
@@ -122,6 +177,24 @@ export interface ModelInvocationPersistence<
 > {
   getState(): Readonly<State>;
   persistEvents(events: Event[]): Promise<boolean>;
+  /** One Host transaction for model/budget admission and an opaque prepared mail batch. */
+  persistAdmission?(input: {
+    readonly invocationId: string;
+    readonly events: Event[];
+    readonly mailPreparation: ModelMailPreparationDescriptor;
+  }): Promise<boolean>;
+}
+
+/** A private Host lookup identity. Message bodies never enter Gateway evidence. */
+export interface ModelMailPreparationDescriptor {
+  readonly preparationId: string;
+}
+
+export interface PreparedModelSurface {
+  readonly compiled: CompiledModelSurface;
+  readonly mailPreparation?: ModelMailPreparationDescriptor;
+  /** Exact child provenance resolved from the prepared transcript. */
+  readonly provenance?: ModelInvocationProvenanceInput;
 }
 
 export interface ModelInvocationProvenanceInput {
@@ -159,7 +232,18 @@ export interface PendingModelCompletion<Event extends BuiltinModelEvent = Builti
   ): Promise<T>;
 }
 
-export type ModelArtifactWriter = Pick<ModelArtifactStore, 'writeSurface' | 'writeResponse'>;
+export type ModelArtifactWriter = Pick<ModelArtifactStore, 'writeSurface' | 'writeResponse'> &
+  Partial<Pick<ModelArtifactStore, 'readSurface'>>;
+
+type ModelDispatchEnvelope = Readonly<{
+  provenance: Readonly<
+    Pick<
+      ModelInvocationEnvelope['provenance'],
+      'invocationId' | 'threadId' | 'turnId' | 'stateRevision'
+    >
+  >;
+  resource: Readonly<ModelInvocationEnvelope['resource']>;
+}>;
 
 /**
  * Content-free correlation for a model invocation that failed after its
@@ -214,39 +298,77 @@ export class ModelInvocationGateway {
 
   async invoke<State extends ModelInvocationStateView, Event extends BuiltinModelEvent>(input: {
     model: SupportedChatModel;
-    compiled: CompiledModelSurface;
+    compiled?: CompiledModelSurface;
+    /** Called once with the Gateway-owned identity, before Surface publication or planning. */
+    prepareSurface?: (invocationId: string) => PreparedModelSurface | Promise<PreparedModelSurface>;
     persistence: ModelInvocationPersistence<State, Event>;
-    provenance: ModelInvocationProvenanceInput;
+    provenance?: ModelInvocationProvenanceInput;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
     replaceReservationId?: string;
     limits?: Partial<ModelInvocationEnvelope['resource']['limits']>;
+    /** Fixed wall-clock limit for a source-funded first child attempt. */
+    hardAttemptTimeoutMs?: number;
     signal?: AbortSignal;
     emitEphemeral?: (event: Event) => void;
   }): Promise<PendingModelCompletion<Event>> {
     const invocationId = this.#runtimeIdSource.next('model_invocation');
+    if (!!input.compiled === !!input.prepareSurface)
+      throw new Error('Model invocation requires exactly one compiled Surface source.');
+    const preparedSurface = input.prepareSurface
+      ? await input.prepareSurface(invocationId)
+      : { compiled: input.compiled };
+    const compiled = preparedSurface?.compiled;
+    const provenance =
+      ('provenance' in preparedSurface ? preparedSurface.provenance : undefined) ??
+      input.provenance;
+    if (!provenance) throw new Error('Model invocation provenance is unavailable.');
+    if (
+      !compiled ||
+      (input.prepareSurface && (!Object.isFrozen(compiled) || !Object.isFrozen(compiled.surface)))
+    )
+      throw new Error('Prepared Model Surface must be frozen.');
+    const mailPreparation =
+      'mailPreparation' in preparedSurface ? preparedSurface.mailPreparation : undefined;
+    if (
+      mailPreparation !== undefined &&
+      (!mailPreparation ||
+        typeof mailPreparation !== 'object' ||
+        Object.keys(mailPreparation).length !== 1 ||
+        !Object.hasOwn(mailPreparation, 'preparationId') ||
+        typeof mailPreparation.preparationId !== 'string' ||
+        !/^[A-Za-z0-9._:-]{1,128}$/u.test(mailPreparation.preparationId))
+    )
+      throw new Error('Model mail preparation identity is invalid.');
+    if (mailPreparation && !input.persistence.persistAdmission)
+      throw new Error('Model mail preparation requires atomic admission persistence.');
     const limits = normalizeLimits(input.limits);
-    const initialSurfaceDigest = computeModelSurfaceDigest(input.compiled.surface);
-    if (initialSurfaceDigest !== input.compiled.surfaceDigest) {
+    if (
+      input.hardAttemptTimeoutMs !== undefined &&
+      (!Number.isSafeInteger(input.hardAttemptTimeoutMs) || input.hardAttemptTimeoutMs <= 0)
+    )
+      throw new Error('Model hard attempt deadline must be finite and positive.');
+    const initialSurfaceDigest = computeModelSurfaceDigest(compiled.surface);
+    if (initialSurfaceDigest !== compiled.surfaceDigest) {
       throw new Error('Frozen Model Surface identity changed before dispatch.');
     }
 
     // Artifact publication precedes resource preparation. A later local failure can
     // only leave an immutable orphan eligible for reachability-based GC.
-    const surfaceArtifact = this.#artifacts.writeSurface(input.compiled.surface);
+    const surfaceArtifact = this.#artifacts.writeSurface(compiled.surface);
     const state = input.persistence.getState();
 
     const resource = this.#planResource(state, {
       invocationId,
-      inputTokens: input.compiled.estimatedInputTokens,
-      ...(input.compiled.surface.request.maxOutputTokens
-        ? { requestedMaxOutputTokens: input.compiled.surface.request.maxOutputTokens }
+      inputTokens: compiled.estimatedInputTokens,
+      ...(compiled.surface.request.maxOutputTokens
+        ? { requestedMaxOutputTokens: compiled.surface.request.maxOutputTokens }
         : {}),
       resourceKind: input.resourceKind,
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
       ...(input.replaceReservationId ? { replaceReservationId: input.replaceReservationId } : {}),
     });
-    assertResourceMatchesSurface(resource, input.compiled);
+    assertResourceMatchesSurface(resource, compiled);
     const envelope: ModelInvocationEnvelope = {
       schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_,
       surface: {
@@ -257,33 +379,204 @@ export class ModelInvocationGateway {
         invocationId,
         threadId: state.session.threadId,
         turnId: state.turn.turnId,
-        parentInvocationId: input.provenance.parentInvocationId ?? null,
-        parentToolCallId: input.provenance.parentToolCallId ?? null,
+        parentInvocationId: provenance.parentInvocationId ?? null,
+        parentToolCallId: provenance.parentToolCallId ?? null,
         stateRevision: state.revision,
-        contextCheckpointId: input.provenance.contextCheckpointId ?? null,
-        promptContractVersion: input.provenance.promptContractVersion,
-        projectionEnvironmentDigest: input.provenance.projectionEnvironmentDigest,
-        capabilityBindingDigest: input.provenance.capabilityBindingDigest,
+        contextCheckpointId: provenance.contextCheckpointId ?? null,
+        promptContractVersion: provenance.promptContractVersion,
+        projectionEnvironmentDigest: provenance.projectionEnvironmentDigest,
+        capabilityBindingDigest: provenance.capabilityBindingDigest,
       },
       resource: { budget: resource.budget, limits },
     };
     const prepared: BuiltinModelEvent = {
       type: 'model.invocation_prepared',
       invocationId,
-      purpose: input.compiled.surface.purpose,
+      purpose: compiled.surface.purpose,
       surfaceArtifact,
       surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
-      routeFingerprint: input.compiled.surface.route.routeFingerprint,
+      routeFingerprint: compiled.surface.route.routeFingerprint,
+      estimatedInputTokens: compiled.estimatedInputTokens,
       budget: envelope.resource.budget,
       limits,
       preparedStateRevision: state.revision,
       parentInvocationId: envelope.provenance.parentInvocationId,
       parentToolCallId: envelope.provenance.parentToolCallId,
     };
-    await persistAck(
-      input.persistence,
-      asModelEvents<Event>([...resource.preparationEvents, prepared]),
+    const admissionEvents = asModelEvents<Event>([...resource.preparationEvents, prepared]);
+    if (mailPreparation) {
+      await persistModelAdmission(input.persistence, {
+        invocationId,
+        events: admissionEvents,
+        mailPreparation: Object.freeze({ preparationId: mailPreparation.preparationId }),
+      });
+    } else await persistAck(input.persistence, admissionEvents);
+
+    return this.#dispatchPrepared(input, {
+      compiled,
+      surfaceArtifact,
+      envelope,
+      initialSurfaceDigest,
+    });
+  }
+
+  /** Resume only the original prepared identity after a durable, pre-dispatch gate. */
+  async resumePrepared<
+    State extends ModelPreparedResumeStateView,
+    Event extends BuiltinModelEvent,
+  >(input: {
+    readonly model: SupportedChatModel;
+    readonly persistence: ModelInvocationPersistence<State, Event>;
+    readonly invocationId: string;
+    readonly expectedStateRevision: number;
+    readonly expectedTurnId: string;
+    readonly expectedRouteFingerprint: string;
+    readonly surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+    readonly surfaceIntegrityIdentifier: string;
+    readonly hardAttemptTimeoutMs: number;
+    /** The target owner checks route plus source activation receipt before any attempt fact. */
+    readonly beforeDispatch: (
+      identity: Readonly<{
+        invocationId: string;
+        sessionId: string;
+        turnId: string;
+        preparedStateRevision: number;
+        observedStateRevision: number;
+        surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+        surfaceIntegrityIdentifier: string;
+        reservationId: string;
+      }>,
+    ) => Promise<boolean>;
+    readonly signal?: AbortSignal;
+    readonly emitEphemeral?: (event: Event) => void;
+  }): Promise<PendingModelCompletion<Event>> {
+    if (!this.#artifacts.readSurface)
+      throw new Error('Prepared Model Surface reader is unavailable.');
+    const state = input.persistence.getState();
+    const prepared = state.modelInvocations[input.invocationId];
+    const reservationId =
+      prepared?.budget.kind === 'reservation' ? prepared.budget.reservationId : '';
+    const reservation = state.resourceBudget.reservations?.[reservationId];
+    if (
+      !prepared ||
+      !input.invocationId ||
+      !Number.isSafeInteger(input.expectedStateRevision) ||
+      state.revision !== input.expectedStateRevision ||
+      state.turn.turnId !== input.expectedTurnId ||
+      state.turn.status !== 'active' ||
+      prepared.invocationId !== input.invocationId ||
+      prepared.purpose !== 'primary_agent' ||
+      prepared.status !== 'prepared' ||
+      prepared.attempts !== 0 ||
+      (prepared.dispatchCertainty !== undefined && prepared.dispatchCertainty !== 'none') ||
+      prepared.responseArtifact !== undefined ||
+      prepared.budget.kind !== 'reservation' ||
+      prepared.parentInvocationId !== null ||
+      prepared.parentToolCallId !== null ||
+      prepared.preparedStateRevision >= state.revision ||
+      prepared.routeFingerprint !== input.expectedRouteFingerprint ||
+      !Number.isSafeInteger(prepared.estimatedInputTokens) ||
+      prepared.estimatedInputTokens! < 0 ||
+      prepared.surfaceArtifact.artifactId !== input.surfaceArtifact.artifactId ||
+      prepared.surfaceArtifact.integrityIdentifier !== input.surfaceArtifact.integrityIdentifier ||
+      prepared.surfaceArtifact.byteLength !== input.surfaceArtifact.byteLength ||
+      prepared.surfaceIntegrityIdentifier !== input.surfaceIntegrityIdentifier ||
+      prepared.surfaceIntegrityIdentifier !== input.surfaceArtifact.integrityIdentifier ||
+      prepared.limits.maxAttempts !== 1 ||
+      !Number.isSafeInteger(input.hardAttemptTimeoutMs) ||
+      input.hardAttemptTimeoutMs <= 0 ||
+      prepared.limits.perAttemptTimeoutMs !== input.hardAttemptTimeoutMs ||
+      prepared.limits.totalTimeBudgetMs !== input.hardAttemptTimeoutMs ||
+      state.resourceBudget.status !== 'active' ||
+      state.resourceBudget.runId !== input.expectedTurnId ||
+      !reservation ||
+      reservation.reservationId !== reservationId ||
+      reservation.runId !== input.expectedTurnId ||
+      reservation.invocationId !== `model-invocation:${input.invocationId}` ||
+      reservation.resourceKind !== 'model' ||
+      reservation.state !== 'reserved' ||
+      (reservation.parentReservationId ?? null) !== prepared.budget.parentReservationId ||
+      reservation.executableUpperBound.counters.modelRequests !== 1 ||
+      !Number.isSafeInteger(reservation.executableUpperBound.counters.inputTokens) ||
+      prepared.estimatedInputTokens! > reservation.executableUpperBound.counters.inputTokens ||
+      !Number.isSafeInteger(reservation.executableUpperBound.counters.outputTokens)
+    )
+      throw new Error('Prepared Model invocation has stale or attempted durable authority.');
+    const surface = this.#artifacts.readSurface(input.surfaceArtifact);
+    const canonical = canonicalModelJson(surface);
+    const verifiedRef = derivePrivateImmutableArtifactReference(
+      'model-artifacts',
+      'model_surface',
+      Buffer.from(canonical, 'utf8'),
     );
+    if (
+      verifiedRef.artifactId !== input.surfaceArtifact.artifactId ||
+      verifiedRef.integrityIdentifier !== input.surfaceIntegrityIdentifier ||
+      verifiedRef.byteLength !== input.surfaceArtifact.byteLength ||
+      surface.purpose !== prepared.purpose ||
+      surface.route.routeFingerprint !== prepared.routeFingerprint ||
+      surface.request.maxOutputTokens === null ||
+      surface.request.maxOutputTokens === undefined ||
+      surface.request.maxOutputTokens > reservation.executableUpperBound.counters.outputTokens
+    )
+      throw new Error('Prepared Model Surface differs from its durable artifact.');
+    const surfaceDigest = computeModelSurfaceDigest(surface);
+    if (input.signal?.aborted) throw abortReason(input.signal);
+    const identity = Object.freeze({
+      invocationId: input.invocationId,
+      sessionId: state.session.threadId,
+      turnId: state.turn.turnId,
+      preparedStateRevision: prepared.preparedStateRevision,
+      observedStateRevision: state.revision,
+      surfaceArtifact: input.surfaceArtifact,
+      surfaceIntegrityIdentifier: input.surfaceIntegrityIdentifier,
+      reservationId,
+    });
+    if (!(await input.beforeDispatch(identity)))
+      throw new Error('Prepared Model dispatch gate has no durable source acknowledgement.');
+    const afterGate = input.persistence.getState();
+    if (
+      afterGate.revision !== state.revision ||
+      afterGate.modelInvocations[input.invocationId]?.status !== 'prepared' ||
+      afterGate.modelInvocations[input.invocationId]?.attempts !== 0 ||
+      afterGate.resourceBudget.reservations?.[reservationId]?.state !== 'reserved'
+    )
+      throw new Error('Prepared Model authority changed before dispatch.');
+    return this.#dispatchPrepared(input, {
+      compiled: { surface: deepFreeze(surface), surfaceDigest },
+      surfaceArtifact: input.surfaceArtifact,
+      envelope: {
+        provenance: {
+          invocationId: input.invocationId,
+          threadId: state.session.threadId,
+          turnId: state.turn.turnId,
+          stateRevision: prepared.preparedStateRevision,
+        },
+        resource: { budget: prepared.budget, limits: prepared.limits },
+      },
+      initialSurfaceDigest: surfaceDigest,
+    });
+  }
+
+  async #dispatchPrepared<Event extends BuiltinModelEvent>(
+    input: {
+      readonly model: SupportedChatModel;
+      readonly persistence: ModelInvocationPersistence<ModelInvocationStateView, Event>;
+      readonly hardAttemptTimeoutMs?: number;
+      readonly signal?: AbortSignal;
+      readonly emitEphemeral?: (event: Event) => void;
+    },
+    prepared: {
+      readonly compiled: Pick<CompiledModelSurface, 'surface' | 'surfaceDigest'>;
+      readonly surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+      readonly envelope: ModelDispatchEnvelope;
+      readonly initialSurfaceDigest: Sha256Digest;
+    },
+  ): Promise<PendingModelCompletion<Event>> {
+    const { compiled, surfaceArtifact, envelope, initialSurfaceDigest } = prepared;
+    const invocationId = envelope.provenance.invocationId;
+    const limits = envelope.resource.limits;
+    const resource = envelope.resource;
 
     let retryBudgetStartedAt: number | undefined;
     let priorError: unknown;
@@ -332,7 +625,7 @@ export class ModelInvocationGateway {
         attempt,
         maxAttempts: limits.maxAttempts,
       });
-      if (attempt === 1 && input.compiled.surface.purpose === 'primary_agent') {
+      if (attempt === 1 && compiled.surface.purpose === 'primary_agent') {
         attemptEvents.push({ type: 'model.requested', requestId: invocationId, invocationId });
       }
       await persistAck(input.persistence, asModelEvents<Event>(attemptEvents));
@@ -340,7 +633,7 @@ export class ModelInvocationGateway {
         await this.#interrupt(input.persistence, envelope, 'cancelled', 'none');
         throw abortReason(input.signal);
       }
-      if (computeModelSurfaceDigest(input.compiled.surface) !== initialSurfaceDigest) {
+      if (computeModelSurfaceDigest(compiled.surface) !== initialSurfaceDigest) {
         await this.#interrupt(input.persistence, envelope, 'surface_identity_changed', 'none');
         throw new Error('Frozen Model Surface changed after attempt acknowledgement.');
       }
@@ -349,13 +642,17 @@ export class ModelInvocationGateway {
       attemptReasoning = '';
       let visibleReasoningLength = 0;
       const visibleReasoningSegments = new Map<string, string>();
-      const attemptAbort = boundedAttemptSignal(input.signal, limits.perAttemptTimeoutMs);
+      const attemptAbort = boundedAttemptSignal(
+        input.signal,
+        limits.perAttemptTimeoutMs,
+        input.hardAttemptTimeoutMs,
+      );
       let outcome: Awaited<ReturnType<ModelResponseSource['attempt']>>;
       try {
         outcome = await waitForAttemptSignal(
           this.#operationExecution.execute({
-            operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[input.compiled.surface.purpose],
-            purpose: input.compiled.surface.purpose,
+            operationId: BUILTIN_MODEL_OPERATION_BY_PURPOSE_[compiled.surface.purpose],
+            purpose: compiled.surface.purpose,
             invocationId,
             attemptOrdinal: attempt,
             threadId: envelope.provenance.threadId,
@@ -363,7 +660,7 @@ export class ModelInvocationGateway {
             stateRevision: envelope.provenance.stateRevision,
             surfaceDigest: initialSurfaceDigest,
             input: Object.freeze({
-              purpose: input.compiled.surface.purpose,
+              purpose: compiled.surface.purpose,
               invocation_id: invocationId,
               attempt_ordinal: attempt,
               thread_id: envelope.provenance.threadId,
@@ -375,7 +672,7 @@ export class ModelInvocationGateway {
             attempt: () =>
               this.#source.attempt({
                 model: input.model,
-                surface: input.compiled.surface,
+                surface: compiled.surface,
                 attemptOrdinal: attempt,
                 signal: attemptAbort.signal,
                 onActivity: attemptAbort.refresh,
@@ -454,7 +751,7 @@ export class ModelInvocationGateway {
           schema: MODEL_RESPONSE_RECORD_SCHEMA_,
           invocationId,
           surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
-          route: input.compiled.surface.route,
+          route: compiled.surface.route,
           response: outcome.response,
           nativeReplayState: outcome.nativeReplayState,
         };
@@ -494,7 +791,7 @@ export class ModelInvocationGateway {
       retryDelayMs =
         outcome.classification === 'provider_rate_limited'
           ? this.#reserveRateLimitRetryDelay(
-              input.compiled.surface.route.routeFingerprint,
+              compiled.surface.route.routeFingerprint,
               baseRetryDelayMs,
               retryBudgetRemaining,
             )
@@ -554,7 +851,7 @@ export class ModelInvocationGateway {
 
   #pendingCompletion<Event extends BuiltinModelEvent>(
     persistence: ModelInvocationPersistence<ModelInvocationStateView, Event>,
-    envelope: ModelInvocationEnvelope,
+    envelope: ModelDispatchEnvelope,
     responseArtifact: ReturnType<ModelArtifactWriter['writeResponse']>,
     response: Readonly<NormalizedModelResponse>,
     signal?: AbortSignal,
@@ -620,7 +917,7 @@ export class ModelInvocationGateway {
 
   async #interrupt<Event extends BuiltinModelEvent>(
     persistence: ModelInvocationPersistence<ModelInvocationStateView, Event>,
-    envelope: ModelInvocationEnvelope,
+    envelope: ModelDispatchEnvelope,
     reasonCode: ModelInvocationInterruptReason,
     dispatchCertainty: 'none' | 'attempted' | 'unknown',
     failureDiagnostic?: ModelFailureDiagnostic,
@@ -785,6 +1082,28 @@ async function persistAck<State extends ModelInvocationStateView, Event extends 
   if (!applied) throw new Error('Model invocation evidence acknowledgement was rejected.');
 }
 
+async function persistModelAdmission<
+  State extends ModelInvocationStateView,
+  Event extends BuiltinModelEvent,
+>(
+  persistence: ModelInvocationPersistence<State, Event>,
+  input: {
+    readonly invocationId: string;
+    readonly events: Event[];
+    readonly mailPreparation: ModelMailPreparationDescriptor;
+  },
+): Promise<void> {
+  if (!persistence.persistAdmission)
+    throw new Error('Model mail preparation requires atomic admission persistence.');
+  let applied: boolean;
+  try {
+    applied = await persistence.persistAdmission(input);
+  } catch (error) {
+    throw new Error('Model invocation admission persistence failed.', { cause: error });
+  }
+  if (!applied) throw new Error('Model invocation admission acknowledgement was rejected.');
+}
+
 function retryDelay(attempt: number, remainingMs: number): number {
   return Math.max(0, Math.min(4_000, 500 * 2 ** (attempt - 1), remainingMs));
 }
@@ -818,10 +1137,18 @@ function visibleRetryPrefix(value: string, attempt: number, baseline: string): s
 function boundedAttemptSignal(
   parent: AbortSignal | undefined,
   timeoutMs: number,
+  hardTimeoutMs?: number,
 ): { signal: AbortSignal; refresh(): void; dispose(): void } {
   const controller = new AbortController();
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const hardTimer =
+    hardTimeoutMs === undefined
+      ? undefined
+      : setTimeout(
+          () => controller.abort(new Error('Model hard attempt deadline elapsed.')),
+          hardTimeoutMs,
+        );
   const refresh = () => {
     if (disposed || controller.signal.aborted) return;
     if (timeoutMs <= 0) return;
@@ -838,6 +1165,7 @@ function boundedAttemptSignal(
     dispose: () => {
       disposed = true;
       if (timer) clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
       parent?.removeEventListener('abort', onAbort);
     },
   };

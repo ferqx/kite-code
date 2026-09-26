@@ -37,6 +37,9 @@ const EXPECTED_MODEL_TOOL_NAMES = Object.freeze([
   'ask_user',
   'complete_skill',
   'edit_file',
+  'followup_task',
+  'interrupt_agent',
+  'list_agents',
   'list_mcp_resources',
   'list_mcp_tools',
   'read_file',
@@ -45,14 +48,17 @@ const EXPECTED_MODEL_TOOL_NAMES = Object.freeze([
   'read_skill_reference',
   'search_content',
   'search_files',
+  'send_message',
   'shell_execute',
   'shell_read',
   'shell_stop',
   'task',
   'task_cancel',
   'task_read',
+  'task_wait',
   'tool_search',
   'update_plan',
+  'wait_agent',
   'web_fetch',
   'write_file',
   'write_plan',
@@ -529,7 +535,7 @@ function askUserInvocation(entry: BuiltinModelToolCatalogEntry): CapabilityExecu
 }
 
 describe('RM-16 S7B Builtin policy corpus', () => {
-  test('compiles one frozen snapshot, all 23 model operations, and fixed policy corpus', async () => {
+  test('compiles one frozen snapshot, all 29 model operations, and fixed policy corpus', async () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const snapshot = registry.snapshot();
     const projection = createBuiltinToolCatalogProjection(snapshot, {
@@ -543,8 +549,8 @@ describe('RM-16 S7B Builtin policy corpus', () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot.modules)).toBe(true);
     expect(Object.isFrozen(snapshot.capabilities)).toBe(true);
-    expect(projection.entries).toHaveLength(31);
-    expect(modelEntries).toHaveLength(23);
+    expect(projection.entries).toHaveLength(37);
+    expect(modelEntries).toHaveLength(29);
     expect(internalEntries).toHaveLength(8);
     expect(modelEntries.map((entry) => entry.name).sort()).toEqual(
       [...EXPECTED_MODEL_TOOL_NAMES].sort(),

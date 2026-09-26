@@ -66,6 +66,43 @@ function runtimeProjection(
 }
 
 describe('TUI RuntimeClientEvent reducer', () => {
+  test('shows Agent mailbox acceptance, input preparation and settlement without duplicate notices', () => {
+    let state = createInitialState();
+    const accepted = {
+      type: 'agent.mail_status',
+      status: 'accepted',
+      targetAgentId: 'child',
+      messageIds: ['mail-1'],
+      submissionId: 'submission-1',
+    } as const;
+    state = apply(state, accepted);
+    state = apply(state, accepted);
+    expect(
+      blocks(state).filter((block) => block.kind === 'text' && block.agentMailStatus),
+    ).toHaveLength(1);
+    state = apply(state, {
+      type: 'agent.mail_status',
+      status: 'input_prepared',
+      targetAgentId: 'child',
+      messageIds: ['mail-1'],
+    });
+    state = apply(state, accepted);
+    const mail = blocks(state).find((block) => block.kind === 'text' && block.agentMailStatus);
+    expect(mail?.kind === 'text' ? mail.content : '').toContain('已准备进入目标模型输入');
+    state = apply(state, {
+      type: 'agent.mail_status',
+      status: 'result_settled',
+      submissionId: 'submission-1',
+      taskId: 'task-2',
+      resultStatus: 'completed',
+    });
+    expect(
+      blocks(state).filter((block) => block.kind === 'text' && block.agentMailStatus),
+    ).toHaveLength(2);
+    expect(
+      blocks(state).some((block) => block.kind === 'text' && block.content.includes('结果已结算')),
+    ).toBe(true);
+  });
   test('keeps a local slash command in the current presentation turn', () => {
     let state = createInitialState();
     state = apply(state, {

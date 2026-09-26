@@ -1,3 +1,4 @@
+import { childThreadIdForToolAttempt, sameChildTaskArtifactRef } from './child-session';
 import { sha256Hex } from './hash';
 import { isToolOutcome } from './normalization';
 import {
@@ -113,10 +114,19 @@ function assertResourceBudget(state: AgentState): void {
     'maxConcurrencyWaitMs',
     'maxArtifactBytes',
   ];
+  const zeroAllowedBudgetFields = new Set([
+    'maxToolInvocations',
+    'maxArtifactBytes',
+    'maxConcurrentSubagents',
+    'maxConcurrentWriters',
+    'maxConcurrentToolInvocations',
+    'maxConcurrentShellInvocations',
+  ]);
   assert(
     budgetFields.every(
       (field) =>
-        Number.isSafeInteger(numberValue(budget, field)) && (numberValue(budget, field) ?? 0) > 0,
+        Number.isSafeInteger(numberValue(budget, field)) &&
+        (numberValue(budget, field) ?? -1) >= (zeroAllowedBudgetFields.has(field) ? 0 : 1),
     ),
     'resource budget limits are invalid.',
   );
@@ -147,6 +157,7 @@ function assertResourceBudget(state: AgentState): void {
             'runId',
             'invocationId',
             'parentReservationId',
+            'replacesReservationId',
             'resourceKind',
             'executableUpperBound',
             'actual',
@@ -185,11 +196,25 @@ function assertResourceBudget(state: AgentState): void {
       'resource reservation metadata is invalid.',
     );
     assert(
-      ['reserved', 'dispatch_started', 'reconciled', 'released', 'unknown'].includes(
+      ['queued', 'reserved', 'dispatch_started', 'reconciled', 'released', 'unknown'].includes(
         stringValue(reservation, 'state') ?? '',
       ),
       'resource reservation state is invalid.',
     );
+    if (stringValue(reservation, 'state') === 'queued') {
+      const upper = recordValue(reservation, 'executableUpperBound');
+      assert(
+        stringValue(reservation, 'resourceKind') === 'subagent' &&
+          (((stringValue(reservation, 'reservationId') ?? '').startsWith('child-allotment:') &&
+            stringValue(reservation, 'invocationId') ===
+              stringValue(reservation, 'reservationId')) ||
+            /^backup_[a-f0-9]{64}$/u.test(stringValue(reservation, 'reservationId') ?? '')) &&
+          reservation.parentReservationId === undefined &&
+          reservation.actual === undefined &&
+          numberValue(recordValue(upper, 'gauges'), 'activeSubagents') === 1,
+        'queued sub-agent reservation identity is invalid.',
+      );
+    }
     assertUsage(
       recordValue(reservation, 'executableUpperBound'),
       'reservation upper bound',
@@ -209,6 +234,14 @@ function assertResourceBudget(state: AgentState): void {
       assert(
         parent !== reservationId && active.reservations[parent] !== undefined,
         'resource reservation parent is invalid.',
+      );
+    const replaced = stringValue(reservation, 'replacesReservationId');
+    if (replaced)
+      assert(
+        replaced !== reservationId &&
+          active.reservations[replaced]?.state === 'released' &&
+          active.reservations[replaced]?.resourceKind === 'subagent',
+        'resource reservation replacement is invalid.',
       );
   }
   for (const [waiterId, waiterValue] of Object.entries(active.waiters)) {
@@ -260,6 +293,47 @@ function assertResourceBudget(state: AgentState): void {
     committedUsageWithinBudget(active),
     'committed resource usage exceeds the effective budget.',
   );
+}
+
+function assertRetainedResourceBudgets(state: AgentState): void {
+  const retained = state.retainedResourceBudgets;
+  assert(
+    retained != null && typeof retained === 'object' && !Array.isArray(retained),
+    'retained resource budgets must be a map.',
+  );
+  const reservationIds = new Set<string>();
+  const waiterIds = new Set<string>();
+  const ledgers = [
+    ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
+    ...Object.values(retained),
+  ];
+  for (const [runId, ledger] of Object.entries(retained)) {
+    assert(
+      runId.length > 0 && ledger?.status === 'active' && ledger.runId === runId,
+      'retained resource budget identity is invalid.',
+    );
+    assert(
+      state.resourceBudget.status !== 'active' || state.resourceBudget.runId !== runId,
+      'current and retained resource budget Run IDs overlap.',
+    );
+    assertResourceBudget({ ...state, resourceBudget: ledger });
+    assert(
+      Object.values(ledger.reservations).some((reservation) =>
+        ['queued', 'reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
+      ) || Object.values(ledger.waiters).some((waiter) => waiter.state === 'waiting'),
+      'retained resource budget has no unsettled authority.',
+    );
+  }
+  for (const ledger of ledgers) {
+    for (const id of Object.keys(ledger.reservations)) {
+      assert(!reservationIds.has(id), 'resource reservation ID appears in more than one ledger.');
+      reservationIds.add(id);
+    }
+    for (const id of Object.keys(ledger.waiters)) {
+      assert(!waiterIds.has(id), 'resource waiter ID appears in more than one ledger.');
+      waiterIds.add(id);
+    }
+  }
 }
 
 function assertUsage(
@@ -384,13 +458,19 @@ function committedUsageWithinBudget(
         (gaugeSums[field] ?? 0) + (numberValue(recordValue(usage, 'gauges'), field) ?? 0);
   };
   add(record(active.reconciledUsage));
-  for (const reservation of Object.values(active.reservations))
-    if (
-      ['reserved', 'dispatch_started', 'unknown'].includes(
-        stringValue(record(reservation), 'state') ?? '',
-      )
-    )
-      add(recordValue(record(reservation), 'executableUpperBound'));
+  for (const reservation of Object.values(active.reservations)) {
+    const state = stringValue(record(reservation), 'state');
+    const upper = recordValue(record(reservation), 'executableUpperBound');
+    if (['reserved', 'dispatch_started', 'unknown'].includes(state ?? '')) add(upper);
+    else if (state === 'queued') {
+      const counters = recordValue(upper, 'counters');
+      const gauges = recordValue(upper, 'gauges');
+      for (const field of Object.keys(counterSums))
+        counterSums[field] = (counterSums[field] ?? 0) + (numberValue(counters, field) ?? 0);
+      gaugeSums.elapsedRunMs =
+        (gaugeSums.elapsedRunMs ?? 0) + (numberValue(gauges, 'elapsedRunMs') ?? 0);
+    }
+  }
   return (
     Object.entries(counterLimits).every(
       ([field, limit]) => counterSums[field]! <= (numberValue(budget, limit) ?? -1),
@@ -779,14 +859,72 @@ function assertCapabilityLifecycleEvidence(
       `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
     );
   const backgroundResult = recordValue(lifecycle, 'backgroundResult');
+  const childLink = recordValue(lifecycle, 'childSession');
+  const recoveryDiagnostic = childLink && recordValue(childLink, 'recoveryDiagnostic');
+  if (recoveryDiagnostic)
+    assert(
+      exactShape(recoveryDiagnostic, ['diagnosticCode', 'observedAt']) &&
+        ['recovery_blocked', 'evidence_inconsistent'].includes(
+          stringValue(recoveryDiagnostic, 'diagnosticCode') ?? '',
+        ) &&
+        validTimestamp(recoveryDiagnostic.observedAt) &&
+        stringValue(childLink, 'childThreadId') ===
+          childThreadIdForToolAttempt({
+            parentSessionId: state.session.threadId,
+            parentInvocationId: invocationId,
+            parentToolCallId: stringValue(invocation, 'toolCallId') ?? '',
+            attempt: numberValue(lifecycle, 'attempt') ?? 0,
+          }),
+      `governed Subagent invocation ${invocationId} has invalid recovery diagnostic.`,
+    );
   if (backgroundResult) {
     const afterTurn = recordValue(backgroundResult, 'afterTurn');
+    const childSession = recordValue(lifecycle, 'childSession');
+    const terminalImport = childSession && recordValue(childSession, 'terminalImport');
+    const independentChildResult =
+      lifecycleStatus === 'intent_recorded' &&
+      !!terminalImport &&
+      Number.isSafeInteger(numberValue(terminalImport, 'terminalRevision')) &&
+      (numberValue(terminalImport, 'terminalRevision') ?? -1) >= 0 &&
+      (stringValue(terminalImport, 'status') === 'failed' ||
+        stringValue(terminalImport, 'status') === 'cancelled' ||
+        (numberValue(terminalImport, 'terminalRevision') ?? 0) >= 1) &&
+      /^sha256:[a-f0-9]{64}$/u.test(stringValue(terminalImport, 'terminalReceiptDigest') ?? '') &&
+      [
+        'completed',
+        'failed',
+        'cancelled',
+        'interrupted',
+        'exhausted',
+        'suspended',
+        'unknown',
+      ].includes(stringValue(terminalImport, 'status') ?? '') &&
+      validPrivateArtifact(terminalImport.resultRef, 'subagent_task') &&
+      stringValue(recordValue(terminalImport, 'resultRef') ?? {}, 'integrityIdentifier') ===
+        stringValue(backgroundResult, 'artifactIntegrityIdentifier') &&
+      stringValue(childSession, 'originRunId') === stringValue(backgroundResult, 'originRunId') &&
+      stringValue(childSession, 'originTurnId') === stringValue(backgroundResult, 'originTurnId') &&
+      stringValue(childSession, 'originToolCallId') ===
+        stringValue(backgroundResult, 'originToolCallId') &&
+      stringValue(childSession, 'childThreadId') ===
+        childThreadIdForToolAttempt({
+          parentSessionId: state.session.threadId,
+          parentInvocationId: invocationId,
+          parentToolCallId: stringValue(invocation, 'toolCallId') ?? '',
+          attempt: numberValue(lifecycle, 'attempt') ?? 0,
+        }) &&
+      sameChildTaskArtifactRef(childSession.taskArtifactRef, lifecycle.taskArtifact) &&
+      stringValue(childSession, 'taskArtifactDigest') ===
+        stringValue(recordValue(lifecycle, 'taskArtifact'), 'integrityIdentifier') &&
+      stringValue(backgroundResult, 'notificationId') ===
+        `subagent:${String(backgroundResult.taskId)}:${String(backgroundResult.artifactIntegrityIdentifier)}`;
     assert(
-      lifecycleStatus === 'cleanup_completed' &&
+      (childSession ? independentChildResult : lifecycleStatus === 'cleanup_completed') &&
         exactShape(backgroundResult, [
           'taskId',
           'notificationId',
           'artifactIntegrityIdentifier',
+          ...(backgroundResult.checkpointRef ? ['checkpointRef'] : []),
           'originRunId',
           'originTurnId',
           'originToolCallId',
@@ -799,6 +937,8 @@ function assertCapabilityLifecycleEvidence(
         /^sha256:[a-f0-9]{64}$/u.test(
           stringValue(backgroundResult, 'artifactIntegrityIdentifier') ?? '',
         ) &&
+        (backgroundResult.checkpointRef === undefined ||
+          validPrivateArtifact(backgroundResult.checkpointRef, 'subagent_checkpoint')) &&
         validString(backgroundResult.originRunId) &&
         stringValue(backgroundResult, 'originToolCallId') ===
           stringValue(invocation, 'toolCallId') &&
@@ -846,6 +986,7 @@ function assertModelInvocations(state: AgentState): void {
       'admission',
       'budget',
       'dispatchCertainty',
+      'estimatedInputTokens',
       'finishReason',
       'interruptionReason',
       'invocationId',
@@ -886,6 +1027,12 @@ function assertModelInvocations(state: AgentState): void {
       stringValue(invocation, 'invocationId') === invocationId,
       'model invocation identity is invalid.',
     );
+    const estimatedInputTokens = numberValue(invocation, 'estimatedInputTokens');
+    if (Object.hasOwn(invocation, 'estimatedInputTokens'))
+      assert(
+        Number.isSafeInteger(estimatedInputTokens) && (estimatedInputTokens ?? -1) >= 0,
+        `model invocation ${invocationId} frozen input estimate is invalid.`,
+      );
     const status = stringValue(invocation, 'status');
     assert(
       ['prepared', 'dispatching', 'completed', 'interrupted'].includes(status ?? ''),
@@ -1727,16 +1874,78 @@ export function assertAgentStateInvariants(state: AgentState): void {
   assert(state.providerReadiness != null, 'provider readiness state is required.');
   assert(state.completionGuard != null, 'completion guard state is required.');
   if (state.completionGuard.waitingReason) {
+    const reason = state.completionGuard.waitingReason;
+    const ids =
+      reason.kind === 'required_background'
+        ? reason.taskIds
+        : reason.kind === 'required_shell'
+          ? reason.shellIds
+          : undefined;
     assert(
-      state.completionGuard.waitingReason.kind === 'required_background' &&
-        state.completionGuard.waitingReason.taskIds.length > 0 &&
-        state.completionGuard.waitingReason.taskIds.every(
-          (taskId, index, values) => taskId.length > 0 && values.indexOf(taskId) === index,
-        ),
+      Array.isArray(ids) &&
+        ids.length > 0 &&
+        ids.every((id, index, values) => id.length > 0 && values.indexOf(id) === index) &&
+        (reason.kind !== 'required_shell' || typeof reason.modelRespondedAfterWait === 'boolean'),
       'completion guard waiting reason is invalid.',
     );
   }
   assertResourceBudget(state);
+  assertRetainedResourceBudgets(state);
+  assert(!state.activeFollowupTurn || state.childSessionOrigin, 'followup requires child origin.');
+  if (state.childSessionOrigin) {
+    const origin = state.childSessionOrigin;
+    const followup = state.activeFollowupTurn;
+    if (followup)
+      assert(
+        origin.terminal?.status === 'completed' &&
+          followup.sourceSessionId === origin.parentSessionId &&
+          validString(followup.submissionId) &&
+          validString(followup.targetRunId) &&
+          validString(followup.taskId) &&
+          followup.taskId !== origin.childInvocationId &&
+          validPrivateArtifact(followup.checkpointRef, 'subagent_checkpoint') &&
+          validPrivateArtifact(followup.grantRef, 'agent_followup_grant') &&
+          followup.grantRef.integrityIdentifier === followup.grantDigest &&
+          /^sha256:[a-f0-9]{64}$/u.test(followup.grantDigest),
+        'child followup continuation identity is invalid.',
+      );
+    assert(
+      state.session.threadId ===
+        childThreadIdForToolAttempt({
+          parentSessionId: origin.parentSessionId,
+          parentInvocationId: origin.parentInvocationId,
+          parentToolCallId: origin.parentToolCallId,
+          attempt: origin.attempt,
+        }) &&
+        /^sha256:[a-f0-9]{64}$/u.test(origin.grantDigest) &&
+        /^sha256:[a-f0-9]{64}$/u.test(origin.delegatedUpperBoundDigest) &&
+        origin.delegatedReservationId.length > 0 &&
+        origin.fundingRunId.length > 0 &&
+        Number.isFinite(Date.parse(origin.deadlineAt)),
+      'child Session origin is invalid.',
+    );
+    if (origin.terminal)
+      assert(
+        (state.terminalOutcome !== undefined ||
+          (followup !== undefined &&
+            state.activeTaskId === followup.taskId &&
+            state.turn.turnId === followup.targetRunId &&
+            state.turn.status === 'active') ||
+          (origin.terminal.status === 'cancelled' &&
+            state.turn.status === 'aborted' &&
+            state.turn.abortCause === 'user' &&
+            origin.terminal.cleanupConfirmed === true)) &&
+          (origin.terminal.cleanupConfirmed === true ||
+            (origin.terminal.status === 'unknown' &&
+              origin.terminal.cleanupConfirmed === false &&
+              state.terminalOutcome?.status === 'unknown' &&
+              state.terminalOutcome.knownExternalEffects === 'unknown' &&
+              state.turn.status !== 'active')) &&
+          Number.isSafeInteger(origin.terminal.sealedRevision) &&
+          origin.terminal.sealedRevision >= 1,
+        'child Session terminal seal is invalid.',
+      );
+  }
   assertRecoveryJournal(state);
   assertModelInvocations(state);
   assertCapabilityInvocations(state);
@@ -1809,7 +2018,7 @@ export function assertAgentStateInvariants(state: AgentState): void {
   for (const taskId of Object.keys(state.tasks)) {
     assert(state.tasks[taskId]!.taskId === taskId, 'task map key does not match task identity.');
     assert(
-      ['active', 'completed', 'cancelled'].includes(state.tasks[taskId]!.status),
+      ['active', 'completed', 'failed', 'cancelled'].includes(state.tasks[taskId]!.status),
       'task status is invalid.',
     );
     assert(

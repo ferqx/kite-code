@@ -1,3 +1,4 @@
+import { childThreadIdForToolAttempt } from './child-session';
 import {
   CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
   CURRENT_RUNTIME_EVENT_TYPE_COUNT,
@@ -46,6 +47,38 @@ function validPrivateRef(value: unknown, kind: string): boolean {
     /^sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier) &&
     Number.isSafeInteger(value.byteLength) &&
     Number(value.byteLength) > 0
+  );
+}
+
+function validAgentId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 256;
+}
+
+function validAgentSequence(value: unknown, allowZero = false): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= (allowZero ? 0 : 1);
+}
+
+function validAgentDigest(value: unknown): value is string {
+  return typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value);
+}
+
+function validAgentSource(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const expected = [
+    'effectAttemptId',
+    'modelInvocationId',
+    'runId',
+    'toolCallId',
+    'turnId',
+    ...(value.sourceTaskId === undefined ? [] : ['sourceTaskId']),
+  ].sort();
+  return (
+    Object.keys(value).sort().join(',') === expected.join(',') &&
+    ['runId', 'turnId', 'modelInvocationId', 'toolCallId'].every((key) =>
+      validAgentId(value[key]),
+    ) &&
+    validAgentId(value.effectAttemptId) &&
+    (value.sourceTaskId === undefined || validAgentId(value.sourceTaskId))
   );
 }
 
@@ -233,6 +266,147 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
     }
   }
   switch (value.type) {
+    case 'agent.created':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.initialTaskId === undefined ? [] : ['initialTaskId']),
+      ]);
+      if (
+        !validAgentId(value.agentId) ||
+        (value.parentAgentId !== null && !validAgentId(value.parentAgentId)) ||
+        (value.parentAgentId === null && value.initialTaskId !== undefined) ||
+        (value.initialTaskId !== undefined && !validAgentId(value.initialTaskId)) ||
+        value.agentId === value.parentAgentId
+      )
+        throw new Error('Agent creation identity is invalid.');
+      break;
+    case 'agent.turn_started':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.submissionId === undefined ? [] : ['submissionId']),
+      ]);
+      if (
+        !validAgentId(value.agentId) ||
+        !validAgentId(value.taskId) ||
+        !validAgentSequence(value.turnOrdinal, true) ||
+        !validAgentId(value.ownerGeneration) ||
+        !validAgentDigest(value.grantDigest) ||
+        (value.submissionId !== undefined && !validAgentId(value.submissionId))
+      )
+        throw new Error('Agent turn start identity is invalid.');
+      break;
+    case 'agent.mail_accepted':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.submissionId === undefined ? [] : ['submissionId']),
+        ...(value.followupAdmissionRef === undefined ? [] : ['followupAdmissionRef']),
+        ...(value.followupAdmissionDigest === undefined ? [] : ['followupAdmissionDigest']),
+      ]);
+      if (
+        !validAgentId(value.messageId) ||
+        !validAgentId(value.senderAgentId) ||
+        !validAgentId(value.targetAgentId) ||
+        !['queue_only', 'trigger_turn', 'reply'].includes(String(value.mode)) ||
+        !validAgentSource(value.source) ||
+        !validPrivateRef(value.bodyRef, 'agent_mail') ||
+        !validAgentDigest(value.bodyDigest) ||
+        !validAgentSequence(value.sequence) ||
+        (value.mode === 'trigger_turn' && !validAgentId(value.submissionId)) ||
+        (value.mode === 'trigger_turn' &&
+          (!validPrivateRef(value.followupAdmissionRef, 'agent_followup_admission') ||
+            !validAgentDigest(value.followupAdmissionDigest))) ||
+        (value.mode !== 'trigger_turn' &&
+          (value.followupAdmissionRef !== undefined ||
+            value.followupAdmissionDigest !== undefined)) ||
+        (value.submissionId !== undefined && !validAgentId(value.submissionId))
+      )
+        throw new Error('Agent mail acceptance identity is invalid.');
+      break;
+    case 'agent.followup_turn_prepared':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      if (
+        !validAgentId(value.sourceSessionId) ||
+        !validAgentId(value.submissionId) ||
+        !validAgentId(value.targetRunId) ||
+        !validAgentId(value.taskId) ||
+        !validPrivateRef(value.checkpointRef, 'subagent_checkpoint') ||
+        !validPrivateRef(value.grantRef, 'agent_followup_grant') ||
+        !validAgentDigest(value.grantDigest) ||
+        (isRecord(value.grantRef) && value.grantRef.integrityIdentifier !== value.grantDigest)
+      )
+        throw new Error('Agent followup turn preparation identity is invalid.');
+      break;
+    case 'agent.followup_turn_settled':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      if (
+        !validAgentId(value.sourceSessionId) ||
+        !validAgentId(value.submissionId) ||
+        !validAgentId(value.targetRunId) ||
+        !validAgentId(value.taskId) ||
+        !['completed', 'failed', 'cancelled', 'unknown'].includes(String(value.status))
+      )
+        throw new Error('Agent followup turn settlement identity is invalid.');
+      break;
+    case 'agent.followup_routed':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      if (
+        ![
+          'submissionId',
+          'targetAgentId',
+          'taskId',
+          'invocationId',
+          'modelAdmissionId',
+          'reservationId',
+          'fundingRunId',
+        ].every((key) => validAgentId(value[key])) ||
+        !['current_turn', 'new_turn'].includes(String(value.route)) ||
+        !validAgentSequence(value.sequence)
+      )
+        throw new Error('Agent followup route identity is invalid.');
+      break;
+    case 'agent.mail_input_prepared':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      if (
+        !validAgentId(value.targetAgentId) ||
+        !validAgentId(value.invocationId) ||
+        !validAgentId(value.modelAdmissionId) ||
+        !validAgentSequence(value.fromSequence, true) ||
+        !validAgentSequence(value.throughSequence) ||
+        Number(value.throughSequence) <= Number(value.fromSequence) ||
+        !Array.isArray(value.messageIds) ||
+        value.messageIds.length === 0 ||
+        value.messageIds.length > 8 ||
+        !value.messageIds.every(validAgentId) ||
+        new Set(value.messageIds).size !== value.messageIds.length
+      )
+        throw new Error('Agent mail input watermark is invalid.');
+      break;
+    case 'agent.task_settled':
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.submissionId === undefined ? [] : ['submissionId']),
+        ...(value.checkpointRef === undefined ? [] : ['checkpointRef']),
+      ]);
+      if (
+        !validAgentId(value.agentId) ||
+        !validAgentId(value.taskId) ||
+        !validAgentId(value.ownerGeneration) ||
+        (value.submissionId !== undefined && !validAgentId(value.submissionId)) ||
+        ![
+          'completed',
+          'failed',
+          'cancelled',
+          'interrupted',
+          'exhausted',
+          'suspended',
+          'unknown',
+        ].includes(String(value.status)) ||
+        !validPrivateRef(value.resultRef, 'subagent_task') ||
+        (value.checkpointRef !== undefined &&
+          !validPrivateRef(value.checkpointRef, 'subagent_checkpoint'))
+      )
+        throw new Error('Agent task settlement identity is invalid.');
+      break;
     case 'session.rewind_requested':
     case 'session.rewind_completed':
     case 'session.rewind_failed': {
@@ -453,9 +627,180 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('subagent.tool_result payload is invalid.');
       }
       break;
+    case 'subagent.child_session_intended':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of [
+        'parentInvocationId',
+        'parentSessionId',
+        'originRunId',
+        'originTurnId',
+        'originToolCallId',
+        'childInvocationId',
+        'childThreadId',
+        'fundingRunId',
+        'delegatedReservationId',
+        'deadlineAt',
+      ])
+        requireNonEmptyString(value, field);
+      assertPositiveAttempt(value);
+      if (
+        !validAgentDigest(value.grantDigest) ||
+        !validAgentDigest(value.taskArtifactDigest) ||
+        !validAgentDigest(value.taskTextDigest) ||
+        !validPrivateRef(value.taskArtifactRef, 'subagent_task') ||
+        (value.taskArtifactRef as { integrityIdentifier: string }).integrityIdentifier !==
+          value.taskArtifactDigest ||
+        !validAgentDigest(value.delegatedUpperBoundDigest) ||
+        !['explore', 'plan', 'code', 'review'].includes(String(value.role)) ||
+        (value.disposition !== 'required' && value.disposition !== 'after_turn') ||
+        value.childThreadId !==
+          childThreadIdForToolAttempt({
+            parentSessionId: String(value.parentSessionId),
+            parentInvocationId: String(value.parentInvocationId),
+            parentToolCallId: String(value.originToolCallId),
+            attempt: Number(value.attempt),
+          })
+      )
+        throw new Error('Child Session intent authority is invalid.');
+      break;
+    case 'subagent.child_session_adopted':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of [
+        'parentSessionId',
+        'parentInvocationId',
+        'parentToolCallId',
+        'childInvocationId',
+        'fundingRunId',
+        'delegatedReservationId',
+        'deadlineAt',
+      ])
+        requireNonEmptyString(value, field);
+      assertPositiveAttempt(value);
+      if (
+        !validAgentDigest(value.grantDigest) ||
+        !validAgentDigest(value.delegatedUpperBoundDigest)
+      )
+        throw new Error('Child Session adoption grant is invalid.');
+      break;
+    case 'subagent.child_approval_proxy_changed':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'proxyInteractionId');
+      requireNonEmptyString(value, 'childInvocationId');
+      if (value.status !== 'pending' && value.status !== 'decided')
+        throw new Error('Child approval proxy status is invalid.');
+      break;
+    case 'subagent.child_recovery_required':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of [
+        'parentSessionId',
+        'parentInvocationId',
+        'childInvocationId',
+        'childThreadId',
+        'originToolCallId',
+        'observedAt',
+      ])
+        requireNonEmptyString(value, field);
+      assertPositiveAttempt(value);
+      if (
+        !validAgentDigest(value.grantDigest) ||
+        !validTimestamp(value.observedAt) ||
+        (value.diagnosticCode !== 'recovery_blocked' &&
+          value.diagnosticCode !== 'evidence_inconsistent') ||
+        value.childThreadId !==
+          childThreadIdForToolAttempt({
+            parentSessionId: String(value.parentSessionId),
+            parentInvocationId: String(value.parentInvocationId),
+            parentToolCallId: String(value.originToolCallId),
+            attempt: Number(value.attempt),
+          })
+      )
+        throw new Error('Child recovery diagnostic identity is invalid.');
+      break;
+    case 'subagent.child_terminal_sealed':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'terminalReceiptId');
+      if (
+        ![
+          'completed',
+          'failed',
+          'cancelled',
+          'interrupted',
+          'exhausted',
+          'suspended',
+          'unknown',
+        ].includes(String(value.status)) ||
+        !validPrivateRef(value.resultRef, 'subagent_task') ||
+        (value.status === 'unknown'
+          ? value.cleanupConfirmed !== false
+          : value.cleanupConfirmed !== true) ||
+        typeof value.cancelRequested !== 'boolean'
+      )
+        throw new Error('Child Session terminal seal is invalid.');
+      break;
+    case 'subagent.child_terminal_imported':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of ['parentInvocationId', 'childInvocationId', 'childThreadId'])
+        requireNonEmptyString(value, field);
+      if (
+        !validAgentSequence(value.terminalRevision) ||
+        !validAgentDigest(value.terminalReceiptDigest) ||
+        ![
+          'completed',
+          'failed',
+          'cancelled',
+          'interrupted',
+          'exhausted',
+          'suspended',
+          'unknown',
+        ].includes(String(value.status)) ||
+        !validPrivateRef(value.resultRef, 'subagent_task')
+      )
+        throw new Error('Child Session terminal import is invalid.');
+      break;
+    case 'subagent.child_creation_failed':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of ['parentInvocationId', 'childInvocationId', 'childThreadId'])
+        requireNonEmptyString(value, field);
+      if (
+        (value.mode !== 'absent_child' &&
+          value.mode !== 'created_unactivated' &&
+          value.mode !== 'activated_no_ack') ||
+        !validAgentDigest(value.failureReceiptDigest) ||
+        !validPrivateRef(value.resultRef, 'subagent_task')
+      )
+        throw new Error('Child Session creation failure receipt is invalid.');
+      break;
+    case 'subagent.child_pre_dispatch_cancelled':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of ['parentInvocationId', 'childInvocationId', 'childThreadId'])
+        requireNonEmptyString(value, field);
+      if (
+        (value.mode !== 'absent_child' &&
+          value.mode !== 'created_unactivated' &&
+          value.mode !== 'activated_no_ack') ||
+        !validAgentDigest(value.terminalReceiptDigest) ||
+        !validPrivateRef(value.resultRef, 'subagent_task')
+      )
+        throw new Error('Child Session pre-dispatch cancellation receipt is invalid.');
+      break;
+    case 'subagent.child_task_input_admitted':
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'childInvocationId');
+      if (
+        !validPrivateRef(value.taskArtifactRef, 'subagent_task') ||
+        !validAgentDigest(value.taskDigest) ||
+        !validAgentDigest(value.taskTextDigest) ||
+        !validAgentDigest(value.grantDigest) ||
+        (value.taskArtifactRef as { integrityIdentifier: string }).integrityIdentifier !==
+          value.taskDigest
+      )
+        throw new Error('Child delegated task input authority is invalid.');
+      break;
     case 'subagent.background_result_persisted':
       exactEventKeys(value, [
         ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.checkpointRef === undefined ? [] : ['checkpointRef']),
+        ...(value.childTerminalStatus === undefined ? [] : ['childTerminalStatus']),
         ...(value.afterTurn === undefined ? [] : ['afterTurn']),
       ]);
       requireNonEmptyString(value, 'taskId');
@@ -471,8 +816,27 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       if (value.source !== 'subagent' || value.modelRole !== 'user') {
         throw new Error('Background subagent result authority is invalid.');
       }
+      if (
+        value.childTerminalStatus !== undefined &&
+        ![
+          'completed',
+          'failed',
+          'cancelled',
+          'interrupted',
+          'exhausted',
+          'suspended',
+          'unknown',
+        ].includes(String(value.childTerminalStatus))
+      )
+        throw new Error('Independent child terminal status is invalid.');
       if (!/^sha256:[0-9a-f]{64}$/u.test(String(value.artifactIntegrityIdentifier))) {
         throw new Error('Background subagent result artifact identity is invalid.');
+      }
+      if (
+        value.checkpointRef !== undefined &&
+        !validPrivateRef(value.checkpointRef, 'subagent_checkpoint')
+      ) {
+        throw new Error('Background subagent checkpoint reference is invalid.');
       }
       if (value.afterTurn !== undefined) {
         if (
@@ -565,9 +929,16 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       exactEventKeys(value, [
         ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
         ...(value.admission === undefined ? [] : ['admission']),
+        ...(value.estimatedInputTokens === undefined ? [] : ['estimatedInputTokens']),
       ]);
       requireNonEmptyString(value, 'invocationId');
       requireNonEmptyString(value, 'routeFingerprint');
+      if (
+        value.estimatedInputTokens !== undefined &&
+        (!Number.isSafeInteger(value.estimatedInputTokens) ||
+          Number(value.estimatedInputTokens) < 0)
+      )
+        throw new Error('Model Surface estimate is invalid.');
       if (value.admission !== undefined) {
         const admission = value.admission;
         if (

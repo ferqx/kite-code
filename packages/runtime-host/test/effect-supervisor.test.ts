@@ -49,6 +49,81 @@ describe('Host EffectSupervisor', () => {
     expect(calls).toEqual(['decision']);
   });
 
+  test('leases only exact cross-Session QueueOnly or TriggerTurn source receipts', () => {
+    const calls: string[] = [];
+    const supervisor = new EffectSupervisor(storageFixture(calls), () => 100);
+    const lease = { sessionId: 'session-1', effectId: 'tool-mail', ownerId: 'owner-a' };
+    expect(supervisor.tryAcquire('session-1', 'tool-mail', 'owner-a', 200)).toBe(true);
+    const receipt = createRuntimeStoredCommandReceipt(
+      {
+        scopeSessionId: 'session-1',
+        commandId: 'mail-1',
+        requestDigest: 'a'.repeat(64),
+        targetSessionId: 'session-1',
+        committedAt: 1,
+      },
+      1,
+    );
+    const mutation = {
+      kind: 'accept_followup' as const,
+      messageId: 'mail-1',
+      targetSessionId: 'child-1',
+      commandId: 'mail-1',
+      requestDigest: 'a'.repeat(64),
+      sourceRunId: 'run-1',
+      sourceTurnId: 'turn-1',
+      sourceModelInvocationId: 'model-1',
+      sourceToolCallId: 'tool-1',
+      sourceEffectAttemptId: 'attempt-1',
+      sourceSequence: 1,
+      bodyText: 'continue',
+      acceptedAtMs: 1,
+      submissionId: 'submission-1',
+      admission: {
+        ref: {
+          artifactId: `pa_${'b'.repeat(64)}`,
+          kind: 'agent_followup_admission' as const,
+          integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+          byteLength: 2,
+        },
+        digest: `sha256:${'b'.repeat(64)}`,
+        canonicalJson: '{}',
+        createdAt: 1,
+      },
+    };
+    const input = {
+      ...transactionInput(),
+      commandReceipt: receipt,
+      crossSessionAgentMailMutation: mutation,
+    };
+    supervisor.commitCommandReceiptEvidence(input, lease);
+    expect(calls).toEqual(['receipt_evidence']);
+    expect(() =>
+      supervisor.commitCommandReceiptEvidence(
+        {
+          ...input,
+          crossSessionAgentMailMutation: { ...mutation, requestDigest: 'c'.repeat(64) },
+        },
+        lease,
+      ),
+    ).toThrow('not one cross-Session mail acceptance');
+    expect(() =>
+      supervisor.commitCommandReceiptEvidence(
+        {
+          ...input,
+          crossSessionAgentMailMutation: {
+            kind: 'receive_queue',
+            sourceSessionId: 'session-1',
+            messageId: 'mail-1',
+            receivedAtMs: 1,
+          },
+        },
+        lease,
+      ),
+    ).toThrow('not one cross-Session mail acceptance');
+    expect(calls).toEqual(['receipt_evidence']);
+  });
+
   test('refuses Run mutations when the storage owner has no Store 8 port', () => {
     const calls: string[] = [];
     const supervisor = new EffectSupervisor(storageFixture(calls));

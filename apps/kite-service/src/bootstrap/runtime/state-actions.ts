@@ -5,7 +5,15 @@ import {
   runtimeHostStateHasPendingSubagentCleanupAuthority as hasPendingSubagentCleanupAuthority,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   runtimeHostStateInteractionToolCall as interactionToolCall,
+  type RuntimeHostStateRestartRecoveryFacts,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
+  runtimeHostStateVerifiedDispatchedChildDelegationIds as verifiedDispatchedChildDelegationIds,
+  runtimeHostStateVerifiedLiveAfterTurnReservationIds as verifiedLiveAfterTurnReservationIds,
+  runtimeHostStateVerifiedPendingAfterTurnReservationIds as verifiedPendingAfterTurnReservationIds,
+  runtimeHostStateVerifiedPendingFollowupReservationIds as verifiedPendingFollowupReservationIds,
+  runtimeHostStateVerifiedPreparedCurrentTurnModelReservationIds as verifiedPreparedCurrentTurnModelReservationIds,
+  runtimeHostStateVerifiedPreparedFollowupModelReservationIds as verifiedPreparedFollowupModelReservationIds,
+  runtimeHostStateVerifiedSealedAfterTurnReportReservationIds as verifiedSealedAfterTurnReportReservationIds,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from './failures';
 import { rootToolInteractionOwner, runtimeInteractionOwnerForPending } from './interaction-owner';
@@ -55,6 +63,206 @@ export function canContinueSettledGlobalAdmission(
   return classifyObsoleteGlobalAdmission(state, journal, 'settled') !== undefined;
 }
 
+/** Resume the original required child wait, never a parent model attempt already dispatched. */
+export function canContinueAcceptedIndependentChild(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): boolean {
+  if (
+    state.recoveryState.kind !== 'normal' ||
+    state.turn.status !== 'active' ||
+    state.interactions.kind !== 'idle' ||
+    !state.activeTaskId ||
+    state.tasks[state.activeTaskId]?.status !== 'active' ||
+    state.terminalOutcome ||
+    journal.at(-1)?.revision !== state.revision ||
+    Object.values(state.modelInvocations).some((invocation) =>
+      ['prepared', 'dispatching', 'unknown'].includes(invocation.status),
+    ) ||
+    Object.values(state.tools.calls).some((call) =>
+      [
+        'running',
+        'queued',
+        'awaiting_approval',
+        'awaiting_review',
+        'awaiting_auto_review',
+      ].includes(call.status),
+    )
+  )
+    return false;
+  let turnStart = -1;
+  for (let index = journal.length - 1; index >= 0; index -= 1) {
+    const event = journal[index]?.event;
+    if (event?.type === 'turn.started' && event.turnId === state.turn.turnId) {
+      turnStart = index;
+      break;
+    }
+  }
+  if (turnStart < 0) return false;
+  const currentTurn = journal.slice(turnStart + 1).map(({ event }) => event);
+  let lastChildIntent = -1;
+  for (let index = currentTurn.length - 1; index >= 0; index -= 1) {
+    const event = currentTurn[index];
+    if (
+      event?.type === 'subagent.child_session_intended' &&
+      event.disposition === 'required' &&
+      event.parentSessionId === state.session.threadId &&
+      event.originRunId === state.turn.turnId &&
+      event.originTurnId === state.turn.turnId &&
+      state.tools.calls[event.originToolCallId]?.status === 'succeeded' &&
+      state.capabilities.invocations[event.parentInvocationId]?.subagentProviderLifecycle
+        ?.childSession?.childThreadId === event.childThreadId
+    ) {
+      lastChildIntent = index;
+      break;
+    }
+  }
+  if (lastChildIntent < 0) return false;
+  return !currentTurn
+    .slice(lastChildIntent + 1)
+    .some(
+      (event) =>
+        event.type === 'model.invocation_prepared' ||
+        event.type === 'turn.aborted' ||
+        event.type === 'run.error' ||
+        event.type === 'run.completed',
+    );
+}
+
+/** Resume a committed provisional final only after its exact required-child wait. */
+export function canContinueBlockedIndependentChild(
+  state: Readonly<RuntimeState>,
+  journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
+): boolean {
+  const waiting = state.completionGuard.waitingReason;
+  if (
+    state.recoveryState.kind !== 'normal' ||
+    state.turn.status !== 'active' ||
+    state.interactions.kind !== 'idle' ||
+    !state.activeTaskId ||
+    state.tasks[state.activeTaskId]?.status !== 'active' ||
+    state.terminalOutcome ||
+    waiting?.kind !== 'required_background' ||
+    waiting.taskIds.length === 0 ||
+    journal.at(-1)?.revision !== state.revision ||
+    Object.values(state.modelInvocations).some((invocation) =>
+      ['prepared', 'dispatching'].includes(invocation.status),
+    ) ||
+    Object.values(state.tools.calls).some((call) =>
+      [
+        'running',
+        'queued',
+        'awaiting_approval',
+        'awaiting_review',
+        'awaiting_auto_review',
+      ].includes(call.status),
+    )
+  )
+    return false;
+  let start = -1;
+  for (let index = journal.length - 1; index >= 0; index -= 1) {
+    const event = journal[index]?.event;
+    if (event?.type === 'turn.started' && event.turnId === state.turn.turnId) {
+      start = index;
+      break;
+    }
+  }
+  if (start < 0) return false;
+  const turn = journal.slice(start + 1).map(({ event }) => event);
+  let blockedIndex = -1;
+  for (let index = turn.length - 1; index >= 0; index -= 1) {
+    const event = turn[index];
+    if (
+      event?.type === 'completion.blocked' &&
+      event.turnId === state.turn.turnId &&
+      event.nextAction === 'wait_for_background'
+    ) {
+      blockedIndex = index;
+      break;
+    }
+  }
+  if (blockedIndex < 0) return false;
+  const blocked = turn[blockedIndex]!;
+  if (blocked.type !== 'completion.blocked' || !blocked.modelInvocationId) return false;
+  const expectedIds = [...new Set(waiting.taskIds)].sort();
+  if (
+    expectedIds.length !== waiting.taskIds.length ||
+    JSON.stringify(expectedIds) !== JSON.stringify([...(blocked.backgroundTaskIds ?? [])].sort())
+  )
+    return false;
+  const model = state.modelInvocations[blocked.modelInvocationId];
+  if (
+    model?.status !== 'completed' ||
+    model.purpose !== 'primary_agent' ||
+    model.responseArtifact?.kind !== 'model_response' ||
+    !/^sha256:[a-f0-9]{64}$/u.test(model.responseArtifact.integrityIdentifier)
+  )
+    return false;
+  const before = turn.slice(0, blockedIndex);
+  let response = -1;
+  for (let index = before.length - 1; index >= 0; index -= 1) {
+    const event = before[index];
+    if (event?.type === 'model.responded' && event.invocationId === blocked.modelInvocationId) {
+      response = index;
+      break;
+    }
+  }
+  if (response < 0) return false;
+  let completed = -1;
+  for (let index = before.length - 1; index >= 0; index -= 1) {
+    const event = before[index];
+    if (
+      event?.type === 'model.invocation_completed' &&
+      event.invocationId === blocked.modelInvocationId &&
+      event.responseArtifact.integrityIdentifier === model.responseArtifact.integrityIdentifier
+    ) {
+      completed = index;
+      break;
+    }
+  }
+  if (completed < 0 || completed > response) return false;
+  for (const taskId of expectedIds) {
+    let intent: Extract<RuntimeEvent, { type: 'subagent.child_session_intended' }> | undefined;
+    for (let index = before.length - 1; index >= 0; index -= 1) {
+      const event = before[index];
+      if (
+        event?.type === 'subagent.child_session_intended' &&
+        event.disposition === 'required' &&
+        event.childInvocationId === taskId &&
+        event.parentSessionId === state.session.threadId &&
+        event.originRunId === state.turn.turnId &&
+        event.originTurnId === state.turn.turnId
+      ) {
+        intent = event;
+        break;
+      }
+    }
+    if (
+      !intent ||
+      state.tools.calls[intent.originToolCallId]?.status !== 'succeeded' ||
+      state.capabilities.invocations[intent.parentInvocationId]?.subagentProviderLifecycle
+        ?.childSession?.childThreadId !== intent.childThreadId
+    )
+      return false;
+  }
+  return !turn
+    .slice(blockedIndex + 1)
+    .some((event) =>
+      [
+        'model.invocation_prepared',
+        'model.invocation_attempt_started',
+        'model.requested',
+        'model.response_superseded',
+        'tool.queued',
+        'tool.started',
+        'capability.execution_started',
+        'run.error',
+        'run.completed',
+        'turn.aborted',
+      ].includes(event.type),
+    );
+}
+
 function classifyObsoleteGlobalAdmission(
   state: Readonly<RuntimeState>,
   journal: readonly { readonly event: RuntimeEvent; readonly revision?: number }[],
@@ -77,7 +285,7 @@ function classifyObsoleteGlobalAdmission(
       ['unknown', 'running', 'recorded'].includes(invocation.status),
     ) ||
     Object.values(state.resourceBudget.reservations).some((reservation) =>
-      ['reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
+      ['queued', 'reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
     ) ||
     (state.resourceBudget.status === 'active' &&
       Object.values(state.resourceBudget.waiters).some(
@@ -212,16 +420,25 @@ export function eventsForRunCancellation(
   ];
 }
 
-function resourceReservationCancellationEvents(state: Readonly<RuntimeState>): RuntimeEvent[] {
+function resourceReservationCancellationEvents(
+  state: Readonly<RuntimeState>,
+  preserveExact = new Set<string>(),
+): RuntimeEvent[] {
   if (state.resourceBudget.status !== 'active') return [];
   const events: RuntimeEvent[] = [];
   for (const reservation of Object.values(state.resourceBudget.reservations)) {
-    if (reservation.state === 'reserved') {
+    if (
+      (reservation.state === 'queued' || reservation.state === 'reserved') &&
+      !preserveExact.has(reservation.reservationId)
+    ) {
       events.push({
         type: 'resource_budget.released',
         reservationId: reservation.reservationId,
       });
-    } else if (reservation.state === 'dispatch_started') {
+    } else if (
+      reservation.state === 'dispatch_started' &&
+      !preserveExact.has(reservation.reservationId)
+    ) {
       events.push({
         type: 'resource_budget.unknown',
         reservationId: reservation.reservationId,
@@ -339,6 +556,28 @@ export function eventsForRestartedSessionRecovery(
   historyEvents: readonly RuntimeEvent[],
   evidence: Readonly<{ kind: 'fenced_previous_execution'; controllerGeneration: number }>,
   reason = 'Runtime process ended before the operation completed.',
+  preserveReservedChildDelegations: readonly string[] = [],
+  preservePendingFollowupFunding: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preservePendingFollowupFunding']
+  > = [],
+  preservePreparedFollowupModels: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preservePreparedFollowupModels']
+  > = [],
+  preservePreparedCurrentTurnModels: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preservePreparedCurrentTurnModels']
+  > = [],
+  preserveDispatchedChildDelegations: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preserveDispatchedChildDelegations']
+  > = [],
+  preservePendingAfterTurnDelegations: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preservePendingAfterTurnDelegations']
+  > = [],
+  preserveLiveAfterTurnDelegations: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preserveLiveAfterTurnDelegations']
+  > = [],
+  preserveSealedAfterTurnReports: NonNullable<
+    RuntimeHostStateRestartRecoveryFacts['preserveSealedAfterTurnReports']
+  > = [],
 ): RuntimeEvent[] {
   if (evidence.kind !== 'fenced_previous_execution' || evidence.controllerGeneration < 1) {
     throw new Error('Restart recovery requires a fenced execution generation.');
@@ -465,14 +704,84 @@ export function eventsForRestartedSessionRecovery(
       (invocation) =>
         invocation.status === 'interrupted' && invocation.interruptionReason === 'runtime_restored',
     ) ||
-    isUndispatchedStartedTurn(state, historyEvents);
+    (preservePreparedFollowupModels.length === 0 &&
+      preservePreparedCurrentTurnModels.length === 0 &&
+      isUndispatchedStartedTurn(state, historyEvents));
+  const exactPendingChildReservations = new Set(
+    historyEvents.flatMap((event) => {
+      if (event.type !== 'subagent.child_session_intended') return [];
+      const reservation =
+        state.resourceBudget.status === 'active'
+          ? state.resourceBudget.reservations[event.delegatedReservationId]
+          : undefined;
+      const invocation = state.capabilities.invocations[event.parentInvocationId];
+      return state.turn.status === 'active' &&
+        event.disposition === 'required' &&
+        event.parentSessionId === state.session.threadId &&
+        event.originRunId === state.turn.turnId &&
+        event.fundingRunId === state.turn.turnId &&
+        event.delegatedReservationId === `child-allotment:${event.childThreadId}` &&
+        preserveReservedChildDelegations.includes(event.delegatedReservationId) &&
+        state.tools.calls[event.originToolCallId]?.status === 'succeeded' &&
+        invocation?.toolCallId === event.originToolCallId &&
+        invocation.status === 'succeeded' &&
+        reservation?.state === 'reserved' &&
+        reservation.resourceKind === 'subagent' &&
+        reservation.invocationId === event.delegatedReservationId
+        ? [event.delegatedReservationId]
+        : [];
+    }),
+  );
+  const exactPendingFollowupReservations = verifiedPendingFollowupReservationIds(
+    state,
+    preservePendingFollowupFunding,
+  );
+  const exactPendingAfterTurnReservations = verifiedPendingAfterTurnReservationIds(
+    state,
+    preservePendingAfterTurnDelegations,
+  );
+  const exactLiveAfterTurnReservations = verifiedLiveAfterTurnReservationIds(
+    state,
+    preserveLiveAfterTurnDelegations,
+  );
+  const exactSealedAfterTurnReports = verifiedSealedAfterTurnReportReservationIds(
+    state,
+    preserveSealedAfterTurnReports,
+  );
+  const exactPreparedModels = verifiedPreparedFollowupModelReservationIds(
+    state,
+    preservePreparedFollowupModels,
+  );
+  const exactCurrentTurnModels = verifiedPreparedCurrentTurnModelReservationIds(
+    state,
+    preservePreparedCurrentTurnModels,
+  );
+  const exactDispatchedChildDelegations = verifiedDispatchedChildDelegationIds(
+    state,
+    preserveDispatchedChildDelegations,
+  );
 
   return [
     ...settledSubagentEvents,
     ...toolEvents,
-    ...resourceReservationCancellationEvents(state),
+    ...resourceReservationCancellationEvents(
+      state,
+      new Set([
+        ...exactPendingChildReservations,
+        ...exactPendingAfterTurnReservations,
+        ...exactLiveAfterTurnReservations,
+        ...exactSealedAfterTurnReports,
+        ...exactPendingFollowupReservations,
+        ...exactPreparedModels.values(),
+        ...exactCurrentTurnModels.values(),
+        ...exactDispatchedChildDelegations,
+      ]),
+    ),
     ...resourceWaiterCancellationEvents(state),
-    ...(state.turn.status === 'active' && hasInterruptedWork && !turnCanResume
+    ...(state.turn.status === 'active' &&
+    !state.activeFollowupTurn &&
+    hasInterruptedWork &&
+    !turnCanResume
       ? [
           {
             type: 'turn.aborted' as const,

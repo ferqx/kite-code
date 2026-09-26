@@ -12,6 +12,8 @@
 
 [kite 界面与协作体验](kite-client-experience.md)：Figma 主稿使用用户提供的 shadcn 组件文件，Kite 内容集中在客户端页面、交互原型和业务组件三个页面。当前 13 个原型状态和 8 个客户端状态复用已有组件；工具过程按需展开，审批处理后退出操作区。最新修订移除批注，主动添加项目即授权，子 Agent 沿用普通消息并显示回传主 Agent 的结果，资料与产出改为顶部按钮控制的右侧副层。产品要求、实施进展和后续验证边界由方案正文维护；设计完成不代表对应客户端能力已交付。
 
+[后台 Agent 与 Shell 的会话协调方案](background-agent-shell-conversation-coordination.md)：阶段 A–C 的等待与结果修复已有交付证据；阶段 D 的旧单 Session 接线暂停，先核对每 Agent 独立 Session、跨线程结果与邮箱协议，以及子线程不进入空间会话列表。现行边界见 [ADR-0191](../adr/0191-independent-agent-sessions-and-result-bridge.md)，历史取舍见适用范围已收窄的 [ADR-0190](../adr/0190-codex-style-agent-mailbox-and-followup-authority.md)。
+
 ## 已确认设计，待实施
 
 [会话存储兼容性与连续性 V1](session-store-compatibility-and-continuity.md)：统一正式数据入口，按明确路径自动兼容或无损迁移，覆盖维护协调、会话保留与跨版本客户端验收。当前仅设计完成，现有 epoch profile 分流与历史入口问题尚未按本方案修正。

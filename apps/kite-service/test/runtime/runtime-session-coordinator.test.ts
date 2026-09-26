@@ -515,6 +515,7 @@ function createFixtureBridge(
     readonly controllerGeneration: number;
     readonly assertCurrent: () => boolean;
   },
+  childSessionAcceptance?: Parameters<typeof createCliRuntimeBridge>[0]['childSessionAcceptance'],
 ) {
   return createCliRuntimeBridge(
     {
@@ -546,6 +547,7 @@ function createFixtureBridge(
       initialSkillActivations: [],
       ...(restartRecoveryOwnership ? { restartRecoveryOwnership } : {}),
       ...(workspaceEffectCompositionFactory ? { workspaceEffectCompositionFactory } : {}),
+      ...(childSessionAcceptance ? { childSessionAcceptance } : {}),
     },
     capabilityExecution,
     () => ({ ...fixture.runtime, builtinToolCatalog }),
@@ -3472,6 +3474,129 @@ describe('retained TUI session coordinator', () => {
       }),
     ]);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test('projects an independent child and re-drives its exact stop intent after cancellation', async () => {
+    const sessionId = 'retained-independent-child-stop';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({ ...identity(sessionId), sandboxAvailable: false });
+    const executionId = 'independent-child-task';
+    const ownerGeneration = 'independent-child-owner';
+    let status: 'running' | 'cancelled' = 'running';
+    let revision = 3;
+    let cancelCalls = 0;
+    const acceptance: NonNullable<
+      Parameters<typeof createCliRuntimeBridge>[0]['childSessionAcceptance']
+    > = {
+      effectLeases: {
+        tryAcquireEffectLease: () => {
+          throw new Error('Child admission is outside this Bridge test');
+        },
+        releaseEffectLease: () => undefined,
+      },
+      onAccepted: () => undefined,
+      backgroundSnapshot: () => ({
+        aggregateGeneration: 'independent-child-directory',
+        watermark: revision,
+        executions: [
+          {
+            executionId,
+            sessionId,
+            sessionRevision: coordinator.getState().revision,
+            kind: 'subagent',
+            status,
+            ownerGeneration,
+            revision,
+            cleanupConfirmed: status === 'cancelled',
+          },
+        ],
+      }),
+      taskControl: {
+        readTask: async () => ({}),
+        waitTasks: async () => ({}),
+        cancelTask: async (taskId) => {
+          expect(taskId).toBe(executionId);
+          cancelCalls += 1;
+          status = 'cancelled';
+          revision += 1;
+          return { status: 'cancelled', cleanup_confirmed: true };
+        },
+      },
+    };
+    const bridge = createFixtureBridge(
+      sessionId,
+      fixture,
+      access,
+      undefined,
+      undefined,
+      acceptance,
+    );
+    try {
+      await bridge.recoverSession(sessionId, () => {});
+      const listed = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId,
+      });
+      expect(listed).toMatchObject({
+        status: 'ok',
+        backgroundSnapshot: {
+          executions: [{ executionId, ownerGeneration, revision: 3, status: 'running' }],
+        },
+      });
+
+      const command = {
+        schema: RUNTIME_COMMAND_SCHEMA_,
+        type: 'stop_background_execution' as const,
+        commandId: 'stop-independent-child',
+        sessionId,
+        expectedRevision: coordinator.getState().revision,
+        executionId,
+        executionKind: 'subagent' as const,
+        expectedOwnerGeneration: ownerGeneration,
+        expectedExecutionRevision: 3,
+      };
+      const wrongOwner = await bridge.inspectCommand(
+        { ...command, expectedOwnerGeneration: 'other-owner' },
+        { targetSessionId: sessionId },
+      );
+      expect(wrongOwner).toMatchObject({ kind: 'terminal', receipt: { code: 'target_ended' } });
+      const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+      if (inspected.kind !== 'accepted') throw new Error('Independent child stop not accepted');
+      revision += 1;
+      expect(inspected.decision.validate?.()).toMatchObject({ code: 'target_ended' });
+      revision -= 1;
+      expect(inspected.decision.validate?.()).toBeUndefined();
+      const committed = await inspected.decision.commit(
+        commandEvidence(sessionId, command.commandId),
+      );
+      await committed.activation?.(() => {});
+      await Bun.sleep(0);
+      await bridge.recoverSession(sessionId, () => {});
+      expect(cancelCalls).toBe(1);
+      expect(
+        fixture.storage.sessions
+          .loadEventsStrict(sessionId)
+          .map((entry) => entry.event.type)
+          .filter((type) => type.startsWith('background_execution.stop_')),
+      ).toEqual(['background_execution.stop_requested', 'background_execution.stop_settled']);
+      const detail = await bridge.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'get_background_execution',
+        sessionId,
+        executionId,
+      });
+      expect(detail).toMatchObject({
+        status: 'ok',
+        backgroundExecution: { executionId, status: 'cancelled', cleanupConfirmed: true },
+      });
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   test('rejects a background stop before item CAS when the Session revision is stale', async () => {

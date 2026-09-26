@@ -2,6 +2,9 @@
 
 ADR 用于追溯设计取舍，不单独构成当前实施要求；accepted、编号较新或措辞强制均不足以证明当前适用性。当前完整结论见[开发入口](../development/README.md)和[产品手册](../handbook/README.md)。引用 ADR 支持实施及处理旧记录时，遵循[ADR 使用边界](../development/documentation.md#adr-使用边界)，明确当前适用范围与现行依据。历史记录仅按需定向读取。
 
+- [ADR-0191：子 Agent 使用独立持久 Session 与父结果桥接](0191-independent-agent-sessions-and-result-bridge.md)
+- [ADR-0190：Codex 式 Agent 邮箱与续轮保留唯一结果权威](0190-codex-style-agent-mailbox-and-followup-authority.md)
+
 - [ADR-0187：执行权绑定实际工作，恢复与空间连接分离](0187-execution-lifetime-and-on-demand-recovery.md)
 - [ADR-0186：会话权限设置与执行准备分离](0186-session-policy-without-execution.md)
 - [ADR-0185：会话权限设置按目标工作区准入](0185-session-permission-admission.md)

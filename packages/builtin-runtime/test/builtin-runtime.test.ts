@@ -179,7 +179,7 @@ describe('builtin runtime package boundary', () => {
   test('registers the exact RM-10 through RM-15 owners and executors', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     expect(registry.operationOwner(TOOL_SEARCH_CAPABILITY_ID_)).toBe('kite-builtin-runtime');
-    expect(registry.snapshot().capabilities).toHaveLength(32);
+    expect(registry.snapshot().capabilities).toHaveLength(37);
     expect(registry.capability(TOOL_SEARCH_CAPABILITY_ID_)).toMatchObject({
       capabilityId: TOOL_SEARCH_CAPABILITY_ID_,
       revision: TOOL_SEARCH_CAPABILITY_REVISION_,
@@ -265,7 +265,7 @@ describe('builtin runtime package boundary', () => {
     });
   });
 
-  test('projects all 32 registered operations without Git inspection', () => {
+  test('projects all 37 registered operations without Git inspection', () => {
     const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -276,8 +276,8 @@ describe('builtin runtime package boundary', () => {
         featureFlags: { skillWorkflow: true, skillActivation: true },
       },
     });
-    expect(projection.entries).toHaveLength(32);
-    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(24);
+    expect(projection.entries).toHaveLength(37);
+    expect(projection.entries.filter((entry) => entry.visibility === 'model')).toHaveLength(29);
     expect(projection.entries.some((entry) => entry.operationId === 'builtin:git_inspect')).toBe(
       false,
     );
@@ -308,6 +308,11 @@ describe('builtin runtime package boundary', () => {
       'builtin:task_read': 'task_control',
       'builtin:task_wait': 'task_control',
       'builtin:task_cancel': 'task_control',
+      'builtin:list_agents': 'task_control',
+      'builtin:wait_agent': 'task_control',
+      'builtin:send_message': 'task_control',
+      'builtin:followup_task': 'task_control',
+      'builtin:interrupt_agent': 'task_control',
       'subagent:start': 'subagent',
       'subagent:resume': 'subagent',
       'verification:deterministic': 'verification',
@@ -316,7 +321,7 @@ describe('builtin runtime package boundary', () => {
       'model:auto_review': 'model',
       'model:subagent': 'model',
     };
-    expect(Object.keys(expectedMechanisms)).toHaveLength(32);
+    expect(Object.keys(expectedMechanisms)).toHaveLength(37);
     expect(projection.entries.map((entry) => entry.operationId).sort()).toEqual(
       Object.keys(expectedMechanisms).sort(),
     );
@@ -718,6 +723,31 @@ describe('builtin runtime package boundary', () => {
         sideEffect: false,
         reason: 'Reads, waits for, or stops Runtime-owned background sub-agents.',
       },
+      list_agents: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Uses the Host-owned Agent mailbox under exact caller scope.',
+      },
+      wait_agent: {
+        effectClass: 'read_only',
+        sideEffect: false,
+        reason: 'Uses the Host-owned Agent mailbox under exact caller scope.',
+      },
+      send_message: {
+        effectClass: 'plan_only',
+        sideEffect: true,
+        reason: 'Uses the Host-owned Agent mailbox under exact caller scope.',
+      },
+      followup_task: {
+        effectClass: 'unknown',
+        sideEffect: true,
+        reason: 'Uses the Host-owned Agent mailbox under exact caller scope.',
+      },
+      interrupt_agent: {
+        effectClass: 'plan_only',
+        sideEffect: true,
+        reason: 'Uses the Host-owned Agent mailbox under exact caller scope.',
+      },
       shell_execute: {
         effectClass: 'read_only',
         sideEffect: false,
@@ -745,6 +775,10 @@ describe('builtin runtime package boundary', () => {
         input = { task_id: 'subagent-test' };
       } else if (entry.name === 'task_wait') {
         input = { task_ids: ['subagent-test'] };
+      } else if (entry.name === 'send_message' || entry.name === 'followup_task') {
+        input = { agent_id: 'agent-test', message: 'Continue.' };
+      } else if (entry.name === 'interrupt_agent') {
+        input = { agent_id: 'agent-test' };
       } else if (entry.name === 'shell_execute') {
         input = { command: 'cat package.json' };
       } else if (entry.name === 'shell_read' || entry.name === 'shell_stop') {

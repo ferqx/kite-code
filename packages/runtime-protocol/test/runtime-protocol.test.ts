@@ -57,6 +57,84 @@ describe('Runtime Protocol', () => {
     expect(result).toMatchObject({ sessions: [{ workspaceDigest: 'sha256:workspace-1' }] });
     expect(JSON.stringify(result)).not.toContain('/private/project');
   });
+  test('child detail requires an explicit parent query and strips the private workspace path', () => {
+    const query = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'get_child_session_projection' as const,
+      sessionId: 'root-1',
+      childSessionId: 'child-1',
+    };
+    expect(mapRuntimeQueryToProtocol(query)).toEqual(query);
+    const result = mapRuntimeQueryResultToProtocol({
+      status: 'ok',
+      queryType: 'get_child_session_projection',
+      session: {
+        schema: 'kite.runtime-projection.v2',
+        sessionId: 'child-1',
+        revision: 5,
+        lifecycle: 'open',
+        workspace: '/private/child-workspace',
+        interactionQueue: { revision: 5, interactions: [] },
+      },
+    });
+    expect(result).toMatchObject({
+      queryType: 'get_child_session_projection',
+      session: { sessionId: 'child-1' },
+    });
+    expect(JSON.stringify(result)).not.toContain('/private/child-workspace');
+    expect(mapRuntimeQueryToProtocol({ ...query, childSessionId: 'root-1' })).toBeUndefined();
+    const list = {
+      schema: 'kite.runtime-query.v1' as const,
+      type: 'list_child_sessions' as const,
+      sessionId: 'root-1',
+      limit: 20,
+    };
+    expect(mapRuntimeQueryToProtocol(list)).toEqual(list);
+    expect(
+      mapRuntimeQueryResultToProtocol({
+        status: 'ok',
+        queryType: 'list_child_sessions',
+        childSessions: [
+          {
+            sessionId: 'child-1',
+            parentSessionId: 'root-1',
+            agentId: 'agent-1',
+            taskId: 'task-1',
+            revision: 5,
+            updatedAtMs: 7,
+          },
+        ],
+      }),
+    ).toMatchObject({ childSessions: [{ sessionId: 'child-1', agentId: 'agent-1' }] });
+    expect(
+      mapRuntimeQueryResultToProtocol({ status: 'ok', queryType: 'list_child_sessions' }),
+    ).toBeUndefined();
+  });
+  test('child History request binds a distinct parent and child without extra fields', () => {
+    const request = {
+      jsonrpc: '2.0' as const,
+      id: 'child-history-1',
+      method: 'history/load_child_session' as const,
+      params: {
+        parentSessionId: 'root-1',
+        childSessionId: 'child-1',
+        page: { afterSequence: 3 },
+      },
+    };
+    expect(safeDecodeRuntimeProtocolMessage(request).success).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        ...request,
+        params: { ...request.params, childSessionId: 'root-1' },
+      }).success,
+    ).toBeFalse();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        ...request,
+        params: { ...request.params, workspace: '/private/workspace' },
+      }).success,
+    ).toBeFalse();
+  });
   test('decodes the stable initialize fixture and preserves it on re-encode', async () => {
     const fixture = await Bun.file(
       new URL('../fixtures/valid-initialize-request.json', import.meta.url),
@@ -1120,7 +1198,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '0b38fd5f:641d2d20';
+    const expectedDigest = 'dc6cc2c4:4420db23';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

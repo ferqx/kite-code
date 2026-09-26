@@ -5,6 +5,7 @@ import type { RuntimeSessionModelRoute } from '@kite-ai/runtime-host/storage';
 import { assertKiteHomeStoreSchema } from './kite-home-store';
 import { KiteHomeWriteError, type KiteHomeWriteTransactionPort } from './kite-home-write';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
+import { hasSessionLineage } from './session-lineage';
 
 export type KiteHomeWorkspaceStoreErrorCode =
   | 'invalid_workspace'
@@ -60,6 +61,8 @@ export interface KiteHomeWorkspaceSessionStore<State> {
   ensure(sessionId: string, state: State): void;
   /** Same-connection primitive. The caller must already own the Store writer transaction. */
   ensureInTransaction(sessionId: string, state?: State): void;
+  /** Candidate Store child admission; never infers lineage from Agent or Run metadata. */
+  ensureChildInTransaction(sessionId: string, parentSessionId: string, state: State): void;
   binding(sessionId: string): KiteHomeSessionBinding | null;
   has(sessionId: string): boolean;
   list(limit?: number): readonly {
@@ -100,6 +103,7 @@ interface SessionRow {
   readonly model_provider: string | null;
   readonly model_name: string | null;
   readonly updated_at: number;
+  readonly parent_session_id?: string | null;
 }
 
 const WORKSPACE_ID_PATTERN = /^workspace_[a-f0-9]{64}$/u;
@@ -221,6 +225,7 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
     throw new TypeError('Kite Home State schema version is invalid.');
   }
   const formatEpoch = input.formatEpoch;
+  const lineage = hasSessionLineage(input.database);
   assertSafeText(formatEpoch, 'Runtime format epoch');
   const now = input.now ?? Date.now;
   const selectWorkspace = input.database.query<WorkspaceRow, [string]>(
@@ -239,6 +244,14 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
       revision, updated_at, run_index_from_revision
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
   );
+  const insertChildSession = lineage
+    ? input.database.query(
+        `INSERT INTO runtime_sessions(
+          session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch,
+          revision, updated_at, run_index_from_revision, parent_session_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+      )
+    : undefined;
   const updateRevision = input.database.query(
     'UPDATE runtime_sessions SET revision = ?, updated_at = ? WHERE session_id = ? AND workspace_id = ?',
   );
@@ -248,7 +261,7 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
   >(
     `SELECT session_id AS thread_id, name, updated_at
        FROM runtime_sessions
-      WHERE workspace_id = ?
+      WHERE workspace_id = ?${lineage ? ' AND parent_session_id IS NULL' : ''}
       ORDER BY updated_at DESC, session_id ASC
       LIMIT ?`,
   );
@@ -293,7 +306,11 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
     return row;
   };
 
-  const ensureInTransaction = (sessionId: string, state?: State): void => {
+  const ensureInTransaction = (
+    sessionId: string,
+    state?: State,
+    parentSessionId?: string,
+  ): void => {
     assertWriterTransaction(input.writer);
     assertSessionId(sessionId);
     const workspace = assertAdmittedWorkspace();
@@ -304,6 +321,31 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
       );
     }
     const existing = scopedSession(sessionId);
+    if (parentSessionId !== undefined) {
+      if (!insertChildSession || parentSessionId === sessionId) {
+        throw new KiteHomeWorkspaceStoreError(
+          'session_conflict',
+          'Child Session lineage is invalid.',
+        );
+      }
+      const parent = scopedSession(parentSessionId);
+      if (
+        !parent ||
+        parent.project_id !== workspace.project_id ||
+        parent.workspace_digest !== workspace.workspace_digest
+      ) {
+        throw new KiteHomeWorkspaceStoreError(
+          'session_conflict',
+          'Child Session parent does not match its Workspace.',
+        );
+      }
+      if (existing && existing.parent_session_id !== parentSessionId) {
+        throw new KiteHomeWorkspaceStoreError(
+          'session_conflict',
+          'Child Session parent is immutable.',
+        );
+      }
+    }
     if (state === undefined) {
       if (existing) return;
       throw new KiteHomeWorkspaceStoreError(
@@ -358,7 +400,7 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
       );
       return;
     }
-    insertSession.run(
+    const insertion = [
       sessionId,
       input.workspace.workspaceId,
       workspace.project_id,
@@ -367,7 +409,9 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
       formatEpoch,
       metadata.stateRevision,
       monotonicTime(now()),
-    );
+    ] as const;
+    if (parentSessionId === undefined) insertSession.run(...insertion);
+    else insertChildSession?.run(...insertion, parentSessionId);
   };
 
   const deleteInTransaction = (sessionId: string, expectedRevision?: number): boolean => {
@@ -419,6 +463,9 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
       input.writer.run(() => ensureInTransaction(sessionId, state));
     },
     ensureInTransaction,
+    ensureChildInTransaction(sessionId: string, parentSessionId: string, state: State): void {
+      ensureInTransaction(sessionId, state, parentSessionId);
+    },
     binding(sessionId: string): KiteHomeSessionBinding | null {
       const row = scopedSession(sessionId);
       return row

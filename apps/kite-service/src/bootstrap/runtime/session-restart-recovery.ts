@@ -13,9 +13,17 @@ import {
   eventsForSettledSubagentHistory,
 } from './state-actions';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
+import {
+  type BackgroundSubagentControlRuntime,
+  backgroundSubagentOwnerKey,
+} from './subagent/background-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 
 interface RestartRecoveryModelRuntime {
+  readonly backgroundSubagentRuntime?: Pick<
+    BackgroundSubagentControlRuntime,
+    'repairSettlementProofs'
+  >;
   readonly reconcilePendingSubagents?: (
     persistence: {
       getState(): Readonly<RuntimeState>;
@@ -49,6 +57,28 @@ export async function reconcileRuntimeSessionAfterRestart(input: {
   readonly modelInvocationRuntime: RestartRecoveryModelRuntime;
   readonly shellExecutor?: ShellExecutor;
   readonly historyEvents: readonly RuntimeEvent[];
+  readonly preserveReservedChildDelegations?: readonly string[];
+  readonly preservePendingAfterTurnDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePendingAfterTurnDelegations']
+  >;
+  readonly preserveLiveAfterTurnDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveLiveAfterTurnDelegations']
+  >;
+  readonly preserveSealedAfterTurnReports?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveSealedAfterTurnReports']
+  >;
+  readonly preservePendingFollowupFunding?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePendingFollowupFunding']
+  >;
+  readonly preservePreparedFollowupModels?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePreparedFollowupModels']
+  >;
+  readonly preservePreparedCurrentTurnModels?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePreparedCurrentTurnModels']
+  >;
+  readonly preserveDispatchedChildDelegations?: NonNullable<
+    import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveDispatchedChildDelegations']
+  >;
   readonly recoveryOwnership: Readonly<{
     kind: 'fenced_previous_execution';
     controllerGeneration: number;
@@ -89,6 +119,24 @@ export async function reconcileRuntimeSessionAfterRestart(input: {
               : 'unknown',
         })
       : false;
+  }
+
+  if (!ownsRecovery()) {
+    return { complete: false, changed: emitted.length > 0, events: emitted, failure: 'ownership' };
+  }
+  try {
+    const state = input.control.getState();
+    input.modelInvocationRuntime.backgroundSubagentRuntime?.repairSettlementProofs(
+      backgroundSubagentOwnerKey(state.session.threadId, state.toolRecovery.identityKey),
+      state,
+    );
+  } catch {
+    return {
+      complete: false,
+      changed: emitted.length > 0,
+      events: emitted,
+      failure: 'state_finalization',
+    };
   }
 
   // A parent Tool may already be terminal while its child presentation event
@@ -140,6 +188,15 @@ export async function reconcileRuntimeSessionAfterRestart(input: {
     input.control.getState(),
     [...input.historyEvents, ...emitted],
     input.recoveryOwnership,
+    undefined,
+    input.preserveReservedChildDelegations,
+    input.preservePendingFollowupFunding,
+    input.preservePreparedFollowupModels,
+    input.preservePreparedCurrentTurnModels,
+    input.preserveDispatchedChildDelegations,
+    input.preservePendingAfterTurnDelegations,
+    input.preserveLiveAfterTurnDelegations,
+    input.preserveSealedAfterTurnReports,
   );
   if (!(await persistence.persistEvents(finalization))) {
     return {

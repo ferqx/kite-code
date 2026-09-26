@@ -60,8 +60,8 @@ describe('Prompt contract token budget', () => {
     expect(prompt).toContain('Serialize dependent tasks');
     expect(prompt).toContain('Obey an explicit user instruction not to delegate');
     expect(prompt).toContain('do not duplicate the assigned investigation');
-    expect(prompt).toContain('let Runtime wait for required background results');
-    expect(prompt).toContain('fixed-interval `task_read`');
+    expect(prompt).toContain('let Runtime wait for all of them in the same Run');
+    expect(prompt).toContain('repeated `task_read` snapshots');
     expect(prompt).toContain('`running` at the same revision');
     expect(prompt).toContain('`result_disposition=after_turn`');
   });

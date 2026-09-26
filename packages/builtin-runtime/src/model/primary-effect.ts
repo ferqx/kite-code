@@ -1,8 +1,9 @@
+import type { PrivateArtifactRef } from '@kite-ai/runtime-spi';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics, type PromptCacheMetrics } from './cache-metrics';
 import type { CompactionReporter } from './compaction-metrics';
 import type { ModelRuntimeConfig } from './config';
-import { preflightModelContext } from './context-budget';
+import { estimateContextTokens, preflightModelContext } from './context-budget';
 import { decideAutomaticContextCompaction } from './context-compaction-decision';
 import { resolveContextCompactionRollout } from './context-compaction-rollout';
 import {
@@ -18,8 +19,11 @@ import {
   type ModelInvocationGateway,
   type ModelInvocationPersistence,
   type ModelInvocationStateView,
+  type ModelPreparedResumeStateView,
   normalizedModelResponseToAIMessage,
+  type PendingModelCompletion,
 } from './invocation-gateway';
+import type { BaseMessage } from './messages';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
 import type { BuiltinRuntimeStateView } from './runtime-view';
 import { compileModelSurface } from './surface-compiler';
@@ -128,12 +132,24 @@ export interface BuiltinPrimaryModelEffectInput<
   readonly capabilityBindingFacts: BuiltinPrimaryCapabilityBindingFacts;
   readonly autoCompaction: BuiltinPrimaryAutoCompactionFacts;
   readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmission;
+  /** Accepted cross-Session child funding binds one hard Provider attempt timeout. */
+  readonly firstAttemptTimeoutMs?: number;
   /** Same-ledger after-turn placeholder replaced by the exact primary Surface reservation. */
   readonly replaceReservationId?: string;
   readonly persistence?: ModelInvocationPersistence<State, Event>;
   readonly compactionReporter?: CompactionReporter;
   readonly signal?: AbortSignal;
   readonly emitEphemeral?: (event: Event) => void;
+  /** A trusted App owner reads a bounded private inbox at the exact Gateway identity. */
+  readonly prepareAgentMail?: (input: {
+    readonly invocationId: string;
+    readonly existingMessages: readonly BaseMessage[];
+  }) => Promise<
+    Readonly<{
+      readonly frames: readonly BaseMessage[];
+      readonly preparationId?: string;
+    }>
+  >;
   /**
    * Pure State-format translation. Builtin owns normalization and the
    * single-use Gateway completion; the adapter can only contribute the event
@@ -146,6 +162,38 @@ export interface BuiltinPrimaryModelEffectInput<
   readonly now?: () => number;
   /** Deterministic test seam for Provider calls without an id. */
   readonly nextToolCallId?: () => string;
+}
+
+/** The target owner supplies one durable route/funding gate for an existing primary request. */
+export interface BuiltinPreparedPrimaryModelResumeInput<
+  State extends ModelPreparedResumeStateView,
+  Event extends BuiltinModelEvent,
+> {
+  readonly model: SupportedChatModel;
+  readonly persistence: ModelInvocationPersistence<State, Event>;
+  readonly invocationId: string;
+  readonly expectedStateRevision: number;
+  readonly expectedTurnId: string;
+  readonly expectedRouteFingerprint: string;
+  readonly surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+  readonly surfaceIntegrityIdentifier: string;
+  readonly hardAttemptTimeoutMs: number;
+  readonly beforeDispatch: Parameters<
+    ModelInvocationGateway['resumePrepared']
+  >[0]['beforeDispatch'];
+  readonly signal?: AbortSignal;
+  readonly emitEphemeral?: (event: Event) => void;
+}
+
+/** Returns the original completion handle; callers reuse their existing pure finalizer. */
+export function resumeBuiltinPreparedPrimaryModelEffect<
+  State extends ModelPreparedResumeStateView,
+  Event extends BuiltinModelEvent,
+>(
+  gateway: ModelInvocationGateway,
+  input: BuiltinPreparedPrimaryModelResumeInput<State, Event>,
+): Promise<PendingModelCompletion<Event>> {
+  return gateway.resumePrepared(input);
 }
 
 function positiveConfigNumber(value: unknown): number | undefined {
@@ -223,6 +271,7 @@ export async function executeBuiltinPrimaryModelEffect<
     workflowSkills: projectionEnvironment.workflowSkills,
     projectInstructions: projectionEnvironment.projectInstructions,
     sandboxBackend: projectionEnvironment.sandboxBackend,
+    delegatedTask: projectionEnvironment.delegatedTask,
   });
   const modelCapabilities = resolveModelCapabilities({
     config: input.config,
@@ -241,6 +290,7 @@ export async function executeBuiltinPrimaryModelEffect<
     warningRatio: input.config.compaction?.warningRatio,
   });
   const metrics = contextMetrics(modelCapabilities, preflight);
+  let effectiveMetrics = metrics;
   input.compactionReporter?.recordContextFollowUp?.(
     input.state.turn.turnIndex,
     preflight.estimate.totalInputTokens,
@@ -279,6 +329,7 @@ export async function executeBuiltinPrimaryModelEffect<
     });
   }
   if (
+    !input.prepareAgentMail &&
     input.resourceAdmission &&
     input.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
   ) {
@@ -291,23 +342,117 @@ export async function executeBuiltinPrimaryModelEffect<
   }
   const now = input.now ?? Date.now;
   const startedAtMs = now();
-  const compiled = compileModelSurface({
-    purpose: 'primary_agent',
-    config: input.config,
-    model: input.model,
-    tools: input.tools,
-    messages: projection.providerMessages,
-    maxOutputTokens:
-      input.resourceAdmission?.maxOutputTokens ??
-      configuredMaxOutputTokens ??
-      modelCapabilities.maxOutputTokens,
-    transport: modelCapabilities.streaming ? 'stream' : 'generate',
-    estimatedInputTokens: preflight.estimate.totalInputTokens,
-    providerOptions: primaryModelProviderOptions(input.config),
-  });
+  const compile = (
+    messages: readonly BaseMessage[],
+    estimatedInputTokens: number,
+    maxOutputTokens?: number,
+  ) =>
+    compileModelSurface({
+      purpose: 'primary_agent',
+      config: input.config,
+      model: input.model,
+      tools: input.tools,
+      messages,
+      maxOutputTokens,
+      transport: modelCapabilities.streaming ? 'stream' : 'generate',
+      estimatedInputTokens,
+      providerOptions: primaryModelProviderOptions(input.config),
+    });
+  const requestedMaxOutputTokens =
+    input.resourceAdmission?.maxOutputTokens ??
+    configuredMaxOutputTokens ??
+    modelCapabilities.maxOutputTokens;
+  const compiled = input.prepareAgentMail
+    ? undefined
+    : compile(
+        projection.providerMessages,
+        preflight.estimate.totalInputTokens,
+        requestedMaxOutputTokens,
+      );
+  if (
+    input.firstAttemptTimeoutMs !== undefined &&
+    (!Number.isSafeInteger(input.firstAttemptTimeoutMs) || input.firstAttemptTimeoutMs <= 0)
+  )
+    throw new Error('Cross-Session first Model attempt requires a finite positive timeout.');
   const pending = await gateway.invoke({
     model: input.model,
-    compiled,
+    ...(compiled
+      ? { compiled }
+      : {
+          prepareSurface: async (invocationId: string) => {
+            const prepared = await input.prepareAgentMail!({
+              invocationId,
+              existingMessages: projection.providerMessages,
+            });
+            if (
+              !Array.isArray(prepared.frames) ||
+              prepared.frames.length > 8 ||
+              prepared.frames.some(
+                (frame) =>
+                  frame.type !== 'human' ||
+                  frame.name !== 'agent_message' ||
+                  frame.response_metadata?.source !== 'agent_message',
+              )
+            )
+              throw new Error('Prepared Agent mail frames are invalid.');
+            if (
+              prepared.frames.length === 0 &&
+              input.resourceAdmission &&
+              input.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
+            )
+              throw new Error(
+                'Model request projection changed after resource admission; refusing Provider dispatch.',
+              );
+            const addition = prepared.frames.length
+              ? estimateContextTokens({
+                  systemMessages: [],
+                  transcriptMessages: [...prepared.frames],
+                  dynamicRuntimeMessages: [],
+                })
+              : undefined;
+            const estimate = addition
+              ? {
+                  ...preflight.estimate,
+                  transcriptTokens: preflight.estimate.transcriptTokens + addition.transcriptTokens,
+                  framingTokens: preflight.estimate.framingTokens + addition.framingTokens,
+                  totalInputTokens: preflight.estimate.totalInputTokens + addition.totalInputTokens,
+                }
+              : preflight.estimate;
+            const exactPreflight = addition
+              ? preflightModelContext({
+                  estimate,
+                  capabilities: modelCapabilities,
+                  requestMaxOutputTokens: requestedMaxOutputTokens,
+                  providerSafetyRatio: input.config.compaction?.providerSafetyRatio,
+                  compactRatio: input.config.compaction?.compactRatio,
+                  hardRatio: input.config.compaction?.hardRatio,
+                  warningRatio: input.config.compaction?.warningRatio,
+                })
+              : preflight;
+            if (addition && exactPreflight.status === 'hard_limit')
+              throw new Error('Prepared Agent mail exceeds the model context limit.');
+            effectiveMetrics = contextMetrics(modelCapabilities, exactPreflight);
+            const exactOutputTokens = [
+              requestedMaxOutputTokens,
+              exactPreflight.reservedOutputTokens,
+            ]
+              .filter((value): value is number => typeof value === 'number' && value > 0)
+              .reduce<number | undefined>(
+                (least, value) => (least === undefined ? value : Math.min(least, value)),
+                undefined,
+              );
+            return {
+              compiled: compile(
+                [...projection.providerMessages, ...prepared.frames],
+                estimate.totalInputTokens,
+                exactOutputTokens,
+              ),
+              ...(prepared.preparationId
+                ? { mailPreparation: { preparationId: prepared.preparationId } }
+                : {}),
+            };
+          },
+        }),
     persistence: input.persistence,
     provenance: {
       contextCheckpointId: input.state.context.activeCheckpoint?.sourceDigest ?? null,
@@ -322,6 +467,18 @@ export async function executeBuiltinPrimaryModelEffect<
       ),
     },
     resourceKind: 'model',
+    ...(input.firstAttemptTimeoutMs === undefined
+      ? {}
+      : {
+          limits: {
+            maxAttempts: 1,
+            perAttemptTimeoutMs: input.firstAttemptTimeoutMs,
+            totalTimeBudgetMs: input.firstAttemptTimeoutMs,
+          },
+        }),
+    ...(input.firstAttemptTimeoutMs === undefined
+      ? {}
+      : { hardAttemptTimeoutMs: input.firstAttemptTimeoutMs }),
     ...(input.replaceReservationId ? { replaceReservationId: input.replaceReservationId } : {}),
     signal: input.signal,
     emitEphemeral: input.emitEphemeral,
@@ -386,7 +543,7 @@ export async function executeBuiltinPrimaryModelEffect<
         : {}),
       ...(cacheMetrics ? { cacheMetrics: Object.freeze({ ...cacheMetrics }) } : {}),
     });
-    return input.finalize(completion, metrics);
+    return input.finalize(completion, effectiveMetrics);
   });
   return Object.freeze({ kind: 'completed', value });
 }

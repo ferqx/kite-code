@@ -23,6 +23,8 @@ compatibility import不参与该journey。
 mirror或Worker discovery。Directory的空Session name只读投影第一条durable `user.message_appended`正文作为Browser展示fallback；它不写回
 `runtime_sessions.name`，不创建命名receipt或第二authority。上述Store 8 pinned reader只供离线migration/legacy transition验证，不能重新接到普通Browser History。
 
+阶段 D0 的内部子 Agent Session 尚未由生产 Service 创建。Store11 候选已让 Directory、History 搜索／最近会话、旧 `sessions.listSessions` 在 SQL 的 `WHERE` 中按持久父 Session 血缘只选择根线程。过滤发生在排序、keyset cursor 与 `LIMIT` 之前，不能由 Service 或客户端截断后隐藏。Store 公共日志读取和 Service 普通顶层详情拒绝已知子 ID；父 Agent 树授权入口仍需准确父链校验。旧 Store10 Session 的私有候选迁移行保持根可见；独立子 Session 路径仍需重启和跨页验收。
+
 App 的 `RuntimeLogPresentationProjector` 是通用日志列表投影；TUI transcript 另由同一个 App source projector
 将 current RuntimeEvent exhaustive 地映射为 closed `RuntimeClientEvent[]`，二者都不递归透传 raw event。
 文本去除终端控制符、脱敏 credential-shaped 内容并实施 text/depth/item 上限，但本地 transcript 保留

@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 
 const ARTIFACT_ID = /^pa_[a-f0-9]{64}$/u;
 const INTEGRITY_IDENTIFIER = /^sha256:[a-f0-9]{64}$/u;
@@ -13,7 +14,9 @@ type ArtifactTable =
   | 'sandbox_preparation_artifacts'
   | 'subagent_task_artifacts'
   | 'subagent_lifecycle_artifacts'
-  | 'subagent_continuation_artifacts';
+  | 'subagent_continuation_artifacts'
+  | 'subagent_checkpoint_artifacts'
+  | 'agent_followup_admission_artifacts';
 
 export type KiteHomeArtifactErrorCode =
   | 'invalid_reference'
@@ -191,6 +194,32 @@ export interface KiteHomeArtifactStore {
     ref: KiteHomePrivateArtifactReference<'subagent_continuation'>,
   ): Readonly<{ artifactFormatVersion: number; canonicalJson: string }>;
   collectSubagentContinuationGarbage(
+    input: KiteHomeArtifactGarbageCollectionInput,
+  ): KiteHomeArtifactGarbageCollectionResult;
+
+  writeSubagentCheckpoint(input: {
+    readonly ref: KiteHomePrivateArtifactReference<'subagent_checkpoint'>;
+    readonly artifactFormatVersion: number;
+    readonly canonicalJson: string;
+    readonly createdAt: number;
+  }): void;
+  readSubagentCheckpoint(
+    ref: KiteHomePrivateArtifactReference<'subagent_checkpoint'>,
+  ): Readonly<{ artifactFormatVersion: number; canonicalJson: string }>;
+  collectSubagentCheckpointGarbage(
+    input: KiteHomeArtifactGarbageCollectionInput,
+  ): KiteHomeArtifactGarbageCollectionResult;
+
+  writeAgentFollowupAdmission(input: {
+    readonly ref: KiteHomePrivateArtifactReference<'agent_followup_admission'>;
+    readonly artifactFormatVersion: number;
+    readonly canonicalJson: string;
+    readonly createdAt: number;
+  }): void;
+  readAgentFollowupAdmission(
+    ref: KiteHomePrivateArtifactReference<'agent_followup_admission'>,
+  ): Readonly<{ artifactFormatVersion: number; canonicalJson: string }>;
+  collectAgentFollowupAdmissionGarbage(
     input: KiteHomeArtifactGarbageCollectionInput,
   ): KiteHomeArtifactGarbageCollectionResult;
 }
@@ -453,6 +482,56 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     },
     collectSubagentContinuationGarbage: (input) =>
       collect(database, 'subagent_continuation_artifacts', input),
+
+    writeSubagentCheckpoint: (input) => {
+      assertPrivateReference(input.ref, ['subagent_checkpoint']);
+      assertHashedPayload(input.canonicalJson, input.ref, 16 * 1024 * 1024);
+      insertExact(database, 'subagent_checkpoint_artifacts', {
+        artifact_id: input.ref.artifactId,
+        integrity_identifier: input.ref.integrityIdentifier,
+        artifact_format_version: positiveInteger(input.artifactFormatVersion),
+        canonical_json: input.canonicalJson,
+        byte_length: input.ref.byteLength,
+        created_at: nonNegativeInteger(input.createdAt),
+      });
+    },
+    readSubagentCheckpoint: (ref) => {
+      assertPrivateReference(ref, ['subagent_checkpoint']);
+      const row = readExact(database, 'subagent_checkpoint_artifacts', ref.artifactId);
+      assertStoredReference(row, ref, 'subagent_checkpoint');
+      assertHashedPayload(storedString(row, 'canonical_json'), ref, 16 * 1024 * 1024);
+      return Object.freeze({
+        artifactFormatVersion: storedInteger(row, 'artifact_format_version'),
+        canonicalJson: storedString(row, 'canonical_json'),
+      });
+    },
+    collectSubagentCheckpointGarbage: (input) =>
+      collect(database, 'subagent_checkpoint_artifacts', input),
+
+    writeAgentFollowupAdmission: (input) => {
+      assertPrivateReference(input.ref, ['agent_followup_admission']);
+      assertHashedPayload(input.canonicalJson, input.ref, 16 * 1024 * 1024);
+      insertExact(database, 'agent_followup_admission_artifacts', {
+        artifact_id: input.ref.artifactId,
+        integrity_identifier: input.ref.integrityIdentifier,
+        artifact_format_version: positiveInteger(input.artifactFormatVersion),
+        canonical_json: input.canonicalJson,
+        byte_length: input.ref.byteLength,
+        created_at: nonNegativeInteger(input.createdAt),
+      });
+    },
+    readAgentFollowupAdmission: (ref) => {
+      assertPrivateReference(ref, ['agent_followup_admission']);
+      const row = readExact(database, 'agent_followup_admission_artifacts', ref.artifactId);
+      assertStoredReference(row, ref, 'agent_followup_admission');
+      assertHashedPayload(storedString(row, 'canonical_json'), ref, 16 * 1024 * 1024);
+      return Object.freeze({
+        artifactFormatVersion: storedInteger(row, 'artifact_format_version'),
+        canonicalJson: storedString(row, 'canonical_json'),
+      });
+    },
+    collectAgentFollowupAdmissionGarbage: (input) =>
+      collect(database, 'agent_followup_admission_artifacts', input),
   };
   return Object.freeze(store);
 }
@@ -499,6 +578,17 @@ function assertPayload(canonicalJson: string, byteLength: number, maxBytes: numb
   if (actual !== byteLength || actual < 1 || actual > maxBytes) {
     invalidReference('Private Artifact byte length is invalid.');
   }
+}
+
+function assertHashedPayload(
+  canonicalJson: string,
+  ref: KiteHomePrivateArtifactReference<string>,
+  maxBytes: number,
+): void {
+  assertPayload(canonicalJson, ref.byteLength, maxBytes);
+  const digest = `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`;
+  if (ref.integrityIdentifier !== digest)
+    invalidReference('Private Artifact integrity identifier does not match its bytes.');
 }
 
 function assertIntegrityIdentifier(value: string, label: string): void {

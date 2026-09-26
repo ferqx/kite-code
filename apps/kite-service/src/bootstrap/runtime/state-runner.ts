@@ -11,12 +11,17 @@ import {
   planRuntimeBudgetAdmission,
   reconciliationEventsForReservations,
   runtimeHostStateRequiredBackgroundFinalRefresh as requiredBackgroundFinalRefresh,
+  requiredBackgroundTaskIds,
+  requiredManagedShellIds,
   type StateRuntimeEffectLease,
   type StateRuntimeEffectPersistenceAcknowledgement,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
+  RuntimeAgentMailboxMutation,
   RuntimeCommandCommitEvidence,
+  RuntimeCrossSessionAgentMailMutation,
   RuntimeEffectLeaseExpectation,
+  RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
 import {
   assertPrecommittedInteractionAction,
@@ -42,12 +47,56 @@ type RuntimeEffectExecutor = HostStateRuntimeEffectExecutor<
   RuntimeEffect
 >;
 
+export interface RuntimeAgentMailboxCommandCommitInput {
+  readonly events: readonly RuntimeEvent[];
+  readonly mutations: readonly RuntimeAgentMailboxMutation[];
+  readonly evidence: RuntimeCommandCommitEvidence;
+}
+
+export interface RuntimeAgentMailboxFactsCommitInput {
+  readonly events: readonly RuntimeEvent[];
+  readonly mutations: readonly RuntimeAgentMailboxMutation[];
+}
+
+export interface RuntimeAgentMailModelAdmissionInput {
+  readonly events: readonly RuntimeEvent[];
+  readonly mutation: Extract<RuntimeAgentMailboxMutation, { kind: 'prepare_input' }>;
+}
+
+export interface RuntimeCrossSessionQueueMailCommandInput {
+  readonly event: Extract<RuntimeEvent, { type: 'agent.mail_accepted' }>;
+  readonly mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'accept_queue' }>;
+  readonly evidence: RuntimeCommandCommitEvidence;
+}
+
+export interface RuntimeCrossSessionInterruptCommandInput {
+  readonly event: Extract<RuntimeEvent, { type: 'background_execution.stop_requested' }>;
+  readonly mutation: Extract<
+    RuntimeCrossSessionAgentMailMutation,
+    { kind: 'request_interrupt' | 'request_queued_interrupt' }
+  >;
+  readonly evidence: RuntimeCommandCommitEvidence;
+}
+
+export interface RuntimeCrossSessionFollowupCommandInput {
+  readonly reservationEvent: Extract<RuntimeEvent, { type: 'resource_budget.reserved' }>;
+  readonly event: Extract<RuntimeEvent, { type: 'agent.mail_accepted' }>;
+  readonly mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'accept_followup' }>;
+  readonly evidence: RuntimeCommandCommitEvidence;
+}
+
+export interface RuntimeCrossSessionQueueMailModelInput {
+  readonly events: readonly RuntimeEvent[];
+  readonly mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'prepare_queue_input' }>;
+}
+
 /**
  * Transitional State runner port. Production is backed by the one Host
  * session; Core's historical AgentKernel only remains a test migration source.
  */
 export interface RuntimeStateSessionPort {
   getState(): Readonly<RuntimeState>;
+  currentRunId?(): string | null;
   waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string };
   processEventBatch(events: RuntimeEvent[]): readonly RuntimeEvent[];
@@ -74,6 +123,12 @@ export interface RuntimeStateSessionPort {
     acknowledgement: StateRuntimeEffectPersistenceAcknowledgement,
     requiredEffectLease?: RuntimeEffectLeaseExpectation,
   ): boolean;
+  commitBackgroundChildAcceptance?(
+    lease: StateRuntimeEffectLease,
+    events: readonly RuntimeEvent[],
+    requiredEffectLease: RuntimeEffectLeaseExpectation,
+    sealedGrant: import('@kite-ai/runtime-host/storage').RuntimeSealedChildGrantPayload,
+  ): boolean;
   applyLateResourceReconciliation(events: readonly RuntimeEvent[]): boolean;
   applyAction(action: RuntimeUserAction, additionalEvents?: RuntimeEvent[]): RuntimeActionResult;
   getSandboxAvailable?(): boolean;
@@ -83,6 +138,42 @@ export interface RuntimeStateSessionPort {
   ): CommittedInteractionCommand;
   /** Host sessions release in-process ownership after every attempt. */
   releaseEffect?(lease: Readonly<StateRuntimeEffectLease>): void;
+  commitAgentMailboxCommand?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeAgentMailboxCommandCommitInput,
+  ): { readonly receipt: RuntimeStoredCommandReceipt; readonly events: readonly RuntimeEvent[] };
+  commitAgentMailboxFacts?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeAgentMailboxFactsCommitInput,
+  ): readonly RuntimeEvent[];
+  persistAgentMailModelAdmission?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeAgentMailModelAdmissionInput,
+  ): readonly RuntimeEvent[];
+  commitCrossSessionQueueMailCommand?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeCrossSessionQueueMailCommandInput,
+  ): { readonly receipt: RuntimeStoredCommandReceipt; readonly events: readonly RuntimeEvent[] };
+  commitCrossSessionInterruptCommand?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeCrossSessionInterruptCommandInput,
+  ): { readonly receipt: RuntimeStoredCommandReceipt; readonly events: readonly RuntimeEvent[] };
+  commitCrossSessionFollowupCommand?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeCrossSessionFollowupCommandInput,
+  ): { readonly receipt: RuntimeStoredCommandReceipt; readonly events: readonly RuntimeEvent[] };
+  commitCurrentTurnFollowupRoute?(
+    lease: StateRuntimeEffectLease,
+    events: readonly [
+      Extract<RuntimeEvent, { type: 'agent.followup_routed' }>,
+      Extract<RuntimeEvent, { type: 'agent.mail_input_prepared' }>,
+    ],
+    mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'route_followup' }>,
+  ): readonly RuntimeEvent[];
+  persistCrossSessionQueueMailModelInput?(
+    lease: StateRuntimeEffectLease,
+    input: RuntimeCrossSessionQueueMailModelInput,
+  ): readonly RuntimeEvent[];
 }
 
 export { resolveResourceAdmissionFailureOutcome } from './resource-admission-terminal';
@@ -256,6 +347,10 @@ async function* executeEffectWithStreaming(
   }
   const pending: Array<{
     events: RuntimeEvent[];
+    mailboxCommit?: {
+      commit: () => { events: readonly RuntimeEvent[]; finish: () => void };
+      reject: (error: unknown) => void;
+    };
     requiredEffectLease?: RuntimeEffectLeaseExpectation;
     acknowledgement?: StateRuntimeEffectPersistenceAcknowledgement;
     mode?: 'late_resource_reconciliation';
@@ -263,6 +358,15 @@ async function* executeEffectWithStreaming(
     reject?: (error: unknown) => void;
   }> = [];
   const pendingToolProgress = new Map<string, (typeof pending)[number]>();
+  const committedMailboxCommands = new Map<
+    string,
+    {
+      readonly requestDigest: string;
+      readonly scopeSessionId: string;
+      readonly targetSessionId: string;
+      readonly receipt: RuntimeStoredCommandReceipt;
+    }
+  >();
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
@@ -304,11 +408,21 @@ async function* executeEffectWithStreaming(
     wake?.();
     wake = null;
   };
+  const enqueueMailboxCommit = (commit: NonNullable<(typeof pending)[number]['mailboxCommit']>) => {
+    if (!acceptingEvents || settled) throw new Error('Agent mailbox effect is no longer active.');
+    pendingToolProgress.clear();
+    pending.push({ events: [], mailboxCommit: commit });
+    wake?.();
+    wake = null;
+  };
   const closeEventChannel = () => {
     acceptingEvents = false;
     wake?.();
     wake = null;
-    for (const pendingEvent of pending.splice(0)) pendingEvent.resolve?.(false);
+    for (const pendingEvent of pending.splice(0)) {
+      pendingEvent.resolve?.(false);
+      pendingEvent.mailboxCommit?.reject(new Error('Agent mailbox effect channel closed.'));
+    }
     pendingToolProgress.clear();
   };
   const execution = executor(
@@ -320,6 +434,7 @@ async function* executeEffectWithStreaming(
     {
       reservationIds,
       getState: () => kernel.getState(),
+      ...(kernel.currentRunId ? { currentRunId: () => kernel.currentRunId!() } : {}),
       ...(kernel.waitForRevisionChange
         ? {
             waitForRevisionChange: (revision: number, signal?: AbortSignal) =>
@@ -337,6 +452,30 @@ async function* executeEffectWithStreaming(
         new Promise<boolean>((resolve, reject) => {
           enqueue(events, resolve, reject, undefined, requiredEffectLease);
         }),
+      ...(lease.effect.type === 'call_model' && kernel.commitCurrentTurnFollowupRoute
+        ? {
+            commitCurrentTurnFollowupRoute: (
+              events: readonly [
+                Extract<RuntimeEvent, { type: 'agent.followup_routed' }>,
+                Extract<RuntimeEvent, { type: 'agent.mail_input_prepared' }>,
+              ],
+              mutation: Extract<RuntimeCrossSessionAgentMailMutation, { kind: 'route_followup' }>,
+            ) =>
+              new Promise<readonly RuntimeEvent[]>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const committed = kernel.commitCurrentTurnFollowupRoute!(
+                      lease,
+                      events,
+                      mutation,
+                    );
+                    return { events: committed, finish: () => resolve(committed) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
       persistAttemptStartEvents: (events, requiredEffectLease) =>
         new Promise<boolean>((resolve, reject) => {
           enqueue(events, resolve, reject, undefined, requiredEffectLease, 'attempt_start');
@@ -349,6 +488,203 @@ async function* executeEffectWithStreaming(
         new Promise<boolean>((resolve, reject) => {
           enqueue([event], resolve, reject, 'late_resource_reconciliation');
         }),
+      ...(lease.effect.type === 'run_tools' && kernel.commitBackgroundChildAcceptance
+        ? {
+            commitBackgroundChildAcceptance: (
+              events: readonly RuntimeEvent[],
+              requiredEffectLease: RuntimeEffectLeaseExpectation,
+              sealedGrant: import('@kite-ai/runtime-host/storage').RuntimeSealedChildGrantPayload,
+            ) =>
+              new Promise<boolean>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const applied = kernel.commitBackgroundChildAcceptance!(
+                      lease,
+                      events,
+                      requiredEffectLease,
+                      sealedGrant,
+                    );
+                    if (!applied) throw new Error('Child Session acceptance became stale.');
+                    return {
+                      events: kernel.getLastAppliedEvents(),
+                      finish: () => resolve(true),
+                    };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'run_tools' && kernel.commitAgentMailboxCommand
+        ? {
+            commitAgentMailboxCommand: (input: RuntimeAgentMailboxCommandCommitInput) =>
+              new Promise<RuntimeStoredCommandReceipt>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const previous = committedMailboxCommands.get(input.evidence.commandId);
+                    if (previous) {
+                      if (
+                        previous.requestDigest !== input.evidence.requestDigest ||
+                        previous.scopeSessionId !== input.evidence.scopeSessionId ||
+                        previous.targetSessionId !== input.evidence.targetSessionId
+                      )
+                        throw new Error(
+                          'Agent mailbox command identity conflicts with its receipt.',
+                        );
+                      return { events: [], finish: () => resolve(previous.receipt) };
+                    }
+                    const committed = kernel.commitAgentMailboxCommand!(lease, input);
+                    committedMailboxCommands.set(input.evidence.commandId, {
+                      requestDigest: input.evidence.requestDigest,
+                      scopeSessionId: input.evidence.scopeSessionId,
+                      targetSessionId: input.evidence.targetSessionId,
+                      receipt: committed.receipt,
+                    });
+                    return { events: committed.events, finish: () => resolve(committed.receipt) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'run_tools' && kernel.commitAgentMailboxFacts
+        ? {
+            commitAgentMailboxFacts: (input: RuntimeAgentMailboxFactsCommitInput) =>
+              new Promise<readonly RuntimeEvent[]>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const committed = kernel.commitAgentMailboxFacts!(lease, input);
+                    return { events: committed, finish: () => resolve(committed) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'call_model' && kernel.persistAgentMailModelAdmission
+        ? {
+            persistAgentMailModelAdmission: (input: RuntimeAgentMailModelAdmissionInput) =>
+              new Promise<readonly RuntimeEvent[]>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const committed = kernel.persistAgentMailModelAdmission!(lease, input);
+                    return { events: committed, finish: () => resolve(committed) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'run_tools' && kernel.commitCrossSessionQueueMailCommand
+        ? {
+            commitCrossSessionQueueMailCommand: (input: RuntimeCrossSessionQueueMailCommandInput) =>
+              new Promise<RuntimeStoredCommandReceipt>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const previous = committedMailboxCommands.get(input.evidence.commandId);
+                    if (previous) {
+                      if (
+                        previous.requestDigest !== input.evidence.requestDigest ||
+                        previous.scopeSessionId !== input.evidence.scopeSessionId ||
+                        previous.targetSessionId !== input.evidence.targetSessionId
+                      )
+                        throw new Error('Cross-Session mail command conflicts with its receipt.');
+                      return { events: [], finish: () => resolve(previous.receipt) };
+                    }
+                    const committed = kernel.commitCrossSessionQueueMailCommand!(lease, input);
+                    committedMailboxCommands.set(input.evidence.commandId, {
+                      requestDigest: input.evidence.requestDigest,
+                      scopeSessionId: input.evidence.scopeSessionId,
+                      targetSessionId: input.evidence.targetSessionId,
+                      receipt: committed.receipt,
+                    });
+                    return { events: committed.events, finish: () => resolve(committed.receipt) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'run_tools' && kernel.commitCrossSessionInterruptCommand
+        ? {
+            commitCrossSessionInterruptCommand: (input: RuntimeCrossSessionInterruptCommandInput) =>
+              new Promise<RuntimeStoredCommandReceipt>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const previous = committedMailboxCommands.get(input.evidence.commandId);
+                    if (previous) {
+                      if (
+                        previous.requestDigest !== input.evidence.requestDigest ||
+                        previous.scopeSessionId !== input.evidence.scopeSessionId ||
+                        previous.targetSessionId !== input.evidence.targetSessionId
+                      )
+                        throw new Error(
+                          'Cross-Session interrupt command conflicts with its receipt.',
+                        );
+                      return { events: [], finish: () => resolve(previous.receipt) };
+                    }
+                    const committed = kernel.commitCrossSessionInterruptCommand!(lease, input);
+                    committedMailboxCommands.set(input.evidence.commandId, {
+                      requestDigest: input.evidence.requestDigest,
+                      scopeSessionId: input.evidence.scopeSessionId,
+                      targetSessionId: input.evidence.targetSessionId,
+                      receipt: committed.receipt,
+                    });
+                    return { events: committed.events, finish: () => resolve(committed.receipt) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'run_tools' && kernel.commitCrossSessionFollowupCommand
+        ? {
+            commitCrossSessionFollowupCommand: (input: RuntimeCrossSessionFollowupCommandInput) =>
+              new Promise<RuntimeStoredCommandReceipt>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const previous = committedMailboxCommands.get(input.evidence.commandId);
+                    if (previous) {
+                      if (
+                        previous.requestDigest !== input.evidence.requestDigest ||
+                        previous.scopeSessionId !== input.evidence.scopeSessionId ||
+                        previous.targetSessionId !== input.evidence.targetSessionId
+                      )
+                        throw new Error(
+                          'Cross-Session followup command conflicts with its receipt.',
+                        );
+                      return { events: [], finish: () => resolve(previous.receipt) };
+                    }
+                    const committed = kernel.commitCrossSessionFollowupCommand!(lease, input);
+                    committedMailboxCommands.set(input.evidence.commandId, {
+                      requestDigest: input.evidence.requestDigest,
+                      scopeSessionId: input.evidence.scopeSessionId,
+                      targetSessionId: input.evidence.targetSessionId,
+                      receipt: committed.receipt,
+                    });
+                    return { events: committed.events, finish: () => resolve(committed.receipt) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
+      ...(lease.effect.type === 'call_model' && kernel.persistCrossSessionQueueMailModelInput
+        ? {
+            persistCrossSessionQueueMailModelInput: (
+              input: RuntimeCrossSessionQueueMailModelInput,
+            ) =>
+              new Promise<readonly RuntimeEvent[]>((resolve, reject) => {
+                enqueueMailboxCommit({
+                  commit: () => {
+                    const committed = kernel.persistCrossSessionQueueMailModelInput!(lease, input);
+                    return { events: committed, finish: () => resolve(committed) };
+                  },
+                  reject,
+                });
+              }),
+          }
+        : {}),
     },
   ).then(
     (events) => {
@@ -397,6 +733,26 @@ async function* executeEffectWithStreaming(
       }
       while (pending.length > 0) {
         const pendingEvent = pending.shift()!;
+        if (pendingEvent.mailboxCommit) {
+          let committed: ReturnType<NonNullable<typeof pendingEvent.mailboxCommit>['commit']>;
+          try {
+            committed = pendingEvent.mailboxCommit.commit();
+          } catch (error) {
+            pendingEvent.mailboxCommit.reject(error);
+            continue;
+          }
+          try {
+            if (committed.events.length > 0) {
+              emitted = true;
+              yield* forward(committed.events);
+            }
+          } finally {
+            // A consumer may close the async generator during publication.
+            // The Store commit already happened, so settle its caller either way.
+            committed.finish();
+          }
+          continue;
+        }
         const events = pendingEvent.events;
         const event = events[0];
         if (!event) {
@@ -563,6 +919,7 @@ export async function* runStateRuntimeLoop(
   const backgroundEvents: RuntimeEvent[] = [];
   const backgroundGroups = new Map<string, number>();
   const backgroundExecutions = new Set<Promise<void>>();
+  let completionWaitSatisfied = false;
   let backgroundFailure: unknown;
   let backgroundNoProgressRevision: number | undefined;
   let wakeBackground: (() => void) | undefined;
@@ -583,6 +940,47 @@ export async function* runStateRuntimeLoop(
     const candidateRevision = backgroundNoProgressRevision;
     backgroundNoProgressRevision = undefined;
     return kernel.getState().revision === candidateRevision;
+  };
+  const steerMessageIds = (state: Readonly<RuntimeState>) =>
+    new Set(
+      state.transcript.messages
+        .filter((message) => message.kind === 'user' && message.messageId.startsWith('input_'))
+        .map((message) => message.messageId),
+    );
+  const waitForCompletionFacts = async (
+    initialAction: 'wait_for_tool' | 'wait_for_background',
+    initialState: Readonly<RuntimeState>,
+  ): Promise<boolean> => {
+    if (!waitForRequiredBackground) {
+      throw new Error('Runtime completion wait port is unavailable.');
+    }
+    const initialSteerIds = steerMessageIds(initialState);
+    let observedState = initialState;
+    for (;;) {
+      const wake = await waitForRequiredBackground(observedState, signal);
+      if (signal?.aborted) return false;
+      const currentState = kernel.getState();
+      observedState = currentState;
+      if (
+        currentState.transcript.messages.some(
+          (message) =>
+            message.kind === 'user' &&
+            message.messageId.startsWith('input_') &&
+            !initialSteerIds.has(message.messageId),
+        )
+      ) {
+        return true;
+      }
+      if (initialAction === 'wait_for_tool' && wake === 'managed_shell_terminal') return true;
+      const current = decideCompletion(currentState);
+      if (
+        current.status !== 'blocked' ||
+        current.code !== 'tool_pending' ||
+        (current.nextAction !== 'wait_for_background' && current.nextAction !== 'wait_for_tool')
+      ) {
+        return true;
+      }
+    }
   };
   const launchShellEffect = (
     effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
@@ -682,6 +1080,26 @@ export async function* runStateRuntimeLoop(
       }
 
       const state = kernel.getState();
+      const waitingReason = state.completionGuard.waitingReason;
+      if (
+        !completionWaitSatisfied &&
+        ((waitingReason?.kind === 'required_background' &&
+          requiredBackgroundTaskIds(state).length > 0) ||
+          (waitingReason?.kind === 'required_shell' &&
+            !waitingReason.modelRespondedAfterWait &&
+            requiredManagedShellIds(state).size > 0))
+      ) {
+        if (
+          !(await waitForCompletionFacts(
+            waitingReason.kind === 'required_shell' ? 'wait_for_tool' : 'wait_for_background',
+            state,
+          ))
+        ) {
+          return;
+        }
+        completionWaitSatisfied = true;
+        continue;
+      }
       let facts = schedulerFacts?.(state);
       let effect = kernel.selectPendingEffects(state, facts)[0] ?? { type: 'stop' as const };
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
@@ -808,45 +1226,26 @@ export async function* runStateRuntimeLoop(
             ? { planIdentity: effect.decision.planIdentity }
             : {}),
         };
-        if (effect.decision.nextAction === 'wait_for_background' && waitForRequiredBackground) {
-          kernel.processEvent(blocked);
-          yield blocked;
-          for (;;) {
-            await waitForRequiredBackground(kernel.getState(), signal);
-            if (signal?.aborted) return;
-            const current = decideCompletion(kernel.getState());
-            if (
-              current.status !== 'blocked' ||
-              current.code !== 'tool_pending' ||
-              current.nextAction !== 'wait_for_background'
-            ) {
-              break;
-            }
+        if (
+          effect.decision.nextAction === 'wait_for_background' ||
+          (effect.decision.nextAction === 'wait_for_tool' &&
+            !effect.decision.canCorrect &&
+            effect.decision.correctionAttempt ===
+              kernel.getState().completionGuard.correctionAttempts)
+        ) {
+          if (!waitForRequiredBackground) {
+            throw new Error('Runtime completion wait port is unavailable.');
           }
+          kernel.processEvent(blocked);
+          const waitState = kernel.getState();
+          yield blocked;
+          if (!(await waitForCompletionFacts(effect.decision.nextAction, waitState))) return;
+          completionWaitSatisfied = true;
           continue;
         }
         if (effect.decision.canCorrect) {
           kernel.processEvent(blocked);
           yield blocked;
-          if (
-            effect.decision.code === 'tool_pending' &&
-            effect.decision.nextAction === 'wait_for_tool' &&
-            waitForRequiredBackground
-          ) {
-            for (;;) {
-              const wake = await waitForRequiredBackground(kernel.getState(), signal);
-              if (signal?.aborted) return;
-              if (wake === 'managed_shell_terminal') break;
-              const current = decideCompletion(kernel.getState());
-              if (
-                current.status !== 'blocked' ||
-                current.code !== 'tool_pending' ||
-                current.nextAction !== 'wait_for_tool'
-              ) {
-                break;
-              }
-            }
-          }
           continue;
         }
         if (effect.decision.code === 'plan_draft_pending') {
@@ -903,6 +1302,7 @@ export async function* runStateRuntimeLoop(
             Date.parse(admission.waitDeadlineAt ?? new Date().toISOString()) - Date.now(),
           );
           if (remainingMs > 0) {
+            const observedRevision = kernel.getState().revision;
             await new Promise<void>((resolve) => {
               let settled = false;
               const finish = () => {
@@ -916,6 +1316,8 @@ export async function* runStateRuntimeLoop(
               if (signal?.aborted) finish();
               else signal?.addEventListener('abort', finish, { once: true });
               if (backgroundExecutions.size > 0) void waitForBackground().then(finish);
+              if (kernel.waitForRevisionChange)
+                void kernel.waitForRevisionChange(observedRevision, signal).then(finish, finish);
             });
             if (signal?.aborted) return;
             continue;

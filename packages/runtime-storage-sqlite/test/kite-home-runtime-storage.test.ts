@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
+  CHILD_SESSION_TASK_USER_GOAL,
   createRuntimeRunStartResourceResult,
   createRuntimeStoredCommandReceipt,
   type RuntimeStoredRun,
@@ -195,6 +196,119 @@ describe('global Kite Home RuntimeStorage owner', () => {
       status: 'running',
       startedAtMs: 1_001,
     });
+  });
+
+  test('keeps receipt-free ordinary Runs and unowned internal followups closed', () => {
+    using database = preparedDatabase();
+    const owner = createKiteHomeRuntimeStorageForConnection<Event, State>({
+      database,
+      codec,
+      stateSchemaVersion: 27,
+      formatEpoch: SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
+    });
+    const admitted = workspace('followup', 'receipt');
+    owner.admissions.admit(admitted);
+    const run: RuntimeStoredRun = {
+      sessionId: 'session-followup',
+      runId: 'followup-run',
+      startCommandId: 'followup:submission-1',
+      phase: 'building',
+      status: 'queued',
+      createdRevision: 4,
+      lastRevision: 4,
+      createdAtMs: 1,
+    };
+    const checkpointRef = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_checkpoint' as const,
+      integrityIdentifier: `sha256:${'a'.repeat(64)}` as const,
+      byteLength: 1,
+    };
+    const grantRef = {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'agent_followup_grant' as const,
+      integrityIdentifier: `sha256:${'b'.repeat(64)}` as const,
+      byteLength: 1,
+    };
+    const mutation = {
+      sourceSessionId: 'source',
+      submissionId: 'submission-1',
+      targetRunId: run.runId,
+      taskId: 'task-1',
+      phase: 'building' as const,
+      checkpointRef,
+      grantDigest: grantRef.integrityIdentifier,
+      grant: { ref: grantRef, canonicalJson: '{}', createdAt: 1 },
+    };
+    const events = [
+      {
+        type: 'agent.followup_turn_prepared',
+        sourceSessionId: mutation.sourceSessionId,
+        submissionId: mutation.submissionId,
+        targetRunId: mutation.targetRunId,
+        taskId: mutation.taskId,
+        checkpointRef,
+        grantRef,
+        grantDigest: mutation.grantDigest,
+      },
+      { type: 'resource_budget.configured', runId: run.runId },
+      {
+        type: 'task.started',
+        taskId: mutation.taskId,
+        turnId: run.runId,
+        userGoal: CHILD_SESSION_TASK_USER_GOAL,
+      },
+      { type: 'turn.started', turnId: run.runId },
+    ];
+    const causeMessages = (operation: () => void): string[] => {
+      try {
+        operation();
+      } catch (error) {
+        const messages: string[] = [];
+        let current: unknown = error;
+        while (current && messages.length < 5) {
+          messages.push(String(current));
+          current = (current as { cause?: unknown }).cause;
+        }
+        return messages;
+      }
+      throw new Error('A receipt-free Run was unexpectedly committed.');
+    };
+    expect(
+      causeMessages(() =>
+        owner.storage.transactions.commitDecision({
+          sessionId: run.sessionId,
+          events,
+          metadata: events.map((_, index) => ({
+            eventId: `followup-event-${index}`,
+            revision: index + 1,
+          })),
+          snapshot: state(admitted, 4),
+          runMutation: { type: 'insert', run },
+          followupRunStart: mutation,
+        }),
+      ),
+    ).toContain(
+      'SqliteRuntimeCommandReceiptValidationError: Runtime internal followup Run has no Store13 owner authority.',
+    );
+    expect(owner.storage.sessions.loadSnapshot(run.sessionId)).toBeNull();
+    expect(
+      causeMessages(() =>
+        owner.storage.transactions.commitDecision({
+          sessionId: run.sessionId,
+          events,
+          metadata: events.map((_, index) => ({
+            eventId: `ordinary-event-${index}`,
+            revision: index + 1,
+          })),
+          snapshot: state(admitted, 4),
+          runMutation: { type: 'insert', run },
+        }),
+      ),
+    ).toContain(
+      'SqliteRuntimeCommandReceiptValidationError: Runtime Run insert requires its exact Store 8 start resource receipt.',
+    );
+    expect(owner.storage.runs.get(run.sessionId, run.runId)).toBeNull();
   });
 
   test('commits initial Session, recovery identity and Controller together and rolls back together', () => {

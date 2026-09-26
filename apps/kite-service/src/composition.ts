@@ -58,7 +58,13 @@ export interface KiteServiceRuntimeCompositionOptions {
   /** The one explicit current Store path used by the Service owner. */
   readonly checkpointPath: string;
   /** Already-open Store 9 owner; when present no legacy Store or History connection is opened. */
-  readonly storageOwner?: import('./bootstrap').KiteRuntimeStorageOwner;
+  readonly storageOwner?: import('./bootstrap').KiteRuntimeStorageOwner &
+    Partial<
+      Pick<
+        import('./bootstrap/kite-session-app-server-storage').KiteSessionAppServerStorageOwner,
+        'openChildSessionHistoryLogs'
+      >
+    >;
   /** At least one admitted Workspace template is required for Runtime execution. */
   readonly workspaces?: readonly (KiteServiceWorkspaceTemplate | KiteServiceWorkspaceSpec)[];
   /** Lazy template resolver used after Trust/connection admission; it is never called at boot. */
@@ -194,6 +200,9 @@ function createKiteServiceRuntimeCompositionUnchecked(
     serverInstanceId: instanceId,
     ...(input.runtimeServerVersion ? { serverVersion: input.runtimeServerVersion } : {}),
     ...(input.appServerProtocol ? { appServerProtocol: true } : {}),
+    ...(input.appServerProtocol && input.storageOwner?.openChildSessionHistoryLogs
+      ? { childHistoryMethods: true }
+      : {}),
     ...(input.appServerDaemonProtocol ? { appServerDaemonProtocol: true } : {}),
     operationGate,
     ...(input.storageOwner ? { storageOwner: input.storageOwner } : {}),
@@ -234,8 +243,16 @@ function createKiteServiceRuntimeCompositionUnchecked(
   });
   for (const workspace of workspaces) bindRuntimeModelControl(workspace);
   const rawHistory = input.storageOwner?.openHistoryLogs
-    ? createKiteRuntimeObserverHistoryClient(() =>
-        input.storageOwner!.openHistoryLogs!(runtimeHostCurrentStateEventTypes()),
+    ? createKiteRuntimeObserverHistoryClient(
+        () => input.storageOwner!.openHistoryLogs!(runtimeHostCurrentStateEventTypes()),
+        input.storageOwner.openChildSessionHistoryLogs
+          ? (parentSessionId, childSessionId) =>
+              input.storageOwner!.openChildSessionHistoryLogs!(
+                parentSessionId,
+                childSessionId,
+                runtimeHostCurrentStateEventTypes(),
+              )
+          : undefined,
       )
     : input.storageOwner
       ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
@@ -277,6 +294,18 @@ function createKiteServiceRuntimeCompositionUnchecked(
           input.storageOwner!.readSnapshot!(() =>
             rawHistory.loadSession(sessionId, throughSequence),
           ),
+        ...(rawHistory.loadChildSession
+          ? {
+              loadChildSession: (
+                parentSessionId: string,
+                childSessionId: string,
+                throughSequence?: number,
+              ) =>
+                input.storageOwner!.readSnapshot!(() =>
+                  rawHistory.loadChildSession!(parentSessionId, childSessionId, throughSequence),
+                ),
+            }
+          : {}),
       })
     : rawHistory;
   let application!: KiteRuntimeApplication;

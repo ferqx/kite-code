@@ -8,7 +8,7 @@ import {
 } from '@kite-ai/runtime-host/storage';
 import { createKiteHomeWorkspaceRuntimeJournal } from '../src/kite-home-runtime-journal';
 import { createKiteHomeRuntimeStorageForConnection } from '../src/kite-home-runtime-storage';
-import { assertKiteSessionStoreSchema } from '../src/kite-home-store';
+import { assertKiteSessionStore10Schema as assertKiteSessionStoreSchema } from '../src/kite-home-store';
 import { createKiteHomeWorkspaceAdmissionPort } from '../src/kite-home-workspaces';
 import { createKiteHomeWriteTransactionPort } from '../src/kite-home-write';
 import { createKiteSessionExecutionAuthority } from '../src/kite-session-execution-authority';
@@ -200,6 +200,7 @@ describe('bounded Store 11 to 10 conversion', () => {
     const authority = createKiteSessionExecutionAuthority({
       database: db,
       writer: createKiteHomeWriteTransactionPort(db, assertKiteSessionStoreSchema),
+      assertStoreSchema: assertKiteSessionStoreSchema,
     }).read('session-1');
     expect(authority).toMatchObject({
       status: 'recovery_required',
@@ -249,6 +250,7 @@ describe('bounded Store 11 to 10 conversion', () => {
     const authority = createKiteSessionExecutionAuthority({
       database: db,
       writer: createKiteHomeWriteTransactionPort(db, assertKiteSessionStoreSchema),
+      assertStoreSchema: assertKiteSessionStoreSchema,
     }).read('session-1');
     expect(authority.status).toBe('recovery_required');
   });

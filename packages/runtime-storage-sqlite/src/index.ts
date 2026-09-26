@@ -68,6 +68,13 @@ export {
   type SqliteWorkspaceDirectoryOutboxEntry,
   type SqliteWorkspaceDirectoryOutboxPage,
 } from './directory-outbox';
+export type { KiteChildApprovalProxyRecord } from './kite-child-approval-proxy';
+export { childApprovalProxyId } from './kite-child-approval-proxy';
+export type {
+  CrossSessionInboxReceipt,
+  CrossSessionMailOutboxRecord,
+  CrossSessionQueuedMail,
+} from './kite-cross-session-agent-mail';
 export {
   createKiteHomeArtifactStore,
   KiteHomeArtifactError,
@@ -109,6 +116,7 @@ export {
 } from './kite-home-runtime-storage';
 export {
   assertKiteHomeStoreSchema,
+  assertKiteSessionStore10Schema,
   assertKiteSessionStoreSchema,
   initializeKiteHomeStoreSchema,
   initializeKiteSessionStoreIfNeeded,
@@ -136,6 +144,12 @@ export {
   KiteHomeWriteError,
   type KiteHomeWriteTransactionPort,
 } from './kite-home-write';
+export {
+  createKiteSessionAgentMetadataPort,
+  KiteSessionAgentMailboxError,
+  type KiteSessionAgentMetadata,
+  type KiteSessionAgentMetadataPort,
+} from './kite-session-agent-mailbox';
 export {
   createKiteSessionEffectPort,
   KiteSessionEffectError,
@@ -189,9 +203,13 @@ export {
   readKiteSessionStoreMetadata,
   validateKiteSessionStoreDatabase,
 } from './kite-session-runtime-file';
+export type { KiteCrossSessionQueueMailPort } from './kite-session-runtime-storage';
 export {
+  type KiteSessionAgentMailboxPort,
+  type KiteSessionAgentMailInputPort,
   type KiteSessionExecutionControl,
   type KiteSessionExecutionHandle,
+  type KiteSessionModelMail,
   type KiteSessionRecoveryPort,
   KiteSessionRuntimeStorageError,
   type KiteSessionRuntimeStorageOwner,

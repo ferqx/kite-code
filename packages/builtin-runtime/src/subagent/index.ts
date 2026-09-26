@@ -1,4 +1,9 @@
 export {
+  type SubagentCheckpoint,
+  type SubagentCheckpointArtifactRef,
+  SubagentCheckpointArtifactStore,
+} from './checkpoint-artifacts';
+export {
   BuiltinChildRuntimeDriver,
   type BuiltinChildRuntimeResumeRegistration,
   type BuiltinChildRuntimeStartRegistration,
@@ -70,6 +75,9 @@ export {
   getRoleConfig,
 } from './roles';
 export type {
+  AgentMailboxCaller,
+  AgentMailboxInvocationScope,
+  AgentMailboxPort,
   BuiltinPlanActionResult,
   BuiltinPlanningExecutionMechanism,
   BuiltinReadPlanInput,
@@ -85,11 +93,15 @@ export type {
 export {
   ASK_USER_INPUT_SCHEMA_,
   createSubagentRuntimeModule,
+  FOLLOWUP_TASK_INPUT_SCHEMA_,
+  INTERRUPT_AGENT_INPUT_SCHEMA_,
   isBuiltinSubagentTaskToolName,
+  LIST_AGENTS_INPUT_SCHEMA_,
   normalizeAskUserRequest,
   planningContinuationAfterPlanSubagent,
   projectSubagentResult,
   READ_PLAN_INPUT_SCHEMA_,
+  SEND_MESSAGE_INPUT_SCHEMA_,
   SUBAGENT_CAPABILITY_REVISIONS_,
   SUBAGENT_EXECUTOR_REVISIONS_,
   SUBAGENT_OPERATION_IDS_,
@@ -100,6 +112,7 @@ export {
   TASK_WAIT_INPUT_SCHEMA_,
   UPDATE_PLAN_INPUT_SCHEMA_,
   validateDelegatedTask,
+  WAIT_AGENT_INPUT_SCHEMA_,
   WRITE_PLAN_INPUT_SCHEMA_,
 } from './runtime-module';
 export {

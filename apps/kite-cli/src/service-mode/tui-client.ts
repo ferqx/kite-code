@@ -10,6 +10,7 @@ import type {
   AcceptedPresentationEnvelope,
   RuntimeAccessNotification,
   RuntimeCheckpointProjection,
+  RuntimeChildSessionCursor,
   RuntimeClientEvent,
   RuntimeClientInteraction,
   RuntimeCommand,
@@ -238,6 +239,49 @@ class NativeTuiRuntimeClient {
       ) => this.#getSnapshot(previous),
       listPersistedSessions: (query?: string) => this.#history.listPersistedSessions(query),
       loadPersistedSession: (sessionId: string) => this.#history.loadPersistedSession(sessionId),
+      childSessionReader: Object.freeze({
+        list: async (
+          parentSessionId: string,
+          limit: number,
+          cursor?: RuntimeChildSessionCursor,
+        ) => {
+          if (parentSessionId !== this.#activeId || !this.#sessions.has(parentSessionId))
+            throw new Error('Child Session list requires the active parent Session.');
+          const result = await this.#runtime.query({
+            schema: RUNTIME_QUERY_SCHEMA_,
+            type: 'list_child_sessions',
+            sessionId: parentSessionId,
+            limit,
+            ...(cursor ? { cursor } : {}),
+          });
+          if (result.status !== 'ok' || !result.childSessions)
+            throw new Error('Child Session list is unavailable.');
+          return Object.freeze({
+            entries: Object.freeze([...result.childSessions]),
+            ...(result.nextChildCursor ? { nextCursor: result.nextChildCursor } : {}),
+          });
+        },
+        load: async (parentSessionId: string, childSessionId: string) => {
+          if (parentSessionId !== this.#activeId || !this.#sessions.has(parentSessionId))
+            throw new Error('Child Session detail requires the active parent Session.');
+          const result = await this.#runtime.query({
+            schema: RUNTIME_QUERY_SCHEMA_,
+            type: 'get_child_session_projection',
+            sessionId: parentSessionId,
+            childSessionId,
+          });
+          const projection = result.status === 'ok' ? result.session : undefined;
+          if (!projection || projection.sessionId !== childSessionId)
+            throw new Error('Child Session detail is unavailable.');
+          const history = await this.#history.loadPersistedChildSession(
+            parentSessionId,
+            childSessionId,
+          );
+          if (parentSessionId !== this.#activeId || history.threadId !== childSessionId)
+            throw new Error('Child Session selection changed during read.');
+          return Object.freeze({ projection, history });
+        },
+      }),
       waitForSessionReady: (sessionId: string) => this.#waitForSessionReady(sessionId),
       removeRuntime: (sessionId: string) => this.#removeRuntime(sessionId),
       deletePersistedSession: (sessionId: string) => this.#deletePersistedSession(sessionId),

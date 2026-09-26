@@ -9,7 +9,7 @@ import { createKiteHomeWriteTransactionPort } from './kite-home-write';
 import { createKiteSessionExecutionAuthority } from './kite-session-execution-authority';
 import { isCanonicalRecoveryIdentity, recoveryIdentityMetaKey } from './preflight';
 
-/** Explicit parent-first copy order for the complete Store 10 table set. */
+/** Explicit parent-first copy order for the complete Store 13 table set. */
 const TABLE_ORDER = [
   'kite_meta',
   'workspaces',
@@ -30,6 +30,19 @@ const TABLE_ORDER = [
   'subagent_task_artifacts',
   'subagent_lifecycle_artifacts',
   'subagent_continuation_artifacts',
+  'subagent_checkpoint_artifacts',
+  'agent_followup_admission_artifacts',
+  'agent_nodes',
+  'agent_mail_bodies',
+  'agent_mail',
+  'agent_mail_outbox',
+  'agent_mail_inbox',
+  'agent_followup_routes',
+  'agent_followup_funding_receipts',
+  'agent_followup_grant_artifacts',
+  'agent_interrupt_intents',
+  'child_session_intents',
+  'child_approval_proxies',
 ] as const;
 
 type Value = string | number | bigint | Uint8Array | null;

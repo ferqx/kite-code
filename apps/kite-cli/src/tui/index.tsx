@@ -1752,6 +1752,7 @@ function TuiApp({
     (query: string) => sessionManager.listPersistedSessions(query),
     [sessionManager],
   );
+  const [childPanelOpen, setChildPanelOpen] = React.useState(false);
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -1787,6 +1788,8 @@ function TuiApp({
         canToggleLastOutputBlock={canToggleLastOutputBlock}
         getRewindPreview={previewRewind}
         loadSessions={loadPersistedSessionsForSelector}
+        childSessionReader={sessionManager.childSessionReader}
+        onChildPanelOpenChange={setChildPanelOpen}
         resizeGeneration={resizeKey}
         modelForDisplay={modelForDisplay}
         presentationKey={presentationKey}
@@ -1801,7 +1804,7 @@ function TuiApp({
                 : 'prompt'
           }
           onSubmit={handleInput}
-          disabled={shouldDisablePromptInput(state)}
+          disabled={shouldDisablePromptInput(state) || childPanelOpen}
           workspace={workspace}
           overlayActive={
             state.showHelp ||
@@ -1813,6 +1816,7 @@ function TuiApp({
             state.showSessions ||
             state.showMcp ||
             state.showRewind ||
+            childPanelOpen ||
             !!state.interrupt
           }
           onSlashSuggestionChange={setSlashSuggestion}

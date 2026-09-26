@@ -2,17 +2,13 @@ import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { createKiteHomeRuntimeStorageForConnection } from './kite-home-runtime-storage';
 import {
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore10Schema,
   assertKiteStoreIntegrity,
-  KITE_SESSION_STORE_DDL,
-  KITE_SESSION_STORE_TABLE_COLUMNS,
+  KITE_SESSION_STORE10_DDL,
+  KITE_SESSION_STORE10_TABLE_COLUMNS,
 } from './kite-home-store';
 import { createKiteHomeWriteTransactionPort } from './kite-home-write';
 import { createKiteSessionExecutionAuthority } from './kite-session-execution-authority';
-import {
-  KITE_SESSION_STORE_FORMAT_EPOCH,
-  KITE_SESSION_STORE_SCHEMA_VERSION,
-} from './kite-session-store-format';
 import {
   isCanonicalRecoveryIdentity,
   recoveryIdentityMetaKey,
@@ -23,10 +19,12 @@ import {
 
 const SOURCE_SCHEMA = 11;
 const SOURCE_EPOCH = 'kite-session-accepted-runs-2026-09-15';
+const TARGET_SCHEMA = 10;
+const TARGET_EPOCH = 'kite-session-app-server-2026-09-02';
 const PENDING_INDEX =
   "CREATE INDEX runtime_runs_pending_input ON runtime_runs(session_id) WHERE status = 'queued' AND input_json IS NOT NULL";
 const findDDL = (prefix: string): string => {
-  const ddl = KITE_SESSION_STORE_DDL.find((sql) => sql.startsWith(prefix));
+  const ddl = KITE_SESSION_STORE10_DDL.find((sql) => sql.startsWith(prefix));
   if (!ddl) throw new Error('Target Store DDL is incomplete.');
   return ddl;
 };
@@ -50,16 +48,16 @@ const sourceCapabilityDDL = targetCapabilityDDL
 if (sourceRunDDL === targetRunDDL || sourceCapabilityDDL === targetCapabilityDDL)
   throw new Error('Source Store DDL derivation failed.');
 export const KITE_SESSION_STORE11_DDL = Object.freeze([
-  ...KITE_SESSION_STORE_DDL.map((sql) =>
+  ...KITE_SESSION_STORE10_DDL.map((sql) =>
     sql === targetRunDDL ? sourceRunDDL : sql === targetCapabilityDDL ? sourceCapabilityDDL : sql,
   ),
   PENDING_INDEX,
 ]);
 
 export const KITE_SESSION_STORE11_TABLE_COLUMNS = Object.freeze({
-  ...KITE_SESSION_STORE_TABLE_COLUMNS,
+  ...KITE_SESSION_STORE10_TABLE_COLUMNS,
   runtime_runs: [
-    ...KITE_SESSION_STORE_TABLE_COLUMNS.runtime_runs,
+    ...KITE_SESSION_STORE10_TABLE_COLUMNS.runtime_runs,
     'input_json',
     'preparation_failure_count',
   ],
@@ -128,8 +126,8 @@ export function assertKiteSessionStore11Schema(database: Database): void {
 
 const businessDigest = (database: Database): string => {
   const hash = createHash('sha256');
-  for (const [table, columns] of Object.entries(KITE_SESSION_STORE_TABLE_COLUMNS).sort(([a], [b]) =>
-    a.localeCompare(b),
+  for (const [table, columns] of Object.entries(KITE_SESSION_STORE10_TABLE_COLUMNS).sort(
+    ([a], [b]) => a.localeCompare(b),
   )) {
     if (table === 'kite_meta') continue;
     hash.update(`${table}\0`);
@@ -256,7 +254,7 @@ export function convertKiteSessionStore11To10<Event, State>(input: {
       targetRunDDL.replace('CREATE TABLE runtime_runs (', 'CREATE TABLE runtime_runs_new ('),
     );
     database.run(
-      `INSERT INTO runtime_runs_new (${KITE_SESSION_STORE_TABLE_COLUMNS.runtime_runs.join(',')}) SELECT ${KITE_SESSION_STORE_TABLE_COLUMNS.runtime_runs.join(',')} FROM runtime_runs`,
+      `INSERT INTO runtime_runs_new (${KITE_SESSION_STORE10_TABLE_COLUMNS.runtime_runs.join(',')}) SELECT ${KITE_SESSION_STORE10_TABLE_COLUMNS.runtime_runs.join(',')} FROM runtime_runs`,
     );
     database.run('DROP TABLE runtime_runs');
     database.run('ALTER TABLE runtime_runs_new RENAME TO runtime_runs');
@@ -270,24 +268,26 @@ export function convertKiteSessionStore11To10<Event, State>(input: {
       ),
     );
     database.run(
-      `INSERT INTO capability_artifacts_new (${KITE_SESSION_STORE_TABLE_COLUMNS.capability_artifacts.join(',')}) SELECT ${KITE_SESSION_STORE_TABLE_COLUMNS.capability_artifacts.join(',')} FROM capability_artifacts`,
+      `INSERT INTO capability_artifacts_new (${KITE_SESSION_STORE10_TABLE_COLUMNS.capability_artifacts.join(',')}) SELECT ${KITE_SESSION_STORE10_TABLE_COLUMNS.capability_artifacts.join(',')} FROM capability_artifacts`,
     );
     database.run('DROP TABLE capability_artifacts');
     database.run('ALTER TABLE capability_artifacts_new RENAME TO capability_artifacts');
     database
       .query("UPDATE kite_meta SET value=? WHERE key='schema_version'")
-      .run(String(KITE_SESSION_STORE_SCHEMA_VERSION));
-    database
-      .query("UPDATE kite_meta SET value=? WHERE key='format_epoch'")
-      .run(KITE_SESSION_STORE_FORMAT_EPOCH);
-    database.run(`PRAGMA user_version = ${KITE_SESSION_STORE_SCHEMA_VERSION}`);
-    assertKiteSessionStoreSchema(database);
+      .run(String(TARGET_SCHEMA));
+    database.query("UPDATE kite_meta SET value=? WHERE key='format_epoch'").run(TARGET_EPOCH);
+    database.run(`PRAGMA user_version = ${TARGET_SCHEMA}`);
+    assertKiteSessionStore10Schema(database);
 
-    const writer = createKiteHomeWriteTransactionPort(database, assertKiteSessionStoreSchema);
-    const authority = createKiteSessionExecutionAuthority({ database, writer });
+    const writer = createKiteHomeWriteTransactionPort(database, assertKiteSessionStore10Schema);
+    const authority = createKiteSessionExecutionAuthority({
+      database,
+      writer,
+      assertStoreSchema: assertKiteSessionStore10Schema,
+    });
     const storage = createKiteHomeRuntimeStorageForConnection({
       database,
-      assertStoreSchema: assertKiteSessionStoreSchema,
+      assertStoreSchema: assertKiteSessionStore10Schema,
       storeSchemaVersion: 10,
       codec: input.codec,
       stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,

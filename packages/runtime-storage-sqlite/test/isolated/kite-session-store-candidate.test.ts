@@ -3,10 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  initializeKiteHomeStoreSchema,
-  initializeKiteSessionStoreIfNeeded,
-} from '../../src/kite-home-store';
+import { initializeKiteHomeStoreSchema, KITE_SESSION_STORE10_DDL } from '../../src/kite-home-store';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { createKiteSessionStoreCandidate } from '../../src/kite-session-store-candidate';
 import { KITE_SESSION_STORE11_DDL } from '../../src/kite-session-store11-conversion';
@@ -29,8 +26,13 @@ function fixture() {
     const database = new Database(databasePath);
     chmodSync(databasePath, 0o600);
     if (version === 9) initializeKiteHomeStoreSchema(database);
-    else if (version === 10) initializeKiteSessionStoreIfNeeded(database);
-    else {
+    else if (version === 10) {
+      for (const sql of KITE_SESSION_STORE10_DDL) database.run(sql);
+      database.run(
+        "INSERT INTO kite_meta VALUES ('schema_version', '10'), ('format_epoch', 'kite-session-app-server-2026-09-02')",
+      );
+      database.run('PRAGMA user_version=10');
+    } else {
       for (const sql of KITE_SESSION_STORE11_DDL) database.run(sql);
       database.run(
         "INSERT INTO kite_meta VALUES ('schema_version', '11'), ('format_epoch', 'kite-session-accepted-runs-2026-09-15')",

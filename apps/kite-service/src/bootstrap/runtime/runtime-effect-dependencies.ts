@@ -94,15 +94,121 @@ export interface RuntimeExecutorDependencies {
   workspaceFilesystemRuntime?: import('@kite-ai/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
   sandboxPreparationArtifacts?: import('@kite-ai/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
+  delegatedTaskArtifacts?: Pick<
+    import('@kite-ai/builtin-runtime/subagent').SubagentTaskArtifactAccess,
+    'read'
+  >;
   backgroundSubagentRuntime?: import('./subagent/background-runtime').BackgroundSubagentControlRuntime;
+  /** Private child Session receipt owner; absence retains the current guarded route. */
+  childSessionAcceptance?: Readonly<{
+    /** Pending Store intents whose delegated budget must survive a fenced restart. */
+    pendingDelegationReservations?: () => readonly string[];
+    pendingAfterTurnDelegations?: () => NonNullable<
+      import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preservePendingAfterTurnDelegations']
+    >;
+    liveAfterTurnDelegations?: () => NonNullable<
+      import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveLiveAfterTurnDelegations']
+    >;
+    sealedAfterTurnReports?: () => NonNullable<
+      import('@kite-ai/runtime-host/kernel-adapter').RuntimeHostStateRestartRecoveryFacts['preserveSealedAfterTurnReports']
+    >;
+    effectLeases: Pick<
+      import('@kite-ai/runtime-host/storage').EffectLeasePort,
+      'tryAcquireEffectLease' | 'releaseEffectLease'
+    >;
+    onAccepted: (
+      accepted: import('./subagent/child-session-acceptance').AcceptedChildSession,
+      parentSignal?: AbortSignal,
+    ) => void | Promise<void>;
+    taskControl?: import('@kite-ai/builtin-runtime/subagent').BuiltinTaskControlExecutionMechanism;
+    backgroundSnapshot?: () => Readonly<{
+      aggregateGeneration: string;
+      watermark: number;
+      executions: readonly import('@kite-ai/runtime-contract').RuntimeBackgroundExecutionProjection[];
+    }>;
+    approvalProxy?: import('./subagent/child-approval-owner').ChildApprovalProxyOwner;
+  }>;
+  /** Exact sealed grant tool ceiling supplied by the private child runner. */
+  childToolCeiling?: Parameters<
+    typeof import('../../runtime/tool-execution/router').executeAppRuntimeTools
+  >[0]['childToolCeiling'];
+  /** Session Host creates a caller-bound port for the exact prepared Tool call. */
+  agentMailboxPortForCall?: (input: {
+    readonly state: Readonly<RuntimeState>;
+    readonly toolCallId: string;
+  }) => import('@kite-ai/builtin-runtime/subagent').AgentMailboxPort | undefined;
+  /** Host Store 11 and exact effect callbacks can admit root mailbox commands. */
+  agentMailboxAvailable?: boolean;
+  /** D2 exact tool surface; does not advertise list/wait/followup/interrupt. */
+  agentMailboxQueueOnlyAvailable?: boolean;
+  /** Workspace-owned policy proof for one prepared TriggerTurn Tool attempt. */
+  followupPolicyForPreparedTool?: NonNullable<
+    import('./agent-mailbox-port').CrossSessionRootMailboxInput['authorizeFollowup']
+  >;
+  /** Child owner may attach one source-funded TriggerTurn at an old Run's next Model boundary. */
+  currentTurnFollowup?: Readonly<{
+    prepareAgentMail: NonNullable<
+      Parameters<typeof import('./model-effect').projectPrimaryModelEffect>[0]['prepareAgentMail']
+    >;
+    firstAttemptTimeoutMs(): number | undefined;
+    /** Narrow the next old-Run Surface while a read-only TriggerTurn is pending. */
+    safeToolNames(stage: 'model' | 'tool'): readonly string[] | undefined;
+    afterPrepared(
+      invocationId: string,
+      commitRoute: NonNullable<
+        import('@kite-ai/runtime-host/kernel-adapter').StateRuntimeEffectExecutionContext<
+          RuntimeState,
+          RuntimeEvent
+        >['commitCurrentTurnFollowupRoute']
+      >,
+    ): Promise<boolean>;
+    beforeDispatch(invocationId: string): Promise<boolean>;
+  }>;
+  /** Store11 owner binds each Tool/Model effect to its own active Host commit callback. */
+  crossSessionQueueMail?: Readonly<{
+    bindForEffect(
+      input: Readonly<{
+        acceptSource?: import('./cross-session-agent-mail-composition').CrossSessionMailDecisionCommitters['acceptSource'];
+        acceptInterruptSource?: import('./cross-session-agent-mail-composition').CrossSessionMailDecisionCommitters['acceptInterruptSource'];
+        prepareModel?: import('./cross-session-agent-mail-composition').CrossSessionMailDecisionCommitters['prepareModel'];
+      }>,
+    ): Readonly<{
+      mailbox: import('./agent-mailbox-port').CrossSessionQueueMailPort;
+      modelInput: import('./agent-mail-model-input').CrossSessionQueueMailModelPort;
+      scheduleDelivery?: (sourceSessionId: string, messageId: string) => void | Promise<void>;
+      scheduleFollowup?: (sourceSessionId: string, submissionId: string) => void | Promise<void>;
+      scheduleInterrupt?: (
+        targetSessionId: string,
+        sourceSessionId: string,
+        commandId: string,
+      ) => void | Promise<void>;
+    }>;
+  }>;
+  crossSessionChildIdentity?: Readonly<{
+    parentSessionId: string;
+    taskId: string;
+    grantId: string;
+    grantDigest: string;
+  }>;
   afterTurnContinuationRuntime?: import('./subagent/after-turn-continuation').AfterTurnContinuationRuntime;
   /** Session-mailbox persistence retained after the starting Tool effect settles. */
   backgroundModelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent> & {
     readonly ownerKey: string;
     readonly recoveryIdentityKey: string;
+    readonly commitBackgroundAgentSettlement?: (
+      input: import('./subagent/task-tool').BackgroundAgentSettlementCommitInput,
+    ) => Promise<
+      ReturnType<
+        import('@kite-ai/runtime-host/kernel-adapter').StateRuntimeSession['commitBackgroundAgentSettlement']
+      >
+    >;
   };
   subagentContinuationArtifacts?: import('@kite-ai/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
+  checkpointArtifacts?: Pick<
+    import('@kite-ai/builtin-runtime/subagent').SubagentCheckpointArtifactStore,
+    'write'
+  >;
   /** Independent user/admin authorization source for one remote MCP invocation. */
 }
 
@@ -132,9 +238,17 @@ export function resolveRuntimeContextProjectionEnvironment(
     skillOptions: dependencies.skillOptions,
     skillCatalog,
     subagentEventSink: dependencies.subagentEventSink,
+    agentMailboxAvailable:
+      dependencies.agentMailboxAvailable === true ||
+      dependencies.agentMailboxPortForCall !== undefined,
+    agentMailboxQueueOnlyAvailable:
+      dependencies.agentMailboxQueueOnlyAvailable === true &&
+      dependencies.crossSessionQueueMail !== undefined,
     signal: dependencies.signal,
     sandboxBackend: dependencies.sandboxBackend,
     builtinToolCatalog: requireBuiltinToolCatalog(dependencies),
+    delegatedTaskArtifacts: dependencies.delegatedTaskArtifacts,
+    childToolCeiling: dependencies.childToolCeiling,
   });
 }
 
@@ -163,6 +277,7 @@ export function prepareRuntimeEffectForBudget(
     workflowSkills: environment.workflowSkills,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
+    delegatedTask: environment.delegatedTask,
   });
   const capabilities = resolveModelCapabilities({
     config: dependencies.config,

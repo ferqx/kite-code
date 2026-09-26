@@ -7,9 +7,9 @@ import {
 
 import { captureSqliteTableContentDigests } from './sqlite-table-content';
 
-/** Exact, private comparison input for the current schema 10 Store only. */
+/** Exact, private comparison input for the current schema 11 Store only. */
 export interface KiteSessionPreservationManifest {
-  readonly schema: 'kite.session-preservation.schema10.v1';
+  readonly schema: 'kite.session-preservation.schema11.v1';
   readonly tables: Readonly<Record<string, { readonly rows: number; readonly sha256: string }>>;
 }
 
@@ -21,7 +21,7 @@ export function captureKiteSessionPreservationManifest(
     assertKiteSessionStoreSchema(database);
     assertKiteStoreIntegrity(database);
     return Object.freeze({
-      schema: 'kite.session-preservation.schema10.v1' as const,
+      schema: 'kite.session-preservation.schema11.v1' as const,
       tables: captureSqliteTableContentDigests(database, KITE_SESSION_STORE_TABLE_COLUMNS),
     });
   })();
@@ -33,8 +33,8 @@ export function compareKiteSessionPreservationManifests(
   after: KiteSessionPreservationManifest,
 ): { readonly preserved: boolean; readonly changedTables: readonly string[] } {
   if (
-    before.schema !== 'kite.session-preservation.schema10.v1' ||
-    after.schema !== 'kite.session-preservation.schema10.v1'
+    before.schema !== 'kite.session-preservation.schema11.v1' ||
+    after.schema !== 'kite.session-preservation.schema11.v1'
   ) {
     throw new Error('Store preservation manifest format is unsupported.');
   }

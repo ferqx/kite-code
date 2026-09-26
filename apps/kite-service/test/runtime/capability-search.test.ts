@@ -1,10 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@kite-ai/agent-kernel';
+import {
+  assertCurrentRuntimeEvent,
+  decodeCurrentAgentStateJson,
+  encodeCurrentAgentStateJson,
+  type RuntimeEvent,
+} from '@kite-ai/agent-kernel';
 import {
   chooseCapabilityDisclosure,
   createCapabilityBinding,
   estimateCapabilityCatalogTokens,
   modelVisibleCapabilitySchema,
+  searchableCapabilitySnapshot,
   searchCapabilitySnapshot,
   searchUnavailableProviders,
 } from '@kite-ai/builtin-runtime';
@@ -73,6 +79,50 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe('progressive capability disclosure', () => {
+  test('persists a real empty catalog revision once without inventing bindings', async () => {
+    const state = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'empty-catalog',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    const revision = searchableCapabilitySnapshot({}).revision;
+    expect(revision).toMatch(/^[a-f0-9]{64}$/u);
+    const emitted: RuntimeEvent[] = [];
+    await projectTestPrimaryModelEffect({
+      model: createMockModel([{ message: aiMessage({ content: 'first' }) }]),
+      state,
+      config: config(),
+      emitRuntimeEvent: (event) => emitted.push(event),
+    });
+    const issued = emitted.filter(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.bindings_issued' }> =>
+        event.type === 'capability.bindings_issued',
+    );
+    expect(issued).toEqual([
+      {
+        type: 'capability.bindings_issued',
+        catalogRevision: revision,
+        bindings: [],
+        disclosures: [],
+        loadedCapabilities: [],
+      },
+    ]);
+    expect(() => assertCurrentRuntimeEvent(issued[0]!)).not.toThrow();
+    const observed = reduceRuntimeState(state, issued[0]!);
+    expect(observed.capabilities.catalogRevision).toBe(revision);
+    expect(decodeCurrentAgentStateJson(encodeCurrentAgentStateJson(observed)).capabilities).toEqual(
+      observed.capabilities,
+    );
+    const replay: RuntimeEvent[] = [];
+    await projectTestPrimaryModelEffect({
+      model: createMockModel([{ message: aiMessage({ content: 'second' }) }]),
+      state: observed,
+      config: config(),
+      emitRuntimeEvent: (event) => replay.push(event),
+    });
+    expect(replay.filter((event) => event.type === 'capability.bindings_issued')).toEqual([]);
+  });
   test('keeps MCP resources out of capability search while resource tools stay built in', () => {
     const resource: CapabilityDescriptor = {
       ...descriptor('resource'),

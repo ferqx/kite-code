@@ -97,9 +97,9 @@ alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式
 
 实现依据：[resolveManagedLocalAppServerTarget](../../scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](../../apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](../../apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](../../tests/release/app-server-client.test.ts)断言源码入口使用该位置。
 
-Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`，不再计算源码 profile digest。正式读写格式为 schema 10。已取得资格的 macOS 入口在维护期自动转换严格识别的 Store 9、精确 Store 11 子集，并合并多个 Store 10 来源；只凭 schema 数字不能证明可转换。未知 epoch、未经证明的语义或较新格式保留原件并返回明确诊断。
+Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 11、`kite-session-lineage-2026-09-24`；启动准备仅对已验证的 Store 9、Store 10 和准确旧 epoch 11 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
 
-启动准备检查已知 `kite.sqlite` 与 `source-profiles/<digest>/kite-session.sqlite` 历史来源，完成一致性备份、候选转换、内容与关联核对后发布到唯一正式入口。未能完成归并或发布结算时不创建替代空库，也不把未归并历史隐藏为成功的空列表。发布意图用于中断后的核验与接续，不以恢复旧备份覆盖当前数据。跨版本及平台的实际资格、尚未完成范围见[实施方案](../plans/session-store-compatibility-and-continuity.md)。
+启动准备检查正式库、已知 `kite.sqlite` 与 `source-profiles/<digest>/kite-session.sqlite` 历史来源及待结算发布意图；合格来源在独占维护期归并为唯一正式库，并在旧会话可读取后才开放业务连接。转换失败或发布不确定时保留原件与恢复资产，不生成替代空库。普通历史查询保持只读，不能触发转换；见[实施方案](../plans/session-store-compatibility-and-continuity.md)。
 
 Desktop 与 stdio TUI/CLI 首次初始化将白名单结构化启动诊断显示为错误码和实际/预期 schema；不展示任意 stderr。Service启动组合对明确的 `store_busy` 每250ms重试准备与开库，首个busy开始最多等待10秒，每轮重新识别真实状态；正常路径不延迟。等待通过封闭的 `waiting_for_store` 阶段展示，超时仍返回busy，未知/不安全准入不重试。启动退出请求可以停止等待；已完成发布的退出不冒充提交前取消。只有实际owner打开成功后报告ready。初始化后的普通断连保持原语义。
 

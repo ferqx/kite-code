@@ -656,6 +656,8 @@ export function reduceContextState(
         payload.modelRole !== 'user' ||
         admittedResults.length !== 1 ||
         state.turn.turnId !== originTurnId ||
+        state.turn.status !== 'active' ||
+        state.terminalOutcome !== undefined ||
         state.transcript.messages.some((message) => message.messageId === notificationId)
       )
         return state;
@@ -665,7 +667,18 @@ export function reduceContextState(
           // This event is the durable admission of new model-visible input.
           // Preserve required Task settlement through task_read/task_cancel,
           // but let the current Run make the model call that can issue it.
-          completionGuard: { correctionAttempts: 0 },
+          completionGuard: state.completionGuard.waitingReason
+            ? {
+                correctionAttempts: 0,
+                waitingReason:
+                  state.completionGuard.waitingReason.kind === 'required_shell'
+                    ? {
+                        ...state.completionGuard.waitingReason,
+                        modelRespondedAfterWait: false,
+                      }
+                    : state.completionGuard.waitingReason,
+              }
+            : { correctionAttempts: 0 },
           terminalOutcome: undefined,
           transcript: { ...state.transcript, final: undefined },
         },
@@ -726,6 +739,17 @@ export function reduceContextState(
         {
           ...state,
           toolRecovery,
+          ...(state.completionGuard.waitingReason?.kind === 'required_shell'
+            ? {
+                completionGuard: {
+                  ...state.completionGuard,
+                  waitingReason: {
+                    ...state.completionGuard.waitingReason,
+                    modelRespondedAfterWait: true,
+                  },
+                },
+              }
+            : {}),
           transcript: {
             ...state.transcript,
             final: toolCalls.length > 0 ? undefined : (text ?? state.transcript.final),
@@ -765,6 +789,10 @@ export function reduceContextState(
       const budget = modelBudget(payload.budget);
       const limits = modelLimits(payload.limits);
       const preparedStateRevision = numberField(payload, 'preparedStateRevision');
+      const estimatedInputTokens =
+        payload.estimatedInputTokens === undefined
+          ? undefined
+          : numberField(payload, 'estimatedInputTokens');
       const parentInvocationId = payload.parentInvocationId;
       const parentToolCallId = payload.parentToolCallId;
       if (
@@ -777,6 +805,8 @@ export function reduceContextState(
         !budget ||
         !limits ||
         !isSafeNonNegativeInteger(preparedStateRevision) ||
+        (payload.estimatedInputTokens !== undefined &&
+          !isSafeNonNegativeInteger(estimatedInputTokens)) ||
         (parentInvocationId !== null && typeof parentInvocationId !== 'string') ||
         (parentToolCallId !== null && typeof parentToolCallId !== 'string')
       ) {
@@ -796,6 +826,7 @@ export function reduceContextState(
             budget,
             limits,
             preparedStateRevision,
+            ...(estimatedInputTokens === undefined ? {} : { estimatedInputTokens }),
             parentInvocationId: parentInvocationId as string | null,
             parentToolCallId: parentToolCallId as string | null,
             attempts: 0,

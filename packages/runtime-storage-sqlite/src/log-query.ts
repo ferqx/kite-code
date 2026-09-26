@@ -31,6 +31,7 @@ import {
   type SqliteRuntimeWorkspaceBinding,
 } from './preflight';
 import { assertSqliteRuntimeRunStoreConnection } from './run-store';
+import { hasSessionLineage } from './session-lineage';
 
 export class SqliteRuntimeLogQueryError extends Error {
   readonly code: RuntimeLogQueryErrorCode;
@@ -99,12 +100,17 @@ function queryError(error: unknown): SqliteRuntimeLogQueryError {
   return new SqliteRuntimeLogQueryError('session_unavailable', 'Runtime log is unavailable.');
 }
 
-function currentSessionLastSequence(db: Database, sessionId: string): number {
+function currentSessionLastSequence(
+  db: Database,
+  sessionId: string,
+  rootOnly: boolean,
+  childParentSessionId?: string,
+): number {
   const session = db
-    .query<{ session_id: string }, [string]>(
-      'SELECT session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',
+    .query<{ session_id: string }, string[]>(
+      `SELECT session_id FROM runtime_sessions WHERE session_id = ?${rootOnly ? ' AND parent_session_id IS NULL' : ''}${childParentSessionId ? ' AND parent_session_id = ?' : ''} LIMIT 1`,
     )
-    .get(sessionId);
+    .get(sessionId, ...(childParentSessionId ? [childParentSessionId] : []));
   if (!session)
     throw new SqliteRuntimeLogQueryError('session_not_found', 'Runtime session was not found.');
   return (
@@ -217,6 +223,8 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State> | RuntimeSnapshotCodec<Event, State>;
   readonly currentEventTypes: readonly string[];
   readonly close?: () => void;
+  /** Internal exact child-history scope; callers expose only getSession/listEvents. */
+  readonly childScope?: Readonly<{ parentSessionId: string; childSessionId: string }>;
 }): RuntimeLogQueryPort<Event> {
   if (input.currentEventTypes.length === 0) {
     throw new SqliteRuntimeLogQueryError(
@@ -225,6 +233,14 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
     );
   }
   const db = input.database;
+  const rootOnly = hasSessionLineage(db) && !input.childScope;
+  if (
+    input.childScope &&
+    (!hasSessionLineage(db) ||
+      !input.childScope.parentSessionId ||
+      !input.childScope.childSessionId)
+  )
+    throw new SqliteRuntimeLogQueryError('session_not_found', 'Runtime session was not found.');
   const closeDatabase = input.close ?? (() => undefined);
   let closed = false;
   const eventTypes = new Set(input.currentEventTypes);
@@ -244,6 +260,7 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
   return Object.freeze({
     getSession(sessionId: string) {
       return run(() => {
+        if (input.childScope && sessionId !== input.childScope.childSessionId) return null;
         const row = db
           .query<
             {
@@ -254,11 +271,11 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
               model_name: string | null;
               last_sequence: number;
             },
-            [string]
+            string[]
           >(`SELECT s.session_id, s.name, s.updated_at, s.model_provider, s.model_name,
           COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence
-          FROM runtime_sessions s WHERE s.session_id = ?`)
-          .get(sessionId);
+          FROM runtime_sessions s WHERE s.session_id = ?${rootOnly ? ' AND s.parent_session_id IS NULL' : ''}${input.childScope ? ' AND s.parent_session_id = ?' : ''}`)
+          .get(sessionId, ...(input.childScope ? [input.childScope.parentSessionId] : []));
         return row
           ? {
               sessionId: row.session_id,
@@ -275,8 +292,12 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
     listSessions(request: RuntimeLogSessionQuery): RuntimeLogSessionReadPage {
       return run(() => {
         assertListRuntimeLogSessionsRequest(request);
-        const filters: string[] = [];
+        const filters: string[] = rootOnly ? ['s.parent_session_id IS NULL'] : [];
         const args: (string | number)[] = [];
+        if (input.childScope) {
+          filters.push('s.session_id = ?', 's.parent_session_id = ?');
+          args.push(input.childScope.childSessionId, input.childScope.parentSessionId);
+        }
         if (request.workspaceDigest) {
           filters.push('s.workspace_digest = ?');
           args.push(request.workspaceDigest);
@@ -328,6 +349,11 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
     listEvents(request: RuntimeLogEventQuery): RuntimeLogEventReadPage<Event> {
       return run(() => {
         assertListRuntimeLogEventsRequest(request);
+        if (input.childScope && request.sessionId !== input.childScope.childSessionId)
+          throw new SqliteRuntimeLogQueryError(
+            'session_not_found',
+            'Runtime session was not found.',
+          );
         const requestedTypes = request.eventTypes ? [...new Set(request.eventTypes)] : undefined;
         if (requestedTypes?.some((type) => !eventTypes.has(type))) {
           throw new SqliteRuntimeLogQueryError(
@@ -335,7 +361,12 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
             'eventTypes contains an unknown current RuntimeEvent type.',
           );
         }
-        const observedLastSequence = currentSessionLastSequence(db, request.sessionId);
+        const observedLastSequence = currentSessionLastSequence(
+          db,
+          request.sessionId,
+          rootOnly,
+          input.childScope?.parentSessionId,
+        );
         const filters = ['session_id = ?'];
         const args: (string | number)[] = [request.sessionId];
         if (request.afterSequence !== undefined) {

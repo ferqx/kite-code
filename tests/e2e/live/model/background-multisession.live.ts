@@ -52,6 +52,7 @@ let afterTurnGateCreated = false;
 let requiredGateAReleased = false;
 let requiredGateBReleased = false;
 let afterTurnGateReleased = false;
+let activeWaitDescription = 'provider preflight';
 const serviceEntrypoint = join(
   import.meta.dir,
   '../../../qualification/fixtures/isolated-store-service.ts',
@@ -170,9 +171,13 @@ async function waitFor(
   predicate: () => Promise<boolean>,
   timeoutMs = LIVE_TIMEOUT_MS,
 ): Promise<void> {
+  activeWaitDescription = description;
   const deadline = Math.min(Date.now() + timeoutMs, SUITE_DEADLINE_AT);
   while (Date.now() < deadline) {
-    if (await predicate()) return;
+    if (await predicate()) {
+      activeWaitDescription = 'between verification stages';
+      return;
+    }
     await Bun.sleep(POLL_INTERVAL_MS);
   }
   throw new Error(`Timed out waiting for ${description}.`);
@@ -583,6 +588,64 @@ function afterTurnLineageDiagnostics(
   }
 }
 
+function afterTurnStallDiagnostics(sessionId: string, executions: readonly unknown[]) {
+  const childTasks = executions.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+    const execution = candidate as Readonly<Record<string, unknown>>;
+    if (execution.kind !== 'subagent') return [];
+    return [
+      {
+        taskId: typeof execution.executionId === 'string' ? execution.executionId : 'unknown',
+        status: typeof execution.status === 'string' ? execution.status : 'unknown',
+        cleanupConfirmed: execution.cleanupConfirmed === true,
+      },
+    ];
+  });
+  try {
+    const database = new Database(join(configRoot, 'kite-session.sqlite'), { readonly: true });
+    try {
+      const events = database
+        .query<{ event_json: string }, [string]>(
+          'SELECT event_json FROM runtime_events WHERE session_id = ? ORDER BY sequence',
+        )
+        .all(sessionId)
+        .map(({ event_json }) => JSON.parse(event_json) as Readonly<Record<string, unknown>>);
+      const toolStates = new Map<string, { kind: string; state: string }>();
+      for (const event of events) {
+        if (event.type === 'tool.queued' && typeof event.toolCallId === 'string') {
+          toolStates.set(event.toolCallId, {
+            kind: event.name === 'task' || event.name === 'shell_execute' ? event.name : 'other',
+            state: 'queued',
+          });
+        } else if (
+          (event.type === 'tool.started' ||
+            event.type === 'tool.finished' ||
+            event.type === 'tool.failed') &&
+          typeof event.toolCallId === 'string'
+        ) {
+          const previous = toolStates.get(event.toolCallId);
+          if (previous) previous.state = event.type.slice('tool.'.length);
+        }
+      }
+      const modelArtifactCounts = database
+        .query<{ kind: string; count: number }, []>(
+          'SELECT kind, COUNT(*) AS count FROM model_artifacts GROUP BY kind',
+        )
+        .all();
+      return {
+        lastEventTypes: events.slice(-40).map((event) => event.type),
+        toolStates: [...toolStates.values()],
+        modelArtifactCounts,
+        childTasks,
+      };
+    } finally {
+      database.close(false);
+    }
+  } catch {
+    return { childTasks, diagnosticStoreUnavailable: true };
+  }
+}
+
 function modelUsageDiagnostics(sessionId: string): Readonly<Record<string, unknown>> {
   try {
     const database = new Database(join(configRoot, 'kite-session.sqlite'), { readonly: true });
@@ -739,7 +802,9 @@ function subagentFailureDiagnostics(
 
 let connection: Connection | undefined;
 const suiteDeadline = setTimeout(() => {
-  process.stderr.write(`DeepSeek background suite exceeded ${LIVE_TIMEOUT_MS}ms.\n`);
+  process.stderr.write(
+    `DeepSeek background suite exceeded ${LIVE_TIMEOUT_MS}ms at ${activeWaitDescription}; session C diagnostics=${JSON.stringify(afterTurnStallDiagnostics(sessionC, []))}.\n`,
+  );
   const emergencyReleases = [
     ...(requiredGateACreated && !requiredGateAReleased
       ? [releaseEventGate(requiredGateA, 'cleanup')]
@@ -1100,6 +1165,19 @@ try {
   assert.equal(afterTurnCalls[0]?.arguments.result_disposition, 'after_turn');
   assert.equal(taskReadCount(afterTurnOriginEvents), 0);
 
+  await waitFor('Session C child Shell command queued', async () => {
+    const current = eventsOf(await connection!.history.loadSession(sessionC));
+    return queuedShellCommands(current).length > 0;
+  });
+  const queuedAfterTurnShell = queuedShellCommands(
+    eventsOf(await connection.history.loadSession(sessionC)),
+  );
+  assert.deepEqual(
+    queuedAfterTurnShell,
+    ['head -n 1 after-turn-gate'],
+    'The child must queue the exact bounded FIFO reader before gate release.',
+  );
+
   const afterTurnRelease = releaseEventGate(afterTurnGate, 'after-turn-released');
   await afterTurnRelease.exited;
   afterTurnGateReleased = true;
@@ -1121,7 +1199,7 @@ try {
     const session = await projection(connection!, sessionC).catch(() => undefined);
     const executions = await background(connection!, sessionC).catch(() => []);
     throw new Error(
-      `${error instanceof Error ? error.message : String(error)} run=${JSON.stringify(runDiagnostic(session?.currentRun))} runs=${JSON.stringify(runPageDiagnostics(runs))} executions=${JSON.stringify(executionDiagnostics(executions))} lineage=${JSON.stringify(afterTurnLineageDiagnostics(sessionC, afterTurnOriginRunId))} rawRunErrors=${JSON.stringify(rawRunErrorDiagnostics(sessionC))} completionFacts=${JSON.stringify(completionDiagnostics(sessionC))} subagentFailures=${JSON.stringify(subagentFailureDiagnostics(sessionC))}`,
+      `${error instanceof Error ? error.message : String(error)} run=${JSON.stringify(runDiagnostic(session?.currentRun))} runs=${JSON.stringify(runPageDiagnostics(runs))} executions=${JSON.stringify(executionDiagnostics(executions))} lineage=${JSON.stringify(afterTurnLineageDiagnostics(sessionC, afterTurnOriginRunId))} rawRunErrors=${JSON.stringify(rawRunErrorDiagnostics(sessionC))} completionFacts=${JSON.stringify(completionDiagnostics(sessionC))} subagentFailures=${JSON.stringify(subagentFailureDiagnostics(sessionC))} stall=${JSON.stringify(afterTurnStallDiagnostics(sessionC, executions))}`,
     );
   });
   await waitForRunTerminal(connection, sessionC);

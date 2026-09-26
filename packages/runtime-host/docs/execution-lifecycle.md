@@ -25,6 +25,12 @@ POSIX 使用 process group/watchdog 边界处理正常取消与 Host 意外退�
 
 验证：[tool coordinator](../test/tool-pipeline-coordinator.test.ts)、[effect supervisor](../test/effect-supervisor.test.ts)、[process execution](../test/process-execution-port.test.ts)、[state recovery](../test/state-recovery.test.ts)。
 
+## 跨 Session Agent 停止意图
+
+`interrupt_agent` 的模型入口在独立父子 Session 的完整 Host 邮箱 Port 就绪时开放。Host 只接受来源当前 Run/Turn 中准确的 `interrupt_agent` Tool attempt，并在持有来源 effect lease 的同一事务提交 `background_execution.stop_requested`、命令回执和 Store 私有停止意图。`agent_id` 先由 Store 解析为直系 child Session 的准确任务、Run 与 controller generation；来源不能把 child ID 当成可直接执行的命令。目标 owner 随后固定原任务身份接纳停止，并使用原 task control 的取消、清理和 unknown 证据；自然完成竞态回报 idle，不伪造刚停止成功。正式 App Server 已验证真实直接子任务的 Stop 结算与非直系拒绝；queued revision 0 子线程的真实 SIGKILL 恢复也已验证。
+
+预算激活前的排队 child 没有目标 Run 或 generation，使用单独的父作用域意图：固定原 child intent 的 `childInvocationId` 和 `toolEventId`，仅父 owner 复用 `task_cancel` 权威。Store 在此意图未结算时拒绝该 child 的预算激活与 Run 创建，因而停止与首次派发按同一持久 writer 串行；兄弟 child 不受影响。恢复扫描只从私有 pending intent 表找候选目标，不从旧同 Session `agent_nodes` 重建活任务权威。
+
 ## 空闲执行权
 
 App Server 的释放回调由 Host 在会话 mailbox 中调用，与下一条命令取得执行权串行。命令提交、activation 和 scheduled work 的 completion 全部结束后，Service 等待 coordinator 清理并核对未决 effect/Provider 事实，才以原 generation 与 authority revision 释放；不再续约空闲会话。下一次执行重新获取 generation 并恢复 coordinator。终态通知先于清理时仍等待实际 completion；等待用户交互只在没有活动执行资源时释放。
@@ -40,9 +46,19 @@ CompletionGuard 的 `wait_for_background` 保持原 Run、Turn、deadline、预�
 
 普通工具调用中的 `task_wait` 只借用 Host 已有的 State revision 通知识别当前 Turn 的新输入，并复用 Background owner watermark 等待目标变化。它的单次 timeout 不持久化，不取得 CompletionGuard 或 child lifecycle 的写权限；新输入、timeout 或 Run abort 结束等待时均不取消 child。required 自动等待与 Kernel 接纳终态的权威关系不变。
 
+[后台 Agent 与 Shell 会话协调方案](../../../docs/plans/background-agent-shell-conversation-coordination.md)的等待修复保留主 Agent `steer_turn` 和原 task 结果权威；Kernel 为有限 Shell 等待保存准确 Shell ID 与模型已回复标记，Host 只将 `required_background` 的初始 task ID 集合投影为 Run 等待原因，各执行卡反映实时状态。阶段 D 的独立 Agent 身份、持久邮箱、QueueOnly／TriggerTurn 路由、模型输入水位及来源后备 reservation 已接入生产事务。`new_turn` 在准确 checkpoint 和新 grant 下将未派发后备原子替换为新 child turn 与首模型 Surface reservation；`current_turn` 仅用已准入旧 Run 的本地模型预算，在准确 call_model lease 内提交目标路由和邮件水位，再由来源事务释放后备，派发前复核来源 ACK。两条路由均不改写原 task 结果，跨 Run 邮件仍是低权限输入；不完整或已尝试的外部效果保持 unknown，不能重派。
+
+阶段 D0 的独立 Agent Session 已接入默认 Store11 App Server：父线程在原 `task` Tool 回执中受理确定性 child intent、required claim 和有限委派预算，子线程分别拥有 State revision、effect lease 与 execution generation；子终态先在子 Session 封存，父线程只从准确结果桥接一次性导入并结算原 claim。默认 Limited 预算保留两个活跃子执行位；第三个 `task` 仍快速返回持久回执，创建 revision 0 的独立子 Session，并以 queued 委派 reservation 保留有限 counters/时间上界但不占活跃位。父 CAS 的 `resource_budget.child_slot_acquired` 在预算位释放后才准子预算激活与 Provider dispatch；排队子任务在派发前被精确取消时使用独立取消事实与释放收据，不把取消写作失败。重启扫描依据同一父意图、子创建回执和预算状态重放内部步骤；已 dispatch 或 unknown 的外部操作不得重试。需要人工审批的子工具目前因尚无父作用域代理交互而失败关闭，不能以旧 Provider 子任务的审批 continuation 证明新路径已支持。
+
+子恢复动作无法取得安全结算证据时，Host 可按原父工具、子线程、attempt 与 grant 精确身份提交非终态 `subagent.child_recovery_required`；同一诊断幂等，冲突诊断拒绝。它只推进父 State revision，供等待与查询观察，不把单个子恢复故障伪装为父 `run.error`，不结算 required claim 或改变预算。Store 在 receipt 事务中复核待处理意图及子执行权；活动或已封存的子线程拒绝该诊断。
+
+独立子线程恢复中的 unknown 终态使用与已确认清理的终态不同的 receipt digest。Host 只在子 State 已为 unknown Run 结果、外部尝试及预算用量仍未知时接受 `cleanupConfirmed=false` 的封存导入，并向父资金 Run 提交 `resource_budget.unknown`；Store 另核对 fenced recovery generation 与释放后的 `recovery_required` authority。结果 Artifact 和 required claim 可一次性交付，但 Host 不将未知用量调和成成功，亦不重派子线程的外部尝试。
+
+已 ACK 但尚未启动外部调用的子 Run 遇持久停止请求时，由 fenced recovery generation 提交用户取消与已确认清理的终态，父结果桥接只导入该封存。queued Run 在这种终态转移时以终态发生时刻填 `startedAtMs`，满足 Run 索引的时间戳不变量；它不表示曾派发模型或工具。父级已先把委派 reservation 标为 unknown 时，导入验证原预算事件与当前 ledger，不追加第二个相同 unknown 事件。
+
 后台 task 接受后，父工具 reservation 可以按工具终态正常结算；在其仍属于同一 Run 且未显式释放时，派发期间创建的 descendant admission 继续作为 child 后续模型轮次和工具调用的预算血缘。admission 仍只能在父 reservation 为 `dispatch_started` 时创建，不能从已结算事实重新构造或扩大授权。
 
-After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。首次执行在 Session mailbox 内另行绑定最新投影 revision 作为变更 CAS，该瞬时值不改变 canonical 请求摘要，因此持久回执和崩溃重放仍使用稳定身份。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。
-Session 已有用户启动的新活动 Run 时，`human_start_preferred` 抑制自动 continuation；持久结果保持可读，但 Host 不把迟到结果注入该活动 Run，也不并发创建第二个主 Run。
+After-turn 具名结果事实持久保存首次启动的 admission revision；内部启动和重试据此重建同一完整 canonical `start_turn` 命令并查询持久回执。首次执行在 Session mailbox 内另行绑定最新投影 revision 作为变更 CAS，该瞬时值不改变 canonical 请求摘要，因此持久回执和崩溃重放仍使用稳定身份。相同 commandId 的摘要不匹配属于 identity collision，必须抑制，不能视作成功重放；缺少该 revision 的旧 after-turn 事实 fail closed。调度失败或被抑制时，Service 释放原 after-turn reservation，不留下第二个预算 owner。 原父 Run 的报告模型预留只为自动汇报保留启动资格：新汇报 Run 准备模型时先释放该旧预留，实际模型请求从新 Run 的活动账本预留，且其输入／输出上界仍不能超过旧报告预留，避免向已清账的旧 Run 新增 reservation 或扩大原授权。
+Host 在等待旧 Run 空闲前先读最新投影，并在等待后再核一次；Session 已有用户启动的新活动 Run 时，`human_start_preferred` 抑制自动 continuation；持久结果保持可读，但 Host 不把迟到结果注入该活动 Run，也不并发创建第二个主 Run。
 
 活动或正在停止的 Shell/service/subagent 会阻止 Fork 与 Rewind；终态历史不会。Session close/delete 先等待现有 bridge 清理这些资源，再释放或删除 State；迟到 callback 不能恢复已删除会话。相关组合回归见 [persistent command host](../test/persistent-command-host.test.ts) 与 Service 的 [Runtime coordinator](../../../apps/kite-service/test/runtime/runtime-session-coordinator.test.ts)。

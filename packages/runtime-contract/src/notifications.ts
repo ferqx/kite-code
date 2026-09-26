@@ -128,6 +128,15 @@ export interface RuntimeClientRewindFileOutcome {
  */
 export type RuntimeClientEvent =
   | {
+      readonly type: 'agent.mail_status';
+      readonly status: 'accepted' | 'input_prepared' | 'result_settled';
+      readonly targetAgentId?: string;
+      readonly messageIds?: readonly string[];
+      readonly submissionId?: string;
+      readonly taskId?: string;
+      readonly resultStatus?: 'completed' | 'failed' | 'cancelled' | 'unknown';
+    }
+  | {
       readonly type: 'user.message';
       readonly messageId: string;
       readonly kind: 'task' | 'answer' | 'resume_context';
@@ -468,6 +477,7 @@ export interface AcceptedPresentationEnvelope {
 export type RuntimeClientEventIdentityScope = 'session' | 'task' | 'turn' | 'run';
 
 const RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_ = {
+  'agent.mail_status': 'session',
   'user.message': 'turn',
   'model.requested': 'turn',
   'reasoning.activity': 'turn',
@@ -856,6 +866,31 @@ function isRuntimeClientSubagentDiagnostic(
 export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
   switch (value.type) {
+    case 'agent.mail_status': {
+      if (value.status === 'accepted' || value.status === 'input_prepared')
+        return (
+          hasExactKeys(
+            value,
+            presentKeys(value, ['type', 'status', 'targetAgentId', 'messageIds'], ['submissionId']),
+          ) &&
+          isIdentifier(value.targetAgentId) &&
+          Array.isArray(value.messageIds) &&
+          value.messageIds.length > 0 &&
+          value.messageIds.length <= 8 &&
+          value.messageIds.every(isIdentifier) &&
+          new Set(value.messageIds).size === value.messageIds.length &&
+          (value.status !== 'accepted' || value.messageIds.length === 1) &&
+          (!Object.hasOwn(value, 'submissionId') || isIdentifier(value.submissionId))
+        );
+      if (value.status === 'result_settled')
+        return (
+          hasExactKeys(value, ['type', 'status', 'submissionId', 'taskId', 'resultStatus']) &&
+          isIdentifier(value.submissionId) &&
+          isIdentifier(value.taskId) &&
+          ['completed', 'failed', 'cancelled', 'unknown'].includes(String(value.resultStatus))
+        );
+      return false;
+    }
     case 'user.message':
       return (
         hasExactKeys(value, ['type', 'messageId', 'kind', 'text']) &&

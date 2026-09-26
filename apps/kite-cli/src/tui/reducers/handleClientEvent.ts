@@ -318,6 +318,8 @@ function reducePresentationBlocks(
   envelope: AcceptedPresentationEnvelope,
 ): TuiState {
   switch (event.type) {
+    case 'agent.mail_status':
+      return projectAgentMailStatus(state, event);
     case 'user.message': {
       // Runtime message identity, rather than text, is the display authority.
       // A subscription may replay the durable notification after reconnect;
@@ -3336,4 +3338,46 @@ function appendNotice(state: TuiState, text: string): TuiState {
     streaming: false,
     presentationState: 'sealed',
   });
+}
+
+function projectAgentMailStatus(
+  state: TuiState,
+  event: Extract<RuntimeClientEvent, { type: 'agent.mail_status' }>,
+): TuiState {
+  const entries =
+    event.status === 'result_settled'
+      ? [{ identity: `followup:${event.submissionId}`, label: 'Agent 续轮' }]
+      : (event.messageIds ?? []).map((messageId) => ({
+          identity: `mail:${messageId}`,
+          label: 'Agent 消息',
+        }));
+  let next = state;
+  for (const entry of entries) {
+    const existing = findBlock(
+      next,
+      (block) => block.kind === 'text' && block.agentMailStatus?.identity === entry.identity,
+    );
+    if (
+      existing?.kind === 'text' &&
+      existing.agentMailStatus?.stage === 'input_prepared' &&
+      event.status === 'accepted'
+    )
+      continue;
+    const phase =
+      event.status === 'accepted'
+        ? '已受理，等待目标读取'
+        : event.status === 'input_prepared'
+          ? '已准备进入目标模型输入'
+          : `结果已结算（${event.resultStatus}）`;
+    const block = {
+      id: existing?.id ?? next.nextBlockId,
+      kind: 'text' as const,
+      content: `${entry.label}：${phase}`,
+      streaming: false,
+      presentationState: 'sealed' as const,
+      agentMailStatus: { identity: entry.identity, stage: event.status },
+    };
+    next = existing ? replaceBlockById(next, existing.id, block) : appendBlock(next, block);
+  }
+  return next;
 }

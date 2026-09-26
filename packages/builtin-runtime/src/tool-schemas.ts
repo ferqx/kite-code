@@ -391,6 +391,40 @@ export const BUILTIN_TASK_CANCEL_SCHEMA_ = z
   })
   .strict();
 
+const BUILTIN_AGENT_ID_SCHEMA_ = z
+  .string()
+  .min(1)
+  .max(256)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
+
+const BUILTIN_AGENT_MESSAGE_SCHEMA_ = z
+  .string()
+  .min(1)
+  .refine((value) => new TextEncoder().encode(value).byteLength <= 4 * 1024, {
+    message: 'message exceeds 4096 UTF-8 bytes',
+  });
+
+export const BUILTIN_LIST_AGENTS_SCHEMA_ = z.object({}).strict();
+
+export const BUILTIN_WAIT_AGENT_SCHEMA_ = z
+  .object({
+    timeout_ms: z.number().int().min(0).max(60_000).optional(),
+  })
+  .strict();
+
+export const BUILTIN_SEND_MESSAGE_SCHEMA_ = z
+  .object({
+    agent_id: BUILTIN_AGENT_ID_SCHEMA_,
+    message: BUILTIN_AGENT_MESSAGE_SCHEMA_,
+  })
+  .strict();
+
+export const BUILTIN_FOLLOWUP_TASK_SCHEMA_ = BUILTIN_SEND_MESSAGE_SCHEMA_;
+
+export const BUILTIN_INTERRUPT_AGENT_SCHEMA_ = z
+  .object({ agent_id: BUILTIN_AGENT_ID_SCHEMA_ })
+  .strict();
+
 export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
   command: z.string().describe('Shell command to execute in the workspace'),
   description: z
@@ -424,10 +458,21 @@ export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
 
 export const BUILTIN_SHELL_READ_SCHEMA_ = z
   .object({
-    shell_id: z.string().min(4).max(128),
-    cursor: z.number().int().min(0).optional(),
+    shell_id: z
+      .string()
+      .min(4)
+      .max(128)
+      .describe('Exact managed shell identity from shell_execute'),
+    cursor: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Cursor returned by the preceding shell_read; returns later output without rereading it',
+      ),
     wait_ms: z.number().int().min(0).max(30_000).optional(),
-    wait_until: z.enum(['terminal']).optional(),
+    wait_until: z.enum(['terminal']).optional().describe('Wait for finite command terminal status'),
   })
   .refine((value) => value.wait_ms === undefined || value.wait_until === undefined, {
     message: 'wait_ms and wait_until are mutually exclusive',
@@ -466,6 +511,11 @@ export const BUILTIN_ZOD_SCHEMAS_ = Object.freeze({
   'builtin:task_read': BUILTIN_TASK_READ_SCHEMA_,
   'builtin:task_wait': BUILTIN_TASK_WAIT_SCHEMA_,
   'builtin:task_cancel': BUILTIN_TASK_CANCEL_SCHEMA_,
+  'builtin:list_agents': BUILTIN_LIST_AGENTS_SCHEMA_,
+  'builtin:wait_agent': BUILTIN_WAIT_AGENT_SCHEMA_,
+  'builtin:send_message': BUILTIN_SEND_MESSAGE_SCHEMA_,
+  'builtin:followup_task': BUILTIN_FOLLOWUP_TASK_SCHEMA_,
+  'builtin:interrupt_agent': BUILTIN_INTERRUPT_AGENT_SCHEMA_,
   'builtin:shell_execute': BUILTIN_SHELL_EXECUTE_SCHEMA_,
   'builtin:shell_read': BUILTIN_SHELL_READ_SCHEMA_,
   'builtin:shell_stop': BUILTIN_SHELL_STOP_SCHEMA_,

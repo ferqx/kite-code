@@ -24,6 +24,29 @@ export function projectRuntimeClientEvent(
 ): RuntimeClientEvent | undefined {
   runtimeHostStateAssertReadableRuntimeEvent(event);
   switch (event.type) {
+    case 'agent.mail_accepted':
+      return {
+        type: 'agent.mail_status',
+        status: 'accepted',
+        targetAgentId: event.targetAgentId,
+        messageIds: [event.messageId],
+        ...(event.submissionId ? { submissionId: event.submissionId } : {}),
+      };
+    case 'agent.mail_input_prepared':
+      return {
+        type: 'agent.mail_status',
+        status: 'input_prepared',
+        targetAgentId: event.targetAgentId,
+        messageIds: event.messageIds,
+      };
+    case 'agent.followup_turn_settled':
+      return {
+        type: 'agent.mail_status',
+        status: 'result_settled',
+        submissionId: event.submissionId,
+        taskId: event.taskId,
+        resultStatus: event.status,
+      };
     case 'user.message_appended':
       return {
         type: 'user.message',
@@ -525,6 +548,22 @@ export function projectRuntimeClientEvent(
         durationMs: event.subagent.durationMs,
       };
     case 'subagent.background_result_persisted':
+      if (event.childTerminalStatus && event.childTerminalStatus !== 'completed') {
+        const status =
+          event.childTerminalStatus === 'cancelled'
+            ? 'cancelled'
+            : event.childTerminalStatus === 'interrupted' ||
+                event.childTerminalStatus === 'suspended' ||
+                event.childTerminalStatus === 'unknown'
+              ? 'interrupted'
+              : 'failed';
+        return {
+          type: 'subagent.failed',
+          subagentId: event.taskId,
+          summary: projectRuntimeClientText(event.shortReport, 8_192),
+          status,
+        };
+      }
       return {
         type: 'subagent.completed',
         subagentId: event.taskId,
@@ -576,6 +615,8 @@ export function projectRuntimeClientEvent(
       return { type: 'context.compaction', status: 'reset' };
     case 'task.completed':
       return { type: 'task.terminal', taskId: event.taskId, status: 'completed' };
+    case 'task.failed':
+      return { type: 'task.terminal', taskId: event.taskId, status: 'failed' };
     case 'task.cancelled':
       return { type: 'task.terminal', taskId: event.taskId, status: 'cancelled' };
     case 'turn.completed':

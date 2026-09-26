@@ -150,6 +150,70 @@ describe('Runtime stdio carrier', () => {
     await carrier.done;
   });
 
+  test('routes explicit child History separately from ordinary Session History', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const reads: string[] = [];
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('ordinary child History denied');
+        },
+        loadChildSession: async (parentSessionId, childSessionId) => {
+          reads.push(`${parentSessionId}/${childSessionId}`);
+          return {
+            session: {
+              sessionId: childSessionId,
+              displayName: 'Child',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            events: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          };
+        },
+      },
+    });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'child',
+        method: 'history/load_child_session',
+        params: { parentSessionId: 'parent', childSessionId: 'child', page: {} },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'child',
+      result: { type: 'history_session_page', session: { sessionId: 'child' } },
+    });
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'ordinary',
+        method: 'history/load_session',
+        params: { sessionId: 'child' },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'ordinary',
+      error: { data: { code: 'internal_error' } },
+    });
+    expect(reads).toEqual(['parent/child']);
+    input.close();
+    await carrier.done;
+  });
+
   test('routes exact App Control after initialize and rejects malformed payloads', async () => {
     const input = new BytesInput();
     const output = new FakeOutput();

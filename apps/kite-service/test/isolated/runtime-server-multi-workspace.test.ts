@@ -474,7 +474,15 @@ test('freezes the active Run model and applies a selected model to the next Run'
     if (firstReceipt.status !== 'applied' || firstReceipt.resource?.kind !== 'run') {
       throw new Error('Expected the first Run to be admitted.');
     }
+    expect(owner.storage.sessions.getSessionModelRoute(sessionId)).toEqual({
+      provider: inputA.config.providerName,
+      name: inputA.config.modelName,
+    });
     owner.applySelectedConfig(admissionIdentity(workspace), inputB.config);
+    expect(owner.storage.sessions.getSessionModelRoute(sessionId)).toEqual({
+      provider: inputA.config.providerName,
+      name: inputA.config.modelName,
+    });
     await waitForTerminal(iterator, sessionId, firstReceipt.resource.run.runId);
 
     expect(modelA.getRequestCount()).toBe(1);
@@ -494,6 +502,10 @@ test('freezes the active Run model and applies a selected model to the next Run'
     if (secondReceipt.status !== 'applied' || secondReceipt.resource?.kind !== 'run') {
       throw new Error('Expected the successor Run to be admitted.');
     }
+    expect(owner.storage.sessions.getSessionModelRoute(sessionId)).toEqual({
+      provider: inputB.config.providerName,
+      name: inputB.config.modelName,
+    });
     for (let attempt = 0; attempt < 100 && modelB.getRequestCount() === 0; attempt += 1) {
       await Bun.sleep(10);
     }

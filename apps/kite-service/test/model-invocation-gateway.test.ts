@@ -249,6 +249,37 @@ describe('ModelInvocationGateway', () => {
     expect(harness.events.at(-1)).toMatchObject({ type: 'model.invocation_completed' });
   });
 
+  test('hard first-attempt deadline ends an active stream without retrying it', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarness({
+      workspace: '/tmp/model-gateway-hard-attempt',
+      transport: async (input) => {
+        dispatches += 1;
+        while (!input.signal?.aborted) {
+          input.onActivity?.();
+          await Bun.sleep(10);
+        }
+        throw input.signal.reason;
+      },
+    });
+    const fixture = compiled();
+    await expect(
+      harness.gateway.invoke({
+        ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+        limits: { maxAttempts: 1, perAttemptTimeoutMs: 30, totalTimeBudgetMs: 80 },
+        hardAttemptTimeoutMs: 80,
+      }),
+    ).rejects.toThrow();
+    expect(dispatches).toBe(1);
+    expect(harness.events).toContainEqual(
+      expect.objectContaining({
+        type: 'model.invocation_interrupted',
+        dispatchCertainty: 'attempted',
+        reasonCode: 'attempt_timeout',
+      }),
+    );
+  });
+
   test('cancellation wins even when the provider ignores its abort signal', async () => {
     let dispatches = 0;
     const harness = createTestModelInvocationHarness({

@@ -92,6 +92,8 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
     case 'list_sessions':
     case 'get_session_recovery':
     case 'get_session_projection':
+    case 'list_child_sessions':
+    case 'get_child_session_projection':
     case 'get_context_status':
     case 'list_checkpoints':
     case 'get_rewind_preview':
@@ -106,6 +108,9 @@ export function mapProtocolQueryToRuntimeQuery(query: RuntimeProtocolQuery): Run
 export function mapRuntimeQueryToProtocol(query: RuntimeQuery): RuntimeProtocolQuery | undefined {
   switch (query.type) {
     case 'get_command_receipt':
+      return RUNTIME_PROTOCOL_QUERY_SCHEMA_.safeParse(query).data;
+    case 'list_child_sessions':
+    case 'get_child_session_projection':
       return RUNTIME_PROTOCOL_QUERY_SCHEMA_.safeParse(query).data;
     case 'list_sessions':
     case 'get_session_recovery':
@@ -402,6 +407,26 @@ export function mapRuntimeQueryResultToProtocol(
     case 'get_session_recovery':
       return RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(result).data;
     case 'get_session_projection':
+      return result.session === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            ...(result.revision === undefined ? {} : { revision: result.revision }),
+            session: mapSession(result.session),
+          }).data;
+    case 'list_child_sessions':
+      return result.childSessions === undefined
+        ? undefined
+        : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({
+            status: 'ok',
+            queryType: result.queryType,
+            childSessions: result.childSessions,
+            ...(result.nextChildCursor === undefined
+              ? {}
+              : { nextChildCursor: result.nextChildCursor }),
+          }).data;
+    case 'get_child_session_projection':
       return result.session === undefined
         ? undefined
         : RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse({

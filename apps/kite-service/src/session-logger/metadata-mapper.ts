@@ -74,6 +74,7 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecord['status
         ? outcomeStatus(canonicalToolOutcome(event))
         : 'ok';
     case 'run.error':
+    case 'task.failed':
     case 'context.compaction_failed':
     case 'context.hard_blocked':
     case 'subagent.failed':

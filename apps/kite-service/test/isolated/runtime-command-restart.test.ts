@@ -231,7 +231,7 @@ test('a pending approval stays durable while a crashed execution owner remains f
   }
 }, 30_000);
 
-test('restart recovery interrupts an unfinished required child without replaying its parent Run', async () => {
+test('restart recovery marks an in-flight required child unknown without replaying its parent Run', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-required-background-restart-'));
   const workspace = join(root, 'workspace');
   const databasePath = join(root, 'kite-session.sqlite');
@@ -239,38 +239,50 @@ test('restart recovery interrupts an unfinished required child without replaying
   const model = createMockModelServer();
   const childRequestStarted = deferred<void>();
   const childResponseGate = deferred<void>();
+  let parentRequests = 0;
   mkdirSync(workspace, { recursive: true });
-  model.setResponses([
-    {
-      message: {
-        tool_calls: [
-          {
-            id: 'required-background-crash-child',
-            name: 'task',
-            args: {
-              name: 'Crash-bound required child',
-              subagent_type: 'explore',
-              task: 'REQUIRED_BACKGROUND_CRASH_CHILD',
-              background: true,
-              result_disposition: 'required',
+  model.setResponses(
+    Array.from({ length: 8 }, () => ({
+      response: async ({ messages }: { messages: readonly unknown[] }) => {
+        const request = JSON.stringify(messages);
+        if (
+          request.includes('REQUIRED_BACKGROUND_CRASH_CHILD') &&
+          !request.includes('REQUIRED_BACKGROUND_CRASH_PARENT')
+        ) {
+          childRequestStarted.resolve();
+          await childResponseGate.promise;
+          return { message: { content: 'This child result must never be admitted.' } };
+        }
+        parentRequests += 1;
+        if (parentRequests === 1) {
+          return {
+            message: {
+              tool_calls: [
+                {
+                  id: 'required-background-crash-child',
+                  name: 'task',
+                  args: {
+                    name: 'Crash-bound required child',
+                    subagent_type: 'explore',
+                    task: 'REQUIRED_BACKGROUND_CRASH_CHILD',
+                    background: true,
+                    result_disposition: 'required',
+                  },
+                },
+              ],
             },
+            toolContinuation: 'required' as const,
+          };
+        }
+        return {
+          message: { content: 'The parent must wait for the required child.' },
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'required-background-crash-child' }],
           },
-        ],
+        };
       },
-      toolContinuation: 'required',
-    },
-    {
-      message: { content: 'The parent must wait for the required child.' },
-      expectedRequest: { toolResults: [{ toolCallId: 'required-background-crash-child' }] },
-    },
-    {
-      response: async () => {
-        childRequestStarted.resolve();
-        await childResponseGate.promise;
-        return { message: { content: 'This child result must never be admitted.' } };
-      },
-    },
-  ]);
+    })),
+  );
   const child = Bun.spawn(
     [
       process.execPath,
@@ -297,7 +309,16 @@ test('restart recovery interrupts an unfinished required child without replaying
     const ready = JSON.parse(await readFirstLine(child.stdout, child.stderr)) as { runId: string };
     expect(ready.runId).toBeString();
     await bounded(childRequestStarted.promise, 'child Provider request');
-    expect(model.getRequestCount()).toBe(3);
+    const requestCountBeforeCrash = model.getRequestCount();
+    expect(requestCountBeforeCrash).toBe(3);
+    expect(
+      model
+        .getRequests()
+        .slice(1)
+        .some(({ messages }) =>
+          JSON.stringify(messages).includes('REQUIRED_BACKGROUND_CRASH_CHILD'),
+        ),
+    ).toBe(true);
     child.kill('SIGKILL');
     expect(await child.exited).not.toBe(0);
 
@@ -326,7 +347,7 @@ test('restart recovery interrupts an unfinished required child without replaying
       }),
     ).toMatchObject({ status: 'applied' });
     await waitForRestartCondition(
-      () => storage!.storage.runs?.get(sessionId, ready.runId)?.status !== 'running',
+      () => storage!.storage.runs?.get(sessionId, ready.runId)?.status === 'unknown',
     );
 
     const snapshot = storage.loadCurrentSnapshot(sessionId);
@@ -334,18 +355,17 @@ test('restart recovery interrupts an unfinished required child without replaying
     const events = storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event);
     expect(run).toMatchObject({
       runId: ready.runId,
-      status: 'failed',
-      terminal: { reasonCode: 'runtime_failed', safeRetry: false },
+      status: 'unknown',
+      terminal: { reasonCode: 'unknown', safeRetry: false, recoveryEntry: 'reconcile' },
     });
     expect(snapshot?.turn.status).toBe('aborted');
     expect(events).toContainEqual(
       expect.objectContaining({
-        type: 'subagent.failed',
-        subagent: expect.objectContaining({ status: 'interrupted' }),
+        type: 'subagent.child_terminal_imported',
       }),
     );
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
-    expect(model.getRequestCount()).toBe(3);
+    expect(model.getRequestCount()).toBe(requestCountBeforeCrash);
 
     await expect(
       runtime.command({
@@ -357,7 +377,7 @@ test('restart recovery interrupts an unfinished required child without replaying
         input: 'REQUIRED_BACKGROUND_CRASH_PARENT',
       }),
     ).resolves.toMatchObject({ status: 'idempotent_replay' });
-    expect(model.getRequestCount()).toBe(3);
+    expect(model.getRequestCount()).toBe(requestCountBeforeCrash);
   } finally {
     childResponseGate.resolve();
     child.kill('SIGKILL');
@@ -528,6 +548,9 @@ function restartRuntimeInput(workspace: string, baseURL: string) {
       apiKey: 'fixture-key',
       baseURL,
       modelName: 'mock-model',
+      modelKwargs: { maxOutputTokens: 64 },
+      modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
+      features: { resourceBudget: true },
       sandbox: { enabled: false },
     },
     shellExecutor: async ({ command }: { command: string }) => ({

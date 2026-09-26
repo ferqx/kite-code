@@ -4,6 +4,7 @@ import type {
   ListRuntimeLogSessionsRequest,
   RuntimeLogErrorCode,
 } from '@kite-ai/runtime-contract';
+
 import {
   assertRuntimeStoredCommandResourceResult,
   type RuntimeRunPhase,
@@ -11,6 +12,10 @@ import {
   type RuntimeRunTransactionMutation,
   type RuntimeStoredCommandResourceResult,
 } from './runtime-run';
+
+/** Exact terminal marker shared by Host decisions and Store proof verification. */
+export const CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED =
+  'Child followup deadline expired before first Model dispatch.';
 
 export type {
   ListRuntimeLogSessionsRequest,
@@ -21,6 +26,11 @@ export {
   assertListRuntimeLogSessionsRequest,
   RuntimeLogRequestValidationError,
 } from '@kite-ai/runtime-contract';
+export {
+  canonicalSealedChildGrantJson,
+  type RuntimeSealedChildGrantPayload,
+  sealChildGrantPayload,
+} from './child-grant';
 export * from './runtime-run';
 
 /**
@@ -153,6 +163,9 @@ export interface RuntimeCommandCommitEvidence extends RuntimeCommandReceiptLooku
   readonly runStart?: {
     readonly runId: string;
     readonly phase: RuntimeRunPhase;
+    /** Only a verified child activation may bind a Run to its parent origin. */
+    readonly originSessionId?: string;
+    readonly originRunId?: string;
   };
 }
 
@@ -341,6 +354,373 @@ export interface RuntimeLogQueryPort<Event = unknown> {
   close(): void;
 }
 
+export interface RuntimeAgentArtifactRef<Kind extends string> {
+  readonly artifactId: string;
+  readonly kind: Kind;
+  readonly integrityIdentifier: string;
+  readonly byteLength: number;
+}
+
+/** Private mailbox rows committed with the same Session State transaction. */
+export type RuntimeAgentMailboxMutation =
+  | Readonly<{
+      kind: 'create_agent';
+      agentId: string;
+      parentAgentId: string | null;
+      initialTaskId?: string;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'accept_mail';
+      messageId: string;
+      submissionId?: string;
+      senderAgentId: string;
+      targetAgentId: string;
+      mode: 'queue_only' | 'trigger_turn' | 'reply';
+      source: Readonly<{
+        runId: string;
+        turnId: string;
+        modelInvocationId: string;
+        toolCallId: string;
+        effectAttemptId: string;
+        sourceTaskId?: string;
+      }>;
+      bodyRef: RuntimeAgentArtifactRef<'agent_mail'>;
+      bodyDigest: string;
+      /** Private body: never copied into a Kernel event, State, or client projection. */
+      bodyText: string;
+      requestDigest: string;
+      sequence: number;
+      acceptedAtMs: number;
+      followupAdmission?: Readonly<{
+        ref: RuntimeAgentArtifactRef<'agent_followup_admission'>;
+        digest: string;
+        canonicalJson: string;
+        createdAt: number;
+      }>;
+    }>
+  | Readonly<{
+      kind: 'prepare_input';
+      targetAgentId: string;
+      modelInvocationId: string;
+      modelAdmissionId: string;
+      fromSequence: number;
+      throughSequence: number;
+      messageIds: readonly string[];
+    }>
+  | Readonly<{
+      kind: 'turn_started';
+      agentId: string;
+      taskId: string;
+      turnOrdinal: number;
+      submissionId?: string;
+    }>
+  | Readonly<{
+      kind: 'task_settled';
+      agentId: string;
+      taskId: string;
+      checkpointRef?: RuntimeAgentArtifactRef<'subagent_checkpoint'>;
+    }>;
+
+/** Store11 cross-Session QueueOnly steps, each committed under its own Session owner. */
+export type RuntimeCrossSessionAgentMailMutation =
+  | Readonly<{
+      kind: 'accept_queue';
+      messageId: string;
+      targetSessionId: string;
+      commandId: string;
+      requestDigest: string;
+      sourceRunId: string;
+      sourceTurnId: string;
+      sourceModelInvocationId: string;
+      sourceToolCallId: string;
+      sourceEffectAttemptId: string;
+      sourceTaskId?: string;
+      sourceGrantId?: string;
+      sourceGrantDigest?: string;
+      sourceSequence: number;
+      bodyText: string;
+      acceptedAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'accept_followup';
+      messageId: string;
+      targetSessionId: string;
+      commandId: string;
+      requestDigest: string;
+      sourceRunId: string;
+      sourceTurnId: string;
+      sourceModelInvocationId: string;
+      sourceToolCallId: string;
+      sourceEffectAttemptId: string;
+      sourceTaskId?: string;
+      sourceGrantId?: string;
+      sourceGrantDigest?: string;
+      sourceSequence: number;
+      bodyText: string;
+      acceptedAtMs: number;
+      submissionId: string;
+      admission: Readonly<{
+        ref: RuntimeAgentArtifactRef<'agent_followup_admission'>;
+        digest: string;
+        canonicalJson: string;
+        createdAt: number;
+      }>;
+    }>
+  | Readonly<{
+      kind: 'request_interrupt';
+      commandId: string;
+      requestDigest: string;
+      sourceRunId: string;
+      sourceTurnId: string;
+      sourceModelInvocationId: string;
+      sourceToolCallId: string;
+      sourceEffectAttemptId: string;
+      sourceTaskId?: string;
+      sourceGrantDigest?: string;
+      targetSessionId: string;
+      targetRunId: string;
+      targetTaskId: string;
+      targetOwnerGeneration: number;
+      targetRevision: number;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'request_queued_interrupt';
+      commandId: string;
+      requestDigest: string;
+      sourceRunId: string;
+      sourceTurnId: string;
+      sourceModelInvocationId: string;
+      sourceToolCallId: string;
+      sourceEffectAttemptId: string;
+      sourceTaskId?: string;
+      sourceGrantDigest?: string;
+      targetSessionId: string;
+      targetRunId: null;
+      targetTaskId: string;
+      targetOwnerGeneration: null;
+      queuedIntentEventId: string;
+      targetRevision: 0;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'settle_queued_interrupt';
+      commandId: string;
+      targetSessionId: string;
+    }>
+  | Readonly<{
+      kind: 'ack_interrupt';
+      sourceSessionId: string;
+      commandId: string;
+      targetGeneration: number;
+    }>
+  | Readonly<{
+      kind: 'settle_interrupt';
+      sourceSessionId: string;
+      commandId: string;
+      targetGeneration: number;
+    }>
+  | Readonly<{
+      kind: 'receive_queue';
+      sourceSessionId: string;
+      messageId: string;
+      receivedAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'receive_followup';
+      sourceSessionId: string;
+      messageId: string;
+      submissionId: string;
+      receivedAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'prepare_queue_input';
+      modelInvocationId: string;
+      modelAdmissionId: string;
+      currentRunId: string;
+      fromSequence: number;
+      throughSequence: number;
+      messageIds: readonly string[];
+    }>
+  | Readonly<{
+      kind: 'replace_followup_backup';
+      targetSessionId: string;
+      messageId: string;
+      submissionId: string;
+      targetRunId: string;
+      modelInvocationId: string;
+      targetRevision: number;
+      surfaceArtifact: RuntimeAgentArtifactRef<'model_surface'>;
+      surfaceInputTokens: number;
+      surfaceMaxOutputTokens: number;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'activate_followup_funding';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      modelInvocationId: string;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'settle_followup_funding';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      modelInvocationId: string;
+      targetRevision: number;
+      disposition: 'completed' | 'unknown' | 'pre_dispatch_released';
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'settle_followup_funding_after_unknown_recovery';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      modelInvocationId: string;
+      targetRevision: number;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'release_accepted_followup_backup';
+      targetSessionId: string;
+      submissionId: string;
+      reason:
+        | 'tool_failed'
+        | 'expired'
+        | 'context_unavailable'
+        | 'authorization_changed'
+        | 'capacity_timeout';
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'release_current_turn_backup';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      invocationId: string;
+      modelAdmissionId: string;
+      reservationId: string;
+      targetRevision: number;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'route_followup';
+      sourceSessionId: string;
+      messageId: string;
+      submissionId: string;
+      route: 'current_turn' | 'new_turn';
+      targetRunId: string;
+      taskId: string;
+      invocationId: string;
+      modelAdmissionId: string;
+      reservationId: string;
+      createdAtMs: number;
+    }>;
+
+/** The child owner seals a replayable terminal checkpoint with its exact seal event. */
+export interface RuntimeChildTerminalCheckpointMutation {
+  readonly ref: RuntimeAgentArtifactRef<'subagent_checkpoint'>;
+  readonly canonicalJson: string;
+  readonly terminalRunId: string;
+  readonly terminalTaskId: string;
+  readonly submissionId?: string;
+}
+
+/** Target-owned new Run start; Store validates the settled checkpoint and source admission. */
+export interface RuntimeFollowupRunStartMutation {
+  readonly sourceSessionId: string;
+  readonly submissionId: string;
+  readonly targetRunId: string;
+  readonly taskId: string;
+  readonly phase: 'planning' | 'building';
+  readonly checkpointRef: RuntimeAgentArtifactRef<'subagent_checkpoint'>;
+  readonly grantDigest: string;
+  readonly grant: Readonly<{
+    ref: RuntimeAgentArtifactRef<'agent_followup_grant'>;
+    canonicalJson: string;
+    createdAt: number;
+  }>;
+}
+
+/** Parent receipt evidence that authorizes one private child Session creation. */
+export interface RuntimeChildSessionIntentMutation {
+  readonly childThreadId: string;
+  readonly parentSessionId: string;
+  readonly parentInvocationId: string;
+  readonly originRunId: string;
+  readonly originTurnId: string;
+  readonly originToolCallId: string;
+  readonly attempt: number;
+  readonly childInvocationId: string;
+  readonly grantDigest: string;
+  readonly sealedGrantJson: string;
+  readonly sealedGrantByteLength: number;
+  readonly sealedGrantDigest: `sha256:${string}`;
+  readonly taskArtifactRef: RuntimeAgentArtifactRef<'subagent_task'>;
+  readonly taskArtifactDigest: string;
+  readonly taskTextDigest: string;
+  readonly disposition: 'required' | 'after_turn';
+  readonly role: 'explore' | 'plan' | 'code' | 'review';
+  readonly fundingRunId: string;
+  readonly delegatedReservationId: string;
+  readonly delegatedUpperBoundDigest: string;
+  readonly deadlineAt: string;
+}
+
+/** CAS proving no child Session was created before a permanent failure settles its Tool claim. */
+export interface RuntimeChildCreationFailureMutation {
+  readonly parentSessionId: string;
+  readonly childThreadId: string;
+  readonly failureReceiptDigest: string;
+  readonly mode: 'absent_child' | 'created_unactivated' | 'activated_no_ack';
+}
+
+export interface RuntimeChildBudgetActivationMutation {
+  readonly childThreadId: string;
+  readonly parentSessionId: string;
+  readonly parentInvocationId: string;
+  readonly childInvocationId: string;
+  readonly grantDigest: string;
+  readonly taskArtifactRef: RuntimeAgentArtifactRef<'subagent_task'>;
+  readonly taskArtifactDigest: string;
+  readonly taskTextDigest: string;
+  readonly fundingRunId: string;
+  readonly delegatedReservationId: string;
+  readonly delegatedUpperBoundDigest: string;
+  readonly childRunId: string;
+  readonly childMaySpawn: boolean;
+  readonly childMayWrite: boolean;
+}
+
+/** Public, fixed Task label; the delegated task body remains in its private Artifact. */
+export const CHILD_SESSION_TASK_USER_GOAL = 'Complete the delegated task.';
+
+export interface RuntimeChildDispatchAckMutation {
+  readonly parentSessionId: string;
+  readonly childThreadId: string;
+  readonly originRunId: string;
+  readonly originToolCallId: string;
+  readonly delegatedReservationId: string;
+}
+
+export interface RuntimeChildTerminalImportMutation {
+  readonly parentSessionId: string;
+  readonly childThreadId: string;
+  readonly terminalReceiptDigest: string;
+}
+
+/** Private parent command decision for one exact child-owned approval request. */
+export interface RuntimeChildApprovalProxyDecisionMutation {
+  readonly proxyInteractionId: string;
+  readonly childRequestRevision: number;
+  readonly childGeneration: number;
+  readonly approvalDigest: `sha256:${string}`;
+  readonly decision: 'approve_once' | 'reject';
+}
+
 export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly sessionId: string;
   readonly events: readonly Event[];
@@ -355,6 +735,20 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly runMutation?: RuntimeRunTransactionMutation;
   /** Session model metadata committed with the same accepted command decision. */
   readonly sessionModelRoute?: RuntimeSessionModelRoute;
+  /** Store11 Agent facts; private bodies share the State/receipt transaction. */
+  readonly agentMailboxMutations?: readonly RuntimeAgentMailboxMutation[];
+  /** One source or target QueueOnly mailbox step in the same Session State transaction. */
+  readonly crossSessionAgentMailMutation?: RuntimeCrossSessionAgentMailMutation;
+  /** Immutable Store row committed with the exact parent Task Tool terminal receipt. */
+  readonly childSessionIntent?: RuntimeChildSessionIntentMutation;
+  readonly childCreationFailure?: RuntimeChildCreationFailureMutation;
+  readonly childBudgetActivation?: RuntimeChildBudgetActivationMutation;
+  readonly childDispatchAck?: RuntimeChildDispatchAckMutation;
+  readonly childTerminalImport?: RuntimeChildTerminalImportMutation;
+  readonly childTerminalCheckpointMutation?: RuntimeChildTerminalCheckpointMutation;
+  readonly followupRunStart?: RuntimeFollowupRunStartMutation;
+  /** Requires the parent command receipt in this exact decision transaction. */
+  readonly childApprovalProxyDecision?: RuntimeChildApprovalProxyDecisionMutation;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
@@ -506,3 +900,5 @@ export function createArtifactPort(
     },
   });
 }
+export { childDelegatedUpperBoundDigest } from '@kite-ai/agent-kernel';
+export { assertChildBudgetWithinDelegation } from '../kernel-adapter/resource-budget';

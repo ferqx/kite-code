@@ -226,6 +226,28 @@ export interface TuiSessionRunDependencies {
 
 /** Closed client facade used by TUI code; no SessionManager passthrough. */
 export interface TuiRuntimeClientFacade {
+  /** Parent-scoped, display-only child reader. It never switches or registers a Runtime Session. */
+  readonly childSessionReader?: Readonly<{
+    list(
+      parentSessionId: string,
+      limit: number,
+      cursor?: import('@kite-ai/runtime-contract').RuntimeChildSessionCursor,
+    ): Promise<
+      Readonly<{
+        entries: readonly import('@kite-ai/runtime-contract').RuntimeChildSessionSummary[];
+        nextCursor?: import('@kite-ai/runtime-contract').RuntimeChildSessionCursor;
+      }>
+    >;
+    load(
+      parentSessionId: string,
+      childSessionId: string,
+    ): Promise<
+      Readonly<{
+        projection: import('@kite-ai/runtime-contract').RuntimeSessionProjection;
+        history: SessionData;
+      }>
+    >;
+  }>;
   submitUserAction(action: TuiSubmittedInteractionAction): Promise<void>;
   createSession(workspace: string): string;
   registerSession(

@@ -6,6 +6,7 @@ import {
   decidePlannedCompletion,
   decideUnplannedCompletion,
   type PlanIdentity,
+  requiredManagedShellIds,
 } from '../../completion';
 import type { KernelEvent } from '../../events';
 import {
@@ -280,6 +281,14 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
       if (decision?.status !== 'blocked') return state;
       if (!blockedEventMatchesDecision(payload, decision)) return state;
       const blocked = decision as CompletionGuardBlocked;
+      const shellIds =
+        blocked.nextAction === 'wait_for_tool' ? [...requiredManagedShellIds(state)].sort() : [];
+      const previousWait = state.completionGuard.waitingReason;
+      const modelRespondedAfterWait =
+        previousWait?.kind === 'required_shell' &&
+        previousWait.modelRespondedAfterWait &&
+        previousWait.shellIds.length === shellIds.length &&
+        shellIds.every((shellId, index) => shellId === previousWait.shellIds[index]);
       return {
         ...state,
         completionGuard: asJsonObject({
@@ -295,7 +304,15 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
                   taskIds: blocked.backgroundTaskIds,
                 },
               }
-            : {}),
+            : shellIds.length > 0
+              ? {
+                  waitingReason: {
+                    kind: 'required_shell',
+                    shellIds,
+                    modelRespondedAfterWait,
+                  },
+                }
+              : {}),
         }),
         transcript: { ...state.transcript, final: undefined },
       };

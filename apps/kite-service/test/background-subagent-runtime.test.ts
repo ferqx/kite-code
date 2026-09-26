@@ -6,8 +6,13 @@ import type {
   PrivateImmutableArtifactRef,
   PrivateImmutableArtifactStorageBackend,
 } from '@kite-ai/builtin-runtime/model';
-import { SubagentResultArtifactStore } from '@kite-ai/builtin-runtime/subagent';
+import { aiMessage, humanMessage } from '@kite-ai/builtin-runtime/model';
+import {
+  SubagentCheckpointArtifactStore,
+  SubagentResultArtifactStore,
+} from '@kite-ai/builtin-runtime/subagent';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeTool } from '../../../tests/helpers/runtime-model';
 import {
   BackgroundSettlementAdmissionError,
@@ -56,6 +61,46 @@ function terminal(overrides: Partial<SubAgentResult> = {}): SubAgentResult {
 }
 
 describe('BackgroundSubagentRuntime', () => {
+  test('reads the exact owner-bound result Artifact before settlement callback completes', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('result-readback', 'recovery');
+    const readback = deferred<void>();
+    let readbackError: unknown;
+    owner.adopt({
+      taskId: 'result-readback-task',
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal(),
+      cancel: async () => {},
+      onResultPersisted: (notification) => {
+        try {
+          expect(
+            owner.readResultArtifact(ownerKey, notification.taskId, notification.resultArtifact),
+          ).toMatchObject({ ok: true, terminalStatus: 'completed' });
+          expect(() =>
+            owner.readResultArtifact(
+              'foreign-owner',
+              notification.taskId,
+              notification.resultArtifact,
+            ),
+          ).toThrow('owner or reference is unavailable');
+          expect(() =>
+            owner.readResultArtifact(ownerKey, notification.taskId, {
+              ...notification.resultArtifact,
+              byteLength: notification.resultArtifact.byteLength + 1,
+            }),
+          ).toThrow('owner or reference is unavailable');
+        } catch (error) {
+          readbackError = error;
+        } finally {
+          readback.resolve();
+        }
+      },
+    });
+    await readback.promise;
+    if (readbackError) throw readbackError;
+  });
+
   test('wakes only the exact owner when its background watermark advances', async () => {
     const owner = runtime();
     const firstOwner = backgroundSubagentOwnerKey('first', 'recovery');
@@ -292,8 +337,9 @@ describe('BackgroundSubagentRuntime', () => {
       status: 'unknown',
       cleanup_confirmed: true,
       error: 'Background sub-agent settlement requires recovery.',
-      result: { summary: 'artifact without settlement' },
     });
+    expect(await rebuilt.readTask(ownerKey, 'task-unsettled')).not.toHaveProperty('artifact');
+    expect(await rebuilt.readTask(ownerKey, 'task-unsettled')).not.toHaveProperty('result');
     expect(
       (await rebuilt.readTask(backgroundSubagentOwnerKey('other', 'other'), 'task-reopen')).status,
     ).toBe('not_found');
@@ -500,8 +546,7 @@ describe('BackgroundSubagentRuntime', () => {
       onResultPersisted: async (notification) => {
         expect(startReceiptReturned).toBe(true);
         expect(await owner.readTask(ownerKey, notification.taskId)).toMatchObject({
-          status: 'completed',
-          result: { summary: 'short persisted report' },
+          status: 'running',
         });
         notifications.push(notification);
       },
@@ -519,6 +564,10 @@ describe('BackgroundSubagentRuntime', () => {
     expect((notifications[0] as { notificationId: string }).notificationId).toMatch(
       /^subagent:subagent-notify:sha256:/,
     );
+    expect(await owner.readTask(ownerKey, 'subagent-notify')).toMatchObject({
+      status: 'completed',
+      result: { summary: 'short persisted report' },
+    });
   });
 
   test('reports a durable-result notification failure for admission release', async () => {
@@ -578,6 +627,361 @@ describe('BackgroundSubagentRuntime', () => {
       }),
     ]);
   });
+
+  test('binds a private checkpoint to the unique terminal proof without exposing it in task reads', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-background-checkpoint-'));
+    roots.push(root);
+    type Ref = PrivateImmutableArtifactRef<'subagent_task'>;
+    const rows = new Map<
+      string,
+      { ref: Ref; payload: Uint8Array; ownerKey: string; taskId: string }
+    >();
+    const backend: PrivateImmutableArtifactStorageBackend<'subagent_task'> = {
+      write(ref, payload) {
+        const value = JSON.parse(new TextDecoder().decode(payload)) as {
+          ownerKey: string;
+          taskId: string;
+        };
+        rows.set(ref.artifactId, { ref, payload, ...value });
+      },
+      read: (ref) => rows.get(ref.artifactId)!.payload,
+      findByOwnerTask: (ownerKey, taskId) =>
+        [...rows.values()].find((row) => row.ownerKey === ownerKey && row.taskId === taskId)?.ref,
+      listByOwner: (ownerKey) =>
+        [...rows.values()].filter((row) => row.ownerKey === ownerKey).map((row) => row.ref),
+      collectGarbage: () => ({
+        scannedEntries: rows.size,
+        retainedArtifacts: rows.size,
+        deletedArtifacts: 0,
+        deletedTemporaryFiles: 0,
+      }),
+    };
+    const results = new SubagentResultArtifactStore({ backend });
+    const checkpoints = new SubagentCheckpointArtifactStore({
+      root: join(root, 'subagent-checkpoints'),
+    });
+    const owner = new BackgroundSubagentRuntime(results, checkpoints);
+    const ownerKey = backgroundSubagentOwnerKey('checkpoint-session', 'recovery');
+    const taskId = 'checkpoint-child';
+    const ref = checkpoints.write({
+      ownerKey,
+      taskId,
+      modelInvocationOrdinal: 2,
+      messages: [humanMessage('inspect'), aiMessage({ content: 'done' })],
+    });
+    const callbackEntered = deferred<void>();
+    const admit = deferred<void>();
+    owner.adopt({
+      taskId,
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal({ checkpointRef: ref }),
+      cancel: async () => {},
+      onResultPersisted: async () => {
+        callbackEntered.resolve();
+        await admit.promise;
+      },
+    });
+    await callbackEntered.promise;
+    expect(owner.checkpointRefForTask(ownerKey, taskId)).toBeNull();
+    admit.resolve();
+    while (owner.hasLiveTask(taskId)) await Bun.sleep(0);
+    expect(owner.checkpointRefForTask(ownerKey, taskId)).toEqual(ref);
+    const taskRead = await owner.readTask(ownerKey, taskId);
+    expect(taskRead).toMatchObject({ status: 'completed' });
+    expect(JSON.stringify(taskRead)).not.toContain('checkpointRef');
+    expect(JSON.stringify(taskRead)).not.toContain('inspect');
+
+    const rebuilt = new BackgroundSubagentRuntime(results, checkpoints);
+    expect(rebuilt.checkpointRefForTask(ownerKey, taskId)).toEqual(ref);
+    // An exact terminal callback retry cannot replace the immutable proof
+    // with an absent checkpoint pointer.
+    owner.adopt({
+      taskId,
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal(),
+      cancel: async () => {},
+      onResultPersisted: async () => {},
+    });
+    while (owner.hasLiveTask(taskId)) await Bun.sleep(0);
+    expect(owner.checkpointRefForTask(ownerKey, taskId)).toEqual(ref);
+
+    owner.adopt({
+      taskId: 'checkpoint-child-other',
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal({ checkpointRef: ref }),
+      cancel: async () => {},
+    });
+    while (owner.hasLiveTask('checkpoint-child-other')) await Bun.sleep(0);
+    expect(owner.checkpointRefForTask(ownerKey, 'checkpoint-child-other')).toBeNull();
+    expect(await owner.readTask(ownerKey, 'checkpoint-child-other')).toMatchObject({
+      status: 'completed',
+    });
+
+    const laterRef = checkpoints.write({
+      ownerKey,
+      taskId: 'checkpoint-child-other',
+      modelInvocationOrdinal: 1,
+      messages: [humanMessage('later'), aiMessage({ content: 'later done' })],
+    });
+    owner.adopt({
+      taskId: 'checkpoint-child-other',
+      ownerKey,
+      ...ORIGIN,
+      observe: async () => terminal({ checkpointRef: laterRef }),
+      cancel: async () => {},
+    });
+    while (owner.hasLiveTask('checkpoint-child-other')) await Bun.sleep(0);
+    expect(owner.checkpointRefForTask(ownerKey, 'checkpoint-child-other')).toBeNull();
+  });
+
+  test('rebuilds a missing proof only from the exact admitted result and checkpoint identity', async () => {
+    type Ref = PrivateImmutableArtifactRef<'subagent_task'>;
+    const rows = new Map<
+      string,
+      { ref: Ref; payload: Uint8Array; ownerKey: string; taskId: string }
+    >();
+    let failProof = true;
+    const backend: PrivateImmutableArtifactStorageBackend<'subagent_task'> = {
+      write(ref, payload) {
+        const value = JSON.parse(new TextDecoder().decode(payload)) as {
+          ownerKey: string;
+          taskId: string;
+        };
+        if (failProof && value.taskId.startsWith('settlement-'))
+          throw new Error('crash before proof');
+        rows.set(ref.artifactId, { ref, payload, ...value });
+      },
+      read: (ref) => rows.get(ref.artifactId)!.payload,
+      findByOwnerTask: (ownerKey, taskId) =>
+        [...rows.values()].find((row) => row.ownerKey === ownerKey && row.taskId === taskId)?.ref,
+      listByOwner: (ownerKey) =>
+        [...rows.values()].filter((row) => row.ownerKey === ownerKey).map((row) => row.ref),
+      collectGarbage: () => ({
+        scannedEntries: rows.size,
+        retainedArtifacts: rows.size,
+        deletedArtifacts: 0,
+        deletedTemporaryFiles: 0,
+      }),
+    };
+    const results = new SubagentResultArtifactStore({ backend });
+    const root = mkdtempSync(join(tmpdir(), 'kite-checkpoint-repair-'));
+    roots.push(root);
+    const checkpoints = new SubagentCheckpointArtifactStore({
+      root: join(root, 'subagent-checkpoints'),
+    });
+    const ownerKey = backgroundSubagentOwnerKey('checkpoint-repair-session', 'recovery');
+    const taskId = 'checkpoint-repair-task';
+    const checkpoint = checkpoints.write({
+      ownerKey,
+      taskId,
+      modelInvocationOrdinal: 2,
+      messages: [humanMessage('private instruction'), aiMessage({ content: 'private answer' })],
+    });
+    let state = createRuntimeHostStateInitialState({
+      threadId: 'checkpoint-repair-session',
+      userId: 'user',
+      workspace: '/workspace',
+      recoveryIdentityKey: 'a'.repeat(64),
+    });
+    const origin = {
+      originRunId: 'checkpoint-repair-run',
+      originTurnId: state.turn.turnId,
+      originToolCallId: 'checkpoint-repair-tool',
+      attempt: 1,
+    };
+    state.tools.calls[origin.originToolCallId] = {
+      toolCallId: origin.originToolCallId,
+      modelMessageId: 'checkpoint-repair-model',
+      name: 'task',
+      args: { background: true },
+      status: 'succeeded',
+      createdAtTurnId: origin.originTurnId,
+    };
+    state.capabilities.invocations[taskId] = {
+      invocationId: taskId,
+      toolCallId: origin.originToolCallId,
+      capabilityId: 'builtin:task',
+      capabilityRevision: 'v1',
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      admissionDigest: 'admission',
+      effectiveEffectsDigest: 'effects',
+      receiptRequirement: 'observation_receipt',
+      attemptsStarted: 1,
+      status: 'succeeded',
+      reconciliation: 'confirmed_success',
+      recordedAt: '2026-09-20T00:00:00.000Z',
+      subagentProviderLifecycle: {
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: taskId,
+        taskArtifact: {
+          artifactId: `pa_${'1'.repeat(64)}`,
+          kind: 'subagent_task',
+          integrityIdentifier: `sha256:${'2'.repeat(64)}`,
+          byteLength: 1,
+        },
+        dispatchIntentDigest: `sha256:${'3'.repeat(64)}`,
+        status: 'cleanup_completed',
+        recordedAt: '2026-09-20T00:00:00.000Z',
+        cleanupAttempt: 1,
+        cleanupKind: 'undispatched',
+        cleanupStartedAt: '2026-09-20T00:00:00.000Z',
+        cleanupConfirmed: true,
+        cleanupCompletedAt: '2026-09-20T00:00:00.000Z',
+      },
+    };
+    const owner = new BackgroundSubagentRuntime(results, checkpoints);
+    owner.adopt({
+      taskId,
+      ownerKey,
+      ...origin,
+      observe: async () => terminal({ checkpointRef: checkpoint }),
+      cancel: async () => {},
+      onResultPersisted: async (notification) => {
+        expect(notification.checkpointRef).toEqual(checkpoint);
+        state = reduceRuntimeState(state, {
+          type: 'subagent.background_result_persisted',
+          taskId: notification.taskId,
+          notificationId: notification.notificationId,
+          artifactIntegrityIdentifier: notification.resultArtifact.integrityIdentifier,
+          checkpointRef: notification.checkpointRef,
+          shortReport: notification.shortReport,
+          source: 'subagent',
+          modelRole: 'user',
+          originRunId: notification.originRunId,
+          originTurnId: notification.originTurnId,
+          originToolCallId: notification.originToolCallId,
+          attempt: notification.attempt,
+        });
+        expect(
+          state.capabilities.invocations[taskId]?.subagentProviderLifecycle?.backgroundResult,
+        ).toEqual(expect.objectContaining({ checkpointRef: checkpoint }));
+      },
+    });
+    while (owner.hasLiveTask(taskId)) await Bun.sleep(0);
+    expect(
+      state.capabilities.invocations[taskId]?.subagentProviderLifecycle?.backgroundResult
+        ?.checkpointRef,
+    ).toEqual(checkpoint);
+    expect(owner.checkpointRefForTask(ownerKey, taskId)).toBeNull();
+    const rebuilt = new BackgroundSubagentRuntime(results, checkpoints);
+    expect(await rebuilt.readTask(ownerKey, taskId)).not.toHaveProperty('result');
+    failProof = false;
+    rebuilt.repairSettlementProofs(ownerKey, state);
+    rebuilt.repairSettlementProofs(ownerKey, state);
+    expect(rebuilt.checkpointRefForTask(ownerKey, taskId)).toEqual(checkpoint);
+    const taskRead = await rebuilt.readTask(ownerKey, taskId);
+    expect(taskRead).toMatchObject({
+      status: 'completed',
+      result: { summary: 'checked the target' },
+    });
+    expect(JSON.stringify(taskRead)).not.toContain('checkpointRef');
+    expect(JSON.stringify(taskRead)).not.toContain('private instruction');
+
+    // A checkpoint that became unreadable after canonical admission does not
+    // roll back the already settled task result or create a fake continuation.
+    for (const [artifactId, row] of rows)
+      if (row.taskId.startsWith('settlement-')) rows.delete(artifactId);
+    const withoutCheckpoint = new BackgroundSubagentRuntime(results, {
+      read: () => {
+        throw new Error('checkpoint corrupt');
+      },
+    });
+    withoutCheckpoint.repairSettlementProofs(ownerKey, state);
+    expect(await withoutCheckpoint.readTask(ownerKey, taskId)).toMatchObject({
+      status: 'completed',
+      result: { summary: 'checked the target' },
+    });
+    expect(withoutCheckpoint.checkpointRefForTask(ownerKey, taskId)).toBeNull();
+
+    const unacceptedTaskId = 'checkpoint-not-admitted';
+    owner.adopt({
+      taskId: unacceptedTaskId,
+      ownerKey,
+      ...origin,
+      observe: async () => terminal({ summary: 'unaccepted result' }),
+      cancel: async () => {},
+      onResultPersisted: async () => {
+        throw new Error('canonical event not committed');
+      },
+    });
+    while (owner.hasLiveTask(unacceptedTaskId)) await Bun.sleep(0);
+    withoutCheckpoint.repairSettlementProofs(ownerKey, state);
+    const unknown = await rebuilt.readTask(ownerKey, unacceptedTaskId);
+    expect(unknown).toMatchObject({ status: 'unknown' });
+    expect(unknown).not.toHaveProperty('artifact');
+    expect(unknown).not.toHaveProperty('result');
+  });
+
+  for (const terminalStatus of ['completed', 'failed', 'suspended'] as const) {
+    test(`holds a ${terminalStatus} result behind Kernel settlement proof`, async () => {
+      const root = mkdtempSync(join(tmpdir(), 'kite-background-settlement-gate-'));
+      roots.push(root);
+      const results = new SubagentResultArtifactStore({ root: join(root, 'subagent-tasks') });
+      const owner = new BackgroundSubagentRuntime(results);
+      const ownerKey = backgroundSubagentOwnerKey(`settlement-gate-${terminalStatus}`, 'recovery');
+      const taskId = `settlement-gate-${terminalStatus}`;
+      const callbackStarted = deferred<void>();
+      const allowSettlement = deferred<void>();
+      let durableArtifactRead = false;
+      owner.adopt({
+        taskId,
+        ownerKey,
+        ...ORIGIN,
+        observe: async () =>
+          terminal({
+            ok: terminalStatus === 'completed',
+            terminalStatus,
+            summary: `${terminalStatus} result`,
+          }),
+        cancel: async () => {},
+        onResultPersisted: async (notification) => {
+          expect(results.read(notification.resultArtifact, taskId)).toMatchObject({
+            summary: `${terminalStatus} result`,
+          });
+          durableArtifactRead = true;
+          callbackStarted.resolve();
+          await allowSettlement.promise;
+        },
+      });
+      const admittedWatermark = owner.ownerWatermark(ownerKey);
+      await callbackStarted.promise;
+      expect(durableArtifactRead).toBe(true);
+      expect(owner.ownerWatermark(ownerKey)).toBe(admittedWatermark);
+      expect(owner.listSnapshot('settlement-gate', ownerKey).executions).toEqual([
+        expect.objectContaining({ executionId: taskId, status: 'running' }),
+      ]);
+      expect(await owner.readTask(ownerKey, taskId)).toMatchObject({
+        task_id: taskId,
+        status: 'running',
+      });
+      expect(await owner.readTask(ownerKey, taskId)).not.toHaveProperty('result');
+      expect(await owner.waitTasks(ownerKey, [taskId], 0)).toMatchObject({
+        status: 'timeout',
+        tasks: [{ task_id: taskId, status: 'running' }],
+      });
+
+      const settled = owner.waitForOwnerChange(ownerKey, admittedWatermark);
+      allowSettlement.resolve();
+      await settled;
+      expect(owner.ownerWatermark(ownerKey)).toBeGreaterThan(admittedWatermark);
+      expect(await owner.readTask(ownerKey, taskId)).toMatchObject({
+        task_id: taskId,
+        status: terminalStatus,
+        result: { summary: `${terminalStatus} result` },
+      });
+      expect(owner.listSnapshot('settlement-gate', ownerKey).executions).toEqual([
+        expect.objectContaining({
+          executionId: taskId,
+          status: terminalStatus === 'suspended' ? 'unavailable' : terminalStatus,
+        }),
+      ]);
+    });
+  }
 
   test('durably exposes an after-turn release after all immediate release attempts fail', async () => {
     type Ref = PrivateImmutableArtifactRef<'subagent_task'>;
@@ -720,6 +1124,10 @@ describe('BackgroundSubagentRuntime', () => {
         cleanupConfirmed: true,
       }),
     ]);
+    const unknownRead = await owner.readTask(ownerKey, 'proof-failure-task');
+    expect(unknownRead).toMatchObject({ status: 'unknown', ok: false });
+    expect(unknownRead).not.toHaveProperty('artifact');
+    expect(unknownRead).not.toHaveProperty('result');
   });
 
   test('cancels only the exact owned child and waits for its watcher cleanup', async () => {

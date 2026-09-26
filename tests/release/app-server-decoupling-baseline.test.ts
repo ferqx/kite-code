@@ -22,7 +22,7 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
   });
 
   test('admits the completed KASD-01 exact Store and multi-connection owner', () => {
-    expect(KITE_SESSION_STORE_FORMAT_EPOCH).toBe('kite-session-app-server-2026-09-02');
+    expect(KITE_SESSION_STORE_FORMAT_EPOCH).toBe('kite-session-cross-followup-2026-09-25');
     expect(source('packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts')).toContain(
       "'store_incompatible'",
     );

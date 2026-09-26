@@ -25,6 +25,11 @@ type RuntimeLogQuerySource =
   | RuntimeLogQueryPort<RuntimeEvent>
   | (() => RuntimeLogQueryPort<RuntimeEvent>);
 
+export type KiteChildHistoryLogOpener = (
+  parentSessionId: string,
+  childSessionId: string,
+) => Pick<RuntimeLogQueryPort<RuntimeEvent>, 'getSession' | 'listEvents' | 'close'>;
+
 export interface KiteRuntimeHistoryCompatibilitySession {
   readonly threadId: string;
   readonly name: string;
@@ -421,6 +426,7 @@ export function projectRuntimeHistoryEvents(
 export function createKiteRuntimeHistoryClient(
   logs: RuntimeLogQuerySource,
   compatibility?: KiteRuntimeHistoryCompatibility,
+  openChildLogs?: KiteChildHistoryLogOpener,
 ): RuntimeHistoryClient {
   return Object.freeze({
     async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
@@ -551,7 +557,11 @@ export function createKiteRuntimeHistoryClient(
             } else if (record.event.type === 'run.error' && record.event.turnId) {
               openTurnIds.delete(record.event.turnId);
             }
-            if (record.event.type === 'task.completed' || record.event.type === 'task.cancelled') {
+            if (
+              record.event.type === 'task.completed' ||
+              record.event.type === 'task.failed' ||
+              record.event.type === 'task.cancelled'
+            ) {
               activeTaskId = undefined;
             }
             previousEventType = record.event.type;
@@ -592,6 +602,35 @@ export function createKiteRuntimeHistoryClient(
             : 'normal',
       };
     },
+    ...(openChildLogs
+      ? {
+          loadChildSession: (
+            parentSessionId: string,
+            childSessionId: string,
+            throughSequence?: number,
+          ) => {
+            if (!parentSessionId || !childSessionId || parentSessionId === childSessionId)
+              throw new Error('Child Session history scope is invalid.');
+            const scopedLogs = () => {
+              const reader = openChildLogs(parentSessionId, childSessionId);
+              return {
+                getSession: (sessionId: string) => reader.getSession?.(sessionId) ?? null,
+                listEvents: (request: Parameters<typeof reader.listEvents>[0]) =>
+                  reader.listEvents(request),
+                close: () => reader.close(),
+                // The indexed child read is the only authorized discovery path.
+                listSessions: () => {
+                  throw new Error('Child Session listing is unavailable.');
+                },
+              } as RuntimeLogQueryPort<RuntimeEvent>;
+            };
+            return createKiteRuntimeHistoryClient(scopedLogs).loadSession(
+              childSessionId,
+              throughSequence,
+            );
+          },
+        }
+      : {}),
   });
 }
 
@@ -638,6 +677,7 @@ export function createKiteRuntimePagedHistoryFromWorkspaceStore(
  */
 export function createKiteRuntimeObserverHistoryClient(
   logs: RuntimeLogQuerySource,
+  openChildLogs?: KiteChildHistoryLogOpener,
 ): RuntimeHistoryClient {
-  return createKiteRuntimeHistoryClient(logs);
+  return createKiteRuntimeHistoryClient(logs, undefined, openChildLogs);
 }

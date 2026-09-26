@@ -106,6 +106,21 @@ function project(
 }
 
 describe('RM-14 Builtin subagent result projection', () => {
+  test('keeps a private checkpoint ref out of model-visible results', () => {
+    const projected = project({
+      ...completedResult(),
+      checkpointRef: {
+        kind: 'subagent_checkpoint',
+        artifactId: `pa_${'a'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+        byteLength: 128,
+      },
+    });
+    expect(projected.ok).toBe(true);
+    expect(JSON.stringify(projected)).not.toContain('checkpointRef');
+    expect(JSON.stringify(projected)).not.toContain('subagent_checkpoint');
+  });
+
   test('projects a required background task as running completion-guard metadata', () => {
     const projected = project(
       {
