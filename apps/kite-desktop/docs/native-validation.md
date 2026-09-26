@@ -151,3 +151,7 @@ Electron 44.3.0／macOS arm64 隔离包，配套 Service candidate `5acc17089999
 本次隔离打包的 `app.asar` SHA-256 为 `dcfaa0e6cdb03194de1e3e78730a045ce35baab231ceffed98b5422ae05b1aaf`，配套 Service build ID 为 `5da70d59f11b04911a970bc3`。`bun run --cwd apps/kite-desktop scripts/native-smoke.ts --execution-recovery` 在真实 Electron 窗口、sandboxed preload、原生 IPC 和配套 Service 下通过；仅使用临时 HOME 与本地模拟 Provider，没有读取用户 Provider 凭据或调用外部模型。三个 required child 的模型回复由测试门分别控制，父 Run 提交完成候选后保持同一 Run 和最初三个 task ID。A 先完成时打开“环境信息”面板可见 A 已完成、B/C 运行中，持久库只有 A 的一条结果事件且无 `run.error`，父模型没有提前重试；B 完成后亦然。C 完成后父模型只恢复一次，三条结果各持久一次，Run 唯一完成且无错误。
 
 父 Turn 自动等待期间，局部结果可以先持久提交而不立即产生客户端订阅事件。DesktopClient 对选中且活动的 Run 读取后台快照，并由 RuntimeClient 的 generation 和 watermark 规则合并；Run 终态或断连后停止读取。窗口宽度下“环境信息”默认收起，测试先显式打开面板再核对卡片。默认视觉 smoke 仍有既有复制按钮尺寸断言（预期 20×20，实际 24×24）失败；本节通过的是 `--execution-recovery` 功能路径，不能据此宣称默认视觉 smoke 或真实外部 Provider 通过。
+
+## 子 Agent 详情入口（2026-09-26）
+
+在 macOS arm64 的隔离打包版中，`app.asar` SHA-256 为 `5d0959a6ff906cf68405bd87bc7b02939a51f4642205d7a9a3b3094c6e907a23`，配套 Service build ID 为 `72a2aee2bd6a589c1422067a`。`bun run apps/kite-desktop/scripts/native-smoke.ts --execution-recovery` 使用临时 HOME 和本机模拟 Provider，通过真实 Electron 窗口、preload、IPC 与 Service 验证三个子 Agent 的环境信息状态、列表刷新、从准确匹配的卡片打开只读子会话并返回父会话。没有匹配独立子会话的旧后台记录只显示状态，由共享 UI 定向测试核对；原生系统对话框仍由测试夹具代答。

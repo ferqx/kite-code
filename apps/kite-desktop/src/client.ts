@@ -1152,7 +1152,7 @@ export class DesktopClient {
   }
   selectSession(sessionId: string): Promise<void> {
     if (this.#view.childSessions?.entries.some((entry) => entry.sessionId === sessionId))
-      return Promise.reject(new Error('子会话只能通过父 Agent 树读取。'));
+      return Promise.reject(new Error('子会话只能通过父会话的环境信息读取。'));
     if (sessionId !== this.#view.selected) {
       this.#childRead?.abort();
       this.#childRead = undefined;
@@ -1257,7 +1257,7 @@ export class DesktopClient {
         (entry) => entry.parentSessionId === parentSessionId && entry.sessionId === childSessionId,
       )
     )
-      throw new Error('请先从父 Agent 树选择子会话。');
+      throw new Error('请先从父会话的环境信息选择子会话。');
     const loadChildSession = connection.history.loadChildSession;
     if (!loadChildSession) throw new Error('当前服务不支持子会话历史读取。');
     this.#childRead?.abort();

@@ -2728,6 +2728,9 @@ body {
   color: var(--muted-foreground);
   font-weight: 400;
 }
+.kite-client .environment-information .background-execution-refresh {
+  margin-left: 4px;
+}
 .kite-client .environment-information .background-execution-group ul {
   margin-top: 6px;
 }
@@ -2745,6 +2748,44 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+.kite-client .environment-information .background-execution-detail {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.kite-client .environment-information .background-execution-detail span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .environment-information .background-execution-detail svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.kite-client .environment-information .background-execution-detail:hover {
+  text-decoration: underline;
+}
+.kite-client .environment-information .background-execution-detail:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.kite-client .environment-information .background-execution-error {
+  padding-left: 26px;
+  color: var(--destructive);
 }
 .kite-client .environment-information .background-execution-name,
 .kite-client .environment-information .background-execution-group code {

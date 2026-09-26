@@ -730,6 +730,12 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   );
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.completed').length, 1);
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.error').length, 0);
+  await childCards.getByRole('button', { name: '刷新子 Agent' }).click();
+  await childCards.getByRole('button', { name: '查看子 Agent 详情：Electron child 0' }).click();
+  await page.getByRole('button', { name: '返回父会话' }).waitFor();
+  assert.equal(await page.getByRole('textbox', { name: '任务输入' }).count(), 0);
+  await page.getByRole('button', { name: '返回父会话' }).click();
+  await page.getByText('Electron background three-child complete.', { exact: false }).waitFor();
   await page.screenshot({ path: join(root, 'out/electron-native-smoke.png') });
   const windowId = String(
     await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getMediaSourceId()'),
@@ -751,7 +757,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   browser = undefined;
   assert.equal(await exited, 0);
   console.log(
-    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching, three-child partial completion, hide/reopen and idle exit passed. No external Provider was used.',
+    'Packaged Electron: isolated paths, sandboxed preload, real IPC/service execution, streaming reload, cached switching, three-child partial completion and child detail navigation, hide/reopen and idle exit passed. No external Provider was used.',
   );
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];

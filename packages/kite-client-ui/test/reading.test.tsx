@@ -173,6 +173,56 @@ test('current environment information shows active shells and fresh subagent his
   expect(document.body.textContent).not.toContain('清理未确认');
 });
 
+test('only an exactly matched child session opens from environment information', async () => {
+  const opened: string[] = [];
+  let refreshed = 0;
+  await render(
+    <BackgroundExecutions
+      currentOnly
+      executions={[
+        {
+          executionId: 'child-internal',
+          displayName: 'Survey renderer',
+          kind: 'subagent',
+          status: 'completed',
+          cleanupConfirmed: true,
+        },
+        {
+          executionId: 'legacy-child',
+          displayName: '旧后台任务',
+          kind: 'subagent',
+          status: 'completed',
+          cleanupConfirmed: true,
+        },
+      ]}
+      subagentDetails={{
+        sessionIdsByExecutionId: new Map([['child-internal', 'private-session']]),
+        error: '列表读取失败',
+        onOpen: (id) => opened.push(id),
+        onRefresh: () => refreshed++,
+      }}
+    />,
+  );
+  const detail = document.querySelector<HTMLButtonElement>(
+    '[aria-label="查看子 Agent 详情：Survey renderer"]',
+  );
+  expect(detail).not.toBeNull();
+  expect(document.querySelector('[aria-label="查看子 Agent 详情：旧后台任务"]')).toBeNull();
+  await act(() => detail!.click());
+  expect(opened).toEqual(['private-session']);
+  await act(() =>
+    document.querySelector<HTMLButtonElement>('[aria-label="刷新子 Agent"]')!.click(),
+  );
+  expect(refreshed).toBe(1);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('列表读取失败');
+  await act(() =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === '重试')!
+      .click(),
+  );
+  expect(refreshed).toBe(2);
+});
+
 test('current environment information stays visible with no fresh running work', async () => {
   await render(
     <BackgroundExecutions

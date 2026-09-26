@@ -1,4 +1,4 @@
-import { BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
+import { ArrowRight01Icon, BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Button } from './ui';
 
@@ -22,6 +22,13 @@ export interface BackgroundExecutionsProps {
   readonly currentOnly?: boolean;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
+  readonly subagentDetails?: {
+    readonly sessionIdsByExecutionId: ReadonlyMap<string, string>;
+    readonly loading?: boolean;
+    readonly error?: string;
+    readonly onOpen: (childSessionId: string) => void;
+    readonly onRefresh: () => void;
+  };
 }
 
 export function BackgroundExecutions({
@@ -31,6 +38,7 @@ export function BackgroundExecutions({
   currentOnly,
   stoppingExecutionId,
   onStop,
+  subagentDetails,
 }: BackgroundExecutionsProps) {
   if (currentOnly) {
     const fresh = stale ? [] : executions;
@@ -66,6 +74,7 @@ export function BackgroundExecutions({
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
           onStop={onStop}
+          subagentDetails={subagentDetails}
         />
       </section>
     );
@@ -112,6 +121,7 @@ function ExecutionGroup({
   executions,
   stoppingExecutionId,
   onStop,
+  subagentDetails,
 }: {
   readonly icon: typeof TerminalIcon;
   readonly label: string;
@@ -119,6 +129,7 @@ function ExecutionGroup({
   readonly executions: readonly BackgroundExecutionSummary[];
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
+  readonly subagentDetails?: BackgroundExecutionsProps['subagentDetails'];
 }) {
   return (
     <section className="background-execution-group" aria-label={label}>
@@ -126,34 +137,70 @@ function ExecutionGroup({
         <HugeiconsIcon icon={icon} />
         <span>{label}</span>
         <span className="background-execution-count">{executions.length}</span>
+        {subagentDetails && (
+          <Button
+            className="ghost background-execution-refresh"
+            size="xs"
+            disabled={subagentDetails.loading}
+            aria-label="刷新子 Agent"
+            onClick={subagentDetails.onRefresh}
+          >
+            刷新
+          </Button>
+        )}
       </h3>
       {executions.length === 0 ? (
         <p className="background-execution-empty">{emptyLabel}</p>
       ) : (
         <ul>
-          {executions.map((execution) => (
-            <li key={execution.executionId}>
-              <span className="background-execution-identity">
-                {execution.displayName ? (
-                  <span className="background-execution-name">{execution.displayName}</span>
-                ) : (
-                  <code>{execution.executionId}</code>
+          {executions.map((execution) => {
+            const childSessionId = subagentDetails?.sessionIdsByExecutionId.get(
+              execution.executionId,
+            );
+            return (
+              <li key={execution.executionId}>
+                <span className="background-execution-identity">
+                  {childSessionId ? (
+                    <button
+                      type="button"
+                      className="background-execution-detail"
+                      title={execution.displayName ?? execution.executionId}
+                      aria-label={`查看子 Agent 详情：${execution.displayName ?? execution.executionId}`}
+                      onClick={() => subagentDetails?.onOpen(childSessionId)}
+                    >
+                      <span>{execution.displayName ?? execution.executionId}</span>
+                      <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
+                    </button>
+                  ) : execution.displayName ? (
+                    <span className="background-execution-name">{execution.displayName}</span>
+                  ) : (
+                    <code>{execution.executionId}</code>
+                  )}
+                </span>
+                <span className="background-execution-status">{statusLabel(execution.status)}</span>
+                {onStop && execution.status === 'running' && (
+                  <Button
+                    className="background-execution-stop"
+                    size="xs"
+                    disabled={stoppingExecutionId === execution.executionId}
+                    onClick={() => onStop(execution)}
+                  >
+                    {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}
+                  </Button>
                 )}
-              </span>
-              <span className="background-execution-status">{statusLabel(execution.status)}</span>
-              {onStop && execution.status === 'running' && (
-                <Button
-                  className="background-execution-stop"
-                  size="xs"
-                  disabled={stoppingExecutionId === execution.executionId}
-                  onClick={() => onStop(execution)}
-                >
-                  {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}
-                </Button>
-              )}
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
+      )}
+      {subagentDetails?.loading && <p role="status">正在读取子 Agent…</p>}
+      {subagentDetails?.error && (
+        <p role="alert" className="background-execution-error">
+          {subagentDetails.error}{' '}
+          <Button className="ghost" size="xs" onClick={subagentDetails.onRefresh}>
+            重试
+          </Button>
+        </p>
       )}
     </section>
   );

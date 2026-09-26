@@ -112,6 +112,9 @@ export function App({ client }: { client: DesktopClient }) {
     !preparing && view.childSessions?.parentSessionId === selected ? view.childSessions : undefined;
   const childDetail =
     !preparing && view.childDetail?.parentSessionId === selected ? view.childDetail : undefined;
+  const childSessionIdsByExecutionId = new Map(
+    childSessions?.entries.map((entry) => [entry.taskId, entry.sessionId] as const) ?? [],
+  );
   const conversationWorkspace = newConversationWorkspace ?? workspace;
   const conversationBranch =
     newConversationBranch?.workspace === conversationWorkspace
@@ -533,60 +536,6 @@ export function App({ client }: { client: DesktopClient }) {
           </>
         ) : undefined
       }
-      beforeConversation={
-        !workbenchView && !scheduledTasksView && !preparing && selected ? (
-          <section aria-label="父 Agent 树" className="child-session-tree">
-            {(childSessions?.entries.length || isActiveRun(projection)) && (
-              <Button
-                className="ghost"
-                disabled={childSessions?.loading}
-                onClick={() =>
-                  void client.refreshChildSessions(selected).catch((error) => client.report(error))
-                }
-              >
-                刷新子 Agent
-              </Button>
-            )}
-            {childSessions?.entries.length ? (
-              <div className="child-session-list">
-                <strong>子 Agent</strong>
-                {childSessions.entries.map((entry) => (
-                  <Button
-                    key={entry.sessionId}
-                    className="ghost"
-                    aria-current={
-                      childDetail?.childSessionId === entry.sessionId ? 'page' : undefined
-                    }
-                    onClick={() =>
-                      void client
-                        .openChildSession(selected, entry.sessionId)
-                        .catch((error) => client.report(error))
-                    }
-                  >
-                    {entry.displayName || entry.taskId || '子 Agent'}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
-            {childSessions?.loading && <p role="status">正在读取子 Agent…</p>}
-            {childSessions?.error && (
-              <p role="alert">
-                {childSessions.error}{' '}
-                <Button
-                  className="ghost"
-                  onClick={() =>
-                    void client
-                      .refreshChildSessions(selected)
-                      .catch((error) => client.report(error))
-                  }
-                >
-                  重试
-                </Button>
-              </p>
-            )}
-          </section>
-        ) : undefined
-      }
       historyError={
         childDetail?.error
           ? {
@@ -634,6 +583,23 @@ export function App({ client }: { client: DesktopClient }) {
             stale={view.background?.[selected]?.stale}
             currentOnly
             stoppingExecutionId={stoppingBackground}
+            subagentDetails={
+              connected && ready
+                ? {
+                    sessionIdsByExecutionId: childSessionIdsByExecutionId,
+                    loading: childSessions?.loading,
+                    error: childSessions?.error,
+                    onOpen: (childSessionId) =>
+                      void client
+                        .openChildSession(selected, childSessionId)
+                        .catch((error) => client.report(error)),
+                    onRefresh: () =>
+                      void client
+                        .refreshChildSessions(selected)
+                        .catch((error) => client.report(error)),
+                  }
+                : undefined
+            }
             onStop={(execution) => {
               if (
                 !execution.sessionId ||

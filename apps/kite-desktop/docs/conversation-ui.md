@@ -52,7 +52,7 @@ Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示
 
 当 Runtime 提供 `model.cache` 样本时，Desktop 按会话累计命中与未命中 token，在 Composer 底栏显示整数缓存命中率。历史读取从已保存事件重建，实时订阅只追加历史水位之后的样本；无样本时不显示，切换会话不沿用上一会话指标。
 
-子代理消息保留服务事实用于恢复，但主会话只渲染工具活动与稳定 stepId 对应的工具步骤，不显示子 Agent 结果段落。可见父 task 的子工具进入父展开区的子 Agent 容器，按确切 toolCallId 去重；没有可见父工具时保留子 Agent 容器入口，内部工具不进入主消息列表。当前没有独立子代理详情或控制。
+子代理消息保留服务事实用于恢复，但主会话只渲染工具活动与稳定 stepId 对应的工具步骤，不显示子 Agent 结果段落。可见父 task 的子工具进入父展开区的子 Agent 容器，按确切 toolCallId 去重；没有可见父工具时保留子 Agent 容器入口，内部工具不进入主消息列表。独立子会话的只读详情从当前父会话的环境信息卡片进入，使用准确 task 身份关联背景记录和父作用域列表；没有匹配身份的旧后台记录只显示状态，不推断可访问详情。
 
 主工具的 `tool.review` 由 Service 投影真实自动审批请求与完成事实，显示审批中、批准、未通过或转人工；技术异常和无效结果均转人工，不伪装拒绝。`approval.granted` 保留明确 grant，批准与工具执行结果分开保存，停止后不丢批准来源。审批控件只在 `interaction.grants` 包含 same_command 时显示下拉直接批准入口，调用原 `respond_interaction`，不增加本地授权缓存。压缩 requested／completed／failed 更新同一次压缩标记；Ask 回执保留已有安全问题文本与回答摘要，详情可折叠。
 

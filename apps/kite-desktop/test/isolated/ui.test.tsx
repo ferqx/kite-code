@@ -314,30 +314,56 @@ class UiClient extends DesktopClient {
   }
 }
 
-test('parent Agent tree reads three private children without selecting or mutating them', async () => {
+test('environment information opens three private child details without selecting or mutating them', async () => {
   const client = new UiClient();
+  const entries = ['a', 'b', 'c'].map((label) => ({
+    sessionId: `private-${label}`,
+    parentSessionId: 's0',
+    agentId: `task-${label}`,
+    taskId: `task-${label}`,
+    displayName: `子任务 ${label}`,
+    revision: 1,
+    updatedAtMs: 1,
+  }));
   client.update({
     childSessions: {
       parentSessionId: 's0',
       loading: false,
-      entries: ['a', 'b', 'c'].map((label) => ({
-        sessionId: `private-${label}`,
-        parentSessionId: 's0',
-        agentId: `agent-${label}`,
-        taskId: `task-${label}`,
-        displayName: `子任务 ${label}`,
-        revision: 1,
-        updatedAtMs: 1,
-      })),
+      entries,
+    },
+    background: {
+      s0: {
+        snapshot: {
+          sessionId: 's0',
+          sessionRevision: 1,
+          aggregateGeneration: 'test-children',
+          watermark: 1,
+          executions: entries.map((entry) => ({
+            executionId: entry.taskId,
+            displayName: entry.displayName,
+            sessionId: 's0',
+            sessionRevision: 1,
+            kind: 'subagent' as const,
+            status: 'completed' as const,
+            ownerGeneration: 'test-children',
+            revision: 1,
+            cleanupConfirmed: true,
+          })),
+        },
+        connectionGeneration: 1,
+        stale: false,
+      },
     },
   });
   await render(<App client={client} />);
   expect(document.querySelectorAll('.session-row')).toHaveLength(2);
-  await click(button('子任务 a'));
+  expect(document.querySelector('[aria-label="父 Agent 树"]')).toBeNull();
+  await click(button('查看子 Agent 详情：子任务 a'));
   expect(document.body.textContent).toContain('答复 private-a');
   expect(input()).toBeNull();
   expect(document.querySelector('.interaction-area')).toBeNull();
-  await click(button('子任务 c'));
+  await click(button('返回父会话'));
+  await click(button('查看子 Agent 详情：子任务 c'));
   expect(document.body.textContent).toContain('答复 private-c');
   expect(document.body.textContent).not.toContain('答复 private-a');
   expect(client.selectedIds).toEqual([]);
