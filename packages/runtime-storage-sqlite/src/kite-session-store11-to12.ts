@@ -9,6 +9,7 @@ import {
   assertKiteStoreIntegrity,
   KITE_SESSION_STORE11_TABLE_COLUMNS,
 } from './kite-home-store';
+import { KITE_SESSION_AGENT_CROSS_SESSION_DDL } from './kite-session-agent-schema';
 import { captureSqliteTableContentDigests } from './sqlite-table-content';
 
 /** Convert only a private copied candidate. The original Store 11 remains untouched. */
@@ -22,6 +23,7 @@ export function convertKiteSessionStore11CandidateTo12(input: {
   const before = captureSqliteTableContentDigests(database, KITE_SESSION_STORE11_TABLE_COLUMNS);
   database.run('BEGIN IMMEDIATE');
   try {
+    for (const statement of KITE_SESSION_AGENT_CROSS_SESSION_DDL) database.run(statement);
     database.run(KITE_CHILD_APPROVAL_PROXY_DDL);
     database.run(KITE_CHILD_APPROVAL_PROXY_PARENT_INDEX);
     database.query('UPDATE kite_meta SET value=? WHERE key=?').run('12', 'schema_version');

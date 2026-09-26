@@ -71,7 +71,7 @@
 
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
 
-App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-preparation.ts)，只对准确已知格式执行维护锁、来源备份、私有候选转换、旧行摘要与连续性校验，再发布 Store13；随后[Session 文件 preflight](src/kite-session-runtime-file.ts)只读核对当前格式。release restart 复用这些检查，失败时不停止旧实例。未知不兼容文件保持原样；absent preflight 不创建文件。旧会话通过原 Session ID 与 History 读取，不清空用户配置、凭据或信任资料。
+App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-preparation.ts)，只对准确已知格式执行维护锁、来源备份、私有候选转换、旧行摘要与连续性校验，再发布 Store13；随后[Session 文件 preflight](src/kite-session-runtime-file.ts)只读核对当前格式。持久 Store11 lineage 格式不含跨 Session mail 的 outbox/inbox 表；Store11→12 候选转换补建这两张空表及索引，再核对旧行未变。release restart 复用这些检查，失败时不停止旧实例。未知不兼容文件保持原样；absent preflight 不创建文件。旧会话通过原 Session ID 与 History 读取，不清空用户配置、凭据或信任资料。
 
 
 当前启动先核对文件安全、格式与精确 schema，不扫描所有会话正文。Session snapshot 读取在同一只读事务内校验该会话的绑定、事件顺序／codec、snapshot checksum／revision、Run 与 receipt；损坏会话不阻止先列出目录。Artifact 内容由 typed reader 在访问时验证。完整 physical/FK 扫描保留于显式文件 preflight，不能在每个组合 reader 创建时重复执行。实现与测试见[事务与状态](docs/transactions-and-state.md)。

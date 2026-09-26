@@ -233,3 +233,22 @@ export const KITE_SESSION_AGENT_INDEXES = Object.freeze([
   'agent_mail_outbox_pending',
   'agent_mail_inbox_input',
 ]);
+
+// The persisted lineage Store 11 predates cross-Session mail. Keep its exact
+// shape separate from the later schema even though both use the Agent tables.
+const isCrossSessionMailStatement = (statement: string): boolean =>
+  statement.startsWith('CREATE TABLE agent_mail_outbox (') ||
+  statement.startsWith('CREATE TABLE agent_mail_inbox (') ||
+  statement.startsWith('CREATE INDEX agent_mail_outbox_pending ') ||
+  statement.startsWith('CREATE INDEX agent_mail_inbox_input ');
+
+export const KITE_SESSION_AGENT_STORE11_DDL = Object.freeze(
+  KITE_SESSION_AGENT_DDL.filter((statement) => !isCrossSessionMailStatement(statement)),
+);
+export const KITE_SESSION_AGENT_CROSS_SESSION_DDL = Object.freeze(
+  KITE_SESSION_AGENT_DDL.filter(isCrossSessionMailStatement),
+);
+export const KITE_SESSION_AGENT_STORE11_INDEXES = Object.freeze([
+  'agent_mail_target_sequence',
+  'agent_nodes_parent',
+] as const);

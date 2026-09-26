@@ -9,7 +9,7 @@ import {
   assertKiteStoreIntegrity,
   KITE_SESSION_STORE10_TABLE_COLUMNS,
 } from './kite-home-store';
-import { KITE_SESSION_AGENT_DDL } from './kite-session-agent-schema';
+import { KITE_SESSION_AGENT_STORE11_DDL } from './kite-session-agent-schema';
 import { captureSqliteTableContentDigests } from './sqlite-table-content';
 
 /**
@@ -31,7 +31,7 @@ export function convertKiteSessionStore10CandidateTo11(input: {
     database.run(
       'ALTER TABLE runtime_sessions ADD COLUMN parent_session_id TEXT REFERENCES runtime_sessions(session_id)',
     );
-    for (const statement of KITE_SESSION_AGENT_DDL) database.run(statement);
+    for (const statement of KITE_SESSION_AGENT_STORE11_DDL) database.run(statement);
     database.run(KITE_CHILD_SESSION_INTENT_DDL);
     database.run(KITE_CHILD_SESSION_INTENT_PENDING_INDEX);
     database.query('UPDATE kite_meta SET value = ? WHERE key = ?').run('11', 'schema_version');

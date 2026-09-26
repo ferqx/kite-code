@@ -25,8 +25,10 @@ import {
   KITE_CROSS_SESSION_FOLLOWUP_ROUTE_DDL,
 } from './kite-cross-session-followup-schema';
 import {
-  KITE_SESSION_AGENT_DDL,
+  KITE_SESSION_AGENT_CROSS_SESSION_DDL,
   KITE_SESSION_AGENT_INDEXES,
+  KITE_SESSION_AGENT_STORE11_DDL,
+  KITE_SESSION_AGENT_STORE11_INDEXES,
   KITE_SESSION_AGENT_TABLE_COLUMNS,
 } from './kite-session-agent-schema';
 
@@ -266,11 +268,18 @@ export const KITE_SESSION_STORE10_TABLE_COLUMNS = Object.freeze({
 export const KITE_SESSION_STORE11_TABLE_COLUMNS = Object.freeze({
   ...KITE_SESSION_STORE10_TABLE_COLUMNS,
   runtime_sessions: [...KITE_SESSION_STORE10_TABLE_COLUMNS.runtime_sessions, 'parent_session_id'],
-  ...KITE_SESSION_AGENT_TABLE_COLUMNS,
+  agent_nodes: KITE_SESSION_AGENT_TABLE_COLUMNS.agent_nodes,
+  agent_mail_bodies: KITE_SESSION_AGENT_TABLE_COLUMNS.agent_mail_bodies,
+  agent_mail: KITE_SESSION_AGENT_TABLE_COLUMNS.agent_mail,
+  subagent_checkpoint_artifacts: KITE_SESSION_AGENT_TABLE_COLUMNS.subagent_checkpoint_artifacts,
+  agent_followup_admission_artifacts:
+    KITE_SESSION_AGENT_TABLE_COLUMNS.agent_followup_admission_artifacts,
   child_session_intents: KITE_CHILD_SESSION_INTENT_COLUMNS,
 } as const);
 export const KITE_SESSION_STORE12_TABLE_COLUMNS = Object.freeze({
   ...KITE_SESSION_STORE11_TABLE_COLUMNS,
+  agent_mail_outbox: KITE_SESSION_AGENT_TABLE_COLUMNS.agent_mail_outbox,
+  agent_mail_inbox: KITE_SESSION_AGENT_TABLE_COLUMNS.agent_mail_inbox,
   child_approval_proxies: KITE_CHILD_APPROVAL_PROXY_COLUMNS,
 } as const);
 export const KITE_SESSION_STORE13_TABLE_COLUMNS = Object.freeze({
@@ -549,12 +558,13 @@ export const KITE_SESSION_STORE11_DDL = Object.freeze([
         )
       : statement,
   ),
-  ...KITE_SESSION_AGENT_DDL,
+  ...KITE_SESSION_AGENT_STORE11_DDL,
   KITE_CHILD_SESSION_INTENT_DDL,
   KITE_CHILD_SESSION_INTENT_PENDING_INDEX,
 ]);
 export const KITE_SESSION_STORE12_DDL = Object.freeze([
   ...KITE_SESSION_STORE11_DDL,
+  ...KITE_SESSION_AGENT_CROSS_SESSION_DDL,
   KITE_CHILD_APPROVAL_PROXY_DDL,
   KITE_CHILD_APPROVAL_PROXY_PARENT_INDEX,
 ]);
@@ -636,7 +646,7 @@ const kiteSessionStore11Profile = (): ExactKiteStoreProfile => ({
   tableColumns: KITE_SESSION_STORE11_TABLE_COLUMNS,
   indexes: [
     ...KITE_HOME_STORE_INDEXES,
-    ...KITE_SESSION_AGENT_INDEXES,
+    ...KITE_SESSION_AGENT_STORE11_INDEXES,
     'child_session_intents_parent_pending',
   ],
 });

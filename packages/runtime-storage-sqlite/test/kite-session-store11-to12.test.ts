@@ -64,12 +64,24 @@ function candidate(): Database {
 }
 
 describe('private Store 11 to 12 candidate conversion', () => {
-  test('adds only the approval proxy table and retains every Store 11 row', () => {
+  test('adds cross-Session mail and approval tables while retaining every lineage Store 11 row', () => {
     const database = candidate();
     try {
+      expect(
+        database.query("SELECT name FROM sqlite_schema WHERE name='agent_mail_outbox'").get(),
+      ).toBeNull();
+      expect(
+        database.query("SELECT name FROM sqlite_schema WHERE name='agent_mail_inbox'").get(),
+      ).toBeNull();
       const before = captureSqliteTableContentDigests(database, KITE_SESSION_STORE11_TABLE_COLUMNS);
       convertKiteSessionStore11CandidateTo12({ database });
       assertKiteSessionStore12Schema(database);
+      expect(
+        database.query("SELECT name FROM sqlite_schema WHERE name='agent_mail_outbox'").get(),
+      ).toEqual({ name: 'agent_mail_outbox' });
+      expect(
+        database.query("SELECT name FROM sqlite_schema WHERE name='agent_mail_inbox'").get(),
+      ).toEqual({ name: 'agent_mail_inbox' });
       const after = captureSqliteTableContentDigests(database, KITE_SESSION_STORE11_TABLE_COLUMNS);
       for (const table of Object.keys(KITE_SESSION_STORE11_TABLE_COLUMNS).filter(
         (name) => name !== 'kite_meta',
