@@ -241,6 +241,21 @@ setInterval(() => {}, 1_000);`,
   }
 }, 25_000);
 
+test('emergency exit can terminate a pre-initialize Service that never settles', async () => {
+  await withFixture(
+    `process.on('SIGTERM', () => {});
+process.stdin.resume();
+setInterval(() => {}, 1_000);`,
+    async (carrier) => {
+      const closing = carrier.close();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      carrier.forceTerminate();
+      await withDeadline(closing, 3_000);
+      expect(carrier.finished).toBe(true);
+    },
+  );
+});
+
 test('nonzero exit after initialize still requires task-result inspection', async () => {
   await withFixture(
     `process.stdin.resume(); process.stdin.on('end', () => process.exit(1));`,

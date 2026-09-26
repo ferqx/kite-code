@@ -26,7 +26,7 @@
 - [桌面 transport](src/transport.ts)每次 IPC 只拉取一个有界 Runtime frame；[Electron 宿主](electron/host.ts)只启动构建时固定、运行时校验过的配套服务，[stdio 进程](electron/runtime/service-process.ts)使用单消费者和 16 帧有界输出队列。
 - [页面重接](electron/runtime/renderer-connection.ts)保留同一 Service protocol peer，页面刷新或 renderer 进程退出只 detach 旧代次；新页面恢复订阅和历史，不清理运行中的任务。传输代次与 UI 导航恢复见[新对话 owner](docs/new-conversation.md#页面刷新与连接恢复)。
 - renderer 只导入 `kite-local-runtime/client/protocol` 的环境无关组合，不使用 Node/Bun、Host、Store 或 Web REST。
-- 关闭窗口隐藏主窗口；明确退出前由 [Electron lifecycle](electron/main.ts)查询完整会话目录，仅有运行或等待中的会话任务时要求确认。继续退出或空闲直接退出都会关闭自有服务 stdin 并等待 Service 清理。查询无法完整确认时保守提示；失败与副作用未知保持可见，不影响其他客户端。
+- 关闭窗口隐藏主窗口；明确退出前由 [Electron lifecycle](electron/main.ts)查询完整会话目录，仅有运行或等待中的会话任务时要求确认。继续退出或空闲直接退出都会先关闭自有服务 stdin 并等待 Service 清理；清理失败或超过 20 秒时提供紧急退出，紧急路径不等待 Host 锁，尝试终止本应用拥有的 Service。查询无法完整确认时保守提示；失败与副作用未知保持可见，不影响其他客户端。
 
 ## 开发与验证
 
@@ -62,7 +62,7 @@ Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配�
 
 [原生验收](docs/native-validation.md)保留 2026-09-07 Tauri 版本在本机 macOS 的制品、隔离条件、真实窗口与生命周期证据，并另列宿主无关的 Service 证据。这些历史结果不作为 Electron 资格；同一记录现已登记 Electron 44.3.0 独立包的准确身份、隔离原生验收与剩余人工验证。
 
-当前 [Electron lifecycle](electron/main.ts)在关窗时隐藏主窗口；明确退出由主进程 `before-quit` 发起完整会话任务检查，只在存在运行或等待中的任务时显示原生异步确认框，空闲时直接清理退出；无法完整检查时保守显示确认。两条路径都在 Service 清理完成后再次退出。空间切换不关闭 Service。标题栏非交互区由 CSS drag region 交给 Electron，双击才调用封闭的最大化切换。窗口、preload、重接、退出和崩溃清理需重复真实 Electron 场景，不能用单元测试或浏览器预览替代。
+当前 [Electron lifecycle](electron/main.ts)在关窗时隐藏主窗口；明确退出由主进程 `before-quit` 发起完整会话任务检查，只在存在运行或等待中的任务时显示原生异步确认框，空闲时直接清理退出；无法完整检查时保守显示确认。正常清理完成后再次退出；清理失败或等待超过 20 秒时仍有紧急退出路径，第二次明确退出也可触发该路径。空间切换不关闭 Service。标题栏非交互区由 CSS drag region 交给 Electron，双击才调用封闭的最大化切换。窗口、preload、重接、退出和崩溃清理需重复真实 Electron 场景，不能用单元测试或浏览器预览替代。
 
 会话切换/重连保持订阅代次边界；跨项目清除旧选中状态，加载会话显示提示并在 20 秒后有界失败。`tool.cancelled`/`tool.rejected` 在历史与实时投影中均为终态，迟到进度不能覆盖。其余范围见首版计划。
 

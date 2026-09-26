@@ -23,6 +23,7 @@ export interface ServiceProcessCarrier {
   receive(signal?: AbortSignal): Promise<string>;
   waitForReceiver(): Promise<void>;
   close(): Promise<void>;
+  forceTerminate?(): void;
   markInitialized?(): void;
 }
 
@@ -182,6 +183,10 @@ export class RendererConnection {
 
   close(): Promise<void> {
     return this.#service.close();
+  }
+
+  forceTerminate(): void {
+    this.#service.forceTerminate?.();
   }
 
   #accept(

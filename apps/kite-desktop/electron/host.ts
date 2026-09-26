@@ -47,6 +47,7 @@ interface RuntimePeer {
   send(generation: number, frame: string): Promise<void>;
   receive(generation: number): Promise<string>;
   close(): Promise<void>;
+  forceTerminate?(): void;
 }
 
 export interface DesktopHostOptions {
@@ -314,6 +315,21 @@ export class DesktopHost {
 
   cancelQuit(): void {
     this.#quitting = false;
+  }
+
+  /** Never waits for the Runtime lock, which may be held by the stalled operation. */
+  forceTerminateOwnedService(): void {
+    this.#quitting = true;
+    try {
+      this.#process?.forceTerminate?.();
+    } catch {
+      // The main process still exits; a failed OS kill remains an unknown outcome.
+    }
+    try {
+      this.#openingProcess?.forceTerminate();
+    } catch {
+      // Startup may have already exited or be inside an uninterruptible OS call.
+    }
   }
 
   async #connection(connectionId: number): Promise<RuntimePeer> {

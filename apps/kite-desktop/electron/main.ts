@@ -4,12 +4,14 @@ import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { DESKTOP_QUIT_INSPECTION_CHANNELS } from '../src/bridge';
 import { DesktopHost } from './host';
 import { registerDesktopIpc } from './ipc';
+import { settleDesktopQuit } from './quit-settlement';
 import { sameRendererDocument } from './security';
 
 declare const __KITE_DESKTOP_SERVICE_MANIFEST__: unknown;
 
 const DEVELOPMENT_RENDERER_URL = 'http://127.0.0.1:1420/';
 const LEGACY_APP_DATA_DIRECTORY = 'dev.kite-code.desktop';
+const QUIT_SETTLEMENT_WAIT_MS = 20_000;
 
 app.setName('kite');
 app.setPath('userData', join(app.getPath('appData'), LEGACY_APP_DATA_DIRECTORY));
@@ -62,43 +64,69 @@ app.on('activate', () => {
 app.on('before-quit', (event) => {
   if (exitAllowed) return;
   event.preventDefault();
-  if (quitInProgress) return;
+  if (quitInProgress) {
+    forceExit();
+    return;
+  }
   quitInProgress = true;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
   }
-  void inspectActiveSessionTasks()
-    .then((hasActiveTasks) => (hasActiveTasks ? showQuitConfirmation() : true))
-    .then(async (confirmed) => {
-      if (!confirmed) {
-        quitInProgress = false;
-        return;
-      }
-      try {
-        await host?.quit();
-        exitAllowed = true;
-        app.quit();
-      } catch (error) {
-        quitInProgress = false;
-        host?.cancelQuit();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.show();
-          await dialog.showMessageBox(mainWindow, {
-            type: 'error',
-            title: '服务收尾未正常完成',
-            message: messageOf(error),
-            buttons: ['确定'],
-            noLink: true,
-          });
-        }
-      }
-    })
-    .catch((error: unknown) => {
-      quitInProgress = false;
-      dialog.showErrorBox('无法确认退出', messageOf(error));
-    });
+  void completeQuit().catch(() => forceExit());
 });
+
+async function completeQuit(): Promise<void> {
+  const hasActiveTasks = await inspectActiveSessionTasks().catch(() => true);
+  const confirmed = hasActiveTasks ? await showQuitConfirmation() : true;
+  if (!confirmed) {
+    quitInProgress = false;
+    return;
+  }
+  const outcome = await settleDesktopQuit({
+    closeService: () => host?.quit() ?? Promise.resolve(),
+    confirmForceExit: () => showQuitWarning(true),
+    warnFailedCleanup: async () => {
+      await showQuitWarning(false);
+    },
+    waitMs: QUIT_SETTLEMENT_WAIT_MS,
+  });
+  if (outcome === 'force') {
+    forceExit();
+    return;
+  }
+  exitAllowed = true;
+  app.quit();
+}
+
+async function showQuitWarning(stillWaiting: boolean): Promise<boolean> {
+  const options = {
+    type: 'warning' as const,
+    title: stillWaiting ? '服务仍在收尾' : '服务收尾未正常完成',
+    message: stillWaiting
+      ? '可以继续等待，或强制退出 kite。'
+      : 'kite 无法确认服务已安全收尾，仍可退出应用。',
+    detail: '强制退出可能中断正在进行的任务。下次启动后请检查会话和文件结果。',
+    buttons: stillWaiting ? ['强制退出', '继续等待'] : ['退出应用'],
+    defaultId: stillWaiting ? 1 : 0,
+    cancelId: stillWaiting ? 1 : 0,
+    noLink: true,
+  };
+  const result =
+    mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showMessageBox(mainWindow, options)
+      : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
+function forceExit(): void {
+  try {
+    host?.forceTerminateOwnedService();
+  } finally {
+    exitAllowed = true;
+    app.exit(1);
+  }
+}
 
 async function inspectActiveSessionTasks(): Promise<boolean> {
   if (!mainWindow || mainWindow.isDestroyed()) return true;

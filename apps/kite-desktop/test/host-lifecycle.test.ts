@@ -21,6 +21,7 @@ class FakePeer {
   readonly sent: Array<{ generation: number; frame: string }> = [];
   finished = false;
   closeCount = 0;
+  forceTerminateCount = 0;
 
   constructor(serverVersion: string) {
     this.serverVersion = serverVersion;
@@ -40,6 +41,11 @@ class FakePeer {
 
   async close(): Promise<void> {
     this.closeCount += 1;
+    this.finished = true;
+  }
+
+  forceTerminate(): void {
+    this.forceTerminateCount += 1;
     this.finished = true;
   }
 }
@@ -214,6 +220,54 @@ test('quit requested while runtimeOpen holds the lock closes its peer before ret
     await expect(opening).rejects.toThrow('应用正在退出');
     await quitting;
     expect(peer.closeCount).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('emergency exit reaches the owned peer while the Runtime lock is held', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-force-quit-')));
+  try {
+    const home = join(root, 'home');
+    const serviceDirectory = join(root, 'service');
+    mkdirSync(home);
+    mkdirSync(serviceDirectory);
+    const executable = join(serviceDirectory, 'kite-service');
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const buildId = 'force-quit-test';
+    const peer = new FakePeer(`kite-app-server-v1-${digest(buildId)}`);
+    const host = new DesktopHost({
+      appDataDirectory: join(root, 'data'),
+      homeDirectory: home,
+      serviceDirectory,
+      platform: 'darwin',
+      serviceManifest: {
+        buildId,
+        environmentKeys: [],
+        executableSha256: digest(readFileSync(executable)),
+        expectedServerVersion: peer.serverVersion,
+      },
+      createPeer: () => peer,
+    });
+    await host.runtimeOpen();
+    let entered!: () => void;
+    const attaching = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    peer.attach = async () => {
+      entered();
+      await held;
+    };
+    const opening = host.runtimeOpen();
+    await attaching;
+    host.forceTerminateOwnedService();
+    expect(peer.forceTerminateCount).toBe(1);
+    release();
+    await opening;
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -121,7 +121,7 @@ writeFileSync(
     model: { default: { provider: 'test', name: 'mock-model' } },
     interactionMode: 'auto',
     sandbox: { enabled: false },
-    features: {},
+    features: { resourceBudget: true, boundedCancellation: true },
     mcpServers: {},
   }),
   { mode: 0o600 },

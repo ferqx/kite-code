@@ -381,6 +381,14 @@ export class ServiceProcess {
     return this.#closePromise;
   }
 
+  /** Emergency app exit bypasses a stuck startup or cleanup wait. */
+  forceTerminate(): void {
+    this.#closing = true;
+    this.#output.discard(new Error('连接已关闭。'));
+    if (!this.#child.stdin.destroyed) this.#child.stdin.destroy();
+    if (!this.#finished) this.#child.kill('SIGKILL');
+  }
+
   async #close(): Promise<void> {
     const starting = !this.#initialized;
     this.#closing = true;

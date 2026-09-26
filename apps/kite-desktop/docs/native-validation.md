@@ -117,9 +117,9 @@ macOS 的 `app.getPath('home')` 不受 shell HOME 覆盖，packaged Electron 也
 | `bun run test:desktop:native` | 真实 Electron host + compiled Service 完成 exact initialize、首屏目录、流中 detach/reattach、旧 receive 取消、复用 RPC id 的代次隔离、持久历史、活动执行 EOF 清理及后继 Service 读取。一次冷样本为 1193ms，后续样本 219ms；均只覆盖摘要校验至初始目录，不是系统点击至窗口绘制计时，也不承诺所有启动小于 300ms |
 | `bun run test:desktop:window` | 源码外 `.app` 完成真实 preload/IPC、添加项目与信任、本机模型流式、运行中关窗隐藏与重新激活、刷新后递增 connection generation 并继续展示同一回复；model fixture 未发生任务重放 |
 | renderer 权限 | 实际窗口的 sandbox/contextIsolation 均为 true，nodeIntegration 为 false；页面只有具名 bridge，没有 `require` 或 `process`。封闭参数、主 frame 身份和路径边界另由 host 专项测试验证 |
-| 退出 | 取消退出保留窗口与连接，确认退出等待自有 Service 收尾并以 0 退出。原生消息框由 fixture 代答，其 UI 与辅助功能操作尚未人工验收 |
+| 退出 | 取消退出保留窗口与连接，正常清理后以 0 退出；`native-smoke.ts --execution-recovery` 的打包 Electron 路径已复验。`quit-failure-smoke.ts` 在隔离 HOME 中终止本次打包应用拥有的 Service，确认宿主显示清理异常提示并以 1 退出；`--repeat-quit` 验证检查尚未完成时再次退出也以 1 结束；`--stalled-startup` 暂停测试自有 Service 并模拟其不响应取消，验证等待 20 秒后的强制退出选项及非零退出。原生消息框由 fixture 代答，其 UI 与辅助功能操作尚未人工验收 |
 | 标题栏与显示 | OS 级单窗口截图确认 52px header 内的交通灯与 kite 标识互不重叠；展开与收起态保留 80px 控件区，交通灯位置为 x=13/y=19；真实 bridge 最大化和还原通过。截图输出为 `out/electron-native-window.png` 与 renderer 截图 `out/electron-native-smoke.png` |
-| host 压力与错误 | 桌面 54 项测试通过；其中真实子进程验证无人读取的满输出队列仍能通过 EOF 正常退出，非法 UTF-8/超限帧会关闭自有服务；项目/Git/editor/manifest 的拒绝路径由对应 host 测试覆盖 |
+| host 压力与错误 | 本次 Desktop 全套 200 项测试通过；其中真实子进程验证无人读取的满输出队列仍能通过 EOF 正常退出，非法 UTF-8/超限帧会关闭自有服务，启动前停滞可由紧急退出终止；项目/Git/editor/manifest 的拒绝路径由对应 host 测试覆盖 |
 
 构建集成修复了 Bun 将源码 `__dirname` 固化到安装包、导致 preload 缺失的问题，当前从 `app.getAppPath()` 定位打包资源。标题栏修正了 Tauri 的偏移量在 Electron 中造成的交通灯／标识重叠。正式包只包含构建代码、页面资源与配套服务，不包含开发依赖和 source maps。
 
