@@ -14,6 +14,7 @@ import {
   type PrecommittedChildActivationDescriptor,
 } from '../turn-coordinator';
 import type { ChildApprovalProxyOwner } from './child-approval-owner';
+import { classifyChildFirstTurnRecovery } from './child-first-turn-recovery';
 
 type ChildTurnInput = Omit<
   Parameters<RuntimeSessionCoordinator['executeTurn']>[0],
@@ -183,12 +184,15 @@ export async function* runAcceptedChildSession(input: {
   readonly consumeStartGrant: (
     grant: Readonly<SubagentDelegationGrant>,
   ) => Readonly<SubagentDelegationGrant>;
+  /** Only for a fenced, previously activated and acknowledged first-turn recovery. */
+  readonly activatedRecovery?: { readonly independentTurnDeadline: boolean };
   readonly actionProvider?: RuntimeActionProvider;
   readonly now?: () => number;
 }): AsyncGenerator<RuntimeEvent> {
   const { child, descriptor, grant } = input;
   const intent = input.owner.readChildSessionIntent(child.sessionId);
   const sealed = sealChildGrantPayload(grant);
+  const nowMs = input.now?.() ?? Date.now();
   if (
     !intent?.childSessionCreated ||
     intent.childThreadId !== child.sessionId ||
@@ -221,13 +225,24 @@ export async function* runAcceptedChildSession(input: {
     grant.taskArtifact.integrityIdentifier !== descriptor.taskArtifactDigest ||
     grant.taskDigest !== descriptor.taskTextDigest ||
     grant.role !== intent.role ||
-    grant.expiresAtMs <= (input.now?.() ?? Date.now())
+    (!input.activatedRecovery && grant.expiresAtMs <= nowMs)
   ) {
     throw new Error('Child Session cannot run without an exact durable dispatch ACK and grant.');
   }
   const state = child.getState();
   if (state.childSessionOrigin?.role !== intent.role || input.turn.threadId !== child.sessionId) {
     throw new Error('Child Session runner identity or role conflicts with the accepted intent.');
+  }
+  if (input.activatedRecovery) {
+    const recovery = classifyChildFirstTurnRecovery({
+      childState: state,
+      intent,
+      grant,
+      nowMs,
+      independentTurnDeadline: input.activatedRecovery.independentTurnDeadline,
+    });
+    if (recovery.kind !== 'begin_first_turn')
+      throw new Error(`Activated child first-turn recovery is unsafe: ${recovery.kind}.`);
   }
   assertPrecommittedChildActivation(
     state,
@@ -238,9 +253,11 @@ export async function* runAcceptedChildSession(input: {
   // Activation commits the child Run as queued. Start it only after the
   // parent dispatch ACK is durable, before any Provider-capable model effect.
   child.session.activateRun(descriptor.childRunId);
-  const consumed = input.consumeStartGrant(grant);
-  if (sealChildGrantPayload(consumed).sealedGrantDigest !== sealed.sealedGrantDigest) {
-    throw new Error('Child Session consuming authority changed the sealed grant.');
+  if (!input.activatedRecovery) {
+    const consumed = input.consumeStartGrant(grant);
+    if (sealChildGrantPayload(consumed).sealedGrantDigest !== sealed.sealedGrantDigest) {
+      throw new Error('Child Session consuming authority changed the sealed grant.');
+    }
   }
   yield* child.executeTurn(
     {

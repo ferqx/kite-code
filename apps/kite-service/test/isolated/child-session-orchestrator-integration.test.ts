@@ -87,6 +87,51 @@ test(
 );
 
 test(
+  'activated and acknowledged child resumes its first model once through the real Store and Host',
+  () =>
+    exerciseChildOrchestration(
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      async ({ owner, orchestrator, model, parentSessionId, childSessionId }) => {
+        model.setResponses([
+          {
+            response: async () => ({ message: { content: 'ORCHESTRATED_CHILD_RESULT' } }),
+          },
+        ]);
+        expect(await orchestrator.recoverPending()).toMatchObject({
+          processed: 1,
+          recoveryRequired: [],
+        });
+        expect(model.getRequestCount()).toBe(1);
+        expect(
+          owner.loadCurrentSnapshot(childSessionId)?.childSessionOrigin?.terminal,
+        ).toMatchObject({
+          status: 'completed',
+          cleanupConfirmed: true,
+        });
+        expect(
+          owner.storage.sessions
+            .loadEventsStrict(parentSessionId)
+            .filter(({ event }) => event.type === 'subagent.child_terminal_imported'),
+        ).toHaveLength(1);
+        expect(await orchestrator.recoverPending()).toMatchObject({ processed: 0 });
+      },
+      true,
+    ),
+  30_000,
+);
+
+test(
   'recovery completion reports a child work queue failure without dispatching Provider',
   () => exerciseChildOrchestration(true, false, false, false, false, false, false, true),
   30_000,

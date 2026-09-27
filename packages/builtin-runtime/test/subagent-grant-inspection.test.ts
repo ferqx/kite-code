@@ -95,6 +95,7 @@ test('repeatable inspect preserves the single Provider start authorization', asy
   expect(prepared.ok).toBe(true);
   if (!prepared.ok) throw new Error('Start grant was not accepted.');
   expect(errorCode(() => authority.inspectStart(grant))).toBe('consumed_grant');
+  expect(authority.inspectActivatedStart(grant)).toEqual(grant);
   const second = await provider.start({ grant });
   expect(second).toMatchObject({ ok: false, failure: { code: 'consumed_grant' } });
   expect(childStarts).toBe(0);
@@ -121,5 +122,9 @@ test('inspect rejects expired and tampered grants without creating a consumed to
   expect(authority.inspectStart(grant)).toEqual(grant);
   now = grant.expiresAtMs;
   expect(errorCode(() => authority.inspectStart(grant))).toBe('expired_grant');
+  expect(authority.inspectActivatedStart(grant)).toEqual(grant);
+  expect(errorCode(() => authority.inspectActivatedStart({ ...grant, role: 'code' }))).toBe(
+    'invalid_grant',
+  );
   expect(errorCode(() => authority.verifier().verifyAndConsumeStart(grant))).toBe('expired_grant');
 });

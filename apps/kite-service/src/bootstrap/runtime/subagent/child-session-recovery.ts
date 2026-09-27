@@ -52,8 +52,10 @@ export function planChildSessionRecovery(input: {
   readonly hasStopRequest?: (childInvocationId: string) => boolean;
   /** Read-only target Event check; the action must obtain a fenced Store proof before dispatch. */
   readonly hasPreparedCurrentTurnRoute?: (childThreadId: string) => boolean;
-  /** Must validate signature, expiry, and current policy without consuming the start grant. */
+  /** New dispatch inspection must reject expired or consumed start grants. */
   readonly inspectGrant: (value: unknown) => Readonly<SubagentDelegationGrant>;
+  /** Historical identity inspection only; never used for a new dispatch. */
+  readonly inspectActivatedGrant: (value: unknown) => Readonly<SubagentDelegationGrant>;
   readonly nowMs: number;
   readonly limit: number;
   readonly cursor?: string;
@@ -244,12 +246,20 @@ export function planChildSessionRecovery(input: {
         sealed.sealedGrantByteLength !== intent.sealedGrantByteLength
       )
         return abandonIfReserved('sealed_grant_unavailable');
-      grant = input.inspectGrant(JSON.parse(sealed.sealedGrantJson) as unknown);
+      const activatedAndAcknowledged = Boolean(
+        child &&
+          intent.childBudgetActivatedRunId &&
+          intent.childBudgetActivatedEventId &&
+          intent.dispatchAckEventId,
+      );
+      grant = (activatedAndAcknowledged ? input.inspectActivatedGrant : input.inspectGrant)(
+        JSON.parse(sealed.sealedGrantJson) as unknown,
+      );
       const resealed = sealChildGrantPayload(grant);
       if (
         resealed.sealedGrantJson !== sealed.sealedGrantJson ||
         grant.purpose !== 'start' ||
-        grant.expiresAtMs <= input.nowMs ||
+        (!activatedAndAcknowledged && grant.expiresAtMs <= input.nowMs) ||
         grant.parentInvocationId !== intent.parentInvocationId ||
         grant.parentToolCallId !== intent.originToolCallId ||
         grant.parentAttempt !== intent.attempt ||

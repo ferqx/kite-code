@@ -151,6 +151,11 @@ export class SubagentGrantAuthority {
     return this.#verify(grant, 'start', false);
   }
 
+  /** Inspect historical identity only; this never authorizes a new Provider start. */
+  inspectActivatedStart(grant: SubagentDelegationGrant): Readonly<SubagentDelegationGrant> {
+    return this.#verify(grant, 'start', false, true);
+  }
+
   verifier(): SubagentGrantVerifier {
     return Object.freeze({
       verifyAndConsumeStart: (grant: SubagentDelegationGrant) => this.#verify(grant, 'start', true),
@@ -269,6 +274,7 @@ export class SubagentGrantAuthority {
     grant: T,
     purpose: T['purpose'],
     consume: boolean,
+    historical = false,
   ): Readonly<T> {
     try {
       const now = this.#effectiveNow();
@@ -287,14 +293,14 @@ export class SubagentGrantAuthority {
       ) {
         invalid();
       }
-      if (copy.issuedAtMs > now || copy.expiresAtMs <= now) {
+      if (copy.issuedAtMs > now || (!historical && copy.expiresAtMs <= now)) {
         throw new SubagentGrantError(
           'expired_grant',
           'Subagent grant expired before lifecycle start.',
         );
       }
       if (copy.expiresAtMs - copy.issuedAtMs > this.#ttlMs) invalid();
-      if (this.#consumed.has(copy.grantId)) {
+      if (!historical && this.#consumed.has(copy.grantId)) {
         throw new SubagentGrantError('consumed_grant', 'Subagent grant was already consumed.');
       }
       if (purpose === 'resume') {
@@ -305,7 +311,7 @@ export class SubagentGrantAuthority {
         required(resume.blockedRuntimeToolCallId, 'blockedRuntimeToolCallId');
         positive(resume.resumeAttempt, 'resumeAttempt');
       }
-      if (this.#consumed.size >= this.#maxConsumedGrantTombstones) {
+      if (!historical && this.#consumed.size >= this.#maxConsumedGrantTombstones) {
         // Dropping a still-valid tombstone would make a replayable grant look
         // fresh.  Refuse the new lifecycle instead of weakening single-use.
         throw new SubagentGrantError(

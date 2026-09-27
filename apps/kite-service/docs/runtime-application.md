@@ -67,7 +67,7 @@ Bridge 把 Shell 与 child 快照合并为带 Session revision、aggregate gener
 
 新 `independent_turn_v2` 的 `followup_task` 在来源 Run 有效时受理，来源事务为目标新 turn 预留有限模型请求、输入／输出 token、Artifact、turn 和并发资金；Tool 次数以明确标记排除累计数值上界。目标 Run 从实际启动独立计时 30 分钟，并用原角色 grant 与现行 Policy／Catalog 交集构造可用工具，不能从邮件或父级授权扩大工具面。来源 Run 完成不撤销已受理的备付和目标执行资格；目标终态、来源资金结算与一次性 reply 仍按准确 submission 链接。缺少 v2 标记的既有 `followup_task` 继续按旧单模型、零 Tool、原期限的 v1 grant 恢复。上文提及的零 Tool Surface、首模型替换与“原期限到期”窗口仅描述该 v1 路径；v2 在目标新 Run 的有限预留内逐次派发模型与角色允许的工具。
 
-恢复时，v2 只有在来源备付、目标 Run／grant、已提交的派发事实与原角色上界均可核时继续；确定未派发的失败从来源事务释放备付，已尝试而结果不明的模型或工具保持 unknown，不以恢复重派。初始 child 已激活但启动 grant 已过期的崩溃窗口尚缺少获批准的恢复规则与运行验收，不能据此宣称该子 Run 可在原 grant 过期后继续。
+恢复时，v2 只有在来源备付、目标 Run／grant、已提交的派发事实与原角色上界均可核时继续；确定未派发的失败从来源事务释放备付，已尝试而结果不明的模型或工具保持 unknown，不以恢复重派。初始 child 首轮若已持久激活且父派发 ACK 已提交，Service 经 Store 执行权隔离旧 owner 后，核对原 grant 身份与激活时有效性、父 `dispatch_started` 预留、子 Run 自身期限及零模型／工具尝试，才沿同一 Run 继续首模型；历史 grant 不进入新的 Provider start 或重新消费。未激活的受理仍要求原启动 grant 在 5 分钟内有效。定向验证见 [首轮恢复分类](../test/child-first-turn-recovery.test.ts)、[恢复规划](../test/child-session-recovery.test.ts) 与 [真实 Store／Host 组合](../test/isolated/child-session-orchestrator-integration.test.ts)；真实 SIGKILL 跨过 5 分钟的窗口尚未单独实跑。
 
 已受理的 TriggerTurn 若仍无目标路由、Run 或模型派发，可由来源资金事务按持久 admission 与当前状态证据释放后备预算，并记录 `tool_failed`、`expired`、`context_unavailable`、`authorization_changed`、`capacity_timeout` 或原 Run 用户取消的 `source_cancelled`；重复恢复读取原结算事实。用户取消的释放原因与原取消事务一起提交，不重复释放预算；正式入口在取消命令提交后调度未通知回执扫描，投递失败仍由持久索引在启动时恢复。Store 验证各原因，Service 回归验证来源授权变化、取消和准备后过期均未派发目标模型。容量不足时，来源备付先以 `queued` 锁定有限计数但不占活动子位；Service 等待原资金 Run 的持久 revision，取得执行位后提交 `resource_budget.child_slot_acquired`，才启动目标新轮。`capacity_timeout` 只在原受理时间加有界等待已到、槽仍满、备付仍 queued 且无目标路由或派发时同事务释放；正式 App Server 定向回归覆盖有位后启动一个续轮和满位超时零目标 Provider 请求。已派发或结果未知的路径不得使用预派发释放。
 

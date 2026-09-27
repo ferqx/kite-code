@@ -170,7 +170,11 @@ export function classifyChildFirstTurnRecovery(input: {
     grant.taskDigest !== intent.taskTextDigest ||
     !Number.isSafeInteger(nowMs) ||
     nowMs < 0 ||
-    grant.expiresAtMs <= nowMs ||
+    !Number.isSafeInteger(grant.issuedAtMs) ||
+    !Number.isSafeInteger(grant.expiresAtMs) ||
+    !Number.isSafeInteger(Date.parse(state.resourceBudget.startedAt)) ||
+    Date.parse(state.resourceBudget.startedAt) < grant.issuedAtMs ||
+    Date.parse(state.resourceBudget.startedAt) >= grant.expiresAtMs ||
     (input.independentTurnDeadline
       ? state.resourceBudget.budget.unboundedToolInvocations !== true ||
         Date.parse(state.resourceBudget.deadlineAt) <= nowMs

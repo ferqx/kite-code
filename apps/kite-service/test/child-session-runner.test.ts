@@ -4,7 +4,7 @@ import {
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { sealChildGrantPayload } from '@kite-ai/runtime-host/storage';
+import { CHILD_SESSION_TASK_USER_GOAL, sealChildGrantPayload } from '@kite-ai/runtime-host/storage';
 import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import {
   HiddenChildInteractionUnavailableError,
@@ -14,8 +14,9 @@ import {
 
 type RunnerInput = Parameters<typeof runAcceptedChildSession>[0];
 
-function fixture(ack = true) {
+function fixture(ack = true, grantLifetimeMs = 60_000) {
   const calls: string[] = [];
+  const nowMs = Date.now();
   const grant = {
     purpose: 'start',
     parentInvocationId: 'parent-invocation',
@@ -31,7 +32,8 @@ function fixture(ack = true) {
     },
     taskDigest: `sha256:${'c'.repeat(64)}`,
     capabilityCeiling: { allowedTools: ['read_file'] },
-    expiresAtMs: Date.now() + 60_000,
+    issuedAtMs: nowMs - 1_000,
+    expiresAtMs: nowMs + grantLifetimeMs,
   } as unknown as SubagentDelegationGrant;
   const sealed = sealChildGrantPayload(grant);
   const descriptor: RunnerInput['descriptor'] = {
@@ -64,7 +66,7 @@ function fixture(ack = true) {
   state.tasks = {
     [descriptor.childInvocationId]: {
       taskId: descriptor.childInvocationId,
-      userGoal: 'Complete the delegated task.',
+      userGoal: CHILD_SESSION_TASK_USER_GOAL,
       status: 'active',
       startedAtTurnId: descriptor.childRunId,
       sideEffectsStarted: false,
@@ -87,13 +89,13 @@ function fixture(ack = true) {
     fundingRunId: descriptor.fundingRunId,
     delegatedReservationId: descriptor.delegatedReservationId,
     delegatedUpperBoundDigest: descriptor.delegatedUpperBoundDigest,
-    deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+    deadlineAt: new Date(nowMs + 60_000).toISOString(),
   };
   state.resourceBudget = {
     status: 'active',
     runId: descriptor.childRunId,
-    startedAt: new Date().toISOString(),
-    deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+    startedAt: new Date(nowMs).toISOString(),
+    deadlineAt: new Date(nowMs + 60_000).toISOString(),
     budget: LIMITED_RESOURCE_BUDGET_,
     reconciledUsage: createZeroResourceUsage('actual', 'test'),
     reservations: {},
@@ -104,6 +106,7 @@ function fixture(ack = true) {
     childSessionCreated: true,
     childThreadId: descriptor.sessionId,
     childBudgetActivatedRunId: descriptor.childRunId,
+    childBudgetActivatedEventId: 'activation-event',
     dispatchAckEventId: ack ? 'durable-ack' : null,
     failureReceiptDigest: null,
     parentClaimSettledEventId: null,
@@ -123,6 +126,7 @@ function fixture(ack = true) {
     delegatedReservationId: descriptor.delegatedReservationId,
     delegatedUpperBoundDigest: descriptor.delegatedUpperBoundDigest,
     role: grant.role,
+    deadlineAt: state.childSessionOrigin.deadlineAt,
   };
   const input = {
     owner: { readChildSessionIntent: () => intent },
@@ -162,12 +166,38 @@ function fixture(ack = true) {
   return { input, calls };
 }
 
+test('fenced activated first turn survives grant expiry without consuming it again', async () => {
+  const { input, calls } = fixture(true, 1_000);
+  const events = [];
+  for await (const event of runAcceptedChildSession({
+    ...input,
+    now: () => input.grant.expiresAtMs + 1,
+    activatedRecovery: { independentTurnDeadline: false },
+  }))
+    events.push(event);
+  expect(events).toHaveLength(1);
+  expect(calls).toEqual(['activate', 'execute']);
+});
+
 test('hidden child begins only after durable ACK and exact sealed grant consumption', async () => {
   const { input, calls } = fixture(true);
   const events = [];
   for await (const event of runAcceptedChildSession(input)) events.push(event);
   expect(events).toHaveLength(1);
   expect(calls).toEqual(['activate', 'consume', 'execute']);
+});
+
+test('an expired grant cannot start a fresh child without the activated recovery path', async () => {
+  const { input, calls } = fixture(true, 1_000);
+  const attempt = (async () => {
+    for await (const _event of runAcceptedChildSession({
+      ...input,
+      now: () => input.grant.expiresAtMs + 1,
+    }))
+      void _event;
+  })();
+  await expect(attempt).rejects.toThrow('durable dispatch ACK and grant');
+  expect(calls).toEqual([]);
 });
 
 test('missing parent dispatch ACK prevents grant consumption and child execution', async () => {

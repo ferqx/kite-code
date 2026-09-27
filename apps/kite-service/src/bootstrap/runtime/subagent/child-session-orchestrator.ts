@@ -4127,6 +4127,21 @@ export function createChildSessionOrchestrator(input: {
     const intent = input.owner.readChildSessionIntent(accepted.childThreadId);
     if (!intent || intent.parentSessionId !== input.parentSessionId)
       throw new Error('Accepted child has no exact Store intent.');
+    if (intent.dispatchAckEventId) {
+      let fenced = input.owner.ownsSessionExecution(accepted.childThreadId);
+      await input.owner.reconcileInterruptedSession(
+        accepted.childThreadId,
+        async (_generation, assertCurrent) => {
+          if (!assertCurrent()) throw new Error('Recovered child lost its execution generation.');
+          fenced = true;
+          return undefined;
+        },
+      );
+      if (!fenced) throw new Error('Recovered child still has a live previous execution owner.');
+      const latestIntent = input.owner.readChildSessionIntent(accepted.childThreadId);
+      if (JSON.stringify(latestIntent) !== JSON.stringify(intent))
+        throw new Error('Recovered child intent changed while fencing its previous owner.');
+    }
     const sealed = input.owner.runWithSessionExecution(input.parentSessionId, () =>
       input.owner.readChildSealedGrant(accepted.childThreadId),
     );
@@ -4234,9 +4249,13 @@ export function createChildSessionOrchestrator(input: {
     };
     const inspectGrant = (serialized: unknown) =>
       modelRuntime.inspectChildStartGrant(serialized as SubagentDelegationGrant);
+    const inspectActivatedGrant = (serialized: unknown) =>
+      modelRuntime.inspectActivatedChildStartGrant(serialized as SubagentDelegationGrant);
     const grant = intent.dispatchAckEventId
       ? (() => {
-          const inspected = inspectGrant(JSON.parse(sealed.sealedGrantJson) as unknown);
+          if (allotment?.state !== 'dispatch_started')
+            throw new Error('Acknowledged child lost its parent allotment.');
+          const inspected = inspectActivatedGrant(JSON.parse(sealed.sealedGrantJson) as unknown);
           const childState = input.owner.storage.sessions.loadSnapshot<RuntimeState>(
             accepted.childThreadId,
           );
@@ -4246,6 +4265,7 @@ export function createChildSessionOrchestrator(input: {
             intent,
             grant: inspected,
             nowMs: Date.now(),
+            independentTurnDeadline: independentTurn,
           });
           if (recovery.kind !== 'begin_first_turn')
             throw new Error(`Acknowledged child cannot restart: ${recovery.kind}.`);
@@ -4333,6 +4353,9 @@ export function createChildSessionOrchestrator(input: {
           grant,
           turn: childTurn,
           consumeStartGrant: modelRuntime.consumeChildStartGrant,
+          ...(intent.dispatchAckEventId
+            ? { activatedRecovery: { independentTurnDeadline: independentTurn } }
+            : {}),
           actionProvider: createChildApprovalActionProvider({
             owner: input.owner,
             parentSessionId: input.parentSessionId,
@@ -4864,7 +4887,7 @@ export function createChildSessionOrchestrator(input: {
       sealed.sealedGrantByteLength !== intent.sealedGrantByteLength
     )
       throw new Error('Recovered child approval has no exact sealed grant.');
-    const grant = runtime.inspectChildStartGrant(
+    const grant = runtime.inspectActivatedChildStartGrant(
       JSON.parse(sealed.sealedGrantJson) as SubagentDelegationGrant,
     );
     if (
@@ -4887,6 +4910,16 @@ export function createChildSessionOrchestrator(input: {
       });
       if (classified.kind === 'recovery_required')
         throw new Error(`Recovered child approval is unsafe: ${classified.reason}.`);
+      const budget = child.getState().resourceBudget;
+      const activatedAt = budget.status === 'active' ? Date.parse(budget.startedAt) : NaN;
+      if (
+        !Number.isSafeInteger(activatedAt) ||
+        activatedAt < grant.issuedAtMs ||
+        activatedAt >= grant.expiresAtMs ||
+        budget.status !== 'active' ||
+        Date.parse(budget.deadlineAt) <= Date.now()
+      )
+        throw new Error('Recovered child approval has no live, authorized child Run.');
       const tool = child.getState().tools.calls[proxy.childToolCallId];
       const invocation = tool?.modelInvocationId
         ? child.getState().modelInvocations[tool.modelInvocationId]
@@ -5113,6 +5146,8 @@ export function createChildSessionOrchestrator(input: {
             );
           },
           inspectGrant: (value) => runtime.inspectChildStartGrant(value as SubagentDelegationGrant),
+          inspectActivatedGrant: (value) =>
+            runtime.inspectActivatedChildStartGrant(value as SubagentDelegationGrant),
           nowMs: Date.now(),
           limit: 100,
           ...(cursor ? { cursor } : {}),

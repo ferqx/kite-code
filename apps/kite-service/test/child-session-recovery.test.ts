@@ -145,6 +145,7 @@ function fixture() {
     childApprovalProxyId,
     isParentRunLive: () => true,
     inspectGrant: () => grant,
+    inspectActivatedGrant: () => grant,
     nowMs: NOW + 1000,
     limit: 10,
   };
@@ -423,6 +424,15 @@ test('marked activated child resumes its first turn against its own deadline', (
   };
   const recovery = { ...f.input, parentState, nowMs: NOW + 40_000, isParentRunLive: () => false };
   expect(planChildSessionRecovery(recovery).actions[0]).toMatchObject({ kind: 'begin_first_turn' });
+  expect(
+    planChildSessionRecovery({
+      ...recovery,
+      nowMs: NOW + 60_000,
+      inspectGrant: () => {
+        throw new Error('Expired start grant cannot authorize a new dispatch.');
+      },
+    }).actions[0],
+  ).toMatchObject({ kind: 'begin_first_turn' });
   expect(
     planChildSessionRecovery({
       ...recovery,

@@ -136,6 +136,7 @@ export type InstalledKiteRuntimeComposition = {
   delegatedTaskArtifacts: Pick<SubagentTaskArtifactAccess, 'read'>;
   childResultArtifacts: SubagentResultArtifactAccess;
   inspectChildStartGrant: InstalledSubagentComposition['grants']['inspectStart'];
+  inspectActivatedChildStartGrant: InstalledSubagentComposition['grants']['inspectActivatedStart'];
   consumeChildStartGrant: ReturnType<
     InstalledSubagentComposition['grants']['verifier']
   >['verifyAndConsumeStart'];
@@ -250,6 +251,8 @@ export function resolveInstalledKiteRuntimeComposition(
     delegatedTaskArtifacts: subagentComposition.taskArtifacts,
     childResultArtifacts: installedSubagents.resultArtifacts,
     inspectChildStartGrant: (grant) => subagentComposition.grants.inspectStart(grant),
+    inspectActivatedChildStartGrant: (grant) =>
+      subagentComposition.grants.inspectActivatedStart(grant),
     consumeChildStartGrant: (grant) =>
       subagentComposition.grants.verifier().verifyAndConsumeStart(grant),
     backgroundSubagentRuntime: installedSubagents.background,

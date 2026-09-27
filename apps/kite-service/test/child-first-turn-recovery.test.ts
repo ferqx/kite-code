@@ -28,6 +28,7 @@ function fixture(): Input {
       byteLength: 24,
     },
     taskDigest: `sha256:${'b'.repeat(64)}`,
+    issuedAtMs: nowMs - 1_000,
     expiresAtMs: nowMs + 60_000,
   } as unknown as SubagentDelegationGrant;
   const sealed = sealChildGrantPayload(grant);
@@ -129,10 +130,48 @@ test('a prepared or dispatching model invocation is never replayed', () => {
   }
 });
 
-test('expired grant, missing ACK and Tool activity require recovery', () => {
+test('an activated child can resume after grant expiry, while missing ACK and Tool activity remain blocked', () => {
   const expired = fixture();
+  const grantExpiry = expired.nowMs + 30_000;
+  const expiredGrant = { ...expired.grant, expiresAtMs: grantExpiry };
+  const resealed = sealChildGrantPayload(expiredGrant);
+  const expiredIntent = {
+    ...expired.intent,
+    grantDigest: resealed.sealedGrantDigest,
+    sealedGrantDigest: resealed.sealedGrantDigest,
+    sealedGrantByteLength: resealed.sealedGrantByteLength,
+  };
+  const expiredState = {
+    ...expired.childState,
+    childSessionOrigin: {
+      ...expired.childState.childSessionOrigin!,
+      grantDigest: resealed.sealedGrantDigest,
+    },
+  };
+  if (expiredState.resourceBudget.status !== 'active') throw new Error('Missing child budget.');
   expect(
-    classifyChildFirstTurnRecovery({ ...expired, nowMs: expired.grant.expiresAtMs }),
+    classifyChildFirstTurnRecovery({
+      ...expired,
+      grant: expiredGrant,
+      intent: expiredIntent,
+      childState: expiredState,
+      nowMs: grantExpiry,
+    }),
+  ).toEqual({ kind: 'begin_first_turn' });
+  expect(
+    classifyChildFirstTurnRecovery({
+      ...expired,
+      grant: expiredGrant,
+      intent: expiredIntent,
+      childState: {
+        ...expiredState,
+        resourceBudget: {
+          ...expiredState.resourceBudget,
+          startedAt: new Date(grantExpiry).toISOString(),
+        },
+      },
+      nowMs: grantExpiry,
+    }),
   ).toMatchObject({ kind: 'recovery_required', reason: 'sealed_grant_expired_or_mismatch' });
   const missingAck = fixture();
   expect(
