@@ -618,7 +618,6 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
       throw new Error('Electron background children did not start and reach the completion wait.');
     }),
   ]);
-  await page.getByText('正在等待后台结果', { exact: false }).waitFor({ timeout: 15_000 });
   const readBackgroundFacts = () => {
     const database = new Database(join(home, '.kite-code/kite-session.sqlite'), {
       readonly: true,
@@ -656,6 +655,11 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
       database.close();
     }
   };
+  const waitDeadline = Date.now() + 15_000;
+  while (readBackgroundFacts().waitingReason?.kind !== 'required_background') {
+    assert.ok(Date.now() < waitDeadline, 'required background wait was not durably recorded');
+    await Bun.sleep(20);
+  }
   const initiallyWaiting = readBackgroundFacts();
   assert.equal(initiallyWaiting.waitingReason?.kind, 'required_background');
   assert.equal(initiallyWaiting.waitingReason?.taskIds?.length, 3);
@@ -701,7 +705,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     .getByText('运行中')
     .waitFor();
   assert.equal(backgroundParentCalls, 2, 'first child terminal must not reprompt the parent');
-  assert.equal(await page.getByText('正在等待后台结果', { exact: false }).count(), 1);
+  assert.equal(await page.getByText('正在等待后台结果', { exact: false }).count(), 0);
   const partiallyWaiting = readBackgroundFacts();
   assert.equal(partiallyWaiting.runId, initiallyWaiting.runId);
   assert.deepEqual(partiallyWaiting.waitingReason?.taskIds, initialTaskIds);

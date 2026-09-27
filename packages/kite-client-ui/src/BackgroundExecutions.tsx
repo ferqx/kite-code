@@ -47,9 +47,7 @@ export function BackgroundExecutions({
         execution.kind === 'shell' &&
         (execution.status === 'running' || execution.status === 'stopping'),
     );
-    const subagents = fresh.filter(
-      (execution) => execution.kind === 'subagent' && execution.status !== 'unavailable',
-    );
+    const subagents = fresh.filter((execution) => execution.kind === 'subagent');
     return (
       <section
         className="background-executions environment-information"

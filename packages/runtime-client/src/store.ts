@@ -382,10 +382,13 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     readonly notification: RuntimeNotification;
     readonly reset?: boolean;
     readonly ready?: boolean;
+    /** A parent-authorized child stream may be joined after its first ephemeral frame. */
+    readonly allowInitialEphemeralSequence?: boolean;
   }): RuntimeSnapshotApplyResult {
     if (!this.#acceptConnection(input.connectionGeneration)) return 'ignored';
     const notification = input.notification;
-    if (notification.durability === 'ephemeral') return this.#applyEphemeral(notification);
+    if (notification.durability === 'ephemeral')
+      return this.#applyEphemeral(notification, input.allowInitialEphemeralSequence === true);
     const sessionId = notification.sessionId;
     const current = this.#snapshot.sessions[sessionId];
     // Concurrent subscriptions on one connection may deliver the same Session
@@ -459,11 +462,12 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
 
   #applyEphemeral(
     notification: Extract<RuntimeNotification, { durability: 'ephemeral' }>,
+    allowInitialSequence: boolean,
   ): RuntimeSnapshotApplyResult {
     if (this.#isClosedRun(notification)) return 'ignored';
     const key = streamKey(notification);
     const current = this.#snapshot.streams[key];
-    if (!current && notification.sequence !== 1) {
+    if (!current && notification.sequence !== 1 && !allowInitialSequence) {
       return this.#markResync(notification.sessionId);
     }
     if (

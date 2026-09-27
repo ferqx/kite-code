@@ -73,16 +73,6 @@ export interface Message {
     | 'cancelled'
     | 'unknown';
   readonly parentToolCallId?: string;
-  /** Exact child lifecycle shown on its parent Task card. */
-  readonly childLifecycle?:
-    | 'creating'
-    | 'running'
-    | 'waiting'
-    | 'auto_reviewing'
-    | 'completed'
-    | 'interrupted'
-    | 'cancelled'
-    | 'failed';
   readonly steps?: readonly {
     readonly id: string;
     readonly toolCallId?: string;

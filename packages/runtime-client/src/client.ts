@@ -1188,6 +1188,7 @@ export class RuntimeClient implements AsyncDisposable {
             connectionGeneration,
             subscriptionGeneration,
             notification,
+            ...(spec.scope === 'child_session' ? { allowInitialEphemeralSequence: true } : {}),
           });
           if (applied === 'resync_required') void this.#resubscribeAfterResync(state);
           if (applied !== 'applied') return;

@@ -169,7 +169,7 @@ test('current environment information shows active shells and fresh subagent his
   expect(document.body.textContent).toContain('child-failed');
   expect(document.body.textContent).not.toContain('service-1');
   expect(document.body.textContent).not.toContain('shell-done');
-  expect(document.body.textContent).not.toContain('child-unavailable');
+  expect(document.body.textContent).toContain('child-unavailable');
   expect(document.body.textContent).not.toContain('清理未确认');
 });
 
@@ -965,7 +965,7 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
   expect(rows[0]?.textContent).toBe('正在运行');
   expect(rows[1]?.textContent).toBe('旧等待状态');
   expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
-  expect(rows[2]?.textContent).toBe('等待后台等待后台结果');
+  expect(rows[2]?.textContent).toBe('等待后台');
   expect(rows[2]?.querySelector('[role="status"]')).toBeNull();
   expect(rows[3]?.textContent).toBe('运行时请求输入待用户输入');
   expect(rows[3]?.querySelector('[role="status"]')).toBeNull();
@@ -1525,55 +1525,95 @@ test('finished subagents stop unfinished child tool animations without inventing
   expect(document.querySelectorAll('.subagent-process [aria-label*="结果未知"]')).toHaveLength(2);
 });
 
-test('parent task heading follows all child lifecycle states even after parent tool completes', async () => {
-  const labels = {
-    creating: '创建中',
-    running: '运行中',
-    waiting: '等待中',
-    auto_reviewing: '自动审批中',
-    completed: '已完成',
-    interrupted: '已中断',
-    cancelled: '已取消',
-    failed: '已失败',
-  } as const;
-  for (const parentStatus of ['running', 'completed'] as const)
-    for (const [status, label] of Object.entries(labels) as [keyof typeof labels, string][]) {
-      const element = (
-        <Conversation
-          loading={false}
-          selected
-          connected
-          saveReading={() => {}}
-          messages={[
-            {
-              id: 'tool:parent',
-              role: 'tool',
-              toolName: 'task',
-              title: '检查仓库',
-              text: 'Parent result',
-              settled: parentStatus === 'completed',
-              status: parentStatus,
-              presentation: 'standalone',
-            },
-            {
-              id: 'subagent:child',
-              role: 'subagent',
-              parentToolCallId: 'parent',
-              title: '检查仓库',
-              text: '',
-              settled: ['completed', 'interrupted', 'cancelled', 'failed'].includes(status),
-              status,
-            },
-          ]}
-        />
-      );
-      if (!root) await render(element);
-      else await act(() => root!.render(element));
-      expect(document.querySelector('.tool-activity')?.textContent).toContain(label);
-      expect(document.querySelector('.tool-activity')?.classList.contains('is-running')).toBe(
-        status === 'creating' || status === 'running',
-      );
-    }
+test('task tool keeps its own execution result when the child lifecycle changes', async () => {
+  const parent: Message = {
+    id: 'tool:parent',
+    role: 'tool',
+    toolName: 'task',
+    title: '检查仓库',
+    text: '',
+    settled: true,
+    status: 'completed',
+    toolResult: { ok: true, stdout: JSON.stringify({ ok: true, task_id: 'child' }) },
+    presentation: 'standalone',
+  };
+  const view = (childStatus: Message['status']) => (
+    <>
+      <Conversation
+        loading={false}
+        selected
+        connected
+        saveReading={() => {}}
+        messages={[
+          parent,
+          {
+            id: 'subagent:child',
+            role: 'subagent',
+            parentToolCallId: 'parent',
+            title: '检查仓库',
+            text: '',
+            settled: ['completed', 'interrupted', 'cancelled', 'failed'].includes(
+              childStatus ?? '',
+            ),
+            status: childStatus,
+          },
+        ]}
+      />
+      <BackgroundExecutions
+        currentOnly
+        executions={[
+          {
+            executionId: 'child',
+            kind: 'subagent',
+            status:
+              childStatus === 'completed'
+                ? 'completed'
+                : childStatus === 'failed'
+                  ? 'failed'
+                  : 'running',
+            cleanupConfirmed: childStatus === 'completed' || childStatus === 'failed',
+          },
+        ]}
+      />
+    </>
+  );
+  for (const childStatus of ['creating', 'running', 'waiting', 'completed', 'failed'] as const) {
+    if (!root) await render(view(childStatus));
+    else await act(() => root!.render(view(childStatus)));
+    const activity = document.querySelector('.tool-activity')!;
+    expect(activity.getAttribute('aria-label')).toContain('已创建');
+    expect(activity.classList.contains('is-running')).toBe(false);
+    expect(activity.querySelector('.tool-activity-state')?.textContent).toBe('已创建');
+    const environment = document.querySelector('.environment-information')!;
+    expect(environment.textContent).toContain(
+      childStatus === 'completed' ? '已完成' : childStatus === 'failed' ? '失败' : '运行中',
+    );
+  }
+  await act(() =>
+    root!.render(
+      <Conversation
+        loading={false}
+        selected
+        connected
+        saveReading={() => {}}
+        messages={[{ ...parent, toolResult: undefined, settled: false, status: 'running' }]}
+      />,
+    ),
+  );
+  expect(document.querySelector('.tool-activity')?.classList.contains('is-running')).toBe(true);
+  expect(document.querySelector('.tool-activity-state')?.textContent).toBe('正在工作');
+  await act(() =>
+    root!.render(
+      <Conversation
+        loading={false}
+        selected
+        connected
+        saveReading={() => {}}
+        messages={[{ ...parent, toolResult: undefined, status: 'failed' }]}
+      />,
+    ),
+  );
+  expect(document.querySelector('.tool-activity-state')?.textContent).toBe('失败');
 });
 
 test('task generic failure is hidden only when a terminal child has a concrete reason', async () => {

@@ -115,6 +115,27 @@ export function App({ client }: { client: DesktopClient }) {
   const childSessionIdsByExecutionId = new Map(
     childSessions?.entries.map((entry) => [entry.taskId, entry.sessionId] as const) ?? [],
   );
+  const backgroundExecutions =
+    selected && !view.background?.[selected]?.stale
+      ? (view.background?.[selected]?.snapshot.executions ?? [])
+      : [];
+  const backgroundChildIds = new Set(
+    backgroundExecutions
+      .filter((execution) => execution.kind === 'subagent')
+      .map((execution) => execution.executionId),
+  );
+  const environmentExecutions = [
+    ...backgroundExecutions,
+    ...(childSessions?.entries ?? [])
+      .filter((entry) => !backgroundChildIds.has(entry.taskId))
+      .map((entry) => ({
+        executionId: entry.taskId,
+        displayName: entry.displayName,
+        kind: 'subagent' as const,
+        status: 'unavailable' as const,
+        cleanupConfirmed: false,
+      })),
+  ];
   const conversationWorkspace = newConversationWorkspace ?? workspace;
   const conversationBranch =
     newConversationBranch?.workspace === conversationWorkspace
@@ -588,8 +609,7 @@ export function App({ client }: { client: DesktopClient }) {
         !childDetail && !workbenchView && !scheduledTasksView && !preparing && selected ? (
           <BackgroundExecutions
             id="session-environment-information"
-            executions={view.background?.[selected]?.snapshot.executions ?? []}
-            stale={view.background?.[selected]?.stale}
+            executions={environmentExecutions}
             currentOnly
             stoppingExecutionId={stoppingBackground}
             subagentDetails={
@@ -771,19 +791,6 @@ export function App({ client }: { client: DesktopClient }) {
               })
             }
           />
-        ) : undefined
-      }
-      statusNotice={
-        !childDetail &&
-        !workbenchView &&
-        !scheduledTasksView &&
-        !preparing &&
-        !interaction &&
-        projection?.currentRun?.status === 'waiting' &&
-        projection.currentRun.waitingReason?.kind === 'required_background' ? (
-          <p className="notice">
-            进行中 · 正在等待后台结果。可以继续发送引导、查看 Shell 日志或停止当前任务。
-          </p>
         ) : undefined
       }
       composer={

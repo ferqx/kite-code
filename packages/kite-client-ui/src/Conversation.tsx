@@ -494,26 +494,6 @@ export function Conversation({
     group.push(message);
     children.set(message.parentToolCallId, group);
   }
-  const withChildLifecycle = (message: Message): Message => {
-    if (message.role !== 'tool' || message.toolName !== 'task') return message;
-    const child = children
-      .get(message.id.slice(5))
-      ?.find((candidate) => candidate.role === 'subagent');
-    if (!child) return message;
-    switch (child.status) {
-      case 'creating':
-      case 'running':
-      case 'waiting':
-      case 'auto_reviewing':
-      case 'completed':
-      case 'interrupted':
-      case 'cancelled':
-      case 'failed':
-        return { ...message, childLifecycle: child.status };
-      default:
-        return message;
-    }
-  };
   const childDetail = (child: Message) => {
     if (child.role !== 'subagent' || !child.id.startsWith('subagent:')) return undefined;
     const childSessionId = childSessionIdsByTaskId?.get(child.id.slice('subagent:'.length));
@@ -628,7 +608,7 @@ export function Conversation({
                 return message.role === 'tool' ? (
                   <ToolActivity
                     key={activityKey}
-                    messages={group.map(withChildLifecycle)}
+                    messages={group}
                     suppressGenericFailure={
                       message.toolName === 'task' &&
                       (children.get(message.id.slice(5)) ?? []).some(

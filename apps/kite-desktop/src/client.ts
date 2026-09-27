@@ -547,10 +547,20 @@ export class DesktopClient {
       }
       if (connection.status === 'closed' || connection.status === 'disconnected') this.#recover();
       if (runFinished && connection.status === 'active') {
-        if (this.#view.selected)
+        if (this.#view.selected) {
+          const completedSessionId = this.#view.selected;
           void this.refreshChildSessions(this.#view.selected, { silent: true }).catch(
             () => undefined,
           );
+          if (connection.runtime.features.backgroundQuery)
+            void connection.runtime
+              .query({
+                schema: 'kite.runtime-query.v1',
+                type: 'list_background_executions',
+                sessionId: completedSessionId,
+              })
+              .catch(() => undefined);
+        }
         void this.refreshSessions().catch((error) => this.report(error));
       }
     });

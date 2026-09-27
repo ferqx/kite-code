@@ -76,7 +76,7 @@ Run keyset page，SQLite query plan命中专用index且不扫event journal。
 LFC exact lifecycle qualification在相同Store 8边界上增加：V2创建仍令runId等于initial Turn，但Provider Action continuation
 transaction推进唯一active Run row，terminal与History继续使用original runId；无法唯一恢复时保持recovery_required。Session projection
 schema v2与start receipt derived messageId作为同一candidate切换，不双发旧词汇、不修改receipt resource JSON。RuntimeClient只有在
-generation/revision store返回applied后才dispatch；durable或ephemeral gap把Session置为not-ready并重新订阅，截断packet不进入presentation。
+generation/revision store返回applied后才dispatch；durable或已有游标的ephemeral gap把Session置为not-ready并重新订阅，截断packet不进入presentation。经父子身份校验的独立子Session可在订阅初始reset后以首个实际收到的ephemeral sequence建立游标；后续缺帧仍重新订阅，普通Session仍要求首帧从1开始。
 
 KRSRUN-02A focused matrix现已证明unpublished Store 8 owner上的delete FK cascade/retained receipt、rewind partial-boundary refusal与fault
 rollback、fork settled-terminal copy/origin/coverage/no-source-receipt、reopen及cross-Workspace binding isolation。Host GET/list在resume前只做

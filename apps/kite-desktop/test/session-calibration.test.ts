@@ -7,6 +7,10 @@ import {
   kiteAppServerVersion,
 } from '@kite-ai/kite-local-runtime/client';
 import type { RuntimeClientConnection } from '@kite-ai/runtime-client';
+import { JSDOM } from 'jsdom';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Conversation } from '../../../packages/kite-client-ui/src/Conversation';
 import { startTestHttpServer } from '../../../tests/helpers/test-http-server';
 import {
   createMockModelServer,
@@ -16,7 +20,11 @@ import { CommandResultUnknown, DesktopClient } from '../src/client';
 import { createTestDesktopBridge, type DesktopTestCall } from './desktop-bridge';
 
 // Real Service, with response gates at the renderer IPC boundary. No private client state is patched.
-async function fixture(responses: MockResponse[] = [], providerBaseURL?: string) {
+async function fixture(
+  responses: MockResponse[] = [],
+  providerBaseURL?: string,
+  options?: { readonly childSessions?: boolean },
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-session-cache-')));
   for (const name of ['workspace', 'home', 'runtime', 'config'])
     mkdirSync(join(root, name), { mode: 0o700 });
@@ -37,6 +45,9 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
       },
       model: { default: { provider: 'test', name: 'mock-model' } },
       interactionMode: 'accept_edits',
+      ...(options?.childSessions
+        ? { features: { resourceBudget: true, boundedCancellation: true } }
+        : {}),
       sandbox: { enabled: false },
       mcpServers: {},
     }),
@@ -55,6 +66,7 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
   let staleNextSendProjection: 'idle' | 'active_on_refresh' | 'stale_on_refresh' | undefined;
   let refreshProjectionAfterConflict: 'active' | 'stale' | undefined;
   const sendCommands: Array<{ type: string; commandId: string }> = [];
+  const backgroundQueries: Array<{ sessionId: string; parentRunStatus: string | undefined }> = [];
   const rewrittenProjections = new Map<unknown, 'stale' | 'active'>();
   const bufferedMessages: unknown[] = [];
   let injectedMode: 'auto' | 'full' = 'auto';
@@ -113,6 +125,14 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
     const carrier = carriers.get(args?.connectionId as number)!;
     if (command === 'runtime_send') {
       const message = JSON.parse(args?.frame as string);
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'list_background_executions'
+      )
+        backgroundQueries.push({
+          sessionId: message.params.query.sessionId,
+          parentRunStatus: client.getSnapshot().projection?.currentRun?.status,
+        });
       if (
         message.method === 'runtime/query' &&
         message.params.query.type === 'get_session_projection' &&
@@ -360,6 +380,9 @@ async function fixture(responses: MockResponse[] = [], providerBaseURL?: string)
     get sendCommands() {
       return sendCommands;
     },
+    get backgroundQueries() {
+      return backgroundQueries;
+    },
     async close() {
       for (const pending of allGates) pending.release();
       for (const pending of gated.values()) pending.release();
@@ -390,6 +413,119 @@ async function waitFor(check: () => boolean) {
     await Bun.sleep(10);
   }
 }
+
+test('desktop makes one final background read when the selected Run finishes', async () => {
+  const f = await fixture([{ message: { content: 'Final answer.' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Finish this turn.');
+    await waitFor(() =>
+      f.backgroundQueries.some(
+        (query) => query.sessionId === f.a && query.parentRunStatus === 'completed',
+      ),
+    );
+    expect(
+      f.client.getSnapshot().messages.some((message) => message.text === 'Final answer.'),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+for (const openAfterFirstFrame of [false, true])
+  test(`child detail renders live text when opened ${openAfterFirstFrame ? 'after' : 'before'} the first frame`, async () => {
+    let releaseChild!: () => void;
+    const childGate = new Promise<void>((resolve) => {
+      releaseChild = resolve;
+    });
+    let parentRequests = 0;
+    let childEnteredGate = false;
+    const f = await fixture(
+      Array.from({ length: 8 }, () => ({
+        response: async ({ messages }) => {
+          const transcript = JSON.stringify(messages);
+          if (
+            transcript.includes('CHILD_STREAM_TASK') &&
+            !transcript.includes('PARENT_STREAM_TASK')
+          ) {
+            childEnteredGate = true;
+            await childGate;
+            return {
+              message: { content_chunks: ['CHILD_STREAM_ALPHA', 'CHILD_STREAM_OMEGA'] },
+              stream_frame_delays: openAfterFirstFrame ? [2_000, 500, 0, 0] : [300, 500, 0, 0],
+            };
+          }
+          parentRequests++;
+          if (parentRequests === 1)
+            return {
+              message: {
+                tool_calls: [
+                  {
+                    id: 'child-stream-task',
+                    name: 'task',
+                    args: {
+                      name: 'Streaming child',
+                      subagent_type: 'review',
+                      task: 'CHILD_STREAM_TASK',
+                      background: true,
+                      result_disposition: 'required',
+                    },
+                  },
+                ],
+              },
+              toolContinuation: 'required' as const,
+            };
+          return {
+            message: { content: 'Parent finished.' },
+            ...(parentRequests === 2
+              ? { expectedRequest: { toolResults: [{ toolCallId: 'child-stream-task' }] } }
+              : {}),
+          };
+        },
+      })),
+      undefined,
+      { childSessions: true },
+    );
+    try {
+      await f.client.selectSession(f.a);
+      await f.client.send('PARENT_STREAM_TASK');
+      await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 1);
+      const childSessionId = f.client.getSnapshot().childSessions!.entries[0]!.sessionId;
+      if (openAfterFirstFrame) {
+        await waitFor(() => childEnteredGate);
+        releaseChild();
+        await Bun.sleep(300);
+      }
+      await f.client.openChildSession(f.a, childSessionId);
+      expect(f.client.getSnapshot().childDetail?.loading).toBe(false);
+      if (!openAfterFirstFrame) releaseChild();
+      if (!openAfterFirstFrame)
+        await waitFor(() =>
+          (f.client.getSnapshot().childDetail?.messages ?? []).some(
+            (message) => message.text.includes('CHILD_STREAM_ALPHA') && !message.settled,
+          ),
+        );
+      await waitFor(() =>
+        (f.client.getSnapshot().childDetail?.messages ?? []).some(
+          (message) => message.text.includes('CHILD_STREAM_OMEGA') && !message.settled,
+        ),
+      );
+      const html = renderToStaticMarkup(
+        createElement(Conversation, {
+          messages: f.client.getSnapshot().childDetail!.messages,
+          loading: false,
+          selected: true,
+          connected: true,
+          saveReading: () => undefined,
+        }),
+      );
+      const document = new JSDOM(html).window.document;
+      expect(document.body.textContent).toContain('CHILD_STREAM_OMEGA');
+    } finally {
+      releaseChild();
+      await f.close();
+    }
+  }, 30_000);
 
 test('provider authentication failure is visible once during live delivery and after history reload', async () => {
   let requests = 0;

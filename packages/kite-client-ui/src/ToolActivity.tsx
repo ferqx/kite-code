@@ -17,7 +17,7 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
 import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
 import { FileDiff } from './FileChanges';
-import { childStatusLabel, statusLabel } from './status';
+import { statusLabel } from './status';
 import type { Message } from './types';
 import { Button } from './ui';
 
@@ -263,9 +263,26 @@ function approvalLabel(message: Message): string | undefined {
   }
 }
 
+function createdChildTask(message: Message): boolean {
+  if (message.toolName !== 'task' || message.status !== 'completed') return false;
+  const output = message.toolResult?.stdout;
+  if (!output) return false;
+  try {
+    const result: unknown = JSON.parse(output);
+    return (
+      !!result &&
+      typeof result === 'object' &&
+      'task_id' in result &&
+      typeof result.task_id === 'string' &&
+      result.task_id.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function executionLabel(message: Message) {
-  if (message.toolName === 'task' && message.childLifecycle)
-    return childStatusLabel(message.childLifecycle);
+  if (createdChildTask(message)) return '已创建';
   if (stoppedDuringAutoReview(message)) return '未执行';
   if (message.approval?.state === 'reviewing' && !message.settled) return '';
   if (message.approval?.state === 'awaiting_user' && !message.settled) return '等待人工审批';
@@ -397,17 +414,11 @@ export function ToolRow({
               {approval}
             </span>
           )}
-          {status &&
-            status !== '成功' &&
-            status !== approval &&
-            (message.status !== 'running' || message.childLifecycle) && (
-              <span
-                className="tool-step-status"
-                data-status={message.childLifecycle ?? message.status}
-              >
-                {status}
-              </span>
-            )}
+          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+            <span className="tool-step-status" data-status={message.status}>
+              {status}
+            </span>
+          )}
         </span>
         {(message.approval?.state === 'awaiting_user' ||
           ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
@@ -475,11 +486,7 @@ export function ToolActivity({
     );
   const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
   const active = messages.some((item) => !item.settled);
-  const running = messages.some((item) =>
-    item.childLifecycle
-      ? item.childLifecycle === 'creating' || item.childLifecycle === 'running'
-      : !item.settled && item.status === 'running',
-  );
+  const running = messages.some((item) => !item.settled && item.status === 'running');
   const issues = messages.filter((item) =>
     ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
   );
@@ -487,8 +494,7 @@ export function ToolActivity({
   const open = expanded ?? (grouped && active);
   const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
-  const pendingReview =
-    !message.childLifecycle && !message.settled && message.approval?.state === 'reviewing';
+  const pendingReview = !message.settled && message.approval?.state === 'reviewing';
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
     (!read || childIssue) &&
@@ -549,15 +555,7 @@ export function ToolActivity({
       {status && (grouped || !shell || !open) && status !== '成功' && status !== approval && (
         <span
           className="tool-activity-state"
-          data-status={
-            message.childLifecycle
-              ? ['failed', 'interrupted', 'cancelled'].includes(message.childLifecycle)
-                ? 'issue'
-                : 'neutral'
-              : issues.length
-                ? 'issue'
-                : 'neutral'
-          }
+          data-status={issues.length ? 'issue' : 'neutral'}
           role="status"
         >
           {status}
@@ -643,14 +641,11 @@ export function ToolActivity({
                 {approval}
               </span>
             )}
-            {status &&
-              status !== '成功' &&
-              status !== approval &&
-              (message.status !== 'running' || message.childLifecycle) && (
-                <span className="tool-step-status" data-status={message.status}>
-                  {status}
-                </span>
-              )}
+            {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+              <span className="tool-step-status" data-status={message.status}>
+                {status}
+              </span>
+            )}
             {!hasDiff &&
               (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
               resultPreview(message) && (

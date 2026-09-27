@@ -338,7 +338,7 @@ test('environment information opens three private child details without selectin
           sessionRevision: 1,
           aggregateGeneration: 'test-children',
           watermark: 1,
-          executions: entries.map((entry) => ({
+          executions: entries.slice(0, 2).map((entry) => ({
             executionId: entry.taskId,
             displayName: entry.displayName,
             sessionId: 's0',
@@ -358,11 +358,18 @@ test('environment information opens three private child details without selectin
   await render(<App client={client} />);
   expect(document.querySelectorAll('.session-row')).toHaveLength(2);
   expect(document.querySelector('[aria-label="父 Agent 树"]')).toBeNull();
+  expect(document.querySelectorAll('.background-execution-detail')).toHaveLength(3);
+  expect(button('查看子 Agent 详情：子任务 c').closest('li')?.textContent).toContain('不可用');
   await click(button('查看子 Agent 详情：子任务 a'));
   expect(document.body.textContent).toContain('答复 private-a');
   expect(input()).toBeNull();
   expect(document.querySelector('.interaction-area')).toBeNull();
   await click(button('返回父会话'));
+  const background = client.view.background?.s0;
+  if (!background) throw new Error('Expected background fixture.');
+  await act(() => client.update({ background: { s0: { ...background, stale: true } } }));
+  expect(document.querySelectorAll('.background-execution-detail')).toHaveLength(3);
+  expect(document.querySelectorAll('.background-execution-stop')).toHaveLength(0);
   await click(button('查看子 Agent 详情：子任务 c'));
   expect(document.body.textContent).toContain('答复 private-c');
   expect(document.body.textContent).not.toContain('答复 private-a');
@@ -2058,7 +2065,7 @@ test('waiting for background results keeps steering and stop controls available'
   };
   await render(<App client={client} />);
 
-  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.body.textContent).not.toContain('等待后台结果');
   expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="停止任务"]')).not.toBeNull();
 
@@ -2069,6 +2076,20 @@ test('waiting for background results keeps steering and stop controls available'
 
   await click(button('停止任务'));
   expect(client.cancelled).toBe(1);
+
+  const completed = {
+    ...session('s0', '工作 0'),
+    currentRun: {
+      runId: 'r',
+      initialTurnId: 't',
+      status: 'completed' as const,
+      revision: 3,
+    },
+  };
+  await act(() => client.update({ projection: completed, sessions: [completed, session('s1')] }));
+  expect(document.body.textContent).not.toContain('等待后台结果');
+  expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
+  expect(document.querySelectorAll('.session-row')[0]?.textContent).toBe('工作 0');
 });
 
 test('three child cards retain their initial waiting Run while one result settles', async () => {
@@ -2122,7 +2143,7 @@ test('three child cards retain their initial waiting Run while one result settle
   expect(group?.textContent).toContain('Child A已完成');
   expect(group?.textContent).toContain('Child B运行中');
   expect(group?.textContent).toContain('Child C运行中');
-  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.body.textContent).not.toContain('等待后台结果');
   expect(document.body.textContent).not.toContain('运行失败');
 });
 
@@ -2169,7 +2190,7 @@ test('background waiting survives a second conversation and keeps both drafts is
     }),
   );
   expect(input().value).toBe('等待期间留在 A 的草稿');
-  expect(document.querySelector('.bottom-controls')?.textContent).toContain('正在等待后台结果');
+  expect(document.body.textContent).not.toContain('等待后台结果');
   expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
   expect(button('发送运行中引导')).not.toBeNull();
 

@@ -479,6 +479,43 @@ describe('Runtime Snapshot Store', () => {
     });
   });
 
+  test('a child stream may join at its first observed sequence but still rejects later gaps', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(projection('session-1', 1)),
+      reset: true,
+      ready: true,
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(2),
+        allowInitialEphemeralSequence: true,
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(3),
+        allowInitialEphemeralSequence: true,
+      }),
+    ).toBe('applied');
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: ephemeral(5),
+        allowInitialEphemeralSequence: true,
+      }),
+    ).toBe('resync_required');
+    expect(Object.values(store.getSnapshot().streams)[0]?.sequence).toBe(3);
+  });
+
   test('requires sequence one when a stream composition revision changes', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active' });
