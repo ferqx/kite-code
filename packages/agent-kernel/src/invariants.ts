@@ -453,9 +453,13 @@ function committedUsageWithinBudget(
     for (const field of Object.keys(counterSums))
       counterSums[field] =
         (counterSums[field] ?? 0) + (numberValue(recordValue(usage, 'counters'), field) ?? 0);
-    for (const field of Object.keys(gaugeSums))
+    for (const field of Object.keys(gaugeSums)) {
+      const value = numberValue(recordValue(usage, 'gauges'), field) ?? 0;
       gaugeSums[field] =
-        (gaugeSums[field] ?? 0) + (numberValue(recordValue(usage, 'gauges'), field) ?? 0);
+        field === 'elapsedRunMs'
+          ? Math.max(gaugeSums[field] ?? 0, value)
+          : (gaugeSums[field] ?? 0) + value;
+    }
   };
   add(record(active.reconciledUsage));
   for (const reservation of Object.values(active.reservations)) {
@@ -467,8 +471,10 @@ function committedUsageWithinBudget(
       const gauges = recordValue(upper, 'gauges');
       for (const field of Object.keys(counterSums))
         counterSums[field] = (counterSums[field] ?? 0) + (numberValue(counters, field) ?? 0);
-      gaugeSums.elapsedRunMs =
-        (gaugeSums.elapsedRunMs ?? 0) + (numberValue(gauges, 'elapsedRunMs') ?? 0);
+      gaugeSums.elapsedRunMs = Math.max(
+        gaugeSums.elapsedRunMs ?? 0,
+        numberValue(gauges, 'elapsedRunMs') ?? 0,
+      );
     }
   }
   return (

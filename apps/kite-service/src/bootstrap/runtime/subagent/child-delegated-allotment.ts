@@ -70,15 +70,14 @@ export function planChildDelegatedAllotment(input: {
   )
     throw new Error('Child allotment transient reservation is not reconcilable.');
   const originalDeadline = Date.parse(ledger.deadlineAt);
-  // Elapsed-run upper bounds are additive in the parent ledger. Split the
-  // finite duration like the counters so two admitted children can coexist
-  // under the normal Limited budget without exceeding the parent ceiling.
-  // Keep one finite share for the parent after all admitted child receipts.
-  // Limited admits two active children and one queued sibling.
+  // Elapsed time is a max gauge in the parent ledger, so concurrent children
+  // may each use the remaining parent deadline up to the role's 30-minute cap.
+  // Counters remain additive and reserve a finite share for each child and
+  // the parent. Limited admits two active children and one queued sibling.
   const divisor = ledger.budget.maxConcurrentSubagents + 2;
   const duration = Math.min(
     DEFAULT_SUBAGENT_TIMEOUT_MS,
-    Math.floor(ledger.budget.maxRunDurationMs / divisor),
+    ledger.budget.maxRunDurationMs,
     originalDeadline - now,
   );
   if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(now + duration))

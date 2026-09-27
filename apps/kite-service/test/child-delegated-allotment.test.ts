@@ -40,7 +40,7 @@ function initialState(budget: ResourceBudget = INTERNAL_RESOURCE_BUDGET_): Runti
       status: 'active',
       runId: 'parent-run',
       startedAt: new Date(NOW).toISOString(),
-      deadlineAt: DEADLINE,
+      deadlineAt: new Date(NOW + Math.min(50 * 60_000, budget.maxRunDurationMs)).toISOString(),
       budget,
       reconciledUsage: createZeroResourceUsage(),
       reservations: {},
@@ -127,6 +127,8 @@ test('three read-only child allotments reconcile transient Tools and coexist und
     expect(plan.reservation.invocationId).toBe(`child-allotment:${childId(index)}`);
     expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
     expect(plan.childBudget.maxTurns).toBe(8);
+    expect(plan.childBudget.maxModelRequests).toBe(30);
+    expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
     expect(Date.parse(plan.deadlineAt)).toBeLessThanOrEqual(Date.parse(DEADLINE));
     reservations.push(plan.reservation);
     state = applyPlanned(state, plan.events);
@@ -153,7 +155,8 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
       taskArtifactBytes: 1,
       now: NOW,
     });
-    expect(plan.childBudget.maxRunDurationMs).toBe(7.5 * 60_000);
+    expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
+    expect(plan.childBudget.maxModelRequests).toBe(30);
     expect(Date.parse(plan.deadlineAt)).toBe(NOW + plan.childBudget.maxRunDurationMs);
     expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(
       plan.childBudget.maxRunDurationMs,
@@ -177,6 +180,12 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
   state = applyPlanned(state, third.events);
   if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
+  expect(committedResourceUsage(state.resourceBudget).gauges.elapsedRunMs).toBe(30 * 60_000);
+  expect(committedResourceUsage(state.resourceBudget).counters.modelRequests).toBe(90);
+  expect(
+    state.resourceBudget.budget.maxModelRequests -
+      committedResourceUsage(state.resourceBudget).counters.modelRequests,
+  ).toBe(30);
   expect(() =>
     reduceResourceBudgetState(
       state.resourceBudget as Extract<typeof state.resourceBudget, { status: 'active' }>,

@@ -134,7 +134,7 @@ describe('ResourceBudget', () => {
     expect(LIMITED_RESOURCE_BUDGET_).toMatchObject({
       maxRunDurationMs: 1_800_000,
       maxTurns: 30,
-      maxModelRequests: 60,
+      maxModelRequests: 120,
       maxToolInvocations: 250,
       maxRunInputTokens: 1_000_000,
       maxRunOutputTokens: 250_000,

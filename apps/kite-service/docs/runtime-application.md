@@ -35,7 +35,7 @@ CLI in-process组合在已完成执行释放coordinator后，也从同一Store�
 
 显式 `task_wait` 复用 Background subagent Runtime 已有的 owner watermark 与 waiter，对 1–8 个目标执行单次有界 wait-any；目标终态、超时、Run abort 或当前 Turn 的新用户输入结束该工具调用。无关 State revision 和非目标 owner 变化只触发重新判定，不直接驱动模型；超时与 steer 不取消 child。它不建立持久 deadline、第二个 scheduler 或新的终态存储，宿主重启后的单次等待由普通 safe-read 重入重新开始。
 
-background task 返回“已接受”时，父工具 reservation 随工具终态结算；派发时已经创建的 descendant admission 仍引用同一 Run 内未释放的父 reservation，为 child 的后续模型轮次和工具调用逐项保留、派发并核销预算。Service 不在父工具结算后重建 admission，也不把该血缘扩展到其他 Run。
+background task 返回“已接受”时，父工具 reservation 随工具终态结算；派发时已经创建的 descendant admission 仍引用同一 Run 内未释放的父 reservation，为 child 的后续模型轮次和工具调用逐项保留、派发并核销预算。子会话的时间上界取角色 30 分钟、父 Run 预算时长和当前父 deadline 剩余时间的最小值；父账本将并发 elapsedRunMs 按最大值核算，不再把时间按子任务数平分。模型请求等累计 counters 仍按受理容量加父份额分配，默认 Limited 的 120 次模型请求为三个 child 和父 Run 各保留 30 次。Service 不在父工具结算后重建 admission，也不把该血缘扩展到其他 Run。
 
 required child 是 CompletionGuard 唯一 blocker 时，State runner 接纳 `wait_for_background` 并停止 Provider 循环；Kernel State 持久保存进入等待时的 required task ID，Bridge 将其投影到同一 Run。混合有限 Shell 命中 `wait_for_tool` 时同样不消耗纠错，Service 按准确 owner 快照等待所有必需 Shell 清理完成与 child 结果接纳；用户引导单独唤醒模型。background owner 只有在具名结果已被 Kernel 接纳并写入 settlement proof，或 settlement failure 的 durable recovery claim 已可枚举后，才发布对应 terminal／unavailable watermark；若 Kernel revision 与 owner watermark 同时到达，waiter 基于最新 State 重算 required 集合，不用旧快照把已接纳结果误判为缺失。background owner watermark、Kernel revision 与 execution authority 只触发重新判定：只有已接纳终态／失败／取消、需父级处理的交互或用户输入等可行动事实才恢复模型，进度、心跳或日志 revision 只更新投影。相同 owner generation、task ID 与 execution revision 的 `running` 读取不会再次成为模型决策输入。owner generation 更替、authority detached／recovery_required、真实缺少 recovery claim 的 settlement admission 失败、deadline 或 Runtime stop 按既有 fail-closed recovery／unknown／取消边界收敛，不释放未被 Kernel 接纳的义务。
 

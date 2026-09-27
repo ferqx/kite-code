@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { reduceLeaseState } from '../src/core/lease/reducer';
 import { reduceCapabilityState } from '../src/domains/capability/reducer';
 import type { KernelEvent } from '../src/events';
+import { assertAgentStateInvariants } from '../src/invariants';
 import { type AgentState, createInitialAgentState } from '../src/state';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
@@ -39,6 +40,7 @@ function budget(maxToolInvocations = 2) {
 function usage(
   source: 'actual' | 'versioned_upper_bound',
   toolInvocations = 0,
+  elapsedRunMs = 0,
 ): Record<string, unknown> {
   return {
     counters: {
@@ -50,7 +52,7 @@ function usage(
       artifactBytes: 0,
     },
     gauges: {
-      elapsedRunMs: 0,
+      elapsedRunMs,
       activeSubagents: 0,
       activeWriters: 0,
       activeToolInvocations: toolInvocations,
@@ -75,6 +77,7 @@ function reservation(
   reservationId: string,
   invocationId: string,
   toolInvocations = 1,
+  elapsedRunMs = 0,
 ): KernelEvent {
   return {
     type: 'resource_budget.reserved',
@@ -84,13 +87,23 @@ function reservation(
       runId: 'run-1',
       invocationId,
       resourceKind: 'tool',
-      executableUpperBound: usage('versioned_upper_bound', toolInvocations),
+      executableUpperBound: usage('versioned_upper_bound', toolInvocations, elapsedRunMs),
       state: 'reserved',
     },
   } as KernelEvent;
 }
 
 describe('State lease reducer', () => {
+  test('kernel invariants count concurrent elapsed time once', () => {
+    let state = configure();
+    state = reduceLeaseState(state, reservation('first', 'first', 1, 60_000));
+    state = reduceLeaseState(state, reservation('second', 'second', 1, 60_000));
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
+    expect(() =>
+      reduceLeaseState(configure(), reservation('over-duration', 'over-duration', 1, 60_001)),
+    ).toThrow(/budget exhausted/u);
+  });
+
   test('uses the active ledger and fails closed for unconfigured or unknown facts', () => {
     expect(() =>
       reduceLeaseState(initialState(), {

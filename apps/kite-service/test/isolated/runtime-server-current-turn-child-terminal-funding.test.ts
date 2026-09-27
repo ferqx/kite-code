@@ -21,7 +21,7 @@ async function until(check: () => boolean, label: string): Promise<void> {
   if (!check()) throw new Error(`Current-turn budget fixture did not reach ${label}.`);
 }
 
-test('formal Service retains accepted followup funding when the old child exhausts its Model budget', async () => {
+test('formal Service releases accepted followup funding when an old child reaches a terminal context error', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-current-turn-budget-'));
   const workspace = join(home, 'workspace');
   mkdirSync(workspace);
@@ -211,7 +211,7 @@ test('formal Service retains accepted followup funding when the old child exhaus
         input: 'BUDGET_PARENT_TASK',
       }),
     ).toMatchObject({ status: 'applied' });
-    await until(() => childCalls === 15, 'old child Model budget exhaustion').catch(() => {
+    await until(() => childCalls === 15, 'old child final Model request').catch(() => {
       const childId = parentEvents().find(
         (event) => event.type === 'subagent.child_session_intended',
       )?.childThreadId;
@@ -272,7 +272,7 @@ test('formal Service retains accepted followup funding when the old child exhaus
           .some(
             ({ event }) => event.type === 'run.error' || event.type === 'agent.followup_routed',
           ),
-      'target budget terminal or followup route',
+      'target terminal or followup route',
     );
     const targetEvents = storage.storage.sessions
       .loadEventsStrict(childSessionId)
@@ -281,7 +281,12 @@ test('formal Service retains accepted followup funding when the old child exhaus
     expect(targetState?.resourceBudget.status).toBe('active');
     if (targetState?.resourceBudget.status !== 'active')
       throw new Error('Target ledger is unavailable.');
-    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(15);
+    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(30);
+    expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(15);
+    expect(targetEvents.find((event) => event.type === 'run.error')).toMatchObject({
+      message: 'Prepared Agent mail exceeds the model context limit.',
+      outcome: { safeRetry: false, recoveryEntry: 'operator_action' },
+    });
     expect(
       targetEvents.filter((event) => event.type === 'model.invocation_attempt_started'),
     ).toHaveLength(15);
@@ -320,6 +325,12 @@ test('formal Service retains accepted followup funding when the old child exhaus
       reservations: { [row.backupReservationId]: { state: 'released' } },
     });
     expect(childCalls).toBe(15);
+    await until(
+      () =>
+        storage!.readChildExecutionAuthority(parentSessionId, childSessionId)?.cleanupConfirmed ===
+        true,
+      'child cleanup',
+    );
   } catch (error) {
     failed = true;
     throw error;
