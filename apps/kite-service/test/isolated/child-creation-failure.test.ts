@@ -22,7 +22,7 @@ const ref = {
   byteLength: 100,
 };
 
-function fixture(created: boolean, activated = false) {
+function fixture(created: boolean, activated = false, releasedAfterCancel = false) {
   const base = createInitialAgentState({
     threadId: parentSessionId,
     userId: 'user',
@@ -78,15 +78,22 @@ function fixture(created: boolean, activated = false) {
       },
     },
     retainedResourceBudgets: {
-      'parent-run': { reservations: { delegated: { state: 'reserved' } } },
+      'parent-run': {
+        reservations: { delegated: { state: releasedAfterCancel ? 'released' : 'reserved' } },
+      },
     },
+    ...(releasedAfterCancel
+      ? { turn: { turnId: 'parent-run', turnIndex: 1, status: 'aborted', abortCause: 'user' } }
+      : {}),
   } as unknown as RuntimeState;
   let written = 0;
   const result = {
     ok: false,
-    terminalStatus: 'failed',
-    error: 'child_creation_failed',
-    summary: 'Child Session could not be started.',
+    terminalStatus: releasedAfterCancel ? 'cancelled' : 'failed',
+    ...(releasedAfterCancel ? {} : { error: 'child_creation_failed' }),
+    summary: releasedAfterCancel
+      ? 'Child Session was cancelled before dispatch.'
+      : 'Child Session could not be started.',
     toolCallCount: 0,
     durationMs: 0,
   };
@@ -120,20 +127,51 @@ function fixture(created: boolean, activated = false) {
       readIntent: () => ({ ...intent, ...overrides }) as never,
       readPreDispatchChildProof: () => proof,
       artifacts,
+      ...(releasedAfterCancel
+        ? {
+            cancelled: true,
+            alreadyReleasedAfterParentCancel: true,
+            hasCancelledParentRunProof: () => true,
+          }
+        : {}),
       commitFailure: (receipt) => {
         expect(receipt.readFailureArtifact(ref, childInvocationId)).toEqual(result);
-        expect(receipt.failureEvent.type).toBe('subagent.child_creation_failed');
-        if (receipt.failureEvent.type !== 'subagent.child_creation_failed')
-          throw new Error('Expected a creation failure receipt.');
-        expect(receipt.failureEvent.failureReceiptDigest).toBe(digest);
+        expect(receipt.failureEvent.type).toBe(
+          releasedAfterCancel
+            ? 'subagent.child_pre_dispatch_cancelled'
+            : 'subagent.child_creation_failed',
+        );
+        expect(
+          receipt.failureEvent.type === 'subagent.child_creation_failed'
+            ? receipt.failureEvent.failureReceiptDigest
+            : receipt.failureEvent.terminalReceiptDigest,
+        ).toBe(digest);
         expect(receipt.resultEvent.notificationId).toBe(`subagent:${childInvocationId}:${digest}`);
         expect(receipt.resultEvent.originRunId).toBe('parent-run');
+        if (releasedAfterCancel) {
+          expect(receipt.releaseEvent).toBeUndefined();
+          return [receipt.failureEvent, receipt.resultEvent];
+        }
+        if (!receipt.releaseEvent) throw new Error('Expected an unconsumed reservation.');
         expect(receipt.releaseEvent.reservationId).toBe('delegated');
         return [receipt.releaseEvent, receipt.failureEvent, receipt.resultEvent];
       },
     });
-  return { call, getWritten: () => written };
+  return { call, parentState, getWritten: () => written };
 }
+
+test('user-cancelled, already released revision-zero child settles without a second release', () => {
+  const f = fixture(true, false, true);
+  Object.assign(f.parentState, { turn: { turnId: 'new-run', status: 'active' } });
+  expect(f.call().map((event) => event.type)).toEqual([
+    'subagent.child_pre_dispatch_cancelled',
+    'subagent.background_result_persisted',
+  ]);
+  Object.assign(f.parentState.retainedResourceBudgets['parent-run']!.reservations.delegated!, {
+    state: 'reserved',
+  });
+  expect(() => f.call()).toThrow('exact parent claim');
+});
 
 test.each([false, true])('failure receipt selects the Store CAS mode for created=%p', (created) => {
   const f = fixture(created);

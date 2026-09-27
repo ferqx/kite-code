@@ -1,4 +1,8 @@
 export {
+  followupChildApprovalParentToolCallId,
+  parseFollowupChildApprovalParentToolCallId,
+} from '@kite-ai/runtime-host/storage';
+export {
   createSqliteWorkspaceAuthority,
   SQLITE_WORKSPACE_AUTHORITY_SCHEMA,
   SQLITE_WORKSPACE_CONTROLLER_RECEIPT_SCHEMA,
@@ -69,11 +73,7 @@ export {
   type SqliteWorkspaceDirectoryOutboxPage,
 } from './directory-outbox';
 export type { KiteChildApprovalProxyRecord } from './kite-child-approval-proxy';
-export {
-  childApprovalProxyId,
-  followupChildApprovalParentToolCallId,
-  parseFollowupChildApprovalParentToolCallId,
-} from './kite-child-approval-proxy';
+export { childApprovalProxyId } from './kite-child-approval-proxy';
 export type {
   CrossSessionInboxReceipt,
   CrossSessionMailOutboxRecord,

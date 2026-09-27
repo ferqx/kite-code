@@ -101,7 +101,7 @@ describe('bounded Runtime cancellation', () => {
     { timeout: 10_000 },
   );
 
-  test('enforces a restored expired run deadline with a structured cancellation terminal', async () => {
+  test('starts a successor with a fresh deadline after an expired cancelled run', async () => {
     const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-expired-deadline-'));
     const storePath = join(workspace, 'runtime.db');
     const threadId = 'expired-run-deadline';
@@ -130,9 +130,9 @@ describe('bounded Runtime cancellation', () => {
       );
       seed.close();
 
-      const model = createMockModel([]);
-      const rawModel = model.model as unknown as { doGenerate: () => Promise<never> };
-      rawModel.doGenerate = () => new Promise<never>(() => {});
+      const model = createMockModel([
+        { message: aiMessage({ content: 'Successor completed after old deadline.' }) },
+      ]);
       const events: RuntimeEvent[] = [];
       for await (const event of runTestRuntimeAgent(
         {
@@ -158,19 +158,13 @@ describe('bounded Runtime cancellation', () => {
       }
 
       expect(events).toContainEqual(
-        expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
-      );
-      expect(events).toContainEqual(
         expect.objectContaining({
-          type: 'run.error',
-          failure: expect.objectContaining({ kind: 'cancel_incomplete' }),
-          outcome: expect.objectContaining({
-            status: 'unknown',
-            reasonCode: 'cancel_incomplete',
-            recoveryEntry: 'reconcile',
-          }),
+          type: 'model.responded',
+          text: 'Successor completed after old deadline.',
         }),
       );
+      expect(events.at(-1)?.type).toBe('turn.completed');
+      expect(events.some((event) => event.type === 'run.error')).toBe(false);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -625,7 +619,7 @@ describe('bounded Runtime cancellation', () => {
     kernel.close();
   });
 
-  test('interrupts a concurrency wait and cannot dispatch a new tool afterward', async () => {
+  test('admits an ordinary tool despite an occupied legacy tool gauge', async () => {
     const now = Date.now();
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
@@ -678,39 +672,37 @@ describe('bounded Runtime cancellation', () => {
       reservationId: 'running-reservation',
     });
 
-    const controller = new AbortController();
     let executorCalls = 0;
     const emitted: string[] = [];
     for await (const event of runStateRuntimeLoop(
       kernel,
       async () => {
         executorCalls += 1;
-        return [];
+        return [
+          {
+            type: 'tool.finished',
+            toolCallId: 'queued-tool',
+            name: 'read_file',
+            result: { ok: true, command: '', exitCode: 0, stdout: 'content', stderr: '' },
+          },
+        ];
       },
       { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-      10_000,
-      undefined,
-      controller.signal,
     )) {
       emitted.push(event.type);
-      if (event.type === 'resource_budget.waiter_enqueued') {
-        kernel.processEventBatch(
-          eventsForRunCancellation(kernel.getState(), 'Cancelled while waiting.', 'user'),
-        );
-        controller.abort();
-      }
+      if (event.type === 'resource_budget.reconciled') break;
     }
 
-    expect(emitted).toEqual(['resource_budget.waiter_enqueued']);
-    expect(executorCalls).toBe(0);
+    expect(emitted).toContain('resource_budget.dispatch_started');
+    expect(emitted).not.toContain('resource_budget.waiter_enqueued');
+    expect(executorCalls).toBe(1);
     expect(kernel.getState()).toMatchObject({
-      turn: { status: 'aborted' },
       resourceBudget: {
         status: 'active',
-        waiters: { 'tool:queued-tool': { state: 'cancelled' } },
-        reservations: { 'running-reservation': { state: 'unknown' } },
+        waiters: {},
+        reservations: { 'running-reservation': { state: 'dispatch_started' } },
       },
-      tools: { calls: { 'queued-tool': { status: 'cancelled' } } },
+      tools: { calls: { 'queued-tool': { status: 'succeeded' } } },
     });
     kernel.close();
   });

@@ -136,7 +136,7 @@ restart 不是磁盘与进程的原子事务。CLI 在旧服务停止后崩溃�
 | 2：客户端启动与显式重启 | TUI/CLI 的自有与共享模式启动/退出/故障展示、candidate 固定与 Web 身份检查；release composition 负责目标预检、预期实例控制、等待、排他启动与结果；CLI 解析 restart/--cancel/status 展示；补齐初始化先后顺序 | TUI/Web 入门与连接恢复、CLI 参考、服务生命周期与排障、源码开发说明 |
 | 3：发布闭环 | candidate 安装/升级提示、默认 TUI/CLI 新旧版本并存及共享数据兼容、跨版本制品测试、三平台 endpoint/admission/process 验证；核对 release 文档中已退役自动换代描述 | release-control、open-source-first-release、release 测试入口与实际资格证据 |
 
-每阶段完成执行 iteration_complete 和 overengineering-check；已有上一阶段验证在输入不变时复用。阶段 1/2 不足以宣称跨版本发布通过。所有阶段完成后将当前事实归回产品/owner/active，移除此计划，ADR 保留决策历史。
+每阶段完成执行 iteration_complete；已有上一阶段验证在输入不变时复用。阶段 1/2 不足以宣称跨版本发布通过。所有阶段完成后将当前事实归回产品/owner/active，移除此计划，ADR 保留决策历史。
 
 ## 必要验收
 

@@ -954,6 +954,96 @@ test('pre-dispatch cancellation records only a cancelled child result', () => {
   expect(readChildSessionIntent(mismatched, childThreadId)?.failureReceiptDigest).toBeNull();
 });
 
+test('already released child settles only with persisted user cancellation and no second release', () => {
+  using db = candidate();
+  recordParentIntent(db);
+  insertUnactivatedChild(db, 'idle');
+  db.query(
+    'UPDATE child_session_intents SET funding_run_id = origin_run_id WHERE child_thread_id = ?',
+  ).run(childThreadId);
+  db.query(
+    "UPDATE runtime_runs SET status = 'cancelled', finished_at_ms = 2, terminal_json = '{}' WHERE session_id = 'root' AND run_id = 'run'",
+  ).run();
+  const parentState = {
+    turn: { turnId: 'run', status: 'aborted', abortCause: 'user' },
+    resourceBudget: {
+      status: 'active',
+      runId: 'run',
+      reservations: { reservation: { state: 'released' } },
+    },
+  };
+  db.query(`INSERT INTO runtime_snapshots(session_id,schema_version,format_epoch,revision,state_json,event_position,state_checksum,created_at)
+    VALUES ('root',27,'state',0,?,0,'checksum',1)`).run(JSON.stringify(parentState));
+  db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+    VALUES ('root','released-child',6,27,?,1)`).run(
+    JSON.stringify({ type: 'resource_budget.released', reservationId: 'reservation' }),
+  );
+  db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+    VALUES ('root','cancelled-parent',7,27,?,1)`).run(
+    JSON.stringify({
+      type: 'turn.aborted',
+      turnId: 'run',
+      reason: 'Cancelled by user.',
+      cause: 'user',
+    }),
+  );
+  const base = failureTransaction('created_unactivated');
+  const failure = {
+    ...base,
+    events: [
+      {
+        ...base.events[1],
+        type: 'subagent.child_pre_dispatch_cancelled',
+        terminalReceiptDigest: base.childCreationFailure.failureReceiptDigest,
+      },
+      { ...base.events[2], childTerminalStatus: 'cancelled' },
+    ],
+  };
+  db.query(
+    "UPDATE runtime_events SET event_json = ? WHERE session_id = 'root' AND event_id = 'cancelled-parent'",
+  ).run(
+    JSON.stringify({
+      type: 'turn.aborted',
+      turnId: 'run',
+      reason: 'Internal error.',
+      cause: 'error',
+    }),
+  );
+  expect(() => settleChildCreationFailureInTransaction(db, 'receipt_evidence', failure)).toThrow(
+    'prior release proof',
+  );
+  db.query(
+    "UPDATE runtime_events SET event_json = ? WHERE session_id = 'root' AND event_id = 'cancelled-parent'",
+  ).run(
+    JSON.stringify({
+      type: 'turn.aborted',
+      turnId: 'run',
+      reason: 'Cancelled by user.',
+      cause: 'user',
+    }),
+  );
+  db.query("UPDATE runtime_snapshots SET state_json = ? WHERE session_id = 'root'").run(
+    JSON.stringify({
+      ...parentState,
+      turn: { turnId: 'new-run', status: 'active' },
+      resourceBudget: { status: 'active', runId: 'new-run', reservations: {} },
+      retainedResourceBudgets: { run: parentState.resourceBudget },
+    }),
+  );
+  expect(() =>
+    settleChildCreationFailureInTransaction(db, 'receipt_evidence', failure),
+  ).not.toThrow();
+  expect(readChildSessionIntent(db, childThreadId)?.failureReceiptDigest).toBe(
+    base.childCreationFailure.failureReceiptDigest,
+  );
+  db.query(
+    "UPDATE runtime_runs SET status = 'failed' WHERE session_id = 'root' AND run_id = 'run'",
+  ).run();
+  expect(() => settleChildCreationFailureInTransaction(db, 'receipt_evidence', failure)).toThrow(
+    'prior release proof',
+  );
+});
+
 test('created child can be abandoned only after revision-zero owner cleanup', () => {
   using db = candidate();
   recordParentIntent(db);

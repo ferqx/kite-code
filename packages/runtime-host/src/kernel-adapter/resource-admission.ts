@@ -432,10 +432,8 @@ function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
 function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsage {
   const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
   usage.counters.toolInvocations = 1;
-  usage.gauges.activeToolInvocations = 1;
   const call = state.tools.calls[toolCallId];
-  if (call?.name === 'shell_execute') usage.gauges.activeShellInvocations = 1;
-  if (call?.sideEffect) usage.gauges.activeWriters = 1;
+  if (call?.sideEffect && call.name !== 'followup_task') usage.gauges.activeWriters = 1;
   if (call?.name === 'task') {
     // Task acceptance is a durable Tool receipt. A child allotment acquires
     // the Sub-agent slot when its independent execution can start.
@@ -460,12 +458,11 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
   if (effect.type === 'request_provider_action') {
     const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
     usage.counters.toolInvocations = 1;
-    usage.gauges.activeToolInvocations = 1;
     return [
       {
         invocationId: `provider-recovery:${effect.interactionId}`,
         resourceKind: 'mcp',
-        requiredPermits: ['tool'],
+        requiredPermits: [],
         upperBound: usage,
       },
     ];
@@ -477,12 +474,11 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
   ) {
     const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
     usage.counters.toolInvocations = 1;
-    usage.gauges.activeToolInvocations = 1;
     return [
       {
         invocationId: `verification:${effect.verificationId}:${effect.type}`,
         resourceKind: 'verification',
-        requiredPermits: ['tool'],
+        requiredPermits: [],
         upperBound: usage,
       },
     ];
@@ -496,7 +492,6 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     if (call?.name === 'task' && call.status === 'queued' && state.suspendedSubagents[toolCallId]) {
       return [];
     }
-    const shell = call?.name === 'shell_execute';
     const resourceKind =
       call?.name === 'task'
         ? ('subagent' as const)
@@ -545,7 +540,7 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
               : taskInvocationPrefix,
         toolCallId,
         resourceKind,
-        requiredPermits: shell ? (['tool', 'shell_invocation'] as const) : (['tool'] as const),
+        requiredPermits: [],
         upperBound: upperBoundForTool(state, toolCallId),
       },
     ];
@@ -912,7 +907,15 @@ export function createDescendantResourceAdmission(input: {
           throw new DescendantResourceAdmissionError('reconciliation_required');
         }
         const attemptTime = now();
-        const existingWaiter = budget.waiters[invocation.invocationId];
+        const storedWaiter = budget.waiters[invocation.invocationId];
+        const existingWaiter = storedWaiter?.state === 'waiting' ? storedWaiter : undefined;
+        if (existingWaiter?.state === 'waiting' && invocation.requiredPermits.length === 0) {
+          await persist({
+            type: 'resource_budget.waiter_cancelled',
+            invocationId: invocation.invocationId,
+          });
+          return { status: 'retry' as const };
+        }
         if (existingWaiter && Date.parse(existingWaiter.deadlineAt) <= attemptTime.getTime()) {
           await persist({
             type: 'resource_budget.waiter_timed_out',
@@ -950,6 +953,8 @@ export function createDescendantResourceAdmission(input: {
           if (!canFitWithoutConcurrency(budget, reservation)) {
             throw new DescendantResourceAdmissionError('budget_exhausted');
           }
+          if (invocation.requiredPermits.length === 0)
+            throw new DescendantResourceAdmissionError('budget_exhausted');
           const waiter = existingWaiter ?? waiterFor(budget, invocation, attemptTime);
           if (!existingWaiter) {
             await persist({ type: 'resource_budget.waiter_enqueued', waiter });
@@ -1027,13 +1032,11 @@ export function createDescendantResourceAdmission(input: {
         (request.toolKind === 'write_file' || request.toolKind === 'edit_file'
           ? remainingArtifactBytes
           : 0);
-      usage.gauges.activeToolInvocations = 1;
-      if (request.shell) usage.gauges.activeShellInvocations = 1;
       return reserveToolWithFifo(
         {
           invocationId: descendantInvocationId(request.invocationKey),
           resourceKind: request.toolKind.startsWith('mcp__') ? 'mcp' : 'tool',
-          requiredPermits: request.shell ? ['tool', 'shell_invocation'] : ['tool'],
+          requiredPermits: [],
           upperBound: usage,
         },
         request.signal ?? input.signal,
@@ -1211,7 +1214,20 @@ export function planRuntimeBudgetAdmission(
       blocked = { reason: 'reconciliation_required' };
       break;
     }
-    const existingWaiter = projected.waiters?.[invocation.invocationId];
+    const storedWaiter = projected.waiters?.[invocation.invocationId];
+    let existingWaiter = storedWaiter?.state === 'waiting' ? storedWaiter : undefined;
+    if (existingWaiter?.state === 'waiting' && invocation.requiredPermits.length === 0) {
+      const cancelled = {
+        type: 'resource_budget.waiter_cancelled',
+        invocationId: invocation.invocationId,
+      } as const;
+      preparationEvents.push(cancelled);
+      projected = reduceResourceBudgetState(
+        projected,
+        cancelled,
+      ) as ActiveResourceBudgetRuntimeState;
+      existingWaiter = undefined;
+    }
     if (existingWaiter && Date.parse(existingWaiter.deadlineAt) <= now.getTime()) {
       const timedOutEvent = {
         type: 'resource_budget.waiter_timed_out',
@@ -1269,6 +1285,10 @@ export function planRuntimeBudgetAdmission(
     } catch {
       const activeProjected = projected;
       if (!canFitWithoutConcurrency(activeProjected, reservation)) {
+        blocked = { reason: 'budget_exhausted' };
+        break;
+      }
+      if (invocation.requiredPermits.length === 0) {
         blocked = { reason: 'budget_exhausted' };
         break;
       }

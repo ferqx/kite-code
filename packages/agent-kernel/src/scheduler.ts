@@ -20,8 +20,8 @@ export interface SchedulerFacts {
   >;
 }
 
-/** Subagent concurrency remains bounded independently from ordinary Tool batches. */
-export const MAX_PARALLEL_SUBAGENTS = 4;
+/** Legacy policy display value; concurrent child admission is enforced by the Run budget. */
+export const MAX_PARALLEL_SUBAGENTS = 3;
 
 const EXECUTION_SCOPE_KINDS = new Set([
   'runtime',
@@ -494,13 +494,7 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
     if (firstCall && approvalFree(firstCall, 'parallel-subagent', facts))
       return {
         type: 'run_tools',
-        toolCallIds: parallelBatch(
-          state,
-          first,
-          'parallel-subagent',
-          MAX_PARALLEL_SUBAGENTS,
-          facts,
-        ),
+        toolCallIds: parallelBatch(state, first, 'parallel-subagent', runnable.length, facts),
       };
     if (
       firstCall &&

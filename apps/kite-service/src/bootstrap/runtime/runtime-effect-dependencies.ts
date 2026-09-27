@@ -248,6 +248,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     sandboxBackend: dependencies.sandboxBackend,
     builtinToolCatalog: requireBuiltinToolCatalog(dependencies),
     delegatedTaskArtifacts: dependencies.delegatedTaskArtifacts,
+    subagentTaskRequests: dependencies.subagentTaskRequests,
     childToolCeiling: dependencies.childToolCeiling,
   });
 }
@@ -278,6 +279,7 @@ export function prepareRuntimeEffectForBudget(
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
     delegatedTask: environment.delegatedTask,
+    transcriptToolCallArgs: environment.transcriptToolCallArgs,
   });
   const capabilities = resolveModelCapabilities({
     config: dependencies.config,

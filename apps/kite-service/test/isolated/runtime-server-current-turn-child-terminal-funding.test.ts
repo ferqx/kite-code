@@ -21,7 +21,7 @@ async function until(check: () => boolean, label: string): Promise<void> {
   if (!check()) throw new Error(`Current-turn budget fixture did not reach ${label}.`);
 }
 
-test('formal Service releases accepted followup funding when an old child reaches a terminal context error', async () => {
+test('independent followup releases source funding and replies when its new Run cannot prepare Model context', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-current-turn-budget-'));
   const workspace = join(home, 'workspace');
   mkdirSync(workspace);
@@ -257,7 +257,6 @@ test('formal Service releases accepted followup funding when an old child reache
     expect(source?.resourceBudget.status).toBe('active');
     if (source?.resourceBudget.status !== 'active')
       throw new Error('Source ledger is unavailable.');
-    const fundingRunId = source.resourceBudget.runId;
     expect(source.resourceBudget.reservations[row.backupReservationId]?.state).toBe('queued');
     expect(
       storage.storage.sessions
@@ -281,15 +280,21 @@ test('formal Service releases accepted followup funding when an old child reache
     expect(targetState?.resourceBudget.status).toBe('active');
     if (targetState?.resourceBudget.status !== 'active')
       throw new Error('Target ledger is unavailable.');
-    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(30);
-    expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(15);
+    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(24);
+    expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(0);
+    expect(targetEvents.filter((event) => event.type === 'run.completed')).toHaveLength(1);
+    expect(
+      targetEvents.filter((event) => event.type === 'agent.followup_turn_prepared'),
+    ).toHaveLength(1);
     expect(targetEvents.find((event) => event.type === 'run.error')).toMatchObject({
-      message: 'Prepared Agent mail exceeds the model context limit.',
-      outcome: { safeRetry: false, recoveryEntry: 'operator_action' },
+      message: 'Independent followup could not dispatch its first Model attempt.',
     });
+    expect(targetEvents.filter((event) => event.type === 'agent.followup_turn_settled')).toEqual([
+      expect.objectContaining({ submissionId: accepted.submissionId, status: 'failed' }),
+    ]);
     expect(
       targetEvents.filter((event) => event.type === 'model.invocation_attempt_started'),
-    ).toHaveLength(15);
+    ).toHaveLength(16);
     expect(
       targetEvents.filter(
         (event) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
@@ -298,39 +303,42 @@ test('formal Service releases accepted followup funding when an old child reache
     expect(targetEvents.filter((event) => event.type === 'agent.mail_input_prepared')).toHaveLength(
       0,
     );
-    expect(
-      childInputs.slice(0, 15).every((input) => !input.includes('BUDGET_FOLLOWUP_MESSAGE')),
-    ).toBe(true);
+    expect(childInputs.every((input) => !input.includes('BUDGET_FOLLOWUP_MESSAGE'))).toBe(true);
     await until(
       () =>
-        storage!.runWithSessionExecution(parentSessionId, () =>
-          storage!.storage.crossSessionQueueMail.readLastReleasedFollowupForDirectChild(
-            parentSessionId,
-            fundingRunId,
-            childSessionId,
-          ),
-        )?.submissionId === accepted.submissionId,
+        parentEvents().some(
+          (event) =>
+            event.type === 'agent.followup_independent_settled' &&
+            event.submissionId === accepted.submissionId,
+        ) &&
+        parentEvents().some(
+          (event) => event.type === 'agent.mail_accepted' && event.mode === 'reply',
+        ),
       'source backup settlement',
     );
     expect(
-      storage.runWithSessionExecution(parentSessionId, () =>
-        storage!.storage.crossSessionQueueMail.readLastReleasedFollowupForDirectChild(
-          parentSessionId,
-          fundingRunId,
-          childSessionId,
-        ),
+      parentEvents().filter(
+        (event) =>
+          event.type === 'agent.followup_independent_settled' &&
+          event.submissionId === accepted.submissionId,
       ),
-    ).toMatchObject({ submissionId: accepted.submissionId, reason: 'context_unavailable' });
+    ).toEqual([expect.objectContaining({ disposition: 'pre_dispatch_released' })]);
+    expect(
+      parentEvents().filter(
+        (event) =>
+          event.type === 'resource_budget.released' &&
+          event.reservationId === row.backupReservationId,
+      ),
+    ).toEqual([expect.objectContaining({ proof: 'local_pre_dispatch_failure' })]);
+    expect(
+      parentEvents().filter(
+        (event) => event.type === 'agent.mail_accepted' && event.mode === 'reply',
+      ),
+    ).toHaveLength(1);
     expect(storage.loadCurrentSnapshot(parentSessionId)?.resourceBudget).toMatchObject({
       reservations: { [row.backupReservationId]: { state: 'released' } },
     });
-    expect(childCalls).toBe(15);
-    await until(
-      () =>
-        storage!.readChildExecutionAuthority(parentSessionId, childSessionId)?.cleanupConfirmed ===
-        true,
-      'child cleanup',
-    );
+    expect(childCalls).toBe(16);
   } catch (error) {
     failed = true;
     throw error;

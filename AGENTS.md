@@ -28,8 +28,6 @@
 
 ## 阶段与提交门禁
 
-当实施新增持久状态、协议操作、兼容层、恢复路径、通用抽象或其他明显机制时，在该实施阶段与最终交付前执行[overengineering-check](.agents/skills/overengineering-check/SKILL.md)。普通小修复和纯文档修改不触发。
-
 已确认且需留作后续实施依据的设计执行 `design_complete`。实施改变产品行为、实现边界或文档时，在迭代完成执行 `iteration_complete`；行为和边界不变时只需说明核对依据。工具调用和进度更新不单独构成阶段；普通小修复不强制新建计划或设计标记。
 
 当变更需要文档同步，或准备 stage、commit、push、PR 交付时，执行[document-before-commit](.agents/skills/document-before-commit/SKILL.md)中对应 action。现有 hook 和 CI 仍独立执行强制检查；不得使用 --no-verify 绕过检查。

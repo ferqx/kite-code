@@ -1288,12 +1288,13 @@ export function createChildSessionOrchestrator(input: {
           allowedTools?: string[];
         })
       : null;
+    const allowedTools = grant?.allowedTools;
     if (
       stored?.ref.integrityIdentifier !== followup.grantDigest ||
       grant?.schema !== 'kite.child-followup-grant.v2' ||
       grant.originRole !== state.childSessionOrigin?.role ||
-      !Array.isArray(grant.allowedTools) ||
-      grant.allowedTools.length === 0
+      !Array.isArray(allowedTools) ||
+      allowedTools.length === 0
     )
       return false;
     const original = input.detachedScope.runInAsyncScope(() =>
@@ -1344,6 +1345,43 @@ export function createChildSessionOrchestrator(input: {
     }
     child.session.activateRun(followup.targetRunId);
     const identity = { runId: followup.targetRunId, taskId };
+    const roleTools = getRoleConfig(state.childSessionOrigin.role).allowedTools;
+    const deniedCalls = Object.entries(child.getState().tools.calls).filter(([_, call]) => {
+      if (
+        (call.status !== 'queued' && call.status !== 'authorized_queued') ||
+        call.createdAtTurnId !== followup.targetRunId
+      )
+        return false;
+      const model = call.modelInvocationId
+        ? child.getState().modelInvocations[call.modelInvocationId]
+        : undefined;
+      if (
+        model?.status !== 'completed' ||
+        model.surfaceIntegrityIdentifier !== model.surfaceArtifact.integrityIdentifier
+      )
+        throw new Error('Independent followup Tool lacks its exact Model Surface.');
+      const surface = runtime.artifacts.readSurface(model.surfaceArtifact);
+      return (
+        !surface.request.tools.some((tool) => tool.name === call.name) ||
+        call.name === 'task' ||
+        (roleTools !== undefined && !roleTools.has(call.name)) ||
+        !allowedTools.includes(call.name)
+      );
+    });
+    if (deniedCalls.length > 0) {
+      const reason = 'Independent child Tool exceeds its sealed role or grant ceiling.';
+      const rejected = child.session.processEventBatch(
+        deniedCalls.map(([toolCallId]) => ({
+          type: 'tool.rejected' as const,
+          toolCallId,
+          reason,
+          failure: classifyFailure('policy_denied', reason),
+        })),
+      );
+      if (rejected.length !== deniedCalls.length)
+        throw new Error('Independent followup Tool denial did not persist.');
+      publishChildCommittedThrough(child, child.getState().revision, identity);
+    }
     for await (const event of child.executeTurn(
       {
         ...childTurnFor(child.getState(), runtime, signal ?? new AbortController().signal),
@@ -1355,7 +1393,7 @@ export function createChildSessionOrchestrator(input: {
         childToolCeiling: {
           grantDigest: followup.grantDigest,
           role: state.childSessionOrigin.role,
-          allowedTools: grant.allowedTools,
+          allowedTools,
         },
         crossSessionChildIdentity: {
           parentSessionId: input.parentSessionId,
@@ -1475,7 +1513,21 @@ export function createChildSessionOrchestrator(input: {
               )
                 return false;
               const applied = child.session.processEventBatch(events);
-              if (applied.length !== events.length) return false;
+              const durable = (batch: readonly RuntimeEvent[]) =>
+                batch
+                  .filter(
+                    (event) =>
+                      event.type !== 'model.cache_metrics' &&
+                      event.type !== 'model.context_metrics',
+                  )
+                  .map((event) =>
+                    event.type === 'model.responded' || event.type === 'tool.queued'
+                      ? { ...event, createdAt: undefined }
+                      : event,
+                  );
+              if (JSON.stringify(durable(applied)) !== JSON.stringify(durable(events))) {
+                return false;
+              }
               if (prepared.length === 1)
                 return routePreparedIndependentFollowup(targetSessionId, submissionId);
               return true;
@@ -2311,28 +2363,38 @@ export function createChildSessionOrchestrator(input: {
           state.resourceBudget.status !== 'active'
         )
           return false;
-        const prepared = Object.values(state.modelInvocations).filter(
+        const followupModels = Object.values(state.modelInvocations).filter(
           (model) =>
             model.purpose === 'primary_agent' &&
             model.budget.kind === 'reservation' &&
-            model.status === 'prepared' &&
-            model.attempts === 0 &&
             state.resourceBudget.reservations[model.budget.reservationId]?.runId ===
               followup.targetRunId,
         );
-        if (prepared.length !== 1 || prepared[0]!.budget.kind !== 'reservation') return false;
-        const local = state.resourceBudget.reservations[prepared[0]!.budget.reservationId];
-        if (local?.state !== 'reserved') return false;
+        if (
+          followupModels.length > 1 ||
+          followupModels.some((model) => model.status !== 'prepared' || model.attempts !== 0)
+        )
+          return false;
+        const prepared = followupModels[0];
+        const local =
+          prepared?.budget.kind === 'reservation'
+            ? state.resourceBudget.reservations[prepared.budget.reservationId]
+            : undefined;
+        if (prepared && local?.state !== 'reserved') return false;
         const failure = classifyFailure(
           'provider_unavailable',
           'Independent followup could not dispatch its first Model attempt.',
         );
         const events: RuntimeEvent[] = [
-          {
-            type: 'resource_budget.released',
-            reservationId: local.reservationId,
-            proof: 'local_pre_dispatch_failure',
-          },
+          ...(local
+            ? ([
+                {
+                  type: 'resource_budget.released',
+                  reservationId: local.reservationId,
+                  proof: 'local_pre_dispatch_failure',
+                },
+              ] as const)
+            : []),
           { type: 'task.failed', taskId: followup.taskId, reason: failure.message },
           {
             type: 'turn.aborted',
@@ -2810,7 +2872,11 @@ export function createChildSessionOrchestrator(input: {
       const target = input.owner.runWithSessionExecution(input.parentSessionId, () =>
         mail.readFollowupTarget(input.parentSessionId, row.targetSessionId),
       );
-      if (target?.status === 'context_unavailable') return 'context_unavailable';
+      // A locally running child may have completed its Run before its terminal
+      // seal and checkpoint are committed. Let that owner finish before judging
+      // whether an accepted followup has lost its target context.
+      if (target?.status === 'context_unavailable')
+        return activeChildren.has(row.targetSessionId) ? null : 'context_unavailable';
       const acceptedProof = input.owner.runWithSessionExecution(row.targetSessionId, () =>
         mail.readAcceptedIndependentFollowupSourcePolicyProof(
           row.targetSessionId,
@@ -3235,8 +3301,14 @@ export function createChildSessionOrchestrator(input: {
               current.activeFollowupTurn!.targetRunId,
         );
         if (localModels.length === 0) {
-          if (!(await executeAcceptedFollowupFirstModel(targetSessionId, submissionId, signal)))
-            throw new Error('Independent followup first Model did not complete.');
+          if (!(await executeAcceptedFollowupFirstModel(targetSessionId, submissionId, signal))) {
+            const settled = input.detachedScope.runInAsyncScope(() =>
+              input.owner.runWithSessionExecution(input.parentSessionId, () =>
+                mail.readFollowupTerminalForSource(input.parentSessionId, submissionId),
+              ),
+            );
+            if (!settled) throw new Error('Independent followup first Model did not complete.');
+          }
           return;
         }
         if (localModels.some((candidate) => candidate.status !== 'completed')) {
@@ -4115,6 +4187,34 @@ export function createChildSessionOrchestrator(input: {
         });
       });
   };
+  const bindPreDispatchChildExecution = async (childThreadId: string): Promise<void> => {
+    try {
+      input.owner.runWithSessionExecution(childThreadId, () => undefined);
+    } catch (error) {
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'recovery_required')
+        throw error;
+      // A child that never dispatched can outlive its initial execution lease.
+      // Fence the old generation only after proving it has no external attempt.
+      await input.owner.reconcileInterruptedSession(
+        childThreadId,
+        async (_generation, assertCurrent) => {
+          const child = input.owner.storage.sessions.loadSnapshot<RuntimeState>(childThreadId);
+          if (
+            !assertCurrent() ||
+            !child ||
+            child.childSessionOrigin?.parentSessionId !== input.parentSessionId ||
+            child.childSessionOrigin.terminal ||
+            Object.keys(child.modelInvocations).length > 0 ||
+            Object.keys(child.tools.calls).length > 0 ||
+            (child.revision !== 0 && child.revision !== 5)
+          )
+            throw new Error('Expired child has no safe pre-dispatch cleanup proof.');
+          return undefined;
+        },
+      );
+      input.owner.runWithSessionExecution(childThreadId, () => undefined);
+    }
+  };
   const launch = async (
     accepted: LaunchChild,
     parentSignal?: AbortSignal,
@@ -4182,6 +4282,9 @@ export function createChildSessionOrchestrator(input: {
       input.owner.createChildSession(creation);
     }
     if (!intent.dispatchAckEventId) {
+      // New children start immediately; legacy queued children may remain here
+      // until their old allotment acquires a slot. Both keep a renewed owner.
+      await bindPreDispatchChildExecution(accepted.childThreadId);
       for (;;) {
         const current = parent.getState();
         const funding = fundingBudgetForRun(current, intent.fundingRunId);
@@ -4471,16 +4574,24 @@ export function createChildSessionOrchestrator(input: {
       parentSignal?.removeEventListener('abort', abortFromParent);
     }
   };
+  const hasCancelledParentRunProof = (runId: string): boolean =>
+    input.owner.storage.runs?.get(input.parentSessionId, runId)?.status === 'cancelled' &&
+    input.owner.storage.sessions
+      .loadEventsStrict(input.parentSessionId)
+      .filter(
+        ({ event }) =>
+          event.type === 'turn.aborted' && event.turnId === runId && event.cause === 'user',
+      ).length === 1;
   const settlePreDispatchFailure = async (
     accepted: Pick<AcceptedChildSession, 'childThreadId'>,
     cancelled = false,
+    alreadyReleasedAfterParentCancel = false,
   ): Promise<void> => {
     const intent = input.owner.readChildSessionIntent(accepted.childThreadId);
     if (!intent || intent.dispatchAckEventId) return;
     const parent = ensureParent();
     if (intent.childSessionCreated) {
-      if (!input.owner.ownsSessionExecution(accepted.childThreadId))
-        input.owner.runWithSessionExecution(accepted.childThreadId, () => undefined);
+      await bindPreDispatchChildExecution(accepted.childThreadId);
       await input.owner.releaseSessionExecution(accepted.childThreadId, () =>
         input.coordinators.release(accepted.childThreadId),
       );
@@ -4513,6 +4624,8 @@ export function createChildSessionOrchestrator(input: {
         artifacts: runtime.childResultArtifacts,
         commitFailure: (proof) => parent.commitChildCreationFailure(proof),
         cancelled,
+        alreadyReleasedAfterParentCancel,
+        hasCancelledParentRunProof,
         ...(intent.disposition === 'after_turn' ? { afterTurnPhase } : {}),
       }),
     );
@@ -5122,6 +5235,7 @@ export function createChildSessionOrchestrator(input: {
             const status = input.owner.storage.runs?.get(input.parentSessionId, runId)?.status;
             return status === 'running' || status === 'waiting';
           },
+          hasCancelledParentRunProof,
           isAfterTurnOriginCompleted: (runId) =>
             input.owner.storage.runs?.get(input.parentSessionId, runId)?.status === 'completed',
           hasStopRequest: (childInvocationId) => stopRequested.has(childInvocationId),
@@ -5177,7 +5291,8 @@ export function createChildSessionOrchestrator(input: {
             }
             if (
               action.kind === 'abandon_stopped_child' ||
-              action.kind === 'abandon_unstartable_child'
+              action.kind === 'abandon_unstartable_child' ||
+              action.kind === 'abandon_cancelled_unstarted_child'
             ) {
               if (
                 action.intent.childSessionCreated &&
@@ -5224,7 +5339,11 @@ export function createChildSessionOrchestrator(input: {
                       );
                     }),
                 );
-              await settlePreDispatchFailure(action.intent, queuedInterrupt === true);
+              await settlePreDispatchFailure(
+                action.intent,
+                queuedInterrupt === true || action.kind === 'abandon_cancelled_unstarted_child',
+                action.kind === 'abandon_cancelled_unstarted_child',
+              );
               return;
             }
             if (action.kind === 'cancel_acknowledged_child') {
@@ -5762,11 +5881,29 @@ export function createChildSessionOrchestrator(input: {
         input.enqueueSessionWork(accepted.childThreadId, async () => {
           try {
             await launch(accepted, parentSignal, queuedAbort);
-          } catch {
+          } catch (error) {
             try {
               await settlePreDispatchFailure(accepted, queuedAbort.signal.aborted);
-            } catch {
-              // The accepted Store intent remains the recovery source.
+            } catch (settlementError) {
+              console.error('Independent child pre-dispatch settlement requires recovery.', {
+                childThreadId: accepted.childThreadId,
+                launchError: error instanceof Error ? error.message : String(error),
+                settlementError:
+                  settlementError instanceof Error
+                    ? settlementError.message
+                    : String(settlementError),
+              });
+              try {
+                reportRecoveryRequired([
+                  {
+                    childThreadId: accepted.childThreadId,
+                    reason: 'pre_dispatch_settlement_failed',
+                  },
+                ]);
+              } catch {
+                // Shutdown can close the Store between local failure and the
+                // diagnostic. Startup recovery still owns the durable intent.
+              }
             }
           } finally {
             queuedChildren.delete(accepted.childThreadId);

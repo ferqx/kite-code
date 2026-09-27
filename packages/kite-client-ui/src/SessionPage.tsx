@@ -55,6 +55,8 @@ export interface SessionPageProps {
   onHeaderMouseDown?: (clickCount: 1 | 2) => void;
   interaction?: ReactNode;
   statusNotice?: ReactNode;
+  /** Ephemeral parent-run wait indicator supplied by a host; never a transcript message. */
+  requiredSubagentWait?: boolean;
   beforeConversation?: ReactNode;
   environmentInformation?: ReactNode;
   diagnosticView?: ReactNode;
@@ -530,6 +532,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                             key={props.readingKey}
                             messages={messages}
                             loading={props.loading}
+                            requiredSubagentWait={props.requiredSubagentWait}
                             selected={!!props.selected}
                             emptyState={
                               !props.composer

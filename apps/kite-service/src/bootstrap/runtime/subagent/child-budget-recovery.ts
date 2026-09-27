@@ -101,10 +101,7 @@ export function recoverChildDelegatedBudget(input: {
       upper.gauges.activeToolInvocations,
       ledger.budget.maxConcurrentToolInvocations,
     ),
-    maxConcurrentShellInvocations: Math.min(
-      upper.gauges.activeShellInvocations,
-      ledger.budget.maxConcurrentShellInvocations,
-    ),
+    maxConcurrentShellInvocations: 0,
     maxConcurrencyWaitMs: Math.min(ledger.budget.maxConcurrencyWaitMs, duration),
   };
   assertResourceBudget(childBudget);

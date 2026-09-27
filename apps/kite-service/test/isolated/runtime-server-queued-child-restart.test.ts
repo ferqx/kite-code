@@ -19,7 +19,7 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-test('queued revision-zero child survives SIGKILL without replaying attempted siblings', async () => {
+test('full child capacity rejects a fourth request before SIGKILL without replaying attempted children', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-queued-child-restart-'));
   const workspace = join(home, 'workspace');
   mkdirSync(workspace);
@@ -29,20 +29,20 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
   const previousHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = home;
   const model = createMockModelServer();
-  const gates = { A: deferred(), B: deferred() };
-  const childRequests = { A: 0, B: 0, C: 0 };
+  const gates = { A: deferred(), B: deferred(), C: deferred() };
+  const childRequests = { A: 0, B: 0, C: 0, D: 0 };
   let parentRequests = 0;
   model.setResponses(
     Array.from({ length: 16 }, () => ({
       response: async ({ messages }: { messages: readonly unknown[] }) => {
         const transcript = JSON.stringify(messages);
-        for (const label of ['A', 'B', 'C'] as const) {
+        for (const label of ['A', 'B', 'C', 'D'] as const) {
           if (
             transcript.includes(`QUEUED_RESTART_CHILD_${label}`) &&
             !transcript.includes('QUEUED_RESTART_PARENT')
           ) {
             childRequests[label] += 1;
-            if (label !== 'C') await gates[label].promise;
+            if (label !== 'D') await gates[label].promise;
             return { message: { content: `QUEUED_RESTART_RESULT_${label}` } };
           }
         }
@@ -50,7 +50,7 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
         if (parentRequests === 1)
           return {
             message: {
-              tool_calls: (['A', 'B', 'C'] as const).map((label) => ({
+              tool_calls: (['A', 'B', 'C', 'D'] as const).map((label) => ({
                 id: `queued-restart-${label}`,
                 name: 'task',
                 args: {
@@ -67,7 +67,7 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
         return {
           message: { content: 'Provisional final while required children remain.' },
           expectedRequest: {
-            toolResults: (['A', 'B', 'C'] as const).map((label) => ({
+            toolResults: (['A', 'B', 'C', 'D'] as const).map((label) => ({
               toolCallId: `queued-restart-${label}`,
             })),
           },
@@ -94,29 +94,29 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
     const ids = JSON.parse(readFileSync(marker, 'utf8')) as { a: string; b: string; c: string };
     crashed.kill('SIGKILL');
     await crashed.exited;
-    expect(childRequests).toEqual({ A: 1, B: 1, C: 0 });
+    expect(childRequests).toEqual({ A: 1, B: 1, C: 1, D: 0 });
     storage = await createKiteSessionAppServerStorageComposition({
       databasePath,
       hostInstanceId: 'queued-child-recovered-host',
       executionLeaseMs: 150,
       renewIntervalMs: 40,
     });
-    const before = storage.readChildSessionIntent(ids.c);
-    expect(before).toMatchObject({
-      parentSessionId,
-      childThreadId: ids.c,
-      childSessionCreated: true,
-      dispatchAckEventId: null,
-    });
-    expect(storage.loadCurrentSnapshot(ids.c)?.revision).toBe(0);
-    expect(storage.storage.sessions.loadEventsStrict(ids.c)).toHaveLength(0);
-    expect(storage.readSessionLineage(ids.c)).toEqual({ parentSessionId });
     const parentBefore = storage.loadCurrentSnapshot(parentSessionId);
+    expect(parentBefore?.resourceBudget.status).toBe('active');
+    expect(storage.readChildSessionIntent(ids.c)?.childThreadId).toBe(ids.c);
+    expect(storage.readSessionLineage(ids.c)).toEqual({ parentSessionId });
     expect(
-      parentBefore?.resourceBudget.status === 'active'
-        ? parentBefore.resourceBudget.reservations[before!.delegatedReservationId]?.state
-        : undefined,
-    ).toBe('queued');
+      storage.storage.sessions
+        .loadEventsStrict(parentSessionId)
+        .find(
+          ({ event }) => event.type === 'tool.finished' && event.toolCallId === 'queued-restart-D',
+        )?.event,
+    ).toMatchObject({
+      result: {
+        ok: false,
+        stderr: expect.stringContaining('concurrency limit (3)'),
+      },
+    });
     const admission: RuntimeServerAdmissionPort = Object.freeze({
       authorize: async (_request: RuntimeServerAdmissionInput) => ({
         allowed: true as const,
@@ -204,10 +204,8 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
     );
     await Bun.sleep(500);
     expect(storage.readChildSessionIntent(ids.c)?.childThreadId).toBe(ids.c);
-    expect(storage.loadCurrentSnapshot(ids.c)?.revision).toBe(0);
-    expect(storage.storage.sessions.loadEventsStrict(ids.c)).toHaveLength(0);
-    expect(childRequests).toEqual({ A: 1, B: 1, C: 0 });
-    for (const id of [ids.a, ids.b])
+    expect(childRequests).toEqual({ A: 1, B: 1, C: 1, D: 0 });
+    for (const id of [ids.a, ids.b, ids.c])
       expect(
         storage.storage.sessions
           .loadEventsStrict(id)
@@ -228,6 +226,7 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
     expect(storage.readChildSessionIntent(ids.c)?.failureReceiptDigest).toBeNull();
     gates.A.resolve();
     gates.B.resolve();
+    gates.C.resolve();
     await client.close();
     client = undefined;
     try {
@@ -242,14 +241,13 @@ test('queued revision-zero child survives SIGKILL without replaying attempted si
     });
     try {
       expect(afterShutdown.readChildSessionIntent(ids.c)?.failureReceiptDigest).toBeNull();
-      expect(afterShutdown.loadCurrentSnapshot(ids.c)?.revision).toBe(0);
-      expect(afterShutdown.storage.sessions.loadEventsStrict(ids.c)).toHaveLength(0);
     } finally {
       afterShutdown.disposeStorage();
     }
   } finally {
     gates.A.resolve();
     gates.B.resolve();
+    gates.C.resolve();
     if (crashed.exitCode === null) crashed.kill('SIGKILL');
     await crashed.exited;
     await client?.close();

@@ -106,7 +106,7 @@ while (Date.now() < deadline) {
   const events = storage.storage.sessions
     .loadEventsStrict(parentSessionId)
     .map(({ event }) => event);
-  const childId = (label: 'A' | 'B' | 'C') => {
+  const childId = (label: 'A' | 'B' | 'C' | 'D') => {
     const toolCallId = `queued-restart-${label}`;
     const dispatch = events.find(
       (event) =>
@@ -126,20 +126,22 @@ while (Date.now() < deadline) {
   const ready = ids.every((id) => id !== undefined);
   if (ready && parent?.resourceBudget.status === 'active') {
     const [a, b, c] = ids as [string, string, string];
-    const cIntent = storage.readChildSessionIntent(c);
-    const cState = storage.loadCurrentSnapshot(c);
-    const aRequested = storage.storage.sessions
-      .loadEventsStrict(a)
-      .some(({ event }) => event.type === 'model.requested');
-    const bRequested = storage.storage.sessions
-      .loadEventsStrict(b)
-      .some(({ event }) => event.type === 'model.requested');
+    const requested = [a, b, c].every((id) =>
+      storage.storage.sessions
+        .loadEventsStrict(id)
+        .some(({ event }) => event.type === 'model.requested'),
+    );
+    const fourthRejected = events.some(
+      (event) =>
+        event.type === 'tool.finished' &&
+        event.toolCallId === 'queued-restart-D' &&
+        event.result.ok === false,
+    );
     if (
-      aRequested &&
-      bRequested &&
-      cIntent?.childSessionCreated &&
-      cState?.revision === 0 &&
-      parent.resourceBudget.reservations[cIntent.delegatedReservationId]?.state === 'queued'
+      requested &&
+      fourthRejected &&
+      !childId('D') &&
+      storage.listChildSessions(parentSessionId, 10).entries.length === 3
     ) {
       writeFileSync(marker, JSON.stringify({ a, b, c }));
       await new Promise(() => undefined);

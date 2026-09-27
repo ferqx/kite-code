@@ -18,6 +18,8 @@
 
 具体表定义以 schema 为准，此处不复制 SQL。目录或 API 返回值不是第二数据库 authority。
 
+续轮子工具审批的父 Tool 身份由 [Host storage codec](../../runtime-host/src/storage/followup-child-approval-identity.ts) 编码与解析；Store 保留原公开函数作为兼容转发，Service 与 Store 使用同一 canonical 格式和字段上界。
+
 ## 写入过程
 
 执行期间的 Session mutation 在 BEGIN IMMEDIATE 内重新读取 generation 与 Session revision，再执行变更。检查不能放在事务前，否则其他 SQLite writer 可以在检查后提交。无 Session、旧 revision 或失效 writer 必须失败，不覆盖较新状态。
@@ -31,6 +33,8 @@ start 对应 Run、command receipt、事件与 State 的关联更新必须在所
 父 `receipt_evidence` 事务中的 `childSessionIntent` 同批核对创建意图、`subagent.started` 角色、dispatch Artifact ref、独立委派预算 reservation 和 `tool.finished` 的 running／required claim。Store 私下读取不可变 Task Artifact，核对 canonical bytes、owner 四元组及独立的原始任务文本 digest。父接受事务还把有界的 sealed grant canonical JSON（最多 128 KiB UTF-8）、字节长度与 SHA-256 同写入私有意图行；Store 校验 grant 的通用父／子身份、角色、Artifact ref 和任务文本 digest，不代替 Builtin 的完整 grant 语义校验。Event 与普通意图 metadata 只包含 ref／digest，不返回 grant JSON。`child_session_intents` 以确定性 childThreadId 唯一保存父 Tool 终态 eventId／revision、角色、Artifact ref、委派上限与 funding deadline。其 receipt marker 为恢复索引，不代替父预算或 Kernel State。
 
 `createChildSession` 在原有 Session／Controller／recovery receipt 同一 writer 事务内核对父意图和 Workspace/project、建立 `parent_session_id`；重放要求同一意图与原创建回执，冲突拒绝。revision 0 的子 State 须预绑定准确 `childSessionOrigin`、私有 Task Artifact ref 和 digest，预算仍为 unconfigured。首轮 `childBudgetActivation` 同批核对 adopted、Task input admitted、configured、turn.started、task.started 与准确子 Run insert，子预算与 deadline 不得超过持久委派上限；之后的模型／工具 dispatch 还要求父 `resource_budget.dispatch_started` ACK 和未结算的准确 child intent；`required` 要求活动父 Run，`after_turn` 允许原父 Run 已完成但仍在原 deadline 内继续执行。父创建永久失败有三个明确模式：子 Session 尚不存在；子 Session 已创建但仍为 revision 0、无 Run/Event/effect、无预算激活与 dispatch ACK；或子 Session 已激活为准确 revision 5／queued Run、但父 dispatch ACK 尚未提交、无外部尝试，且持久 execution owner 已释放为 idle／cleanupConfirmed。Store 在同一父结果事务内重验血缘、Workspace、snapshot、owner 与 mode 后 CAS 记录 failure digest；不删除已创建的内部子 Session，准确重放或冲突均按原行判断。取消后的子清理事实可继续落盘，新的外部 dispatch 拒绝。`after_turn` 的父受理事务同时预留子额度与一次自动汇报模型额度；重启时只保留已核对的 pending、同进程 live ACK 或子终态 seal 所需预留，缺失证明维持 unknown。
+
+父 Run 因用户取消而已释放子预留时，仅 `required`、revision 0 且无任何 Event／Run／effect lease 的子 Session 可走无第二次 `resource_budget.released` 的预派发取消结算。Store 在相同父事务内复核原 Run 的 `cancelled` 状态、准确预留的 `released` 状态、唯一历史释放与 `cause=user` 的原 turn 取消 Event，以及子 Session 已释放的 idle／cleanupConfirmed owner；父快照的当前 turn 可以是后来新开的 Run，不作为旧取消的证明。缺少任一证明则拒绝。普通预派发失败仍须提交原三事件，不借此变体跳过预算结算。
 
 `readChildSessionIntent` 和有界的 `listPendingChildSessionIntents(parentSessionId,limit,cursor)` 是无写入的内部恢复读口，返回准确身份和 ACK／结算 marker，不返回任务正文或 sealed grant JSON。读取私有 `readChildSealedGrant(childThreadId)` 必须处于准确父 Session 的活动执行或 recovery handle scope，再按父／子 ID 与字节 digest 复核。普通用户的 Session 列表与已知 ID 日志读取不经这些读口。父 Session 带子意图时删除受 FK 阻止；fork／rewind 与父 close 的完整跨线程语义仍需 D0 集成验收。
 

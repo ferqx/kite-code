@@ -6,7 +6,11 @@ import {
 } from './compaction';
 import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
 import type { ModelRuntimeConfig } from './config';
-import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
+import {
+  buildContextProjection,
+  type ContextProjectionEnvironment,
+  modelVisibleToolCallArgs,
+} from './context-projection';
 import type { SupportedChatModel } from './factory';
 import {
   type BuiltinModelEvent,
@@ -272,6 +276,16 @@ export function createNarrativeContextCompactor(options: {
     }
     const messages = narrativeOnly ? [] : candidateSource.coveredMessages;
     const last = messages.at(-1)!;
+    const summaryMessages = messages.map((message) => {
+      if (message.kind !== 'assistant') return message;
+      return {
+        ...message,
+        toolCalls: message.toolCalls.map((call) => ({
+          ...call,
+          args: modelVisibleToolCallArgs(call, input.projectionEnvironment?.transcriptToolCallArgs),
+        })),
+      };
+    });
     const projectionInput = {
       role: 'agent' as const,
       state: input.state,
@@ -279,6 +293,7 @@ export function createNarrativeContextCompactor(options: {
       activeSkillInstructions: input.projectionEnvironment?.activeSkillInstructions,
       workflowSkills: input.projectionEnvironment?.workflowSkills,
       delegatedTask: input.projectionEnvironment?.delegatedTask,
+      transcriptToolCallArgs: input.projectionEnvironment?.transcriptToolCallArgs,
     };
     const before = buildContextProjection(projectionInput).estimate.totalInputTokens;
     // Use the smallest valid narrative to calculate an upper bound on possible
@@ -311,7 +326,7 @@ export function createNarrativeContextCompactor(options: {
     }
     const requestInput = summaryInput({
       baseSummary: base?.summary,
-      messages,
+      messages: summaryMessages,
       customInstructions,
     });
     const completeRequestTokens =

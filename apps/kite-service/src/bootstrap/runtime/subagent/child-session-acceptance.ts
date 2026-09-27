@@ -3,6 +3,7 @@ import { subagentDispatchIntentDigest } from '@kite-ai/builtin-runtime/subagent'
 import {
   childSessionAcceptanceEffectId,
   childThreadIdForToolAttempt,
+  committedResourceUsage,
   reduceResourceBudgetState,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
@@ -16,7 +17,10 @@ import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#kite-service/config/index';
 import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 import { planAfterTurnContinuationReservation } from './after-turn-continuation';
-import { planChildDelegatedAllotment } from './child-delegated-allotment';
+import {
+  canFundStagedChildCounterShares,
+  planChildDelegatedAllotment,
+} from './child-delegated-allotment';
 import type { SubAgentResult } from './types';
 
 type ChildRole = 'explore' | 'plan' | 'code' | 'review';
@@ -81,7 +85,8 @@ export function createChildSessionAcceptanceStage(input: {
   return Object.freeze({
     stage(child: StagedChildSession): SubAgentResult {
       const { grant } = child;
-      if (input.getState().resourceBudget.status !== 'active') {
+      const budget = input.getState().resourceBudget;
+      if (budget.status !== 'active') {
         const reason = 'Background child Session requires an active Run resource budget.';
         return {
           ok: false,
@@ -103,6 +108,59 @@ export function createChildSessionAcceptanceStage(input: {
       ) {
         throw new Error('Child Session staging identity is invalid or expired.');
       }
+      if (
+        !canFundStagedChildCounterShares({
+          ledger: budget,
+          children: [
+            ...[...pending.values()].map((candidate) => ({
+              parentToolCallId: candidate.grant.parentToolCallId,
+              taskArtifactBytes: candidate.grant.taskArtifact.byteLength,
+            })),
+            {
+              parentToolCallId: grant.parentToolCallId,
+              taskArtifactBytes: grant.taskArtifact.byteLength,
+            },
+          ],
+        })
+      ) {
+        const reason =
+          'Sub-agent budget cannot provide a positive child allotment; the new child was not created.';
+        return {
+          ok: false,
+          summary: reason,
+          error: reason,
+          terminalStatus: 'failed',
+          toolCallCount: 0,
+          durationMs: 0,
+        };
+      }
+      const committed = committedResourceUsage(budget);
+      const occupied = committed.gauges.activeSubagents + pending.size;
+      if (occupied >= budget.budget.maxConcurrentSubagents) {
+        const reason = `Sub-agent concurrency limit (${budget.budget.maxConcurrentSubagents}) reached; the new child was not created.`;
+        return {
+          ok: false,
+          summary: reason,
+          error: reason,
+          terminalStatus: 'failed',
+          toolCallCount: 0,
+          durationMs: 0,
+        };
+      }
+      const writers =
+        committed.gauges.activeWriters +
+        [...pending.values()].filter((candidate) => candidate.role === 'code').length;
+      if (child.role === 'code' && writers >= budget.budget.maxConcurrentWriters) {
+        const reason = 'Code sub-agent writer capacity is full; the new child was not created.';
+        return {
+          ok: false,
+          summary: reason,
+          error: reason,
+          terminalStatus: 'failed',
+          toolCallCount: 0,
+          durationMs: 0,
+        };
+      }
       pending.set(grant.parentToolCallId, child);
       return {
         ok: true,
@@ -113,9 +171,21 @@ export function createChildSessionAcceptanceStage(input: {
       };
     },
     async commitReceipt(events: RuntimeEvent[]): Promise<boolean | null> {
+      for (const event of events) {
+        if (
+          (event.type === 'tool.finished' && event.result.ok !== true) ||
+          event.type === 'tool.failed' ||
+          event.type === 'tool.rejected' ||
+          event.type === 'tool.cancelled'
+        ) {
+          pending.delete(event.toolCallId);
+        }
+      }
       const finished = events.filter(
         (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
-          event.type === 'tool.finished' && pending.has(event.toolCallId),
+          event.type === 'tool.finished' &&
+          event.result.ok === true &&
+          pending.has(event.toolCallId),
       );
       if (finished.length === 0) return null;
       if (finished.length !== 1)

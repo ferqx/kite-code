@@ -16,7 +16,7 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-async function exerciseFormalCurrentTurnBoundary(
+async function exerciseIndependentFollowupBoundary(
   role: 'review' | 'code',
   eagerFollowup = false,
   secondChildModel = false,
@@ -88,7 +88,7 @@ async function exerciseFormalCurrentTurnBoundary(
                 },
                 toolContinuation: 'required' as const,
               };
-            if (childCalls === 2 && unsafeToolAfterRoute)
+            if (childCalls === 3 && unsafeToolAfterRoute)
               return {
                 message: {
                   tool_calls: [
@@ -112,7 +112,7 @@ async function exerciseFormalCurrentTurnBoundary(
                       toolResults: [
                         {
                           toolCallId:
-                            unsafeToolAfterRoute && childCalls > 2
+                            unsafeToolAfterRoute && childCalls > 3
                               ? 'current-boundary-unsafe-shell'
                               : 'current-boundary-read',
                         },
@@ -165,34 +165,15 @@ async function exerciseFormalCurrentTurnBoundary(
               expectedRequest: { toolResults: [{ toolCallId: 'start-current-boundary-child' }] },
             };
           }
-          if (secondChildModel && !unsafeToolAfterRoute && parentCalls === 3)
-            return {
-              message: {
-                tool_calls: [
-                  {
-                    id: 'wait-for-current-turn-reply',
-                    name: 'wait_agent',
-                    args: { timeout_ms: 10_000 },
-                  },
-                ],
-              },
-              toolContinuation: 'required' as const,
-              expectedRequest: {
-                toolResults: [{ toolCallId: 'followup-current-boundary-child' }],
-              },
-            };
           return {
             message: { content: 'PARENT_PROVISIONAL_FINAL' },
-            expectedRequest: {
-              toolResults: [
-                {
-                  toolCallId:
-                    secondChildModel && !unsafeToolAfterRoute
-                      ? 'wait-for-current-turn-reply'
-                      : 'followup-current-boundary-child',
-                },
-              ],
-            },
+            ...(parentCalls === 3
+              ? {
+                  expectedRequest: {
+                    toolResults: [{ toolCallId: 'followup-current-boundary-child' }],
+                  },
+                }
+              : {}),
           };
         },
       })),
@@ -325,15 +306,11 @@ async function exerciseFormalCurrentTurnBoundary(
     else expect(grant.capabilityCeiling?.allowedTools).toEqual([]);
     if (!eagerFollowup) expect(childToolSurfaces[0]?.length).toBeGreaterThan(0);
     if (role === 'code') {
-      await until(() =>
-        parentEvents().some((event) => event.type === 'resource_budget.waiter_enqueued'),
-      );
       expect(
         parentEvents().filter(
           (event) => event.type === 'agent.mail_accepted' && event.mode === 'trigger_turn',
         ),
       ).toHaveLength(0);
-      releaseFirstChildModel?.();
     }
     await until(() =>
       parentEvents().some(
@@ -370,33 +347,38 @@ async function exerciseFormalCurrentTurnBoundary(
           ),
       );
     releaseFirstChildModel?.();
+    await until(() =>
+      storage!.storage.sessions
+        .loadEventsStrict(childSessionId)
+        .some(({ event }) => event.type === 'subagent.child_terminal_sealed'),
+    );
+    await until(() =>
+      storage!.storage.sessions
+        .loadEventsStrict(childSessionId)
+        .some(({ event }) => event.type === 'agent.followup_routed' && event.route === 'new_turn'),
+    );
+    const routedEvents = storage.storage.sessions
+      .loadEventsStrict(childSessionId)
+      .map(({ event }) => event);
+    expect(
+      routedEvents.filter(
+        (event) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
+      ),
+    ).toHaveLength(0);
+    expect(
+      routedEvents.filter((event) => event.type === 'agent.followup_turn_prepared'),
+    ).toHaveLength(1);
+    expect(routedEvents.filter((event) => event.type === 'agent.mail_input_prepared')).toHaveLength(
+      1,
+    );
+    expect(routedEvents.filter((event) => event.type === 'run.error')).toHaveLength(0);
     if (secondChildModel) {
-      await until(() => childCalls >= 2);
-      await until(() =>
-        storage!.storage.sessions
-          .loadEventsStrict(childSessionId)
-          .some(
-            ({ event }) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
-          ),
-      );
-      expect(childInputs[1]).toContain('CURRENT_BOUNDARY_FOLLOWUP');
+      await until(() => childCalls >= 3);
+      expect(childInputs[1]).not.toContain('CURRENT_BOUNDARY_FOLLOWUP');
+      expect(childInputs[2]).toContain('CURRENT_BOUNDARY_FOLLOWUP');
       expect(childToolSurfaces[1]).toContain('read_file');
       expect(childToolSurfaces[1]).not.toContain('shell_execute');
-      expect(childToolSurfaces[1]).not.toContain('read_mcp_resource');
-      const resumedEvents = storage.storage.sessions
-        .loadEventsStrict(childSessionId)
-        .map(({ event }) => event);
-      expect(
-        resumedEvents.filter((event) => event.type === 'agent.followup_turn_prepared'),
-      ).toHaveLength(0);
-      expect(
-        resumedEvents.filter((event) => event.type === 'agent.mail_input_prepared'),
-      ).toHaveLength(1);
-      await until(() =>
-        storage!.storage.sessions
-          .loadEventsStrict(childSessionId)
-          .some(({ event }) => event.type === 'subagent.child_terminal_sealed'),
-      );
+      expect(childToolSurfaces[2]).not.toContain('shell_execute');
       if (!unsafeToolAfterRoute) {
         await until(() =>
           storage!.storage.sessions
@@ -427,10 +409,6 @@ async function exerciseFormalCurrentTurnBoundary(
         expect(
           parentEvents().filter((event) => event.type === 'subagent.child_terminal_imported'),
         ).toHaveLength(1);
-        await until(() => parentInputs.some((input) => input.includes('agent_terminal_reply')));
-        expect(parentInputs.filter((input) => input.includes('agent_terminal_reply'))).toHaveLength(
-          1,
-        );
         expect(storage.listUnrepliedSettledFollowupTerminalSources(100)).toEqual([]);
         const replayed = storage.runWithSessionExecution(childSessionId, () =>
           storage!.storage.crossSessionQueueMail.acceptFollowupTerminalReply(
@@ -457,24 +435,30 @@ async function exerciseFormalCurrentTurnBoundary(
       }
       if (unsafeToolAfterRoute) {
         await until(() =>
-          parentEvents().some((event) => event.type === 'subagent.child_terminal_imported'),
-        );
-        expect(
           storage!.storage.sessions
             .loadEventsStrict(childSessionId)
-            .filter(
+            .some(
+              ({ event }) =>
+                (event.type === 'tool.rejected' || event.type === 'tool.failed') &&
+                event.toolCallId === 'current-boundary-unsafe-shell',
+            ),
+        );
+        expect(shellCommands).toEqual([]);
+        await until(() => childCalls >= 4);
+        await until(() =>
+          storage!.storage.sessions
+            .loadEventsStrict(childSessionId)
+            .some(
               ({ event }) =>
                 event.type === 'agent.followup_turn_settled' &&
-                event.submissionId === acceptedSubmissionId &&
-                event.status === 'unknown',
+                event.submissionId === acceptedSubmissionId,
             ),
-        ).toHaveLength(1);
-        expect(
-          parentEvents().filter(
+        );
+        await until(() =>
+          parentEvents().some(
             (event) => event.type === 'agent.mail_accepted' && event.mode === 'reply',
           ),
-        ).toHaveLength(0);
-        expect(shellCommands).toEqual([]);
+        );
         expect(
           storage.storage.sessions
             .loadEventsStrict(childSessionId)
@@ -486,23 +470,23 @@ async function exerciseFormalCurrentTurnBoundary(
         ).toBe(true);
       }
     } else {
+      await until(() => childCalls >= 2);
+      expect(childInputs[0]).not.toContain('CURRENT_BOUNDARY_FOLLOWUP');
+      expect(childInputs[1]).toContain('CURRENT_BOUNDARY_FOLLOWUP');
       await until(() =>
         storage!.storage.sessions
           .loadEventsStrict(childSessionId)
-          .some(({ event }) => event.type === 'subagent.child_terminal_sealed'),
+          .some(
+            ({ event }) =>
+              event.type === 'agent.followup_turn_settled' &&
+              event.submissionId === acceptedSubmissionId,
+          ),
       );
-      const childEvents = storage.storage.sessions
-        .loadEventsStrict(childSessionId)
-        .map(({ event }) => event);
-      expect(
-        childEvents.filter(
-          (event) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
+      await until(() =>
+        parentEvents().some(
+          (event) => event.type === 'agent.mail_accepted' && event.mode === 'reply',
         ),
-      ).toHaveLength(0);
-      expect(
-        childEvents.filter((event) => event.type === 'model.invocation_attempt_started').length,
-      ).toBeGreaterThanOrEqual(1);
-      expect(childEvents.filter((event) => event.type === 'run.error')).toHaveLength(0);
+      );
     }
   } catch (error) {
     failed = true;
@@ -529,32 +513,32 @@ async function exerciseFormalCurrentTurnBoundary(
 }
 
 test(
-  'formal review child cannot route an accepted followup into its attempted first Model',
-  () => exerciseFormalCurrentTurnBoundary('review'),
+  'review child defers a followup accepted during its first Model to a new Run',
+  () => exerciseIndependentFollowupBoundary('review'),
   30_000,
 );
 
 test(
-  'formal code child with an empty unrestricted grant and independent mode revision cannot enter zero Tool current_turn',
-  () => exerciseFormalCurrentTurnBoundary('code'),
+  'code child with an unrestricted original grant accepts followup without current-turn routing',
+  () => exerciseIndependentFollowupBoundary('code'),
   30_000,
 );
 
 test(
-  'formal eager followup still arrives after a review child first Model attempt',
-  () => exerciseFormalCurrentTurnBoundary('review', true),
+  'eager review followup waits for the first child Model before starting a new Run',
+  () => exerciseIndependentFollowupBoundary('review', true),
   30_000,
 );
 
 test(
-  'formal review child consumes an accepted followup in its next read-only Model',
-  () => exerciseFormalCurrentTurnBoundary('review', false, true),
+  'review child consumes an accepted followup in a new Run after its original read Tool',
+  () => exerciseIndependentFollowupBoundary('review', false, true),
   30_000,
 );
 
 test(
-  'formal review child rejects an unadvertised shell Tool after current_turn routing',
-  () => exerciseFormalCurrentTurnBoundary('review', false, true, true),
+  'review followup rejects an unadvertised shell Tool in its new Run',
+  () => exerciseIndependentFollowupBoundary('review', false, true, true),
   30_000,
 );
 

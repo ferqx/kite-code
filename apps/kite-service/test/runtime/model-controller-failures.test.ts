@@ -8,7 +8,10 @@ import { aiMessage, buildContextProjection } from '@kite-ai/builtin-runtime/mode
 import { subagentTaskDigest } from '@kite-ai/builtin-runtime/subagent';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { SuspendedSubagentSnapshot } from '@kite-ai/runtime-spi';
-import { eventsForInvalidModelToolCalls } from '#kite-service/bootstrap/runtime/model-effect';
+import {
+  eventsForInvalidModelToolCalls,
+  resolveContextProjectionEnvironment,
+} from '#kite-service/bootstrap/runtime/model-effect';
 import { mapRuntimeMetadata } from '#kite-service/session-logger';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../../../scripts/support/runtime-host-state';
@@ -18,9 +21,19 @@ import { createTestModelInvocationHarness } from '../../../../tests/helpers/mode
 import {
   executeTestRuntimeTools,
   projectTestPrimaryModelEffect,
+  testBuiltinToolCatalog,
   testSubagentContinuationArtifacts,
   testSubagentTaskRequests,
 } from '../../../../tests/helpers/runtime-model';
+
+const fixtureConfig = {
+  apiKey: 'unused',
+  baseURL: 'https://example.invalid',
+  providerName: 'fixture',
+  providerType: 'openai-compatible' as const,
+  modelName: 'fixture',
+  sandbox: { enabled: false },
+};
 
 function projectObservabilityMetrics(events: readonly unknown[]) {
   const projector = createBuiltinObservabilityProjector();
@@ -203,6 +216,151 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
   expect(publicJson).not.toContain(task);
   expect(publicJson).not.toContain(rawTaskDigest);
   expect(publicJson).not.toContain(rawArgumentsDigest);
+});
+
+test('rehydrates a prior private Task call into public model history with exact artifact identity', () => {
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'private-task-history-rehydration',
+    userId: 'user',
+    workspace: process.cwd(),
+  });
+  const requests = testSubagentTaskRequests();
+  const invocationId = 'previous-model-invocation';
+  const toolCallId = 'previous-task-call';
+  const task = 'PRIVATE_HISTORY_TASK_SENTINEL_7bc2 investigate the prior result';
+  const taskArtifact = requests.write({
+    parentModelInvocationId: invocationId,
+    parentToolCallId: toolCallId,
+    name: 'Investigate result',
+    role: 'review',
+    task,
+  });
+  state.tools.calls[toolCallId] = {
+    toolCallId,
+    name: 'task',
+    modelMessageId: 'previous-model-message',
+    modelInvocationId: invocationId,
+    args: { name: 'Investigate result', subagent_type: 'review', taskArtifact },
+    createdAtTurnId: state.turn.turnId,
+    status: 'succeeded',
+  };
+  state = {
+    ...state,
+    transcript: {
+      messages: [
+        {
+          kind: 'assistant',
+          messageId: 'previous-model-message',
+          modelInvocationId: invocationId,
+          turnId: state.turn.turnId,
+          ordinal: 0,
+          createdAt: new Date(0).toISOString(),
+          toolCalls: [
+            {
+              id: toolCallId,
+              name: 'task',
+              args: { name: 'Investigate result', subagent_type: 'review', taskArtifact },
+            },
+          ],
+        },
+        {
+          kind: 'tool',
+          messageId: 'previous-task-result',
+          turnId: state.turn.turnId,
+          ordinal: 1,
+          createdAt: new Date(0).toISOString(),
+          toolCallId,
+          name: 'task',
+          content: 'Investigation completed.',
+          ok: true,
+        },
+      ],
+    },
+  };
+  const environment = resolveContextProjectionEnvironment({
+    state,
+    config: fixtureConfig,
+    model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
+    builtinToolCatalog: testBuiltinToolCatalog(),
+    subagentTaskRequests: requests,
+  });
+  const projected = buildContextProjection({
+    role: 'agent',
+    state,
+    transcriptToolCallArgs: environment.transcriptToolCallArgs,
+  });
+  const historyCall = projected.providerMessages
+    .flatMap((message) =>
+      'tool_calls' in message && Array.isArray(message.tool_calls) ? message.tool_calls : [],
+    )
+    .find((call) => call.id === toolCallId);
+  expect(historyCall?.args).toEqual({
+    name: 'Investigate result',
+    subagent_type: 'review',
+    task,
+  });
+  expect(JSON.stringify(projected.providerMessages)).not.toContain(taskArtifact.artifactId);
+  expect(JSON.stringify(state)).not.toContain(task);
+  state.tools.calls[toolCallId] = {
+    ...state.tools.calls[toolCallId]!,
+    modelInvocationId: 'different-model-invocation',
+  };
+  expect(() =>
+    resolveContextProjectionEnvironment({
+      state,
+      config: fixtureConfig,
+      model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
+      builtinToolCatalog: testBuiltinToolCatalog(),
+      subagentTaskRequests: requests,
+    }),
+  ).toThrow('binding is invalid');
+});
+
+test('malformed current Task arguments fail the tool without persisting a forged private ref', async () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'malformed-current-task',
+    userId: 'user',
+    workspace: process.cwd(),
+  });
+  const forged = 'FORGED_PRIVATE_TASK_REF_SENTINEL_2f81';
+  const model = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'bad-current-task',
+            name: 'task',
+            args: { name: 'Invalid task', subagent_type: 'review', taskArtifact: forged },
+          },
+        ],
+      }),
+    },
+  ]);
+  model.supportsToolCalls = true;
+  const events = await projectTestPrimaryModelEffect({ model, state, config: fixtureConfig });
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'model.responded',
+      toolCalls: [
+        expect.objectContaining({
+          id: 'bad-current-task',
+          args: { _invalid_args_code: 'invalid_arguments', _invalid_args_redacted: true },
+        }),
+      ],
+    }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'tool.failed',
+      toolCallId: 'bad-current-task',
+      failure: expect.objectContaining({ kind: 'model_invalid_tool_args' }),
+    }),
+  );
+  expect(JSON.stringify(events)).not.toContain(forged);
+  expect(events.some((event) => event.type === 'run.error')).toBe(false);
 });
 
 test('omits absent optional model response fields so live reduction matches replay', async () => {

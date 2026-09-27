@@ -39,6 +39,9 @@ export function settleAcceptedChildCreationFailure(input: {
   readonly artifacts: SubagentResultArtifactAccess;
   readonly commitFailure: (proof: FailureCommit) => readonly RuntimeEvent[];
   readonly cancelled?: boolean;
+  /** Parent user cancellation already released this exact, never-dispatched child allotment. */
+  readonly alreadyReleasedAfterParentCancel?: boolean;
+  readonly hasCancelledParentRunProof?: (runId: string) => boolean;
   readonly afterTurnPhase?: 'planning' | 'building';
 }): readonly RuntimeEvent[] {
   const { parentState, childThreadId } = input;
@@ -75,8 +78,14 @@ export function settleAcceptedChildCreationFailure(input: {
     link.delegatedReservationId !== intent.delegatedReservationId ||
     call?.result?.resultMeta?.taskId !== intent.childInvocationId ||
     call.result.resultMeta.taskStatus !== 'running' ||
-    (ledger?.reservations[intent.delegatedReservationId]?.state !== 'reserved' &&
-      ledger?.reservations[intent.delegatedReservationId]?.state !== 'queued')
+    (input.alreadyReleasedAfterParentCancel
+      ? !input.cancelled ||
+        intent.disposition !== 'required' ||
+        intent.fundingRunId !== intent.originRunId ||
+        input.hasCancelledParentRunProof?.(intent.originRunId) !== true ||
+        ledger?.reservations[intent.delegatedReservationId]?.state !== 'released'
+      : ledger?.reservations[intent.delegatedReservationId]?.state !== 'reserved' &&
+        ledger?.reservations[intent.delegatedReservationId]?.state !== 'queued')
   )
     throw new Error('Child creation failure lost its exact parent claim.');
 
@@ -96,7 +105,8 @@ export function settleAcceptedChildCreationFailure(input: {
         child.ownerStatus !== 'idle' ||
         child.cleanupConfirmed !== true)) ||
     (mode === 'activated_no_ack') !==
-      Boolean(intent.childBudgetActivatedRunId && intent.childBudgetActivatedEventId)
+      Boolean(intent.childBudgetActivatedRunId && intent.childBudgetActivatedEventId) ||
+    (input.alreadyReleasedAfterParentCancel && mode !== 'created_unactivated')
   )
     throw new Error('Child Session is not safely absent or abandoned before dispatch.');
 
@@ -201,10 +211,17 @@ export function settleAcceptedChildCreationFailure(input: {
   };
   return input.commitFailure({
     mode,
-    releaseEvent: {
-      type: 'resource_budget.released',
-      reservationId: intent.delegatedReservationId,
-    },
+    ...(input.alreadyReleasedAfterParentCancel
+      ? {
+          alreadyReleasedAfterParentCancel: true as const,
+          hasCancelledParentRunProof: input.hasCancelledParentRunProof!,
+        }
+      : {
+          releaseEvent: {
+            type: 'resource_budget.released' as const,
+            reservationId: intent.delegatedReservationId,
+          },
+        }),
     failureEvent,
     resultEvent,
     readFailureArtifact: readOwned,

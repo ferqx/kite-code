@@ -273,10 +273,10 @@ test('source TriggerTurn seals a full independent child turn from trusted origin
   });
   expect(accepted.reservationEvent.reservation.executableUpperBound.counters).toMatchObject({
     turns: 1,
-    modelRequests: 30,
+    modelRequests: 24,
     toolInvocations: 0,
-    inputTokens: 250_000,
-    outputTokens: 62_500,
+    inputTokens: 200_000,
+    outputTokens: 50_000,
   });
   expect(accepted.reservationEvent.reservation.executableUpperBound).toMatchObject({
     unboundedToolInvocations: true,

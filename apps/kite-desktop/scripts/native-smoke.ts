@@ -663,6 +663,42 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   const initiallyWaiting = readBackgroundFacts();
   assert.equal(initiallyWaiting.waitingReason?.kind, 'required_background');
   assert.equal(initiallyWaiting.waitingReason?.taskIds?.length, 3);
+  const waitStatus = page.locator('.reading-column > [data-slot="marker"][role="status"]');
+  await waitStatus.getByText('正在等待子 Agent 结果', { exact: true }).waitFor({ timeout: 15_000 });
+  const provisionalAnswer = page.locator('.message.assistant', {
+    hasText: 'Provisional Electron background final.',
+  });
+  assert.equal(await provisionalAnswer.getAttribute('data-final-reply'), 'false');
+  assert.equal(await page.getByRole('button', { name: '停止任务' }).count(), 1);
+  await input.focus();
+  assert.equal(await input.evaluate((element) => document.activeElement === element), true);
+  const originalWindowBounds = (await main(
+    '__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].getBounds()',
+  )) as { width: number; height: number };
+  await main('__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].setSize(900, 700)');
+  assert.equal(await waitStatus.isVisible(), true);
+  assert.equal(
+    await page.evaluate(() => {
+      const status = document.querySelector<HTMLElement>(
+        '.reading-column > [data-slot="marker"][role="status"]',
+      )!;
+      const reading = document.querySelector<HTMLElement>('.reading-column')!;
+      return (
+        window.innerWidth < 1132 &&
+        status.getBoundingClientRect().right <= reading.getBoundingClientRect().right &&
+        reading.getBoundingClientRect().right <= window.innerWidth
+      );
+    }),
+    true,
+    'the waiting marker must remain inside the reading column in a narrow window',
+  );
+  await main(
+    `__kiteNativeSmoke.BrowserWindow.getAllWindows()[0].setSize(${originalWindowBounds.width}, ${originalWindowBounds.height})`,
+  );
+  await page.reload();
+  await waitStatus.getByText('正在等待子 Agent 结果', { exact: true }).waitFor({ timeout: 15_000 });
+  assert.equal(readBackgroundFacts().runId, initiallyWaiting.runId);
+  assert.equal(await page.getByRole('button', { name: '停止任务' }).count(), 1);
   const initialTaskIds = initiallyWaiting.waitingReason.taskIds!;
   backgroundGates[0]!.resolve();
   await Promise.race([
@@ -705,7 +741,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
     .getByText('运行中')
     .waitFor();
   assert.equal(backgroundParentCalls, 2, 'first child terminal must not reprompt the parent');
-  assert.equal(await page.getByText('正在等待后台结果', { exact: false }).count(), 0);
+  assert.equal(await waitStatus.getByText('正在等待子 Agent 结果', { exact: true }).count(), 1);
   const partiallyWaiting = readBackgroundFacts();
   assert.equal(partiallyWaiting.runId, initiallyWaiting.runId);
   assert.deepEqual(partiallyWaiting.waitingReason?.taskIds, initialTaskIds);
@@ -719,6 +755,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   // detail must receive the answer through the live child subscription.
   await childCards.getByRole('button', { name: '查看子 Agent 详情：Electron child 1' }).click();
   await page.getByRole('button', { name: '返回父会话' }).waitFor();
+  assert.equal(await waitStatus.count(), 0);
   await page.waitForFunction(() => {
     const refresh = [...document.querySelectorAll('button')].find((button) =>
       button.textContent?.includes('刷新详情'),
@@ -742,10 +779,18 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
       timeout: 15_000,
     });
   assert.equal(backgroundParentCalls, 2, 'second child terminal must not reprompt the parent');
+  assert.equal(await waitStatus.getByText('正在等待子 Agent 结果', { exact: true }).count(), 1);
   backgroundGates[2]!.resolve();
   await page.getByText('Electron background three-child complete.', { exact: false }).waitFor({
     timeout: 15_000,
   });
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll<HTMLElement>('.message.assistant')].some(
+      (message) =>
+        message.textContent?.includes('Electron background three-child complete.') &&
+        message.dataset.finalReply === 'true',
+    ),
+  );
   const backgroundTerminal = readBackgroundFacts();
   assert.equal(backgroundTerminal.runId, initiallyWaiting.runId);
   assert.equal(backgroundTerminal.runStatus, 'completed');
@@ -757,6 +802,7 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   );
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.completed').length, 1);
   assert.equal(backgroundTerminal.eventTypes.filter((type) => type === 'run.error').length, 0);
+  assert.equal(await waitStatus.count(), 0);
   await childCards.getByRole('button', { name: '查看子 Agent 详情：Electron child 0' }).click();
   await page.getByRole('button', { name: '返回父会话' }).waitFor();
   assert.equal(await page.getByRole('textbox', { name: '任务输入' }).count(), 0);

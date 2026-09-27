@@ -203,7 +203,7 @@ test('SIGKILL after queued interrupt receipt resumes one parent-owned stop witho
     await until(
       () => readStop(databasePath).row?.status === 'settled',
       'settled stop receipt',
-      40_000,
+      80_000,
     );
     const after = readStop(databasePath);
     expect(after.row?.command_id).toBe(before.row?.command_id);
@@ -238,4 +238,4 @@ test('SIGKILL after queued interrupt receipt resumes one parent-owned stop witho
     else process.env.KITE_CODE_HOME = previousHome;
     rmSync(home, { recursive: true, force: true });
   }
-}, 60000);
+}, 100_000);

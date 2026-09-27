@@ -287,6 +287,59 @@ test('closed parent Run settles only a reserved child without dispatch ACK', () 
   });
 });
 
+test('user-cancelled parent safely abandons only a released, untouched revision-zero child', () => {
+  const f = fixture();
+  f.setIntent({ ...f.intent, childSessionCreated: true });
+  f.setChild(f.childState);
+  const parent = f.input.parentState;
+  if (parent.resourceBudget.status !== 'active') throw new Error('missing budget');
+  Object.assign(parent, {
+    turn: { turnId: f.intent.originRunId, turnIndex: 1, status: 'aborted', abortCause: 'user' },
+  });
+  const reservation = parent.resourceBudget.reservations.reservation;
+  if (!reservation) throw new Error('missing reservation');
+  const closed = { ...f.input, isParentRunLive: () => false };
+  Object.assign(closed, {
+    hasCancelledParentRunProof: (runId: string) =>
+      runId === f.intent.originRunId && parent.turn.abortCause === 'user',
+  });
+  (reservation as { state: string }).state = 'released';
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'abandon_cancelled_unstarted_child',
+  });
+  Object.assign(parent, { turn: { turnId: 'new-run', status: 'active' } });
+  Object.assign(closed, {
+    hasCancelledParentRunProof: (runId: string) => runId === f.intent.originRunId,
+  });
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'abandon_cancelled_unstarted_child',
+  });
+
+  f.childState.modelInvocations = { attempt: { status: 'attempted' } as never };
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'recovery_required',
+    reason: 'parent_run_not_live',
+  });
+  f.childState.modelInvocations = {};
+  f.childState.revision = 1;
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'recovery_required',
+    reason: 'parent_run_not_live',
+  });
+  f.childState.revision = 0;
+  Object.assign(closed, { hasCancelledParentRunProof: () => false });
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'recovery_required',
+    reason: 'parent_run_not_live',
+  });
+  Object.assign(closed, { hasCancelledParentRunProof: () => true });
+  f.setIntent({ ...f.intent, childSessionCreated: true, dispatchAckEventId: 'ack' });
+  expect(planChildSessionRecovery(closed).actions[0]).toMatchObject({
+    kind: 'recovery_required',
+    reason: 'parent_run_not_live',
+  });
+});
+
 test('marked child can be recovered after parent deadline while its signed grant remains live', () => {
   const f = fixture();
   const parentDeadlineAt = new Date(NOW + 30_000).toISOString();

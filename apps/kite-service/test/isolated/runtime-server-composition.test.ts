@@ -38,7 +38,11 @@ test('one Runtime Run waits for required background work, accepts steering, and 
   }) => {
     const snapshot = JSON.stringify(request.messages);
     requestSnapshots.push(snapshot);
-    if (snapshot.includes('VERTICAL_CHILD_TASK') || !snapshot.includes('VERTICAL_PARENT_START')) {
+    if (
+      !request.messages.some(
+        (message) => message.role === 'user' && message.content === 'VERTICAL_PARENT_START',
+      )
+    ) {
       childRequestStarted.resolve();
       await childTerminal.promise;
       return { message: { content: 'VERTICAL_CHILD_RESULT' } };

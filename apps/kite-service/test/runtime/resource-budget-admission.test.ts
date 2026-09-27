@@ -9,7 +9,6 @@ import {
   createDescendantResourceAdmission,
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
-  DescendantResourceAdmissionError,
   LIMITED_RESOURCE_BUDGET_,
   planModelInvocationResource,
   planRuntimeBudgetAdmission,
@@ -542,7 +541,7 @@ describe('runtime resource budget admission', () => {
     expect(persisted).toBe(0);
   });
 
-  test('queues descendant tool permits durably in FIFO order and promotes atomically', async () => {
+  test('runs descendant tools concurrently without FIFO permits', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
       maxConcurrentShellInvocations: 1,
@@ -551,7 +550,8 @@ describe('runtime resource budget admission', () => {
     if (state.resourceBudget.status === 'active') {
       state.resourceBudget = {
         ...state.resourceBudget,
-        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+        startedAt: new Date(Date.now() - 1_000).toISOString(),
+        deadlineAt: new Date(Date.now() + 29 * 60_000).toISOString(),
       };
     }
     state.tools.calls['task-fifo'] = {
@@ -600,36 +600,62 @@ describe('runtime resource budget admission', () => {
       toolKind: 'read_file',
       shell: false,
     });
-    const first = await firstPromise;
-    for (let i = 0; i < 20; i++) {
-      const budget = kernel.getState().resourceBudget;
-      if (
-        budget.status === 'active' &&
-        Object.values(budget.waiters).some((waiter) => waiter.state === 'waiting')
-      ) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1));
-    }
-    const waitingBudget = kernel.getState().resourceBudget;
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
     expect(
-      waitingBudget.status === 'active'
-        ? Object.values(waitingBudget.waiters).map((waiter) => waiter.state)
-        : [],
-    ).toEqual(['waiting']);
-
-    await firstAdmission.reconcileTool({ reservationId: first.reservationId });
-    const second = await secondPromise;
-    expect(batches).toContainEqual(['resource_budget.waiter_promoted', 'resource_budget.reserved']);
+      batches.some((batch) => batch.some((type) => type.startsWith('resource_budget.waiter_'))),
+    ).toBe(false);
+    expect(kernel.getState().resourceBudget).toMatchObject({ status: 'active', waiters: {} });
     expect(kernel.getState().resourceBudget).toMatchObject({
       status: 'active',
       reservations: { [second.reservationId]: { state: 'dispatch_started' } },
     });
     await secondAdmission.reconcileTool({ reservationId: second.reservationId });
+    await firstAdmission.reconcileTool({ reservationId: first.reservationId });
     kernel.close();
   });
 
-  test('cancels a queued descendant permit with the child invocation signal', async () => {
+  test('cancels a persisted legacy Tool waiter before direct admission', () => {
+    let state = configuredState();
+    state.tools.calls['legacy-tool'] = {
+      toolCallId: 'legacy-tool',
+      modelMessageId: 'legacy-model',
+      name: 'read_file',
+      args: { path: 'fixture.txt' },
+      status: 'approved',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'legacy-tool'];
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.waiter_enqueued',
+      waiter: {
+        version: 1,
+        runId: 'run-1',
+        invocationId: 'tool:legacy-tool',
+        requiredPermits: ['tool'],
+        sequence: 0,
+        enqueuedAt: '2026-07-30T00:00:01Z',
+        deadlineAt: '2026-07-30T00:00:02Z',
+        state: 'waiting',
+      },
+    });
+    const plan = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['legacy-tool'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(plan.status).toBe('admitted');
+    expect(plan.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.waiter_cancelled',
+      'resource_budget.reserved',
+    ]);
+    expect(apply(state, plan.preparationEvents).resourceBudget).toMatchObject({
+      status: 'active',
+      waiters: { 'tool:legacy-tool': { state: 'cancelled' } },
+    });
+  });
+
+  test('does not queue a second descendant tool while the first is active', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
       maxConcurrentShellInvocations: 1,
@@ -638,7 +664,8 @@ describe('runtime resource budget admission', () => {
     if (state.resourceBudget.status === 'active') {
       state.resourceBudget = {
         ...state.resourceBudget,
-        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+        startedAt: new Date(Date.now() - 1_000).toISOString(),
+        deadlineAt: new Date(Date.now() + 29 * 60_000).toISOString(),
       };
     }
     state.tools.calls['task-cancel'] = {
@@ -684,21 +711,19 @@ describe('runtime resource budget admission', () => {
       signal: abortController.signal,
     });
 
-    await Bun.sleep(10);
+    const second = await queued;
     abortController.abort();
-    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
     expect(kernel.getState().resourceBudget).toMatchObject({
       status: 'active',
-      waiters: {
-        'descendant:tool:task-cancel:tool:cancelled': { state: 'cancelled' },
-      },
+      waiters: {},
     });
 
+    await admission.reconcileTool({ reservationId: second.reservationId });
     await admission.reconcileTool({ reservationId: occupied.reservationId });
     kernel.close();
   });
 
-  test('times out a descendant compound permit at the earlier shared run deadline', async () => {
+  test('runs overlapping descendant Shell invocations without a compound permit', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
       maxConcurrentShellInvocations: 1,
@@ -707,7 +732,8 @@ describe('runtime resource budget admission', () => {
     if (state.resourceBudget.status === 'active') {
       state.resourceBudget = {
         ...state.resourceBudget,
-        deadlineAt: new Date(Date.now() + 200).toISOString(),
+        startedAt: new Date(Date.now() - 1_000).toISOString(),
+        deadlineAt: new Date(Date.now() + 29 * 60_000).toISOString(),
       };
     }
     state.tools.calls['task-timeout'] = {
@@ -746,24 +772,18 @@ describe('runtime resource budget admission', () => {
       shell: true,
     });
 
-    let rejected: unknown;
-    try {
-      await admission.reserveTool({
-        invocationKey: 'shell:timeout',
-        toolKind: 'shell_execute',
-        shell: true,
-      });
-    } catch (error) {
-      rejected = error;
-    }
-    expect(rejected).toBeInstanceOf(DescendantResourceAdmissionError);
-    expect(rejected).toMatchObject({ reason: 'shell_concurrency_saturated' });
+    const second = await admission.reserveTool({
+      invocationKey: 'shell:parallel',
+      toolKind: 'shell_execute',
+      shell: true,
+    });
     expect(persisted).toEqual([
       'resource_budget.reserved',
       'resource_budget.dispatch_started',
-      'resource_budget.waiter_enqueued',
-      'resource_budget.waiter_timed_out',
+      'resource_budget.reserved',
+      'resource_budget.dispatch_started',
     ]);
+    await admission.reconcileTool({ reservationId: second.reservationId });
     await admission.reconcileTool({ reservationId: occupied.reservationId });
   });
 
@@ -1101,7 +1121,8 @@ describe('runtime resource budget admission', () => {
     if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
     state.resourceBudget = {
       ...state.resourceBudget,
-      deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+      startedAt: new Date(Date.now() - 1_000).toISOString(),
+      deadlineAt: new Date(Date.now() + 29 * 60_000).toISOString(),
     };
     state.session.workspace = '/tmp';
     const subagentTaskRequests = testSubagentTaskRequests();
@@ -1197,127 +1218,6 @@ describe('runtime resource budget admission', () => {
       }),
     );
     expect(events.some((event) => event.type === 'run.error')).toBe(false);
-    kernel.close();
-  });
-
-  test('projects descendant permit timeout through the canonical run terminal policy', async () => {
-    let state = configuredState({
-      maxConcurrentToolInvocations: 1,
-      maxConcurrentShellInvocations: 1,
-      maxConcurrencyWaitMs: 5,
-    });
-    if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
-    state.resourceBudget = {
-      ...state.resourceBudget,
-      deadlineAt: new Date(Date.now() + 5_000).toISOString(),
-    };
-    const occupiedUsage = createZeroResourceUsage(
-      'versioned_upper_bound',
-      'descendant-terminal-test-v1',
-    );
-    occupiedUsage.counters.toolInvocations = 1;
-    occupiedUsage.gauges.activeToolInvocations = 1;
-    state = apply(state, [
-      {
-        type: 'resource_budget.reserved',
-        reservation: {
-          version: 1,
-          reservationId: 'occupied-tool',
-          runId: state.resourceBudget.runId,
-          invocationId: 'fixture:occupied-tool',
-          resourceKind: 'tool',
-          executableUpperBound: occupiedUsage,
-          state: 'reserved',
-        },
-      },
-      { type: 'resource_budget.dispatch_started', reservationId: 'occupied-tool' },
-    ]);
-    const subagentTaskRequests = testSubagentTaskRequests();
-    state.tools.calls['task-terminal'] = {
-      toolCallId: 'task-terminal',
-      modelMessageId: 'model-terminal',
-      modelInvocationId: 'parent-model-terminal',
-      name: 'task',
-      args: {
-        name: 'Read one file',
-        subagent_type: 'explore',
-        taskArtifact: subagentTaskRequests.write({
-          parentModelInvocationId: 'parent-model-terminal',
-          parentToolCallId: 'task-terminal',
-          name: 'Read one file',
-          role: 'explore',
-          task: 'Read a file.',
-        }),
-      },
-      status: 'queued',
-      sideEffect: false,
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.queue = [...state.tools.queue, 'task-terminal'];
-    const kernel = new AgentKernel({
-      store: openStateStoreForTest(':memory:'),
-      initialState: state,
-      interactionMode: 'accept_edits',
-    });
-    const config: AgentConfig = {
-      apiKey: 'unused',
-      baseURL: 'https://example.invalid',
-      modelName: 'child-terminal-model',
-      providerName: 'fixture',
-      providerType: 'openai-compatible',
-      features: { resourceBudget: true, boundedCancellation: true },
-      sandbox: { enabled: false },
-    };
-    const executor = createTestRuntimeEffectExecutor({
-      config,
-      model: createMockModel([
-        {
-          message: aiMessage({
-            content: 'read',
-            tool_calls: [{ id: 'child-read', name: 'read_file', args: { path: 'missing.txt' } }],
-          }),
-        },
-      ]),
-      subagentTaskRequests,
-      workspaceFilesystemRuntime: testWorkspaceFilesystemRuntime(state.session.workspace),
-      subagentEventSink: () => {},
-    });
-    const events: import('@kite-ai/agent-kernel').RuntimeEvent[] = [];
-    for await (const event of runStateRuntimeLoop(kernel, executor, {
-      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
-    })) {
-      events.push(event);
-    }
-
-    const terminal = events.find((event) => event.type === 'run.error');
-    expect(terminal).toMatchObject({
-      type: 'run.error',
-      failure: { kind: 'resource_saturated' },
-    });
-    expect(terminal?.type === 'run.error' ? terminal.outcome : undefined).toEqual(
-      resolveResourceAdmissionFailureOutcome('tool_concurrency_saturated', kernel.getState()),
-    );
-    expect(events.map((event) => event.type)).toContain('turn.aborted');
-    expect(
-      events.some(
-        (event) =>
-          event.type === 'capability.invocation_recorded' &&
-          event.toolCallId.startsWith('subagent-tool:'),
-      ),
-    ).toBe(false);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'capability.execution_failed',
-        artifact: expect.objectContaining({ kind: 'capability_result' }),
-      }),
-    );
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'tool.failed',
-        toolCallId: 'task-terminal',
-        failure: expect.objectContaining({ kind: 'resource_saturated' }),
-      }),
-    );
     kernel.close();
   });
 

@@ -126,8 +126,8 @@ test('three read-only child allotments reconcile transient Tools and coexist und
     expect(plan.events[0].actual.gauges.activeSubagents).toBe(0);
     expect(plan.reservation.invocationId).toBe(`child-allotment:${childId(index)}`);
     expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
-    expect(plan.childBudget.maxTurns).toBe(8);
-    expect(plan.childBudget.maxModelRequests).toBe(30);
+    expect(plan.childBudget.maxTurns).toBe(10);
+    expect(plan.childBudget.maxModelRequests).toBe(36);
     expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
     expect(plan.childBudget.unboundedToolInvocations).toBe(true);
     expect(plan.childBudget.maxToolInvocations).toBe(0);
@@ -145,10 +145,10 @@ test('three read-only child allotments reconcile transient Tools and coexist und
   expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(3);
 });
 
-test('LIMITED budget queues a third finite child allotment and promotes it after one settles', () => {
+test('LIMITED budget admits three child allotments and rejects a fourth without queuing', () => {
   let state = initialState(LIMITED_RESOURCE_BUDGET_);
   const reservations: BudgetReservation[] = [];
-  for (let index = 1; index <= 2; index += 1) {
+  for (let index = 1; index <= 3; index += 1) {
     state = withTransient(state, index);
     const plan = planChildDelegatedAllotment({
       state,
@@ -160,7 +160,7 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
       now: NOW,
     });
     expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
-    expect(plan.childBudget.maxModelRequests).toBe(30);
+    expect(plan.childBudget.maxModelRequests).toBe(24);
     expect(Date.parse(plan.deadlineAt)).toBe(NOW + plan.childBudget.maxRunDurationMs);
     expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(
       plan.childBudget.maxRunDurationMs,
@@ -169,36 +169,22 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
     state = applyPlanned(state, plan.events);
   }
   if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
-  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
-  state = withTransient(state, 3);
-  const third = planChildDelegatedAllotment({
-    state,
-    transientReservationId: transientId(3),
-    toolFinished: finished(3),
-    childThreadId: childId(3),
-    role: 'review',
-    taskArtifactBytes: 1,
-    now: NOW,
-  });
-  expect(third.reservation.state).toBe('queued');
-  state = applyPlanned(state, third.events);
-  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
-  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
-  expect(committedResourceUsage(state.resourceBudget).gauges.elapsedRunMs).toBe(30 * 60_000);
-  expect(committedResourceUsage(state.resourceBudget).counters.modelRequests).toBe(90);
-  expect(
-    state.resourceBudget.budget.maxModelRequests -
-      committedResourceUsage(state.resourceBudget).counters.modelRequests,
-  ).toBe(30);
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
+  state = withTransient(state, 4);
   expect(() =>
-    reduceResourceBudgetState(
-      state.resourceBudget as Extract<typeof state.resourceBudget, { status: 'active' }>,
-      {
-        type: 'resource_budget.child_slot_acquired',
-        reservationId: third.reservation.reservationId,
-      },
-    ),
-  ).toThrow('Child concurrency slot is unavailable');
+    planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(4),
+      toolFinished: finished(4),
+      childThreadId: childId(4),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: NOW,
+    }),
+  ).toThrow('Sub-agent concurrency capacity is full');
+  expect(
+    Object.values(state.resourceBudget.reservations).filter((item) => item.state === 'queued'),
+  ).toEqual([]);
   state = {
     ...state,
     resourceBudget: reduceResourceBudgetState(state.resourceBudget, {
@@ -207,17 +193,6 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
     }),
   };
   if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
-  state = {
-    ...state,
-    resourceBudget: reduceResourceBudgetState(state.resourceBudget, {
-      type: 'resource_budget.child_slot_acquired',
-      reservationId: third.reservation.reservationId,
-    }),
-  };
-  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
-  expect(state.resourceBudget.reservations[third.reservation.reservationId]?.state).toBe(
-    'reserved',
-  );
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
 });
 
@@ -260,7 +235,7 @@ test('code children consume the parent writer gauge without overbooking', () => 
     state = applyPlanned(state, plan.events);
   }
   state = withTransient(state, 3);
-  expect(
+  expect(() =>
     planChildDelegatedAllotment({
       state,
       transientReservationId: transientId(3),
@@ -269,8 +244,8 @@ test('code children consume the parent writer gauge without overbooking', () => 
       role: 'code',
       taskArtifactBytes: 1,
       now: NOW,
-    }).reservation.state,
-  ).toBe('queued');
+    }),
+  ).toThrow('Sub-agent concurrency capacity is full');
 });
 
 test('insufficient finite counters and expired deadline reject before child reservation', () => {

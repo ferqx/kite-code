@@ -761,7 +761,7 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('caps one parallel subagent batch', () => {
+  test('attempts every compatible subagent creation in one model batch', () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-subagents',
@@ -784,7 +784,10 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: Array.from({ length: MAX_PARALLEL_SUBAGENTS }, (_, index) => `review-${index}`),
+      toolCallIds: Array.from(
+        { length: MAX_PARALLEL_SUBAGENTS + 2 },
+        (_, index) => `review-${index}`,
+      ),
     });
   });
 

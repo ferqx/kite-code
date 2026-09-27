@@ -1,6 +1,6 @@
 # ADR-0104：有界并发 Subagent 派发
 
-状态：accepted
+状态：部分被 ADR-0193 替代
 
 日期：2026-08-13
 
@@ -9,6 +9,8 @@
 相关：ADR-0049、ADR-0102、ADR-0103
 
 取代：ADR-0049 中将 `task` 固定为并行批次屏障的部分，以及当前文档中的 Subagent 全局串行规则
+
+现行适用范围：同一模型响应内兼容 `task` 可以并发、不同 child 保持独立身份与终态、审批交互按持久 continuation 逐个呈现，以及写者安全约束继续适用。第 2 条的固定单批上限 4 和“预算缩小派发集合”的排队式理解，以及“单批最多 4 个”的后果，已由 [ADR-0193](0193-configurable-immediate-subagent-admission.md) 替代。此处以下正文保留当时的历史取舍；当前行为以[执行手册](../handbook/features/execution.md)、[Service owner](../../apps/kite-service/docs/runtime-application.md)和[Kernel owner](../../packages/agent-kernel/docs/scheduling-authorization.md)为准。
 
 ## 背景
 

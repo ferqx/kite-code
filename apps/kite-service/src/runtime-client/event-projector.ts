@@ -144,7 +144,10 @@ export function projectRuntimeClientEvent(
         ...(event.presentationOwner === undefined
           ? {}
           : { presentationOwner: event.presentationOwner }),
-        summary: 'Tool execution failed.',
+        summary:
+          event.failure?.kind === 'model_invalid_tool_args'
+            ? '模型给出的工具参数不符合当前格式。'
+            : 'Tool execution failed.',
       };
     case 'tool.rejected':
       return {

@@ -34,9 +34,9 @@ test('required background completion resumes the same Run and permits a direct f
     }>;
   }) => {
     const snapshot = JSON.stringify(request.messages);
-    const isChildRequest =
-      snapshot.includes('DIRECT_FINAL_CHILD_TASK') ||
-      !snapshot.includes('DIRECT_FINAL_PARENT_START');
+    const isChildRequest = !request.messages.some(
+      (message) => message.role === 'user' && message.content === 'DIRECT_FINAL_PARENT_START',
+    );
     if (isChildRequest) {
       childRequestStarted.resolve();
       await childTerminal.promise;

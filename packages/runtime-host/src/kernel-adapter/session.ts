@@ -318,14 +318,13 @@ export interface StateRuntimeBackgroundAgentSettlementInput {
   readonly reply?: Readonly<{ event: AgentMailAcceptedEvent; mutation: AcceptMailMutation }>;
 }
 
-export interface StateRuntimeChildCreationFailureInput {
+export type StateRuntimeChildCreationFailureInput = {
   readonly mode: RuntimeChildCreationFailureMutation['mode'];
   readonly failureEvent: Extract<
     KernelEvent,
     { type: 'subagent.child_creation_failed' | 'subagent.child_pre_dispatch_cancelled' }
   >;
   readonly resultEvent: Extract<KernelEvent, { type: 'subagent.background_result_persisted' }>;
-  readonly releaseEvent: Extract<KernelEvent, { type: 'resource_budget.released' }>;
   readonly readFailureArtifact: (
     ref: RuntimeAgentArtifactRef<'subagent_task'>,
     taskId: string,
@@ -336,7 +335,18 @@ export interface StateRuntimeChildCreationFailureInput {
     ownerStatus: 'idle' | 'active' | 'detached' | 'recovery_required';
     cleanupConfirmed: boolean;
   }> | null;
-}
+} & (
+  | {
+      readonly releaseEvent: Extract<KernelEvent, { type: 'resource_budget.released' }>;
+      readonly alreadyReleasedAfterParentCancel?: false;
+      readonly hasCancelledParentRunProof?: never;
+    }
+  | {
+      readonly releaseEvent?: never;
+      readonly alreadyReleasedAfterParentCancel: true;
+      readonly hasCancelledParentRunProof: (runId: string) => boolean;
+    }
+);
 
 export interface StateRuntimeChildTerminalImportInput {
   readonly importEvent: Extract<KernelEvent, { type: 'subagent.child_terminal_imported' }>;
@@ -1310,6 +1320,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     ];
     const artifact = input.readFailureArtifact(failure.resultRef, failure.childInvocationId);
     const cancelled = failure.type === 'subagent.child_pre_dispatch_cancelled';
+    const alreadyReleased = input.alreadyReleasedAfterParentCancel === true;
     const receiptDigest = cancelled ? failure.terminalReceiptDigest : failure.failureReceiptDigest;
     if (
       !link ||
@@ -1319,8 +1330,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       invocation?.subagentProviderLifecycle?.childInvocationId !== failure.childInvocationId ||
       call?.result?.resultMeta?.taskId !== failure.childInvocationId ||
       call.result.resultMeta.taskStatus !== 'running' ||
-      (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
-      input.releaseEvent.reservationId !== link.delegatedReservationId ||
+      (alreadyReleased
+        ? !cancelled ||
+          input.mode !== 'created_unactivated' ||
+          input.hasCancelledParentRunProof?.(link.originRunId) !== true ||
+          reservation?.state !== 'released'
+        : (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
+          input.releaseEvent?.reservationId !== link.delegatedReservationId) ||
       receiptDigest !== failure.resultRef.integrityIdentifier ||
       artifact.terminalStatus !== (cancelled ? 'cancelled' : 'failed') ||
       artifact.ok !== false ||
@@ -1341,7 +1357,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       failureReceiptDigest: receiptDigest,
       mode: input.mode,
     };
-    const events = [input.releaseEvent, failure, result];
+    const events = alreadyReleased ? [failure, result] : [input.releaseEvent!, failure, result];
     const committed = this.#processEventBatch(
       events,
       { source: 'host_fact', acknowledgement: 'receipt_evidence' },

@@ -8,7 +8,6 @@ export type RuntimeClientEventCoverageDecision =
 
 const CLIENT_VISIBLE = [
   'agent.followup_turn_settled',
-  'agent.followup_independent_settled',
   'agent.mail_accepted',
   'agent.mail_input_prepared',
   'approval.granted',
@@ -81,6 +80,7 @@ const CLIENT_VISIBLE = [
 ] as const satisfies readonly RuntimeEvent['type'][];
 
 const INTERNAL_ONLY = [
+  'agent.followup_independent_settled',
   'subagent.child_session_intended',
   'subagent.child_session_adopted',
   'subagent.child_approval_proxy_changed',

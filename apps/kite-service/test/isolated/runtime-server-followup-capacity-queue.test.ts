@@ -186,6 +186,7 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
             modelName: 'mock-model',
             modelKwargs: { maxOutputTokens: 64 },
             modelCapabilities: { contextWindowTokens: 32_768, maxOutputTokens: 64 },
+            resources: { maxConcurrentSubagents: 2 },
             features: { resourceBudget: true, toolSearch: false },
             sandbox: { enabled: true },
           },

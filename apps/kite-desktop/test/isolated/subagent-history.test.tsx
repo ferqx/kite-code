@@ -340,6 +340,19 @@ test('persisted background result settles a running subagent after history reloa
       },
     } as RuntimeEvent,
     {
+      type: 'tool.finished',
+      toolCallId: 'parent-background-task',
+      name: 'task',
+      result: {
+        ok: true,
+        command: '',
+        exitCode: 0,
+        stdout: JSON.stringify({ ok: true, task_id: 'background-child' }),
+        stderr: '',
+        resultMeta: { taskId: 'background-child', taskStatus: 'running' },
+      },
+    } as RuntimeEvent,
+    {
       type: 'subagent.background_result_persisted',
       taskId: 'background-child',
       notificationId: 'background-notification',
@@ -408,7 +421,7 @@ test('persisted background result settles a running subagent after history reloa
   );
   const card = document.querySelector<HTMLElement>('.reading-column > .message.tool-activity');
   expect(card).not.toBeNull();
-  expect(card?.getAttribute('aria-label')).toContain('已完成');
+  expect(card?.getAttribute('aria-label')).toContain('已创建');
   expect(card?.textContent).not.toContain('正在工作');
 });
 

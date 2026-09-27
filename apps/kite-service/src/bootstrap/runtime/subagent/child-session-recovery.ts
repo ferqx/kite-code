@@ -29,6 +29,7 @@ export type ChildSessionRecoveryAction =
   | { readonly kind: 'reconcile_unknown_child'; readonly intent: Intent }
   | { readonly kind: 'abandon_stopped_child'; readonly intent: Intent }
   | { readonly kind: 'abandon_unstartable_child'; readonly intent: Intent }
+  | { readonly kind: 'abandon_cancelled_unstarted_child'; readonly intent: Intent }
   | { readonly kind: 'cancel_acknowledged_child'; readonly intent: Intent }
   | { readonly kind: 'import_terminal'; readonly intent: Intent }
   | { readonly kind: 'recovery_required'; readonly intent: Intent; readonly reason: string };
@@ -46,6 +47,8 @@ export function planChildSessionRecovery(input: {
   readonly readParentCommandReceipt?: KiteSessionAppServerStorageOwner['storage']['commandReceipts']['lookup'];
   /** Must reflect the current Store Run status, not a cached parent turn. */
   readonly isParentRunLive: (runId: string) => boolean;
+  /** Persisted Run terminal and user abort event, independent of the current turn. */
+  readonly hasCancelledParentRunProof?: (runId: string) => boolean;
   /** A nonrequired child may start while its original Run is durably completed. */
   readonly isAfterTurnOriginCompleted?: (runId: string) => boolean;
   /** A durable stop request blocks new child dispatch even after its stop receipt is settled. */
@@ -79,17 +82,51 @@ export function planChildSessionRecovery(input: {
       (intent.disposition !== 'required' && intent.disposition !== 'after_turn')
     )
       return required('intent_changed_or_settled');
-    const abandonIfReserved = (reason: string): ChildSessionRecoveryAction => {
-      const reservation = fundingBudgetForRun(input.parentState, intent.fundingRunId)?.reservations[
-        intent.delegatedReservationId
-      ];
-      return !intent.dispatchAckEventId &&
-        (reservation?.state === 'reserved' || reservation?.state === 'queued')
-        ? { kind: 'abandon_unstartable_child', intent }
-        : required(reason);
-    };
     const funding = fundingBudgetForRun(input.parentState, intent.fundingRunId);
     const reservation = funding?.reservations[intent.delegatedReservationId];
+    const child = input.readChildState(intent.childThreadId);
+    const abandonIfReserved = (reason: string): ChildSessionRecoveryAction => {
+      if (
+        !intent.dispatchAckEventId &&
+        (reservation?.state === 'reserved' || reservation?.state === 'queued')
+      )
+        return { kind: 'abandon_unstartable_child', intent };
+      const origin = child?.childSessionOrigin;
+      if (
+        reason === 'parent_run_not_live' &&
+        intent.disposition === 'required' &&
+        intent.fundingRunId === intent.originRunId &&
+        reservation?.state === 'released' &&
+        !input.isParentRunLive(intent.originRunId) &&
+        input.hasCancelledParentRunProof?.(intent.originRunId) === true &&
+        intent.childSessionCreated &&
+        !intent.childBudgetActivatedRunId &&
+        !intent.childBudgetActivatedEventId &&
+        !intent.dispatchAckEventId &&
+        child?.revision === 0 &&
+        child.session.threadId === intent.childThreadId &&
+        child.recoveryState.kind === 'normal' &&
+        child.resourceBudget.status === 'unconfigured' &&
+        !child.terminalOutcome &&
+        !child.activeTaskId &&
+        Object.keys(child.tasks).length === 0 &&
+        Object.keys(child.modelInvocations).length === 0 &&
+        Object.keys(child.tools.calls).length === 0 &&
+        Object.keys(child.capabilities.invocations).length === 0 &&
+        origin?.parentSessionId === intent.parentSessionId &&
+        origin.parentInvocationId === intent.parentInvocationId &&
+        origin.parentToolCallId === intent.originToolCallId &&
+        origin.attempt === intent.attempt &&
+        origin.childInvocationId === intent.childInvocationId &&
+        origin.grantDigest === intent.grantDigest &&
+        origin.fundingRunId === intent.fundingRunId &&
+        origin.delegatedReservationId === intent.delegatedReservationId &&
+        !origin.taskInputAdmitted &&
+        !origin.terminal
+      )
+        return { kind: 'abandon_cancelled_unstarted_child', intent };
+      return required(reason);
+    };
     const independentTurnDeadline =
       intent.fundingRunId === intent.originRunId &&
       reservation?.reservationId === `child-allotment:${intent.childThreadId}` &&
@@ -107,7 +144,6 @@ export function planChildSessionRecovery(input: {
         input.parentState.turn.turnId === intent.originRunId &&
         input.parentState.turn.abortCause === 'user'
       );
-    const child = input.readChildState(intent.childThreadId);
     if (Boolean(child) !== intent.childSessionCreated) return required('child_presence_mismatch');
     if (child?.childSessionOrigin?.terminal) {
       if (!intent.dispatchAckEventId) return required('terminal_without_dispatch_ack');

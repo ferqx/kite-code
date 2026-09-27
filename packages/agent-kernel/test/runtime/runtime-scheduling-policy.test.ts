@@ -16,7 +16,7 @@ describe('RuntimeSchedulingPolicy', () => {
       },
       parallelSubagent: {
         concurrencyGroup: 'parallel-subagent',
-        ceiling: 4,
+        ceiling: 'run_budget',
         scope: 'same_task_and_model_message',
         admission: 'approval_free_and_shared_budget',
       },
@@ -26,7 +26,7 @@ describe('RuntimeSchedulingPolicy', () => {
       },
       concurrencyAdmission: {
         scope: 'subagent_and_writer',
-        queue: 'fifo_per_resource',
+        queue: 'legacy_or_followup_only',
       },
       lateEventPolicy: 'diagnostic_or_reconciliation_only',
     });

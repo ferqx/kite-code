@@ -14,6 +14,27 @@ import {
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {
+  test('loads a positive subagent concurrency limit and rejects invalid limits', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'subagents.jsonc');
+      const provider = '"provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }';
+      writeFileSync(configPath, `{ ${provider}, "resources": { "maxConcurrentSubagents": 5 } }`);
+      expect(loadAgentConfig({ configPath }).resources?.maxConcurrentSubagents).toBe(5);
+      writeFileSync(configPath, `{ ${provider}, "resources": { "maxConcurrentSubagents": 28 } }`);
+      expect(loadAgentConfig({ configPath }).resources?.maxConcurrentSubagents).toBe(28);
+      for (const value of ['0', '-1', '1.5', '29', '9007199254740992']) {
+        writeFileSync(
+          configPath,
+          `{ ${provider}, "resources": { "maxConcurrentSubagents": ${value} } }`,
+        );
+        expect(() => loadAgentConfig({ configPath })).toThrow();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('preserves an explicitly selected OpenAI provider type after saving', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
     const previousBaseURL = process.env.OPENAI_BASE_URL;

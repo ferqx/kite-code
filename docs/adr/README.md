@@ -2,6 +2,7 @@
 
 ADR 用于追溯设计取舍，不单独构成当前实施要求；accepted、编号较新或措辞强制均不足以证明当前适用性。当前完整结论见[开发入口](../development/README.md)和[产品手册](../handbook/README.md)。引用 ADR 支持实施及处理旧记录时，遵循[ADR 使用边界](../development/documentation.md#adr-使用边界)，明确当前适用范围与现行依据。历史记录仅按需定向读取。
 
+- [ADR-0193：可配置的子 Agent 即时准入与独立工具执行](0193-configurable-immediate-subagent-admission.md)
 - [ADR-0192：开发期 Shell 默认广泛只读](0192-development-shell-read-visibility.md)
 - [ADR-0191：子 Agent 使用独立持久 Session 与父结果桥接](0191-independent-agent-sessions-and-result-bridge.md)
 - [ADR-0190：Codex 式 Agent 邮箱与续轮保留唯一结果权威](0190-codex-style-agent-mailbox-and-followup-authority.md)

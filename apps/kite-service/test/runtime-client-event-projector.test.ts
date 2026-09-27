@@ -310,6 +310,31 @@ describe('Runtime Client event projector', () => {
     });
   });
 
+  test('shows a safe explanation for malformed model tool arguments', () => {
+    const projected = projectRuntimeClientEvent(
+      {
+        type: 'tool.failed',
+        toolCallId: 'bad-task',
+        failure: {
+          kind: 'model_invalid_tool_args',
+          message: 'private provider response',
+          retryable: true,
+          modelFixable: true,
+          needsUserIntervention: false,
+          terminatesTurn: false,
+          journal: true,
+          parseFailureCode: 'invalid_arguments',
+        },
+      },
+      { sessionRevision: 1 },
+    );
+    expect(projected).toMatchObject({
+      type: 'tool.failed',
+      summary: '模型给出的工具参数不符合当前格式。',
+    });
+    expect(JSON.stringify(projected)).not.toContain('private provider response');
+  });
+
   test('projects bounded local reasoning activity and credential-shaped user text', () => {
     const longReasoning = `local detail ${'x'.repeat(5_000)}`;
     expect(

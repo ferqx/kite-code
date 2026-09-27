@@ -135,6 +135,29 @@ test('a passive run status notice does not hide the composer', () => {
   expect(html).toContain('aria-label="发送运行中引导"');
 });
 
+test('a required subagent wait appears once after transcript content only while history is visible', () => {
+  const waiting = renderToStaticMarkup(
+    <SessionPage
+      {...base}
+      messages={[{ id: 'progress', role: 'assistant', text: '阶段进展', settled: true }]}
+      requiredSubagentWait
+    />,
+  );
+  expect(waiting.match(/正在等待子 Agent 结果/g)).toHaveLength(1);
+  expect(waiting).toMatch(/data-slot="marker"[^>]*role="status"/);
+  expect(waiting.indexOf('阶段进展')).toBeLessThan(waiting.indexOf('正在等待子 Agent 结果'));
+  expect(waiting.indexOf('正在等待子 Agent 结果')).toBeLessThan(
+    waiting.indexOf('class="conversation-footer"'),
+  );
+  expect(renderToStaticMarkup(<SessionPage {...base} />)).not.toContain('正在等待子 Agent 结果');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} requiredSubagentWait loading />),
+  ).not.toContain('正在等待子 Agent 结果');
+  expect(
+    renderToStaticMarkup(<SessionPage {...base} requiredSubagentWait selected={undefined} />),
+  ).not.toContain('正在等待子 Agent 结果');
+});
+
 test('the primary new-conversation navigation exposes its stable style hook while disabled', () => {
   const html = renderToStaticMarkup(
     <SessionPage {...base} busy actions={{ newSession: () => {} }} />,

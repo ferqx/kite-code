@@ -42,6 +42,7 @@ export function currentContextPreflight(
       projectInstructions: environment.projectInstructions,
       sandboxBackend: environment.sandboxBackend,
       delegatedTask: environment.delegatedTask,
+      transcriptToolCallArgs: environment.transcriptToolCallArgs,
     }).estimate,
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
@@ -138,6 +139,7 @@ export function buildContextStatusReport(
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
     delegatedTask: environment.delegatedTask,
+    transcriptToolCallArgs: environment.transcriptToolCallArgs,
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,

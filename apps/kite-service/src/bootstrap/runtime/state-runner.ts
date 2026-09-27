@@ -1107,6 +1107,21 @@ export async function* runStateRuntimeLoop(
       }
 
       const state = kernel.getState();
+      if (
+        state.resourceBudget.status === 'active' &&
+        state.resourceBudget.requiredChildWait &&
+        requiredBackgroundTaskIds(state).length === 0
+      ) {
+        const waitEnded: RuntimeEvent = {
+          type: 'resource_budget.required_child_wait_ended',
+          runId: state.resourceBudget.runId,
+          at: new Date().toISOString(),
+          taskIds: [...state.resourceBudget.requiredChildWait.taskIds],
+        };
+        kernel.processEvent(waitEnded);
+        yield waitEnded;
+        continue;
+      }
       const waitingReason = state.completionGuard.waitingReason;
       if (
         !completionWaitSatisfied &&
@@ -1291,21 +1306,6 @@ export async function* runStateRuntimeLoop(
           yield blocked;
           if (waitStarted) yield waitStarted;
           if (!(await waitForCompletionFacts(effect.decision.nextAction, waitState))) return;
-          const resumed = kernel.getState();
-          if (
-            resumed.resourceBudget.status === 'active' &&
-            resumed.resourceBudget.requiredChildWait &&
-            requiredBackgroundTaskIds(resumed).length === 0
-          ) {
-            const waitEnded: RuntimeEvent = {
-              type: 'resource_budget.required_child_wait_ended',
-              runId: resumed.resourceBudget.runId,
-              at: new Date().toISOString(),
-              taskIds: [...resumed.resourceBudget.requiredChildWait.taskIds],
-            };
-            kernel.processEvent(waitEnded);
-            yield waitEnded;
-          }
           completionWaitSatisfied = true;
           continue;
         }

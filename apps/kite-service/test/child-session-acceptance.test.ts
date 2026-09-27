@@ -6,6 +6,7 @@ import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
   INTERNAL_RESOURCE_BUDGET_,
+  LIMITED_RESOURCE_BUDGET_,
   reduceResourceBudgetState,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeEvent, RuntimeState } from '../src/bootstrap/runtime/state-runtime';
@@ -42,8 +43,6 @@ function addTransient(state: RuntimeState, index: number): RuntimeState {
   const upper = createZeroResourceUsage('versioned_upper_bound', 'acceptance-test-v1');
   upper.counters.toolInvocations = 1;
   upper.counters.artifactBytes = 100;
-  upper.gauges.activeSubagents = 1;
-  upper.gauges.activeToolInvocations = 1;
   const reservation: BudgetReservation = {
     version: 1,
     reservationId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
@@ -86,7 +85,7 @@ function runningReceipt(index: number): Extract<RuntimeEvent, { type: 'tool.fini
   };
 }
 
-function grant(index: number) {
+function grant(index: number, role: 'review' | 'code' = 'review') {
   return new SubagentGrantAuthority({
     now: () => NOW,
     idSource: () => `acceptance-grant-${index}`,
@@ -98,7 +97,7 @@ function grant(index: number) {
     admissionDigest: '2'.repeat(64),
     effectiveEffectsDigest: '3'.repeat(64),
     childInvocationId: `child-invocation-${index}`,
-    role: 'review',
+    role,
     taskArtifact: {
       artifactId: `pa_${String(index).repeat(64)}`,
       kind: 'subagent_task',
@@ -162,6 +161,143 @@ test('unconfigured parent budget rejects staging before any receipt becomes pend
   });
   expect(await stage.commitReceipt([runningReceipt(1)])).toBeNull();
   expect(commits).toBe(0);
+});
+
+test('zero-share parent budget rejects staging before a running receipt', async () => {
+  const base = initialState();
+  if (base.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+  const state = addTransient(
+    {
+      ...base,
+      resourceBudget: {
+        ...base.resourceBudget,
+        budget: { ...LIMITED_RESOURCE_BUDGET_, maxConcurrentSubagents: 29 },
+      },
+    },
+    1,
+  );
+  let commits = 0;
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => {
+      commits += 1;
+      return true;
+    },
+    onAccepted: () => undefined,
+  });
+  expect(
+    stage.stage({
+      grant: grant(1),
+      name: 'reviewer',
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    }),
+  ).toMatchObject({
+    ok: false,
+    terminalStatus: 'failed',
+    summary:
+      'Sub-agent budget cannot provide a positive child allotment; the new child was not created.',
+  });
+  expect(await stage.commitReceipt([runningReceipt(1)])).toBeNull();
+  expect(commits).toBe(0);
+});
+
+test('exhausted model budget rejects staging before a running receipt', async () => {
+  const base = initialState();
+  if (base.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+  const usage = createZeroResourceUsage();
+  usage.counters.modelRequests = base.resourceBudget.budget.maxModelRequests;
+  const state = addTransient(
+    {
+      ...base,
+      resourceBudget: { ...base.resourceBudget, reconciledUsage: usage },
+    },
+    1,
+  );
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => {
+      throw new Error('Unexpected child acceptance.');
+    },
+    onAccepted: () => undefined,
+  });
+  expect(
+    stage.stage({
+      grant: grant(1),
+      name: 'reviewer',
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    }),
+  ).toMatchObject({ ok: false, terminalStatus: 'failed' });
+  expect(await stage.commitReceipt([runningReceipt(1)])).toBeNull();
+});
+
+test('pending sibling shares are counted before staging another child', () => {
+  const base = initialState();
+  if (base.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+  const usage = createZeroResourceUsage();
+  usage.counters.turns = base.resourceBudget.budget.maxTurns - 10;
+  let state: RuntimeState = {
+    ...base,
+    resourceBudget: { ...base.resourceBudget, reconciledUsage: usage },
+  };
+  state = addTransient(addTransient(state, 1), 2);
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => {
+      throw new Error('Unexpected child acceptance.');
+    },
+    onAccepted: () => undefined,
+  });
+  const candidate = (index: number) =>
+    stage.stage({
+      grant: grant(index),
+      name: `reviewer-${index}`,
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    });
+  expect(candidate(1).ok).toBe(true);
+  expect(candidate(2)).toMatchObject({ ok: false, terminalStatus: 'failed' });
+});
+
+test('one remaining turn can still fund a child with a reduced allotment', () => {
+  const base = initialState();
+  if (base.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+  const usage = createZeroResourceUsage();
+  usage.counters.turns = base.resourceBudget.budget.maxTurns - 1;
+  const state = addTransient(
+    { ...base, resourceBudget: { ...base.resourceBudget, reconciledUsage: usage } },
+    1,
+  );
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => true,
+    onAccepted: () => undefined,
+  });
+  expect(
+    stage.stage({
+      grant: grant(1),
+      name: 'reviewer',
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    }).ok,
+  ).toBe(true);
 });
 
 test('staging does not dispatch; receipt commits one sealed parent batch with exact lease', async () => {
@@ -277,6 +413,90 @@ test('three sibling receipts serialize fresh parent budget planning', async () =
       id.startsWith('child-allotment:'),
     ),
   ).toHaveLength(3);
+});
+
+test('fourth sibling is rejected before a child intent or Session can be created', async () => {
+  let state = initialState();
+  for (let index = 1; index <= 4; index += 1) state = addTransient(state, index);
+  const batches: RuntimeEvent[][] = [];
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async (events) => {
+      batches.push([...events]);
+      for (const event of events) {
+        if (
+          event.type === 'resource_budget.reconciled' ||
+          event.type === 'resource_budget.reserved'
+        ) {
+          state = {
+            ...state,
+            resourceBudget: reduceResourceBudgetState(state.resourceBudget, event),
+          };
+        }
+      }
+      return true;
+    },
+    onAccepted: () => undefined,
+  });
+  const stageOne = (index: number) =>
+    stage.stage({
+      grant: grant(index),
+      name: `reviewer-${index}`,
+      role: 'review',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    });
+  for (let index = 1; index <= 3; index += 1) {
+    expect(stageOne(index).ok).toBe(true);
+  }
+  expect(stageOne(4)).toMatchObject({
+    ok: false,
+    terminalStatus: 'failed',
+    summary: 'Sub-agent concurrency limit (3) reached; the new child was not created.',
+  });
+  expect(await stage.commitReceipt([runningReceipt(4)])).toBeNull();
+  expect(batches).toHaveLength(0);
+});
+
+test('code writer capacity fails immediately and a failed staged receipt releases its pending slot', async () => {
+  const initial = initialState();
+  let state = {
+    ...initial,
+    resourceBudget: {
+      ...initial.resourceBudget,
+      budget: { ...INTERNAL_RESOURCE_BUDGET_, maxConcurrentWriters: 1 },
+    },
+  } as RuntimeState;
+  state = addTransient(addTransient(state, 1), 2);
+  const stage = createChildSessionAcceptanceStage({
+    getState: () => state,
+    now: () => NOW,
+    effectLeases: { tryAcquireEffectLease: () => true, releaseEffectLease: () => undefined },
+    commit: async () => true,
+    onAccepted: () => undefined,
+  });
+  const code = (index: number) =>
+    stage.stage({
+      grant: grant(index, 'code'),
+      name: `coder-${index}`,
+      role: 'code',
+      originRunId: RUN,
+      originTurnId: state.turn.turnId,
+      disposition: 'required',
+    });
+  expect(code(1).ok).toBe(true);
+  expect(code(2)).toMatchObject({
+    ok: false,
+    summary: 'Code sub-agent writer capacity is full; the new child was not created.',
+  });
+  const failed = runningReceipt(1);
+  expect(
+    await stage.commitReceipt([{ ...failed, result: { ...failed.result, ok: false } }]),
+  ).toBeNull();
+  expect(code(2).ok).toBe(true);
 });
 
 test('post-commit release and activation failures cannot turn a receipt into a Tool failure', async () => {

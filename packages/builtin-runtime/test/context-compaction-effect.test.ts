@@ -4,6 +4,7 @@ import {
   type BuiltinContextCompactor,
   buildContextProjection,
   ContextCompactionValidationError,
+  createNarrativeContextCompactor,
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   findSafeCompactionBoundary,
@@ -108,6 +109,95 @@ function terminal(
   if (!value) throw new Error('expected terminal event');
   return value;
 }
+
+test('narrative compaction restores public Task arguments without exposing private references', async () => {
+  const base = stateWithPending();
+  const toolCallId = 'historical-task-call';
+  const privateRef = 'PRIVATE_TASK_ARTIFACT_REF_SENTINEL_42';
+  const task = 'Review the completed implementation and report findings.';
+  const state: BuiltinRuntimeStateView = {
+    ...base,
+    transcript: {
+      messages: [
+        {
+          kind: 'user',
+          messageId: 'historical-user',
+          turnId: 'settled-turn',
+          ordinal: 0,
+          createdAt: '2026-08-21T00:00:00.000Z',
+          content: `Inspect the implementation. ${'Preserve this settled historical context. '.repeat(800)}`,
+        },
+        {
+          kind: 'assistant',
+          messageId: 'historical-assistant',
+          turnId: 'settled-turn',
+          ordinal: 1,
+          createdAt: '2026-08-21T00:00:01.000Z',
+          toolCalls: [
+            {
+              id: toolCallId,
+              name: 'task',
+              args: {
+                name: 'Review implementation',
+                subagent_type: 'review',
+                taskArtifact: { artifactId: privateRef, kind: 'subagent_task_request' },
+              },
+            },
+          ],
+        },
+        {
+          kind: 'tool',
+          messageId: 'historical-tool-result',
+          turnId: 'settled-turn',
+          ordinal: 2,
+          createdAt: '2026-08-21T00:00:02.000Z',
+          toolCallId,
+          name: 'task',
+          content: 'Review completed.',
+          ok: true,
+        },
+      ],
+    },
+    tools: {
+      calls: {
+        [toolCallId]: {
+          toolCallId,
+          modelMessageId: 'historical-assistant',
+          args: { taskArtifact: { artifactId: privateRef } },
+          status: 'succeeded',
+        },
+      },
+    },
+  };
+  const requests: string[] = [];
+  const compact = createNarrativeContextCompactor({
+    generate: async ({ input }) => {
+      requests.push(input);
+      return 'Completed implementation review.';
+    },
+  });
+  const pending = state.context.pendingCompaction!;
+  await compact({
+    state,
+    pending,
+    sourceRevision: state.revision,
+    projectionEnvironment: {
+      serializedTools: [],
+      workflowSkills: [],
+      transcriptToolCallArgs: {
+        [toolCallId]: { name: 'Review implementation', subagent_type: 'review', task },
+      },
+    },
+  });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toContain(`"task":"${task}"`);
+  expect(requests[0]).not.toContain('taskArtifact');
+  expect(requests[0]).not.toContain(privateRef);
+  await expect(compact({ state, pending, sourceRevision: state.revision })).rejects.toThrow(
+    'Private task history could not be restored.',
+  );
+  expect(requests).toHaveLength(1);
+});
 
 describe('executeBuiltinContextCompaction', () => {
   test('emits a JSON-safe completed terminal DTO with deterministic timing', async () => {

@@ -79,6 +79,9 @@ export interface CompletedChildOrchestrationFixture {
   readonly parentSessionId: string;
   readonly parentRunId: string;
   readonly childSessionId: string;
+  readonly acceptedChild?: Parameters<
+    ReturnType<typeof createChildSessionOrchestrator>['onAccepted']
+  >[0];
   readonly workspace: string;
   readonly childNotifications: readonly RuntimeNotification[];
 }
@@ -104,6 +107,7 @@ export async function exerciseChildOrchestration(
   childDeadlineMs = 120_000,
   failChildModel = false,
   shellApprovalChild = false,
+  shortInitialLease = false,
 ): Promise<void> {
   const durableHome = process.env.KITE_D3_SIGKILL_HOME;
   const localModelBaseURL = process.env.KITE_D3_SIGKILL_MOCK_URL;
@@ -173,7 +177,7 @@ export async function exerciseChildOrchestration(
   const owner = await createKiteSessionAppServerStorageComposition({
     databasePath: join(home, 'kite-session.sqlite'),
     hostInstanceId: 'orchestrator-integration-host',
-    ...(crashAfterAttempt
+    ...(crashAfterAttempt || shortInitialLease
       ? { executionLeaseMs: 120, renewIntervalMs: 40 }
       : durableHome
         ? { executionLeaseMs: 1_000, renewIntervalMs: 200 }
@@ -589,6 +593,7 @@ export async function exerciseChildOrchestration(
       parentSessionId,
       parentRunId,
       childSessionId: accepted[0]!.childThreadId,
+      acceptedChild: accepted[0]!,
       workspace,
       childNotifications,
     });
@@ -695,7 +700,19 @@ export async function exerciseChildOrchestration(
     });
     expect(creation.runtime.snapshot.childSessionOrigin?.childInvocationId).toBe(childInvocationId);
     if (duringQueuedChild) {
-      expect(owner.createChildSession(creation).status).toBe('applied');
+      expect(
+        owner.createChildSession(
+          shortInitialLease
+            ? {
+                ...creation,
+                controller: {
+                  ...creation.controller,
+                  executionLeaseUntilMs: Date.now() + 120,
+                },
+              }
+            : creation,
+        ).status,
+      ).toBe('applied');
       expect(owner.loadCurrentSnapshot(accepted[0]!.childThreadId)?.revision).toBe(0);
       await duringQueuedChild(callbackFixture());
       return;

@@ -677,7 +677,12 @@ export async function* executeRuntimeTurn(
           deadlineAt: new Date(
             startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
           ).toISOString(),
-          budget: LIMITED_RESOURCE_BUDGET_,
+          budget: {
+            ...LIMITED_RESOURCE_BUDGET_,
+            maxConcurrentSubagents:
+              input.config.resources?.maxConcurrentSubagents ??
+              LIMITED_RESOURCE_BUDGET_.maxConcurrentSubagents,
+          },
         };
         const applied = kernel.processEventBatch([event]);
         scheduleRunDeadline();
@@ -1029,9 +1034,19 @@ export async function* executeRuntimeTurn(
             : requiredBackground,
         );
         const inspectRequiredBackground = () => {
-          if (!children || awaitedBackground.size === 0) return undefined;
+          if (awaitedBackground.size === 0) return undefined;
           const currentState = kernel.getState();
           if (currentState.revision !== revision) return 'state_changed' as const;
+          const recoveryBlocked = Object.values(currentState.capabilities.invocations).find(
+            (invocation) =>
+              awaitedBackground.has(
+                invocation.subagentProviderLifecycle?.childInvocationId ?? '',
+              ) &&
+              invocation.subagentProviderLifecycle?.childSession?.recoveryDiagnostic !== undefined,
+          );
+          if (recoveryBlocked)
+            throw new Error('Required child Session needs explicit execution recovery.');
+          if (!children) return undefined;
           const independentChildren = new Set(
             Object.values(currentState.capabilities.invocations)
               .filter(

@@ -8,6 +8,10 @@ Kernel 选择 effect；Host 将已提交命令对应的 prepared execution 绑�
 
 Tool coordinator 在 preparation、dispatch、receipt 和结果提交之间维持同一 identity。Builtin 提供实际执行机制，Host 管理 attempt、lease 和提交资格，Store 验证持久 generation/revision。三者职责不能合并为“执行器返回成功即可完成”。
 
+续轮子工具审批的父 Tool 身份使用 [Host storage codec](../src/storage/followup-child-approval-identity.ts) 统一编码和解析。Service 审批路由与 SQLite Store 使用同一版本前缀、字段界限及 canonical 复编码规则；SQLite 保留原公开导出作兼容，但 Service 的运行时逻辑不从具体 Store 包取得该解析权威。格式回归见 [Store 审批代理测试](../../runtime-storage-sqlite/test/kite-child-approval-proxy.test.ts) 与 [Service 代理测试](../../../apps/kite-service/test/child-approval-proxy.test.ts)。
+
+预派发子 Session 的失败结算通常在父事务中提交预算释放、失败与结果三个事件。父 Run 已由用户取消且准确子预留先前已释放时，Host 仅对 revision 0 的未激活子 Session 接受显式 `alreadyReleasedAfterParentCancel` 变体，凭原 Run 的持久取消证明提交取消与结果两个事件；Store 再核对原 Run 的取消状态、用户取消事件、原释放及子线程未派发证明。当前 turn 可以属于后来的 Run，不能替代或否定原 Run 的证据。其他路径不能省去预算释放或重放外部操作。
+
 ## 并发与失效
 
 dispatch 前严格检查 fence；已 dispatch 的同一模型 invocation 可按当前规则接受与无关用户控制 revision 并发的流和终态，但 Turn 终止、invocation 替换或 identity 漂移后拒绝迟到结果。后台 child 结算可能在 `task_read`、`task_wait` 或 `task_cancel` 已派发后先推进 revision；Host 只在原 Turn 仍活动、精确 Tool／Capability identity 仍 live 且返回批次仅关闭该调用时接纳其旧 lease 终态。该例外不适用于 attempt start、其他工具或已结束调用，也不把接纳已执行结果扩展为重试许可。
@@ -52,7 +56,7 @@ CompletionGuard 的 `wait_for_background` 保持原 Run、Turn、deadline、预�
 
 `followup_task` 的新 `independent_turn_v2` 在来源 Run 受理时保留有限 Model、token、Artifact、turn 与并发备付，目标 child 新 Run 从启动时独立计时 30 分钟。`followup_task` 工具本身不写工作区 Artifact，其工具 reservation 不重复占用目标备付的 Artifact 额度。Host 依来源备付上的 `independentFollowupTurn`／`unboundedToolInvocations` 标记和目标原角色 grant 验证预算、可见 Tool Surface 与执行权限；没有累计工具次数上限，不继承来源 Run 后续完成与否作为目标 Run 截止时间。目标派发后，来源备付与目标支出按同一 submission 身份结算；确定未派发则释放备付，外部尝试不明则保持 unknown。缺少 v2 标记的旧 followup 仍走原期限、一次模型请求与零 Tool 的 v1 恢复路径。初始子 Run 已持久激活并收到父派发 ACK 后，短期启动 grant 过期不截断无模型／工具尝试的首轮恢复；Service 必须先以 Store 执行权隔离旧 owner，核对激活时授权有效、父预留已派发、子 Run 未到期和原工具上界。未激活的 child 仍要求有效启动 grant，结果不明的外部尝试不能重派。
 
-阶段 D0 的独立 Agent Session 已接入默认 Store11 App Server：父线程在原 `task` Tool 回执中受理确定性 child intent、required claim 和有限委派预算，子线程分别拥有 State revision、effect lease 与 execution generation；子终态先在子 Session 封存，父线程只从准确结果桥接一次性导入并结算原 claim。默认 Limited 预算保留两个活跃子执行位；第三个 `task` 仍快速返回持久回执，创建 revision 0 的独立子 Session，并以 queued 委派 reservation 保留有限 counters/时间上界但不占活跃位。父 CAS 的 `resource_budget.child_slot_acquired` 在预算位释放后才准子预算激活与 Provider dispatch；排队子任务在派发前被精确取消时使用独立取消事实与释放收据，不把取消写作失败。重启扫描依据同一父意图、子创建回执和预算状态重放内部步骤；已 dispatch 或 unknown 的外部操作不得重试。需要人工审批的子工具目前因尚无父作用域代理交互而失败关闭，不能以旧 Provider 子任务的审批 continuation 证明新路径已支持。
+阶段 D0 的独立 Agent Session 已接入默认 Store11 App Server：父线程在原 `task` Tool 回执中受理确定性 child intent、required claim 和有限委派预算，子线程分别拥有 State revision、effect lease 与 execution generation；子终态先在子 Session 封存，父线程只从准确结果桥接一次性导入并结算原 claim。新 Run 的 Limited 预算默认允许三个活跃子 Agent，Service 配置可改变该数量；超过子 Agent 或写者额度的创建请求在父工具回执前失败，不记录 child intent，也不创建 revision 0 子 Session。历史 queued 委派仍由父 CAS 的 `resource_budget.child_slot_acquired` 在预算位释放后激活；排队子任务在派发前被精确取消时继续使用独立取消事实与释放收据。新建子 Session 立即登记到本机 execution lease 续约 owner；旧 revision 0 子 Session 的初始租约若已过期，预派发失败结算先隔离旧 generation 并验证没有模型或工具尝试。重启扫描依据同一父意图、子创建回执和预算状态重放内部步骤；已 dispatch 或 unknown 的外部操作不得重试。人工审批的独立子工具由父作用域代理交互承接，具体授权仍按现行代理回执核验。
 
 子恢复动作无法取得安全结算证据时，Host 可按原父工具、子线程、attempt 与 grant 精确身份提交非终态 `subagent.child_recovery_required`；同一诊断幂等，冲突诊断拒绝。它只推进父 State revision，供等待与查询观察，不把单个子恢复故障伪装为父 `run.error`，不结算 required claim 或改变预算。Store 在 receipt 事务中复核待处理意图及子执行权；活动或已封存的子线程拒绝该诊断。
 

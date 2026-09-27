@@ -107,20 +107,25 @@ export function projectEventWithIdentity(
     if (event.status !== 'failed') return settledMessages;
     const id = `failure:${turnId}`;
     const previous = settledMessages.find((message) => message.id === id);
-    const authRequired =
-      event.type === 'run.terminal' && event.outcome?.reasonCode === 'provider_auth_required';
+    const reason = event.type === 'run.terminal' ? event.outcome?.reasonCode : undefined;
+    const reasonText: Partial<Record<string, string>> = {
+      provider_auth_required: '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。',
+      model_retry_exhausted: '模型请求重试次数已用尽。请检查模型服务状态后重试。',
+      provider_unavailable: '模型服务暂不可用。请检查连接和提供商状态后重试。',
+      persistence_unavailable: '会话存储不可用。请检查服务状态后重试。',
+      loop_exhausted: '本轮工具纠错次数已用尽。请检查失败的工具调用后继续。',
+    };
+    const specificReason = reason ? reasonText[reason] : undefined;
     const notice: Message = {
       id,
       turnId,
       role: 'system',
       title: '本轮回复失败',
-      text: authRequired
-        ? '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。'
-        : '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。',
+      text: specificReason ?? '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。',
       status: 'failed',
       settled: true,
     };
-    if (previous && (!authRequired || previous.text === notice.text)) return settledMessages;
+    if (previous && (!specificReason || previous.text === notice.text)) return settledMessages;
     return previous
       ? settledMessages.map((message) => (message.id === id ? notice : message))
       : [...settledMessages, notice];

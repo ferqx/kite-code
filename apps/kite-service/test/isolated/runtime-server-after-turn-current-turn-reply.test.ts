@@ -15,7 +15,7 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-test('after_turn current_turn reply reaches the new parent Run once after original result import', async () => {
+test('after_turn independent followup replies to the new parent Run after child checkpoint', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-after-turn-independent-'));
   const workspace = join(home, 'workspace');
   mkdirSync(workspace);
@@ -281,7 +281,7 @@ test('after_turn current_turn reply reaches the new parent Run once after origin
     expect(humanRunId).toBeDefined();
     expect(humanRunId).not.toBe(rootRunId);
     expect(parentCalls).toBe(5);
-    expect(childCalls).toBe(2);
+    expect(childCalls).toBe(3);
     expect(replyInput).toContain('<agent_message');
     expect(replyInput).toContain('agent_terminal_reply');
     expect(replyInput).not.toContain('<subagent_result task_id=');
@@ -309,7 +309,7 @@ test('after_turn current_turn reply reaches the new parent Run once after origin
       .map(({ event }) => event);
     expect(
       childEvents.filter(
-        (event) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
+        (event) => event.type === 'agent.followup_routed' && event.route === 'new_turn',
       ),
     ).toHaveLength(1);
     expect(

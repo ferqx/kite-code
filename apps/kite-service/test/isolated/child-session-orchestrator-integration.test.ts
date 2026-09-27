@@ -87,6 +87,133 @@ test(
 );
 
 test(
+  'expired revision zero child lease is fenced before its first dispatch and parent claim settles',
+  () =>
+    exerciseChildOrchestration(
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      false,
+      undefined,
+      async ({ owner, orchestrator, model, parentSessionId, childSessionId, acceptedChild }) => {
+        model.setResponses([
+          { response: async () => ({ message: { content: 'ORCHESTRATED_CHILD_RESULT' } }) },
+        ]);
+        await Bun.sleep(220);
+        expect(owner.loadCurrentSnapshot(childSessionId)?.revision).toBe(0);
+        expect(() => owner.runWithSessionExecution(childSessionId, () => undefined)).toThrow();
+        if (!acceptedChild) throw new Error('Accepted child fixture was missing.');
+        await orchestrator.onAccepted(acceptedChild);
+        expect(model.getRequestCount()).toBe(1);
+        expect(
+          owner.loadCurrentSnapshot(childSessionId)?.childSessionOrigin?.terminal,
+        ).toMatchObject({
+          status: 'completed',
+          cleanupConfirmed: true,
+        });
+        expect(
+          owner.storage.sessions
+            .loadEventsStrict(parentSessionId)
+            .filter(({ event }) => event.type === 'subagent.child_terminal_imported'),
+        ).toHaveLength(1);
+      },
+      undefined,
+      false,
+      120_000,
+      false,
+      false,
+      true,
+    ),
+  30_000,
+);
+
+test(
+  'cancelled parent recovers a released, never-dispatched child without releasing twice',
+  () =>
+    exerciseChildOrchestration(
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      false,
+      undefined,
+      async ({
+        owner,
+        parentCoordinator,
+        parentSessionId,
+        parentRunId,
+        childSessionId,
+        model,
+        orchestrator,
+      }) => {
+        const intent = owner.readChildSessionIntent(childSessionId);
+        if (!intent) throw new Error('Accepted child intent was missing.');
+        owner.runWithSessionExecution(parentSessionId, () =>
+          parentCoordinator.control.processEventBatch([
+            {
+              type: 'resource_budget.released',
+              reservationId: intent.delegatedReservationId,
+            },
+            {
+              type: 'turn.aborted',
+              turnId: parentRunId,
+              reason: 'Cancelled by user.',
+              cause: 'user',
+            },
+          ]),
+        );
+        const run = owner.storage.runs!.get(parentSessionId, parentRunId);
+        expect(run?.status).toBe('cancelled');
+        owner.runWithSessionExecution(parentSessionId, () =>
+          parentCoordinator.control.processEventBatch([
+            { type: 'turn.started', turnId: 'orchestrator-next-turn' },
+          ]),
+        );
+        expect(owner.loadCurrentSnapshot(parentSessionId)?.turn.turnId).toBe(
+          'orchestrator-next-turn',
+        );
+        const result = await orchestrator.recoverPending();
+        expect(result).toMatchObject({ processed: 1, recoveryRequired: [] });
+        expect(owner.readChildSessionIntent(childSessionId)?.failureReceiptDigest).toBeTruthy();
+        expect(owner.readChildSessionIntent(childSessionId)?.dispatchAckEventId).toBeNull();
+        expect(owner.loadCurrentSnapshot(childSessionId)?.revision).toBe(0);
+        expect(
+          owner
+            .loadCurrentSnapshot(parentSessionId)
+            ?.transcript.messages.some(
+              (message) => message.kind === 'user' && message.content.includes('<subagent_result'),
+            ),
+        ).toBe(false);
+        expect(owner.storage.runs!.get(parentSessionId, parentRunId)?.status).toBe('cancelled');
+        const events = owner.storage.sessions
+          .loadEventsStrict(parentSessionId)
+          .map(({ event }) => event);
+        expect(events.filter((event) => event.type === 'resource_budget.released')).toHaveLength(1);
+        expect(
+          events.filter((event) => event.type === 'subagent.child_pre_dispatch_cancelled'),
+        ).toHaveLength(1);
+        expect(
+          events.filter((event) => event.type === 'subagent.background_result_persisted'),
+        ).toHaveLength(1);
+        expect(await orchestrator.recoverPending()).toMatchObject({ processed: 0 });
+        expect(model.getRequestCount()).toBe(0);
+      },
+    ),
+  30_000,
+);
+
+test(
   'activated and acknowledged child resumes its first model once through the real Store and Host',
   () =>
     exerciseChildOrchestration(

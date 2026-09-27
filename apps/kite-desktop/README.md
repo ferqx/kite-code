@@ -21,7 +21,7 @@
 
 [新对话、项目与分支](docs/new-conversation.md)说明全局准备页、首次发送创建会话、已打开项目列表和立即生效的本地分支选择；共享 UI 只呈现选择数据，原生宿主负责目录与 Git。
 
-- [React 入口](src/main.tsx)装配[App](src/App.tsx)，[客户端适配](src/client.ts)消费 Runtime Client、App Control 与 History；[投影](src/presentation.ts)按请求身份保留累计正文与持久终态。
+- [React 入口](src/main.tsx)装配[App](src/App.tsx)，[客户端适配](src/client.ts)消费 Runtime Client、App Control 与 History；[投影](src/presentation.ts)按请求身份保留累计正文与持久终态。 App 仅从已选父会话的准确 `currentRun.waitingReason` 向共享页面传递临时 required 子 Agent 等待提示；消息本身与最终答复身份仍由投影和 Turn 终态决定。
 - [具名 bridge](src/bridge.ts)定义 renderer 可见的完整 API；[preload](electron/preload.ts)只通过 `contextBridge` 暴露冻结的 `window.kiteDesktop`，[IPC owner](electron/ipc.ts)逐通道核实主窗口 frame 与封闭参数。复制消息通过最大 1 MiB 的纯文本通道交给 Electron 主进程写入系统剪贴板，不依赖打包页的 Web Clipboard API。renderer 不取得 `ipcRenderer`、任意 channel、Node 或 Electron 对象。
 - [桌面 transport](src/transport.ts)每次 IPC 只拉取一个有界 Runtime frame；[Electron 宿主](electron/host.ts)只启动构建时固定、运行时校验过的配套服务，[stdio 进程](electron/runtime/service-process.ts)使用单消费者和 16 帧有界输出队列。
 - [页面重接](electron/runtime/renderer-connection.ts)保留同一 Service protocol peer，页面刷新或 renderer 进程退出只 detach 旧代次；新页面恢复订阅和历史，不清理运行中的任务。传输代次与 UI 导航恢复见[新对话 owner](docs/new-conversation.md#页面刷新与连接恢复)。

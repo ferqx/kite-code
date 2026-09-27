@@ -926,7 +926,7 @@ for (const order of ['shells-first', 'children-first', 'same-batch'] as const) {
   }, 30_000);
 }
 
-test('cancelling the queued third child settles only its required claim', async () => {
+test('three admitted children keep the parent waiting until each result is terminal', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-cancel-first-child-barrier-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -941,10 +941,8 @@ test('cancelling the queued third child settles only its required claim', async 
   });
   const gates = [deferred<void>(), deferred<void>(), deferred<void>()];
   const started = [deferred<void>(), deferred<void>(), deferred<void>()];
-  const cancelIssued = deferred<void>();
   const finalCandidate = deferred<void>();
   let parentCalls = 0;
-  let cancelledTaskId: string | undefined;
   let thirdChildRequests = 0;
   model.setResponses(
     Array.from({ length: 9 }, () => ({
@@ -970,7 +968,7 @@ test('cancelling the queued third child settles only its required claim', async 
                 id: `cancel-start-${index}`,
                 name: 'task',
                 args: {
-                  name: `Cancel child ${index}`,
+                  name: `Required child ${index}`,
                   subagent_type: 'review',
                   task: `CANCEL_CHILD_${index}`,
                   background: true,
@@ -981,38 +979,18 @@ test('cancelling the queued third child settles only its required claim', async 
             toolContinuation: 'required' as const,
           };
         if (parentCalls === 2) {
-          const queuedReceipt = messages.find(
-            (message) => message.role === 'tool' && message.tool_call_id === 'cancel-start-2',
-          );
-          cancelledTaskId = JSON.stringify(queuedReceipt).match(/subagent-[a-f0-9]+/u)?.[0];
-          expect(cancelledTaskId).toBeDefined();
-          cancelIssued.resolve();
+          finalCandidate.resolve();
           return {
-            message: {
-              tool_calls: [
-                {
-                  id: 'cancel-exact-child',
-                  name: 'task_cancel',
-                  args: { task_id: cancelledTaskId },
-                },
-              ],
-            },
+            message: { content: 'Provisional final while three children run.' },
             expectedRequest: {
               toolResults: [0, 1, 2].map((index) => ({ toolCallId: `cancel-start-${index}` })),
             },
-            toolContinuation: 'required' as const,
-          };
-        }
-        if (parentCalls === 3) {
-          finalCandidate.resolve();
-          return {
-            message: { content: 'Provisional final while two siblings run.' },
-            expectedRequest: { toolResults: [{ toolCallId: 'cancel-exact-child' }] },
           };
         }
         expect(snapshot).toContain('CANCEL_LATE_RESULT_0');
         expect(snapshot).toContain('CANCEL_LATE_RESULT_1');
-        return { message: { content: 'Cancelled child and both siblings settled.' } };
+        expect(snapshot).toContain('CANCEL_LATE_RESULT_2');
+        return { message: { content: 'All three children settled.' } };
       },
     })),
   );
@@ -1094,37 +1072,14 @@ test('cancelling the queued third child settles only its required claim', async 
         input: 'CANCEL_PARENT',
       }),
     ).toMatchObject({ status: 'applied' });
-    await bounded(Promise.all([started[0]!.promise, started[1]!.promise, cancelIssued.promise]));
-    await Promise.race([
-      finalCandidate.promise,
-      Bun.sleep(5_000).then(() => {
-        throw new Error(
-          `Cancel continuation stalled: ${JSON.stringify({ parentCalls, events: events().map((event) => event.type) })}`,
-        );
-      }),
-    ]);
+    await bounded(Promise.all(started.map((item) => item.promise)));
+    await bounded(finalCandidate.promise);
     await until(() => events().some((event) => event.type === 'completion.blocked'));
     expect(events().find((event) => event.type === 'completion.blocked')).toMatchObject({
       nextAction: 'wait_for_background',
       correctionAttempt: 0,
     });
-    await until(() =>
-      events().some((event) => event.type === 'subagent.background_result_persisted'),
-    );
-    expect(events().some((event) => event.type === 'subagent.child_pre_dispatch_cancelled')).toBe(
-      true,
-    );
-    const partial = events();
-    expect(
-      partial.filter((event) => event.type === 'subagent.background_result_persisted'),
-    ).toHaveLength(1);
-    expect(
-      partial.find((event) => event.type === 'subagent.background_result_persisted'),
-    ).toMatchObject({ taskId: cancelledTaskId });
-    expect(
-      partial.some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
-    ).toBe(false);
-    expect(parentCalls).toBe(3);
+    expect(parentCalls).toBe(2);
     const background = await client.query({
       schema: RUNTIME_QUERY_SCHEMA_,
       type: 'list_background_executions',
@@ -1133,78 +1088,36 @@ test('cancelling the queued third child settles only its required claim', async 
     expect(background).toMatchObject({
       status: 'ok',
       backgroundSnapshot: {
-        executions: expect.arrayContaining([
-          expect.objectContaining({ executionId: cancelledTaskId, status: 'cancelled' }),
-          expect.objectContaining({ displayName: 'Cancel child 0', status: 'running' }),
-          expect.objectContaining({ displayName: 'Cancel child 1', status: 'running' }),
-        ]),
+        executions: expect.arrayContaining(
+          [0, 1, 2].map((index) =>
+            expect.objectContaining({ displayName: `Required child ${index}`, status: 'running' }),
+          ),
+        ),
       },
     });
-    gates[0]!.resolve();
-    await until(
-      () =>
-        events().filter((event) => event.type === 'subagent.background_result_persisted').length ===
-        2,
-    );
-    expect(parentCalls).toBe(3);
-    expect(
-      events().some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
-    ).toBe(false);
-    gates[1]!.resolve();
+    for (let index = 0; index < 2; index += 1) {
+      gates[index]!.resolve();
+      await until(
+        () =>
+          events().filter((event) => event.type === 'subagent.background_result_persisted')
+            .length ===
+          index + 1,
+      );
+      expect(parentCalls).toBe(2);
+      expect(
+        events().some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
+      ).toBe(false);
+    }
+    gates[2]!.resolve();
     await until(() => events().some((event) => event.type === 'run.completed'));
     const terminal = events();
-    expect(parentCalls).toBe(4);
+    expect(parentCalls).toBe(3);
     const terminalResults = terminal.filter(
       (event) => event.type === 'subagent.background_result_persisted',
     );
-    if (!cancelledTaskId) throw new Error('Cancelled child task identity was not captured.');
     expect(terminalResults).toHaveLength(3);
     expect(new Set(terminalResults.map((event) => event.taskId)).size).toBe(3);
-    expect(terminalResults.map((event) => event.taskId)).toContain(cancelledTaskId);
-    expect(
-      terminal.filter((event) => event.type === 'subagent.child_pre_dispatch_cancelled'),
-    ).toHaveLength(1);
-    expect(thirdChildRequests).toBe(0);
-    const queuedIntent = terminal.find(
-      (event) =>
-        event.type === 'subagent.child_session_intended' &&
-        event.originToolCallId === 'cancel-start-2',
-    );
-    if (queuedIntent?.type !== 'subagent.child_session_intended')
-      throw new Error('Cancelled queued child lost its exact Session intent.');
-    expect(storage.loadCurrentSnapshot(queuedIntent.childThreadId)?.revision).toBe(0);
-    expect(
-      storage.loadCurrentSnapshot(queuedIntent.childThreadId)?.childSessionOrigin?.terminal,
-    ).toBeUndefined();
-    expect(
-      storage.readChildSessionIntent(queuedIntent.childThreadId)?.failureReceiptDigest,
-    ).toBeTruthy();
-    expect(
-      storage.readChildExecutionAuthority(sessionId, queuedIntent.childThreadId),
-    ).toMatchObject({
-      status: 'idle',
-      cleanupConfirmed: true,
-    });
-    const children = await client.query({
-      schema: RUNTIME_QUERY_SCHEMA_,
-      type: 'list_child_sessions',
-      sessionId,
-      limit: 10,
-    });
-    expect(children).toMatchObject({
-      status: 'ok',
-      childSessions: expect.arrayContaining([
-        expect.objectContaining({ sessionId: queuedIntent.childThreadId, revision: 0 }),
-      ]),
-    });
-    expect(
-      await client.query({
-        schema: RUNTIME_QUERY_SCHEMA_,
-        type: 'get_child_session_projection',
-        sessionId,
-        childSessionId: queuedIntent.childThreadId,
-      }),
-    ).toMatchObject({ status: 'ok', revision: 0 });
+    expect(thirdChildRequests).toBe(1);
     expect(terminal.filter((event) => event.type === 'run.completed')).toHaveLength(1);
     expect(terminal.filter((event) => event.type === 'turn.completed')).toHaveLength(1);
     expect(

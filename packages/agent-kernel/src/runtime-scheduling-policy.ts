@@ -1,5 +1,4 @@
 import { sha256Hex } from './hash';
-import { MAX_PARALLEL_SUBAGENTS } from './scheduler';
 
 export interface RuntimeSchedulingPolicy {
   version: 1;
@@ -10,7 +9,7 @@ export interface RuntimeSchedulingPolicy {
   };
   parallelSubagent: {
     concurrencyGroup: 'parallel-subagent';
-    ceiling: number;
+    ceiling: 'run_budget';
     scope: 'same_task_and_model_message';
     admission: 'approval_free_and_shared_budget';
   };
@@ -21,7 +20,7 @@ export interface RuntimeSchedulingPolicy {
   };
   concurrencyAdmission: {
     scope: 'subagent_and_writer';
-    queue: 'fifo_per_resource';
+    queue: 'legacy_or_followup_only';
     deadline: 'min_wait_deadline_and_run_deadline';
   };
   lateEventPolicy: 'diagnostic_or_reconciliation_only';
@@ -37,7 +36,7 @@ export function createRuntimeSchedulingPolicy(): RuntimeSchedulingPolicy {
     }),
     parallelSubagent: Object.freeze({
       concurrencyGroup: 'parallel-subagent' as const,
-      ceiling: MAX_PARALLEL_SUBAGENTS,
+      ceiling: 'run_budget' as const,
       scope: 'same_task_and_model_message' as const,
       admission: 'approval_free_and_shared_budget' as const,
     }),
@@ -48,7 +47,7 @@ export function createRuntimeSchedulingPolicy(): RuntimeSchedulingPolicy {
     }),
     concurrencyAdmission: Object.freeze({
       scope: 'subagent_and_writer' as const,
-      queue: 'fifo_per_resource' as const,
+      queue: 'legacy_or_followup_only' as const,
       deadline: 'min_wait_deadline_and_run_deadline' as const,
     }),
     lateEventPolicy: 'diagnostic_or_reconciliation_only' as const,

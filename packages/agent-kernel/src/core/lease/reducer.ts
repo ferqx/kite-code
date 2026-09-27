@@ -11,6 +11,7 @@ import type {
   ResourceUsage,
   ResourceWaiter,
 } from '../../state';
+import { epochMillisecondsToIsoUtc } from './utc-iso';
 
 const BUDGET_FIELDS = [
   'maxRunDurationMs',
@@ -587,18 +588,18 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       const elapsed = ended - Date.parse(previous.startedAt);
       const total = (active.totalRequiredChildWaitMs ?? 0) + elapsed;
       const deadline = Date.parse(active.deadlineAt) + elapsed;
+      const extendedDeadlineAt = epochMillisecondsToIsoUtc(deadline);
       if (
         !Number.isSafeInteger(ended) ||
         !Number.isSafeInteger(elapsed) ||
         elapsed < 0 ||
         !Number.isSafeInteger(total) ||
-        !Number.isSafeInteger(deadline) ||
-        !Number.isFinite(new Date(deadline).getTime())
+        !extendedDeadlineAt
       )
         throw new Error('Required child wait duration is invalid.');
       return withBudgetLedger(state, {
         ...active,
-        deadlineAt: new Date(deadline).toISOString(),
+        deadlineAt: extendedDeadlineAt,
         totalRequiredChildWaitMs: total,
         requiredChildWait: undefined,
         lastRequiredChildWait: {

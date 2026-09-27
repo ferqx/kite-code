@@ -518,11 +518,14 @@ export function settleChildCreationFailureInTransaction<Event, State>(
   const results = events.filter((event) => event?.type === 'subagent.background_result_persisted');
   const event = failures[0];
   const cancelled = event?.type === 'subagent.child_pre_dispatch_cancelled';
+  const alreadyReleasedAfterParentCancel = releases.length === 0 && cancelled;
   const resultEvent = results[0];
   const resultRef = object(event?.resultRef);
   if (
     failures.length !== 1 ||
-    releases.length !== 1 ||
+    (alreadyReleasedAfterParentCancel
+      ? failure.mode !== 'created_unactivated'
+      : releases.length !== 1) ||
     results.length !== 1 ||
     !event ||
     event.childThreadId !== failure.childThreadId ||
@@ -532,7 +535,8 @@ export function settleChildCreationFailureInTransaction<Event, State>(
     (cancelled ? event.terminalReceiptDigest : event.failureReceiptDigest) !==
       failure.failureReceiptDigest ||
     resultRef?.integrityIdentifier !== failure.failureReceiptDigest ||
-    releases[0]?.reservationId !== intent.delegatedReservationId ||
+    (!alreadyReleasedAfterParentCancel &&
+      releases[0]?.reservationId !== intent.delegatedReservationId) ||
     !resultEvent ||
     resultEvent.taskId !== intent.childInvocationId ||
     resultEvent.artifactIntegrityIdentifier !== failure.failureReceiptDigest ||
@@ -543,6 +547,52 @@ export function settleChildCreationFailureInTransaction<Event, State>(
     resultEvent.childTerminalStatus !== (cancelled ? 'cancelled' : 'failed')
   )
     throw new Error('Child creation failure does not match its result import.');
+  if (alreadyReleasedAfterParentCancel) {
+    const run = database
+      .query<{ status: string }, [string, string]>(
+        'SELECT status FROM runtime_runs WHERE session_id = ? AND run_id = ? LIMIT 1',
+      )
+      .get(intent.parentSessionId, intent.originRunId);
+    const snapshot = database
+      .query<{ state_json: string }, [string]>(
+        'SELECT state_json FROM runtime_snapshots WHERE session_id = ? LIMIT 1',
+      )
+      .get(intent.parentSessionId);
+    const state = snapshot ? object(JSON.parse(snapshot.state_json) as unknown) : null;
+    const activeBudget = object(state?.resourceBudget);
+    const retained = object(state?.retainedResourceBudgets);
+    const funding =
+      activeBudget?.runId === intent.fundingRunId
+        ? activeBudget
+        : object(retained?.[intent.fundingRunId]);
+    const reservation = object(object(funding?.reservations)?.[intent.delegatedReservationId]);
+    const released = database
+      .query<{ count: number }, [string, string]>(
+        `SELECT count(*) AS count FROM runtime_events
+         WHERE session_id = ? AND json_extract(event_json, '$.type') = 'resource_budget.released'
+           AND json_extract(event_json, '$.reservationId') = ?`,
+      )
+      .get(intent.parentSessionId, intent.delegatedReservationId);
+    const aborted = database
+      .query<{ count: number }, [string, string]>(
+        `SELECT count(*) AS count FROM runtime_events
+         WHERE session_id = ? AND json_extract(event_json, '$.type') = 'turn.aborted'
+           AND json_extract(event_json, '$.turnId') = ?
+           AND json_extract(event_json, '$.cause') = 'user'`,
+      )
+      .get(intent.parentSessionId, intent.originRunId);
+    if (
+      intent.disposition !== 'required' ||
+      intent.fundingRunId !== intent.originRunId ||
+      run?.status !== 'cancelled' ||
+      reservation?.state !== 'released' ||
+      released?.count !== 1 ||
+      aborted?.count !== 1 ||
+      intent.childBudgetActivatedRunId ||
+      intent.dispatchAckEventId
+    )
+      throw new Error('Released child has no exact cancelled parent and prior release proof.');
+  }
   const child = database
     .query<{ session_id: string }, [string]>(
       'SELECT session_id FROM runtime_sessions WHERE session_id = ? LIMIT 1',

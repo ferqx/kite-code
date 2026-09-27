@@ -343,6 +343,7 @@ const MessageItem = memo(function MessageItem({
 export function Conversation({
   messages,
   loading,
+  requiredSubagentWait,
   selected,
   connected,
   initialReading,
@@ -355,6 +356,7 @@ export function Conversation({
 }: {
   messages: readonly Message[];
   loading: boolean;
+  requiredSubagentWait?: boolean;
   selected: boolean;
   connected: boolean;
   initialReading?: ReadingState;
@@ -677,6 +679,11 @@ export function Conversation({
                 );
               })
             ))}
+          {!loading && selected && requiredSubagentWait && (
+            <Marker className="mt-4" role="status">
+              <MarkerContent>正在等待子 Agent 结果</MarkerContent>
+            </Marker>
+          )}
         </div>
       </ScrollArea>
       {loading && (

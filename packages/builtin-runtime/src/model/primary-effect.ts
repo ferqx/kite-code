@@ -272,6 +272,7 @@ export async function executeBuiltinPrimaryModelEffect<
     projectInstructions: projectionEnvironment.projectInstructions,
     sandboxBackend: projectionEnvironment.sandboxBackend,
     delegatedTask: projectionEnvironment.delegatedTask,
+    transcriptToolCallArgs: projectionEnvironment.transcriptToolCallArgs,
   });
   const modelCapabilities = resolveModelCapabilities({
     config: input.config,

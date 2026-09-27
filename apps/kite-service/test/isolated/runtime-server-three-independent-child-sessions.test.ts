@@ -193,9 +193,11 @@ test('default Store11 App Server isolates three required child Sessions through 
         parentEvents().some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
       ).toBe(false);
     };
-    await until(() => childIdFor('A') !== undefined && childRequests.A === 1).catch(() => {
+    await until(() =>
+      labels.every((label) => childIdFor(label) && childRequests[label] === 1),
+    ).catch(() => {
       throw new Error(
-        `Child A did not start: ${JSON.stringify({
+        `Three children did not start concurrently: ${JSON.stringify({
           childRequests,
           childIds: labels.map((label) => childIdFor(label)),
           parentEvents: parentEvents().map((event) => event.type),
@@ -204,25 +206,27 @@ test('default Store11 App Server isolates three required child Sessions through 
       );
     });
     const childA = childIdFor('A')!;
-    expect(storage.readSessionLineage(childA)).toEqual({ parentSessionId });
-    await until(() => childRequests.B === 1 && childIdFor('C') !== undefined);
-    const queuedChildC = childIdFor('C')!;
-    expect(storage.readChildSessionIntent(queuedChildC)).not.toBeNull();
-    expect(storage.loadCurrentSnapshot(queuedChildC)?.revision).toBe(0);
-    expect(storage.readSessionLineage(queuedChildC)).toEqual({ parentSessionId });
-    for (const childId of [childA, childIdFor('B')!, queuedChildC])
+    const childBId = childIdFor('B')!;
+    const childC = childIdFor('C')!;
+    expect(new Set([childA, childBId, childC]).size).toBe(3);
+    for (const childId of [childA, childBId, childC]) {
+      expect(storage.readChildSessionIntent(childId)?.childSessionCreated).toBe(true);
+      expect(storage.readSessionLineage(childId)).toEqual({ parentSessionId });
+      expect(storage.loadCurrentSnapshot(childId)?.revision).toBeGreaterThan(0);
       expect(storage.readChildExecutionAuthority(parentSessionId, childId)).toMatchObject({
         status: 'active',
         controllerGeneration: 1,
       });
-    expect(storage.loadCurrentSnapshot(parentSessionId)?.resourceBudget).toMatchObject({
-      reservations: {
-        [`child-allotment:${queuedChildC}`]: { state: 'queued' },
-      },
-    });
-    expect(childRequests.C).toBe(0);
+    }
+    const bActiveRevision = storage.loadCurrentSnapshot(childBId)!.revision;
+    const cActiveRevision = storage.loadCurrentSnapshot(childC)!.revision;
+    expect(storage.listCurrentSessions('', 10).map((entry) => entry.threadId)).toEqual([
+      parentSessionId,
+    ]);
+    await assertParentStillWaiting();
     gates.A.resolve();
     await until(() => storage.readChildSessionIntent(childA)?.parentClaimSettledEventId != null);
+    const aTerminalRevision = storage.loadCurrentSnapshot(childA)!.revision;
     expect(
       parentEvents()
         .filter((event) => event.type === 'resource_budget.reconciled')
@@ -230,54 +234,8 @@ test('default Store11 App Server isolates three required child Sessions through 
     ).toMatchObject({
       actual: { gauges: { activeSubagents: 0 } },
     });
-    await assertParentStillWaiting();
-
-    await until(() => childIdFor('B') !== undefined && childRequests.B === 1).catch(() => {
-      const diagnostic = JSON.stringify({
-        childRequests,
-        childIds: labels.map((label) => childIdFor(label)),
-        parentEvents: parentEvents().map((event) => event.type),
-      });
-      throw new Error(`Child B did not start: ${diagnostic}`);
-    });
-    const childBId = childIdFor('B')!;
-    const aTerminalRevision = storage.loadCurrentSnapshot(childA)!.revision;
-    expect(storage.readSessionLineage(childBId)).toEqual({ parentSessionId });
-    const bActiveRevision = storage.loadCurrentSnapshot(childBId)!.revision;
-    await until(() => childRequests.C === 1).catch(() => {
-      const diagnostic = JSON.stringify({
-        childRequests,
-        childIds: labels.map((label) => childIdFor(label)),
-        parentEvents: parentEvents().map((event) => event.type),
-        budget: (() => {
-          const budget = storage.loadCurrentSnapshot(parentSessionId)?.resourceBudget;
-          return budget?.status === 'active'
-            ? {
-                reservations: Object.values(budget.reservations).map((reservation) => [
-                  reservation.invocationId,
-                  reservation.state,
-                  reservation.executableUpperBound.gauges.activeSubagents,
-                  reservation.actual?.gauges.activeSubagents,
-                  reservation.actual?.gauges.elapsedRunMs,
-                ]),
-                waiters: budget.waiters,
-              }
-            : budget?.status;
-        })(),
-      });
-      throw new Error(`Queued child C did not start after A settlement: ${diagnostic}`);
-    });
-    const childC = childIdFor('C')!;
-    expect(storage.readChildSessionIntent(childC)?.childSessionCreated).toBe(true);
-    expect(storage.readSessionLineage(childC)).toEqual({ parentSessionId });
-    const cActiveRevision = storage.loadCurrentSnapshot(childC)!.revision;
-    expect(cActiveRevision).toBeGreaterThan(0);
     expect(storage.loadCurrentSnapshot(childBId)?.revision).toBe(bActiveRevision);
-    expect(storage.loadCurrentSnapshot(childA)?.revision).toBe(aTerminalRevision);
-    expect(new Set([childA, childBId, childC]).size).toBe(3);
-    expect(storage.listCurrentSessions('', 10).map((entry) => entry.threadId)).toEqual([
-      parentSessionId,
-    ]);
+    expect(storage.loadCurrentSnapshot(childC)?.revision).toBe(cActiveRevision);
     await assertParentStillWaiting();
     const background = await client.query({
       schema: RUNTIME_QUERY_SCHEMA_,

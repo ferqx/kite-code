@@ -198,7 +198,7 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     expect(upper).toMatchObject({
       independentFollowupTurn: true,
       unboundedToolInvocations: true,
-      counters: { turns: 1, modelRequests: 30, toolInvocations: 0 },
+      counters: { turns: 1, modelRequests: 24, toolInvocations: 0 },
       gauges: { elapsedRunMs: 1_800_000, activeSubagents: 1 },
     });
     const funded = {
@@ -363,7 +363,7 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     const upper = createZeroResourceUsage('versioned_upper_bound', 'occupied-slot-v1');
     upper.gauges.activeSubagents = 1;
     let budget = input.sourceState.resourceBudget;
-    for (const id of ['occupied-1', 'occupied-2']) {
+    for (const id of ['occupied-1', 'occupied-2', 'occupied-3']) {
       budget = reduceResourceBudgetState(budget, {
         type: 'resource_budget.reserved',
         reservation: {
@@ -388,7 +388,7 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     budget = reduceResourceBudgetState(budget, accepted.reservationEvent);
     expect(budget.reservations[accepted.admission.backupReservationId]?.state).toBe('queued');
     if (budget.status !== 'active') throw new Error('Funding ledger became unavailable.');
-    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(2);
+    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(3);
     expect(committedResourceUsage(budget).counters.turns).toBe(1);
     const slotInput = {
       sourceState: { ...occupiedSource, resourceBudget: budget },
@@ -417,7 +417,7 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     budget = reduceResourceBudgetState(budget, ready.event);
     expect(budget.reservations[accepted.admission.backupReservationId]?.state).toBe('reserved');
     if (budget.status !== 'active') throw new Error('Funding ledger became unavailable.');
-    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(2);
+    expect(committedResourceUsage(budget).gauges.activeSubagents).toBe(3);
     expect(
       planCrossSessionFollowupSlotAcquisition({
         ...slotInput,

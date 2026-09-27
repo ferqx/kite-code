@@ -11,6 +11,7 @@ import {
   acquireConfigFileMutationLocks,
   replaceConfigFileAtomically,
 } from '@kite-ai/kite-local-runtime/config';
+import { LIMITED_RESOURCE_BUDGET_ } from '@kite-ai/runtime-host/kernel-adapter';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import { admitProductionExecutionBoundary } from './execution-boundary';
@@ -293,6 +294,17 @@ export const configSchema = z.object({
   /** Personal terminal language preference. Project config must never override it. */
   language: languagePreferenceSchema.optional(),
   interactionMode: interactionModeSchema.optional(),
+  resources: z
+    .object({
+      maxConcurrentSubagents: z
+        .number()
+        .int()
+        .min(1)
+        .max(LIMITED_RESOURCE_BUDGET_.maxTurns - 2)
+        .optional(),
+    })
+    .strict()
+    .optional(),
   features: featuresSchema,
   sessionLogging: sessionLoggingTighteningSchema,
   telemetry: telemetryConfigSchema,
@@ -402,6 +414,7 @@ export interface AgentConfig {
     streaming?: boolean;
   };
   interactionMode?: z.infer<typeof interactionModeSchema>;
+  resources?: NonNullable<KiteCodeConfig['resources']>;
   features?: Partial<FeatureFlags>;
   /** Release-pinned execution boundary; never sourced from project/user config. */
   executionBoundary?: ExecutionBoundary;
@@ -522,6 +535,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     // provide the initial default, but it must not overwrite a mode the user
     // selected and persisted through the TUI.
     interactionMode: user.interactionMode ?? project.interactionMode,
+    resources: { ...user.resources, ...project.resources },
     features: { ...user.features, ...project.features },
     sessionLogging: project.sessionLogging ?? user.sessionLogging,
     telemetry: user.telemetry,
@@ -668,6 +682,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
         }
       : {}),
     interactionMode: cfg.interactionMode ?? 'auto',
+    resources: cfg.resources,
     features: cfg.features,
     sessionLoggingPolicy,
     telemetry: {

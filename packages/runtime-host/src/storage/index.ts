@@ -31,6 +31,11 @@ export {
   type RuntimeSealedChildGrantPayload,
   sealChildGrantPayload,
 } from './child-grant';
+export {
+  type FollowupChildApprovalParentToolIdentity,
+  followupChildApprovalParentToolCallId,
+  parseFollowupChildApprovalParentToolCallId,
+} from './followup-child-approval-identity';
 export * from './runtime-run';
 
 /**

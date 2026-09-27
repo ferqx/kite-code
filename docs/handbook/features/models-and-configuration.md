@@ -18,4 +18,6 @@ Provider 凭据通过实际支持的配置和认证入口维护，不在手册�
 
 活动执行使用开始时确定的配置，保存新的期望配置供后续执行使用。功能开关启用不替代授权和平台支持；默认关闭的扩展不能凭旧文档推断可运行。
 
+`resources.maxConcurrentSubagents` 可在用户级或项目级 `kite-code.jsonc` 中设置为 1–28 的整数；项目配置覆盖用户配置。当前父 Run 的 30 次 turn 有限预算须为每个受理的子 Agent 保留正额度，因此更大的配置会在加载时被拒绝。未设置时，一个 Run 最多同时运行 3 个子 Agent。该数值在 Run 开始时写入预算并告知模型，修改配置不会改变已开始的 Run。
+
 CLI 当前拒绝 `--feature` 等已退役覆盖选项。设置操作见[TUI 设置](../clients/tui/reference/settings.md)，命令支持见[CLI 参考](../cli/commands.md)。

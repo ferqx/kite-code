@@ -51,6 +51,7 @@ import {
   runtimeHostStateClassifyFailure as classifyFailure,
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
+  runtimeHostStateClassifyToolOutcome,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { CapabilityTurnContext } from '@kite-ai/runtime-spi';
@@ -170,7 +171,7 @@ export function eventsForInvalidModelToolCalls(
     args: {
       _raw_invalid_args?: unknown;
       _parse_error?: string;
-      _invalid_args_code?: 'invalid_json';
+      _invalid_args_code?: 'invalid_json' | 'invalid_arguments';
       _invalid_args_redacted?: true;
     };
     canonicalInvocationFingerprint?: string;
@@ -181,16 +182,17 @@ export function eventsForInvalidModelToolCalls(
 ): RuntimeEvent[] {
   const events: RuntimeEvent[] = [];
   for (const [index, call] of calls.entries()) {
+    const parseCode = call.args._invalid_args_code ?? 'invalid_json';
     const invocationFingerprint =
       call.canonicalInvocationFingerprint ??
       toolInvocationFingerprint({
         toolName: call.name,
-        parseCode: 'invalid_json',
+        parseCode,
         pathCategory: 'unknown',
         unparsedArgs: call.args._raw_invalid_args ?? call.args,
       });
     const opaqueArgs = {
-      _invalid_args_code: 'invalid_json' as const,
+      _invalid_args_code: parseCode,
       _invalid_args_redacted: true as const,
     };
     const queued = {
@@ -207,14 +209,24 @@ export function eventsForInvalidModelToolCalls(
       // the provider-supplied tool name in the Client projector.
       presentation: 'standalone' as const,
     };
+    const failure = classifyFailure(
+      'model_invalid_tool_args',
+      'Provider returned invalid tool arguments.',
+      parseCode,
+    );
     events.push(queued, {
       type: 'tool.failed' as const,
       toolCallId: call.id,
-      failure: classifyFailure(
-        'model_invalid_tool_args',
-        'Provider returned invalid tool arguments.',
-        'invalid_json',
-      ),
+      failure,
+      outcome: runtimeHostStateClassifyToolOutcome({
+        status: 'failed',
+        failure,
+        authority: {
+          dispatchState: 'not_started',
+          externalEffects: 'none',
+          replaySafety: 'pre_dispatch',
+        },
+      }),
     });
   }
   return events;
@@ -268,6 +280,7 @@ export function resolveContextProjectionEnvironment(input: {
   agentMailboxAvailable?: boolean;
   agentMailboxQueueOnlyAvailable?: boolean;
   delegatedTaskArtifacts?: Pick<SubagentTaskArtifactAccess, 'read'>;
+  subagentTaskRequests?: import('@kite-ai/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   childToolCeiling?: DelegatedToolCeiling;
   signal?: AbortSignal;
   mcpBindings?: Array<{
@@ -299,6 +312,49 @@ export function resolveContextProjectionEnvironment(input: {
       taskTextDigest: origin.taskTextDigest,
     });
   })();
+  const transcriptToolCallArgs: Record<string, Readonly<Record<string, unknown>>> = {};
+  const checkpointId = input.state.context.activeCheckpoint?.coveredThroughMessageId;
+  const checkpointIndex = checkpointId
+    ? input.state.transcript.messages.findIndex((message) => message.messageId === checkpointId)
+    : -1;
+  for (const message of input.state.transcript.messages.slice(checkpointIndex + 1)) {
+    if (message.kind !== 'assistant') continue;
+    for (const call of message.toolCalls) {
+      const args = call.args;
+      if (
+        call.name !== 'task' ||
+        !args ||
+        typeof args !== 'object' ||
+        Array.isArray(args) ||
+        !Object.hasOwn(args, 'taskArtifact')
+      )
+        continue;
+      const durable = input.state.tools.calls[call.id];
+      if (
+        !input.subagentTaskRequests ||
+        !durable?.modelInvocationId ||
+        durable.modelMessageId !== message.messageId ||
+        durable.name !== call.name
+      )
+        throw new Error('Private task history could not be restored.');
+      const record = args as Record<string, unknown>;
+      const restored = input.subagentTaskRequests.read(
+        record.taskArtifact as import('@kite-ai/runtime-spi').SubagentTaskRequestArtifact,
+        { parentModelInvocationId: durable.modelInvocationId, parentToolCallId: call.id },
+      );
+      if (restored.name !== record.name || restored.role !== record.subagent_type)
+        throw new Error('Private task history identity does not match.');
+      transcriptToolCallArgs[call.id] = {
+        name: restored.name,
+        subagent_type: restored.role,
+        task: restored.task,
+        ...(typeof record.background === 'boolean' ? { background: record.background } : {}),
+        ...(record.result_disposition === 'required' || record.result_disposition === 'after_turn'
+          ? { result_disposition: record.result_disposition }
+          : {}),
+      };
+    }
+  }
   const descriptors = [
     ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
     ...(input.skillCatalog?.capabilities.descriptors ?? []),
@@ -394,6 +450,7 @@ export function resolveContextProjectionEnvironment(input: {
     }),
     sandboxBackend: input.sandboxBackend ?? 'unknown',
     ...(delegatedTask ? { delegatedTask } : {}),
+    ...(Object.keys(transcriptToolCallArgs).length > 0 ? { transcriptToolCallArgs } : {}),
     leaseMetadata: {
       providerName: input.config.providerName,
       modelName: input.config.modelName,
@@ -682,6 +739,7 @@ export async function projectPrimaryModelEffect(params: {
     builtinToolCatalog: params.builtinToolCatalog,
     projectedTools: tools,
     delegatedTaskArtifacts: params.delegatedTaskArtifacts,
+    subagentTaskRequests: params.subagentTaskRequests,
     childToolCeiling: params.childToolCeiling,
   });
   const result = await params.modelEffectCoordinator.executePrimaryModelEffect({
@@ -709,7 +767,22 @@ export async function projectPrimaryModelEffect(params: {
     signal: params.signal,
     emitEphemeral: params.emitRuntimeEvent,
     finalize: (completion, contextMetricsEvent) => {
-      const invalidToolCalls = completion.invalidToolCalls.map((call) => {
+      const validToolCalls = completion.toolCalls.filter((call) => {
+        const builtinEntry = builtinEntriesByName.get(call.name);
+        return (
+          builtinEntry?.executionMechanism !== 'subagent' ||
+          builtinEntry.parseModelInput(call.args, builtinTurnContext).success
+        );
+      });
+      const invalidToolCalls: Array<{
+        id: string;
+        name: string;
+        canonicalInvocationFingerprint: string;
+        args: {
+          _invalid_args_code: 'invalid_json' | 'invalid_arguments';
+          _invalid_args_redacted: true;
+        };
+      }> = completion.invalidToolCalls.map((call) => {
         const invocationFingerprint = toolInvocationFingerprint({
           toolName: call.name,
           parseCode: 'invalid_json',
@@ -726,20 +799,38 @@ export async function projectPrimaryModelEffect(params: {
           },
         };
       });
-      const durableToolCalls = completion.toolCalls.map((call) => {
+      for (const call of completion.toolCalls) {
+        if (validToolCalls.includes(call)) continue;
+        invalidToolCalls.push({
+          id: call.id,
+          name: call.name,
+          canonicalInvocationFingerprint: toolInvocationFingerprint({
+            toolName: call.name,
+            parseCode: 'invalid_arguments',
+            pathCategory: 'unknown',
+            unparsedArgs: call.args,
+          }),
+          args: {
+            _invalid_args_code: 'invalid_arguments',
+            _invalid_args_redacted: true,
+          },
+        });
+      }
+      const durableToolCalls = validToolCalls.map((call) => {
         const builtinEntry = builtinEntriesByName.get(call.name);
         if (builtinEntry?.executionMechanism !== 'subagent') return call;
         const name = call.args.name;
         const role = call.args.subagent_type;
         const task = call.args.task;
-        if (
-          !params.subagentTaskRequests ||
-          typeof name !== 'string' ||
-          !['explore', 'plan', 'code', 'review'].includes(String(role)) ||
-          typeof task !== 'string'
-        ) {
+        if (!params.subagentTaskRequests) {
           throw new Error('Private Subagent task request Artifact storage is unavailable.');
         }
+        if (
+          typeof name !== 'string' ||
+          (role !== 'explore' && role !== 'plan' && role !== 'code' && role !== 'review') ||
+          typeof task !== 'string'
+        )
+          throw new Error('Validated Subagent task arguments are unavailable.');
         return {
           ...call,
           args: {
@@ -790,7 +881,7 @@ export async function projectPrimaryModelEffect(params: {
       }
 
       let ordinal = 0;
-      for (const [index, call] of completion.toolCalls.entries()) {
+      for (const [index, call] of validToolCalls.entries()) {
         const durableCall = durableToolCalls[index];
         if (!durableCall) throw new Error('Durable tool-call projection is unavailable.');
         const bindingEntry = mcpBindings.find(

@@ -424,6 +424,19 @@ export function App({ client }: { client: DesktopClient }) {
       ? []
       : pendingAskMessages;
   const readingMessages = childDetail ? childDetail.messages : displayedMessages;
+  const requiredSubagentWait =
+    !preparing &&
+    !workbenchView &&
+    !scheduledTasksView &&
+    !childDetail &&
+    connected &&
+    ready &&
+    !loadingSession &&
+    selectingSession === undefined &&
+    view.hasLoadedHistory &&
+    projection?.sessionId === selected &&
+    projection.currentRun?.status === 'waiting' &&
+    projection.currentRun.waitingReason?.kind === 'required_background';
   const directory = directorySnapshot ?? view.sessions;
   if (startup !== 'ready')
     return (
@@ -519,6 +532,7 @@ export function App({ client }: { client: DesktopClient }) {
       }
       readingKey={childDetail ? `child:${selected}:${childDetail.childSessionId}` : draftKey}
       messages={readingMessages}
+      requiredSubagentWait={requiredSubagentWait}
       childSessionIdsByTaskId={childDetail ? undefined : childSessionIdsByExecutionId}
       onOpenChildSession={
         !childDetail && selected && connected && ready

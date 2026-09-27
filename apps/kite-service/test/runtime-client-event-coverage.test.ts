@@ -20,6 +20,7 @@ test('classifies every current Kernel event exactly once for Runtime Client proj
 
 test('keeps interactive and Subagent lifecycle facts client-visible', () => {
   const entries = runtimeClientEventCoverageEntries();
+  expect(entries.get('agent.followup_independent_settled')).toBe('internal_only');
   for (const type of [
     'approval.requested',
     'approval.granted',

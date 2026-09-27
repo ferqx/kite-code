@@ -6,6 +6,10 @@
 
 Service 在运行准入时解析模型配置，Builtin 从 State view、项目指令、历史/压缩点、工具声明和当前阶段构造上下文。上下文预算与屏幕消息长度不同；不能从 TUI viewport 重建请求。
 
+历史中已持久化的子任务调用只保存私有 Artifact 引用。Service 在准确原模型 invocation 与工具调用身份下读取请求 Artifact，将公开 `{name, subagent_type, task}` 参数作为纯数据交给统一上下文投影；普通模型请求、预算预检和压缩摘要使用同一恢复结果，缺失或身份不符则拒绝投影。持久 State 与客户端历史仍只保留私有引用，不在公开工具 schema 中暴露 `taskArtifact`。
+
+系统提示词从当前 Run 已持久化的资源预算读取 `maxConcurrentSubagents`，向主 Agent 和子 Agent 分别说明各自实际并发上限及超限立即拒绝的行为；不从可在运行期间变化的期望配置推断旧 Run 的额度。
+
 compiled model surface 确定 messages、tools 和请求设置，以 digest 绑定 invocation。模型状态、Provider route 与当前 Run identity 一致；运行中修改期望配置只影响后续准入，不能让已发请求换成另一模型。
 主 Agent 的 reasoning effort 由 Provider 类型编译为 provider-owned options，并进入同一冻结 surface 与 digest；显式关闭 reasoning 时不发送该选项。
 

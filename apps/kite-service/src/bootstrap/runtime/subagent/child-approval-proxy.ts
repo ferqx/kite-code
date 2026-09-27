@@ -1,8 +1,6 @@
 import type { RuntimeApprovalInteraction } from '@kite-ai/runtime-contract';
-import {
-  type KiteChildApprovalProxyRecord,
-  parseFollowupChildApprovalParentToolCallId,
-} from '@kite-ai/runtime-storage-sqlite';
+import { parseFollowupChildApprovalParentToolCallId } from '@kite-ai/runtime-host/storage';
+import type { KiteChildApprovalProxyRecord } from '@kite-ai/runtime-storage-sqlite';
 import { projectRuntimeClientInteraction } from '../../../runtime-client/interaction-projector';
 import type { RuntimeState } from '../state-runtime';
 

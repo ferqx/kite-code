@@ -95,6 +95,29 @@ test('generic runtime failure does not misclassify the model service', () => {
   expect(messages[0]?.text).not.toContain('模型服务');
 });
 
+test('a classified run failure replaces the generic turn notice and survives replay', () => {
+  const generic = projectEventWithIdentity([], {
+    type: 'turn.terminal',
+    turnId: 't1',
+    status: 'failed',
+  });
+  const terminal = {
+    type: 'run.terminal',
+    runId: 't1',
+    status: 'failed',
+    outcome: {
+      status: 'blocked',
+      reasonCode: 'loop_exhausted',
+      safeRetry: false,
+      recoveryEntry: 'new_run',
+    },
+  } as const;
+  const classified = projectEventWithIdentity(generic, terminal);
+  expect(classified).toHaveLength(1);
+  expect(classified[0]?.text).toContain('工具纠错次数已用尽');
+  expect(projectEventWithIdentity(classified, terminal)).toEqual(classified);
+});
+
 test('turn and run terminal failures share one notice and remain scoped to their turn', () => {
   let messages = projectEventWithIdentity([], {
     type: 'turn.terminal',

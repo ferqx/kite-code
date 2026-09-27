@@ -2057,15 +2057,33 @@ test('waiting for background results keeps steering and stop controls available'
       currentRun: {
         runId: 'r',
         initialTurnId: 't',
+        activeTurnId: 't',
         status: 'waiting',
         revision: 2,
         waitingReason: { kind: 'required_background', taskIds: ['task-1'] },
       },
     },
+    messages: [
+      {
+        id: 'waiting-answer',
+        turnId: 't',
+        role: 'assistant',
+        text: '三个任务已派发',
+        settled: true,
+      },
+    ],
   };
   await render(<App client={client} />);
 
-  expect(document.body.textContent).not.toContain('等待后台结果');
+  const waitStatus = document.querySelector(
+    '.reading-column > [data-slot="marker"][role="status"]',
+  );
+  expect(waitStatus?.textContent).toBe('正在等待子 Agent 结果');
+  expect(document.querySelector('.reading-column')?.lastElementChild).toBe(waitStatus);
+  expect(document.querySelector('.message.assistant')?.getAttribute('data-final-reply')).toBe(
+    'false',
+  );
+  expect(document.querySelector('.bottom-controls [role="status"]')).toBeNull();
   expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="停止任务"]')).not.toBeNull();
 
@@ -2087,9 +2105,59 @@ test('waiting for background results keeps steering and stop controls available'
     },
   };
   await act(() => client.update({ projection: completed, sessions: [completed, session('s1')] }));
-  expect(document.body.textContent).not.toContain('等待后台结果');
+  expect(
+    document.querySelector('.reading-column > [data-slot="marker"][role="status"]'),
+  ).toBeNull();
   expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
   expect(document.querySelectorAll('.session-row')[0]?.textContent).toBe('工作 0');
+});
+
+test('required child wait is limited to the loaded selected parent conversation', async () => {
+  const client = new UiClient();
+  const waiting = {
+    ...session('s0'),
+    currentRun: {
+      runId: 'run-waiting',
+      initialTurnId: 'turn-waiting',
+      activeTurnId: 'turn-waiting',
+      status: 'waiting' as const,
+      revision: 2,
+      waitingReason: { kind: 'required_background' as const, taskIds: ['child-a'] },
+    },
+  };
+  const status = () =>
+    document.querySelector('.reading-column > [data-slot="marker"][role="status"]');
+  client.view = { ...client.view, sessions: [waiting, session('s1')], projection: waiting };
+  await render(<App client={client} />);
+  expect(status()?.textContent).toBe('正在等待子 Agent 结果');
+
+  await act(() => client.update({ loadingSession: true }));
+  expect(status()).toBeNull();
+  await act(() => client.update({ loadingSession: false, hasLoadedHistory: false }));
+  expect(status()).toBeNull();
+  await act(() => client.update({ hasLoadedHistory: true, projection: session('s1') }));
+  expect(status()).toBeNull();
+  await act(() => client.update({ projection: waiting }));
+  expect(status()?.textContent).toBe('正在等待子 Agent 结果');
+
+  await act(() =>
+    client.update({
+      childDetail: {
+        parentSessionId: 's0',
+        childSessionId: 'child-a',
+        loading: false,
+        messages: [{ id: 'child-reply', role: 'assistant', text: '子任务过程', settled: true }],
+      },
+    }),
+  );
+  expect(status()).toBeNull();
+  await act(() => client.update({ childDetail: undefined }));
+  expect(status()?.textContent).toBe('正在等待子 Agent 结果');
+
+  await click(button('工作台'));
+  expect(status()).toBeNull();
+  await click(button('新对话'));
+  expect(status()).toBeNull();
 });
 
 test('three child cards retain their initial waiting Run while one result settles', async () => {
@@ -2143,7 +2211,9 @@ test('three child cards retain their initial waiting Run while one result settle
   expect(group?.textContent).toContain('Child A已完成');
   expect(group?.textContent).toContain('Child B运行中');
   expect(group?.textContent).toContain('Child C运行中');
-  expect(document.body.textContent).not.toContain('等待后台结果');
+  expect(
+    document.querySelector('.reading-column > [data-slot="marker"][role="status"]')?.textContent,
+  ).toBe('正在等待子 Agent 结果');
   expect(document.body.textContent).not.toContain('运行失败');
 });
 
@@ -2190,12 +2260,17 @@ test('background waiting survives a second conversation and keeps both drafts is
     }),
   );
   expect(input().value).toBe('等待期间留在 A 的草稿');
-  expect(document.body.textContent).not.toContain('等待后台结果');
+  expect(
+    document.querySelector('.reading-column > [data-slot="marker"][role="status"]')?.textContent,
+  ).toBe('正在等待子 Agent 结果');
   expect(document.querySelector('[aria-label="任务输入"]')).not.toBeNull();
   expect(button('发送运行中引导')).not.toBeNull();
 
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!);
   expect(input().value).toBe('只属于 B 的新草稿');
+  expect(
+    document.querySelector('.reading-column > [data-slot="marker"][role="status"]'),
+  ).toBeNull();
   expect(client.cancelled).toBe(0);
 });
 

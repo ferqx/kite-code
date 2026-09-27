@@ -309,6 +309,11 @@ for (const decisionWindow of ['pending', 'decided'] as const)
       expect(
         storage.storage.sessions
           .loadEventsStrict(parentSessionId)
+          .some(({ event }) => event.type === 'resource_budget.required_child_wait_ended'),
+      ).toBe(true);
+      expect(
+        storage.storage.sessions
+          .loadEventsStrict(parentSessionId)
           .filter(({ event }) => event.type === 'run.completed'),
       ).toHaveLength(1);
       expect(parentRequests).toBe(3);
