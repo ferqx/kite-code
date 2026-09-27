@@ -146,10 +146,9 @@ function Workspace({
         >
           {sessions.map((session) => {
             const awaitingInteraction = Boolean(session.pendingInteractions);
-            const statusLabel =
-              session.waitingReason === 'required_background'
-                ? undefined
-                : sessionStatusLabel(session.status);
+            const managedWaiting =
+              session.status === 'waiting' && session.waitingReason === 'required_background';
+            const statusLabel = managedWaiting ? '任务进行中' : sessionStatusLabel(session.status);
             return (
               <Tooltip key={session.sessionId}>
                 <TooltipTrigger asChild>
@@ -170,8 +169,8 @@ function Workspace({
                     </span>
                     {awaitingInteraction ? (
                       <Badge>待用户输入</Badge>
-                    ) : session.status === 'running' ? (
-                      <Spinner aria-label="会话运行中" />
+                    ) : session.status === 'running' || managedWaiting ? (
+                      <Spinner aria-label={managedWaiting ? '任务进行中' : '会话运行中'} />
                     ) : null}
                   </Button>
                 </TooltipTrigger>

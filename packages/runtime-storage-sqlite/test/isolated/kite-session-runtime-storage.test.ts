@@ -313,16 +313,16 @@ describe('multi-connection Kite Session Runtime storage', () => {
     const owner = openOwner(fixture.path);
     try {
       const first = owner.listChildSessions('parent', 1);
-      expect(first.entries.map((row) => row.sessionId)).toEqual(['child-b']);
+      expect(first.entries.map((row) => row.sessionId)).toEqual(['child-c']);
       expect(first.entries[0]).toMatchObject({
         parentSessionId: 'parent',
-        updatedAt: 10,
+        updatedAt: 9,
         revision: 0,
       });
       const second = owner.listChildSessions('parent', 1, first.nextCursor);
-      expect(second.entries.map((row) => row.sessionId)).toEqual(['child-a']);
+      expect(second.entries.map((row) => row.sessionId)).toEqual(['child-b']);
       const third = owner.listChildSessions('parent', 1, second.nextCursor);
-      expect(third.entries.map((row) => row.sessionId)).toEqual(['child-c']);
+      expect(third.entries.map((row) => row.sessionId)).toEqual(['child-a']);
       expect(third.nextCursor).toBeUndefined();
       expect(owner.listChildSessions('other-parent', 10).entries).toEqual([]);
       expect(owner.listChildSessions('missing', 10).entries).toEqual([]);
@@ -374,6 +374,40 @@ describe('multi-connection Kite Session Runtime storage', () => {
       ).toThrow('not found');
       history.close();
     } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('keeps unread children on later pages when their updated_at advances', () => {
+    const fixture = createFixture(['parent', 'child-a', 'child-b', 'child-c']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id!='parent'")
+        .run();
+      seed.query("UPDATE runtime_sessions SET updated_at=10 WHERE session_id='child-c'").run();
+      seed.query("UPDATE runtime_sessions SET updated_at=9 WHERE session_id='child-b'").run();
+      seed.query("UPDATE runtime_sessions SET updated_at=8 WHERE session_id='child-a'").run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    const writer = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      const first = owner.listChildSessions('parent', 1);
+      expect(first.entries.map((row) => row.sessionId)).toEqual(['child-c']);
+      writer.query("UPDATE runtime_sessions SET updated_at=11 WHERE session_id='child-b'").run();
+      const second = owner.listChildSessions('parent', 1, first.nextCursor);
+      expect(second.entries.map((row) => row.sessionId)).toEqual(['child-b']);
+      expect(second.entries[0]?.updatedAt).toBe(11);
+      writer.query("UPDATE runtime_sessions SET updated_at=12 WHERE session_id='child-a'").run();
+      const third = owner.listChildSessions('parent', 1, second.nextCursor);
+      expect(third.entries.map((row) => row.sessionId)).toEqual(['child-a']);
+      expect(third.entries[0]?.updatedAt).toBe(12);
+      expect(third.nextCursor).toBeUndefined();
+    } finally {
+      writer.close(false);
       owner.close();
       fixture.remove();
     }

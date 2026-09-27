@@ -165,6 +165,7 @@ export class DesktopClient {
   #connectionId?: number;
   #selection?: AbortController;
   #childRead?: AbortController;
+  #childRestore?: { readonly parentSessionId: string; readonly childSessionId: string };
   #calibratedChild?: {
     readonly controller: AbortController;
     readonly subscriptionGeneration: number;
@@ -435,6 +436,11 @@ export class DesktopClient {
   }
   async #connect(refreshDirectory: boolean) {
     const selected = this.#view.selected;
+    if (selected && this.#view.childDetail?.parentSessionId === selected)
+      this.#childRestore = {
+        parentSessionId: selected,
+        childSessionId: this.#view.childDetail.childSessionId,
+      };
     await this.#detach();
     const info: DesktopConnectionInfo = await this.#native().runtimeOpen();
     const connection = createAppServerProtocolConnection(
@@ -445,6 +451,7 @@ export class DesktopClient {
     );
     this.#connection = connection;
     this.#connectionId = info.connectionId;
+    if (this.#view.workspace !== info.workspace) this.#childRestore = undefined;
     this.#publish({
       workspace: info.workspace,
       error: undefined,
@@ -651,6 +658,7 @@ export class DesktopClient {
     this.#childRead = undefined;
     this.#calibratedChild = undefined;
     this.#childListRead++;
+    this.#childListRefreshInFlight = undefined;
     this.#selectionLoad = undefined;
     this.#calibratedSelection = undefined;
     this.#historyCache.clear();
@@ -722,6 +730,7 @@ export class DesktopClient {
   }
   async disconnect() {
     ++this.#recoveryGeneration;
+    this.#childRestore = undefined;
     this.#wakeRecovery?.();
     await this.#recovering;
     const connectionId = this.#connectionId;
@@ -1204,10 +1213,12 @@ export class DesktopClient {
     if (this.#view.childSessions?.entries.some((entry) => entry.sessionId === sessionId))
       return Promise.reject(new Error('子会话只能通过父会话的环境信息读取。'));
     if (sessionId !== this.#view.selected) {
+      this.#childRestore = undefined;
       this.#childRead?.abort();
       this.#childRead = undefined;
       this.#calibratedChild = undefined;
       this.#childListRead++;
+      this.#childListRefreshInFlight = undefined;
       this.#publish({ childSessions: undefined, childDetail: undefined });
     }
     const connection = this.#connection;
@@ -1282,6 +1293,10 @@ export class DesktopClient {
           throw new Error('子会话列表分页未继续前进。');
         cursor = result.nextChildCursor;
       }
+      entries.sort(
+        (left, right) =>
+          right.updatedAtMs - left.updatedAtMs || right.sessionId.localeCompare(left.sessionId),
+      );
       if (
         this.#connection === connection &&
         this.#view.selected === parentSessionId &&
@@ -1306,6 +1321,22 @@ export class DesktopClient {
           )
         )
           this.#publish({ childSessions: { parentSessionId, entries, loading: false } });
+        const restore = this.#childRestore;
+        if (restore?.parentSessionId === parentSessionId && !this.#view.childDetail) {
+          if (!entries.some((entry) => entry.sessionId === restore.childSessionId))
+            this.#childRestore = undefined;
+          else
+            void this.openChildSession(parentSessionId, restore.childSessionId)
+              .then(() => {
+                if (
+                  this.#childRestore === restore &&
+                  this.#view.childDetail?.childSessionId === restore.childSessionId &&
+                  !this.#view.childDetail.error
+                )
+                  this.#childRestore = undefined;
+              })
+              .catch((error) => this.report(error));
+        }
       }
     } catch (error) {
       if (
@@ -1326,6 +1357,7 @@ export class DesktopClient {
   }
 
   leaveChildSession() {
+    this.#childRestore = undefined;
     this.#childRead?.abort();
     this.#childRead = undefined;
     this.#calibratedChild = undefined;
@@ -1701,6 +1733,15 @@ export class DesktopClient {
         projection: session?.projection,
         ready: session?.ready ?? false,
       });
+      void this.refreshChildSessions(sessionId).catch(() => undefined);
+      if (connection.runtime.features.backgroundQuery)
+        void connection.runtime
+          .query({
+            schema: 'kite.runtime-query.v1',
+            type: 'list_background_executions',
+            sessionId,
+          })
+          .catch(() => undefined);
       void this.#followSelection(
         connection,
         controller,

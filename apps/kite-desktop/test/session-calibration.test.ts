@@ -53,6 +53,7 @@ async function fixture(
     }),
   );
   let generation = 0;
+  let failNextRuntimeOpen = false;
   let historyRequests = 0;
   let droppedEvent: string | undefined;
   let nextLiveFailure: 'projection' | 'subscription' | undefined;
@@ -94,6 +95,10 @@ async function fixture(
         canSwitch: false,
       } as T;
     if (command === 'runtime_open') {
+      if (failNextRuntimeOpen) {
+        failNextRuntimeOpen = false;
+        throw new Error('fixture first reconnect failed');
+      }
       const connection = await createBunStdioChildRuntimeClientTransport({
         argv: [
           process.execPath,
@@ -383,6 +388,15 @@ async function fixture(
     get backgroundQueries() {
       return backgroundQueries;
     },
+    get connectionGeneration() {
+      return generation;
+    },
+    failOneReconnect() {
+      failNextRuntimeOpen = true;
+    },
+    async dropCurrentTransport() {
+      await carriers.get(generation)?.connection.close();
+    },
     async close() {
       for (const pending of allGates) pending.release();
       for (const pending of gated.values()) pending.release();
@@ -521,6 +535,32 @@ for (const openAfterFirstFrame of [false, true])
       );
       const document = new JSDOM(html).window.document;
       expect(document.body.textContent).toContain('CHILD_STREAM_OMEGA');
+      if (openAfterFirstFrame) {
+        expect(document.body.textContent).toContain('CHILD_STREAM_ALPHA');
+        await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+        await f.client.selectSession(f.b);
+        expect(f.client.getSnapshot().childSessions?.parentSessionId).not.toBe(f.a);
+        await f.client.selectSession(f.a);
+        await waitFor(() =>
+          (f.client.getSnapshot().childSessions?.entries ?? []).some(
+            (entry) => entry.sessionId === childSessionId,
+          ),
+        );
+        await f.client.openChildSession(f.a, childSessionId);
+        expect(
+          f.client.getSnapshot().childDetail?.messages.some((message) => message.settled),
+        ).toBe(true);
+        const previousConnection = f.connectionGeneration;
+        f.failOneReconnect();
+        await f.dropCurrentTransport();
+        await waitFor(
+          () =>
+            f.connectionGeneration > previousConnection &&
+            f.client.getSnapshot().childDetail?.childSessionId === childSessionId &&
+            f.client.getSnapshot().childDetail?.loading === false,
+        );
+        expect(f.client.getSnapshot().selected).toBe(f.a);
+      }
     } finally {
       releaseChild();
       await f.close();

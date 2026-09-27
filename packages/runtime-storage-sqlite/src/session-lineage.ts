@@ -70,6 +70,9 @@ export function listDirectChildSessions(
   )
     throw new Error('Direct child Session page request is invalid.');
   if (!hasSessionLineage(database) || !parentSessionId) return { entries: [] };
+  // updated_at changes while a child runs. Page by immutable identity so an
+  // update between requests cannot move an unread child behind the cursor.
+  // Keep updatedAt in the cursor for the existing wire shape.
   const rows = database
     .query<
       {
@@ -82,13 +85,9 @@ export function listDirectChildSessions(
       (string | number)[]
     >(`SELECT c.session_id,c.parent_session_id,c.name,c.updated_at,c.revision
       FROM runtime_sessions c JOIN runtime_sessions p ON p.session_id=c.parent_session_id
-      WHERE p.session_id=?${cursor ? ' AND (c.updated_at < ? OR (c.updated_at = ? AND c.session_id < ?))' : ''}
-      ORDER BY c.updated_at DESC,c.session_id DESC LIMIT ?`)
-    .all(
-      parentSessionId,
-      ...(cursor ? [cursor.updatedAt, cursor.updatedAt, cursor.sessionId] : []),
-      limit + 1,
-    );
+      WHERE p.session_id=?${cursor ? ' AND c.session_id < ?' : ''}
+      ORDER BY c.session_id DESC LIMIT ?`)
+    .all(parentSessionId, ...(cursor ? [cursor.sessionId] : []), limit + 1);
   const entries = rows.slice(0, limit).map((row) => ({
     sessionId: row.session_id,
     parentSessionId: row.parent_session_id,

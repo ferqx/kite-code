@@ -927,7 +927,7 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
           id: 'w',
           label: 'Workspace',
           state: 'loaded',
-          sessionCount: 5,
+          sessionCount: 7,
           sessions: [
             {
               sessionId: 'running',
@@ -951,7 +951,20 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
               status: 'running',
               pendingInteractions: 1,
             },
+            {
+              sessionId: 'background-pending',
+              displayName: '后台任务请求输入',
+              status: 'waiting',
+              waitingReason: 'required_background',
+              pendingInteractions: 1,
+            },
             { sessionId: 'done', displayName: '已经完成', status: 'completed' },
+            {
+              sessionId: 'done-with-stale-reason',
+              displayName: '旧等待原因已完成',
+              status: 'completed',
+              waitingReason: 'required_background',
+            },
           ],
         },
       ]}
@@ -960,17 +973,22 @@ test('shared directory distinguishes running sessions from sessions awaiting inp
       onOpen={() => {}}
     />,
   );
+  await click(document.querySelector<HTMLButtonElement>('.session-load-more')!);
   const rows = Array.from(document.querySelectorAll<HTMLElement>('.session-row'));
   expect(rows[0]?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('会话运行中');
   expect(rows[0]?.textContent).toBe('正在运行');
   expect(rows[1]?.textContent).toBe('旧等待状态');
   expect(rows[1]?.querySelector('[role="status"]')).toBeNull();
   expect(rows[2]?.textContent).toBe('等待后台');
-  expect(rows[2]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[2]?.querySelector('[role="status"]')?.getAttribute('aria-label')).toBe('任务进行中');
   expect(rows[3]?.textContent).toBe('运行时请求输入待用户输入');
   expect(rows[3]?.querySelector('[role="status"]')).toBeNull();
-  expect(rows[4]?.textContent).toBe('已经完成');
+  expect(rows[4]?.textContent).toBe('后台任务请求输入待用户输入');
   expect(rows[4]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[5]?.textContent).toBe('已经完成');
+  expect(rows[5]?.querySelector('[role="status"]')).toBeNull();
+  expect(rows[6]?.textContent).toBe('旧等待原因已完成');
+  expect(rows[6]?.querySelector('[role="status"]')).toBeNull();
 });
 
 test('tool activity keeps failures visible and groups adjacent tools without raw details', async () => {
