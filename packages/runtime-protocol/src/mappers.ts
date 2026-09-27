@@ -299,28 +299,17 @@ export function mapRuntimeNotificationToSubscriptionMessage(
       notification.projection.event === undefined
         ? undefined
         : mapRuntimeClientEventToProtocol(notification.projection.event);
-    return RUNTIME_PROTOCOL_EVENT_SCHEMA_.safeParse(event).success || event === undefined
-      ? {
-          type: 'notification',
-          durability: 'durable',
-          sessionId: notification.sessionId,
-          revision: notification.revision,
-          ...(notification.runId === undefined ? {} : { runId: notification.runId }),
-          ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
-          ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
-          session: mapSession(notification.projection.session),
-          ...(event === undefined ? {} : { event }),
-        }
-      : {
-          type: 'notification',
-          durability: 'durable',
-          sessionId: notification.sessionId,
-          revision: notification.revision,
-          ...(notification.runId === undefined ? {} : { runId: notification.runId }),
-          ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
-          ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
-          session: mapSession(notification.projection.session),
-        };
+    return {
+      type: 'notification',
+      durability: 'durable',
+      sessionId: notification.sessionId,
+      revision: notification.revision,
+      ...(notification.runId === undefined ? {} : { runId: notification.runId }),
+      ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
+      ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
+      session: mapSession(notification.projection.session),
+      ...(event === undefined ? {} : { event }),
+    };
   }
   const event = mapRuntimeClientEventToProtocol(notification.event) ?? {
     type: 'unavailable',

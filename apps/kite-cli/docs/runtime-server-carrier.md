@@ -24,7 +24,7 @@ development reference由`apps/kite-service`拥有，CLI只拥有client/presentat
 `kite-service app-server run-stdio`启动，路径/profile/build/env均由composition提供；EOF或signal drain child，Session facts继续持久化。
 
 development loopback/WebSocket reference也已迁往Service owner，仅用于transport qualification；它不是production
-listener。不存在 `kite server --web`，ADR-0053 Web No-Go保持有效。
+listener。不存在 `kite server --web`，[Agent Note 0053](../../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md) Web No-Go保持有效。
 
 ## 验证
 

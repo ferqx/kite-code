@@ -51,8 +51,7 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 - required MCP 的可用性不再成为模型调用前置条件；真实工具认证与授权保持按需检查。专用 Git Broker 不再进入 Service Runtime 工具执行链，文件工具由 Builtin filesystem module 提供。
 - Shell 的只读命令判定只在受限文件系统范围内投影为只读沙箱信任；已批准的工作区外读取或 Full 模式使用完整文件系统范围时，不同时附加互斥的只读信任，原有审批仍生效。
 
-- source 与 installed 使用相同协议、Store schema 和 execution 语义；source 按 canonical checkout 隔离 profile，installed 使用
-  canonical profile。
+- source 与 installed 使用相同协议、Store schema、execution 语义和 canonical Kite Home；checkout 只确定配套代码与 build identity，不隔离正式会话库。
 - parent-owned App Server 必须与 client exact build 配对；显式 daemon 只按 fixed protocol/capability 判断兼容，build 仅用于诊断。
 - release upgrade/rollback 只切换 active candidate；不发现、停止、替换或升级运行中的 daemon。
 - App Server 退出不删除 Session/History；同 Session takeover 只能通过 durable generation、cleanup 与 recovery rules。
@@ -103,7 +102,7 @@ Native lifecycle token/descriptor 与 Service-owned Web listener 均已删除。
 ## 文档影响
 
 App Server、Session/Store authority、daemon/Web、Trust、安全、恢复或release行为变化时，必须同步更新本README、对应本地文档与
-`docs/active/` current authority；架构决策另增ADR。
+`docs/active/` 记录当前适用的跨包约束；重要架构取舍另记入 [Agent Notes](../../.agents/notes/README.md)，并同步负责文档。
 
 ## 产品与修改导航
 

@@ -6,7 +6,7 @@
 
 验证：`bun test packages/runtime-contract/test/runtime-contract.test.ts packages/runtime-storage-sqlite/test/log-query.test.ts apps/kite-service/test/runtime-log-presentation.test.ts`、`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`。
 
-相关：ADR-0129、ADR-0142、ADR-0143、[`Kite Runtime Server V1`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-26-kite-runtime-server-v1.md)。
+相关：[Agent Note 0129](../../.agents/notes/implemented/feature/2026-08-23-sqlite-runtime-log-query-boundary.md)、[Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md)、[Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md)、[`Kite Runtime Server V1`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-26-kite-runtime-server-v1.md)。
 
 SQLite Runtime Store 是可回放会话日志的唯一事实源。`runtime_events` 的 `(session_id, sequence)` 是单会话的唯一顺序；rolling snapshot 只服务恢复。Session Logger、`events.jsonl`、trace 和 metadata/content logging 是独立诊断设施，不得被查询器、Server 或 Web 用来补齐、覆盖或验证 SQLite 结果。
 
@@ -83,4 +83,4 @@ composition/focused evidence，KLSV1-07的三平台installed process/release qua
 Store 9 的 `openHistoryLogs` 在现有连接与只读快照内提供索引 `getSession` 和事件查询；单会话读取不扫描全局会话列表。目录分页使用 updatedAt/sessionId cursor 与持久 membership，并返回已保存的 Session 模型路由供客户端切换时直接展示，不打开项目路径。标题 fallback 只取首条用户正文并由 Service 投影脱敏和限长，不写回命名。
 
 
-默认 Session Store 的普通启动使用精确 schema/marker 检查，不重复执行 SQLite physical/FK 全库扫描或解码全部历史。完整 physical/FK 检查仍供显式 release preflight 使用；Session snapshot 恢复按所选 sessionId 在同一 read snapshot 验证绑定、事件、snapshot、Run/receipt，不因其他会话的内容损坏阻塞目录。Artifact 在 typed read 时校验；目录成功不宣称全库内容健康。性能取舍见 [ADR-0183](../adr/0183-bounded-startup-validation.md)。
+默认 Session Store 的普通启动使用精确 schema/marker 检查，不重复执行 SQLite physical/FK 全库扫描或解码全部历史。完整 physical/FK 检查仍供显式 release preflight 使用；Session snapshot 恢复按所选 sessionId 在同一 read snapshot 验证绑定、事件、snapshot、Run/receipt，不因其他会话的内容损坏阻塞目录。Artifact 在 typed read 时校验；目录成功不宣称全库内容健康。性能取舍见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)。

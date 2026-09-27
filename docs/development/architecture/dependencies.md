@@ -50,6 +50,8 @@
 
 新增输入或事件时，先确定 producer 和 consumer，再核对 schema/codec、projection、调用与测试。不能用宽泛继承、any、动态代理或复制内部类型绕过边界。
 
+TypeScript 判别联合先按 `kind` 等判别字段收窄；外部 SDK 的不完整类型需要局部校验和注释，不用 `as any` 或双重断言掩盖跨包类型归属。客户端可见模式使用 [Runtime Contract 的 `InteractionMode`](../../../packages/runtime-contract/src/presentation.ts) 常量及类型，不以裸字符串判断或赋值业务模式；Kernel 内部状态由自身类型定义，不能把 App 类型反向导入底层包；不要用内联 `import()` 掩盖循环依赖，缺少中立类型时先归位到相应 contract 或 SPI。
+
 同一事实经不同投影进入 TUI/Web，展示差异不应扩大后台权限。需要新增机制时先检查现有 port 和事务 owner，避免平行 registry、queue 或 writer。
 
 规范见[Runtime 跨包架构](../../active/six-concept-runtime-architecture.md)。验证入口：[runtime package gate](../../../scripts/check-runtime-packages.ts)、[API package gate](../../../scripts/check-agent-api-packages.ts)、[core boundary](../../../scripts/check-core-boundary.ts)。

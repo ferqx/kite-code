@@ -19,7 +19,7 @@
 
 Electron `before-quit` 先经 renderer 使用既有 Runtime 连接完整查询会话任务；只有存在 queued、running 或 waiting 任务时进入绑定主窗口的确认，无活动任务直接清理退出，查询失败或目录无法证明完整时保守确认。确认退出和空闲直接退出都先关闭 stdin，正常收尾后再次退出。收尾失败、超过 20 秒仍未完成，或用户在退出流程中再次明确退出时，主进程允许紧急退出并尝试终止本应用拥有的 Service；此路径不等待可能被启动或清理占用的 Host 锁，也不把未确认的取消或发布标记为成功。窗口关闭只隐藏应用。崩溃继续沿用父子连接断开和现有 Service 资源清理，不重放任务或审批。正常与紧急路径均已有 packaged Electron 隔离原生夹具验证；原生消息框操作仍待人工验收。
 
-桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [ADR-0184](../adr/0184-electron-desktop-runtime-host.md)。
+桌面具名 `runtimeStatus` 暴露宿主当前项目和页面接入代次。renderer 刷新后，`runtimeOpen` 对已有 Service 自动重新接入，不关闭 stdin、重启任务或再次初始化底层 protocol peer。Electron renderer adapter 缓存同一 peer 的真实 initialize 结果、隔离各页面 RPC id、取消旧页面 receive 和订阅；主进程还在 document 导航、renderer 崩溃或销毁时主动 detach。新的 Runtime Client 重新查询、订阅与加载历史。旧代次的关闭不能影响新页面；项目／分支切换或退出仍按 EOF 清理。桌面连接恢复由客户端内部单一退避循环负责，复用健康 Service，仅在旧进程结束后重新启动配套服务；主页面没有连接管理操作。切换与退出取消恢复，不能让迟到接入跨越生命周期。传输重接不改变 principal、Service 授权、Session execution authority 或命令幂等，不保存第二份运行状态；当前宿主取舍见 [Agent Note 0184](../../.agents/notes/implemented/feature/2026-09-12-electron-desktop-runtime-host.md)。
 
 桌面 stdio App Server 可以省略执行 Workspace，先读取同一 profile 的持久历史。`history/list_sessions` 返回有界摘要、cursor 和 Store Workspace membership；目录、历史日志、选中会话的投影查询及订阅均只读取持久事实，不触发旧执行清理。执行命令在受控恢复 scope 内核验旧执行，必要时完成资源清理与持久收尾；恢复失败不隐藏历史。投影查询返回的持久 revision 同时发布给 Host 订阅，订阅建立期间 Store 水位推进后仍须达到一致的初始水位，不使客户端无限等待加载。创建任务须显式请求并授权目标 Workspace；已有会话执行按其持久 Workspace identity 路由和核对既有信任，不以进程启动目录、Desktop项目登记或原目录仍存在限制续聊。原目录缺失时保留其持久身份和原路径，Shell/文件能力在实际调用时报告不可用；不创建替代目录、不回落到进程cwd，也不因读取历史扩大工具权限。已有会话的 `set_interaction_mode` 按持久 Session 身份核对目标 Workspace Trust，再进入同一 Host 的命令事务；不绑定进程当前执行项目，也不改变它。该操作不申请执行租约：已有本地 Runtime 时沿其 execution fence 提交，否则只在 idle／recovery_required 且版本一致时提交权限事务，保留恢复事实；仍受目标 Trust、并发执行所有权、revision 与持久回执约束，不因可读历史获得授权；完整机制见 [Service owner](../../apps/kite-service/docs/runtime-application.md#app-controlhistory-与-mutation)。历史读取不会授予写权限，停止与退出只处理当前 owner 的任务。
 
@@ -153,6 +153,8 @@ Service 从持久 Store 读取未由当前进程持有执行权的会话时，�
 ## 会话格式连续性准备
 
 Service默认存储组合在初始化客户端协议前执行已知格式准备；正常连接持共享维护锁，转换及发布持canonical与所有来源的独占锁。source CLI/TUI采用当前构建和父进程准入；Desktop通过编入Electron Host的清单摘要与配对Service文件摘要核验发行身份。配对清单的纯Node helper仅供Electron主进程，renderer仍只能使用环境无关的协议入口，不能导入文件、进程观测或Service准入。
+
+source CLI/TUI、paired Desktop 和 installed CLI/TUI 的旧写入者观测按目标 canonical config home 限定：同目录活动 Kite 进程或无法核实目录的候选 Kite 进程仍拒绝维护，其他已核实目录的进程不阻断本 Store。发行入口是否存在不再单独作为迁移拒绝条件。进程观测只对可确认无法承载 Kite 入口的无关进程跳过读取失败；身份不明时仍拒绝。该准入只在迁移准备执行，当前格式正常打开不进入旧写入者准入。
 
 准备在私有副本完成严格9/11转换和10来源合并，维护期全量核验后才发布唯一canonical。固定短期意图优先于正常打开，发布后生产读取失败保留恢复阶段；未结清历史来源不能显示成空列表。实际支持矩阵与尚未完成的资格见[会话连续性计划](../plans/session-store-compatibility-and-continuity.md)。此机制不使任意旧安装或手动历史可执行文件自动获得跨版本并发兼容资格。
 

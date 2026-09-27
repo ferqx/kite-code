@@ -10,7 +10,7 @@ OpenAPI/schema生成、Public compatibility或静态`/api-docs` artifact时。
 `bun run --cwd packages/agent-api-client test`、`bun run --cwd packages/agent-api-client typecheck`、
 `bun test apps/kite-service/test/agent-api`、`bun run check:docs-impact`。
 
-相关：ADR-0149、ADR-0150、ADR-0155；owner-local边界见
+相关：[Agent Note 0149（部分已交付的提案）](../../.agents/notes/proposed/feature/2026-08-29-stable-local-agent-api-facade.md)、[Agent Note 0150](../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md)；owner-local边界见
 [`packages/agent-api-contract/README.md`](../../packages/agent-api-contract/README.md)与
 [`packages/agent-api-client/README.md`](../../packages/agent-api-client/README.md)。
 

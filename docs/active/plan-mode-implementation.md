@@ -6,7 +6,7 @@
 
 验证：`bun test apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/runtime/completion-guard.test.ts apps/kite-service/test/runtime/plan-actions.test.ts tests/isolated/runtime/plan-artifacts.test.ts tests/integration/runtime/plan-persistence.test.ts tests/integration/runtime/plan-state.test.ts tests/integration/runtime-contract/plan-tools.test.ts apps/kite-service/test/isolated/runtime/task-plan-lifecycle.test.ts packages/builtin-runtime/test/subagent-delegation-contract.test.ts apps/kite-service/test/subagent-runner.test.ts apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
-相关：ADR-0002、ADR-0137、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
+相关：[Agent Note 0002](../../.agents/notes/implemented/process/2026-07-02-plan-lifecycle.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
 ## 当前架构
 
@@ -93,7 +93,7 @@ Planning 允许结构化读取、搜索、研究、提问、计划维护和只�
 Planning 的 `task` 不解析 `userGoal` 作委派授权；模型只应为有界、自包含且值得独立调用的 architecture/design 工作选择只读 `plan`，一般证据收集选择 `explore`。Project instruction、Shell context、工具结果或远端内容不能提升 child 的 phase、authorization、预算或 capability ceiling。`code` 与 `review` 在 planning 拒绝且不可审批提升。plan child 终结后，
 Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
 `update_plan` 或 child final 跳过 Artifact/review lifecycle。多个相互独立的只读 explore/plan sibling
-可按 ADR-0104 在同一响应中有界并发；依赖其他 child 结果的规划工作仍须串行。只有成功 plan child
+可按 [Agent Note 0104](../../.agents/notes/implemented/feature/2026-08-13-bounded-concurrent-subagent-dispatch.md) 在同一响应中有界并发；依赖其他 child 结果的规划工作仍须串行。只有成功 plan child
 才能进入 CompletionGuard 前的受控 save/submit continuation。
 
 Shell 在 planning 中按只读 baseline 与 known effects 处理：baseline 内 direct；已知需要扩大 filesystem/network/process scope 时按

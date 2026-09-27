@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `run.completed`、final 文本、Plan lifecycle、scheduler/runner/reducer 终态或 Task 完成投影时。
 验证：`bun test packages/agent-kernel/test/completion.test.ts packages/agent-kernel/test/core-reducers.test.ts tests/runtime`、`bun run typecheck`。
-相关：ADR-0095、`plan-mode-implementation.md`、`failure-classification.md`。
+相关：[Agent Note 0095](../../.agents/notes/implemented/feature/2026-08-13-runtime-completion-truth.md)、`plan-mode-implementation.md`、`failure-classification.md`。
 
 模型的无工具 final 文本只是 completion candidate。CompletionGuard 是 Agent Kernel-owned、单调版本化的纯判定；scheduler
 在选择 `emit_final` 前、runner 在持久化前、reducer 在接收 `run.completed` 时都按事件绑定的 guard version 重算，
@@ -60,7 +60,7 @@ task-wide blocker 必须先于 V2 schema/identity/evidence 校验；即使 V2 do
 `plan_evidence_unresolved` 遮蔽当前交互 barrier。
 
 PlanDocument V2 的 completion evidence/replay 门禁额外拒绝任何 pending interaction 或 approval，不限工具是否
-具有副作用。ADR-0118 后，内建文件读取不再因 Workspace 外路径产生 approval；但 Shell、MCP 或其他能力
+具有副作用。[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 后，内建文件读取不再因 Workspace 外路径产生 approval；但 Shell、MCP 或其他能力
 形成的 read-only approval 仍是 unresolved blocker。facade 和 reducer必须使用相同 blocker，不能形成
 `planning=completed` 与 `interactions=awaiting_tool_approval` 并存的状态。
 

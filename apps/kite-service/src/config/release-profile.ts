@@ -380,7 +380,7 @@ function failClosedEmbeddedProfile(
 
 /**
  * Static, non-distributable ceilings. D-04 keeps every capability and budget
- * closed; these values are schema fixtures until an ADR admits a real target.
+ * closed; these values are schema fixtures until a confirmed release target is recorded.
  */
 export const EMBEDDED_RELEASE_PROFILES_: Readonly<
   Record<EmbeddedReleaseProfileId, ReleaseProfile>

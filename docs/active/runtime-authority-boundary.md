@@ -6,7 +6,7 @@
 
 验证：`bun test packages/runtime-host/test/control-frame.test.ts packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-host/test/mcp-stdio-process.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts packages/kite-local-runtime/test/manager apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts apps/kite-cli/test/keyless-runtime-startup.test.ts`、`bun run typecheck`、`bun run check:runtime-packages`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0053、ADR-0123/0124/0125、ADR-0127、ADR-0142、ADR-0143、ADR-0152、ADR-0153、ADR-0164、ADR-0165、ADR-0166。
+相关：[Agent Note 0053](../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md)、[Agent Note 0123](../../.agents/notes/implemented/simplification/2026-08-22-runtime-modularization-authority-cutover.md)、[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、[Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md)、[Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md)、[Agent Note 0166](../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)。
 
 ## KASD-01 authority substrate
 
@@ -120,7 +120,7 @@ Trust identity除canonical Workspace三元组外还绑定Service发现的exact e
 向TUI/CLI投影canonical paths，decision经revision/scope CAS后才允许Sandbox只读挂载。scope drift重新阻断connection，
 generic Shell、carrier或client均不能按命令名、`.git`文本或旧trust record自行提升这一authority。
 
-本地 presentation DTO 与 observability 是不同边界。按 ADR-0143，closed `RuntimeClientEvent` 可以保留有界
+本地 presentation DTO 与 observability 是不同边界。按 [Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md)，closed `RuntimeClientEvent` 可以保留有界
 reasoning segment、动态 tool label、普通 path/pattern/command/arguments、stdout/stderr/result 与 user-cancel
 cause，使 live 与 replay 由同一 TUI reducer 组装；明显 credential/authority material 仍过滤，raw RuntimeEvent、
 State、Store handle 和 settlement callback 仍禁止。该本地内容不进入 metric、diagnostic 或远程 reporter，
@@ -197,7 +197,7 @@ Host query命中Store-authoritative Session projection时，经同一Notificatio
 registry/history和已等待subscriber；该动作不写Store。这样订阅先注册、query后加载且Session未出现在本进程notification history时仍能
 完成ready。
 
-Store 7/8 migration与旧Coordinator/Worker/Gateway control plane属于未发布历史机制。ADR-0154 clean cutover后，正式CLI/release不再组合
+Store 7/8 migration与旧Coordinator/Worker/Gateway control plane属于未发布历史机制。[Agent Note 0154](../../.agents/notes/implemented/simplification/2026-08-30-pre-release-store9-clean-cutover.md) clean cutover后，正式CLI/release不再组合
 这些entrypoint、barrier或descriptor recovery；current Runtime authority只从单Service与Store 9建立，普通startup也不扫描或删除旧source。
 
 App Server infrastructure不改变上述可信域。`kite-app-contract`只允许no-secret exact projection/action；Provider API key与MCP OAuth

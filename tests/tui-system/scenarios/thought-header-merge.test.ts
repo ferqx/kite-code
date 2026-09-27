@@ -1,5 +1,5 @@
 /**
- * PTY System Test — 探索阶段块（ADR-0030）：真实会话回放
+ * PTY System Test — 探索阶段块：真实会话回放
  *
  * 测试数据取自真实会话日志 ~/.kite-code/sessions/tui/tui-ms0cuzee-0
  * （"仔细了解TUI模块" 对话：7 次模型调用 / 32 次工具调用），按原结构回放：
@@ -97,7 +97,7 @@ function expectedFixtureToolResults(calls: readonly FixtureToolCall[]) {
   });
 }
 
-describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session replay)', () => {
+describe('TUI PTY System — Thought Text Header Merge (real-session replay)', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -245,10 +245,10 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 非探索工具边界后的思考标签单次消费（ADR-0047）
+  // Test 2 — 非探索工具边界后的思考标签单次消费
   //
   // 真实日志 tui-ms0ihe3d-0 第 5 次调用为 search + task + read×2（task
-  // 切断 Thought，后段 read 保持非思考标签）。ADR-0047 覆盖 ADR-0027：
+  // 切断 Thought，后段 read 保持非思考标签）。当前规则要求：
   // 前段已经消费 reasoning 与 Thought 标签，后段只有收到新的真实 reason
   // 才能升级为 Thought。harness 无子代理执行环境，以 write_file（同为非
   // 探索工具）触发等价切断。

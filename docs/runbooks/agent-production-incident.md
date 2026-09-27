@@ -31,7 +31,7 @@ payload/manifest/evidence identity。控制面不可用时保持 embedded ceilin
 ## 5. Credential and key rotation
 
 隔离受影响 Provider/MCP route，撤销或轮换真实 credential。不要把 token、header、authorization
-code 或 private key 写入 incident report。Keyless release identity 变更需要新 ADR/Gate evidence。
+code 或 private key 写入 incident report。Keyless release identity 变更需要新 Agent Note 与 Gate evidence。
 
 ## 6. User notification
 

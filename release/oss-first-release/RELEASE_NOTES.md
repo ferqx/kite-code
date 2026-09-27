@@ -9,7 +9,7 @@ uninstall 工具，并在三平台 GitHub-hosted smoke 中对真实候选包执�
 fail-closed 边界。Capability profile 只能收紧 embedded ceiling。MCP write、effectful Skills、remote
 telemetry 和 Auto Compaction 默认关闭。
 
-生产路线图已按 ADR-0069 收敛为终态：108 个历史 Task 中 83 个完成、25 个被取代、0 个 optional。
+生产路线图已按 [Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 收敛为终态：108 个历史 Task 中 83 个完成、25 个被取代、0 个 optional。
 项目不保留 external cohort、长期服务等级/error-budget、分阶段 rollout/promotion 或 enterprise GA
 后续资格路线；旧 verifier 仅作为 fail-closed 负向安全资产。
 

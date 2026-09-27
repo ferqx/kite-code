@@ -1,6 +1,6 @@
 # Builtin Runtime
 
-[文件工具脱离 Git 与专用 Git 链退役](../../docs/adr/0188-on-demand-capabilities-and-filesystem-owner.md)：五个文件工具由 filesystem module 注册；专用 Git inspect、Broker、旧 schema/SPI 和发布证据链已移除。
+[文件工具脱离 Git 与专用 Git 链退役](../../.agents/notes/implemented/simplification/2026-09-16-on-demand-capabilities-and-filesystem-owner.md)：五个文件工具由 filesystem module 注册；专用 Git inspect、Broker、旧 schema/SPI 和发布证据链已移除。
 
 ## 定位
 

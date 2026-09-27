@@ -325,7 +325,7 @@ export function useStaticContent({
       }
 
       // Terminal facts can close the remaining contiguous prefix on the same
-      // frame that the Run becomes idle.  ADR-0168/0171/0172 make those block
+      // frame that the Run becomes idle. Block
       // facts—not Run liveness—the completion authority, so retain no stale
       // dynamic owner once the prefix is proven immutable.
       // Timeline owns both lifecycle and the immutable render model. Reading

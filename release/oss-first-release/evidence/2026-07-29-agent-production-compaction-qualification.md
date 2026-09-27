@@ -2,7 +2,7 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：4.1–4.8、4.12 的结构/语义/continuation、本地 route/handoff、真实最小 Provider
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：4.1–4.8、4.12 的结构/语义/continuation、本地 route/handoff、真实最小 Provider
 兼容 smoke 与文档记为 `completed`；4.9–4.11 的 rollout/maturity 路线已被取代。Auto Compaction 首版
 不受支持并默认关闭。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
@@ -11,7 +11,7 @@
 [`Phase 2A Release Control`](2026-07-29-agent-production-release-control.md)、
 [`Phase 2B Agent Evaluation`](2026-07-29-agent-production-evaluation.md)、
 [`Phase 3 Observability`](2026-07-29-agent-production-observability-operations.md)
-架构依赖：ADR-0021、ADR-0022、ADR-0024
+架构依赖：[Agent Note 0021](../../../.agents/notes/implemented/feature/2026-07-23-context-compaction-checkpoint.md)、[Agent Note 0022](../../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-single-narrative.md)、[Agent Note 0024](../../../.agents/notes/implemented/simplification/2026-07-23-context-compaction-manual-auto-only.md)
 设计依据：RFC §11
 
 ## 目标
@@ -69,7 +69,7 @@ verifier；以上仅补齐本地 exact-record lookup 与 Gate 代码，4.4 的
 - route qualification registry
 - Release Evidence/G3
 - TUI/CLI route status 与 handoff
-- active/ADR/book/map
+- active/决策记录/book/map
 
 ## 共享 schema ownership
 
@@ -96,7 +96,7 @@ Phase 4 中的 internal auto 仅用于内部资格和安全证据；本计划唯
 | 4.9 | 4.2–4.8、`T:3:3.5`、`T:3:3.6` | internal manual/auto profile、evidence/Gate record；唯一产生 `MS:4-INTERNAL-AUTO-FRESH` | internal rollout Gate replay + G3/G4 | 不向 external cohort 开放；identity/freshness 变化即失效 |
 | 4.10 | 4.9、`MS:LIM-APPROVED`、`MS:LIMITED-SLO` | external manual canary profile、dashboard/evidence | external manual canary Gate replay + G3/G4/G5 | critical failure cohort=0 + compaction off；不删除 checkpoint |
 | 4.11 | 4.10 | `release/capability-decisions/manual-compaction.json`、maturity Gate record | `bun test tests/evals/compaction/manual-maturity-gate.test.ts`；Gate replay | 唯一产生 `MS:4-MANUAL-STABLE`；不允许 canary 直接标 stable |
-| 4.12 | 4.1–4.11 | active/book/map/ADR/完成记录目标 | `bun run check:docs-impact`、`bun run check:docs` | 文档不收敛则 route 不进入 stable |
+| 4.12 | 4.1–4.11 | active/book/map/决策记录/完成记录目标 | `bun run check:docs-impact`、`bun run check:docs` | 文档不收敛则 route 不进入 stable |
 
 ### Task 4.1：定义 `CompactionCaseV1`
 
@@ -290,7 +290,7 @@ non-inferiority、G3–G5、用户理解度和 rollback rehearsal：
 - `packages/agent-kernel/README.md`
 - `tests/README.md`
 - `docs/documentation-map.json`
-- compaction quality/qualification ADR。
+- compaction quality/qualification 决策记录。
 
 旧 archived rollout 计划保留历史，不改写。
 

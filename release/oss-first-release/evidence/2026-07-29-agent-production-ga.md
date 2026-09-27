@@ -2,7 +2,7 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：6A.1–6A.4、6B.1、6B.2、6B.4 均已被取代；普通跨版本兼容/回滚与文档收敛
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：6A.1–6A.4、6B.1、6B.2、6B.4 均已被取代；普通跨版本兼容/回滚与文档收敛
 （6B.3/6B.5）记为 `completed`。Auto Compaction 首版不受支持；项目不建设 enterprise GA promotion
 体系。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
@@ -29,7 +29,7 @@ route/cohort dependency、canonical stable selection、rollback/compatibility re
 authority 也会以 `*_production_evidence_missing` 阻断。assembler 不写文件、不联网、不发布；production assembly authority 缺失时固定
 `distributable=false`、`milestone=null`。6A/6B Task 仍未绑定，真实 GA evidence 与观察窗口未发生。
 
-ADR-0067 规定 single-maintainer review 可由 `github:@ferqx` 完成；另一位真人或第三方 review 是可选
+[Agent Note 0067](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-candidate-security-review.md) 规定 single-maintainer review 可由 `github:@ferqx` 完成；另一位真人或第三方 review 是可选
 assurance evidence，不再是 GA dependency。自审仍必须绑定最终 selection、rollback/compatibility 与
 candidate identity，且不能覆盖 G0/G1、未关闭 P0/P1 或任何失败的自动 Gate。
 
@@ -74,7 +74,7 @@ capability 同理。
 | 6B.2 | 6B.1、`MS:2A-RC` | GA profile/payload/detached manifest/evidence/support matrix | `bun run release:build`；`bun run release:verify`；Gate replay | 回滚完整 payload/manifest；不抬高未选或非 stable 能力 |
 | 6B.3 | 6B.2 | upgrade/downgrade/schema/session compatibility fixtures | `bun test tests/release/ga-compatibility.test.ts`；rollback rehearsal | 不可逆迁移需备份；不兼容则 No-Go |
 | 6B.4 | 6B.2、6B.3、`MS:3-OPS-READY` | post-release observation record、alerts/support | observation window/error-budget review | critical failure 立即 capability/artifact rollback |
-| 6B.5 | 6B.1–6B.4 | README/active/book/map/ADR/changelog/completed records | `bun run check:docs-impact`、`bun run check:docs` | 文档或完成证据不收敛则不宣称 GA |
+| 6B.5 | 6B.1–6B.4 | README/active/book/map/决策记录/changelog/completed records | `bun run check:docs-impact`、`bun run check:docs` | 文档或完成证据不收敛则不宣称 GA |
 
 ## 6A：Optional Auto Compaction
 
@@ -222,10 +222,10 @@ GA profile：
 
 ### Task 6B.5：文档最终收敛
 
-更新 README、正式支持范围、active、book、documentation map、ADR、changelog、安全/隐私
+更新 README、正式支持范围、active、book、documentation map、决策记录、changelog、安全/隐私
 说明、各子计划完成记录、roadmap M4 与 plans index。
 
-RFC 保持 accepted 历史设计；当前行为只由源码、测试、active 和 ADR 表达。
+RFC 保持 accepted 历史设计；当前行为以源码、测试和 active 文档核对；Agent Notes 记录持久的设计取舍。
 
 ## GA Gate
 
@@ -263,7 +263,7 @@ RFC 保持 accepted 历史设计；当前行为只由源码、测试、active �
 - [ ] 升级/降级/rollback 演练通过；
 - [ ] 发布说明与真实支持矩阵一致；
 - [ ] 发布后观察和 on-call 就绪；
-- [ ] 计划/active/ADR/completed 记录收敛。
+- [ ] 计划/active/决策记录/completed 记录收敛。
 
 ## 回滚
 

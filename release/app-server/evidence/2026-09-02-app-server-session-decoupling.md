@@ -1,5 +1,7 @@
 # App Server进程与Durable Session解耦实施方案
 
+迁移说明：文中的无链接编号仅标识当时的决策记录；当前仓库没有对应 Agent Note，不将这些编号视为现行依据。已迁移的决策直接链接到对应 Note；当前行为以负责文档核对。
+
 状态：archived（KASD-00～KASD-06 completed；[完成记录](2026-09-03-app-server-session-decoupling.md)）
 
 日期：2026-09-02
@@ -9,7 +11,7 @@
 替代：[`Kite Home 与本机 Runtime 单一化实施方案`](2026-08-30-kite-home-and-local-runtime-simplification.md)中“全局单Service拥有
 Runtime/Store/Web”的未完成与后续演进部分；已完成的Store 9、typed Artifact、Trust、receipt与clean cutover成果继续复用。
 
-相关：ADR-0166、ADR-0142、ADR-0152、ADR-0165。
+相关：[Agent Note 0166](../../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)、[Agent Note 0142](../../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md)、历史决策编号 0152、0165。
 
 ## 1. 目标拓扑
 
@@ -47,7 +49,7 @@ Web -------loopback HTTP------------>       │
 
 | Tranche | 状态 | 当前产出 |
 | --- | --- | --- |
-| KASD-00 | completed | accepted ADR、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
+| KASD-00 | completed | 已接受的决策记录、current mutation/owner inventory、target Store/profile/authority contract、release baseline test |
 | KASD-01 | completed | 多连接Session Store、统一execution fence、effect crash reconciliation、global config CAS与真实进程门禁 |
 | KASD-02 | completed | stdio/Host/Session generation、完整client面、source/candidate配对与active model/Shell crash已通过 |
 | KASD-03 | completed | TUI/CLI default local cutover、observer/mutation边界、双TUI与installed smoke |
@@ -57,7 +59,7 @@ Web -------loopback HTTP------------>       │
 
 ### KASD-00：冻结契约与迁移基线
 
-- 将ADR-0166转为测试able contract：process、connection、Session、Store四类identity不得混用；
+- 将 [Agent Note 0166](../../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md) 的取舍转为可测试契约：process、connection、Session、Store四类identity不得混用；
 - 保留`54a5603e`作为已验证但不发布的过渡实现，后续tranche撤销临时Store删除语义；
 - 建立新旧路径inventory，标出single-Service build convergence、Native manager、Web ownership与Store owner的删除时机；
 - 冻结新exact Store epoch与clean-cutover规则：新App Server只使用新的`kite-session.sqlite`，现有`kite.sqlite`/WAL/SHM原样保留且不自动
@@ -207,7 +209,7 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 
 - 增加`kite server start/status/stop`和显式`--server <endpoint>`；不自动发现daemon；
 - daemon使用owner-only Unix socket/Windows named pipe，WebSocket/remote保持未支持；
-- 只定义一套exact Kite App protocol：复用ADR-0142 transport envelope/request identity/strict schema/receipt边界，`initialize`是首个请求而非
+- 只定义一套exact Kite App protocol：复用 [Agent Note 0142](../../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md) 的 transport envelope/request identity/strict schema/receipt边界，`initialize`是首个请求而非
   outer/nested协议；选择新的exact revision与exact writable Store format，unknown version/capability fail closed，不做range negotiation，
   不协商build ID；
 - 不兼容客户端可获得typed诊断但不能触发daemon升级、stop或spawn；
@@ -236,7 +238,7 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 - Web assets从App Server Runtime readiness中移除；default local不启动HTTP；
 - `kite web`只连接已经显式启动的daemon；daemon absent返回typed unavailable，不隐式启动；
 - TUI/CLI只走owner-only Unix socket/Windows named pipe；Browser走loopback HTTP。daemon托管同build静态资产与API，asset/API revision必须exact配对；
-- Browser principal保持read-only，除非未来单独ADR批准mutation；
+- Browser principal保持read-only，除非未来单独的决策记录批准 mutation；
 - `/status`显示transport、App Server与Session writer状态，不再把Web URL当Runtime identity；
 - 删除每local TUI Web listener、Service-owned static-root preflight和相关build convergence依赖。
 
@@ -263,7 +265,7 @@ outcome-unknown规则resume既有Session；late Host completion无法提交；�
 - 删除默认路径的active-candidateService replacement、previous-build client、source/installed build drift分支和全局Service reservation；KASD-01已
   前置删除Workspace/Store单进程owner限制，本阶段只清理不可达旧控制面；
 - 仅保留daemon endpoint所需的最小process owner状态，不让PID/build拥有Session或Store authority；
-- 更新ADR-0152/0159/0164/0165替代关系与全部current authority；
+- 核对历史决策编号 0152/0159/0164/0165 的替代关系与全部current authority；
 - 完成macOS、Ubuntu、Windows真实process/SQLite locking/PTY/candidate smoke。
 
 验收：普通启动代码不存在canonical Service discovery或build replacement；release upgrade只影响下一次配套App Server启动；完整Gate通过。
@@ -280,7 +282,7 @@ writable(exactSessionFormat) -> boolean
 acquireWriter(sessionId, expectedRevision) -> fenced generation
 ```
 
-首次真实format升级另立ADR，必须给出真实旧版消费者与fixture。优先Session-local迁移；禁止App Server启动时批量改写全库，禁止未知字段
+首次真实 format 升级另立决策记录，必须给出真实旧版消费者与fixture。优先Session-local迁移；禁止App Server启动时批量改写全库，禁止未知字段
 lossy round-trip，禁止通过重放Shell/MCP/文件效果重建状态。
 
 ## 5. 测试矩阵
@@ -300,7 +302,7 @@ lossy round-trip，禁止通过重放Shell/MCP/文件效果重建状态。
 每个tranche完成前：
 
 - 执行`.agents/skills/overengineering-check/SKILL.md`；
-- 更新owner README与命中的`docs/active/`，架构变化新增ADR而不改写accepted历史；
+- 更新owner README与命中的`docs/active/`，架构变化新增决策记录，保留旧 Note 的历史结论；
 - 运行`bun run check:docs-impact`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`和相关真实process测试；
 - 在新路径通过全部qualification前不得删除旧保护；在cutover完成后不得保留双路径fallback。
 

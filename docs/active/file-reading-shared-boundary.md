@@ -5,7 +5,7 @@
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 
-相关：ADR-0111、ADR-0113、ADR-0118、ADR-0122、ADR-0131。
+相关：[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0113](../../.agents/notes/implemented/architecture/2026-08-18-descriptor-relative-workspace-mutation-publication.md)、[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0122](../../.agents/notes/implemented/bug-fix/2026-08-18-windows-handle-locked-workspace-mutation.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)。
 
 ## 设计目标
 
@@ -39,11 +39,11 @@ grant 绑定 thread、turn、Tool Call、invocation、capability revision、effe
 path-policy revision、JSON-safe file boundary、approval summary、完整 operation 与 TTL，并以 canonical
 binding digest 检测同进程 identity drift；它不是密码学 authenticity。Runtime 的 `searchBoundaryDigest` 与
 protocol 的 `protectedPathRevision` 保留字段名；文件
-工具按 ADR-0118 固定空的 path-name deny/allow projection，其 digest 仍进入 intent/grant。purpose 不匹配、
+工具按 [Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 固定空的 path-name deny/allow projection，其 digest 仍进入 intent/grant。purpose 不匹配、
 过期、重复消费、取消、Workspace/path/operation/identity/preimage 漂移均 fail closed。commit 会在写入前重新
 捕获 no-follow/followed/nearest-existing parent identity。Unix commit 从已 pin 的 ancestor descriptor
 逐段使用 no-follow `openat`/`mkdirat` 创建 parent，并以同一 pinned parent descriptor 完成 exclusive temp create、
-`unlinkat` cleanup 与 `renameat` 发布。Windows 则按 ADR-0122 以 `CreateFileW` 打开 ancestor/parent 的
+`unlinkat` cleanup 与 `renameat` 发布。Windows 则按 [Agent Note 0122](../../.agents/notes/implemented/bug-fix/2026-08-18-windows-handle-locked-workspace-mutation.md) 以 `CreateFileW` 打开 ancestor/parent 的
 non-reparse directory handle，并排除 `FILE_SHARE_DELETE`；temporary sibling 的写入、flush 与 `MoveFileExW`
 replacement 全程处于这些 handle 锁定的目录内。两条路径都不回退到未经 pin 的 path-based rename。
 最后一次 identity 重验前发现 hardlink、symlink swap 或 stale preimage 保持零文件写入；final check 后的
@@ -62,20 +62,7 @@ Artifact 中。既有 `tool.queued` arguments 与 `tool.finished.resultMeta` 仍
 但它们不构成 Provider grant、target identity 或 freshness authority；旧 rewind checkpoint 只是
 best-effort 次级投影，不授权 commit。
 
-## 根因：runtime context 教模型用 POSIX 路径
-
-`buildCacheableRuntimeContext` 原先的逻辑：
-
-```
-Shell: bash — use bash syntax, use POSIX paths (e.g. /d/work, not D:\work)
-Workspace: /d/work/my-project
-```
-
-模型忠实地对所有工具使用 POSIX 路径。host MSYS2 bash 原生理解 `/d/...`；Windows restricted-token
-使用的 isksh 不提供 drive mount，因此其 adapter 把字面量 shell path token 转为 `D:/...` 后执行。
-这两种 `shell_execute` 路径都有效，但 `read_file` 直接调用 Node.js `fs`，无法解析 `/d/...`。
-
-## 架构
+## 路径与身份防御
 
 ### 三层防御
 
@@ -161,7 +148,7 @@ exact approved invocation 才能形成 `approved_external`。已批准 read/muta
 protected-path 二次拒绝。Local Provider 不导入 Policy，只机械执行空的文件
 path-name projection与 scope、canonical/no-follow identity、preimage/stale/ready/commit 约束。symlink/parent
 swap若把 `workspace_only` 目标移到 Workspace 外会拒绝；若仍解析到 Workspace 内的另一路径，则按当前受信任
-Workspace 语义继续执行并由 freshness/TOCTOU evidence 约束。按 ADR-0131，Shell、MCP executable/cwd 与原生
+Workspace 语义继续执行并由 freshness/TOCTOU evidence 约束。按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)，Shell、MCP executable/cwd 与原生
 sandbox 的 execute/process 投影也不得以内部名称缩小 canonical Workspace；typed Git 仍保留独立 schema、
 repository hostile 检查与 capability routing，但不再依赖 Workspace `.git` 的原生名称级 deny。
 
@@ -321,7 +308,7 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 - `tool.queued` 只保留为 Runtime 调度事实，不创建可见工具块；启动前取消的读取不展示
   Cancelled；只有开始执行，或开始前直接失败且需要展示诊断时才进入消息列表。审批目标只在
   Footer 展示待授权命令，不因等待审批而物化。用户拒绝或取消任一工具审批会中止整个当前
-  turn：未开始读取保持不可见，已开始读取按 cancelled 收尾（ADR-0049）。
+  turn：未开始读取保持不可见，已开始读取按 cancelled 收尾（[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)）。
 - task 子 agent 与普通工具都通过 Runtime/Tool Controller 调度，不建立 UI 专用执行通道。
 - `tool.started` 是工具实际开始执行的唯一计时边界。若早到的 `tool_call` 已以 `running`
   乐观物化卡片，TUI 仍须以 `tool.started` 重置该卡片的计时基线；排队、审批、admission

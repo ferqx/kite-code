@@ -39,4 +39,4 @@ flowchart TD
 
 ## 设计依据与边界
 
-[App Server 契约](../../active/app-server-local-runtime.md)明确默认 same-build child、显式 daemon、单 Session writer 与 unknown 不重放的约束；其具体含义是客户端升级不能悄悄替换别人的服务，旧执行者不能在执行权转移后补交结果。[ADR-0184](../../adr/0184-electron-desktop-runtime-host.md)记录 Electron 宿主取舍。更早为何选择全部包拆分及所有传输方式的原始理由，本次未找到完整依据；不能把当前实现自动解释成历史决策。旧 Worker/Coordinator 和 legacy Store 代码不在本图默认发布路径，维护它们时按对应 owner 与实际消费者核实。
+[App Server 契约](../../active/app-server-local-runtime.md)明确默认 same-build child、显式 daemon、单 Session writer 与 unknown 不重放的约束；其具体含义是客户端升级不能悄悄替换别人的服务，旧执行者不能在执行权转移后补交结果。[Agent Note 0184](../../../.agents/notes/implemented/feature/2026-09-12-electron-desktop-runtime-host.md)记录 Electron 宿主取舍。当前实现不自动构成全部包拆分与传输方式的历史决策依据。旧 Worker/Coordinator 和 legacy Store 代码不在本图默认发布路径，维护它们时按对应 owner 与实际消费者核实。

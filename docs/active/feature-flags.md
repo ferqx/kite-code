@@ -8,13 +8,13 @@ Runtime 功能开关注册在 `apps/kite-service/src/config/features.ts`；CLI�
 
 当前公开 CLI 拒绝 `--feature`（包括 true/false），不能使用旧的单次运行覆盖示例。配置与 release composition 按各自边界解析已注册名称；实际默认值见 [features 源码](../../apps/kite-service/src/config/features.ts)。
 
-新增开关必须默认 `false` 并覆盖两个取值的测试。Kite Code 未发布；当 current 路径成为唯一生产语义后，必须删除旧分支与对应 flag，不保留回滚 alias。只有 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。
+新增开关必须默认 `false` 并覆盖两个取值的测试。Kite Code 未发布；当 current 路径成为唯一生产语义后，必须删除旧分支与对应 flag，不保留回滚 alias。只有相关 Agent Note 已记录实施决定、当前 owner 文档与实现一致，且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。
 
-Production Runtime format 不受 feature flag 控制。当前 writer 直接使用 State 27/SAQ epoch；ADR-0138 的已知历史
+Production Runtime format 不受 feature flag 控制。当前 writer 直接使用 State 27/SAQ epoch；[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 的已知历史
 source reader/import 是无开关的 session data compatibility boundary，不恢复旧 dispatch composition 或 runtime rollback flag。
 未知 profile 静默忽略。这项 format authority 不适用上面的普通功能 rollout 保留期。
 
-例外是 ADR-0007 已明确替换旧 MCP adapter，ADR-0020 已完成稳定按需加载。因此 `capabilityCatalog`、`mcpRuntimeBinding` 和 `toolSearch` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。
+例外是 [Agent Note 0007](../../.agents/notes/implemented/architecture/2026-07-14-capability-bindings.md) 已明确替换旧 MCP adapter，[Agent Note 0020](../../.agents/notes/implemented/feature/2026-07-19-mcp-stable-on-demand-tool-loading.md) 已完成稳定按需加载。因此 `capabilityCatalog`、`mcpRuntimeBinding` 和 `toolSearch` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。
 
 启用 `toolSearch` 后，MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接绑定；其他情况下，只有整体 catalog 仍适合该预算才直接披露，超出预算则通过仅含元数据的搜索按需加载。revision 匹配时已加载能力保留在会话中；Skill 披露仍按 Provider tool-call 支持与上下文预算独立决策。
 

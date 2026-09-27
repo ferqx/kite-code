@@ -11,8 +11,6 @@
 - [Runtime CompletionGuard V1 / V2](../../active/completion-guard.md)
 - [Coordinator、Workspace 与 Web 当前边界](../../active/coordinator-workspace-worker-web.md)
 - [Runtime 模块准入](../../active/core-entry-criteria.md)
-- [文档语言与当前内容检查](../../active/documentation-language.md)
-- [实证结论的维护](../../active/empirical-research-archive.md)
 - [Production execution boundary contract](../../active/execution-boundary.md)
 - [Production execution platform support](../../active/execution-platform-support.md)
 - [Failure classification](../../active/failure-classification.md)
@@ -30,7 +28,6 @@
 - [Plan Mode 当前实现](../../active/plan-mode-implementation.md)
 - [Runtime 动态状态投影与 Prompt Cache](../../active/plan-state-reminder.md)
 - [Private immutable Artifact storage](../../active/private-artifact-storage.md)
-- [当前规则：项目约定](../../active/project-conventions.md)
 - [开源候选版本控制](../../active/release-control.md)
 - [Runtime Authority Boundary 与 Threat Model](../../active/runtime-authority-boundary.md)
 - [Runtime 韧性与 bounded soak 资格门禁](../../active/runtime-resilience-qualification.md)
@@ -43,6 +40,3 @@
 - [Runtime 分级验证治理](../../active/verification-governance.md)
 - [Windows Shell 沙箱：direct restricted-token 与已审批当前用户联网](../../active/windows-shell-sandbox.md)
 - [Workspace 信任门禁 / Workspace Trust Gate](../../active/workspace-trust.md)
-
-
-包导出检查同时识别声明处导出与 `export { local as name }` 的本地具名列表，避免将共享 shadcn primitive 误判为缺失符号；不存在的 re-export 仍失败。回归见 [包检查器测试](../../../apps/kite-service/test/scripts/check-runtime-packages.test.ts)。

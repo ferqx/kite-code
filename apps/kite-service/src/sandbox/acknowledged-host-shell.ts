@@ -2,7 +2,7 @@ import { createBuiltinShellExecutor, type ShellExecutor } from '@kite-ai/builtin
 import { createRuntimeHostProcessExecutionPort } from '@kite-ai/runtime-host';
 
 /**
- * The single App-owned construction point for ADR-0119 host-shell
+ * The single App-owned construction point for host-shell
  * availability fallback. Static boundary checks keep every other production
  * module from importing this factory directly.
  */

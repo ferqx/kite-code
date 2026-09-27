@@ -34,6 +34,15 @@ test('Desktop observation recognizes main processes without treating launchers o
   ).toBeUndefined();
 });
 
+test('executable-only Kite patterns remain identifiable without arguments', () => {
+  expect(classifyKiteProcess('/some/prefix/bin/kite-service', [], [])).toBe('launcher');
+  expect(classifyKiteProcess('/Applications/kite.app/Contents/MacOS/kite', [], [])).toBe('desktop');
+  expect(classifyKiteProcess('/usr/bin/git', [], [])).toBeUndefined();
+  expect(
+    classifyKiteProcess('/Applications/Other.app/Contents/MacOS/Other', [], []),
+  ).toBeUndefined();
+});
+
 const children: Array<{ kill(signal?: NodeJS.Signals | number): void; exited: Promise<number> }> =
   [];
 const directories: string[] = [];
@@ -46,17 +55,95 @@ afterEach(async () => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-function fixture(entrypoint: 'service' | 'cli', args: string[]) {
+function fixture(entrypoint: 'service' | 'cli', args: string[], env?: Record<string, string>) {
   const root = mkdtempSync(join(tmpdir(), 'kite-legacy-process-'));
   directories.push(root);
   const folder = join(root, 'scripts', 'release', 'entrypoints');
   mkdirSync(folder, { recursive: true });
   const path = join(folder, `${entrypoint}.ts`);
   writeFileSync(path, "process.stdout.write('ready\\n'); setInterval(() => undefined, 1000);\n");
-  const child = Bun.spawn([process.execPath, path, ...args], { stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, path, ...args], {
+    env: { ...process.env, ...env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   children.push(child);
   return child;
 }
+
+test('Darwin scopes live Services by Store and refuses an unknown candidate home', async () => {
+  if (process.platform !== 'darwin') return;
+  const root = mkdtempSync(join(tmpdir(), 'kite-scoped-observation-'));
+  directories.push(root);
+  const home = join(root, 'home');
+  const otherHome = join(root, 'other-home');
+  mkdirSync(home);
+  mkdirSync(otherHome);
+  const child = fixture('service', ['app-server', 'run-stdio'], {
+    KITE_CODE_CONFIG_HOME: home,
+    KITE_CODE_HOME: home,
+  });
+  await ready(child);
+  const same = observeLegacyKiteStoreProcesses({ canonicalKiteHome: home });
+  expect(same.status).toBe('busy');
+  if (same.status === 'busy')
+    expect(same.matches.some((entry) => entry.pid === child.pid)).toBe(true);
+  const other = observeLegacyKiteStoreProcesses({ canonicalKiteHome: otherHome });
+  expect(other.status).toBe('complete');
+  child.kill('SIGTERM');
+  await child.exited;
+  const unknown = fixture('service', ['app-server', 'run-stdio'], {
+    KITE_CODE_CONFIG_HOME: 'relative-home',
+    KITE_CODE_HOME: 'relative-home',
+  });
+  await ready(unknown);
+  expect(observeLegacyKiteStoreProcesses({ canonicalKiteHome: home })).toEqual({
+    status: 'incomplete',
+    reason: 'process_identity',
+  });
+});
+
+test('Darwin ignores a verified zombie even while its PID still exists', async () => {
+  if (process.platform !== 'darwin') return;
+  const python = Bun.which('python3');
+  if (!python) throw new Error('Python is required for the macOS zombie process fixture.');
+  const root = mkdtempSync(join(tmpdir(), 'kite-zombie-observation-'));
+  directories.push(root);
+  const home = join(root, 'home');
+  mkdirSync(home);
+  const script = [
+    'import ctypes, os, sys',
+    'pid = os.fork()',
+    'if pid == 0: os._exit(0)',
+    'info = ctypes.create_string_buffer(128)',
+    'libc = ctypes.CDLL(None, use_errno=True)',
+    'if libc.waitid(os.P_PID, pid, info, os.WEXITED | os.WNOWAIT) != 0: os._exit(2)',
+    'print(pid, flush=True)',
+    'sys.stdin.read(1)',
+    'os.waitpid(pid, 0)',
+  ].join('\n');
+  const parent = Bun.spawn([python, '-c', script], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  try {
+    const reader = parent.stdout.getReader();
+    const line = await reader.read();
+    reader.releaseLock();
+    const pid = Number(new TextDecoder().decode(line.value).trim());
+    expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    expect(observeLegacyKiteStoreProcesses({ canonicalKiteHome: home })).toEqual({
+      status: 'complete',
+      matches: [],
+    });
+  } finally {
+    parent.stdin.write('x');
+    parent.stdin.end();
+    await parent.exited;
+  }
+});
 
 async function ready(child: ReturnType<typeof fixture>): Promise<void> {
   const reader = child.stdout.getReader();

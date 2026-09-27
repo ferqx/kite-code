@@ -48,7 +48,7 @@
   terminal tool-call ID/outcome、skipped step ID/reason code 和 unresolved kind/reference ID；不得保存
   prompt/tool body、路径、命令、stdout 或任意错误正文；
 - 当前 Runtime 只创建和接受 PlanDocument V2；current snapshot 仍必须具有精确 schema version 与 format
-  epoch。ADR-0138 的已知历史会话迁移只保留已终结 Plan/Task 展示历史，不读取或搬移旧 Plan Artifact，
+  epoch。[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 的已知历史会话迁移只保留已终结 Plan/Task 展示历史，不读取或搬移旧 Plan Artifact，
   不建立 recovery-only Plan 工具面，也不恢复 active plan authority；未知格式静默忽略，损坏只让该会话
   打开失败。既有 Artifact 文件不主动删除或搬移。
 

@@ -130,7 +130,7 @@ KRSRUN-02A再由`packages/runtime-storage-sqlite/test/run-recovery.test.ts`、`r
 no-receipt copy、reopen/Workspace isolation、pre-resume unknown投影、显式resume与unknown terminal refinement。它仍是unpublished Store8
 mechanism evidence，不替代02B migration、03A production composition或release三平台qualification。
 
-KRSRUN-02B的Store7→Store8 migration是未发布历史机制；ADR-0154 clean cutover后不再由`tests/release`或正式CLI验证/组合。current release
+KRSRUN-02B的Store7→Store8 migration是未发布历史机制；[Agent Note 0154](../.agents/notes/implemented/simplification/2026-08-30-pre-release-store9-clean-cutover.md)确定 clean cutover 后，不再由`tests/release`或正式CLI验证/组合。current release
 只验证App Server、Store 9与retired companion absence。
 
 KRSRUN-03A的历史证据由同一migration suite的active adapter/new-Workspace case、`workspace-worker/application.test.ts`、
@@ -227,7 +227,7 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 设计方案链接位于产品和技术页面；`tests/isolated/scripts/docs-impact-scopes.test.ts` 验证计划删除后两侧都必须清理链接，部分交付保持有效入口。核心回归命令：`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts tests/integration/document-sync-skill.test.ts tests/isolated/scripts/docs-impact-scopes.test.ts`。
 
-根入口检查覆盖仓库根目录与 docs 根目录的全部 Markdown，而非仅固定 README 名单；新增客户端规则或产品入口的失效链接同样会失败。历史 ADR 正文仍按历史材料处理，不以旧代码路径强制改写决策。
+根入口检查覆盖仓库根目录与 docs 根目录的全部 Markdown，而非仅固定 README 名单；新增客户端规则或产品入口的失效链接同样会失败。已归档的 Agent Notes 按历史材料处理，不以旧代码路径强制改写其正文；当前文档引用仍须链接有效。
 
 
 ## 桌面客户端验证

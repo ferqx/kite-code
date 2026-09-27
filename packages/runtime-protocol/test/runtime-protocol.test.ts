@@ -979,6 +979,56 @@ describe('Runtime Protocol', () => {
     });
   });
 
+  test('durable notifications include only admitted events and preserve identity', () => {
+    const notification = {
+      schema: 'kite.runtime-notification.v2',
+      durability: 'durable',
+      sessionId: 'session-1',
+      revision: 4,
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      projection: {
+        kind: 'snapshot',
+        session: {
+          schema: 'kite.runtime-projection.v2',
+          sessionId: 'session-1',
+          revision: 4,
+          workspace: '/private/workspace',
+          lifecycle: 'open',
+          sessionCommandGrantCount: 0,
+          interactionQueue: { revision: 4, interactions: [] },
+        },
+      },
+    } as const;
+    const admitted = mapRuntimeNotificationToSubscriptionMessage({
+      ...notification,
+      projection: {
+        ...notification.projection,
+        event: { type: 'planning.exited', taskId: 'task-1' },
+      },
+    });
+    expect(admitted).toMatchObject({
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      event: { type: 'planning.exited', taskId: 'task-1' },
+    });
+    expect(JSON.stringify(admitted)).not.toContain('/private/workspace');
+
+    const unknown = mapRuntimeNotificationToSubscriptionMessage({
+      ...notification,
+      projection: { ...notification.projection, event: { type: 'future_event' } as never },
+    });
+    expect(Object.hasOwn(unknown, 'event')).toBeFalse();
+    expect(unknown).toMatchObject({
+      runId: 'run-1',
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      revision: 4,
+    });
+  });
+
   test('preserves closed session-index reset boundaries for the client store', () => {
     const wire = mapRuntimeAccessNotificationToSubscriptionMessage({
       type: 'session_upsert',

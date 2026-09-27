@@ -10,7 +10,7 @@ export type SubagentInteractionMode = 'accept_edits' | 'auto' | 'full';
 export type SubagentRole = 'explore' | 'plan' | 'code' | 'review';
 export type SubagentWorkspaceAccess = 'write';
 
-/** Protocol-first contract for the governed child lifecycle seam (ADR-0111). */
+/** Protocol-first contract for the governed child lifecycle seam. */
 export const SUBAGENT_PROVIDER_SCHEMA_ = 'kite.subagent-provider.v1' as const;
 export const SUBAGENT_TASK_ARTIFACT_MAX_BYTES = 1024 * 1024;
 

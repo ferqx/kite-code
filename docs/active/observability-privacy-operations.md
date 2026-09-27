@@ -4,7 +4,7 @@
 读取时机：修改本地结构化指标、health/status、alert、kill switch、incident runbook 或退出 flush 时。
 验证：`bun test tests/observability`、`bun run scripts/operations/rehearse-agent-incident.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0056、ADR-0063、ADR-0069、Phase 3。
+相关：[Agent Note 0056](../../.agents/notes/implemented/architecture/2026-07-30-metadata-first-data-boundaries.md)、[Agent Note 0063](../../.agents/notes/implemented/process/2026-08-02-no-content-observability-and-single-maintainer-operations.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、Phase 3。
 
 当前运营范围只有本地 metadata-only 结构化状态、health/status、disable-only kill switch、incident
 runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等级/error-budget 资格、分阶段运营
@@ -25,7 +25,7 @@ Workspace/Store authority identity 不属于诊断输入，也不得写入 Runti
 stderr）、Session Logger、metric、health/status、report 或 observability artifact。canonical Runtime Event
 本身是否持久化只由 Runtime Store contract 决定，不由 observability 规则删除。
 
-ADR-0143 允许用户本地 TUI/CLI 的 closed presentation event 保留 reasoning、工具参数/结果与普通路径；该
+[Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md) 允许用户本地 TUI/CLI 的 closed presentation event 保留 reasoning、工具参数/结果与普通路径；该
 产品展示面不是 observability。其正文可以进入 canonical Runtime Session history 并由 History Client 回放，
 但不得复制到本节定义的 metric、health、diagnostic stderr、reporter 或运营 artifact。
 

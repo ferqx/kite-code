@@ -4372,7 +4372,7 @@ describe('BlockRenderer', () => {
     expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
   });
 
-  test('text block with thoughtElapsedMs renders merged Thought header above content (ADR-0026)', () => {
+  test('text block with thoughtElapsedMs renders merged Thought header above content', () => {
     const block = {
       id: 1,
       kind: 'text',

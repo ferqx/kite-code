@@ -25,10 +25,9 @@
 相关：
 
 - `tool-gated-autonomy.md`
-- `project-conventions.md`
 - `file-reading-shared-boundary.md` — MSYS2 路径转换 + readTextContent 边界
-- ADR-0131 — canonical Workspace 不再按隐藏名称二次拒绝
-- ADR-0137 — sandbox-first phase/mode 与 durable approval queue
+- [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md) — canonical Workspace 不再按隐藏名称二次拒绝
+- [Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md) — sandbox-first phase/mode 与 durable approval queue
 
 验证：
 
@@ -65,17 +64,17 @@ Gate 尚未完成，不能把 scoped closure 误称为 RM-16 completed。
 
 TUI 与 foreground
 CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 由 Local allocating Provider 在 durable
-intent 后生成 transport，并在用户命令前保留 fail-closed 的 runner/OS/cleanup 失败处理。按 ADR-0119，App 可以在 startup
+intent 后生成 transport，并在用户命令前保留 fail-closed 的 runner/OS/cleanup 失败处理。按 [Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)，App 可以在 startup
 unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择 host interpreter；该调用
 仍须具有 Runtime identity/lifecycle，且已通过 Policy/approval 与 attempt ack。
 
-ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
+[Agent Note 0100](../../.agents/notes/implemented/feature/2026-08-13-user-approved-external-filesystem-capability.md) 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
 相应的 sealed filesystem scope 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
-也不得自行切换 host Shell；只有 ADR-0119 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
+也不得自行切换 host Shell；只有 [Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md) 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
 effects；Workspace 外固定高危身份由 Tool Policy 分类为 `sensitiveExternalAccess`，授权后 Seatbelt、bubblewrap 或
 Windows runner 不得安装第二层 protected-path deny。canonical Workspace member 不得因名称被拒绝。按
-ADR-0133，Full 直接授权；Auto 模式由自动审批模型选择批准、拒绝或请求真人审批；其他模式请求 exact user
+[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)，Full 直接授权；Auto 模式由自动审批模型选择批准、拒绝或请求真人审批；其他模式请求 exact user
 approval，模型异常或 circuit breaker 也升级真人审批。
 Full 的用户文件系统授权不包含 Kite 自身的 Host-control base：macOS 显式 deny，Linux 对整个 base 投影只读
 空 tmpfs，以隔离当前及并发 invocation 的 supervisor socket、lock 与 identity。
@@ -176,7 +175,7 @@ Shell Tool Policy 与 macOS/Linux 共用逐调用模式治理：精确 `node|npm
 Accept/Auto/Full route。分类出的 network、external filesystem 与 uncertain effects 只帮助 reviewer 和 scope projection，不产生免审。批准后仅该 invocation
 投影相应 filesystem/network scope。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
-descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
+descendant allowlist。因此已选 backend 的 TUI/CLI Full 仅是 [Agent Note 0121](../../.agents/notes/implemented/feature/2026-08-18-windows-development-full-mode.md)
 定义的开发期交互模式，不是 production admission；backend unavailable 不会改变 Full interaction mode，但实际执行 boundary
 不可用时必须 fail closed。
 
@@ -209,7 +208,7 @@ Workspace token 对外部路径没有 capability allow，写访问仍被拒绝�
 non-zero exit、timeout、cancel、runner、Job 或 ACL cleanup failure 都不得在其他
 Bash/cmd/PowerShell 上 replay。
 
-ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
+[Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
 direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
 `release/platform-capabilities/windows-runner.json`。
 本次 native source 语义变化必须由 canonical Windows 构建重新生成 runner 与 manifest digest；旧 pin

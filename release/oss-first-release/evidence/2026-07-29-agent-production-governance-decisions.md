@@ -1,8 +1,10 @@
-# Agent 生产化 Phase 0：治理、决策与 ADR 计划
+# Agent 生产化 Phase 0：治理与决策记录计划
 
 状态：superseded
 
-终态范围（ADR-0069）：本计划的 5 个 Task 均记为 `completed`。旧双人/独立 authority 设计只保留
+迁移说明：本历史计划曾使用独立的决策文档目录和编号；相关任务与验收结论是当时的阶段证据。现存决策记录已迁入 [Agent Notes](../../../.agents/notes/README.md)，当前要求以负责文档和现行门禁为准。
+
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：本计划的 5 个 Task 均记为 `completed`。旧双人/独立 authority 设计只保留
 历史参考；当前权威状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
@@ -13,7 +15,7 @@
 
 ## 目标
 
-在修改生产行为前，把 Owner、未决决策、共享 schema、ADR 和验收责任固定下来。Phase 0
+在修改生产行为前，把 Owner、未决决策、共享 schema、决策记录和验收责任固定下来。Phase 0
 不实现 Release Profile 或运行时安全能力；它为所有后续计划提供不会随实现者临时变化的
 治理基线。
 
@@ -23,11 +25,11 @@
 - 不生成 `limited-production` artifact；
 - 不实现远程 rollout 服务；
 - 不把人员角色写入 Runtime 或模型 prompt；
-- 不用本计划替代后续技术 ADR。
+- 不用本计划替代后续技术决策记录。
 
 ## 范围
 
-- `docs/adr/`
+- 当时的决策记录目录（现已迁移）
 - `docs/design/2026-07-29-agent-production-readiness-rfc.md`
 - `docs/space/plans/2026-07-29-agent-production-*.md`
 - `docs/plans/README.md`
@@ -38,7 +40,7 @@
 
 - Task 0.1–0.5 已完成；Phase 0 artifact commit 为
   `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`；
-- D-02/D-08/D-09/D-11/D-12/D-13/D-14 已关闭，ADR-0051–0060 已接受；
+- D-02/D-08/D-09/D-11/D-12/D-13/D-14 已关闭，[Agent Note 0051](../../../.agents/notes/implemented/process/2026-07-30-release-profile-monotonic-composition.md)–0060 已接受；
 - [Task 0.5 完成记录](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-07-30-agent-production-governance.md)
   唯一产生 `MS:M0`，结论为 `approved_for_internal_implementation`；
 - 1A.1/1C.1 已建立 `ready` execution binding；其余非 Phase 0 Task 仍按依赖保持未绑定；
@@ -76,7 +78,7 @@
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
 | 0.1 | — | 新增 `release/oss-first-release/evidence/2026-07-29-agent-production-decision-register.md`；更新本计划 | `bun run check:docs`；检查 14 个唯一 ID、Owner/backup/default/blockingPhase | 仅文档；回滚为新 revision，不删除历史决定 |
-| 0.2 | 0.1 | `docs/adr/` 中按边界新增 ADR；更新 decision register | `bun run check:docs`、`bun run check:docs-impact` | 仅文档；错误决定用新 ADR 替代 |
+| 0.2 | 0.1 | 在当时的决策记录目录中按边界新增决策记录；更新 decision register | `bun run check:docs`、`bun run check:docs-impact` | 仅文档；错误决定用新决策记录替代 |
 | 0.3 | 0.2 | 本计划 schema owner 表；各 schema 计划入口 | `rg -n \"首个实现计划\" docs/space/plans/2026-07-29-agent-production-*`；`bun run check:docs` | 仅文档；owner 变化保留审批历史 |
 | 0.4 | 0.3 | 全部生产就绪子计划、`docs/plans/README.md`、`scripts/check-plan-execution-matrix.ts` | `bun run scripts/check-plan-execution-matrix.ts`；`bun run check:docs` | 仅文档/门禁脚本；不得用删除字段方式回滚 |
 | 0.5 | 0.1–0.4 | decision register、计划状态、M0 评审记录（唯一产生 `MS:M0`） | `bun run check:docs-impact`、`bun run check:docs` | 不通过则所有子计划保持 `draft` |
@@ -101,9 +103,9 @@
 
 检查点：发布负责人可以从一个入口回答“谁在何时决定什么、未决时采用什么默认值”。
 
-### Task 0.2：新增架构 ADR
+### Task 0.2：新增架构决策记录
 
-至少评估并按最终边界拆分 ADR：
+至少评估并按最终边界拆分决策记录：
 
 1. Release Profile、maturity/rollout 正交和字段单调组合；
 2. Release Manifest/Evidence/Gate 与 behavior digest；
@@ -116,14 +118,14 @@
 8. Agent task/diff/test/review 作为产品验收结果；
 9. 可选 disable-only signed rollout manifest。
 10. single-maintainer 角色合并、显式无 backup 和 external release 前 candidate-bound maintainer review；
-    第三方评审按 ADR-0067 为可选增强。
+    第三方评审按 [Agent Note 0067](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-candidate-security-review.md) 为可选增强。
 
 实施约束：
 
-- 先检索现有 ADR，覆盖部分只新增补充/替代 ADR；
-- 不修改 accepted ADR 的历史结论；
+- 先检索现有决策记录，覆盖部分只新增补充/替代决策记录；
+- 不修改 accepted 决策记录的历史结论；
 - signed rollout 可以独立延后，不能阻塞首个 limited；
-- 每份 ADR 写清 rollback 不能恢复哪条不安全旧路径。
+- 每份决策记录写清 rollback 不能恢复哪条不安全旧路径。
 
 验证：
 
@@ -194,7 +196,7 @@ milestone producer。
 - 风险与限制；
 - Gate 决策；
 - 与计划偏差；
-- active 文档和 ADR 收敛。
+- active 文档和决策记录收敛。
 
 ### Task 0.5：Phase 0 评审
 
@@ -206,8 +208,8 @@ milestone producer。
 - Runtime/Capability Owner；
 - Evaluation/Product Owner。
 
-ADR-0060 的 single-maintainer 模式允许上述角色由 `github:@ferqx` 同一人承担；签署必须按角色
-逐项留下结论，不能把一次笼统批准复制成五份。M0 只允许内部实现。ADR-0067 后，
+[Agent Note 0060](../../../.agents/notes/implemented/process/2026-07-30-single-maintainer-release-governance.md) 的 single-maintainer 模式允许上述角色由 `github:@ferqx` 同一人承担；签署必须按角色
+逐项留下结论，不能把一次笼统批准复制成五份。M0 只允许内部实现。[Agent Note 0067](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-candidate-security-review.md) 后，
 `MS:LIM-APPROVED` 使用绑定不可变 candidate 的具名 maintainer security review；独立第三方评审为
 可选增强，不再是 external release 的硬门禁。
 
@@ -232,7 +234,7 @@ milestone，也不得为非 Phase 0 Task 创建 execution binding。
 - [x] 六类 Owner 已具名；不存在的 backup 已显式登记为 `none (single-maintainer)`；
 - [x] RFC §24 的 14 项决策全部登记；
 - [x] Phase 0 blocking 决策已关闭；
-- [x] 必要 ADR 已接受；
+- [x] 必要决策记录已接受；
 - [x] 共享 schema ownership 无冲突；
 - [x] 所有子计划有可解析依赖、验证、rollback 和完成记录入口；
 - [x] execution binding 与合并增量复核基线一致；
@@ -244,7 +246,7 @@ milestone，也不得为非 Phase 0 Task 创建 execution binding。
 
 Phase 0 只改文档和决策，不改生产行为。若某项决策被后续证据推翻：
 
-1. 新增 ADR 替代旧 ADR；
+1. 新增决策记录替代旧决策记录；
 2. 更新决策记录状态与依据；
 3. 重新评估受影响子计划和已生成 evidence；
 4. 使不再匹配的 evidence 失效；
@@ -256,7 +258,7 @@ Phase 0 只改文档和决策，不改生产行为。若某项决策被后续证
 | --- | --- |
 | 角色有名字但无实际权限 | 记录可执行的批准、kill switch 和发布权限 |
 | 决策长时间 open | 到期使用最严格默认值；blocking phase 不允许越过 |
-| ADR 粒度过大 | 按可独立替代和回滚的边界拆分 |
+| 决策记录粒度过大 | 按可独立替代和回滚的边界拆分 |
 | schema ownership 重叠 | 每个 schema 只有一个规范 producer |
 | 联系方式进入公开仓库 | 只保存团队 identity/值班入口，不保存私人联系方式 |
 

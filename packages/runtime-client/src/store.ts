@@ -158,26 +158,12 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       current?.snapshot.aggregateGeneration === input.snapshot.aggregateGeneration &&
       input.snapshot.watermark <= current.snapshot.watermark
     ) {
-      if (input.snapshot.sessionRevision <= current.snapshot.sessionRevision) return 'ignored';
-      this.#replace({
-        ...this.#snapshot,
-        background: {
-          ...this.#snapshot.background,
-          [input.snapshot.sessionId]: {
-            snapshot: {
-              ...current.snapshot,
-              sessionRevision: input.snapshot.sessionRevision,
-              executions: current.snapshot.executions.map((execution) => ({
-                ...execution,
-                sessionRevision: input.snapshot.sessionRevision,
-              })),
-            },
-            connectionGeneration: input.connectionGeneration,
-            stale: false,
-          },
-        },
-      });
-      return 'applied';
+      return this.#advanceBackgroundSessionRevision(
+        current,
+        input.snapshot.sessionId,
+        input.snapshot.sessionRevision,
+        input.connectionGeneration,
+      );
     }
     const snapshot = retainTerminalBackground(current?.snapshot, input.snapshot);
     this.#replace({
@@ -214,26 +200,12 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       prior.revision >= input.execution.revision ||
       (isTerminalBackground(prior) && input.execution.status === 'running')
     ) {
-      if (input.execution.sessionRevision <= current.snapshot.sessionRevision) return 'ignored';
-      this.#replace({
-        ...this.#snapshot,
-        background: {
-          ...this.#snapshot.background,
-          [input.execution.sessionId]: {
-            snapshot: {
-              ...current.snapshot,
-              sessionRevision: input.execution.sessionRevision,
-              executions: current.snapshot.executions.map((execution) => ({
-                ...execution,
-                sessionRevision: input.execution.sessionRevision,
-              })),
-            },
-            connectionGeneration: input.connectionGeneration,
-            stale: false,
-          },
-        },
-      });
-      return 'applied';
+      return this.#advanceBackgroundSessionRevision(
+        current,
+        input.execution.sessionId,
+        input.execution.sessionRevision,
+        input.connectionGeneration,
+      );
     }
     const retained =
       current.snapshot.executions.filter(
@@ -575,6 +547,34 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     for (const [key, fence] of this.#closedRuns) {
       if (fence.sessionId === sessionId) this.#closedRuns.delete(key);
     }
+  }
+
+  #advanceBackgroundSessionRevision(
+    current: RuntimeClientBackgroundState,
+    sessionId: string,
+    sessionRevision: number,
+    connectionGeneration: number,
+  ): RuntimeSnapshotApplyResult {
+    if (sessionRevision <= current.snapshot.sessionRevision) return 'ignored';
+    this.#replace({
+      ...this.#snapshot,
+      background: {
+        ...this.#snapshot.background,
+        [sessionId]: {
+          snapshot: {
+            ...current.snapshot,
+            sessionRevision,
+            executions: current.snapshot.executions.map((execution) => ({
+              ...execution,
+              sessionRevision,
+            })),
+          },
+          connectionGeneration,
+          stale: false,
+        },
+      },
+    });
+    return 'applied';
   }
 
   #markResync(sessionId: string): RuntimeSnapshotApplyResult {

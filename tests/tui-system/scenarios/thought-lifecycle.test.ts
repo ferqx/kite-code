@@ -85,7 +85,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: PHASE_TWO 思考 + search_files  ← 新一轮模型调用
   //   Response 3: 文本输出（阶段结束，最终回答脱离）
   //
-  // 预期 TUI 现象（ADR-0045 / ADR-0169）：
+  // 预期 TUI 现象：
   //   - reasoning completed 后才显示，工具活动在同一窗口覆盖 reasoning
   //   - 带工具响应的流式正文保留归属但不渲染
   //   - 阶段块 settle 后只保留单行统计，最终回答为独立文本块
@@ -1082,7 +1082,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 1: reasoning_content  ← 纯思考，无 tool_calls
   //   Response 2: content
   //
-  // 预期 TUI 现象（ADR-0026）：
+  // 预期 TUI 现象：
   //   - "Thinking Xs" 作为回答文本的暗色题头行（无圆点、无独立块）
   //   - settle 后随文本块保留在消息列表中（时长并入题头，信息不丢失）
   // ═══════════════════════════════════════════════════════════════

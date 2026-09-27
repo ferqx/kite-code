@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、项目信任提示或 Approval Store 时。
 验证：`bun test apps/kite-service/test/isolated/mcp-config-catalog.test.ts apps/kite-service/test/isolated/mcp-project-approval.test.ts apps/kite-service/test/mcp-supervisor.test.ts apps/kite-cli/test/mcp-panel.test.tsx apps/kite-cli/test/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/local/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、ADR-0010、ADR-0014、ADR-0018、`apps/kite-service/src/config/mcp-config.ts`、`apps/kite-service/src/config/mcp-project-approvals.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、`apps/kite-cli/src/tui/mcp/`。
+相关：[Agent Note 0009](../../.agents/notes/implemented/feature/2026-07-15-project-mcp-local-approval.md)、[Agent Note 0010](../../.agents/notes/implemented/architecture/2026-07-15-mcp-supervisor-control-plane.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、`apps/kite-service/src/config/mcp-config.ts`、`apps/kite-service/src/config/mcp-project-approvals.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、`apps/kite-cli/src/tui/mcp/`。
 
 ## 当前安全性质
 

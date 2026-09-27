@@ -747,21 +747,26 @@ function failureFor(event: KernelEvent): ClassifiedFailure | undefined {
   return classifyFailure('unknown', 'Runtime failure.');
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+/** Canonical JSON for the Kernel's private Tool identities. */
+export function stableStringifyToolIdentity(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) throw new Error('Recovery fact is not JSON serializable.');
+    return serialized;
+  }
+  if (Array.isArray(value)) return `[${value.map(stableStringifyToolIdentity).join(',')}]`;
   return `{${Object.entries(value as Readonly<Record<string, unknown>>)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`)
+    .map(([key, child]) => `${JSON.stringify(key)}:${stableStringifyToolIdentity(child)}`)
     .join(',')}}`;
 }
-function digestFailureIdentity(
+export function digestFailureIdentity(
   toolCallId: string,
   fingerprint: string,
   outcome: UnknownOutcome,
 ): string {
   return sha256Hex(
-    stableStringify({
+    stableStringifyToolIdentity({
       toolCallId,
       invocationFingerprint: fingerprint,
       status: outcome.status,

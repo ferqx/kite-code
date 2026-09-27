@@ -6,7 +6,7 @@
 
 验证：`bun test apps/kite-service/test/mcp.test.ts tests/integration/mcp-manager.test.ts tests/integration/mcp-stdio-transport.test.ts packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts packages/builtin-runtime/test/mcp-credential-broker.test.ts apps/kite-service/test/mcp/write-admission.test.ts packages/builtin-runtime/test/mcp/write-dispatch-governance.test.ts apps/kite-service/test/isolated/runtime/tool-controller.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`、`bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0127、ADR-0131、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
+相关：[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
 
 MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`，不得与 Required CI
 形成第二套 Bun 基线。

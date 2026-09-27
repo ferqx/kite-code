@@ -6,7 +6,7 @@
 
 方案：[`2026-09-02-app-server-session-decoupling.md`](2026-09-02-app-server-session-decoupling.md)
 
-ADR：[`ADR-0166`](../../../docs/adr/0166-decouple-app-server-process-from-durable-session-authority.md)
+决策记录：[`Agent Note 0166`](../../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)
 
 ## 最终结果
 

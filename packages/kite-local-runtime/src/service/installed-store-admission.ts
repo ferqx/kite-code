@@ -4,13 +4,11 @@ import {
   constants,
   lstatSync,
   openSync,
-  readdirSync,
   readFileSync,
   readSync,
   realpathSync,
 } from 'node:fs';
-import { userInfo } from 'node:os';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   observeLegacyKiteStoreProcesses,
   readKiteInstalledStdioLineage,
@@ -81,7 +79,6 @@ export function acquireInstalledKiteStoreAdmission(input: {
     const revalidate = () => {
       lock.revalidate();
       assertSelectedCandidate(installRoot, candidateRoot, executable);
-      assertNoOtherInstalledEntrypoints(installRoot, process.env.PATH ?? '');
       const lineage = readKiteInstalledStdioLineage({
         parentPid: process.ppid,
         candidateRoot,
@@ -90,6 +87,7 @@ export function acquireInstalledKiteStoreAdmission(input: {
       if (!lineage) throw new Error('Installed client and stable launcher lineage is unverified.');
       const observed = observeLegacyKiteStoreProcesses({
         exclude: lineage,
+        canonicalKiteHome: input.canonicalKiteHome,
         managedInstallPrefixes: [installRoot],
       });
       if (observed.status === 'busy')
@@ -159,38 +157,6 @@ function assertSelectedCandidate(
     throw new Error('Selected Service slot does not match the candidate.');
 }
 
-function assertNoOtherInstalledEntrypoints(installRoot: string, searchPath: string): void {
-  if (!searchPath) throw new Error('PATH is unavailable.');
-  const defaultRoot = join(userInfo().homedir, '.local/share/kite-code');
-  if (defaultRoot !== installRoot && lstatSync(defaultRoot, { throwIfNoEntry: false }))
-    throw new Error('Another managed install is present.');
-  for (const directory of searchPath.split(':')) {
-    if (!isAbsolute(directory)) throw new Error('PATH is not absolute.');
-    let names: string[];
-    try {
-      names = readdirSync(directory);
-    } catch (error) {
-      if (isNodeError(error, 'ENOENT') || isNodeError(error, 'ENOTDIR')) continue;
-      throw error;
-    }
-    if (
-      directory !== join(installRoot, 'bin') &&
-      names.some((name) => /^(?:kite|kite-tui|kite-service)(?:\.exe)?$/iu.test(name))
-    )
-      throw new Error('Another Kite launcher is on PATH.');
-  }
-  for (const root of ['/Applications', join(userInfo().homedir, 'Applications')]) {
-    const stat = lstatSync(root, { throwIfNoEntry: false });
-    if (
-      stat &&
-      (!stat.isDirectory() ||
-        stat.isSymbolicLink() ||
-        readdirSync(root).some((name) => /^kite\.app$/iu.test(name)))
-    )
-      throw new Error('Another Desktop entrypoint is present.');
-  }
-}
-
 function readPrivateFile(path: string, maxBytes: number): Buffer {
   const stat = lstatSync(path);
   if (
@@ -218,7 +184,4 @@ function hashFile(path: string): string {
   } finally {
     closeSync(fd);
   }
-}
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

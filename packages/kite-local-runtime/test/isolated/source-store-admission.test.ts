@@ -16,6 +16,8 @@ async function runSourceFixture(
     pathCandidate?: boolean;
     pathMissing?: boolean;
     runtimeRoot?: 'separate' | 'historical';
+    peerHome?: 'same' | 'other' | 'invalid';
+    peerRuntimeHome?: 'same';
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-source-admission-'));
@@ -46,6 +48,37 @@ async function runSourceFixture(
       : '/usr/bin:/bin';
   const managedPrefix = join(root, 'managed-install');
   if (options.managedPrefix) mkdirSync(managedPrefix);
+  let peer: ReturnType<typeof Bun.spawn> | undefined;
+  if (options.peerHome) {
+    const peerRoot = join(root, 'peer');
+    const peerEntry = join(peerRoot, 'scripts/release/entrypoints/service.ts');
+    mkdirSync(join(peerRoot, 'scripts/release/entrypoints'), { recursive: true });
+    writeFileSync(
+      peerEntry,
+      "process.stdout.write('ready\\n'); setInterval(() => undefined, 1000);\n",
+    );
+    const peerConfigHome =
+      options.peerHome === 'same'
+        ? home
+        : options.peerHome === 'other'
+          ? join(root, 'other-home')
+          : 'relative-home';
+    if (options.peerHome === 'other') mkdirSync(peerConfigHome);
+    const started = Bun.spawn([process.execPath, peerEntry, 'app-server', 'run-stdio'], {
+      env: {
+        ...process.env,
+        KITE_CODE_CONFIG_HOME: peerConfigHome,
+        KITE_CODE_HOME: options.peerRuntimeHome === 'same' ? home : peerConfigHome,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    peer = started;
+    const reader = started.stdout.getReader();
+    const ready = await reader.read();
+    expect(new TextDecoder().decode(ready.value)).toContain('ready');
+    reader.releaseLock();
+  }
   const servicePath = join(scripts, 'service.ts');
   const cliPath = join(scripts, 'cli.ts');
   const modulePath = resolve(import.meta.dir, '../../src/service/source-store-admission.ts');
@@ -60,19 +93,24 @@ async function runSourceFixture(
     `const child = Bun.spawn([process.execPath, ${JSON.stringify(servicePath)}, 'app-server', 'run-stdio'],{cwd:${JSON.stringify(repositoryRoot)},env:{...process.env,KITE_CODE_HOME:${JSON.stringify(runtimeRoot)},KITE_CODE_CONFIG_HOME:${JSON.stringify(home)},KITE_APP_SERVER_BUILD_ID:${JSON.stringify(options.buildId ?? 'dev:fixture')},PATH:${JSON.stringify(fixturePath)}},stdout:'pipe',stderr:'pipe'});\n` +
       `process.stdout.write(await new Response(child.stdout).text()); await child.exited;\n`,
   );
-  const parent = Bun.spawn([process.execPath, cliPath], {
-    cwd: repositoryRoot,
-    env: { ...process.env, PATH: fixturePath },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const output = await new Response(parent.stdout).text();
-  const code = await parent.exited;
-  expect(code).toBe(0);
-  return JSON.parse(output) as ReturnType<typeof reviewSourceKiteStoreAdmission>;
+  try {
+    const parent = Bun.spawn([process.execPath, cliPath], {
+      cwd: repositoryRoot,
+      env: { ...process.env, PATH: fixturePath },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const output = await new Response(parent.stdout).text();
+    const code = await parent.exited;
+    expect(code).toBe(0);
+    return JSON.parse(output) as ReturnType<typeof reviewSourceKiteStoreAdmission>;
+  } finally {
+    peer?.kill('SIGTERM');
+    if (peer) await peer.exited;
+  }
 }
 
-test('source CLI parent and current Service admit only with distribution and process evidence', async () => {
+test('source CLI parent and current Service admit with verified process evidence', async () => {
   if (process.platform !== 'darwin') {
     expect(
       reviewSourceKiteStoreAdmission({
@@ -89,23 +127,49 @@ test('source CLI parent and current Service admit only with distribution and pro
   if (result.admitted) expect(result.evidence.scope).toBe('current_source_cli_tui');
 });
 
-test('source build drift and a managed installation both refuse admission', async () => {
+test('source build drift and historical runtime aliases refuse admission', async () => {
   if (process.platform !== 'darwin') return;
   expect(await runSourceFixture({ buildId: 'dev:stale' })).toEqual({
     admitted: false,
     reason: 'source_build_mismatch',
-  });
-  expect(await runSourceFixture({ managedPrefix: true })).toEqual({
-    admitted: false,
-    reason: 'installed_entrypoint_present',
-  });
-  expect(await runSourceFixture({ pathCandidate: true })).toEqual({
-    admitted: false,
-    reason: 'installed_entrypoint_present',
   });
   expect(await runSourceFixture({ runtimeRoot: 'historical' })).toEqual({
     admitted: false,
     reason: 'source_identity_mismatch',
   });
   expect((await runSourceFixture({ runtimeRoot: 'separate' })).admitted).toBe(true);
+});
+
+test('source migration admits a separate home and blocks an active same-home writer', async () => {
+  if (process.platform !== 'darwin') return;
+  expect(
+    (
+      await runSourceFixture({
+        managedPrefix: true,
+        pathCandidate: true,
+        peerHome: 'other',
+      })
+    ).admitted,
+  ).toBe(true);
+  expect(await runSourceFixture({ peerHome: 'same' })).toEqual({
+    admitted: false,
+    reason: 'legacy_process_busy',
+  });
+  expect(await runSourceFixture({ peerHome: 'other', peerRuntimeHome: 'same' })).toEqual({
+    admitted: false,
+    reason: 'legacy_process_busy',
+  });
+  expect(await runSourceFixture({ peerHome: 'invalid' })).toEqual({
+    admitted: false,
+    reason: 'legacy_process_inspection_incomplete',
+  });
+});
+
+test('source admission ignores static installed and PATH entries', async () => {
+  if (process.platform !== 'darwin') return;
+  const result = await runSourceFixture({
+    managedPrefix: true,
+    pathCandidate: true,
+  });
+  expect(result.admitted).toBe(true);
 });

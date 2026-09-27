@@ -47,9 +47,9 @@
 
 ## 当前限制
 
-配置读写、模型选择、信任、新建/历史会话、输入/流式结果、取消、单次工具审批/拒绝、问题回答与计划审核已接入。[变更阅读与外部编辑器](docs/results-and-editor.md)使用成功文件工具记录；迁移前的 Tauri 版本曾在本机 macOS 确认 VS Code 实际打开，Electron 版本仍需重做该原生验收。自动更新和非 macOS 发布未交付。扩展/验证交互明确提示限制并允许取消，不自动应答。目录使用现有 Runtime list_sessions（服务最多 1,000 条），按工作区摘要过滤；选择时再次核实归属。助手正文支持 Markdown，工具过程按需展开；点击会话直接加载消息，无标题搜索或二次确认；独立子代理详情和运行中输入队列尚未接入。
+配置读写、模型选择、信任、新建/历史会话、输入/流式结果、取消、单次工具审批/拒绝、问题回答与计划审核已接入。[变更阅读与外部编辑器](docs/results-and-editor.md)使用成功文件工具记录；迁移前的 Tauri 版本曾在本机 macOS 确认 VS Code 实际打开，Electron 版本仍需重做该原生验收。自动更新和非 macOS 发布未交付。扩展/验证交互明确提示限制并允许取消，不自动应答。目录使用现有 Runtime list_sessions（服务最多 1,000 条），按工作区摘要过滤；选择时再次核实归属。助手正文支持 Markdown，工具过程按需展开；点击会话直接加载消息，无标题搜索或二次确认。独立子 Agent 的只读详情可从当前父会话的环境信息卡片打开，不能作为平级会话直接进入；没有匹配独立子会话的旧后台记录只显示状态。运行中纯文本引导可追加到同一 Run，但后继消息队列尚未接入。
 
-最新[项目进入与资料副层设计](../../docs/plans/kite-client-experience.md#workspace设置与恢复)已接入用户主动添加／选择项目即授权，由现有 Service 信任接口记录；普通重连不自动授权，关联外部目录仍单独确认。子代理已沿用正文样式；独立详情与交接回执仍待真实数据支持。文件工具记录已通过右侧副层呈现，不扩展为完整资料工作区。
+最新[项目进入与资料副层设计](../../docs/plans/kite-client-experience.md#workspace设置与恢复)已接入用户主动添加／选择项目即授权，由现有 Service 信任接口记录；普通重连不自动授权，关联外部目录仍单独确认。子代理已沿用正文样式；有匹配子会话时独立只读详情可用，交接回执仍待真实数据支持。文件工具记录已通过右侧副层呈现，不扩展为完整资料工作区。
 
 Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配置文件，API key 不放入 DesktopView 或浏览器持久存储，提交时清空输入。结果未知时查询配置且不自动重放；模型选择使用 App Control revision CAS。macOS standalone Service 已嵌入现有 MCP 原生 keyring 模块，其源码与编译程序的隔离读写删除 smoke 通过；迁移前的 Tauri 包内 Service 还完成了本机模拟 OAuth、Keychain 保存与重启后认证恢复。Provider 配置写入仍遵循原配置 owner，不因此改为 keyring 存储。真实 DeepSeek 的服务协议闭环属于宿主无关 Service 证据；Electron 窗口中的模型与扩展流程仍按原生验收记录中的剩余范围验证。用户行为与验证限制见[桌面手册](../../docs/handbook/clients/desktop/README.md)。
 

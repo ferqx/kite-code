@@ -3,7 +3,7 @@ import type {
   WorkspaceFilesystemMutationReadyRecord,
 } from '@kite-ai/runtime-contract';
 
-/** Protocol-first contract for the governed Workspace filesystem seam (ADR-0111). */
+/** Protocol-first contract for the governed Workspace filesystem seam. */
 
 export const WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_ =
   'kite.workspace-filesystem-provider.v1' as const;

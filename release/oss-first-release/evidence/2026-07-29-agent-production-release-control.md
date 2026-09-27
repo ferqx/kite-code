@@ -2,19 +2,19 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：2A.0–2A.8、2A.10、2A.11 按普通开源候选的 build、manifest/checksum、
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：2A.0–2A.8、2A.10、2A.11 按普通开源候选的 build、manifest/checksum、
 install/start/rollback、三平台 CI、RC 文档和 G0/G1 记为 `completed`；2A.9 远程 signed rollout service
 记为 `superseded`。Sigstore、attestation、notarization 与 Authenticode 不再阻塞首发，也不得冒充已取得。
 当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)
 Foundation 依赖：仅 Phase 0
 RC Assembly 依赖：Phase 1A、1B、1C、Phase 2B 和 Phase 3
 设计依据：RFC §8–§10、§15、§20
 
-2026-08-02：D-06 已按 ADR-0062 关闭。Task 2A.0–2A.7 已由恢复点
+2026-08-02：D-06 已按 [Agent Note 0062](../../../.agents/notes/implemented/process/2026-08-02-keyless-release-signing-and-github-hosting.md) 关闭。Task 2A.0–2A.7 已由恢复点
 `2e98681c800a2f1f745bc18e41ac682d9c09e84b` 收口；53 个 release 定向测试、synthetic
 build/verify/bootstrap 与 deterministic foundation Gate replay 全部通过，Task 2A.7 唯一产生
 `MS:2A-F`。真实 Sigstore/attestation/GitHub Release 保持 disabled，D-04 production support set
@@ -76,7 +76,7 @@ production receipt；当前 registry 为空。`MS:2B-DONE`、`MS:3-OPS-READY`、
 - `.github/workflows/`
 - `package.json`
 - artifact packaging/version/changelog/security docs
-- active、book、ADR 和 documentation map
+- active、book、决策记录和 documentation map
 
 ## 共享 schema ownership
 
@@ -103,7 +103,7 @@ production receipt；当前 registry 为空。`MS:2B-DONE`、`MS:3-OPS-READY`、
 | 2A.7 | 2A.3、2A.6 | `scripts/release/gate-evaluator.ts`、gate policy/fixtures/tests、foundation Gate record；唯一产生 `MS:2A-F` | `bun test tests/release/gate-evaluator.test.ts`；clean-environment replay | Gate policy versioned；回滚 policy 必须重新评估全部 evidence |
 | 2A.8 | 2A.0、2A.3、2A.5、2A.7、`D-04:CLOSED`、`D-06:CLOSED` | `.github/workflows/release-candidate.yml`、`scripts/release/platform-smoke.ts`、`scripts/run-default-tests.ts`、`generate-sbom.ts`、`verify-provenance.ts`、tamper smoke | `bun run test`、`bun run release:smoke`；各声明支持平台 workflow | workflow/tamper smoke 失败不发布；不得回退为源码 smoke |
 | 2A.9 | 2A.7、`D-03:CLOSED`、`D-06:CLOSED`、`D-13:CLOSED` | `src/app/release/rollout-manifest-loader.ts`、`rollout-cache.ts`、`scripts/release/sign-rollout-manifest.ts`、`tests/release/disable-only-rollout.test.ts` | `bun test tests/release/disable-only-rollout.test.ts` | 可选且默认不开启；故障回到 embedded ceiling，不能扩大权限 |
-| 2A.10 | 2A.1–2A.8 | active/book/README/map/ADR/changelog/support matrix | `bun run check:docs-impact`、`bun run check:docs` | 文档与实现不一致时阻断 2A-RC |
+| 2A.10 | 2A.1–2A.8 | active/book/README/map/决策记录/changelog/support matrix | `bun run check:docs-impact`、`bun run check:docs` | 文档与实现不一致时阻断 2A-RC |
 | 2A.11 | `MS:1A-DONE`、`MS:1B-DONE`、`MS:1C-DONE`、`MS:2B-DONE`、`MS:3-OPS-READY`、2A.8、2A.10 | `scripts/release/assemble-rc.ts`、`replay-gate.ts`、schema upgrade/rollback rehearsal、`tests/release/rc-assembly.test.ts`、`schema-rollback.test.ts`、RC workflow；唯一产生 `MS:2A-RC` | `bun test tests/release/rc-assembly.test.ts tests/release/schema-rollback.test.ts`；`bun run release:build`；`bun run release:verify`；Gate replay | Gate 失败不发布；回滚完整 payload/manifest/evidence identity |
 
 ### Task 2A.0：冻结 payload、detached manifest 与打包入口
@@ -387,7 +387,7 @@ Gate：
 - `docs/handbook/cli/README.md`；
 - `tests/README.md`；
 - `docs/documentation-map.json`；
-- release ADR、changelog、安全与支持矩阵。
+- release 决策记录、changelog、安全与支持矩阵。
 
 ### Task 2A.11：RC bundle 与最终 Gate assembly
 
@@ -424,7 +424,7 @@ producer；任一前置 Task 或 foundation Gate 失败时不得写入。
 
 Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远程 kill switch 时才进入
 该里程碑。Task 2A.11 是 `MS:2A-RC` 的唯一 producer。该 milestone 只表示 candidate
-assembly，不产生 `MS:LIM-APPROVED`；ADR-0067 要求在后续人工发布评审中完成绑定 candidate
+assembly，不产生 `MS:LIM-APPROVED`；[Agent Note 0067](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-candidate-security-review.md) 要求在后续人工发布评审中完成绑定 candidate
 identity 的 maintainer security review，另一位真人或第三方评审为可选 assurance evidence。
 
 ## 验收条件

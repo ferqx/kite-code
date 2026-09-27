@@ -2,13 +2,13 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：1A.1–1A.7 的 metadata-only、secret 与 Provider/MCP egress fail-closed 边界全部
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：1A.1–1A.7 的 metadata-only、secret 与 Provider/MCP egress fail-closed 边界全部
 保留并记为 `completed`；企业式外部 evidence 不再是本计划的完成条件。当前状态见
 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
 Task 1A.1–1A.7 已完成；1A.7 以
@@ -52,7 +52,7 @@ Task 1A.1–1A.7 已完成；1A.7 以
 - `tests/session-logger/`
 - `tests/config.test.ts`
 - MCP/model data policy 与迁移测试
-- 相关 active、book、ADR 和 documentation map
+- 相关 active、book、决策记录和 documentation map
 
 ## 共享 schema ownership
 
@@ -78,7 +78,7 @@ artifact policy ceiling；当前 Release Profile 尚未组合且 flag 默认关�
 | 1A.4 | 1A.3 | secure writer、`active-session-lease.ts`、retention/migration、`scripts/release/session-log-acl-smoke.ts` | `bun test tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts`；POSIX/Windows ACL workflow | migration 先收紧权限再切换；lease 不确定时不删除 |
 | 1A.5 | 1A.1、`D-14:CLOSED` | policy registry/loader、route/data classifier、payload provenance、model admission/status tests | `bun test tests/config/provider-data-policy.test.ts tests/model-provider-data-policy.test.ts` | `providerDataPolicyV1=false` 时 production route 全部关闭；旧资格全部失效 |
 | 1A.6 | 1A.1、1A.5、`T:1B:1B.4` | MCP route identity/egress permit/policy/integration/concurrency tests | `bun test tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts` | `remoteMcpEgressPolicyV1=false`；回滚为禁止 remote content egress |
-| 1A.7 | 1A.1–1A.6 | active/book/map/ADR/README/完成记录；唯一产生 `MS:1A-DONE` | `bun run check:docs-impact`、`bun run check:docs` | 文档不收敛则 Phase 1A 不完成 |
+| 1A.7 | 1A.1–1A.6 | active/book/map/决策记录/README/完成记录；唯一产生 `MS:1A-DONE` | `bun run check:docs-impact`、`bun run check:docs` | 文档不收敛则 Phase 1A 不完成 |
 
 ### Task 1A.1：定义日志与数据策略 schema
 
@@ -140,7 +140,7 @@ interface WorkspaceDataLabelV1 {
 }
 ```
 
-实施时字段可以按 ADR 收敛，但必须保持：
+实施时字段可以按决策记录收敛，但必须保持：
 
 - route identity 不是 model name；
 - secret/credential 始终高于可发送分类；
@@ -395,7 +395,7 @@ interface RemoteMcpEgressPermitV1 {
 - `docs/handbook/features/sessions.md`；
 - `docs/handbook/features/extensions.md`；
 - `docs/documentation-map.json`；
-- session logger 与数据边界 ADR。
+- session logger 与数据边界决策记录。
 
 旧 `2026-06-18-session-logger.md` 保持 archived 历史事实，不改写；完成记录说明本计划改变了
 其“全量本地日志”当前行为。
@@ -413,7 +413,7 @@ interface RemoteMcpEgressPermitV1 {
 - [x] model route 有版本化 data policy 和 digest；
 - [x] remote MCP 使用独立 egress consent；
 - [x] 真实用户正文默认不进入 secondary evaluation；
-- [x] 相关 active/book/ADR/map 收敛；
+- [x] 相关 active/book/决策记录/map 收敛；
 - [x] 完整 Required CI 通过。
 
 ## 回滚

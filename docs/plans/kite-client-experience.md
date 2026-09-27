@@ -275,7 +275,7 @@ Web 沿用当前 Browser principal 的只读策略，不注入发送、新建、
 
 验收要求：两端生产入口导入同一个页面，删除旧主页面和重复消息渲染；Web 只读场景不能触发写操作，桌面既有发送、审批、停止与中文组词行为继续有效；导航、直接加载消息、阅读位置、深链接和诊断保持可用。先进行 HTML 浏览器预览，再执行两端测试、类型、构建和相关依赖边界检查。同步两端手册、owner 文档和共享包职责；原生能力本轮未改动时复用其既有证据并明确范围。
 
-本轮共享 UI 5 项、Web 13 项、桌面 22 项与服务端只读 API 33 项测试通过；18 个 workspace 类型检查、两端构建及相关边界检查通过。HTML 预览核对两端常用／最小窗口、Web 深浅主题与窄屏、预览／URL 返回、Markdown 和审批输入布局，测试数据未进入生产入口。原生 IPC 与宿主操作未改动，本轮未重跑系统输入法及 Tauri 窗口资格；Web 既有取消／未知状态投影和深链接快照优先级差异仍由其 owner 文档记录，未以页面迁移宣称修复。构建仍提示约 554 KB（桌面）和 580 KB（Web）的单包体积。过度设计检查通过；架构取舍见 [ADR-0179](../adr/0179-shared-web-desktop-conversation-page.md)。
+本轮共享 UI 5 项、Web 13 项、桌面 22 项与服务端只读 API 33 项测试通过；18 个 workspace 类型检查、两端构建及相关边界检查通过。HTML 预览核对两端常用／最小窗口、Web 深浅主题与窄屏、预览／URL 返回、Markdown 和审批输入布局，测试数据未进入生产入口。原生 IPC 与宿主操作未改动，本轮未重跑系统输入法及 Tauri 窗口资格；Web 既有取消／未知状态投影和深链接快照优先级差异仍由其 owner 文档记录，未以页面迁移宣称修复。构建仍提示约 554 KB（桌面）和 580 KB（Web）的单包体积。过度设计检查通过；架构取舍见 [Agent Note 0179](../../.agents/notes/implemented/feature/2026-09-08-shared-web-desktop-conversation-page.md)。
 
 2026-09-08 用户确认优先通过 HTML 页面预览调整界面；后续实施遵循 desktop owner 的 [HTML 预览优先流程](../../apps/kite-desktop/docs/conversation-ui.md#html-预览优先的界面迭代)，并同步已确认调整的代码与文档。
 
@@ -341,11 +341,11 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 本轮共享 UI 7 项、桌面 27 项、Web 13 项测试通过；Rust 默认测试 9 项及 `test:desktop:native` 配套服务实测通过。全仓 18 个 workspace 类型检查、最终受影响 workspace 复查、两端构建、相关依赖边界与文档检查通过。HTML 预览覆盖 1440 × 960、760 × 540 与窄屏，检查建议填入、菜单及首次发送。构建仍提示桌面约 572 KB、Web 约 590 KB 的单包体积。
 
-`iteration_complete` 已核对产品手册、desktop／共享 UI owner、原生服务边界与 [ADR-0180](../adr/0180-desktop-new-conversation-context.md)。过度设计检查通过：项目记录、受限 IPC、独立准备草稿和未知创建回执的同身份查询均对应明确需求；未新增队列、自动重试或第二套运行权威。此标记仅结束实现迭代，不代表真实系统目录选择器、原生窗口项目恢复／分支切换／首次发送的完整验收已通过；当前工具不支持原生界面自动操作，正式界面验收仍待补。本轮不提交或发布。
+`iteration_complete` 已核对产品手册、desktop／共享 UI owner、原生服务边界与 [Agent Note 0180](../../.agents/notes/implemented/feature/2026-09-10-desktop-new-conversation-context.md)。过度设计检查通过：项目记录、受限 IPC、独立准备草稿和未知创建回执的同身份查询均对应明确需求；未新增队列、自动重试或第二套运行权威。此标记仅结束实现迭代，不代表真实系统目录选择器、原生窗口项目恢复／分支切换／首次发送的完整验收已通过；当前工具不支持原生界面自动操作，正式界面验收仍待补。本轮不提交或发布。
 
 ## 应用历史与普通工作目录修复
 
-状态：iteration_complete。用户确认历史读取应独立于项目环境，且工作目录可能用于非代码任务、没有 Git。当前实现与验证归位到[历史与恢复](../../apps/kite-desktop/docs/history-and-recovery.md)，架构取舍见 [ADR-0182](../adr/0182-neutral-desktop-history.md)。历史按持久空间分页，跨空间阅读保留原任务；断线有界自动重接且不重放命令。普通工作目录不要求 Git，实际执行仍核对可用路径与授权。新版系统窗口与输入法的人工资格仍按原生验收边界单独处理。
+状态：iteration_complete。用户确认历史读取应独立于项目环境，且工作目录可能用于非代码任务、没有 Git。当前实现与验证归位到[历史与恢复](../../apps/kite-desktop/docs/history-and-recovery.md)，架构取舍见 [Agent Note 0182](../../.agents/notes/implemented/bug-fix/2026-09-11-neutral-desktop-history.md)。历史按持久空间分页，跨空间阅读保留原任务；断线有界自动重接且不重放命令。普通工作目录不要求 Git，实际执行仍核对可用路径与授权。新版系统窗口与输入法的人工资格仍按原生验收边界单独处理。
 
 ## 新对话选择与 Session 模型隔离
 
@@ -353,4 +353,4 @@ Web 与桌面继续消费相同页面，Web 只读数据缺少明确工具类型
 
 ## 本地启动性能
 
-状态：in_progress（主要 Service 启动瓶颈已优化；迁移前新构建产物首次运行仍超出 300ms，完整 Electron 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [ADR-0183](../adr/0183-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把迁移前分段计时或并发负载下的样本当作 Electron 系统启动硬实时保证。
+状态：in_progress（主要 Service 启动瓶颈已优化；迁移前新构建产物首次运行仍超出 300ms，完整 Electron 窗口绘制资格待补）。2026-09-11 用户要求连接与首屏目录进入 300ms 预算；已移除重复全库检查与全历史解码，使用完整 SHA-256 加速及首次计数时才加载 tokenizer。校验边界见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)，样本、条件与尚未覆盖的端到端范围见[启动 owner](../../apps/kite-desktop/docs/history-and-recovery.md#启动预算与验证边界)。不把迁移前分段计时或并发负载下的样本当作 Electron 系统启动硬实时保证。

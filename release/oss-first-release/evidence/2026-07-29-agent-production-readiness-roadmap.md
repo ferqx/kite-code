@@ -5,7 +5,7 @@
 修订：2026-08-04
 完成：2026-08-04
 优先级：P0
-权威决策：ADR-0068、ADR-0069
+权威决策：[Agent Note 0068](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)
 Task 状态：`release/oss-first-release/task-status.json`
 完成记录：[`2026-08-04-single-maintainer-open-source-first-release.md`](2026-08-04-single-maintainer-open-source-first-release.md)
 
@@ -22,7 +22,7 @@ workflow、Runtime fault/soak、Compaction、Verification、MCP write 与 Skills
 继续使用。旧 milestone、OIDC/Sigstore/attestation registry、external rollout 和 promotion 窗口已经
 移出当前及后续路线图。
 
-108 个历史 Task 已按 ADR-0069 收敛为终态：
+108 个历史 Task 已按 [Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 收敛为终态：
 
 | 状态 | 数量 | 首发含义 |
 | --- | ---: | --- |
@@ -59,7 +59,7 @@ cohort 或长期观察。checksum 只证明完整性，不能表述为来源认�
 
 ### Batch A：权威范围与状态
 
-新增 ADR-0068/ADR-0069 和 active 首发终态规则；更新本路线图、全部 Phase 子计划、decision register、README、
+新增 [Agent Note 0068](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)/[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 和 active 首发终态规则；更新本路线图、全部 Phase 子计划、decision register、README、
 技术全书与文档映射；让文档门禁验证新的 108 Task 分类，而不是旧企业 milestone。
 
 ### Batch B：Release Candidate
@@ -90,7 +90,7 @@ adversarial case。capability 默认 off，只有本机用户可显式开启。A
 
 ```mermaid
 flowchart LR
-    Scope["ADR-0069 + Task 终态"] --> G0["G0 本地正确性与安全"]
+    Scope["Agent Note 0069 + Task 终态"] --> G0["G0 本地正确性与安全"]
     Scope --> Build["候选构建、安装与回滚"]
     Build --> G1["G1 三平台与真实 Provider"]
     G0 --> Review["一次整体 Review"]
@@ -117,7 +117,7 @@ macOS 的普通发行兼容性与 effectful execution capability 分开判断；
 - Auto Compaction 与 enterprise GA authority/profile assembly；
 - 托管 observability、托管执行、多租户或服务端 credential custody。
 
-对应历史 Task 均为 `superseded`，不属于发布后待办。未来产品形态改变时必须新建 RFC/ADR 和 Task，
+对应历史 Task 均为 `superseded`，不属于发布后待办。未来产品形态改变时必须新建 RFC/决策记录和 Task，
 不得恢复旧 milestone 或把历史 synthetic contract 冒充真实证据。
 
 ## 维护者检查

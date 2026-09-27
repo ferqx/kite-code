@@ -6,7 +6,7 @@
 
 验证：`bun run check:pre-release-architecture`、`bun run check:runtime-packages`、`bun run check:core-boundary`、`bun run typecheck`、`bun test packages/runtime-contract/test packages/runtime-spi/test packages/agent-kernel/test packages/runtime-host/test packages/builtin-runtime/test packages/runtime-storage-sqlite/test`、`bun run --cwd packages/kite-local-runtime test`、`bun run --cwd apps/kite-service test`、`bun run --cwd apps/kite-cli test`。
 
-相关：ADR-0128、ADR-0137、ADR-0138、ADR-0140、ADR-0142、ADR-0143、ADR-0152、ADR-0153；模块局部边界见各 workspace README。
+相关：[Agent Note 0128](../../.agents/notes/implemented/simplification/2026-08-23-pre-release-clean-cutover-module-boundaries.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)、[Agent Note 0140](../../.agents/notes/implemented/process/2026-08-26-workspace-documentation-authority-v2.md)、[Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md)、[Agent Note 0143](../../.agents/notes/implemented/bug-fix/2026-08-26-local-runtime-presentation-fidelity.md)；模块局部边界见各 workspace README。
 
 物理本机默认拓扑是每个TUI/CLI invocation一个parent-owned stdio App Server；source/installed按各自profile共享多连接
 `kite-session.sqlite`，同Session writer由generation/revision fence裁决，普通启动没有HTTP listener。显式`kite server start`可创建
@@ -134,7 +134,7 @@ Kernel 是唯一 state/event/reducer/scheduler authority：
 - Kernel 不读 clock、random、filesystem、network 或 Provider；Host 必须把 identity、time 与 observed facts 显式投影为 input；
 - schema/protocol/format 数字只作为 metadata 值，不作为类型或文件身份。
 
-State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段；ADR-0138 另外允许 exact 已知历史 profile 在选中单个会话后投影为当前 State。迁移只保留安全历史，清空 approval/grant/effect authority；未知格式在发现阶段静默忽略，不猜测、不改写。恢复 Session 时，State 的 Workspace path 与 Project digest 是不可拆分的 retained identity，不能与调用方当前 checkout 路径混合；Coordinator admission 必须先于 Session registry publication。checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整仍只让所属会话 fail closed。
+State 只有一个当前写入 shape。当前 codec 继续读取同一 schema/epoch 内有明确白名单和测试的退休事件字段；[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 另外允许 exact 已知历史 profile 在选中单个会话后投影为当前 State。迁移只保留安全历史，清空 approval/grant/effect authority；未知格式在发现阶段静默忽略，不猜测、不改写。恢复 Session 时，State 的 Workspace path 与 Project digest 是不可拆分的 retained identity，不能与调用方当前 checkout 路径混合；Coordinator admission 必须先于 Session registry publication。checksum/revision/project/workspace identity 漂移、event tail 非法或 recovery evidence 不完整仍只让所属会话 fail closed。
 
 ## Capability、Policy 与 Tool Pipeline
 
@@ -174,9 +174,9 @@ Builtin concrete operation modules位于 `git/model/planning/subagent/verificati
 
 App Session 的执行权威位于 Runtime Host；Service 只保留面向命令的局部适配：
 
-- `session-lifecycle` 管理列表、加载、删除与命名；
+- [Service composition](../../apps/kite-service/src/composition.ts) 通过 Runtime History 与 Store 快照提供 Session 列表、加载和事件读取；生命周期命令由 Host 与 Storage owner 受理；
 - `rewind-service` 管理 checkpoint preview/fork/restore；
-- `planning-mode-service` 只通过 live Kernel control 改变 planning；
+- [turn-command-decision](../../apps/kite-service/src/bootstrap/runtime/turn-command-decision.ts) 与 [turn-coordinator](../../apps/kite-service/src/bootstrap/runtime/turn-coordinator.ts) 通过 live Kernel control 生成 Plan 模式进入事件；
 - `context-compaction-service` 复用同一 Host control、Model Gateway、effect lease 与 storage ports；
 - `runtime-host/src/host/session-registry.ts` 管理每个 Session 的 mailbox、revision fencing、lifecycle 与 recovery；
 - Runtime Client/Service projection 形成 Session/TUI 可消费投影，Service 不再提供独立 legacy session-manager/session-runtime registry。
@@ -274,4 +274,4 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 
 Package/App 的职责、允许依赖、公开入口与局部不变量由各自 README 拥有；本页只定义跨 workspace 的 Runtime
 authority 和依赖方向。TUI 展示与系统测试规范位于 `apps/kite-cli/docs/`，测试归属与默认执行位于
-`tests/README.md`。ADR、book、plan、completed、design、deprecated 和索引不替代 current authority。
+`tests/README.md`。Agent Notes、历史资料、计划和索引不替代 current authority。

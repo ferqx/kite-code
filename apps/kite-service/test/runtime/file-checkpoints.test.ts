@@ -1,4 +1,4 @@
-// ── ADR-0025 §4：文件原像恢复测试 / file pre-image restore tests ──
+// ── 文件原像恢复测试 / file pre-image restore tests ──
 // 验证 restoreFilesToCheckpoint 将工作区文件恢复到命名检查点时刻的状态。
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';

@@ -8,7 +8,7 @@
 
 附加验证：`bun run check:core-boundary`、`bun run check:runtime-packages`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0131、ADR-0137。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、[Agent Note 0007](../../.agents/notes/implemented/architecture/2026-07-14-capability-bindings.md)、[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)、[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md)、[Agent Note 0048](../../.agents/notes/implemented/bug-fix/2026-07-29-durable-user-turn-cancellation.md)、[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0111](../../.agents/notes/implemented/feature/2026-08-18-governed-local-provider-seams.md)、[Agent Note 0114](../../.agents/notes/implemented/testing/2026-08-18-stable-subagent-actor-identity-for-strict-replay.md)、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)。
 
 ## 统一执行链路
 
@@ -128,7 +128,7 @@ adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispa
 Subagent task adapter 与 Builtin catalog/Host dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
-迁移不增加 runtime execution fallback flag。SAQ clean cutover 已统一切换 State 27/SQLite Store/SAQ epoch；ADR-0138
+迁移不增加 runtime execution fallback flag。SAQ clean cutover 已统一切换 State 27/SQLite Store/SAQ epoch；[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)
 只允许选中已知历史会话后导入安全 transcript/Task/Plan 投影，旧 dispatch、旧 approval grant、effect authority 和旧单槽
 shape 不进入新 epoch，未知 source 静默忽略。
 
@@ -187,14 +187,14 @@ framed restricted-token runner 的 process spawn、output、timeout、cancel、p
 导入 Policy、approval、Runtime state/event 或 App。ready 后 crash 由 Kernel 从 keyed private Artifact 恢复
 cleanup handle，并先记录 disposal intent，再执行 provider reconciliation 与 receipt。旧 Windows executor
 入口已删除；intent 后、ready 前的崩溃通过 preparation digest 可重建的确定性 allocation identity 和独立
-abandonment intent/receipt 回收。Local Provider 对 backend unavailable 仍 fail closed；按 ADR-0119，App 只在
+abandonment intent/receipt 回收。Local Provider 对 backend unavailable 仍 fail closed；按 [Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)，App 只在
 typed pre-dispatch unavailable 且 cleanup receipt 已确认后，为同一条已获 Policy/approval 与 attempt ack 的
 命令选择一次 host Shell。该 availability 路径不属于 Provider fallback，也不改变 schema/format epoch。
 
 Development Shell 的文件系统能力是逐 invocation 的：Planning 非 Full 使用 Workspace read-only baseline，Building 非 Full 使用
 Workspace read/write baseline；默认 baseline 使用 native backend。这里的 baseline 限定写入：开发期 Native Shell 的 read scope 默认广泛只读，封存生产仍使用 exact roots。`externalRead`、`externalWrite`在命令启动前按phase/mode
 路由；`uncertainEffects`在Auto中先进入审批模型，在Accept Edits/Full中请求exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
-host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
+host fallback；[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md) 的 App availability 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
 模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常和无效响应升级真人审批；此前审查的 circuit breaker 不让新的 Shell 命令跳过模型。
 显式敏感路径以及因变量、任意脚本或间接 child 无法证明文件目标的 Shell 都投影
 `sensitiveExternalAccess`。Workspace 外固定 credential/persistence/system identity 也必须投影该 fact：Full 直接授权，Auto 三态
@@ -206,7 +206,7 @@ host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启
 Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
 qualification evidence。
 
-Shell command surface不可穷举。ADR-0160规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；ADR-0189调整Auto路由。未命中且
+Shell command surface不可穷举。[Agent Note 0160](../../.agents/notes/implemented/bug-fix/2026-09-01-uncertain-shell-requires-exact-approval.md)规定只读grammar仅为通过验证的命令生成`proven_read_only`免审事实；[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)调整Auto路由。未命中且
 无法完整确定effects时生成`uncertainEffects`并按模式审批，而不是fixed-list hard deny。已知Workspace mutation与
 已知扩scope继续按既有phase/mode矩阵治理。Auto reviewer接管uncertain Shell的审批判断，但不接管关键系统hard deny或native
 capability qualification；Full同样不能绕过uncertain Shell的exact确认。
@@ -240,7 +240,7 @@ mode review，它不会作为无需交互的 read batch 成员；RM-09 后 Sched
 `access/resourceScopes/conflictKeys/isolation/causalGroup/interactionBarrier/concurrencyGroup/leaseFenceRequired`
 判定 overlap，不读取具体工具名。误分类不能依赖
 Workspace sandbox 兜底，因为 development 的 `workspace_only` capability 仍可能允许 Workspace 写入。
-按ADR-0162，uncertain Shell的人类approval grants固定为`approve_once|same_command`，并保留拒绝动作；
+按[Agent Note 0162](../../.agents/notes/implemented/simplification/2026-09-01-remove-read-only-trial-grant.md)，uncertain Shell的人类approval grants固定为`approve_once|same_command`，并保留拒绝动作；
 它们继续使用原sealed policy scope，不增加只读Sandbox变体或额外用户选项。
 `rg -f/--file` 保持只读，但其 pattern 文件与搜索路径都是读取目标；任一目标位于 Workspace 外时必须进入
 external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
@@ -257,10 +257,10 @@ payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `
 该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
 `RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
 `--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
-按 ADR-0137，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、`git log`、
+按 [Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)，Building 的 Workspace baseline 与 Planning 的 read-only baseline 内 direct `git status`、`git log`、
 不写文件的`git diff`及由`head/tail/echo`组成的只读pipe可直接执行；`2>/dev/null`等只丢弃输出的redirect不产生
 Workspace mutation或人工审批。已知external/sensitive scope才按当前mode审查。
-命中 ADR-0134 闭集 classifier 的 status/log 仍使用 hardened environment：POSIX固定将`HOME/XDG_CONFIG_HOME`
+命中 [Agent Note 0134](../../.agents/notes/implemented/simplification/2026-08-24-closed-read-only-git-shell-grammar.md) 闭集 classifier 的 status/log 仍使用 hardened environment：POSIX固定将`HOME/XDG_CONFIG_HOME`
 投影到不存在的中性路径，关闭system/global config、credential prompt、pager、optional locks与repository fsmonitor helper，
 且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git解释为待执行的空helper，不能用于关闭。Planning 与关键系统
 destructive hard deny保持独立且只匹配高置信executable位置；参数或输出中的危险词不能触发。`git_inspect` 已退役，
@@ -385,8 +385,8 @@ auto-review，缺少该字段的历史 snapshot 必须保守回退到人工审�
 Sub-agent lifecycle attempt，不创建或结算 parent/tool reservation；真正获批恢复时才打开新的
 parent attempt。已经自动或人工获批的 active continuation 优先于 queued sibling；获批 child
 完成或再次暂停前，后者不得插队占用 canonical interaction。每个 child 的 model/tool reservation
-仍来自父 run 的共享累计预算 ledger（ADR-0104）。自动审查升级人工审批时，内部 `reviewFailure` 继续
-记录 reviewer 的判断或技术失败，但按 ADR-0142 不作为 raw client payload；App projector 只可输出有界、
+仍来自父 run 的共享累计预算 ledger（[Agent Note 0104](../../.agents/notes/implemented/feature/2026-08-13-bounded-concurrent-subagent-dispatch.md)）。自动审查升级人工审批时，内部 `reviewFailure` 继续
+记录 reviewer 的判断或技术失败，但按 [Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md) 不作为 raw client payload；App projector 只可输出有界、
 低敏感度的 approval title/summary，TUI 不得重新读取 raw command、scope、Provider body 或 Host payload。
 升级后的 canonical approval interaction 本身必须可见，不能表现成永久等待。当 durable approval interaction 早于 Runtime action waiter 到达 TUI 时，Enter/Esc 决定必须绑定 exact interaction id 排队，waiter 建立后立即消费；错配的后续 interaction 不得继承该决定。Runtime 调用 reviewer
 时必须提供当前用户任务、workspace root，以及可用时的 Subagent 身份和角色；reviewer 不得只依据
@@ -404,7 +404,7 @@ TUI 对 tool 和 Subagent 生命周期的可见标签可以按用户语言本地
 不得绘制 `├─`、竖线或伪父子树。该布局只消费 Runtime 已签发的 group、child status 与 step
 事实，不得改变调度、审批顺序、reservation 或并发判断。
 
-ADR-0134 的 direct status/log 闭集同时提供 `proven_read_only` 与 hardening 分类，不依赖专用 Git surface。
+[Agent Note 0134](../../.agents/notes/implemented/simplification/2026-08-24-closed-read-only-git-shell-grammar.md) 的 direct status/log 闭集同时提供 `proven_read_only` 与 hardening 分类，不依赖专用 Git surface。
 `git_inspect` 与 internal broker 已退役。status/log 等已证明只读 Shell 按 phase baseline 直接执行；
 stage、commit 等已知 mutation 按 mode 治理；remote、未知 raw Git 与其他无法完整确定 effects 的命令请求 exact 真人审批。
 Git 进程由 Shell executor 承载，其 stdout/stderr 继续按 Shell 的有界输出与 receipt 规则处理。
@@ -437,7 +437,7 @@ JSON/schema/secret inspection，并绑定 exact endpoint 与已批准的 executi
 
 Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，不得在 Controller 私有数组中无界累积并等待终态结果。`tool.progress` 是仅供当前进程展示的 ephemeral event术语（瞬态事件）：Runner 按 `toolCallId + stream` 合并尚未消费的批次并保留有界 tail，不写入 Runtime event store 或 snapshot，也不推进 revision；任何 started/terminal/durable event 都是顺序屏障，必须先交付此前 progress，终态事件不得被 progress 淘汰。批次可携带仅保留的完整行和原始 `lineCount`，TUI 因而能在丢弃中间展示帧后继续显示准确总行数。前台 Session 以 50ms presentation frame 合并，同一 call/stream 内保序；一个 frame 内 stdout/stderr 不承诺跨 stream 全序。后台 Session 同样只保留每个 call/stream 的有界聚合 tail，缓冲容量是 presentation soft limit，不能通过 `shift oldest` 丢弃 terminal/lifecycle fact。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 
-## 工具名单单一事实源（ADR-0043）
+## 工具名单单一事实源（[Agent Note 0043](../../.agents/notes/implemented/feature/2026-07-26-tool-spec-registry-and-strict-edit.md)）
 
 computer、coordination、interrupt 与 runtime action 静态工具由 Builtin frozen catalog projection 统一描述；dynamic MCP
 仍走独立 binding/descriptor route。Prepared production request 先由 Pipeline/Kernel governance admission 形成
@@ -469,7 +469,7 @@ App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution
 path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用分类和审计 `action.intent` 可由命令形态
-派生，但审批 payload 不接受模型建议授权或 prefix rule。ADR-0137 的回归语料必须证明 `ls`、`pwd`、`rg`、
+派生，但审批 payload 不接受模型建议授权或 prefix rule。[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md) 的回归语料必须证明 `ls`、`pwd`、`rg`、
 direct `git status`/无patch `git log`在phase baseline内可direct，Workspace mutation与local Git扩scope进入既有
 mode-aware route，未知脚本在Auto中进入审批模型、在其他模式请求exact真人审批。`git_inspect` 已退役，不进入 model ToolSet。
 
@@ -511,8 +511,8 @@ Runtime-action/coordination execute 输出中的 events 在模型投影之外返
 
 当 run 携带 sealed `ExecutionBoundary` 时，Builtin catalog entry 还从 capability contract 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
-Workspace identity 和 canonical target。按 ADR-0118，文件 read 对任何有效路径 allow，Workspace 内
-write 对所有名称 allow，Workspace 外 write 返回 prompt；按 ADR-0131，execute/process 对 Workspace 内所有
+Workspace identity 和 canonical target。按 [Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)，文件 read 对任何有效路径 allow，Workspace 内
+write 对所有名称 allow，Workspace 外 write 返回 prompt；按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)，execute/process 对 Workspace 内所有
 名称同样 allow，additional deny/allow 与 protected name 只能约束 Workspace 外 identity。Tool Pipeline 在 grant 签发前固定 evaluator revision；Local Provider 再验证
 canonical Workspace、`workspace_only | external_read | approved_external` scope 与 no-follow identity。
 read/write/edit 分别声明实际 access，search 声明 root read且不再按 protected 名称过滤。完整 builtin tuple 的
@@ -534,7 +534,7 @@ command deny 仍独立存在，且两者不得重新引入 Workspace 内名称�
    何处，Building 阶段内可证明只作用于其内部的结构化 `write_file`/`edit_file` 可直接执行；raw Shell 与 Git
    在对应 phase baseline 内可 direct，已知 external/sensitive scope 才在 Full 直接授权、Auto 三态审查、Accept
    Edits 请求用户审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal`
-   boolean 推导批准。Windows operation 使用 runtime context 指示的原生路径，并按 ADR-0122 由 locked directory
+   boolean 推导批准。Windows operation 使用 runtime context 指示的原生路径，并按 [Agent Note 0122](../../.agents/notes/implemented/bug-fix/2026-08-18-windows-handle-locked-workspace-mutation.md) 由 locked directory
    handle 发布；native handle capability 不可用时仍以技术能力不足 fail closed。
 3. `accept_edits`、`auto`、`full` 是当前唯一可密封到 Subagent grant 的交互模式，只决定交互策略，不取消
    capability schema、revision、minimum approval 或 sandbox 检查；旧的 `default` identity 必须在 Driver/
@@ -575,7 +575,7 @@ command deny 仍独立存在，且两者不得重新引入 Workspace 内名称�
     sibling approval，Runner 必须先排空后台 terminal/diagnostic 再结束，不能提前关闭
     RuntimeStore 或 logger。
 
-## 文件原像与可逆性（ADR-0042 §4）
+## 文件原像与可逆性（[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md) §4）
 
 `write_file` / `edit_file` 改动工作区文件前，工具执行链捕获目标文件原像，成功写入后记录
 最后一次 Kite 写入结果的内容指纹，一并存入 RuntimeStore。这是 `accept_edits` 等模式

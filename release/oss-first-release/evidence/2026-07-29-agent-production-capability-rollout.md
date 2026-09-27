@@ -2,7 +2,7 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：5.1、5.2、5A.1、5A.2、5.3A、5B.1–5B.3、5.3B、5C.1、5C.2、5.3C、5.4 的
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：5.1、5.2、5A.1、5A.2、5.3A、5B.1–5B.3、5.3B、5C.1、5C.2、5.3C、5.4 的
 本地 profile/status/conformance/adversarial/security Gate 记为 `completed`；所有 dogfood、canary 与
 maturity Task 已被取代。Verification、MCP write 与 Skills 仍受默认关闭、显式用户开启和 embedded
 ceiling 约束。当前状态见 `release/oss-first-release/task-status.json`。
@@ -13,7 +13,7 @@ ceiling 约束。当前状态见 `release/oss-first-release/task-status.json`。
 [`Phase 2B Agent Evaluation`](2026-07-29-agent-production-evaluation.md)、
 [`Phase 3 Observability`](2026-07-29-agent-production-observability-operations.md)
 安全依赖：Phase 1A、1B、1C 全部完成
-架构依赖：MCP/Skills/Verification 现有 accepted ADR 与 active governance
+架构依赖：MCP/Skills/Verification 现有 accepted 决策记录与 active governance
 设计依据：RFC §8、§12、§16
 
 ## 目标
@@ -23,7 +23,7 @@ Capability 分别评估、canary、回滚，避免实现存在被误认为生产
 
 ## 当前本地 Contract 边界
 
-D-10 已由 ADR-0064 关闭；两路最终整体 Review 均为 GO 后，Task 5.1、5.2、5A.1、5A.2、5C.1、
+D-10 已由 [Agent Note 0064](../../../.agents/notes/implemented/architecture/2026-08-02-conservative-skill-effects-and-capability-profile-admission.md) 关闭；两路最终整体 Review 均为 GO 后，Task 5.1、5.2、5A.1、5A.2、5C.1、
 5C.2 与 5.4 的 dependency-ready 本地 foundation 已完成。5.3A/5.3C 等 task evidence 仍等待
 `MS:2B-DONE`；5B.1–5B.3 仍受 stable Verification/route 依赖阻塞。本地完成证据见
 [Phase 5 Capability Foundation 记录](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-08-02-agent-production-capability-foundation.md)。
@@ -101,7 +101,7 @@ off
 | 5C.6 | `MS:5A-STABLE`、`MS:5C-READONLY-STABLE`、5.3C | internal effectful Skill profile/evidence | internal effectful Skill Gate replay | 与 MCP write 分 cohort；关闭后保留 receipt/Verification |
 | 5C.7 | 5C.6、`MS:LIM-APPROVED`、`MS:LIMITED-SLO` | external effectful Skill canary/evidence | effectful Skill canary G3/G4/G5 replay | cohort 0 + effectful Skill off；不删除 Verification |
 | 5C.8 | 5C.7 | `release/capability-decisions/skills-effectful.json`、beta/stable Gate records | `bun test tests/release/capability-maturity-gate.test.ts`；Gate replay | 唯一产生 `MS:5C-EFFECTFUL-STABLE` |
-| 5.4 | 5.1、5.2 | common active/book/map/ADR、framework evidence/完成记录 | `bun run check:docs-impact`、`bun run check:docs` | 每条 maturity Task 自带 capability-specific 文档；未完成轨道保持 off |
+| 5.4 | 5.1、5.2 | common active/book/map/决策记录、framework evidence/完成记录 | `bun run check:docs-impact`、`bun run check:docs` | 每条 maturity Task 自带 capability-specific 文档；未完成轨道保持 off |
 
 里程碑：
 
@@ -398,7 +398,7 @@ Skill `allowed-tools`/dependencies 只表达 ceiling，不预批准工具。
 - `docs/handbook/features/extensions.md`
 - `tests/README.md`
 - `docs/documentation-map.json`
-- capability-specific ADR 和完成记录。
+- capability-specific 决策记录和完成记录。
 
 ## 验收条件
 
@@ -429,7 +429,7 @@ Skill `allowed-tools`/dependencies 只表达 ceiling，不预批准工具。
 - [ ] 每个 capability 有独立 profile、dashboard、Gate 和 rollback；
 - [ ] 首次 canary 不耦合多个高风险能力；
 - [ ] Agent task 和人工 review 达预注册阈值；
-- [ ] active/book/ADR/map 与实现一致。
+- [ ] active/book/决策记录/map 与实现一致。
 
 ## 回滚
 

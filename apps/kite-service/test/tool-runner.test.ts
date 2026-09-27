@@ -1045,9 +1045,9 @@ describe('invokeGovernedTool 鈥?search_content', () => {
   });
 });
 
-// ── ADR-0042 §4：写入前文件原像捕获 / file pre-image capture ──
+// ── 写入前文件原像捕获 / file pre-image capture ──
 
-describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
+describe('invokeGovernedTool — file pre-image capture', () => {
   let workspace: string;
   beforeEach(() => {
     workspace = mkdtempSync(join(tmpdir(), 'kite-code-preimage-capture-'));
@@ -1131,7 +1131,7 @@ describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
 
   it('captures the pre-image before edit_file replaces content', async () => {
     writeFileSync(join(workspace, 'code.ts'), 'const a = 1;\n', 'utf8');
-    // ADR-0042 §1：先读后改——先经 read_file 登记读取状态，edit 才能通过校验。
+    // 先读后改：先经 read_file 登记读取状态，edit 才能通过校验。
     await invokeGovernedTool({
       workspace,
       request: requestOf('read_file', { path: 'code.ts' }),

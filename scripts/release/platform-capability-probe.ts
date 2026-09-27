@@ -321,7 +321,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
       ...partial,
       outcome,
       // Native probes establish only technical capability. Production admission
-      // additionally requires an accepted ADR, closed D-04, and a pinned matrix.
+      // additionally requires an implemented Agent Note, closed D-04, and a pinned matrix.
       productionSupported: false,
       limitations,
     };

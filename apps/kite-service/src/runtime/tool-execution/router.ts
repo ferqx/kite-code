@@ -237,7 +237,7 @@ export async function executeAppRuntimeTools(params: {
   /** Current Kernel state used to reject a prepared/leased effect that became unsafe. */
   getRuntimeState?: () => Readonly<RuntimeState>;
   waitForStateRevisionChange?: (revision: number, signal?: AbortSignal) => Promise<void>;
-  /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
+  /** 写入前文件原像记录器，透传给工具执行链。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorder;
   /** Actor identities for nested child calls; absent top-level calls use parent. */

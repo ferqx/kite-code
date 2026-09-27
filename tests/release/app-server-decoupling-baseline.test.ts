@@ -64,10 +64,12 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
     expect(source('scripts/release/app-server-client.ts')).toContain('runtimeRoot: home.root');
   });
 
-  test('binds the accepted decision and archived completion evidence', () => {
+  test('binds the implemented Note and archived completion evidence', () => {
     expect(
-      source('docs/adr/0166-decouple-app-server-process-from-durable-session-authority.md'),
-    ).toContain('状态：accepted');
+      source(
+        '.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md',
+      ),
+    ).toContain('Status: implemented');
     const plan = source('release/app-server/evidence/2026-09-02-app-server-session-decoupling.md');
     expect(plan).toContain('状态：archived');
     expect(plan).toContain('kite-session-app-server-2026-09-02');

@@ -1,6 +1,5 @@
-import { lstatSync, readdirSync, realpathSync } from 'node:fs';
-import { userInfo } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import {
   type LegacyKiteProcessIdentity,
   observeLegacyKiteStoreProcesses,
@@ -12,9 +11,6 @@ export type SourceKiteStoreAdmissionReason =
   | 'source_identity_mismatch'
   | 'source_build_mismatch'
   | 'source_parent_unverified'
-  | 'installed_entrypoint_present'
-  | 'desktop_entrypoint_present'
-  | 'distribution_inspection_incomplete'
   | 'legacy_process_busy'
   | 'legacy_process_inspection_incomplete';
 
@@ -31,7 +27,7 @@ export type SourceKiteStoreAdmission =
   | { readonly admitted: false; readonly reason: SourceKiteStoreAdmissionReason };
 
 /**
- * A bounded distribution/process review for source CLI/TUI Service startup on macOS.
+ * A bounded process review for source CLI/TUI Service startup on macOS.
  * This is one prerequisite for migration, never a replacement for canonical maintenance,
  * source snapshot revalidation, or transaction-safe publication.
  */
@@ -85,11 +81,10 @@ export function reviewSourceKiteStoreAdmission(input: {
   }
   const parent = readKiteSourceClientParentIdentity(process.ppid, root);
   if (!parent) return { admitted: false, reason: 'source_parent_unverified' };
-  const distribution = inspectSourceDistributionEntrypoints(input.knownManagedPrefixes ?? [], env);
-  if (distribution !== 'clear') return { admitted: false, reason: distribution };
   const observation = observeLegacyKiteStoreProcesses({
     exclude: [parent],
     managedInstallPrefixes: input.knownManagedPrefixes,
+    canonicalKiteHome: home,
   });
   if (observation.status === 'busy') return { admitted: false, reason: 'legacy_process_busy' };
   if (observation.status !== 'complete') {
@@ -104,54 +99,4 @@ export function reviewSourceKiteStoreAdmission(input: {
       observedAt: new Date().toISOString(),
     },
   };
-}
-
-function inspectSourceDistributionEntrypoints(
-  knownManagedPrefixes: readonly string[],
-  environment: Readonly<Record<string, string | undefined>>,
-):
-  | 'clear'
-  | 'installed_entrypoint_present'
-  | 'desktop_entrypoint_present'
-  | 'distribution_inspection_incomplete' {
-  const systemHome = userInfo().homedir;
-  const prefixes = [join(systemHome, '.local/share/kite-code'), ...knownManagedPrefixes];
-  if (prefixes.some((value) => !isAbsolute(value))) return 'distribution_inspection_incomplete';
-  try {
-    for (const prefix of prefixes) {
-      if (lstatSync(prefix, { throwIfNoEntry: false })) return 'installed_entrypoint_present';
-    }
-    const searchPath = environment.PATH;
-    if (!searchPath) return 'distribution_inspection_incomplete';
-    for (const directory of searchPath.split(':')) {
-      if (!isAbsolute(directory)) return 'distribution_inspection_incomplete';
-      let names: string[];
-      try {
-        names = readdirSync(directory);
-      } catch (error) {
-        // PATH routinely contains optional directories that do not exist on this host.
-        // Command resolution cannot start an old Kite entrypoint from such a segment.
-        if (isNodeError(error, 'ENOENT') || isNodeError(error, 'ENOTDIR')) continue;
-        throw error;
-      }
-      if (names.some((name) => /^(?:kite|kite-tui|kite-service)(?:\.exe)?$/iu.test(name))) {
-        return 'installed_entrypoint_present';
-      }
-    }
-    for (const parent of ['/Applications', join(systemHome, 'Applications')]) {
-      const stat = lstatSync(parent, { throwIfNoEntry: false });
-      if (!stat) continue;
-      if (!stat.isDirectory() || stat.isSymbolicLink()) return 'distribution_inspection_incomplete';
-      if (readdirSync(parent).some((name) => /^kite\.app$/iu.test(name))) {
-        return 'desktop_entrypoint_present';
-      }
-    }
-    return 'clear';
-  } catch {
-    return 'distribution_inspection_incomplete';
-  }
-}
-
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

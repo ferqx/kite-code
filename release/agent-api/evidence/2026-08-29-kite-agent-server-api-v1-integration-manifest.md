@@ -4,7 +4,7 @@
 
 日期：2026-08-29
 
-相关：[`Public contract freeze`](2026-08-29-kite-agent-server-api-v1-contract-freeze.md)、ADR-0149、ADR-0150、
+相关：[`Public contract freeze`](2026-08-29-kite-agent-server-api-v1-contract-freeze.md)、[Agent Note 0149](../../../.agents/notes/proposed/feature/2026-08-29-stable-local-agent-api-facade.md)、[Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md)、
 [`Kite Agent Server API V1 实施方案`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-29-kite-agent-server-api-v1.md)。
 
 ## 1. 新workspace contract
@@ -109,7 +109,7 @@ KASAPI-02A只接Context、ServerInfo与read-only route shell；KASAPI-02B接Sess
 
 ## 4. Store 8 / Host integration inventory
 
-ADR-0150 implementation只修改existing Runtime owners：
+[Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md) implementation只修改existing Runtime owners：
 
 ```text
 packages/runtime-host/src/storage/**
@@ -186,7 +186,7 @@ filesystem/ACL evidence通过才升级。
 | `web-api-docs` | Web api-docs source、Vite emit、Gateway static routes、release asset verifier | Web/Service README；Coordinator/Web、open-source release active记录 |
 | `native-agent-api-bootstrap` | `packages/kite-local-runtime/src/agent-api/**` | local-runtime README/doc；Workspace Trust、Coordinator/Worker、Agent API active记录 |
 
-ADR、RFC、plan与understanding manifest不是current authority，不能作为documentation-map `authorities`。KASAPI-05C只有在所有owner source、README、
+决策记录、RFC、plan 与 understanding manifest 不是 current authority，不能作为documentation-map `authorities`。KASAPI-05C只有在所有owner source、README、
 active/book/runbook/release evidence共同收敛后才把主计划标记completed。
 
 ## 8. Rollback inventory
@@ -194,6 +194,6 @@ active/book/runbook/release evidence共同收敛后才把主计划标记complete
 - 01A/01B无consumer时删除package、root graph与generated artifacts；
 - 02A/02B移除existing Worker route registration/context/read adapter，不触碰Store；
 - 02C移除exact Web emit/static route与release manifest entry，不留discoverable stale spec；
-- Store 8只按ADR-0150 journal/fence/write-state回滚，不能因HTTP façade关闭而回退Store writer；
+- Store 8只按 [Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md) 的 journal/fence/write-state回滚，不能因HTTP façade关闭而回退Store writer；
 - mutation/SSE关闭时先quiesce admission并drain，已applied Run/receipt继续由Runtime recovery收敛；
 - SDK/Native export与descriptor/capability同tranche撤回；private Runtime TUI/CLI与Web Observer不切到fallback。

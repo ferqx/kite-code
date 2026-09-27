@@ -1,4 +1,4 @@
-/** Protocol-first contract for the governed sandbox preparation seam (ADR-0111). */
+/** Protocol-first contract for the governed sandbox preparation seam. */
 
 import type {
   SandboxExecutionBackend as RuntimeContractSandboxExecutionBackend,

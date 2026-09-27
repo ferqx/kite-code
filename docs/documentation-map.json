@@ -17,11 +17,7 @@
         ".github/pull_request_template.md",
         "CLAUDE.md"
       ],
-      "authorities": [
-        "docs/active/documentation-language.md",
-        "docs/development/documentation.md",
-        "docs/AGENTS.md"
-      ]
+      "authorities": ["docs/development/documentation.md", "docs/AGENTS.md"]
     },
     {
       "id": "root-package-manifest",
@@ -625,7 +621,7 @@
         "release/**",
         "scripts/release/**",
         "tests/release/**",
-        "docs/adr/0069-first-release-terminal-scope.md",
+        ".agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md",
         ".github/workflows/release-candidate.yml"
       ],
       "excludeSources": [

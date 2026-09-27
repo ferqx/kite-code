@@ -5,13 +5,11 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readdirSync,
   readFileSync,
   readSync,
   realpathSync,
 } from 'node:fs';
-import { userInfo } from 'node:os';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   type PairedDesktopServiceManifest,
   pairedDesktopManifestDigest,
@@ -28,9 +26,6 @@ export type PairedDesktopStoreAdmissionReason =
   | 'desktop_identity_mismatch'
   | 'paired_manifest_mismatch'
   | 'desktop_parent_unverified'
-  | 'other_distribution_differs'
-  | 'other_distribution_unknown'
-  | 'distribution_inspection_incomplete'
   | 'legacy_process_busy'
   | 'legacy_process_inspection_incomplete';
 
@@ -122,15 +117,9 @@ export function reviewPairedDesktopStoreAdmission(input: {
     ...(input.sourceRepositoryRoot ? { sourceRepositoryRoot: input.sourceRepositoryRoot } : {}),
   });
   if (!parent) return { admitted: false, reason: 'desktop_parent_unverified' };
-  const distribution = inspectPairedDesktopDistribution({
-    serviceSha256: paired.serviceSha256,
-    manifestSha256: paired.manifestSha256,
-    knownManagedPrefixes: input.knownManagedPrefixes ?? [],
-    searchPath: environment.PATH ?? '',
-  });
-  if (distribution !== 'clear') return { admitted: false, reason: distribution };
   const observation = observeLegacyKiteStoreProcesses({
     exclude: [parent],
+    canonicalKiteHome: home,
     managedInstallPrefixes: input.knownManagedPrefixes,
   });
   if (observation.status === 'busy') return { admitted: false, reason: 'legacy_process_busy' };
@@ -146,75 +135,6 @@ export function reviewPairedDesktopStoreAdmission(input: {
       observedAt: new Date().toISOString(),
     },
   };
-}
-
-/** Fixed platform locations plus explicit managed prefixes; an unknown Kite PATH slot refuses. */
-export function inspectPairedDesktopDistribution(input: {
-  readonly serviceSha256: string;
-  readonly manifestSha256: string;
-  readonly knownManagedPrefixes: readonly string[];
-  readonly searchPath: string;
-  readonly defaultManagedPrefix?: string;
-  readonly applicationRoots?: readonly string[];
-}):
-  | 'clear'
-  | 'other_distribution_differs'
-  | 'other_distribution_unknown'
-  | 'distribution_inspection_incomplete' {
-  const home = userInfo().homedir;
-  const prefixes = [
-    input.defaultManagedPrefix ?? join(home, '.local/share/kite-code'),
-    ...input.knownManagedPrefixes,
-  ];
-  const applications = input.applicationRoots ?? ['/Applications', join(home, 'Applications')];
-  if (
-    prefixes.some((value) => !isAbsolute(value)) ||
-    applications.some((value) => !isAbsolute(value))
-  )
-    return 'distribution_inspection_incomplete';
-  try {
-    for (const prefix of prefixes) {
-      if (!lstatSync(prefix, { throwIfNoEntry: false })) continue;
-      const active = readSmallRegularFile(join(prefix, 'active'), 64).toString('utf8');
-      if (!/^[a-f0-9]{24}\n$/u.test(active)) return 'other_distribution_unknown';
-      const candidate = join(prefix, 'releases', active.trim(), 'bin', 'kite-service');
-      if (hashRegularFile(candidate) !== input.serviceSha256) return 'other_distribution_differs';
-    }
-    if (!input.searchPath) return 'distribution_inspection_incomplete';
-    for (const directory of input.searchPath.split(':')) {
-      if (!isAbsolute(directory)) return 'distribution_inspection_incomplete';
-      let names: string[];
-      try {
-        names = readdirSync(directory);
-      } catch (error) {
-        if (isNodeError(error, 'ENOENT') || isNodeError(error, 'ENOTDIR')) continue;
-        throw error;
-      }
-      if (!names.some((name) => /^(?:kite|kite-tui|kite-service)(?:\.exe)?$/iu.test(name)))
-        continue;
-      const known = prefixes.some((prefix) => directory === join(prefix, 'bin'));
-      if (!known) return 'other_distribution_unknown';
-    }
-    for (const root of applications) {
-      const stat = lstatSync(root, { throwIfNoEntry: false });
-      if (!stat) continue;
-      if (!stat.isDirectory() || stat.isSymbolicLink()) return 'distribution_inspection_incomplete';
-      for (const name of readdirSync(root)) {
-        if (!/^kite\.app$/iu.test(name)) continue;
-        const service = join(root, name, 'Contents/Resources/service/kite-service');
-        if (hashRegularFile(service) !== input.serviceSha256) return 'other_distribution_differs';
-        const manifestBytes = readSmallRegularFile(join(dirname(service), 'desktop.json'), 16_384);
-        if (
-          pairedDesktopManifestDigest(JSON.parse(manifestBytes.toString('utf8')) as unknown) !==
-          input.manifestSha256
-        )
-          return 'other_distribution_differs';
-      }
-    }
-    return 'clear';
-  } catch {
-    return 'distribution_inspection_incomplete';
-  }
 }
 
 function readSmallRegularFile(path: string, maxBytes: number): Buffer {
@@ -261,7 +181,4 @@ function hashRegularFile(path: string): string {
   } finally {
     closeSync(fd);
   }
-}
-function isNodeError(error: unknown, code: string): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }

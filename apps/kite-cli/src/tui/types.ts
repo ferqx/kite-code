@@ -111,10 +111,10 @@ export type OutputBlockVariant =
        * child rows are appended. The hidden source retains the unfinished row. */
       streamingComponent?: 'code' | 'table';
       streamingSource?: string;
-      /** 被文本关闭的纯思考块并入的时长（ms，ADR-0026）。存在时在文本块顶部
+      /** 被文本关闭的纯思考块并入的时长（ms）。存在时在文本块顶部
        *  渲染暗色 "Thinking Xs" 题头行；独立思考块已删除，时长全量转移。
        *  Elapsed (ms) of a pure-thinking block merged in when text closed it
-       *  (ADR-0026). Renders a dim "Thinking Xs" header above the content;
+       *  Renders a dim "Thinking Xs" header above the content;
        *  the standalone block was removed with its elapsed fully transferred. */
       thoughtElapsedMs?: number;
       /** Complete reasoning revealed only after model.responded, merged with the Thought header. */

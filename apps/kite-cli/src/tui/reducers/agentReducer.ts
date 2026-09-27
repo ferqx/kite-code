@@ -6,6 +6,7 @@ import type { OutputBlock, TuiApprovalStatus, TuiPendingApproval, TuiState } fro
 import type { Action } from './actions';
 import { projectPresentationBoundary } from './handleClientEvent';
 import { appendBlock, findBlockById, replaceBlockById } from './helpers';
+import { resetModelStreamProjection } from './model-stream-projection';
 
 function focusableApproval(status: TuiApprovalStatus): boolean {
   return (
@@ -120,17 +121,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         runCount: state.runCount + 1,
         runStartTime: Date.now(),
         runTokenBaseline: state.status.totalTokens,
-        currentRunReasonId: undefined,
-        currentThoughtSummaryId: undefined,
-        currentModelRequestId: undefined,
-        currentModelTextStreamed: undefined,
-        currentModelTextSource: undefined,
-        toolBearingModelRequestId: undefined,
-        toolBearingPresentationGroupId: undefined,
-        currentModelReasoningStreamed: false,
-        currentModelReasoningText: undefined,
-        currentModelReasoningRequestId: undefined,
-        settledModelRequestIds: new Set(),
+        ...resetModelStreamProjection(),
         explorationSummaryIds: {},
         presentationGroupSummaryIds: {},
         pendingToolCalls: {},

@@ -9,7 +9,7 @@
 `bun run --cwd apps/kite-web typecheck`、`bun run check:runtime-packages`、`bun run check:pre-release-architecture`、
 `bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
-相关：ADR-0147、ADR-0148、ADR-0152、ADR-0154、ADR-0155、ADR-0156、
+相关：[Agent Note 0154](../../.agents/notes/implemented/simplification/2026-08-30-pre-release-store9-clean-cutover.md)、
 [`本机 App Server 与 Durable Session Runtime`](app-server-local-runtime.md)。
 
 ## 当前拓扑
@@ -23,7 +23,7 @@ process/control/state与Coordinator production glue已经删除，不能由普�
 Workspace仍是Trust、配置、Skill、MCP、Sandbox、Controller与query scope，但不拥有独立进程、DB或idle lifecycle。
 `apps/kite-service/src/workspace-worker/`中仍被App Server消费的identity、Trust、effect与execution组件是in-process领域模块。
 
-ADR-0166的`kite-session.sqlite`多连接owner不取得Workspace process lock，以Session generation裁决writer，并允许同Workspace不同App
+[Agent Note 0166](../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)的`kite-session.sqlite`多连接owner不取得Workspace process lock，以Session generation裁决writer，并允许同Workspace不同App
 Server写不同Session。KASD-03默认client已切入该owner；这不恢复Coordinator/Worker拓扑，旧Workspace lock与one-connection Store没有
 production caller。
 

@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 const root = process.cwd();
 const planDirectory = join(root, 'release', 'oss-first-release', 'evidence');
+const firstReleaseNote =
+  '.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md';
 const plans = [
   '2026-07-29-agent-production-governance-decisions.md',
   '2026-07-29-agent-production-local-data-privacy.md',
@@ -28,7 +30,7 @@ const registrySchema = z
     schema: z.literal('OpenSourceFirstReleaseTaskStatusV2'),
     version: z.literal(2),
     asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    authority: z.literal('ADR-0069'),
+    authority: z.literal(firstReleaseNote),
     categories: z
       .object({
         first_release_required: categorySchema,
@@ -53,7 +55,6 @@ for (const plan of plans) {
   const source = readFileSync(join(planDirectory, plan), 'utf8');
   if (!source.includes('状态：superseded'))
     failures.push(`${plan}: must remain a superseded historical plan`);
-  if (!source.includes('ADR-0069')) failures.push(`${plan}: missing ADR-0069 terminal-scope note`);
   if (!source.includes('release/oss-first-release/task-status.json')) {
     failures.push(`${plan}: missing current Task status authority`);
   }
@@ -105,8 +106,11 @@ if (computed.total !== 108 || computed.completed !== 83 || computed.superseded !
   failures.push(`unexpected first-release Task classification: ${JSON.stringify(computed)}`);
 }
 
-requireText('docs/adr/0069-first-release-terminal-scope.md', [
-  '状态：accepted',
+requireText(firstReleaseNote, [
+  '# Agent Note: ',
+  'Status: implemented',
+  '## Problem',
+  '## Decision',
   'G0',
   'G1',
   '83 `completed`、25 `superseded`、0 optional',
@@ -115,7 +119,7 @@ requireText('docs/active/open-source-first-release.md', [
   '状态：active',
   '读取时机：',
   '验证：',
-  'ADR-0069',
+  '2026-08-04-first-release-terminal-scope.md',
   'G0',
   'G1',
   'release:build',
@@ -126,7 +130,6 @@ requireText('docs/active/open-source-first-release.md', [
 ]);
 requireText('release/oss-first-release/evidence/2026-07-29-agent-production-readiness-roadmap.md', [
   '状态：archived',
-  'ADR-0069',
   '`completed` | 83',
   '`superseded` | 25',
   '0 optional',
@@ -144,13 +147,12 @@ if (maintainerChecklist.includes('- [ ]')) {
   failures.push('first-release maintainer checklist still has unchecked items');
 }
 requireText('release/oss-first-release/evidence/2026-07-29-agent-production-decision-register.md', [
-  'ADR-0069',
   '| 45 | 2026-08-04 |',
   '83 completed、25 superseded、0 optional',
 ]);
 requireText('docs/documentation-map.json', [
   'docs/active/open-source-first-release.md',
-  'docs/adr/0069-first-release-terminal-scope.md',
+  firstReleaseNote,
 ]);
 
 if (failures.length > 0) {

@@ -3,6 +3,7 @@
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
 import { findBlockById, replaceBlockById } from './helpers';
+import { resetModelStreamProjection } from './model-stream-projection';
 
 /** Collect all reason blocks across all turns — shared by TOGGLE_ALL_REASON and TOGGLE_THINKING */
 function collectReasonBlocks(state: TuiState): (OutputBlock & { kind: 'reason' })[] {
@@ -187,17 +188,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         pendingToolCalls: {},
         presentationGroupSummaryIds: {},
         pendingSubagentTerminals: new Map(),
-        currentRunReasonId: undefined,
-        currentThoughtSummaryId: undefined,
-        currentModelRequestId: undefined,
-        currentModelTextStreamed: undefined,
-        currentModelTextSource: undefined,
-        toolBearingModelRequestId: undefined,
-        toolBearingPresentationGroupId: undefined,
-        currentModelReasoningStreamed: false,
-        currentModelReasoningText: undefined,
-        currentModelReasoningRequestId: undefined,
-        settledModelRequestIds: new Set(),
+        ...resetModelStreamProjection(),
       };
     case 'ESCAPE': {
       if (state.showHelp) return { ...state, showHelp: false };

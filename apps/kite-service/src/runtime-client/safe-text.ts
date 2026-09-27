@@ -9,29 +9,9 @@ export function projectRuntimeClientText(
   value: string,
   maximum = MAX_CLIENT_TEXT_CODE_POINTS,
 ): string {
-  let text = '';
-  for (const character of value) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint === undefined) continue;
-    if (
-      codePoint <= 0x08 ||
-      codePoint === 0x0b ||
-      codePoint === 0x0c ||
-      (codePoint >= 0x0e && codePoint <= 0x1f) ||
-      (codePoint >= 0x7f && codePoint <= 0x9f)
-    ) {
-      continue;
-    }
-    text += character;
-  }
+  let text = stripControlCharacters(value);
   for (const pattern of SECRET_PATTERNS) text = text.replace(pattern, '[redacted]');
-  if (text.length <= maximum) return text;
-  let end = Math.max(0, maximum - 1);
-  // Protocol/Zod bounds use JavaScript string length. Avoid splitting a UTF-16
-  // surrogate pair while keeping the ellipsis inside the same exact bound.
-  const trailing = text.charCodeAt(end - 1);
-  if (trailing >= 0xd800 && trailing <= 0xdbff) end -= 1;
-  return `${text.slice(0, end)}…`;
+  return truncateWithEllipsis(text, maximum);
 }
 
 /** One presentation policy for unnamed Session titles across Runtime History and Agent API. */
@@ -41,6 +21,10 @@ export function projectRuntimeSessionTitle(value: string): string {
 
 /** Approval commands must remain recognizable; only control characters and length are bounded. */
 export function projectRuntimeClientCommand(value: string, maximum = 16_384): string {
+  return truncateWithEllipsis(stripControlCharacters(value), maximum);
+}
+
+function stripControlCharacters(value: string): string {
   let text = '';
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -56,8 +40,14 @@ export function projectRuntimeClientCommand(value: string, maximum = 16_384): st
     }
     text += character;
   }
+  return text;
+}
+
+function truncateWithEllipsis(text: string, maximum: number): string {
   if (text.length <= maximum) return text;
   let end = Math.max(0, maximum - 1);
+  // Protocol/Zod bounds use JavaScript string length. Avoid splitting a UTF-16
+  // surrogate pair while keeping the ellipsis inside the same exact bound.
   const trailing = text.charCodeAt(end - 1);
   if (trailing >= 0xd800 && trailing <= 0xdbff) end -= 1;
   return `${text.slice(0, end)}…`;

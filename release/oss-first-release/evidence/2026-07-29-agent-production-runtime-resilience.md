@@ -2,13 +2,13 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：1C.1–1C.8 的资源预算、有界取消、终态、fault 与 soak 本地边界全部保留并记为
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：1C.1–1C.8 的资源预算、有界取消、终态、fault 与 soak 本地边界全部保留并记为
 `completed`。长期资格窗口不再阻塞首发；测试失败或 `inconclusive` 仍不得包装成通过。当前状态见
 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §9.1、§15.3、§17
 
 Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 与
@@ -90,7 +90,7 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 | 1C.5 | 1C.2–1C.4、`T:1A:1A.1`、`T:1B:1B.1` | table-driven failure-mode conformance | `bun test tests/runtime/failure-mode-conformance.test.ts` | fixture 失败阻断相关 capability，不放宽 fallback |
 | 1C.6 | 1C.3、1C.4 | TUI listener/PTY root-cause fix、stability tests | `bun run test:tui:system` 连续运行；`bun test tests/runtime/stability.test.ts` | 不以延长 timeout 回滚；失败关闭相关 Sub-agent flow |
 | 1C.7 | 1C.2–1C.6 | soak/fault runner、resource trend/evidence adapter | `bun test tests/runtime/fault-injection.test.ts`；bounded soak runner | 超阈值停止扩面；保留诊断与 pending intent |
-| 1C.8 | 1C.1–1C.7 | active/book/map/ADR/migration/完成记录；唯一产生 `MS:1C-DONE` | `bun run check:docs-impact`、`bun run check:docs` | schema 已持久化后只允许兼容 artifact rollback |
+| 1C.8 | 1C.1–1C.7 | active/book/map/决策记录/migration/完成记录；唯一产生 `MS:1C-DONE` | `bun run check:docs-impact`、`bun run check:docs` | schema 已持久化后只允许兼容 artifact rollback |
 
 ### Task 1C.1：定义 `ResourceBudgetV1`
 
@@ -313,7 +313,7 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 迁移以 schema v18 为当前稳定输入，保留 v17 作为前一稳定输入；至少提供
 v16→v17→v18 和 v18→next fixtures；验证
 `active/completed/aborted` turn、pending interaction、tool call/result 顺序以及
-ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 artifact rollback 后
+[Agent Note 0049](../../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)/[Agent Note 0050](../../../.agents/notes/implemented/feature/2026-07-30-client-specific-session-navigation.md) 的调度/客户端投影在 upgrade、feature disable 和 artifact rollback 后
 继续收敛。
 
 要求：
@@ -478,15 +478,15 @@ canonical digest `sha256:cd1b96bbc40ce1f94300835a7c817c667562b927ed5537cdb1914aa
 - `docs/handbook/clients/tui/guides/tools-and-subagents.md`
 - `docs/handbook/features/sessions.md`
 - `docs/documentation-map.json`
-- 对应 ADR。
+- 对应决策记录。
 
-2026-08-01 pre-close 审计已确认：四份指定 active 文档、Book 04/10 与 ADR-0055 已反映当前
+2026-08-01 pre-close 审计已确认：四份指定 active 文档、Book 04/10 与 [Agent Note 0055](../../../.agents/notes/implemented/architecture/2026-07-30-cumulative-runtime-resource-governance.md) 已反映当前
 预算、调度、取消、恢复和终态实现；Book 06 已补齐父/子 Agent 共享 ledger、child reservation、
 compound permit 与 unknown/reconciliation 语义。独立审查发现的 child admission 缺口已通过
 durable FIFO waiter、原子 promotion + reservation、有界 deadline、canonical failure terminal 与
 resource-only late reconciliation 补强；artifact bytes 明确计入产出它的 child tool/MCP
 reservation，不虚构独立 invocation。documentation map 已把 Runtime/Subagent 变更路由到当前
-active 与协作章节；ADR-0055 继续作为已接受决策，不能替代当前行为文档。Task 1C.6 历史完成
+active 与协作章节；[Agent Note 0055](../../../.agents/notes/implemented/architecture/2026-07-30-cumulative-runtime-resource-governance.md) 继续作为已接受决策，不能替代当前行为文档。Task 1C.6 历史完成
 记录中跨隔离进程的 PTY 指标已降级为诊断，不再称为 qualification 资源趋势证据。
 
 默认分支正式 Ubuntu artifact 已按 Task 1C.7 所述通过来源身份、canonical digest、retained
@@ -514,7 +514,7 @@ production-ready 结论。
 - [x] soak 无 listener/FD/handle/RSS 持续增长；
 - [x] kill -9/磁盘满/网络抖动 fixture 不损坏 Runtime；
 - [x] schema v16→v17→v18→next 与 rollback fixture 不重开 aborted/completed turn；
-- [x] active/book/ADR/map 收敛。
+- [x] active/book/决策记录/map 收敛。
 
 ## 回滚
 

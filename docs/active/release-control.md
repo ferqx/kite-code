@@ -7,7 +7,7 @@
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、
 `bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0051、0052、0059、0065、0068、0069、0093、0166、`open-source-first-release.md`、
+相关：[Agent Note 0051](../../.agents/notes/implemented/process/2026-07-30-release-profile-monotonic-composition.md)、0052、0059、0065、0068、0069、0093、0166、`open-source-first-release.md`、
 `app-server-local-runtime.md`。
 
 ## 首发权威

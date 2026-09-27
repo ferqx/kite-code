@@ -321,7 +321,7 @@ export interface TaskToolDeps {
   afterTurnContinuationRuntime?: AfterTurnContinuationRuntime;
   toolDispatcher?: import('./types').SubAgentToolDispatcher;
   maxDepth?: number;
-  /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
+  /** 写入前文件原像记录器，透传给子 agent 的工具执行。 */
   recordFilePreimage?: import('@kite-ai/runtime-host/storage').RuntimeHostFilePreimageRecorder;
 }
 

@@ -2,17 +2,19 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：1B.0–1B.9 的 Workspace、network、protected path、worktree 与 MCP transport
+迁移说明：本历史计划曾使用独立的决策文档目录；现存记录已迁入 [Agent Notes](../../../.agents/notes/README.md)。历史任务和验证结论按原文保留，当前准入要求仍以负责文档和现行门禁为准。
+
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：1B.0–1B.9 的 Workspace、network、protected path、worktree 与 MCP transport
 fail-closed 边界全部保留并记为 `completed`。三平台普通 TUI/CLI 发行不要求 effectful execution support
 set 非空；能力准入继续独立关闭。当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §7、§9.4、§18
 
 Task 1B.0 已完成：三平台原生 probe 均为 `excluded`、`productionSupported=false`，
-ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；其中 1B.2/1B.3 以
+[Agent Note 0061](../../../.agents/notes/implemented/process/2026-07-31-production-platform-capability-admission.md) 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；其中 1B.2/1B.3 以
 `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` 的候选加固、fresh 三平台 artifact 与独立复核
 收口为明确 `excluded`。该负向完成不产生 production qualification 或 `MS:1B-DONE`。
 Task 1B.5 已以 `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的全绿 Required/Platform
@@ -43,7 +45,7 @@ stat-dirty tracked file 在拒绝前触发 clean/process filter。多步物化�
 Execution conformance workflow 的第三方 Actions 全部固定 immutable SHA。默认分支 run 与独立
 artifact verification 已完成；D-04 空支持集和所有 capability exclusion 保持不变。
 
-2026-08-02 的后续 admission 加固按 ADR-0065 把普通三平台发行与 effectful execution capability
+2026-08-02 的后续 admission 加固按 [Agent Note 0065](../../../.agents/notes/implemented/process/2026-08-02-cross-platform-distribution-and-capability-admission.md) 把普通三平台发行与 effectful execution capability
 分开：现有 GitHub-hosted matrix 吸收 TUI/foreground CLI 共享 composition、精确 process surface
 和 Linux cgroup pids 候选探针；撤回未提交的 self-hosted Ubuntu 常规发行要求。该后续工作不重开
 或改写已完成的 Phase 1B，也不把本地实现登记为 production support。
@@ -97,7 +99,7 @@ enforcement；不得复制 2A 的预算默认值/composition 或 1C 的 reservat
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
-| 1B.0 | `T:0:0.1`、`T:0:0.2`、`D-04:CLOSED`、`D-08:CLOSED`、`D-09:CLOSED` | `docs/adr/` 隔离 ADR、`scripts/release/platform-capability-probe.ts`、filesystem/network/process-tree support matrix、`tests/sandbox/platform-capability-probe.test.ts` | `bun test tests/sandbox/platform-capability-probe.test.ts`；每个声明支持组合运行 native deny/allow/process probe | 仅调查/ADR；不可行平台明确 verified in-process read-only 或排除 |
+| 1B.0 | `T:0:0.1`、`T:0:0.2`、`D-04:CLOSED`、`D-08:CLOSED`、`D-09:CLOSED` | 当时的隔离决策记录、`scripts/release/platform-capability-probe.ts`、filesystem/network/process-tree support matrix、`tests/sandbox/platform-capability-probe.test.ts` | `bun test tests/sandbox/platform-capability-probe.test.ts`；每个声明支持组合运行 native deny/allow/process probe | 仅调查/决策记录；不可行平台明确 verified in-process read-only 或排除 |
 | 1B.1 | 1B.0、`T:0:0.3` | `src/core/sandbox/types.ts`、`src/core/config/execution-boundary.ts`、`src/core/types.ts`、`tests/sandbox/execution-boundary.test.ts` | `bun test tests/sandbox/execution-boundary.test.ts` | `executionBoundaryV1=false` 时 production 禁止进程型/写能力；不得用审批恢复 |
 | 1B.2 | 1B.0、1B.1 | `src/core/sandbox/profile.ts`、`executor.ts`、`shell-wrapper.ts`、macOS process-tree limit 与真实 sandbox tests | `bun test tests/sandbox.test.ts tests/sandbox-runtime.test.ts tests/sandbox/process-tree-limit.test.ts`；macOS native smoke | production 不回退裸 shell；失败关闭 macOS process/write capability |
 | 1B.3 | 1B.0、1B.1 | `src/core/sandbox/bwrap.ts`、Windows backend/projection、platform/process-tree tests | `bun test tests/sandbox/platform-backends.test.ts tests/sandbox/process-tree-limit.test.ts`；声明支持平台 native smoke | unsupported 不伪装 sandbox；仅 verified in-process read-only 或平台排除 |
@@ -110,7 +112,7 @@ enforcement；不得复制 2A 的预算默认值/composition 或 1C 的 reservat
 
 ### Task 1B.0：平台 backend 可行性与支持矩阵
 
-在实现 schema 或 backend 前完成 bounded spike，并由 ADR 固定：
+在实现 schema 或 backend 前完成 bounded spike，并由决策记录固定：
 
 - 首发声明支持的 OS/version/backend 与 `read_only/workspace_write/network off/allowlist`
   能力矩阵；
@@ -122,7 +124,7 @@ enforcement；不得复制 2A 的预算默认值/composition 或 1C 的 reservat
 - 每个平台结论只能是 `supported`、`read_only_only` 或 `excluded`；
 - allowlist backend 不可行时允许 `network=off`，但不得以 proxy environment 变量作为无旁路
   技术边界；
-- 产出 ADR、support matrix 和 native probe evidence；Task 1B.1–1B.4 不能边实现边选择
+- 产出决策记录、support matrix 和 native probe evidence；Task 1B.1–1B.4 不能边实现边选择
   backend。
 
 ### Task 1B.1：冻结执行边界 schema
@@ -226,7 +228,7 @@ Windows：
 
 ### Task 1B.4：network off/allowlist 执行层
 
-实现策略使用 Task 1B.0 ADR 已选择的透明代理、namespace firewall 或平台等价机制，并且
+实现策略使用 Task 1B.0 决策记录已选择的透明代理、namespace firewall 或平台等价机制，并且
 必须满足：
 
 - DNS 解析后检查实际 IP；
@@ -370,7 +372,7 @@ Runtime/MCP/Skill 前失败。
 
 目标 workflow 使用实际分发制品，不只从源码运行。
 
-所有声明支持的组合通过、未支持组合显式排除且 active/book/ADR/map 收敛后，本任务唯一产生
+所有声明支持的组合通过、未支持组合显式排除且 active/book/决策记录/map 收敛后，本任务唯一产生
 `MS:1B-DONE`。
 
 ## 验收条件
@@ -386,7 +388,7 @@ Runtime/MCP/Skill 前失败。
 - [x] 三平台 artifact conformance 有明确通过/不支持结果；
 - [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；
 - [x] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；
-- [x] active/book/ADR/map 与 Phase 1B 最终实现和证据同步。
+- [x] active/book/决策记录/map 与 Phase 1B 最终实现和证据同步。
 
 ## 回滚
 

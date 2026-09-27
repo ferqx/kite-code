@@ -41,6 +41,6 @@ sequenceDiagram
 
 适用范围：上述按键与排队行为只核实到 TUI；`cancel_turn`、命令回执、Host/Service 清理是共享 Runtime 路径。CLI 的继续是新任务输入，Web 只读；Desktop 的停止入口需另按其调用链核对，不能从 TUI 测试推定。进程退出、未知副作用和多进程 takeover 的持久判断由 [Storage recovery](../../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md) 负责，不能靠本地 UI 状态推断。此处原始设计理由未找到；可证实的约束是前驱取消提交后仍可能有执行资源，后继必须等待可调度边界。
 
-验证层级：已阅读 [Native TUI facade 测试](../../../apps/kite-cli/test/service-mode/tui-client.test.ts) 中排队后继、`runtime_busy`、revision conflict 与取消断言，以及 [Host 测试](../../../packages/runtime-host/test/runtime-host.test.ts) 中“取消先持久化再 abort”“清理后至多启动一个后继”的断言；本页所述 TUI facade 与 Host lifecycle/continuation 套件本次未执行（其他共享机制的实跑见[验证记录](../architecture.md#本次实际执行)），其他客户端和真实多进程时序不由这些断言证明。
+验证入口：[Native TUI facade 测试](../../../apps/kite-cli/test/service-mode/tui-client.test.ts)覆盖排队后继、`runtime_busy`、revision conflict 与取消；[Host 测试](../../../packages/runtime-host/test/runtime-host.test.ts)覆盖取消持久化、abort 和清理后后继。其他客户端和真实多进程时序需分别核对。
 
 底层：[Host lifecycle](../../../packages/runtime-host/docs/execution-lifecycle.md)、[Storage recovery](../../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md)、[Kernel recovery](../../../packages/agent-kernel/docs/completion-recovery.md)。验证：[effect supervisor](../../../packages/runtime-host/test/effect-supervisor.test.ts)、[effect persistence](../../../packages/runtime-storage-sqlite/test/kite-session-effects.test.ts)、[取消后继 PTY](../../../tests/tui-system/scenarios/cancel-successor-render.test.ts)。

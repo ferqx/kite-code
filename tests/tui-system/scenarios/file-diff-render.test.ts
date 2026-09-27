@@ -8,7 +8,7 @@
  * 2. 新建文件：客户端显示 Create、路径与写入摘要。
  * 3. 内容未变的覆写：客户端显示 Write 与 unchanged 结果。
  *
- * append 轮已由 ADR-0042 §2 移除（追加改由 edit_file 尾部匹配或 shell 表达）。
+ * append 轮已移除（追加改由 edit_file 尾部匹配或 shell 表达）。
  *
  * NOTE: 默认交互模式为 accept-edits，工作区写入自动放行，无审批浮层。
  * Default interaction mode is accept-edits: workspace writes auto-approve.

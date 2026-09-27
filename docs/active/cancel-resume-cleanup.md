@@ -127,7 +127,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 ## 会话导航的客户端映射
 
-“切换会话”是否表示取消属于 App 适配层交互语义，不是 Kernel 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
+“切换会话”是否表示取消属于 App 适配层交互语义，不是 Kernel 规则（[Agent Note 0050](../../.agents/notes/implemented/feature/2026-07-30-client-specific-session-navigation.md)）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
 
 历史会话打开采用两阶段前台提交：TUI Runtime client adapter 可以先完成目标 Runtime 的注册与切换，但 metadata-only
 `SET_SESSIONS` 在 `LOAD_SESSION_PENDING` 期间不得提前改变 TUI 的 `activeSessionId`。只有 `LOAD_SESSION` 才能在同一
@@ -196,7 +196,7 @@ Required Provider admission 只能在 successor recovery 与新用户轮次持�
 interaction 掩盖旧 Task 的 Tool 清理或吞掉本次用户消息。`user.message_appended + turn.started` 必须通过同一 Kernel
 batch 原子提交；任一持久化失败都不能留下“消息已追加但新 turn 尚未开始”的半轮次。挂起 Subagent 仅在父 `task` Tool 存在、非终态且属于当前工作时有效；缺失或终态父 Tool 的残留不得进入 `wait_for_subagent`。
 
-## Rewind 文件恢复（ADR-0042 §4）
+## Rewind 文件恢复（[Agent Note 0042](../../.agents/notes/implemented/feature/2026-07-25-file-tool-semantics-and-write-safety.md) §4）
 
 `/rewind` 的 TUI 默认恢复不再截断源会话。检查点列表把命名恢复点解释为其后第一条用户消息
 发送前的边界，用户确认后按范围执行：
@@ -302,7 +302,7 @@ dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 
 child actual usage 只能经 Kernel 的 resource-only late reconciliation 入口提交；该入口不接受
 child tool/model terminal event，不能复活 turn、permit 或后继调用。
 
-## 交互终态与 TUI 回放（ADR-0071）
+## 交互终态与 TUI 回放（[Agent Note 0071](../../.agents/notes/implemented/bug-fix/2026-08-08-tui-local-interaction-recovery-projection.md)）
 
 所有人工交互（`ask_user`、工具审批、Plan review、Provider action、Provider admission、子 Agent 工具审批）都必须先持久化用户终态，再清除 TUI。用户回答 `ask_user` 写入 `user_input.answered`；其client-safe投影必须保留有界answer summary，使TUI按interaction identity封存提问并在live/History/reconnect中显示同一份用户选择，不能依赖Footer本地状态或完整Tool Result恢复。用户取消写入同时携带`interactionId`与`toolCallId`的`user_input.cancelled`，随后写入对应的`tool.finished`。工具审批的批准/拒绝、Plan review的批准/修订/取消以及Provider终态必须校验当前交互身份；Plan review还校验`planId`、`version`和`structuralDigest`。迟到或重复的旧交互事件不得清除新的交互或重复追加答案。
 
@@ -314,7 +314,7 @@ Runtime canonical event store 只记录真实用户操作。TUI 从事件日志�
 
 ## SAQ-10 durable queue 叠加规则
 
-本节是 ADR-0137 对本页旧单槽交互描述的定向更新：State 27 的 `pendingApprovals`、`activeApprovalId`、generation、queue
+本节是 [Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md) 对本页旧单槽交互描述的定向更新：State 27 的 `pendingApprovals`、`activeApprovalId`、generation、queue
 sequence、Session grants 和独立 receipts 是唯一审批事实；Subagent private deferred slot 不是 authority。只有 active、visible 的
 `queued_user|awaiting_user|approving` record 拥有人工 Footer；`queued_auto|auto_reviewing` 不抢焦点。
 

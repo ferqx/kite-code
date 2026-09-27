@@ -14,7 +14,7 @@ apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、ADR-0131、ADR-0137、`release/platform-capabilities/support-matrix.json`、
+相关：[Agent Note 0054](../../.agents/notes/implemented/architecture/2026-07-30-production-execution-isolation.md)、[Agent Note 0061](../../.agents/notes/implemented/process/2026-07-31-production-platform-capability-admission.md)、[Agent Note 0065](../../.agents/notes/implemented/process/2026-08-02-cross-platform-distribution-and-capability-admission.md)、[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0097](../../.agents/notes/implemented/feature/2026-08-13-brokered-git-capability.md)、[Agent Note 0116](../../.agents/notes/implemented/process/2026-08-18-ps02-github-actions-native-evidence-authority.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、`release/platform-capabilities/support-matrix.json`、
 `release/oss-first-release/evidence/2026-07-29-agent-production-execution-isolation.md`。
 
 ## SAQ-10 scope contract
@@ -34,7 +34,7 @@ availability。
 ## 当前支持集合
 
 当前 effectful execution 的 production-supported platform/backend 集合为空，D-04 已按“空支持集”
-关闭。ADR-0068 明确该空集合只阻止对应 Shell、writer、MCP write、effectful Skill 等能力，不再阻止
+关闭。[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md) 明确该空集合只阻止对应 Shell、writer、MCP write、effectful Skill 等能力，不再阻止
 生成和安装普通开源 TUI/CLI 候选包。候选包与 effectful capability 支持声明是两个独立结论：
 
 Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标，正式 GitHub workflow 统一 pin Bun `1.4.2`。发行/启动/PTY/路径/ACL/keyring
@@ -69,9 +69,9 @@ lefthook 安装失败继续是非关键开发工具故障，不能阻断应用�
 | Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | excluded | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
 | Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络与 strict production 资格；V3 ledger migration 尚待新 runner artifact |
 
-ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
+[Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
 `networkMode=off` 调用以 restricted current-user token、capability-SID ACL 和 Job Object 直接运行
-canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有明确 `interactionMode=full` 且 sealed scope 为
+canonical 真实 Workspace，不创建 staging 副本。按 [Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)，只有明确 `interactionMode=full` 且 sealed scope 为
 `filesystem=full_access, network=allow_all` 的调用
 才直接使用当前登录用户 token 与该用户 Schannel profile；不创建本地账号、不请求 UAC、不保存密码或 readiness
 state。无法由当前 interactionMode/endpoint 同时兑现网络与 filesystem scope 的调用必须在 user script 前 fail closed，不能借联网授权扩大文件系统
@@ -79,30 +79,30 @@ state。无法由当前 interactionMode/endpoint 同时兑现网络与 filesyste
 Full qualification。
 
 direct token 是 lower-assurance backend。WRITE_RESTRICTED 只限制相应 SID 的写入检查；它不能证明
-Workspace 外普通读取全部被拒绝，也不能为任意 descendant 提供结构性 network-off/allowlist。按 ADR-0131，
+Workspace 外普通读取全部被拒绝，也不能为任意 descendant 提供结构性 network-off/allowlist。按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)，
 Workspace 内 `.env.*` 不再需要或允许单独 ACL deny。因此 productionSupported 仍为 false，outcome 仍为 excluded。
-但 ADR-0121 将已选 windows_restricted_token 的 TUI/CLI Full 定义为开发期交互模式；它不改变该
+但 [Agent Note 0121](../../.agents/notes/implemented/feature/2026-08-18-windows-development-full-mode.md) 将已选 windows_restricted_token 的 TUI/CLI Full 定义为开发期交互模式；它不改变该
 production verdict。受限 backend=none 时只显示该 backend 的 unsupported/fail-closed 状态；Full 仍由
 `interactionMode=full` 表达，不显示旧 grant，也不触发 host fallback。
 
-ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
+[Agent Note 0082](../../.agents/notes/implemented/architecture/2026-08-08-windows-development-network-authorization-parity.md)/[Agent Note 0101](../../.agents/notes/implemented/bug-fix/2026-08-13-approved-invocation-native-guards-and-network-projection.md)/[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md) 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
 在 `interactionMode=full` 或 exact approval 后产生的 sealed scope，并要求 backend contract 明确其实际 token；更窄 filesystem scope 的
 更窄 scope 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。prepared consumer 因此只把 `off`/受限 filesystem 当成需要 enforcement evidence
 的限制，不把已批准的 development `allow_all` 伪装成 allowlist/full-access qualification；静态
-`backendCapabilities.network.allowlist` 与 `filesystem.full_access` 仍保持 `unsupported`。ADR-0088 已删除
+`backendCapabilities.network.allowlist` 与 `filesystem.full_access` 仍保持 `unsupported`。[Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 已删除
 AppContainer、private staging 与 repository reconciliation。
 
 ### Unified startup downgrade
 
-ADR-0100 另行定义 development approved-filesystem capability：审批通过的 `externalRead`、
+[Agent Note 0100](../../.agents/notes/implemented/feature/2026-08-13-user-approved-external-filesystem-capability.md) 另行定义 development approved-filesystem capability：审批通过的 `externalRead`、
 `externalWrite` 或 `uncertainEffects` invocation 在用户命令开始前扩大所选 native backend 的文件系统
 scope。它不是 startup downgrade、host Shell 或 native failure replay；三个平台保持相同产品语义，
 且进程、网络与资源 sandbox 继续有效。此能力不能写入 capability probe 的静态 enforced 项，也不能
 改变下表或 D-04 production support verdict。
 
-ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
+[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0080](../../.agents/notes/implemented/simplification/2026-08-08-sandbox-environment-only-host-fallback.md) 与 [Agent Note 0081](../../.agents/notes/implemented/simplification/2026-08-08-codex-style-unelevated-direct-workspace-backend.md) 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
 或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
 backend=none 且受限 capability 不可用；Full mode 仍由 interactionMode 表达，实际 boundary 不可用时执行 fail closed。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
@@ -121,23 +121,23 @@ vendored `isksh`、Windows sandbox 直接依赖的 App/Builtin/Host/SPI 文件�
 
 backend 选中后，user command 一旦可能启动就绝不跨 environment replay。只有 typed
 `backend_unavailable + pre_dispatch + cleanupConfirmed` 证明 native 用户命令未启动且 abandonment 已 durable
-收敛时，ADR-0119 才允许 App 把同一条已获准调用交给 host Shell 一次。script failure、timeout、cancellation、
+收敛时，[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md) 才允许 App 把同一条已获准调用交给 host Shell 一次。script failure、timeout、cancellation、
 runner failure、ACL cleanup failure、reconciliation failure 和 process-tree cleanup failure 都是 selected backend 的
 fail-closed result。host fallback 不是 isolation evidence，也不能改变 excluded production-support outcome。
 
 ### Windows 10 API 兼容性基线
 
-ADR-0074 保留 Windows 10 22H2 (10.0.19045) 作为 API/build baseline。native startup gate 与 release
+[Agent Note 0074](../../.agents/notes/implemented/process/2026-08-08-windows-10-api-compatibility-baseline.md) 保留 Windows 10 22H2 (10.0.19045) 作为 API/build baseline。native startup gate 与 release
 manifest 会在低于该 baseline 时 fail closed。Win11 是 priority native-E2E environment；不得声称未经测试的
 physical Win10 behavior。该 baseline 不会让任一 Windows development backend 成为 production-qualified profile。
 
 ### native protocol 兼容性
 
-ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
+[Agent Note 0101](../../.agents/notes/implemented/bug-fix/2026-08-13-approved-invocation-native-guards-and-network-projection.md) 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
 `protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
 network `off | allow_all` 与 filesystem `read_only | workspace_write | full_access` sealed-scope projection，并删除 backend mode、AppContainer identity 与 staging
 字段。只有 `interactionMode=full` 且 backend 明确支持 `full_access + allow_all` scope 时才可使用当前登录用户 token；更窄 scope fail closed，非网络
-approved filesystem invocation 暂时携带 protocol compatibility SID，但按 ADR-0132 不安装 protected-path deny。
+approved filesystem invocation 暂时携带 protocol compatibility SID，但按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md) 不安装 protected-path deny。
 V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
 仓库当前 release pin 已由 canonical Windows build 固定为 0.8.3/V6 及其对应 binary digest；adapter
@@ -184,7 +184,7 @@ Linux backend detection 还会执行与真实 executor 相同的 PID/network nam
 只有 binary 在 PATH 上但宿主禁止这些 namespace 时投影为 `backend=none`，而不是创建随后必败的
 runtime 或把 binary discovery 当成可执行边界。
 `outcome` 只是技术能力分类；探针固定输出 `productionSupported=false`，不能自行完成治理签署。
-即使某 runner 的技术项全部为 `enforced`，也必须由新的追加 ADR、新鲜证据与独立 release
+即使某 runner 的技术项全部为 `enforced`，也必须由记录已实施决定的 Agent Note、新鲜证据与独立 release
 gate 才能改变已关闭 D-04 的空支持集并产生 production support 声明。`backend=none` 不可能产生进程型
 `supported`，只能在另行验证的无进程 fallback 条件下产生 `read_only_only`。
 
@@ -193,9 +193,9 @@ read/write、symlink escape、network-off 和
 shell descendant filesystem inheritance；executor 还使用逐 invocation、`0700`、结束清理且不
 共享的 runtime temp，返回前请求终止已跟踪 process group；未确认退出时 fail closed 并保留 runtime，
 确认后才以不跟随 symlink 的物理清理恢复 hostile mode/BSD immutable flag，删除不能确认时也
-fail closed。这些只是未固定的开发 evidence。ADR-0131 之后，Workspace 内
+fail closed。这些只是未固定的开发 evidence。[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md) 之后，Workspace 内
 `.GIT/config` read 与 `.ENV.TEST` write 必须正向通过；旧 run `30705493919` 的名称级负向场景已经过时，
-不得作为当前实现 evidence。按 ADR-0132，旧的 Workspace 外 protected identity native deny 场景同样过时；
+不得作为当前实现 evidence。按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)，旧的 Workspace 外 protected identity native deny 场景同样过时；
 新证据必须证明敏感访问未经 Policy approval 不 dispatch、批准后 sealed scope 不被 native backend 二次拒绝，
 但本次 profile 变化尚无绑定当前 source 的 release-pinned native artifact。
 Seatbelt 没有实现并
@@ -271,7 +271,7 @@ child inheritance 和 verified in-process read-only strength。flag/artifact 缺
 关闭；同一环境 admission key 重复也按歧义拒绝，不能由 registry 文件顺序选择首项。
 
 `read_only_only` 还要求 digest 校验通过的非空 tool catalog；每个 tool contract 明确禁止 network、
-process 与 write。原生 `externalPath=false` 仍关闭进程的 Workspace 外路径，但 ADR-0118 的 governed
+process 与 write。原生 `externalPath=false` 仍关闭进程的 Workspace 外路径，但 [Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 的 governed
 filesystem read 可由独立 Provider `external_read` scope 读取任意有效路径。准入 surface 保留 catalog
 revision/digest、descriptor revision 与 effect contract，供后续 tool disclosure/execution 对照，
 不能只按相同 tool ID 放行。当前 builtin disclosure 与 runner 已执行该匹配，并拒绝动态 MCP、进程
@@ -349,7 +349,7 @@ acknowledged preparation intent 后确认 actual restricted-token command dispat
 receipt 与 Local Provider 零 spawn；runner build/Cargo/protocol evidence 与此 conformance 一起证明 development
 sandbox 可用，但不能解释为 production support。
 
-## PS-02 原生证据边界（ADR-0116）
+## PS-02 原生证据边界（[Agent Note 0116](../../.agents/notes/implemented/process/2026-08-18-ps02-github-actions-native-evidence-authority.md)）
 
 PS-02 的 protocol、Pipeline、allocating lifecycle、Host-owned spawn、recovery 与 no-bypass
 实现可以由定向 contract/conformance 测试验收；当前开发机不是三平台原生证据来源。原生平台资格只由
@@ -372,7 +372,7 @@ Docker、WSL、emulation 与本机非目标 OS 均不能宣称某次原生 Actio
 
 探针 JSON 记录实际 OS release/version、architecture、Bun、backend、逐项 verdict、限制和
 canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
-profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR
+profile、composition root、runner image 或边界实现变化都需要新 evidence；只有记录已实施决定的 Agent Note
 与独立 release gate 才能加入非空生产支持项。
 
 GitHub-hosted evidence 还绑定 repository/head/ref/workflow ref/workflow SHA/run ID/attempt 与封闭

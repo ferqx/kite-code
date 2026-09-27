@@ -2,13 +2,13 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：3.1–3.9 的本地结构化无正文日志、status、kill switch、runbook 和本地 rehearsal
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：3.1–3.9 的本地结构化无正文日志、status、kill switch、runbook 和本地 rehearsal
 记为 `completed`；3.10 的 external cohort 长期 SLO Gate 已被取代，不再属于产品规则或未来路线图。
 当前状态见 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)、
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)、
 [`Phase 1A 数据与隐私`](2026-07-29-agent-production-local-data-privacy.md)、
 [`Phase 1C Runtime 稳定性`](2026-07-29-agent-production-runtime-resilience.md)、
 [`Phase 2B Agent Evaluation`](2026-07-29-agent-production-evaluation.md) 的 metrics contract
@@ -75,7 +75,7 @@ metadata 通过 allowlist mapper 构造生产指标。
 - TUI/CLI consent/status
 - dashboards/alerts/runbooks
 - `.github/workflows/` 和 Release Evidence
-- active/book/ADR/map
+- active/book/决策记录/map
 
 ## 共享 schema ownership
 
@@ -314,7 +314,7 @@ SLO：
 - `tests/README.md`；
 - README consent/config；
 - `docs/documentation-map.json`；
-- telemetry/privacy/incident ADR。
+- telemetry/privacy/incident 决策记录。
 
 无正文 mapper、告警、kill switch、runbook、事故演练和文档门禁全部收敛后，本任务唯一产生
 `MS:3-OPS-READY`。该 milestone 表示运营基础设施就绪，不代表 limited cohort 已满足 SLO；

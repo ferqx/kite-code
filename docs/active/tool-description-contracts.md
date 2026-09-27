@@ -25,7 +25,7 @@
 相关：
 
 - `./tool-gated-autonomy.md`
-- `../adr/0118-trusted-workspace-unrestricted-file-access.md`
+- [Workspace 文件访问取舍](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)
 
 验证：
 
@@ -68,12 +68,12 @@ Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen
 - `task` 的 raw 模型输入形态是严格闭合的 `{name, subagent_type, task}`。`name` 是主 Agent 显式提供、用于 TUI 与 Runtime Event 的公开名称，必须简短说明子 Agent 正在做什么；它本来就是展示字段，不按隐私数据处理，也不得再从任务正文第一行推导。Model Controller 必须在 queue commit 前把任务正文写入 private Artifact，durable 形态只允许独立的 `{name, subagent_type, taskArtifact}` 严格分支。后续模型轮次读取历史时，由 Service 按原模型 invocation 与工具调用身份核验 private Artifact，再只在模型输入投影中恢复公开的 `task` 参数；压缩摘要输入同样不得包含 `taskArtifact`。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`；模型新生成的错误形态先以脱敏工具失败结算，不把它误报成存储故障。当前格式不恢复已持久化 raw Task，也不把任务正文暴露到模型 schema 或持久事件。
 - 已退役的 `git_inspect` 不创建 `ToolContractSection`；模型发出的 Git、构建、测试与其他 project script
   全部使用`shell_execute`。
-- 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
+- 五个 filesystem 工具的 path 文案必须与 [Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 一致：read/search 接受 Workspace-relative、absolute 与
   `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
   路径说明需要 exact mutation approval。Schema/contract 不得继续声称 path 只能相对 Workspace，也不得把
   文件工具的开放语义扩写成 Shell/MCP/Git 权限。
 
-### Builtin catalog 迁移边界（ADR-0043）
+### Builtin catalog 迁移边界（[Agent Note 0043](../../.agents/notes/implemented/feature/2026-07-26-tool-spec-registry-and-strict-edit.md)）
 
 工具契约由 `packages/builtin-runtime/src/tool-contracts.ts` 与 Builtin operation definition 绑定，并由
 `createRuntimeModuleRegistry(createBuiltinRuntimeModules()).snapshot()` →

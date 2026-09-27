@@ -1,17 +1,17 @@
-# Kite Agent Server API V1 当前证据矩阵
+# Kite Agent Server API V1 历史证据矩阵
 
-状态：current evidence（KASAPI-00B 完成输入；不是 current behavior authority）
+状态：KASAPI-00B 历史证据快照（不是 current behavior authority；文中「current」「blocked」均指 2026-08-29 审计时点）
 
 日期：2026-08-29
 
-基线：`docs/kasapi-00b-evidence@53da4cea`（继承已接受 ADR-0149）
+基线：`docs/kasapi-00b-evidence@53da4cea`（当时按已接受的 0149 号决策方向审计；迁移后的 [Agent Note 0149](../../../.agents/notes/proposed/feature/2026-08-29-stable-local-agent-api-facade.md) 现列于 `proposed`，其旧 Coordinator/Worker/Store 7 前提不再是当前实施依据）
 
-相关：[`ADR-0149`](../../../docs/adr/0149-stable-local-agent-api-facade.md)、
+相关：[Agent Note 0149](../../../.agents/notes/proposed/feature/2026-08-29-stable-local-agent-api-facade.md)、
 [`Kite Agent Server API V1 RFC`](https://github.com/ferqx/kite-code/blob/854b3084479d78e79b37864bda99e0bb235db2d8/docs/design/2026-08-29-kite-agent-server-api-v1-rfc.md)、
 [`Kite Agent Server API V1 实施方案`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-29-kite-agent-server-api-v1.md)。
 
 后续裁决：KASAPI-00C已由[`Public contract freeze`](2026-08-29-kite-agent-server-api-v1-contract-freeze.md)关闭exact Public选择，并由
-[`ADR-0150`](../../../docs/adr/0150-store-8-canonical-runtime-run-index.md)与
+[Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md)与
 [`Runtime Run Store V1子计划`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-29-kite-runtime-run-store-v1.md)接受State 27 / Store 8迁移；本文仍保留00B源码证据。
 
 ## 1. 审计结论
@@ -23,7 +23,7 @@ KASAPI-00B 对 current command、State/event、receipt、Store 7、History、sub
 | --- | --- | --- |
 | start identity | 部分足够 | Public `run_id` 应以current `turnId`为identity；`workId`不稳定，不能作为Run identity |
 | applied retry | 足够支撑applied-only replay | 复用Store 7 scoped applied receipt；public idempotency mapper不能依赖transient Client/capability identity |
-| first-class Run get/list | 不足 | 需要新的canonical Run persistence/index与Store migration ADR；KASAPI-03A blocked |
+| first-class Run get/list | 不足 | 需要新的 canonical Run persistence/index 与 Store migration 决策记录；KASAPI-03A blocked |
 | Run status/phase/timestamp | 不足 | current facts只能投影active/部分terminal；queued、historical phase、完整terminal/timestamp不闭合 |
 | Session/History read | 部分足够 | raw Store query有bounded page，但现有`RuntimeHistoryClient` rich transcript API会全量物化；需新增Service-owned safe page port |
 | revision/event sequence | 足够 | current Store正常event的State revision等于durable sequence；可作为resync的durable watermark |
@@ -36,7 +36,7 @@ KASAPI-00B 对 current command、State/event、receipt、Store 7、History、sub
 
 核心阻断裁决：
 
-1. **需要新的 Store migration ADR。** current Store 7不能满足first-class Run的bounded list/get、phase/status/timestamp、delete/fork/rewind
+1. **需要新的 Store migration 决策记录。** current Store 7不能满足first-class Run的bounded list/get、phase/status/timestamp、delete/fork/rewind
    与late retry语义；不得用日志扫描或adapter Map替代。
 2. **KASAPI-01与read-only KASAPI-02可在Store migration前推进。** Contract/OpenAPI、authenticated read-only Session/History/Checkpoint
    façade不依赖Run table，但必须先完成KASAPI-00C contract freeze。
@@ -157,7 +157,7 @@ run identity/phase/status索引。用它实现Run list/get会产生以下问题�
 
 ### 3.5 Store裁决
 
-KASAPI-03A需要新的Store profile/migration ADR。推荐ADR只冻结需求和唯一authority，不在evidence文档预设最终表名；至少必须提供：
+KASAPI-03A 需要新的 Store profile/migration 决策记录。推荐 Note只冻结需求和唯一authority，不在evidence文档预设最终表名；至少必须提供：
 
 - start transaction原子写Run identity、phase、created/started time、initial status与receipt resource result；
 - terminal/recovery transaction原子更新status/finished time/outcome；
@@ -165,7 +165,7 @@ KASAPI-03A需要新的Store profile/migration ADR。推荐ADR只冻结需求和�
 - delete/fork/rewind/tombstone/retention规则；
 - Store 7 source → new target offline copy-and-switch、journal/fence与三平台验证。
 
-在该ADR及migration完成前，KASAPI-03A/03B/03C/03D保持blocked。
+在该决策记录及 migration 完成前，KASAPI-03A/03B/03C/03D 在当时保持 blocked；后续裁决见文首的 Agent Note 0150 与 contract freeze。
 
 ## 4. Applied receipt与Public idempotency
 
@@ -384,15 +384,15 @@ Current可用时间：
 - 部分domain event自带`createdAt`，不是所有Turn/Run event都有。
 
 Public Run需要唯一规则。新Run transaction建议使用Host command evidence `committedAt`作为created/started timestamp，terminal transaction使用
-persisted event fact time；exact source、precision、ISO normalization与fork/rewind规则由Run Store ADR冻结。HTTP adapter不能使用response time或
+persisted event fact time；exact source、precision、ISO normalization与fork/rewind规则由Run Store 决策记录冻结。HTTP adapter不能使用response time或
 当前clock补写历史timestamp。
 
 ## 8. KASAPI-00C输入与停止条件
 
 ### 8.1 00C必须冻结
 
-1. Public `run_id = opaque projection of canonical turn identity`，但Run row/schema由新Store ADR拥有；
-2. 新Store migration ADR与subplan，KASAPI-03A～03D在完成前blocked；
+1. Public `run_id = opaque projection of canonical turn identity`，但Run row/schema由新Store 决策记录拥有；
+2. 新 Store migration 决策记录与 subplan，KASAPI-03A～03D在完成前blocked；
 3. Public idempotency commandId mapper不含transient principal；
 4. Agent API session context exchange/expiry/reconnect与per-target Controller revalidation；
 5. Service-owned paginated safe History port与stable Session page cursor；
@@ -410,7 +410,7 @@ persisted event fact time；exact source、precision、ISO normalization与fork/
 
 ### 8.3 Blocked Task
 
-- KASAPI-03A～03D：等待Run Store migration ADR/subplan与implementation；
+- KASAPI-03A～03D：等待 Run Store migration 决策记录/subplan与implementation；
 - KASAPI-04A～04D：等待00C cursor/resync freeze和03D Run qualification；
 - KASAPI-05：等待04D。
 

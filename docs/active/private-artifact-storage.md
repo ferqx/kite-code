@@ -6,7 +6,7 @@
 
 验证：`bun test packages/builtin-runtime/test/isolated/private-immutable-artifacts.test.ts tests/integration/model-artifacts.test.ts tests/isolated/runtime/capability-artifacts.test.ts packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts apps/kite-service/test/subagent-artifacts.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0056、ADR-0109/0110/0114/0115、ADR-0127、ADR-0152、ADR-0153、`model-provider-boundary.md`。
+相关：[Agent Note 0056](../../.agents/notes/implemented/architecture/2026-07-30-metadata-first-data-boundaries.md)、[Agent Note 0109](../../.agents/notes/implemented/testing/2026-08-18-model-invocation-evidence-and-replay.md)、[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、`model-provider-boundary.md`。
 
 ## 当前存储模型
 
@@ -27,7 +27,7 @@ subagent-lifecycles/handles/
 Store 9对应`model_artifacts`、`plan_artifacts`、`capability_artifacts`、`filesystem_preimage_artifacts`、
 `sandbox_preparation_artifacts`、`subagent_task_artifacts`、`subagent_lifecycle_artifacts`与`subagent_continuation_artifacts`。
 `filesystem_preimage_artifacts`是mutation ready-before-commit evidence；它与Session checkpoint用的`runtime_file_preimages`不是同一领域，
-不得合表或相互fallback，见ADR-0153。
+不得合表或相互 fallback；当前存储与恢复边界见[Runtime Authority](runtime-authority-boundary.md)及[SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
 Store11 另有私有 `subagent_checkpoint_artifacts` 与 `agent_followup_admission_artifacts`，分别保存普通子 Agent 续轮上下文和已受理续轮的授权快照；`agent_mail_bodies` 保存有界消息正文。Agent 邮箱事件只保存 ref、digest 与来源，正文读取还须当前 Session 执行 handle、准确活动 task 和模型 invocation 准入证明。Store10→11 只在离线候选副本转换，不由普通启动静默修改；当前模型可见 Agent 邮箱和普通续轮尚未开放。
 

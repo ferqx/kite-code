@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { validateAgentNotes } from './check-agent-notes';
 import { validateDocumentationMap } from './check-docs-impact';
 
 const root = process.cwd();
@@ -98,7 +99,10 @@ for (const path of [
   ...collectMarkdownFiles(join(root, 'docs', 'handbook')),
   ...collectMarkdownFiles(join(root, 'docs', 'development')),
   ...collectMarkdownFiles(join(root, 'docs', 'runbooks')),
-  join(root, 'docs', 'adr', 'README.md'),
+  ...collectMarkdownFiles(join(root, '.agents', 'notes', 'proposed')),
+  ...collectMarkdownFiles(join(root, '.agents', 'notes', 'implemented')),
+  join(root, '.agents', 'notes', 'README.md'),
+  join(root, '.agents', 'notes', 'AGENTS.md'),
   join(root, 'docs', 'plans', 'README.md'),
   ...collectMarkdownFiles(join(root, 'packages')),
   ...collectMarkdownFiles(join(root, 'apps')),
@@ -108,6 +112,7 @@ for (const path of [
 }
 
 checkDocumentationMap();
+for (const error of validateAgentNotes(root)) fail(error);
 
 for (const path of [
   'docs/handbook/README.md',

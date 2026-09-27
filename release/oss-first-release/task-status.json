@@ -2,7 +2,7 @@
   "schema": "OpenSourceFirstReleaseTaskStatusV2",
   "version": 2,
   "asOf": "2026-08-04",
-  "authority": "ADR-0069",
+  "authority": ".agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md",
   "categories": {
     "first_release_required": {
       "status": "completed",

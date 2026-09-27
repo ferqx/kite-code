@@ -868,7 +868,7 @@ function isTableRowLike(line: string): boolean {
 }
 
 /**
- * ADR-0045/0046 streaming commit boundary. Ordinary text stays hidden until
+ * Streaming commit boundary. Ordinary text stays hidden until
  * a complete paragraph/list item is proven. Recognized code/table shells may
  * stay as the one mutable structural component, but only complete child rows
  * enter that component.

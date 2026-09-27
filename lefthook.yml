@@ -21,7 +21,7 @@ pre-commit:
       glob: "packages/runtime-storage-sqlite/**"
       run: bun test packages/runtime-storage-sqlite/test/kite-session-store-format-lock.test.ts
     plan-evidence:
-      glob: "{release/oss-first-release/**,scripts/check-plan-execution-matrix.ts,docs/active/open-source-first-release.md,docs/adr/0069-first-release-terminal-scope.md}"
+      glob: "{release/oss-first-release/**,scripts/check-plan-execution-matrix.ts,docs/active/open-source-first-release.md,.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md}"
       run: bun run check:plan-evidence
     docs:
       glob: "*.{md,json,ts}"

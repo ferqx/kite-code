@@ -4,7 +4,7 @@
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
 验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
 
-相关：ADR-0118、ADR-0119、ADR-0131、ADR-0132、ADR-0133、ADR-0137、ADR-0138、ADR-0189、
+相关：[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)、[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)、[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)、
 `tool-gated-autonomy.md`、`cancel-resume-cleanup.md`、`plan-mode-implementation.md`。
 
 ## 概述
@@ -58,7 +58,7 @@ interface SessionApprovalState {
 ```
 
 `PendingApproval` 保存 parent/child/runtime identity、原始 route、binding digest、scope/effects、sequence、generation、createdAt
-和状态。ADR-0138 的已知历史 profile 会把旧 grant/review/event 只读投影为 inert history；未知 profile 静默忽略。
+和状态。[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 的已知历史 profile 会把旧 grant/review/event 只读投影为 inert history；未知 profile 静默忽略。
 当前格式中的未知字段、缺 identity 或 Full grant 仍使该单个会话 fail closed，不能影响其他会话或恢复 live authority。
 
 ## 硬规则（Agent Kernel authorization domain）
@@ -98,18 +98,18 @@ backend 不可用时受限执行 clean fail closed，不影响 Full mode 的持�
 
 ## 受信任 Workspace 边界
 
-ADR-0118 把内建文件工具与进程执行授权分开。普通 Workspace 外读取进入 observe-only `external_read` scope；
-按 ADR-0132/ADR-0133，`read_file` 直接访问敏感外部 identity，或任何无法预先证明遍历范围的外部 recursive
+[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 把内建文件工具与进程执行授权分开。普通 Workspace 外读取进入 observe-only `external_read` scope；
+按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)/[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)，`read_file` 直接访问敏感外部 identity，或任何无法预先证明遍历范围的外部 recursive
 search 时必须完成模式感知授权：Full 直接授权、Auto 三态审查、其他模式 exact approval。授权后仍使用 sealed
 read scope，Provider 不再按 protected name 二次拒绝。
 当前 Workspace 的物理位置不影响信任，文件工具可直接读写其中 `.git`、`.env`、`.ssh`、`.codex`、
 `.agents` 等名称。Building 阶段的 `accept_edits` 直接放行 Workspace 内 mutation；Workspace 外
-`write_file`/`edit_file` 按 ADR-0135 进入模式路由：Full 直接授权、Auto 三态审查、Accept Edits 请求 exact
+`write_file`/`edit_file` 按 [Agent Note 0135](../../.agents/notes/implemented/simplification/2026-08-24-mode-aware-workspace-authorization-boundary.md) 进入模式路由：Full 直接授权、Auto 三态审查、Accept Edits 请求 exact
 invocation approval；批准后形成 `approved_external`，文件名与宿主祖先不得再二次拒绝。canonical/no-follow
 identity、read-before-edit、preimage/stale、single-use commit、取消、大小/编码与真实 OS failure 仍由
 Provider 执行。
 
-ADR-0160与ADR-0189保留phase、sandbox与durable queue：可证明只读命令按phase baseline
+[Agent Note 0160](../../.agents/notes/implemented/bug-fix/2026-09-01-uncertain-shell-requires-exact-approval.md)与[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)保留phase、sandbox与durable queue：可证明只读命令按phase baseline
 direct；Building中效果已知的Workspace mutation继续按当前mode治理；无法证明只读且无法完整确定effects的命令（包括
 `bun test`与任意project script）在Auto模式进入审批模型，即使审查熔断也不直接跳到人工；在Accept Edits/Full请求exact真人审批。命令不因不在列表而hard deny；只有Compiler
 明确`allowed=false`的关键系统规则不可覆盖。显式same-command grant只按完整Session identity匹配。
@@ -121,7 +121,7 @@ Subagent role ceiling与scheduler metadata；未命中只能生成`uncertainEffe
 `git_inspect` 已从 Runtime capability registry 退役，所有模型 Git/脚本命令统一通过 `shell_execute`。
 主Agent的当前Prompt同时约束常规Workspace检查：优先使用file/search能力；Shell已经运行在当前Workspace，因此不生成冗余`cd`或当前Workspace的`git -C`，Git读取优先拆成单条简单命令，也不只为拼接、分组或裁剪输出引入`&&`、pipe和loop。该约束只降低无谓的unknown/审批与展示碎片，不能替代Builtin只读grammar，也不能让未证明命令取得read-only授权。
 
-ADR-0161把只读证明收敛到Builtin-owned、冻结的v1 Shell semantics registry；registry digest必须进入
+只读证明收敛到 Builtin-owned、冻结的 v1 Shell semantics registry；registry digest 必须进入
 `shell_execute` capability revision，语义升级不能复用旧binding。普通只读program由descriptor声明，参数敏感program
 由descriptor选择局部inspector；未注册或未命中只生成低基数本地诊断，不产生allow，也不进入远程telemetry。
 
@@ -139,7 +139,7 @@ Plan/child mechanism。Builtin Subagent role ceiling 可收紧 allowed tool 与 
 提升 phase/workspace access 或绕过 parent authorization。`ask_user` 仍是 Kernel-owned interrupt；Builtin module 的
 同名 operation 不形成 execution 旁路。缺少 mechanism、binding 或 grant 均 fail closed，没有旧 handler fallback。
 
-ADR-0131 把同一 identity 规则扩展到 Shell、MCP executable/cwd 与原生 sandbox：canonical Workspace
+[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md) 把同一 identity 规则扩展到 Shell、MCP executable/cwd 与原生 sandbox：canonical Workspace
 内 read/write/execute 不得因 `.git`、`.env`、Agent/MCP 配置、credential-looking 名称或 additional deny
 二次拒绝。Skill reference 仍有独立 schema 和 capability routing；Git 命令统一受 Shell 的 Policy、approval、
 sandbox 与 receipt 治理，不构成 Workspace 名称级 deny。下文的`externalRead`/sealed
@@ -171,7 +171,7 @@ Shell 网络授权按 invocation 投影。精确的 `node|npm|pnpm|yarn|bun --ve
 local-only或无法完整确定effects的arbitrary script使用`uncertainEffects`请求审批。Auto先由reviewer判断，
 Accept Edits/Full请求exact真人审批，并保持编译的sealed sandbox scope；只有明确外部/网络facts才能
 请求对应扩scope。exact same-command grant仍按编译策略与完整identity复用。
-按ADR-0162，uncertain Shell不提供额外的只读试跑选项，只使用正常的`approve_once`、符合条件的
+按[Agent Note 0162](../../.agents/notes/implemented/simplification/2026-09-01-remove-read-only-trial-grant.md)，uncertain Shell不提供额外的只读试跑选项，只使用正常的`approve_once`、符合条件的
 `same_command`与拒绝；不得把classifier或Sandbox实现差异暴露为新的用户决策。
 用户一旦对该 exact invocation 授予 `approve_once`，本次 Shell 只获得该 invocation 的 sealed scope；
 静态 effects 只决定审批文案与 filesystem scope，不能在批准后再次把该调用强制改成 network-disabled。

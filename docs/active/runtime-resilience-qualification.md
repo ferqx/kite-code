@@ -6,7 +6,7 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、ADR-0115、ADR-0116、ADR-0164、ADR-0165、ADR-0166、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0116](../../.agents/notes/implemented/process/2026-08-18-ps02-github-actions-native-evidence-authority.md)、[Agent Note 0166](../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)。
 
 ## KASD-01局部资格
 
@@ -166,7 +166,7 @@ owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Wi
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
 qualification结论，CI-profile soak按设计`qualificationMetricsSupported=false`。
 
-本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 ADR-0053。
+本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 [Agent Note 0053](../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md)。
 
 本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：
 [Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084) 的 unit、quality、
@@ -342,7 +342,7 @@ CI profile 的普通 Bun test probe 通过 preload 采集 fresh child 的 `befor
 替代或升级本节的正式 Ubuntu fault/soak qualification artifact。后续 release evidence 若引用
 Runtime 韧性结论，仍必须绑定上文默认分支 run、独立 verifier 与完整 retained attempts identity。
 
-ADR-0068/ADR-0069 的 G0/G1 不以该深度 qualification artifact 为门禁；当前 `release:build`、
+[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)/[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 的 G0/G1 不以该深度 qualification artifact 为门禁；当前 `release:build`、
 `release:verify`、`release:smoke` 是普通开源候选包构建、校验与安装/启动/回滚 smoke。上文
 qualification 流程只保留为按需诊断工具，不是发布后 Task 或 milestone；未运行时不得登记为已通过。
 
@@ -424,7 +424,7 @@ CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。
 RA-06 current Runtime State/SQLite Store 是新会话的唯一 production writer；qualification 分别证明未知 source 被静默忽略，
 已知历史 source 保持 byte-for-byte 不变，且选中的单个 session exactly-once 导入。current write API 仍拒绝历史 metadata；迁移
-只能经过 ADR-0138 的 readonly-source/atomic-target boundary，并清除旧 authority/effect。corrupt Event/Snapshot、writer
+只能经过 [Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 的 readonly-source/atomic-target boundary，并清除旧 authority/effect。corrupt Event/Snapshot、writer
 mismatch、fork/rollback/delete inconsistency 只隔离受影响 session，且都必须在 dispatch 前 fail closed；健康会话与新会话
 继续可用。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
 > 路径同步：runtime resilience 验证引用当前无版本命名的 state/store 实现路径；格式版本仍由 metadata 校验。

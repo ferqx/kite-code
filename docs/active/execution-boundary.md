@@ -18,7 +18,7 @@ apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
 `.github/workflows/execution-boundary-conformance.yml` 的 path filter 与 adversarial command 必须共同覆盖
 上述 App、qualification、isolated、integration 和 package owner 路径；迁移测试时不得只更新其中一侧。
 
-相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、ADR-0131、ADR-0137、
+相关：[Agent Note 0051](../../.agents/notes/implemented/process/2026-07-30-release-profile-monotonic-composition.md)、[Agent Note 0054](../../.agents/notes/implemented/architecture/2026-07-30-production-execution-isolation.md)、[Agent Note 0061](../../.agents/notes/implemented/process/2026-07-31-production-platform-capability-admission.md)、[Agent Note 0097](../../.agents/notes/implemented/feature/2026-08-13-brokered-git-capability.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、
 `execution-platform-support.md`。
 
 ## Schema ownership
@@ -71,13 +71,13 @@ production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio
 和 Runner dispatch 两层拒绝进程内 writer，`network=false` 同样拒绝进程内网络工具。两层门禁
 都消费 Registry Capability Descriptor 的 declared/effective effects；Shell 的保守 `unknown`
 descriptor 只由显式 `process + shell` surface 接管，实际 filesystem/network 继续由 native
-sandbox 强制。ADR-0118 的 governed in-process file read 不属于原生 process external-path capability：
+sandbox 强制。[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 的 governed in-process file read 不属于原生 process external-path capability：
 `read_file`/search 可使用 `external_read`，而 writer 仍要求 surface `write=true`，外部 mutation 另需 exact
 approval。process capability 不能替代该 Pipeline authority。
 
 `read_only_only` 是独立受限 surface：registry 必须携带 digest 校验通过的非空工具 catalog；每个
 工具 descriptor 仍固定 `workspace_read + network:none + process:false + write:false + externalPath:false`；
-这里的 `externalPath` 轴描述原生进程 capability，不否定 ADR-0118 的 Provider `external_read`。
+这里的 `externalPath` 轴描述原生进程 capability，不否定 [Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md) 的 Provider `external_read`。
 其 capability surface 保留 catalog revision/digest、每个 descriptor revision 和完整 effect
 contract，而不是只列 tool ID，并显式关闭 network、process、writer、Shell、Skill child 和
 local stdio MCP。模型工具 disclosure 和执行 runner 都会把当前 builtin capability descriptor 的
@@ -153,10 +153,10 @@ Service composition 对无 release-pinned `ExecutionBoundary` 的开发期 Nativ
 若 Policy 对 exact invocation 依据完整 effects/scope facts 密封
 `filesystem=full_access` scope，则可访问 Workspace 外敏感 identity，native profile 不再
 按名称二次拒绝；网络、进程、资源和真实宿主 ACL/TCC 边界保持不变。
-按 ADR-0131/ADR-0135，canonical Workspace 是完整授权身份：Policy、Seatbelt、bubblewrap 与 Windows runner 不得因
+按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)/[Agent Note 0135](../../.agents/notes/implemented/simplification/2026-08-24-mode-aware-workspace-authorization-boundary.md)，canonical Workspace 是完整授权身份：Policy、Seatbelt、bubblewrap 与 Windows runner 不得因
 `.git`、Agent/MCP 配置、credential、shell profile、隐藏名称或大小写别名对内部成员追加 deny；
 Shell child 继承同一整 Workspace scope。`checkDangerousPaths()` 接收 canonical Workspace，把可证明位于其外的
-固定 credential/persistence/system identity 分类为 `sensitiveExternalAccess`，按 ADR-0133 进入模式感知授权，
+固定 credential/persistence/system identity 分类为 `sensitiveExternalAccess`，按 [Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md) 进入模式感知授权，
 不再生成永久 deny；关键 destructive
 command 仍由独立规则硬拒绝。
 Building 阶段内，Policy 对可证明只作用于该 Workspace 的结构化文件 mutation 直接授权；native profile 仍执行
@@ -304,8 +304,8 @@ kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating �
 
 Seatbelt 不再由 `brokeredGitFeatureRevision` 或 Git 命令名决定是否读取用户 `.gitconfig` 或 `.config/git/config`。开发期普通 Shell 使用 broad read scope，可在宿主权限允许时读取这些配置；封存生产 Shell 仍仅按明确 scope／已授权 roots 投影。`policy_proven_read_only` Shell 的中性 HOME、Git config 禁用规则不变。
 
-按 ADR-0136，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
-classifier 不再产生免审授权。批准后，匹配 ADR-0134 grammar 的 status/log 仍可使用 hardened Shell
+按 [Agent Note 0136](../../.agents/notes/implemented/simplification/2026-08-24-mode-governed-shell-without-command-allowlists.md)，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
+classifier 不再产生免审授权。批准后，匹配 [Agent Note 0134](../../.agents/notes/implemented/simplification/2026-08-24-closed-read-only-git-shell-grammar.md) grammar 的 status/log 仍可使用 hardened Shell
 environment，由 preparation 在POSIX使用中性`HOME/XDG_CONFIG_HOME`，固定关闭system/global config、prompt、pager、
 optional locks与repository fsmonitor，并且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git当成待执行的
 空helper，不能用于关闭。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
@@ -315,7 +315,7 @@ reviewer 与 sandbox scope 的结构化事实。
 
 `createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
 `tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`
-fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutor()`；按 ADR-0119，其决策为
+fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutor()`；按 [Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)，其决策为
 `sandbox | host_shell | denied`。`host_shell` 只接受已经过 Policy/approval、durable Tool attempt ack 的调用，
 并且只能在用户命令启动前的 startup unavailable，或 typed `backend_unavailable + pre_dispatch +
 cleanupConfirmed` 后选择；缺 Runtime identity/lifecycle 的 App executor 直调继续拒绝。

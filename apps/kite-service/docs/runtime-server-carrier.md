@@ -90,7 +90,7 @@ diagnostic或response；response loss继续由mutation ID与`outcome_unknown`规
 ## Development reference
 
 development loopback/reference仅用于同一Protocol transport qualification，不进入production support。显式daemon的private loopback Web已由
-ADR-0166批准；仍不存在remote/LAN `kite server --web`或把Browser cookie提升为Runtime mutation credential的路径。
+[Agent Note 0166](../../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)批准；仍不存在remote/LAN `kite server --web`或把Browser cookie提升为Runtime mutation credential的路径。
 
 ## 验证
 

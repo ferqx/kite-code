@@ -6,18 +6,18 @@
 
 ## 产品与架构全景
 
-先看[客户端能力](../handbook/capabilities.md)区分正式 TUI、CLI、只读 Web、Server 和开发中的 Desktop，再按下表从用户目标进入实现。产品承诺仍由手册负责；这里的实现入口不自动证明承诺全部兑现。核实层级、分析基线、冲突和实跑结果见[本次建图范围](architecture.md#本次建图范围与证据)。
+先看[客户端能力](../handbook/capabilities.md)区分正式 TUI、CLI、只读 Web、Server 和开发中的 Desktop，再按下表从用户目标进入实现。产品承诺仍由手册负责；这里的实现入口不自动证明承诺全部兑现。验证应从对应 owner 文档、源码和测试入口核对。
 
-| 用户目标与产品承诺 | 实现与影响路径 | 验证定位 / 本次深度 |
+| 用户目标与产品承诺 | 实现与影响路径 | 验证定位 |
 | --- | --- | --- |
-| [发起工作并取得结果](../handbook/features/execution.md) | [提交到完成](flows/task-execution.md) → Service/Host/Kernel；[模型工具循环](flows/model-tool-cycle.md) → Builtin | 链路含源码符号、已读断言；Host、Kernel 与 Pipeline 定向实跑，未跑真实模型 |
-| [选择模型与管理上下文](../handbook/features/models-and-configuration.md) | [模型子系统](subsystems/model-context.md) → Service 配置、Builtin context/gateway；活动 Run 与保存偏好分开 | 已核对执行链中的冻结配置；各 Provider、压缩与设置 UI 未全面深入 |
-| [使用工具和控制授权](../handbook/features/tools-and-approvals.md)、[确认计划](../handbook/features/planning-and-tasks.md) | [交互链路](flows/interactions.md) → 客户端提交、Service 事务、Kernel 决定、Host 继续 | 已读 TUI/Host 交互断言，审批队列实跑；Desktop/CLI 独立 UI 时序未深入 |
-| [停止、恢复并再次工作](../handbook/features/recovery.md) | [取消和后继](flows/cancellation-recovery.md) → TUI 队列、Service/Host cleanup、Store effect | 已核实 TUI caller/receiver 并读相关断言；PTY、崩溃和原生清理未实跑 |
-| [管理连续会话](../handbook/features/sessions.md) | [切换/历史/重连](flows/session-history.md) → 各客户端投影；[多客户端同会话](architecture/identities-state.md#同一会话被多个客户端或进程访问) → Service/Store | 导航竞态和 SQLite 多进程 writer 定向实跑；不是整套连接恢复验收 |
-| [使用 MCP 与 Skills](../handbook/features/extensions.md) | [工具子系统](subsystems/tools.md) → Builtin、Service App Control、Native 客户端 | 已清点 owner 与调用入口；认证、外部服务、所有 Skill workflow 未深入 |
-| [查看执行与诊断](../handbook/flows/web-observation.md) | [Web 查询](flows/web-queries.md) → Web/共享 UI、API client/contract、Service read adapter | 核实 REST 与页面轮询分界；[Web 测试缺口](../../apps/kite-web/docs/testing.md)仍保留 |
-| [启动本机服务](../handbook/server/README.md)及[桌面工作](../handbook/clients/desktop/README.md) | [拓扑](architecture/topology.md)、[启动准入](flows/startup-admission.md) → release、Native、Desktop host、Service | 核实进程和正式数据入口，配对测试实跑；Desktop 原生、发行与跨平台资格未重跑 |
+| [发起工作并取得结果](../handbook/features/execution.md) | [提交到完成](flows/task-execution.md) → Service/Host/Kernel；[模型工具循环](flows/model-tool-cycle.md) → Builtin | [Host 命令测试](../../packages/runtime-host/test/persistent-command-host.test.ts)、[Kernel 完成测试](../../packages/agent-kernel/test/completion.test.ts) |
+| [选择模型与管理上下文](../handbook/features/models-and-configuration.md) | [模型子系统](subsystems/model-context.md) → Service 配置、Builtin context/gateway；活动 Run 与保存偏好分开 | [模型与上下文 owner](../../packages/builtin-runtime/docs/model-and-context.md) |
+| [使用工具和控制授权](../handbook/features/tools-and-approvals.md)、[确认计划](../handbook/features/planning-and-tasks.md) | [交互链路](flows/interactions.md) → 客户端提交、Service 事务、Kernel 决定、Host 继续 | [交互测试](../../packages/agent-kernel/test/interaction-governance.test.ts)、[TUI 客户端测试](../../apps/kite-cli/test/service-mode/tui-client.test.ts) |
+| [停止、恢复并再次工作](../handbook/features/recovery.md) | [取消和后继](flows/cancellation-recovery.md) → TUI 队列、Service/Host cleanup、Store effect | [Host 生命周期测试](../../packages/runtime-host/test/runtime-host.test.ts)、[TUI 系统场景](../../tests/tui-system/scenarios/session-switch.test.ts) |
+| [管理连续会话](../handbook/features/sessions.md) | [切换/历史/重连](flows/session-history.md) → 各客户端投影；[多客户端同会话](architecture/identities-state.md#同一会话被多个客户端或进程访问) → Service/Store | [导航测试](../../apps/kite-cli/test/session-navigation.test.ts)、[Store authority 测试](../../packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts) |
+| [使用 MCP 与 Skills](../handbook/features/extensions.md) | [工具子系统](subsystems/tools.md) → Builtin、Service App Control、Native 客户端 | [工具流水线测试](../../packages/builtin-runtime/test/tool-pipeline-callbacks.test.ts) |
+| [查看执行与诊断](../handbook/flows/web-observation.md) | [Web 查询](flows/web-queries.md) → Web/共享 UI、API client/contract、Service read adapter | [Web 测试与限制](../../apps/kite-web/docs/testing.md) |
+| [启动本机服务](../handbook/server/README.md)及[桌面工作](../handbook/clients/desktop/README.md) | [拓扑](architecture/topology.md)、[启动准入](flows/startup-admission.md) → release、Native、Desktop host、Service | [App Server 配对测试](../../tests/release/app-server-client.test.ts)、[Desktop 原生验收](../../apps/kite-desktop/docs/native-validation.md) |
 
 从模块反查功能：使用[全部 workspace 清单](architecture/dependencies.md#从功能找模块从模块反查功能)，覆盖 4 个 app 与 14 个 package 的职责、manifest、代表性源码消费点、产品和 owner 文档。修改影响可沿该行进入链路，在 producer/consumer 两侧核对；共享 `kite-client-ui` 影响 Web/Desktop 的呈现，不使 Web 获得 Desktop 的执行权限。
 
@@ -49,6 +49,6 @@
 
 ## 查询与维护
 
-[跨包契约目录](subsystems/contracts.md) · [测试体系](../../tests/README.md) · [文档同步](documentation.md) · [有效计划](../plans/README.md) · [运行排障](../runbooks/agent-production-incident.md)。
+[跨包契约目录](subsystems/contracts.md) · [测试体系](../../tests/README.md) · [文档同步](documentation.md) · [有效计划](../plans/README.md) · [Agent Notes](../../.agents/notes/README.md) · [运行排障](../runbooks/agent-production-incident.md)。
 
 局部任务从上表进入对应段落、负责模块与测试；发现跨层影响后再扩读。影响映射是核对候选，不是整批必读清单。完成时按[文档同步](documentation.md#规则归属与执行入口)定位规则，已读内容与验证结果的复用由现有 Skill 判断。

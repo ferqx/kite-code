@@ -43,7 +43,7 @@ runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，�
 checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
-相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097、ADR-0110、ADR-0131、ADR-0137，
+相关：[Agent Note 0074](../../.agents/notes/implemented/process/2026-08-08-windows-10-api-compatibility-baseline.md)、[Agent Note 0077](../../.agents/notes/implemented/simplification/2026-08-08-unified-sandbox-startup-downgrade.md)、[Agent Note 0079](../../.agents/notes/implemented/architecture/2026-08-08-windows-managed-restricted-token-sandbox.md) 至 [Agent Note 0089](../../.agents/notes/implemented/feature/2026-08-08-windows-online-loopback-proxy-inheritance.md)、[Agent Note 0097](../../.agents/notes/implemented/feature/2026-08-13-brokered-git-capability.md)、[Agent Note 0110](../../.agents/notes/implemented/feature/2026-08-18-tool-pipeline-commit-boundaries.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)，
 `release/platform-capabilities/windows-runner.json`。
 
 ## SAQ-10 当前 contract
@@ -73,12 +73,12 @@ Windows 只有以下 runtime outcome：
 | windows_restricted_token | protocol V6/native runner compatibility path；Builtin Local Provider 在 durable intent 后生成 transport，Runtime lifecycle consumer 经唯一 Host spawn primitive 启动 | canonical 真实 Workspace，不复制 repository | development restricted-token sandbox；开发期 Full 可用，production qualification 不可用 |
 | none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；受限 scope clean fail closed，Full 不转成旧 grant |
 
-另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
+另有 [Agent Note 0100](../../.agents/notes/implemented/feature/2026-08-13-user-approved-external-filesystem-capability.md) 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
 证明的命令审批通过后，仍由去权 restricted token 与 Job Object 执行，只使用当前用户普通 ACL，而不使用
 Workspace-only `WRITE_RESTRICTED` capability gate。它不是 host executor、startup fallback 或失败后 replay。
 
 AppContainer backend、`KITE_WINDOWS_APPCONTAINER_EXPERIMENTAL` 选择逻辑、private Workspace
-staging、repository copy、预算 Worker 和 reconciliation 已由 ADR-0088 删除。设置旧环境变量不会改变
+staging、repository copy、预算 Worker 和 reconciliation 已由 [Agent Note 0088](../../.agents/notes/implemented/simplification/2026-08-08-remove-windows-appcontainer-backend.md) 删除。设置旧环境变量不会改变
 backend。该移除不降低 production 能力，因为实验路径从未取得 production qualification。
 
 RM-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
@@ -164,7 +164,7 @@ local path 的 `WRITE_RESTRICTED` 通过 restricted SID check 限制写入，但
 权限。approved filesystem path 同样保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping，使 read/execute
 只服从 current user 普通 ACL，并让 restricted SID check 仅参与写访问；token 的 restricted SID 集合镜像
 user/group SID 并加入 compatibility SID，同时保留 Logon/World SID。这样 GitHub runner toolcache 等只向普通用户
-ACL 身份授予执行权的 system/toolchain binary 仍可运行；按 ADR-0132，Workspace 外固定路径不再对该 SID
+ACL 身份授予执行权的 system/toolchain binary 仍可运行；按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)，Workspace 外固定路径不再对该 SID
 安装 write deny ACE。approved token 与普通 Workspace token 使用同一
 Logon/World/capability default DACL 初始化，确保 shell 创建的 pipe 与 Node/npm 等 descendant process
 object 可由该 token 继续访问。只有带 `full_access + allow_all` sealed scope 的网络调用才改用当前用户 token，
@@ -173,15 +173,15 @@ exact 已审批 command 的文件权限边界，也不得安装该 token 无法�
 filesystem scope 的网络调用均被拒绝，不能把 network approval 变成该 filesystem 扩权。
 Job Object 提供进程树数量和终止边界，不单独作为 filesystem 或 network boundary。
 
-该 backend 没有 structural network-off 或 arbitrary-descendant allowlist。按 ADR-0131，Workspace 内
+该 backend 没有 structural network-off 或 arbitrary-descendant allowlist。按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)，Workspace 内
 `.env.*` 等名称不再需要动态 deny；ledger 属于 trusted host state，并只保留完整 Workspace root capability。
 用户目录等 Workspace 外 protected path 不得写入该 ledger，因为 Workspace capability 在外部没有 allow ACE。
-按 ADR-0132/ADR-0133，approved filesystem invocation 已在 Tool Policy 完成当前模式授权，runner 不再为外部固定路径
+按 [Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)/[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)，approved filesystem invocation 已在 Tool Policy 完成当前模式授权，runner 不再为外部固定路径
 安装 guard deny ACE；compatibility SID 暂时保留以维持 protocol V6，且外部路径不进入 Workspace repair。
 
 因此 `windows_restricted_token` 是 development backend：
 
-- 可以开启 ADR-0121 定义的开发期 Full，但不能以此宣称 production Full qualification；
+- 可以开启 [Agent Note 0121](../../.agents/notes/implemented/feature/2026-08-18-windows-development-full-mode.md) 定义的开发期 Full，但不能以此宣称 production Full qualification；
 - 不能为 arbitrary Shell descendant 资格化 network-off 或 allowlist；
 - 不再提供或要求 Workspace 内 `.env.*` protected-path deny；
 - `productionSupported=false`，D-04 仍为 excluded。
@@ -240,17 +240,17 @@ E2E/probe。
 | none 请求受限 scope | disabled/rejected，并显示当前 backend 不可用；不 host fallback |
 | windows_restricted_token 请求 Full | 允许开发期 Full；不改变 `productionSupported=false` 或 strict production evidence 要求 |
 
-ADR-0120 开始实现 direct Workspace 的临时 AppContainer strict candidate：它不是 Windows 登录账户，
+[Agent Note 0120](../../.agents/notes/implemented/feature/2026-08-18-windows-strict-appcontainer-profile.md) 开始实现 direct Workspace 的临时 AppContainer strict candidate：它不是 Windows 登录账户，
 不请求 UAC，也不恢复 repository copy。默认零 capability profile 与已批准网络 profile 必须分离；在
 offline network、Workspace 外 read/write/protected identity、Job/ACL/profile cleanup 和两入口 native
 conformance 全部通过前，它仍不是可选择 backend，也不能用于 production Full qualification。开发期 Full
-已由 ADR-0121 的 direct backend 语义提供。
+已由 [Agent Note 0121](../../.agents/notes/implemented/feature/2026-08-18-windows-development-full-mode.md) 的 direct backend 语义提供。
 
-按 ADR-0131，Windows restricted-token 开发 backend 不再尝试证明通用 Shell 对 Workspace `.git`
+按 [Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)，Windows restricted-token 开发 backend 不再尝试证明通用 Shell 对 Workspace `.git`
 metadata 的独立 read/write deny；旧 ACL snapshot 会由 V3 ledger migration 恢复并删除。专用 Git Broker、
-schema 与资格字段现已退役，普通 Shell 的 OS 权限与执行资格仍保留。按 ADR-0137，Windows raw Shell 先按 interactionMode
+schema 与资格字段现已退役，普通 Shell 的 OS 权限与执行资格仍保留。按 [Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)，Windows raw Shell 先按 interactionMode
 与 phase 选择 Workspace baseline：Building 使用 Workspace 读写，Planning 非 Full 使用 Workspace 只读；
 baseline 不再因为命令名进入全量人工审批，已知 external/sensitive scope 才路由到 durable approval/Auto
-review。命中 ADR-0134 read-only classifier 的命令仍可使用 hardened environment，并固定关闭 external
+review。命中 [Agent Note 0134](../../.agents/notes/implemented/simplification/2026-08-24-closed-read-only-git-shell-grammar.md) read-only classifier 的命令仍可使用 hardened environment，并固定关闭 external
 config、prompt、pager、optional locks 与 fsmonitor；该分类不跳过 mode/policy review。raw Git token 不被
 硬拒绝；删除 Git 专用资格不构成 Windows 平台生产资格通过的证据。

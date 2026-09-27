@@ -23,6 +23,8 @@ export type LegacyKiteProcessObservation =
 
 const PROC_PIDTBSDINFO = 3;
 const PROC_BSDINFO_SIZE = 136; // macOS SDK struct proc_bsdinfo
+const KINFO_PROC_SIZE = 648; // macOS 64-bit SDK struct kinfo_proc
+const SZOMB = 5; // macOS SDK sys/proc.h
 const MAX_PIDS = 65_536;
 const MAX_ARG_BYTES = 1_048_576;
 const MAX_PATH_BYTES = 4_096;
@@ -235,6 +237,8 @@ export function observeLegacyKiteStoreProcesses(
   input: {
     readonly exclude?: readonly LegacyKiteProcessIdentity[];
     readonly platform?: NodeJS.Platform;
+    /** Only report processes that may use this canonical Store home. */
+    readonly canonicalKiteHome?: string;
     /** Verified managed installation prefixes; required for non-default --prefix installs. */
     readonly managedInstallPrefixes?: readonly string[];
   } = {},
@@ -244,6 +248,11 @@ export function observeLegacyKiteStoreProcesses(
   }
   const uid = process.getuid?.();
   if (uid === undefined) return { status: 'unsupported' };
+  const scopedHome = input.canonicalKiteHome
+    ? canonicalStoreHome(input.canonicalKiteHome)
+    : undefined;
+  if (input.canonicalKiteHome && !scopedHome)
+    return { status: 'incomplete', reason: 'process_identity' };
   let api: DarwinApi;
   try {
     api = openDarwinApi();
@@ -269,7 +278,7 @@ export function observeLegacyKiteStoreProcesses(
       if (pid <= 0 || pid === process.pid) continue;
       const identity = readDarwinIdentity(api, pid);
       if (!identity) {
-        if (processIsGone(pid)) continue;
+        if (processIsGone(pid) || isStableDarwinZombie(api, pid)) continue;
         return { status: 'incomplete', reason: 'process_identity' };
       }
       if (identity.uid !== uid && identity.ruid !== uid) continue;
@@ -280,23 +289,34 @@ export function observeLegacyKiteStoreProcesses(
         continue;
       }
       const executable = readDarwinExecutable(api, pid);
-      const argv = readDarwinArgv(api, pid);
-      if (!executable || !argv) {
-        if (!executable && argv && isVerifiedUnrelatedHelper(api, pid, identity.commandName)) {
+      const invocation = readDarwinProcessInvocation(api, pid);
+      if (!executable || !invocation) {
+        if (
+          executable
+            ? !invocation &&
+              isDefinitelyUnrelatedExecutable(executable, identity.commandName, prefixes)
+            : isVerifiedUnrelatedHelper(api, pid, identity.commandName)
+        ) {
           const after = readDarwinIdentity(api, pid);
           if (after?.startIdentity === startIdentity && after.commandName === identity.commandName)
             continue;
         }
-        if (processIsGone(pid)) continue;
+        if (processIsGone(pid) || isStableDarwinZombie(api, pid, startIdentity)) continue;
         return { status: 'incomplete', reason: 'process_arguments' };
       }
       const after = readDarwinIdentity(api, pid);
       if (!after || after.startIdentity !== startIdentity) {
-        if (processIsGone(pid)) continue;
+        if (processIsGone(pid) || isStableDarwinZombie(api, pid, startIdentity)) continue;
         return { status: 'incomplete', reason: 'process_identity' };
       }
-      const kind = classifyKiteProcess(executable, argv, prefixes);
-      if (kind) matches.push(Object.freeze({ pid, startIdentity, kind }));
+      const kind = classifyKiteProcess(executable, invocation.argv, prefixes);
+      if (!kind) continue;
+      if (scopedHome) {
+        const processHomes = kiteProcessStoreHomes(kind, invocation);
+        if (!processHomes) return { status: 'incomplete', reason: 'process_identity' };
+        if (!processHomes.includes(scopedHome)) continue;
+      }
+      matches.push(Object.freeze({ pid, startIdentity, kind }));
     }
     return matches.length > 0
       ? { status: 'busy', matches: Object.freeze(matches) }
@@ -306,6 +326,53 @@ export function observeLegacyKiteStoreProcesses(
   } finally {
     api.close();
   }
+}
+
+/** A zombie has no writer left; require two matching kernel snapshots before skipping it. */
+function isStableDarwinZombie(
+  api: DarwinApi,
+  pid: number,
+  expectedStartIdentity?: string,
+): boolean {
+  const first = readDarwinZombieIdentity(api, pid);
+  if (!first || (expectedStartIdentity && first !== expectedStartIdentity)) return false;
+  return readDarwinZombieIdentity(api, pid) === first;
+}
+
+function readDarwinZombieIdentity(api: DarwinApi, pid: number): string | undefined {
+  const mib = new Int32Array([1, 14, 1, pid]); // CTL_KERN, KERN_PROC, KERN_PROC_PID
+  const bytes = new Uint8Array(KINFO_PROC_SIZE);
+  const length = new BigUint64Array([BigInt(bytes.length)]);
+  if (api.symbols.sysctl(ptr(mib), mib.length, ptr(bytes), ptr(length), null, 0) !== 0)
+    return undefined;
+  if (Number(length[0]) !== KINFO_PROC_SIZE) return undefined;
+  const value = new DataView(bytes.buffer);
+  if (value.getInt32(40, true) !== pid || value.getUint8(36) !== SZOMB) return undefined;
+  const seconds = value.getBigInt64(0, true);
+  const microseconds = value.getBigInt64(8, true);
+  if (seconds <= 0n || microseconds < 0n || microseconds >= 1_000_000n) return undefined;
+  return `darwin:${seconds}:${microseconds}`;
+}
+
+/** Readable paths can rule out Kite only for OS-owned binaries or another app's main executable. */
+function isDefinitelyUnrelatedExecutable(
+  executable: string,
+  commandName: string,
+  managedInstallPrefixes: readonly string[],
+): boolean {
+  if (!isAbsolute(executable) || !commandName) return false;
+  const name = basename(executable);
+  if (commandName !== name.slice(0, 16)) return false;
+  if (classifyKiteProcess(executable, [], managedInstallPrefixes)) return false;
+  // Source entrypoints can run under a generic script runtime; a renamed or
+  // unrecognized binary outside these known locations is similarly unknown.
+  if (/^(?:bun|node|nodejs|deno|electron|kite(?:-tui|-service)?)(?:\.exe)?$/iu.test(name))
+    return false;
+  const systemBinary = /^(?:\/bin|\/sbin|\/usr\/bin|\/usr\/sbin)\/[^/]+$/u.test(executable);
+  const otherAppMain =
+    /(?:^|\/)[^/]+\.app\/Contents\/MacOS\/[^/]+$/iu.test(executable) &&
+    !/(?:^|\/)kite\.app\//iu.test(executable);
+  return systemBinary || otherAppMain;
 }
 
 function readDarwinIdentity(
@@ -392,7 +459,21 @@ function readDarwinExecutable(api: DarwinApi, pid: number): string | undefined {
   }
 }
 
+interface DarwinProcessInvocation {
+  readonly argv: readonly string[];
+  readonly configHome?: string;
+  readonly runtimeHome?: string;
+  readonly environmentComplete: boolean;
+}
+
 function readDarwinArgv(api: DarwinApi, pid: number): readonly string[] | undefined {
+  return readDarwinProcessInvocation(api, pid)?.argv;
+}
+
+function readDarwinProcessInvocation(
+  api: DarwinApi,
+  pid: number,
+): DarwinProcessInvocation | undefined {
   const mib = new Int32Array([1, 49, pid]); // CTL_KERN, KERN_PROCARGS2, pid
   const length = new BigUint64Array([0n]);
   if (api.symbols.sysctl(ptr(mib), mib.length, null, ptr(length), null, 0) !== 0) return undefined;
@@ -420,10 +501,72 @@ function readDarwinArgv(api: DarwinApi, pid: number): readonly string[] | undefi
       argv.push(decoder.decode(bytes.subarray(offset, end)));
       offset = end + 1;
     }
-    return argv;
+    let configHome: string | undefined;
+    let runtimeHome: string | undefined;
+    let environmentComplete = false;
+    while (offset < size) {
+      const end = bytes.indexOf(0, offset);
+      if (end < offset || end >= size) break;
+      if (end === offset) {
+        environmentComplete = true;
+        break;
+      }
+      const entry = decoder.decode(bytes.subarray(offset, end));
+      if (entry.startsWith('KITE_CODE_CONFIG_HOME=')) {
+        if (configHome !== undefined) break;
+        configHome = entry.slice('KITE_CODE_CONFIG_HOME='.length);
+      }
+      if (entry.startsWith('KITE_CODE_HOME=')) {
+        if (runtimeHome !== undefined) break;
+        runtimeHome = entry.slice('KITE_CODE_HOME='.length);
+      }
+      offset = end + 1;
+    }
+    return { argv, configHome, runtimeHome, environmentComplete };
   } catch {
     return undefined;
   }
+}
+
+function canonicalStoreHome(path: string): string | undefined {
+  if (!isAbsolute(path)) return undefined;
+  try {
+    return realpathSync.native(path);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT')
+      return resolve(path);
+    return undefined;
+  }
+}
+
+function kiteProcessStoreHomes(
+  kind: LegacyKiteProcessKind,
+  invocation: DarwinProcessInvocation,
+): readonly string[] | undefined {
+  const positions = invocation.argv.flatMap((value, index) =>
+    value === '--kite-home' ? [index] : [],
+  );
+  if (positions.length > 1) return undefined;
+  const explicit = positions.length === 1 ? invocation.argv[positions[0]! + 1] : undefined;
+  if (positions.length === 1 && !explicit) return undefined;
+  if (!invocation.environmentComplete) return undefined;
+  const defaultHome = join(userInfo().homedir, '.kite-code');
+  if (kind === 'service') {
+    // Older Services may keep their Store under the runtime root even when
+    // their config root differs. Either root can therefore conflict.
+    const paths = [invocation.configHome, invocation.runtimeHome].filter(
+      (path): path is string => path !== undefined,
+    );
+    const homes = (paths.length > 0 ? paths : [defaultHome]).map(canonicalStoreHome);
+    return homes.every((home): home is string => home !== undefined) ? homes : undefined;
+  }
+  // Current clients use --kite-home or the OS home. Include inherited Kite
+  // roots as candidates as well, since an older client may route through them.
+  const paths = [explicit ?? defaultHome, invocation.configHome, invocation.runtimeHome].filter(
+    (path): path is string => path !== undefined,
+  );
+  const homes = paths.map(canonicalStoreHome);
+  return homes.every((home): home is string => home !== undefined) ? homes : undefined;
 }
 
 function processIsGone(pid: number): boolean {

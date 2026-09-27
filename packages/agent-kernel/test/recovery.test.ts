@@ -4,6 +4,7 @@ import {
   classifyToolOutcome,
   isToolOutcome,
   normalizeAgentToolOutcomeEvent,
+  stableStringifyToolIdentity,
   type ToolOutcome,
 } from '../src/normalization';
 import {
@@ -40,6 +41,35 @@ function userActionOutcome(): ToolOutcome {
 }
 
 describe('State ToolOutcome user-action recovery parity', () => {
+  test('preserves canonical failure identity bytes and missing-detail fallback', () => {
+    const failed: ToolOutcome = {
+      ...userActionOutcome(),
+      failure: { kind: 'tool_runtime_error', detailCode: 'runtime_exception' },
+    };
+    expect(stableStringifyToolIdentity({ b: 1, a: 2 })).toBe(
+      stableStringifyToolIdentity({ a: 2, b: 1 }),
+    );
+    expect(
+      toolFailureInstanceId({
+        toolCallId: 'tool-1',
+        invocationFingerprint: 'abc',
+        outcome: failed,
+      }),
+    ).toBe('f485223670354bb06734410f9873d67998cb0edf05b7f4e642dd4bc0c4913830');
+
+    const withoutFailure = classifyToolOutcome({
+      status: 'success',
+      authority: { dispatchState: 'not_started', externalEffects: 'none' },
+    });
+    expect(
+      toolFailureInstanceId({
+        toolCallId: 'tool-1',
+        invocationFingerprint: 'abc',
+        outcome: withoutFailure,
+      }),
+    ).toBe('dfe2b3da88125011de8551c48abca8348811714aa9b7e4e775058431bcfda03b');
+  });
+
   test('recovery journals consume normalization-owned outcomes without widening unknown or diagnostic facts', () => {
     const canonicalFailure = classifyToolOutcome({
       status: 'failed',

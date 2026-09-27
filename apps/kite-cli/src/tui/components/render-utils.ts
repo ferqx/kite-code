@@ -30,7 +30,7 @@ export function actionName(name: string): string {
  * 输出 diff 统计（"Added … removed …"），新建输出 "Wrote …"，
  * 内容未变的覆写输出 "Wrote … (content unchanged)"。
  * 运行/排队态调用方没有 summary 可传，用中性 Write。
- * append 已由 ADR-0025 §2 移除；历史会话残留的 "Appended …" summary
+ * append 已移除；历史会话残留的 "Appended …" summary
  * 归入中性 Write（无 Append 分支）。
  *
  * Card verb for write_file — distinguishes create vs overwrite (the
@@ -38,7 +38,7 @@ export function actionName(name: string): string {
  * is inferred from the summary's first line (core emits diff stats for
  * overwrites, "Wrote …" for creates, and "Wrote … (content unchanged)"
  * for no-op overwrites). Running/queued callers pass no summary →
- * neutral Write. Append was removed by ADR-0025 §2; legacy "Appended …"
+ * neutral Write. Append was removed; legacy "Appended …"
  * summaries from old sessions fall back to Write (no Append branch).
  */
 export function writeFileActionName(

@@ -7,10 +7,8 @@ import {
   pairedDesktopManifestDigest,
   parsePairedDesktopServiceManifest,
 } from '../../src/paired-desktop-manifest';
-import {
-  inspectPairedDesktopDistribution,
-  verifyPairedDesktopServiceArtifact,
-} from '../../src/service/paired-desktop-admission';
+import { observeLegacyKiteStoreProcesses } from '../../src/service/legacy-store-processes';
+import { verifyPairedDesktopServiceArtifact } from '../../src/service/paired-desktop-admission';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -82,45 +80,38 @@ test('manifest digest is field-order stable and paired artifact rejects any dige
   ).toThrow();
 });
 
-test('distribution gate permits the same active Service and rejects unknown or different entrypoints', () => {
-  const data = fixture();
-  const prefix = join(data.root, 'managed');
-  const apps = join(data.root, 'Applications');
-  const missingPath = join(data.root, 'optional-bin');
-  mkdirSync(prefix);
-  mkdirSync(apps);
-  const input = {
-    serviceSha256: data.manifest.executableSha256,
-    manifestSha256: data.digest,
-    knownManagedPrefixes: [] as string[],
-    searchPath: `${missingPath}:/usr/bin:/bin`,
-    defaultManagedPrefix: prefix,
-    applicationRoots: [apps],
-  };
-  expect(inspectPairedDesktopDistribution(input)).toBe('distribution_inspection_incomplete');
-  const candidateId = 'a'.repeat(24);
-  const candidateDir = join(prefix, 'releases', candidateId, 'bin');
-  mkdirSync(candidateDir, { recursive: true });
-  writeFileSync(join(prefix, 'active'), `${candidateId}\n`);
-  writeFileSync(join(candidateDir, 'kite-service'), 'paired-service-fixture');
-  expect(inspectPairedDesktopDistribution(input)).toBe('clear');
-  writeFileSync(join(candidateDir, 'kite-service'), 'different-service');
-  expect(inspectPairedDesktopDistribution(input)).toBe('other_distribution_differs');
-  writeFileSync(join(candidateDir, 'kite-service'), 'paired-service-fixture');
-  const unknownBin = join(data.root, 'unknown-bin');
-  mkdirSync(unknownBin);
-  writeFileSync(join(unknownBin, 'kite'), 'unknown');
-  expect(
-    inspectPairedDesktopDistribution({ ...input, searchPath: `${unknownBin}:/usr/bin:/bin` }),
-  ).toBe('other_distribution_unknown');
-  const appService = join(apps, 'kite.app', 'Contents', 'Resources', 'service');
-  mkdirSync(appService, { recursive: true });
-  writeFileSync(join(appService, 'kite-service'), 'paired-service-fixture');
-  writeFileSync(join(appService, 'desktop.json'), JSON.stringify(data.manifest));
-  expect(inspectPairedDesktopDistribution(input)).toBe('clear');
+test('live legacy Service only blocks its own Store home', async () => {
+  if (process.platform !== 'darwin') return;
+  const root = mkdtempSync(join(tmpdir(), 'kite-paired-homes-'));
+  roots.push(root);
+  const firstHome = join(root, 'first');
+  const secondHome = join(root, 'second');
+  const entrypoint = join(root, 'scripts', 'release', 'entrypoints', 'service.ts');
+  mkdirSync(firstHome);
+  mkdirSync(secondHome);
+  mkdirSync(join(root, 'scripts', 'release', 'entrypoints'), { recursive: true });
   writeFileSync(
-    join(appService, 'desktop.json'),
-    JSON.stringify({ ...data.manifest, buildId: 'different' }),
+    entrypoint,
+    "process.stdout.write('ready\\n'); setInterval(() => undefined, 1000);\n",
   );
-  expect(inspectPairedDesktopDistribution(input)).toBe('other_distribution_differs');
+  const child = Bun.spawn([process.execPath, entrypoint, 'app-server', 'run-stdio'], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, KITE_CODE_CONFIG_HOME: firstHome, KITE_CODE_HOME: firstHome },
+  });
+  try {
+    const reader = child.stdout.getReader();
+    const ready = await reader.read();
+    expect(new TextDecoder().decode(ready.value)).toContain('ready');
+    reader.releaseLock();
+    const first = observeLegacyKiteStoreProcesses({ canonicalKiteHome: firstHome });
+    expect(first.status).toBe('busy');
+    if (first.status === 'busy')
+      expect(first.matches.some((match) => match.pid === child.pid)).toBe(true);
+    const second = observeLegacyKiteStoreProcesses({ canonicalKiteHome: secondHome });
+    expect(second.status).toBe('complete');
+  } finally {
+    child.kill('SIGTERM');
+    await child.exited;
+  }
 });

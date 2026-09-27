@@ -387,7 +387,7 @@ describe('tool safety', () => {
     });
     expect(writeResult.ok).toBe(true);
 
-    // ADR-0043 §3: oldString has trailing spaces — matching is exact, no fallback
+    // oldString has trailing spaces — matching is exact, no fallback
     const result = await filesystem.mutate({
       kind: 'edit_file',
       path: 'cfg.ts',
@@ -417,7 +417,7 @@ describe('tool safety', () => {
     });
     expect(writeResult.ok).toBe(true);
 
-    // ADR-0043 §3: oldString stripped of indent — exact match fails, no per-line fallback
+    // oldString stripped of indent — exact match fails, no per-line fallback
     const result = await filesystem.mutate({
       kind: 'edit_file',
       path: 'f.ts',

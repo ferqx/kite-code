@@ -33,7 +33,7 @@
 
 确定性时间验证空闲过期可继续、完成早于清理、并发取得执行权、失权旧句柄拒绝、未知副作用不重放、恢复 CAS、历史只读、丢回执幂等；多空间验证任务不互相取消且配置/授权不串用。Electron 验证原生宿主、隐藏、重接与退出。真实 xp 数据只在隔离副本验证，不加入仓库。
 
-每阶段执行 iteration_complete；修改产品行为同步手册、边界同步 owner/active，重要取舍新增 ADR。UI 验证后由子 Agent 同步 Figma。Git 操作前执行 document-before-commit。最终交付实际简化、必要保护、验证证据和剩余项。
+每阶段执行 iteration_complete；修改产品行为同步手册、边界同步 owner/active，重要取舍按规范新增或更新 Agent Note。UI 验证后由子 Agent 同步 Figma。Git 操作前执行 document-before-commit。最终交付实际简化、必要保护、验证证据和剩余项。
 
 ## 基线证据
 

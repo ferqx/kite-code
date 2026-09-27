@@ -6,11 +6,10 @@
 验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts apps/kite-service/test/capabilities/status-projection.test.ts
 tests/verification tests/mcp/write-*.test.ts tests/integration/skills/effect-classification.test.ts
 apps/kite-service/test/skills/workflow-contract.test.ts`、`bun run typecheck`。
-相关：ADR-0008、ADR-0051、ADR-0064、ADR-0068、ADR-0069、D-10、Phase 5。
+相关：[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)、[Agent Note 0051](../../.agents/notes/implemented/process/2026-07-30-release-profile-monotonic-composition.md)、[Agent Note 0064](../../.agents/notes/implemented/architecture/2026-08-02-conservative-skill-effects-and-capability-profile-admission.md)、[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、D-10、Phase 5。
 
 当前只要求 Verification、MCP write、Skills readonly/effectful 的本地 profile、status、conformance、
-recovery 与 adversarial Gate。旧 internal dogfood、external canary、beta/stable maturity 和 authority
-路线已由 ADR-0069 取代，不再形成发布阶段或未来 Task。四条 capability 继续默认 off；只有本机用户可
+recovery 与 adversarial Gate。发布范围按 [Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 收敛，不包含 dogfood、canary 或 maturity promotion。四条 capability 继续默认 off；只有本机用户可
 显式开启，且配置不能扩大 embedded ceiling。unknown/destructive/MCP write/Verification false pass 的
 fail-closed 语义不变。
 
@@ -26,9 +25,7 @@ embedded ceiling、实际 evidence age 与 G3/G4/G5 passed。MCP write 还必须
 都不能模糊成另一项。Rollback 只关闭新 admission 并保留 Receipt 与已有 required Verification。
 Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成。
 
-旧 capability retained-evidence schema、producer/verifier、contract-only adapter 和无 authority workflow
-已删除：它们在空 registry 下只能固定产出 `blocked/evidenceEligible=false`，且 ADR-0069 后不再对应产品路线。
-当前安全证明由实际 profile/admission/status、Verification、MCP write governance 和 Skill workflow 测试负责。
+当前安全证明由实际 profile/admission/status、Verification、MCP write governance 和 Skill workflow 测试负责；已退役的 retained-evidence schema 与无 authority workflow 不构成当前准入路径。
 未来若引入真实发布 authority，必须先确定可信根、route 和证据消费者，再建立新的端到端 evidence contract。
 
 ## Verification
@@ -50,8 +47,7 @@ admission、intent/receipt/idempotency/reconciliation/compensation、route quali
 现由 production-owned `packages/builtin-runtime/src/mcp/write-governance.ts` 实现，不再由测试 fixture 拥有规则；测试只复用
 该模块。`release/mcp-write-routes.json` 是 source-owned strict registry，当前显式为空。实际 MCP
 dispatch 尚未获得非空 production route 或 stable Verification evidence，因此任何 write capability 仍
-保持 off。旧 production stable milestone 已被取代；5B 本地 conformance、安全 Gate 与默认关闭状态
-已经完成。
+保持 off。5B 本地 conformance、安全 Gate 与默认关闭状态已经完成。
 
 MCP Manager 已接入可选且在 sealed production 中强制的 durable write dispatch guard。生产配置缺 guard
 会在 Provider 调用前拒绝；admission/intent 或 receipt 持久化失败同样拒绝，provider 异常只记录 unknown
@@ -66,5 +62,4 @@ symlink/size/output/frame/recovery/budget 边界，malicious instruction 不能�
 SKILL.md 正文直接注入模型的旧路径。Task 5C.1/5C.2 的分类与 Workflow Contract 本地
 conformance 已完成。
 
-duplicate/unauthorized/data violation 或 effect/reference drift 继续使 capability off。旧 rollout 与 stable
-milestone 已被取代，不存在待完成的 Phase 5 promotion Task。
+duplicate/unauthorized/data violation 或 effect/reference drift 继续使 capability off。当前没有 Phase 5 promotion Task。

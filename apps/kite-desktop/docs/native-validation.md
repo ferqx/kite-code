@@ -155,3 +155,11 @@ Electron 44.3.0／macOS arm64 隔离包，配套 Service candidate `5acc17089999
 ## 子 Agent 详情入口（2026-09-26）
 
 在 macOS arm64 的隔离打包版中，`app.asar` SHA-256 为 `5d0959a6ff906cf68405bd87bc7b02939a51f4642205d7a9a3b3094c6e907a23`，配套 Service build ID 为 `72a2aee2bd6a589c1422067a`。`bun run apps/kite-desktop/scripts/native-smoke.ts --execution-recovery` 使用临时 HOME 和本机模拟 Provider，通过真实 Electron 窗口、preload、IPC 与 Service 验证三个子 Agent 的环境信息状态、列表刷新、从准确匹配的卡片打开只读子会话并返回父会话。没有匹配独立子会话的旧后台记录只显示状态，由共享 UI 定向测试核对；原生系统对话框仍由测试夹具代答。
+
+## Agent 等待展示与最终回复（2026-09-27）
+
+`bun run --cwd apps/kite-desktop test:native:window --execution-recovery` 在隔离 HOME、源码外打包 Electron 窗口、真实 preload／IPC／配套 Service 和本机模型 fixture 中通过定向验收；没有调用外部 Provider。此模式只运行执行恢复与多子 Agent 功能路径，跳过默认视觉 smoke 中与本次展示无关的复制按钮和文件变更面板几何断言；**不能据此宣称默认完整 smoke 通过**。
+
+三个 required 子 Agent 错峰结算时，持久 Run 进入 `waiting/required_background`，主会话阅读列只出现一条 `role=status` 的“正在等待子 Agent 结果”；模型先前正文保持非最终，停止入口仍可用，输入框可聚焦。窗口缩至 900 px 后状态仍位于阅读列内；刷新后同一 Run 恢复等待提示。部分结果持久接纳时，卡片分别显示完成与运行中，父模型未提前重试。打开独立子会话详情时父级提示撤下，返回父会话后恢复。全部结果接纳后，父模型继续一次，最终正文仅在终态标为最终回复，等待提示消失；持久事件核对三条子结果、一次 `run.completed` 且无 `run.error`。这些断言由[原生窗口 smoke](../scripts/native-smoke.ts)中的 `--execution-recovery` 路径覆盖。
+
+同次交付的共享页面 70 项、Desktop UI 81 项、Service 三子任务与混合等待 11 项测试、相关类型检查及 Electron renderer／host 打包通过；它们分别证明组件与服务断言，不能替代上述窗口验证。原生目录选择与确认框仍由 fixture 代答，系统输入法和正式签名分发不在这次定向验收范围内。默认视觉 smoke 的既有失败仍按上文记录，不因定向路径通过而改变。

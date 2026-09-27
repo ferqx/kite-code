@@ -1,12 +1,14 @@
 # Kite Home 与本机 Runtime 单一化实施方案
 
+迁移说明：文中的无链接编号仅标识当时的决策记录；当前仓库没有对应 Agent Note，不将这些编号视为现行依据。已迁移的决策直接链接到对应 Note；当前行为以负责文档核对。
+
 状态：superseded
 
 日期：2026-08-30
 
 优先级：P0
 
-相关：ADR-0152、ADR-0153、ADR-0154。
+相关：历史决策编号 0152、0153，以及 [Agent Note 0154](../../../.agents/notes/implemented/simplification/2026-08-30-pre-release-store9-clean-cutover.md)。
 
 替代：2026-09-02由[`App Server进程与Durable Session解耦实施方案`](2026-09-02-app-server-session-decoupling.md)接管未完成与后续演进；
 已完成的Store 9、typed Artifact、Trust、receipt与clean cutover成果继续有效，“全局单Service拥有Runtime/Store/Web”不再是目标拓扑。
@@ -70,7 +72,7 @@ Artifact表继续保留各自schema、digest、byte bound、reader与GC；单数
 
 ## 4. Clean cutover
 
-Kite Code仍处于未发布阶段，执行ADR-0128/0154 clean cutover：
+Kite Code仍处于未发布阶段，执行当时编号 0128 对应的清理方案与 [Agent Note 0154](../../../.agents/notes/implemented/simplification/2026-08-30-pre-release-store9-clean-cutover.md) 的 clean cutover：
 
 - 正式CLI/candidate不提供Store 7/8 migration、legacy `web recover`或Coordinator/Worker/Gateway release entrypoint；
 - normal Service不扫描、读取、迁移或删除旧DB/layout/Artifact/process state及`~/.kite-code-coordination`；

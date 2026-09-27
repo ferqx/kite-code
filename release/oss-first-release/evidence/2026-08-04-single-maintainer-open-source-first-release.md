@@ -3,7 +3,7 @@
 状态：completed
 日期：2026-08-04
 关联计划：[`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md)
-关联决策：ADR-0068、ADR-0069
+关联决策：[Agent Note 0068](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)
 关联 PR：[ferqx/kite-code#31](https://github.com/ferqx/kite-code/pull/31)
 
 ## 结论

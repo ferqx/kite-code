@@ -6,15 +6,15 @@
 
 基线：`docs/kasapi-00c-contract-freeze@b5f3695d`
 
-相关：[`ADR-0149`](../../../docs/adr/0149-stable-local-agent-api-facade.md)、
-[`ADR-0150`](../../../docs/adr/0150-store-8-canonical-runtime-run-index.md)、
+相关：[`Agent Note 0149`](../../../.agents/notes/proposed/feature/2026-08-29-stable-local-agent-api-facade.md)、
+[`Agent Note 0150`](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md)、
 [`当前证据矩阵`](2026-08-29-kite-agent-server-api-v1-evidence.md)、
 [`实施方案`](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/plans/2026-08-29-kite-agent-server-api-v1.md)。
 
 ## 1. 冻结结论
 
 本文关闭KASAPI-00C全部Public contract选择。KASAPI-01A/01B必须把本文逐项编码为codec、OpenAPI、JSON Schema、fixtures与tests；
-后续实现不能在handler或SDK中另选status、header、cursor、auth或retry语义。若实现证据证明某项不可兑现，必须先修订本文并用新ADR处理
+后续实现不能在handler或SDK中另选status、header、cursor、auth或retry语义。若实现证据证明某项不可兑现，必须先修订本文并用新决策记录处理
 authority变化，不能发布`200|202`、`409|426`或“暂时兼容”的双轨行为。
 
 固定结论：
@@ -24,7 +24,7 @@ authority变化，不能发布`200|202`、`409|426`或“暂时兼容”的双�
 3. observer只能读，controller只是endpoint allowlist；existing Session mutation仍逐请求验证Store Controller lease并pin
    `bindingReference`；
 4. Public idempotency identity不包含Client、connection、capability或Worker instance；只有applied receipt被持久重放；
-5. first-class Run依赖ADR-0150 Store 8，Store 7不开放`runs`capability或partial Run route；
+5. first-class Run依赖 [Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md) 的 Store 8，Store 7不开放`runs`capability或partial Run route；
 6. 所有mutation response返回`applied_revision`与`stream_consistency = refetch_required`，V1不承诺当前无法证明的
    `applied_through_event_id`；
 7. pagination是bounded live keyset；History使用固定`through_sequence`，concurrent delete/rewind使相关cursor显式invalidated；
@@ -175,7 +175,7 @@ settle interaction。此时Session固定投影`lifecycle = unavailable`、`statu
 进入Host recovery；成功200返回新的canonical Session projection。无法证明recovery outcome返回503 `outcome_unknown`，不得返回stale
 running。
 
-ADR-0150 coverage boundary以前的private historical turns只进入History，不进入Run list/get。只有Store 8 ready时ServerInfo才包含`runs`；
+[Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md) coverage boundary以前的private historical turns只进入History，不进入Run list/get。只有Store 8 ready时ServerInfo才包含`runs`；
 不存在Store 7上的partial/slow-scan `runs`模式。
 
 ## 6. Exact REST surface
@@ -343,7 +343,7 @@ Run/Session。context到期或Worker drain关闭stream，Client重新exchange/re
 ## 12. 00C Gate结果
 
 以下原未决项已关闭：auth context、stable idempotency mapper、Controller binding、Run authority、pagination、HTTP status/header、SSE
-resync、restart read、compatibility与limits。唯一implementation blocker是ADR-0150 Store 8 tranche；它只阻断KASAPI-03 Run/mutation，
+resync、restart read、compatibility与limits。唯一implementation blocker是 [Agent Note 0150](../../../.agents/notes/implemented/simplification/2026-08-29-store-8-canonical-runtime-run-index.md) 的 Store 8 tranche；它只阻断KASAPI-03 Run/mutation，
 不阻断KASAPI-01 contract/OpenAPI和KASAPI-02 authenticated read-only façade。
 
 本文仍不宣称任何endpoint已运行。KASAPI-01开始后，codec/OpenAPI若不能逐项表达本文，Gate应失败并回到contract review；不得由implementation

@@ -7,7 +7,7 @@
 验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
-相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、ADR-0137、ADR-0138。
+相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)。
 
 Session Logger的process-start identity读取已下沉为`@kite-ai/kite-local-runtime/config`共享primitive，原有Linux boot-id/start-ticks、macOS
 current-process fallback与`ps`比较、Windows native creation-time字符串保持不变。此重用只移除重复实现，不让config lock读取Session日志，也不改变
@@ -31,7 +31,7 @@ executor/env、binding digest、receipt identity、parent/child identity 或 gra
 
 `approval.batch_released`、`session_grants_cleared` 及迟到/过期事件按当前 epoch 的 strict decoder 与
 session/revision/generation 规则投影；当前格式中的未知 key 或 identity 不完整仍使该会话恢复 fail closed。
-ADR-0138 的已知历史 profile 会在 logger 之前把旧 approval/review/未知 event 转为 inert fact，未知 profile 静默
+[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md) 的已知历史 profile 会在 logger 之前把旧 approval/review/未知 event 转为 inert fact，未知 profile 静默
 忽略；logger 不补默认值、不参与迁移，也不复活旧 grant。Auto review 只记录 `approve_once`、`reject` 或 `ask_user` 的
 低基数结果；`same_command` 与 Full 不作为 reviewer grant 写入。Live/replay 必须消费同一 canonical event，
 logger 不能制造 UI-only approval 事实。

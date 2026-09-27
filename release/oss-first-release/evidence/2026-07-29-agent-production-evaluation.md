@@ -2,14 +2,14 @@
 
 状态：superseded
 
-终态范围（ADR-0069）：2B.1–2B.6、2B.8–2B.10 以小规模本地 case、核心 adversarial、安全/正确性
+终态范围（[Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)）：2B.1–2B.6、2B.8–2B.10 以小规模本地 case、核心 adversarial、安全/正确性
 case 与 DeepSeek/千问各一次低成本真实 smoke 记为 `completed`；2B.7 的 external participant/human
 cohort 要求记为 `superseded`。不要求重复 8/20 次或 production evaluator authority。当前状态见
 `release/oss-first-release/task-status.json`。
 创建：2026-07-29
 优先级：P0
 依赖：
-[`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
+[`Phase 0 治理与决策记录`](2026-07-29-agent-production-governance-decisions.md)
 Contract 依赖：
 [`Phase 2A Release Control`](2026-07-29-agent-production-release-control.md) 的 `2A-F`
 执行 fixture/adversarial 依赖：Phase 1B、1C；涉及真实 data route/human review 时再依赖 Phase 1A
@@ -31,7 +31,7 @@ determinism；本地 `real_run` discriminator 和 participant/sample constructor
 Release artifact/frozen baseline identity、D-07 success/G0/p95 Gate、精确有序 21-case formal adversarial
 receipts 与 fixture signature 校验。本地 Gate 失败独立标为 failed；调用者不能把 fixture key/route 注入为
 production。`github_oidc_sigstore_v1` schema 会把 subject/attestation/verification receipt/authority/workflow
-作为 exact tuple 与源码预登记记录匹配，但 ADR-0062 Sigstore 密码学 verifier 尚未实现、registry 与 route
+作为 exact tuple 与源码预登记记录匹配，但 [Agent Note 0062](../../../.agents/notes/implemented/process/2026-08-02-keyless-release-signing-and-github-hosting.md) Sigstore 密码学 verifier 尚未实现、registry 与 route
 registry 仍为空，所以 2B.4/2B.5 状态与上述
 真实 evidence 缺口不变。新增 manual/no-publish workflow 已能用真实 GitHub artifact ID 生成并独立验证
 `contract_conformance` retained bundle，但 signature 固定 unconfigured、route 未配置、结果固定 blocked；
@@ -306,7 +306,7 @@ oracle 自身必须单测，并能对预制 good/bad patch 给出预期结果。
 - `tests/README.md`；
 - README 中准确的测试命令；
 - `docs/documentation-map.json`；
-- 产品验收 ADR。
+- 产品验收决策记录。
 
 suite、oracle、重复运行、人工验收、Evidence adapter 和文档门禁全部收敛后，本任务唯一产生
 `MS:2B-DONE`。

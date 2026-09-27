@@ -79,6 +79,7 @@ describe('documentation impact command outcomes', () => {
   function setup(): void {
     repository = mkdtempSync(join(tmpdir(), 'kite-docs-command-'));
     mkdirSync(join(repository, 'src'), { recursive: true });
+    mkdirSync(join(repository, '.agents/notes'), { recursive: true });
     mkdirSync(join(repository, 'docs', 'handbook', 'clients', 'tui', 'guides'), {
       recursive: true,
     });
@@ -118,19 +119,28 @@ describe('documentation impact command outcomes', () => {
     expect(all.exitCode).toBe(0);
     expect(all.stdout.toString()).toContain('changed; review content:');
   });
-  it('fails invalid and missing mapping targets, including historical authorities', () => {
+  it('fails invalid and missing mapping targets, including historical Notes as authorities', () => {
     setup();
     unlinkSync(join(repository, 'docs/handbook/clients/tui/guides/input.md'));
     expect(run().exitCode).toBe(1);
     writeFileSync(join(repository, 'docs/documentation-map.json'), '{invalid');
     expect(run().exitCode).toBe(1);
-    mkdirSync(join(repository, 'docs/adr'), { recursive: true });
-    writeFileSync(join(repository, 'docs/adr/old.md'), '# Historical\n');
+    mkdirSync(join(repository, '.agents/notes/rejected/process'), { recursive: true });
+    writeFileSync(
+      join(repository, '.agents/notes/rejected/process/2026-01-01-old.md'),
+      '# Agent Note: Old\n\nStatus: rejected — historical\n\n## Problem\nOld decision.\n\n## Proposal\nOld choice.\n\n## Alternatives considered\nOther choice.\n',
+    );
     writeFileSync(
       join(repository, 'docs/documentation-map.json'),
       JSON.stringify({
         version: 2,
-        rules: [{ id: 'input', sources: ['src/**'], authorities: ['docs/adr/old.md'] }],
+        rules: [
+          {
+            id: 'input',
+            sources: ['src/**'],
+            authorities: ['.agents/notes/rejected/process/2026-01-01-old.md'],
+          },
+        ],
       }),
     );
     expect(run().exitCode).toBe(1);
@@ -201,7 +211,7 @@ describe('documentation impact command outcomes', () => {
     writeFileSync(join(repository, technical), '# 交付后的实现\n');
     expect(check().exitCode).toBe(0);
   });
-  it('checks new root and docs-root Markdown without opting historical ADRs into current validation', () => {
+  it('checks new root and docs-root Markdown without opting rejected Notes into current link validation', () => {
     setup();
     for (const directory of [
       'apps',
@@ -209,7 +219,7 @@ describe('documentation impact command outcomes', () => {
       'docs/active',
       'docs/development',
       'docs/plans',
-      'docs/adr',
+      '.agents/notes/rejected/process',
     ]) {
       mkdirSync(join(repository, directory), { recursive: true });
     }
@@ -223,7 +233,10 @@ describe('documentation impact command outcomes', () => {
     const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
     const check = () =>
       Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
-    writeFileSync(join(repository, 'docs/adr/history.md'), '# 当时记录\n[旧路径](removed.ts)\n');
+    writeFileSync(
+      join(repository, '.agents/notes/rejected/process/2026-01-01-history.md'),
+      '# Agent Note: 当时记录\n\nStatus: rejected — historical\n\n## Problem\n[旧路径](removed.ts)\n\n## Proposal\nOld choice.\n\n## Alternatives considered\nOther choice.\n',
+    );
     expect(check().exitCode).toBe(0);
     writeFileSync(join(repository, 'NEW-ENTRY.md'), '# 新入口\n[失效](missing.md)\n');
     const rootFailure = check();
@@ -237,6 +250,46 @@ describe('documentation impact command outcomes', () => {
     expect(docsFailure.stderr.toString()).toContain(
       'docs/NEW-ENTRY.md links to missing local target',
     );
+  });
+  it('checks links in nested proposed and implemented Notes', () => {
+    setup();
+    for (const directory of [
+      'apps',
+      'packages',
+      'docs/active',
+      'docs/development',
+      'docs/plans',
+      '.agents/notes/proposed/architecture',
+      '.agents/notes/implemented/process',
+    ]) {
+      mkdirSync(join(repository, directory), { recursive: true });
+    }
+    for (const path of [
+      'docs/handbook/README.md',
+      'docs/development/README.md',
+      'docs/plans/README.md',
+    ]) {
+      writeFileSync(join(repository, path), '# 导航\n');
+    }
+    const structureScript = join(import.meta.dir, '../../../scripts/check-docs.ts');
+    const check = () =>
+      Bun.spawnSync(['bun', structureScript], { cwd: repository, stdout: 'pipe', stderr: 'pipe' });
+    const proposed = '.agents/notes/proposed/architecture/2026-01-01-proposal.md';
+    writeFileSync(
+      join(repository, proposed),
+      '# Agent Note: Proposal\n\nStatus: proposed\n\n## Problem\n[missing](missing.md)\n\n## Proposal\nChange.\n\n## Alternatives considered\nKeep.\n\n## Acceptance criteria\nPass.\n\n## Risks\nDrift.\n',
+    );
+    expect(check().stderr.toString()).toContain(`${proposed} links to missing local target`);
+    writeFileSync(
+      join(repository, proposed),
+      '# Agent Note: Proposal\n\nStatus: proposed\n\n## Problem\nNo link.\n\n## Proposal\nChange.\n\n## Alternatives considered\nKeep.\n\n## Acceptance criteria\nPass.\n\n## Risks\nDrift.\n',
+    );
+    const implemented = '.agents/notes/implemented/process/2026-01-02-implemented.md';
+    writeFileSync(
+      join(repository, implemented),
+      '# Agent Note: Implemented\n\nStatus: implemented\n\n## Problem\n[missing](missing.md)\n\n## Decision\nChange.\n\n## Alternatives considered\nKeep.\n\n## Consequences\nMaintenance.\n',
+    );
+    expect(check().stderr.toString()).toContain(`${implemented} links to missing local target`);
   });
   it('reports both sides of renames and deleted tracked files', () => {
     setup();

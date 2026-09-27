@@ -23,6 +23,14 @@ source 与 installed 当前共用所选 canonical Kite Home 下的正式会话�
 
 测试分层与真实模型调用约束见[测试入口](../../tests/README.md)。只修改文档不默认启动真实 Provider、发送外部请求或运行所有平台测试。
 
+Required quality job 运行 `bun run format:check`（Biome check），同时检查格式、import 整理与启用的 lint 规则；`bun run lint` 可用于定向检查。hook 的 staged 输入和不同平台／制品资格仍单独验证。
+
+测试失败先核对产品要求、当前契约与断言；不能为通过测试而削弱仍有效的约束。修改 CLI 行为或参数时，同步其用户文档和相关测试。注释只解释不易从上下文看出的原因，不提交本地 checkpoint、临时运行产物或密钥。
+
+生产 TypeScript 不用 `as any` 绕过约束，也不以 `as unknown as T` 代替判别联合的类型守卫；`catch` 的未知错误先按 `unknown` 收窄。外部 SDK 类型不完整且无法用守卫表达时，将必要断言限制在适配边界并注明原因；测试 mock 的断言不扩散为生产接口。
+
+`man` 的直接提交由[本地分支守卫](../../scripts/check-protected-branch.ts)与 [Required workflow](../../.github/workflows/required.yml)限制；合并和 cherry-pick 的实际准入按守卫实现核对。
+
 ## Web 启动失败处理
 
 [`ensure-web`](../../scripts/development/ensure-web.ts) 按 build→start→discover 调用子进程，任一步骤非零退出即终止并保留该退出码。回归见[入口测试](../../tests/release/companion-entrypoints.test.ts)。daemon lifecycle v1 可独立于业务握手查询和停止。旧开发实例的 `protocol_version_mismatch` 仍仅作只读诊断，start 不清理存活 owner；验证见[daemon 测试](../../tests/release/app-server-daemon.test.ts)，操作说明见[服务生命周期](../handbook/server/lifecycle.md)。

@@ -1,6 +1,6 @@
 import { sha256Hex } from './hash';
 import type { ToolOutcome } from './normalization';
-import { isToolOutcome } from './normalization';
+import { digestFailureIdentity, isToolOutcome, stableStringifyToolIdentity } from './normalization';
 
 export type { ToolOutcome, ToolOutcomeStatus } from './normalization';
 
@@ -79,18 +79,6 @@ export type RecoveryAdmission =
       readonly detailCode: 'recovery_not_allowed' | 'recovery_exhausted' | 'no_progress';
     };
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    const serialized = JSON.stringify(value);
-    if (serialized === undefined) throw new Error('Recovery fact is not JSON serializable.');
-    return serialized;
-  }
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
-  return `{${Object.entries(value as Readonly<Record<string, unknown>>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`)
-    .join(',')}}`;
-}
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
@@ -133,24 +121,13 @@ function blockedFailures(journal: ToolRecoveryJournal): ToolRecoveryFailure[] {
       (failure): failure is ToolRecoveryFailure => failure != null && failureStillBlocks(failure),
     );
 }
-function canonicalFailureDetail(outcome: ToolOutcome): string {
-  return outcome.failure?.detailCode ?? 'success';
-}
-
 /** Exact State failure identity; the private fingerprint is never projected. */
 export function toolFailureInstanceId(input: {
   readonly toolCallId: string;
   readonly invocationFingerprint: string;
   readonly outcome: ToolOutcome;
 }): string {
-  return sha256Hex(
-    stableStringify({
-      toolCallId: input.toolCallId,
-      invocationFingerprint: input.invocationFingerprint,
-      status: input.outcome.status,
-      detailCode: canonicalFailureDetail(input.outcome),
-    }),
-  );
+  return digestFailureIdentity(input.toolCallId, input.invocationFingerprint, input.outcome);
 }
 
 export function toolInvocationFingerprint(input: {
@@ -162,14 +139,14 @@ export function toolInvocationFingerprint(input: {
   readonly identityRevision?: string;
 }): string {
   const material = input.parseCode
-    ? stableStringify({
+    ? stableStringifyToolIdentity({
         toolName: input.toolName,
         parseCode: input.parseCode,
         pathCategory: input.pathCategory ?? 'unknown',
         opaqueArgs: input.unparsedArgs,
         identityRevision: input.identityRevision ?? 'unknown',
       })
-    : stableStringify({
+    : stableStringifyToolIdentity({
         toolName: input.toolName,
         parsedArgs: input.parsedArgs,
         identityRevision: input.identityRevision ?? 'unknown',
