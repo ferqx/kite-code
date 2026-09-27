@@ -43,7 +43,7 @@
 - Run insert/transition 与所属 State/event/receipt 提交一致。start 后的 queued→running row-only activation 可以复用相同 State revision；其他 transition 仍按 revision/lifecycle 校验。Run list 使用稳定 keyset，单页最多 200 项。
 - rewind 只在允许的 coverage/between-turn 边界修改；fork 克隆 checkpoint 范围内可复制的终态 Run，重绑 identity。target facts、receipt 与初始 authority 在同一事务，任一步失败整体回滚。
 - Directory、History、Checkpoint 与 Agent API 复用已打开 owner 的有界 read ports，不建立 Catalog mirror 或第二 writer。Directory 不返回 canonical path；空会话名的首条用户消息 fallback 只读、不写回命名事实。
-- D0 候选的 `runtime_sessions.parent_session_id` 是父血缘字段（根为 NULL、子为准确父 Session ID），有外键／身份校验。Directory、History 搜索与最近会话、Workspace/Space 分页以及旧 `sessions.listSessions` 已在 SQL 的排序、游标与 LIMIT 之前过滤根 Session；Store 公共日志读取和 Service 普通顶层详情拒绝已知子 ID。父 Agent 树授权的子详情入口及其恢复验证仍待完成。
+- 当前 Store13 的 `runtime_sessions.parent_session_id` 是父血缘字段（根为 NULL、子为准确父 Session ID），有外键／身份校验。Directory、History 搜索与最近会话、Workspace/Space 分页以及旧 `sessions.listSessions` 在 SQL 的排序、游标与 LIMIT 之前过滤根 Session；Store 公共日志读取和 Service 普通顶层详情拒绝已知子 ID。父 Agent 树授权的只读子详情已由 TUI 与 Desktop 接入，具体可见性和恢复资格见[会话手册](../../docs/handbook/features/sessions.md)及[后台 Agent 协调计划](../../docs/plans/background-agent-shell-conversation-coordination.md)。
 - Artifact 按 Model/Plan/Capability/filesystem preimage/Sandbox/Subagent 领域存储，不建立通用 blob authority。当前 Session Store 仍禁用 Artifact GC，不能把旧 Home Store 的 GC 接到普通 Session 读取。
 
 详细机制与测试入口：[事务与数据](docs/transactions-and-state.md)、[Writer/Effect/恢复](docs/authority-and-recovery.md)、[查询与 Artifact](docs/queries-and-artifacts.md)。
@@ -81,6 +81,6 @@ App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-
 
 [准备编排](src/kite-session-store-preparation.ts)由普通 App Server 在 owner 打开前调用。它在迁移期取得 canonical 与全部历史源的独占锁，调用方须提供旧 writer 准入，再以[一致性备份](src/kite-session-recovery-backup.ts)和[私有候选](src/kite-session-store-candidate.ts)处理已证明的 9/10/11/12 格式。准确 Store10→11→12→13 转换只对私有候选执行；旧表内容摘要与目标 schema 的完整转换证明必须通过，原位 main/WAL 保持一致，不接受遗漏非空 WAL 来源。
 
-[连续性校验](src/kite-session-continuity-validation.ts)只在维护期完整检查生产Session、目录、State/Event、Run/receipt、Fork、tombstone和Artifact读取；普通启动不全扫历史。[发布](src/kite-session-store-publication.ts)使用固定短期意图和逐文件指纹恢复同文件系统发布，保留原文件作私有恢复资产；生产reader复核之前不开放正常连接。普通owner取得共享维护锁后，先复查待发布意图及未归并历史源，再打开或创建正式库，并持锁至关闭；准备器取得独占锁后也重新读取意图，不能以锁外的旧观察启动另一次发布。调用方仍须独立证明旧writer已退出及正常入口已参与维护；这些Storage函数不授予进程准入。当前平台与发行资格见[实施计划](../../docs/plans/session-store-compatibility-and-continuity.md#17-启动准备与四源收敛集成2026-09-17)。
+[连续性校验](src/kite-session-continuity-validation.ts)只在维护期完整检查生产Session、目录、State/Event、Run/receipt、Fork、tombstone和Artifact读取；普通启动不全扫历史。[发布](src/kite-session-store-publication.ts)使用固定短期意图和逐文件指纹恢复同文件系统发布，保留原文件作私有恢复资产；生产reader复核之前不开放正常连接。普通owner取得共享维护锁后，先复查待发布意图及未归并历史源，再打开或创建正式库，并持锁至关闭；准备器取得独占锁后也重新读取意图，不能以锁外的旧观察启动另一次发布。调用方仍须独立证明旧writer已退出及正常入口已参与维护；这些Storage函数不授予进程准入。当前平台与发行资格见[实施计划](../../docs/plans/session-store-compatibility-and-continuity.md#未完成的资格)。
 
 受支持的AppServer 9/10/11来源将模型、计划、能力结果、文件前像、沙箱准备及三类子任务Artifact存入SQLite的八个专属表；`runtime_file_preimages`也保留文件前像内容。正式Service为这些Builtin读写器注入数据库后端，不使用缺省文件目录作为另一资产权威。迁移逐表保留内容，并验证State/Event和命名快照中已知字段的引用；已知引用缺失或损坏会拒绝候选发布。此校验不是任意嵌套内容或外部路径扫描，Store备份不代表外部工作区文件、技能、配置、日志或任意附件文件也已备份。其他历史入口若依赖外置资产，必须另有来源证据与明确处置，不能套用这组资格。

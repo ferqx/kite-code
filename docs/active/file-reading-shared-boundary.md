@@ -279,48 +279,7 @@ capability surface 不得把文件工具读取误分类为原生进程 external-
 bun run typecheck
 bun test tests/isolated/tools.test.ts
 bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-policy.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
-bun test tests/tui-system/scenarios/subagent-approval.test.ts
-bun test apps/kite-cli/test/tui-reducer.test.ts apps/kite-cli/test/tui-layout.test.tsx apps/kite-service/test/isolated/runtime/cli-runtime-coordinator.test.ts apps/kite-service/test/runtime/runtime-session-coordinator.test.ts
 ```
-
-### LOAD_SESSION 未设置 nextBlockId + blockIndex 删除（`sessionReducer.ts`、`handleClientEvent.ts`、`helpers.ts`）
-
-`LOAD_SESSION` 从 DB 加载会话的 turns/blocks 后未更新 `nextBlockId`，新事件创建的
-block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换了 wrong block → `tool_done` 永远找不到目标。
-
-修复：
-
-- `LOAD_SESSION` 中加入 `nextBlockId: Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1)`
-- `SWITCH_SESSION` 原先已有此逻辑，提取 `maxBlockIdInTurns` 到 `helpers.ts` 复用
-- 彻底删除 `blockIndex` 手动缓存（`callId→blockId` 映射，6 处同步点），换用 `findBlock`/`hasBlock` 全量扫描，消除所有缓存一致性 bug 类别
-
-### 子 agent 取消/异常收尾（`agentReducer.ts`、`subagent/tool-adapter.ts`、`SubAgentBlock.tsx`）
-
-- `cancelRunningBlocks`：Esc 取消时在 `running: false` 之前同步将 running subagent/tool_card 标记为 `"Cancelled"`，防止状态被 `<Static>` 永久冻结
-- `AbortError` 识别为 `"Cancelled"` 而非 `"The operation was aborted."`
-- `subagent_error` 事件携带 `summary`/`toolCallCount`/`durationMs`，TUI 与 `subagent_done` 一样展示步骤全景
-- done/error/cancelled 三态统一用 `●` 圆点（与 `tool_card` 一致），running 态用 `⠋` spinner
-
-### Runtime 工具结果渐进展示
-
-- Runtime 可将同一模型响应内连续、免审且已证明无副作用的兼容内置读取组成并行批次，不设置额外固定小批次上限；每项仍独立
-  投影工具生命周期事件，TUI 在并发执行期间按实际 started/progress/terminal 事件渐进刷新。
-- `tool.queued` 只保留为 Runtime 调度事实，不创建可见工具块；启动前取消的读取不展示
-  Cancelled；只有开始执行，或开始前直接失败且需要展示诊断时才进入消息列表。审批目标只在
-  Footer 展示待授权命令，不因等待审批而物化。用户拒绝或取消任一工具审批会中止整个当前
-  turn：未开始读取保持不可见，已开始读取按 cancelled 收尾（[Agent Note 0049](../../.agents/notes/implemented/bug-fix/2026-07-30-effect-aware-read-scheduling.md)）。
-- task 子 agent 与普通工具都通过 Runtime/Tool Controller 调度，不建立 UI 专用执行通道。
-- `tool.started` 是工具实际开始执行的唯一计时边界。若早到的 `tool_call` 已以 `running`
-  乐观物化卡片，TUI 仍须以 `tool.started` 重置该卡片的计时基线；排队、审批、admission
-  等执行前阶段不得计入命令耗时。`tool.started` 之后的 executor/sandbox preparation 属于本次
-  受治理执行，仍应如实计入。`tool_done` handler 使用这条基线计算 `elapsedMs`，且不得被后续
-  投影覆盖。
-
-### `<Static key={blockRenderCacheKey}>`（`useStaticContent.tsx`、`App.tsx`）
-
-- `<Static>` item key 使用`blockRenderCacheKey(block)`的canonical visual digest；只有projector sealed item可以提交，
-  同一RenderEpoch内已提交item不可变。
-- settled turns 缓存从纯计数改为 fingerprint 驱动，捕获取消后 block 状态变更
 
 ## 关联文档
 

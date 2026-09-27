@@ -1,18 +1,18 @@
 # Agent 生产化决策登记
 
-状态：active
+状态：archived（Phase 0–6 历史决策与修订记录；不构成当前发布门禁）
 创建：2026-07-30
-适用范围：Agent 生产就绪 Phase 0–6
+适用范围：2026-07-30 至 2026-08-04 的 Agent 生产就绪 Phase 0–6 历史路线
 规范来源：
 [`Agent Note 0069 首发终态范围`](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、
 [`Agent Note 0068 单维护者开源首发模型`](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、
 [`Agent 生产就绪 RFC §24`](https://github.com/ferqx/kite-code/blob/854b3084479d78e79b37864bda99e0bb235db2d8/docs/design/2026-07-29-agent-production-readiness-rfc.md)、
 [`Phase 0 治理计划`](2026-07-29-agent-production-governance-decisions.md)
 
-## 使用规则
+## 历史使用规则
 
 [Agent Note 0069](../../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md) 自 2026-08-04 起把 [Agent Note 0068](../../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md) 的精简首发进一步收敛为终态。下方 D-01–D-14、bindings 与
-Revision 1–44 保留为历史事实，不得据此要求签名、attestation、独立 authority、external rollout 或
+Revision 1–45 保留为历史事实，下方角色、默认值、`open` 决策和 milestone 仅解释当时的执行记录，不得据此要求签名、attestation、独立 authority、external rollout 或
 promotion evidence。当前 108 Task 状态只以 `release/oss-first-release/task-status.json` 为准：
 83 `completed`、25 `superseded`、0 optional。发布只使用 G0/G1 和普通维护者检查清单。
 

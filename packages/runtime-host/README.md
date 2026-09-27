@@ -76,7 +76,7 @@
 - Host restart后、Session尚未admit/recover时，private Run get/list把唯一nonterminal行只读投影为`unknown/recovery_required`；投影复用最后
   一个durable Run clock值，不读取HTTP/Logger wall clock，也不写Store或触发recovery。显式resume完成existing Host recovery后恢复canonical
   active/terminal投影；真实unknown只允许由reconciliation原子细化为更精确terminal，并保留原`finishedAtMs`。
-- current production Workspace Worker已打开committed Store 8并消费上述Host Run机制；Store 7只保留为显式offline migration source。
+- 保留的非默认 Workspace Worker 可打开 committed Store8 并消费上述 Host Run 机制；Store7 只保留为显式 offline migration source。默认 App Server 使用 canonical Kite Home 的 Store13 Session 库。
   Agent ServerInfo和Public handler仍不发布`runs`，所以Store authority cutover不等于Public mutation开放。
 
 ## 测试

@@ -16,7 +16,7 @@ G0 包含未授权副作用、sandbox/Workspace trust 绕过、credential/正文
 ## 2. Ownership and escalation
 
 Owner 为 `github:@ferqx`。当前无真实 backup；Owner 不可联系时 cohort 必须保持 0，恢复批准
-blocked。External release 前需要不同真人完成、绑定 candidate identity 的第三方安全评审。
+blocked。首发按单维护者 G0/G1 与实际候选证据判断；第三方安全评审不是首发硬门禁，未取得时不得宣称通过。
 
 ## 3. Containment
 
@@ -45,8 +45,7 @@ conformance；G0/G1、identity mismatch、unknown external effect 或残留进�
 
 ## 8. Reopen rollout
 
-只有 evidence 与 Owner 决策都有效时才重新开放；single-maintainer external release 还需要真实
-第三方安全评审。恢复不能越过 embedded artifact ceiling 或提高原 cohort。
+只有对应 G0/G1、候选证据与 Owner 决策都有效时才重新开放；恢复不能越过 embedded artifact ceiling 或提高原 cohort。
 
 ## 9. Postmortem
 

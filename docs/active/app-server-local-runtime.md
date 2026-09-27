@@ -59,6 +59,8 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 - read/list 不取得 writer；resume/handoff/执行 mutation 必须取得并持续验证 durable generation。冷会话权限事务仅在 idle／recovery_required 与版本一致时允许，不清除恢复状态、不 dispatch Effect。
 - stale generation 不能 dispatch effect、提交 terminal receipt 或补写 late completion；unknown outcome 不自动重放。
 
+历史恢复边界曾在用户会话库的隔离只读副本验证：一个已完成 Turn 仍携带 `recovery_required`，`cleanupConfirmed=false`，且没有 pending/unknown effect；只读检查不改变原数据，显式恢复返回 `session_cleanup_pending`。这只证明当时缺少旧执行实际清理证据，不构成对原库的恢复或对其他历史会话的放行。后续安全自动清理仍按上面的 writer 事务与[恢复手册](../handbook/features/recovery.md)核对准确 owner、Run 和 effect 事实。
+
 ## 默认 paired App Server
 
 TUI/CLI 通过 release composition 解析 child：

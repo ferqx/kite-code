@@ -18,7 +18,7 @@ reasoning delta 只累计，completed 才更新有界活动窗口；工具步骤
 
 ## 工具与提交
 
-queued 仅缓存 closed classification、label 和有界参数；started 才物化对应展示。未 started 的拒绝在有 queued metadata 时显示拒绝卡；完全缺失目标时不伪造匿名执行。分类由 Service 提供，TUI 不解析 Shell 命令重新判断只读。
+queued 仅缓存 closed classification、label 和有界参数；started 才物化对应展示，并作为该工具耗时的起点。排队、审批与执行准入不计入工具执行时长；started 后的执行器或沙箱准备计入。未 started 的拒绝在有 queued metadata 时显示拒绝卡；完全缺失目标时不伪造匿名执行。分类由 Service 提供，TUI 不解析 Shell 命令重新判断只读。
 
 tool_summary 只有阶段封口且聚合结果终结才能 seal；active=true 时不能用子工具全终态提前封口。standalone 终态卡片和并发 Subagent 的组终态由 projector 发布，renderer 不扫描子字段推断。Shell 成功保留有界 stdout/stderr 及 exit 状态，只有用户主动折叠才隐藏。
 

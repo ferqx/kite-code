@@ -63,5 +63,5 @@ daemon在发布endpoint ready前验证release composition提供的immutable stat
 
 unknown route、credential混用、Origin/Fetch Metadata错误、Directory scope漂移、History cursor/boundary失效、Controller generation漂移、
 Protocol/client-contract不兼容与process identity不确定继续fail closed。daemon build ID只作诊断；相同v2 exact protocol的不同build可连接，
-v1或unknown capability拒绝且不触发replace/stop。source与installed profile互不复用；这些规则不授权第二Service、第二Store、兼容BFF
+v1或unknown capability拒绝且不触发replace/stop。source与installed共用canonical Kite Home Store；checkout只决定配套代码与build identity；这些规则不授权第二Service、第二Store、兼容BFF
 或旧Coordinator恢复路径。

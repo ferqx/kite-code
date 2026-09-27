@@ -3,7 +3,7 @@
 Status: implemented
 
 ## Problem
-当前 `src/core/model/compaction.ts` 的 `shouldCompact()` 和 `estimateTokens()` 已实现但从未接入模型调用路径（model-controller 未传递 `contextBudget`）。直接在现有 `BaseMessage[]` 压缩代码上增加 M2 对话摘要会加剧以下问题：
+作出本决定时，旧 `src/core/model/compaction.ts` 的 `shouldCompact()` 和 `estimateTokens()` 尚未接入模型调用路径（model-controller 未传递 `contextBudget`）。直接在当时的 `BaseMessage[]` 压缩代码上增加 M2 对话摘要会加剧以下问题：
 
 - **数据层混乱**：LangChain message 是 provider 边界格式，不应承担领域级压缩；ToolMessage content 既是对模型展示的正文，又是压缩器反解析结构化元数据的唯一来源（`extractPath` / `extractTotalLines` / `extractCommand` 均通过 `JSON.parse(content)` 猜测）。
 - **tool-pair 风险**：多 tool-call AIMessage 可能被错误地作为一个压缩块处理；压缩后无再次校验。
@@ -110,30 +110,25 @@ hard-limit 导致的压缩失败（`hard_limit`、`overflow_recovery_failed`）�
 
 ### Feature flag 渐进灰度
 
-新增三个 feature flag，按阶段独立开启：
-
-| Flag | 职责 |
-|---|---|
-| `contextCompactionV2` | Canonical frame + 安全 M1 + pairing validator。第一阶段开启，替换旧 M1。 |
-| `contextCompactionAutoV1` | 自动软/硬阈值触发 + overflow recovery。第二阶段灰度。 |
-| `contextCompactionManualV1` | `/compact` 命令。可先于自动 M2 开放。 |
-
-任一 flag 关闭时，对应路径 fail closed（不执行压缩），不进入 legacy 兼容路径。
+原决定要求基础、自动和手动压缩可分别关闭，关闭后不回退旧压缩路径。当前配置中的开关为 `contextCompaction`、`contextCompactionAuto`、`contextCompactionManual`；[Service 默认值](../../../../apps/kite-service/src/config/features.ts)分别为开、关、开。自动压缩的实际准入还受其模式与配置控制；这些开关名称和默认值以现行 Service owner 为准，不沿用原方案中的 `*V1`／`*V2` 名称。
 
 ## Alternatives considered
 
 <!-- agent-note-format: alternatives-not-recorded (pre-format Agent Note) -->
 
 ## Consequences
+
+以下记录该决定当时的实现影响；当前字段、路径、开关和验证范围须以 [Builtin 模型上下文](../../../../packages/builtin-runtime/docs/model-and-context.md)、[Service 配置](../../../../apps/kite-service/src/config/features.ts)及相应源码核对。
+
 - **RuntimeState schema 版本递增**：新增 `context` 字段（`ContextRuntimeState`），旧 snapshot migration 默认 `{ history: [] }`。
 - **新增 RuntimeEffect**：`compact_context`，scheduler 优先级位于 verification 之后、call_model 之前。
 - **新增 RuntimeEvent**：`context.compaction_requested`、`context.compaction_completed`、`context.compaction_failed`、`context.compaction_reset`。
 - **新增 CompactionController**：负责 summary 模型调用、schema 校验和 fact ledger 构建。
 - **摘要消息角色**：checkpoint summary 必须作为 `CompactionSummaryFrame` 序列化为 assistant history message，不得作为 SystemMessage 注入。
-- **旧 M1 代码生命周期**：`microCompactToolOutputs()` 和 `foldToolOutputs()` 在 V2 稳定后标记 deprecated 并删除。
-- **文档映射**：新增文件需要更新 `docs/documentation-map.json` 的 `model-and-context` zone。
+- **旧 M1 代码生命周期**：原计划在新投影稳定后删除 `microCompactToolOutputs()` 和 `foldToolOutputs()`；当前生产源码已无这两个函数名，不将其作为尚待执行的清理项。
+- **文档映射**：原实施要求将模型上下文 owner 纳入 `docs/documentation-map.json`；当前归属与检查由现行映射决定。
 - **未知上下文窗口**：无法解析 `contextWindow` 时标记为 explicit unknown 状态，不假设默认值，向用户输出明确配置提示。proactive auto M2 不运行。
-- **测试要求**：除单元测试外，需要真实数据链路测试（RuntimeEvent → reduce → canonical frames → M1 → provider messages → validator）和属性测试。
+- **验证边界**：原决定要求单元、真实数据链路（RuntimeEvent → reduce → canonical frames → M1 → provider messages → validator）及属性测试；是否已覆盖须按现行测试断言和执行结果核对，不能仅凭本 Note 推定通过。
 - **配置跨字段校验**：`warningRatio < compactRatio < hardRatio`、`maxSummaryInputTokens + maxSummaryTokens + safetyMargin <= contextWindow` 等必须在 Zod schema 层 enforce。
 
 ## Historical relationships

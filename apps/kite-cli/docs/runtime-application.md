@@ -27,8 +27,7 @@ legacy Service。
 ## 生命周期
 
 client `close`/TUI facade `dispose`关闭自身stdio connection、subscription、snapshot observer、presentation resource和parent-owned child；
-不会删除Session facts或隐式`cancelAll`。Ctrl+C通过exact Runtime cancel command作用于当前Turn。显式legacy Service stop/restart仍是独立
-lifecycle command，并非默认Runtime lifecycle。
+不会删除Session facts或隐式`cancelAll`。Ctrl+C通过exact Runtime cancel command作用于当前Turn。显式 daemon 的 `kite server stop/restart` 仍是独立生命周期命令，不属于默认 parent-owned Runtime 的 close。
 
 ## 验证
 
