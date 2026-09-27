@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import { sealChildGrantPayload } from '@kite-ai/runtime-host/storage';
 import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
-import type { KiteChildApprovalProxyRecord } from '@kite-ai/runtime-storage-sqlite';
+import {
+  type KiteChildApprovalProxyRecord,
+  parseFollowupChildApprovalParentToolCallId,
+} from '@kite-ai/runtime-storage-sqlite';
 import type { KiteSessionAppServerStorageOwner } from '../../kite-session-app-server-storage';
 import type { RuntimeSessionCoordinator } from '../RuntimeSessionCoordinator';
 import type { RuntimeActionProvider } from '../state-runner';
@@ -51,7 +54,18 @@ export function createChildApprovalActionProvider(input: {
       if (effect.type !== 'request_tool_approval')
         throw new HiddenChildInteractionUnavailableError(effect.type);
       const origin = state.childSessionOrigin;
-      if (!origin || origin.parentSessionId !== input.parentSessionId || origin.terminal)
+      if (!origin || origin.parentSessionId !== input.parentSessionId)
+        throw new Error('Child approval request has no active parent lineage.');
+      const active = state.activeFollowupTurn;
+      const followup =
+        active && origin.terminal?.status === 'completed' && origin.terminal.cleanupConfirmed
+          ? {
+              submissionId: active.submissionId,
+              targetRunId: active.targetRunId,
+              grantDigest: active.grantDigest,
+            }
+          : null;
+      if (origin.terminal && !followup)
         throw new Error('Child approval request has no active parent lineage.');
       const matches = [];
       let cursor: string | undefined;
@@ -66,7 +80,18 @@ export function createChildApprovalActionProvider(input: {
             (row) =>
               row.childThreadId === state.session.threadId &&
               row.childInvocationId === origin.childInvocationId &&
-              row.grantDigest === origin.grantDigest &&
+              (followup
+                ? row.grantDigest === followup.grantDigest &&
+                  parseFollowupChildApprovalParentToolCallId(row.parentToolCallId)?.submissionId ===
+                    followup.submissionId &&
+                  parseFollowupChildApprovalParentToolCallId(row.parentToolCallId)?.targetRunId ===
+                    followup.targetRunId &&
+                  state.turn.turnId === followup.targetRunId &&
+                  state.turn.status === 'active' &&
+                  state.resourceBudget.status === 'active' &&
+                  state.resourceBudget.runId === followup.targetRunId
+                : row.grantDigest === origin.grantDigest &&
+                  row.parentToolCallId === origin.parentToolCallId) &&
               row.childInteractionId === effect.interactionId &&
               row.childToolCallId === effect.toolCallId,
           ),

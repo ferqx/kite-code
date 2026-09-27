@@ -173,6 +173,8 @@ export interface ResourceBudget {
   readonly maxTurns: number;
   readonly maxModelRequests: number;
   readonly maxToolInvocations: number;
+  /** New grants may omit a cumulative Tool count ceiling; zero without this flag still denies Tools. */
+  readonly unboundedToolInvocations?: true;
   readonly maxRunInputTokens: number;
   readonly maxRunOutputTokens: number;
   readonly maxConcurrentSubagents: number;
@@ -201,6 +203,12 @@ export interface ResourceUsage {
   };
   readonly source: 'actual' | 'versioned_upper_bound';
   readonly estimatorVersion?: string;
+  /** Only valid on an upper bound; actual Tool calls remain counted. */
+  readonly unboundedToolInvocations?: true;
+  /** Child allotment may give its own turn a fresh deadline after activation. */
+  readonly independentChildTurnDeadline?: true;
+  /** Source-held envelope for one independent followup child turn. */
+  readonly independentFollowupTurn?: true;
 }
 
 export type ResourceReservationState =
@@ -1264,6 +1272,17 @@ export interface AgentResourceBudgetActiveState {
   readonly runId: string;
   readonly startedAt: string;
   readonly deadlineAt: string;
+  /** Time spent awaiting required child turns is excluded from this Run's active-time deadline. */
+  readonly totalRequiredChildWaitMs?: number;
+  readonly requiredChildWait?: {
+    readonly startedAt: string;
+    readonly taskIds: readonly string[];
+  };
+  readonly lastRequiredChildWait?: {
+    readonly startedAt: string;
+    readonly endedAt: string;
+    readonly taskIds: readonly string[];
+  };
   readonly budget: ResourceBudget;
   readonly reconciledUsage: ResourceUsage;
   readonly reservations: Readonly<Record<string, ResourceReservation>>;

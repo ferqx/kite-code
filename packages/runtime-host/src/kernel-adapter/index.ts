@@ -20,6 +20,7 @@ export { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-
 export type {
   CrossSessionFollowupAdmission,
   CrossSessionFollowupPolicy,
+  CrossSessionIndependentTurnPolicyProof,
   CrossSessionReceiptPreflight,
   CrossSessionTargetFollowupPolicyProof,
 } from './cross-session-followup';
@@ -27,6 +28,7 @@ export {
   CrossSessionFollowupAdmissionError,
   planCrossSessionFirstModelReplacement,
   planCrossSessionFollowupSlotAcquisition,
+  planCrossSessionIndependentTurnActivation,
   planCrossSessionTriggerTurnBackup,
 } from './cross-session-followup';
 export type {

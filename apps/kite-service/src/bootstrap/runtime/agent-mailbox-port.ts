@@ -155,6 +155,10 @@ export interface CrossSessionQueueMailPort {
       | 'cancelled'
       | 'context_unavailable';
     checkpointReady: boolean;
+    /** Exact child origin read from the target's persisted State in one Store snapshot. */
+    originRole?: 'explore' | 'plan' | 'code' | 'review';
+    originalGrantDigest?: string;
+    observedTargetRevision?: number;
   }> | null;
   lookupFollowupReceipt?(input: RuntimeCommandReceiptLookupInput): RuntimeCommandReceiptLookup;
   acceptFollowupCommand?(
@@ -871,6 +875,13 @@ function createCrossSessionMailboxPort(
             (!['active', 'waiting'].includes(target.status) && !target.checkpointReady)
           )
             return { ok: false, code: 'target_unavailable' };
+          if (
+            !['explore', 'plan', 'code', 'review'].includes(target.originRole ?? '') ||
+            !/^sha256:[a-f0-9]{64}$/u.test(target.originalGrantDigest ?? '') ||
+            !Number.isSafeInteger(target.observedTargetRevision) ||
+            (target.observedTargetRevision ?? -1) < 0
+          )
+            return { ok: false, code: 'target_unavailable' };
           const state = input.getState();
           const policy = input.authorizeFollowup({ state, scope, targetSessionId: agentId });
           if (!validFollowupPolicy(state, scope.toolCallId, policy) || !policy.preparedTool)
@@ -892,12 +903,17 @@ function createCrossSessionMailboxPort(
             submissionId,
             requestDigest,
             receipt: { status: 'missing' },
-            policy: sourcePolicy,
+            policy: {
+              ...sourcePolicy,
+              executionMode: 'independent_turn_v2',
+              targetRole: target.originRole,
+              targetGrantDigest: target.originalGrantDigest,
+            },
             nowMs,
           });
           if (planned.status !== 'planned') return { ok: false, code: 'identity_conflict' };
           const admissionJson = canonicalJson({
-            schema: 'kite.cross-session-followup-admission.v1',
+            schema: 'kite.cross-session-followup-admission.v2',
             submissionId,
             messageId,
             sourceSessionId: caller.sessionId,

@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
+import {
+  createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { testToolPipelineComposition } from '../../../tests/helpers/runtime-model';
 import { executeAppRuntimeTools } from '../src/runtime/tool-execution/router';
 
@@ -73,4 +77,76 @@ test('independent child Tool router rejects missing or widened grant before disp
     toolPipelineComposition: testToolPipelineComposition(),
   });
   expect(events[0]?.type).toBe('tool.rejected');
+});
+
+test('followup Tool router accepts only the active independent turn grant', async () => {
+  const state = childWithQueuedTool('read_file');
+  const digest = `sha256:${'6'.repeat(64)}`;
+  const runId = 'followup-run';
+  state.turn = { ...state.turn, turnId: runId, status: 'active' };
+  state.activeFollowupTurn = {
+    sourceSessionId: 'parent',
+    submissionId: 'followup-submission',
+    targetRunId: runId,
+    taskId: 'followup-task',
+    checkpointRef: {
+      artifactId: 'checkpoint',
+      kind: 'subagent_checkpoint',
+      integrityIdentifier: `sha256:${'7'.repeat(64)}`,
+      byteLength: 1,
+    },
+    grantRef: {
+      artifactId: 'followup-grant',
+      kind: 'agent_followup_grant',
+      integrityIdentifier: digest,
+      byteLength: 1,
+    },
+    grantDigest: digest,
+  };
+  state.resourceBudget = {
+    status: 'active',
+    runId,
+    startedAt: new Date().toISOString(),
+    deadlineAt: new Date(Date.now() + 60_000).toISOString(),
+    budget: { ...LIMITED_RESOURCE_BUDGET_, maxToolInvocations: 0, unboundedToolInvocations: true },
+    reconciledUsage: createZeroResourceUsage(),
+    reservations: {},
+    waiters: {},
+    nextWaiterSequence: 0,
+  };
+  const ceiling = { grantDigest: digest, role: 'explore' as const, allowedTools: ['read_file'] };
+  const accepted = await executeAppRuntimeTools({
+    state,
+    toolCallIds: ['child-tool'],
+    toolPipelineComposition: testToolPipelineComposition(),
+    childToolCeiling: ceiling,
+  });
+  expect(
+    accepted.some(
+      (event) =>
+        event.type === 'tool.rejected' &&
+        event.reason === 'Independent child Tool exceeds its sealed role or grant ceiling.',
+    ),
+  ).toBe(false);
+
+  const forged = await executeAppRuntimeTools({
+    state: {
+      ...state,
+      activeFollowupTurn: { ...state.activeFollowupTurn, targetRunId: 'old-run' },
+    },
+    toolCallIds: ['child-tool'],
+    toolPipelineComposition: testToolPipelineComposition(),
+    childToolCeiling: ceiling,
+  });
+  expect(forged).toHaveLength(1);
+  expect(forged[0]?.type).toBe('tool.rejected');
+
+  const originalGrant = await executeAppRuntimeTools({
+    state,
+    toolCallIds: ['child-tool'],
+    toolPipelineComposition: testToolPipelineComposition(),
+    childToolCeiling: { ...ceiling, grantDigest: state.childSessionOrigin!.grantDigest },
+  });
+  expect(originalGrant).toHaveLength(1);
+  expect(originalGrant[0]?.type).toBe('tool.rejected');
 });

@@ -1,5 +1,8 @@
 import type { RuntimeApprovalInteraction } from '@kite-ai/runtime-contract';
-import type { KiteChildApprovalProxyRecord } from '@kite-ai/runtime-storage-sqlite';
+import {
+  type KiteChildApprovalProxyRecord,
+  parseFollowupChildApprovalParentToolCallId,
+} from '@kite-ai/runtime-storage-sqlite';
 import { projectRuntimeClientInteraction } from '../../../runtime-client/interaction-projector';
 import type { RuntimeState } from '../state-runtime';
 
@@ -9,6 +12,27 @@ function matchesChildOrigin(
   proxy: Readonly<KiteChildApprovalProxyRecord>,
 ): boolean {
   const origin = child.childSessionOrigin;
+  const followupIdentity = parseFollowupChildApprovalParentToolCallId(proxy.parentToolCallId);
+  const active = child.activeFollowupTurn;
+  if (followupIdentity) {
+    return Boolean(
+      parent.session.threadId === proxy.parentSessionId &&
+        child.session.threadId === proxy.childThreadId &&
+        origin?.parentSessionId === proxy.parentSessionId &&
+        origin.childInvocationId === proxy.childInvocationId &&
+        origin.terminal?.status === 'completed' &&
+        origin.terminal.cleanupConfirmed &&
+        active?.sourceSessionId === proxy.parentSessionId &&
+        active.submissionId === followupIdentity.submissionId &&
+        active.targetRunId === followupIdentity.targetRunId &&
+        active.grantDigest === proxy.grantDigest &&
+        child.turn.turnId === followupIdentity.targetRunId &&
+        child.turn.status === 'active' &&
+        child.resourceBudget.status === 'active' &&
+        child.resourceBudget.runId === followupIdentity.targetRunId,
+    );
+  }
+  if (proxy.parentToolCallId.startsWith('followup-approval:v2:')) return false;
   if (
     parent.session.threadId !== proxy.parentSessionId ||
     parent.turn.status !== 'active' ||

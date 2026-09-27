@@ -1,5 +1,8 @@
 import { fundingBudgetForRun } from '@kite-ai/runtime-host/kernel-adapter';
-import { sealChildGrantPayload } from '@kite-ai/runtime-host/storage';
+import {
+  childDelegatedUpperBoundDigest,
+  sealChildGrantPayload,
+} from '@kite-ai/runtime-host/storage';
 import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import type { KiteSessionAppServerStorageOwner } from '../../kite-session-app-server-storage';
 import type { RuntimeState } from '../state-runtime';
@@ -83,6 +86,25 @@ export function planChildSessionRecovery(input: {
         ? { kind: 'abandon_unstartable_child', intent }
         : required(reason);
     };
+    const funding = fundingBudgetForRun(input.parentState, intent.fundingRunId);
+    const reservation = funding?.reservations[intent.delegatedReservationId];
+    const independentTurnDeadline =
+      intent.fundingRunId === intent.originRunId &&
+      reservation?.reservationId === `child-allotment:${intent.childThreadId}` &&
+      reservation.invocationId === reservation.reservationId &&
+      reservation.resourceKind === 'subagent' &&
+      (reservation.state === 'reserved' ||
+        reservation.state === 'queued' ||
+        reservation.state === 'dispatch_started') &&
+      reservation.executableUpperBound.independentChildTurnDeadline === true &&
+      reservation.executableUpperBound.unboundedToolInvocations === true &&
+      funding?.deadlineAt === intent.deadlineAt &&
+      childDelegatedUpperBoundDigest(reservation.executableUpperBound) ===
+        intent.delegatedUpperBoundDigest &&
+      !(
+        input.parentState.turn.turnId === intent.originRunId &&
+        input.parentState.turn.abortCause === 'user'
+      );
     const child = input.readChildState(intent.childThreadId);
     if (Boolean(child) !== intent.childSessionCreated) return required('child_presence_mismatch');
     if (child?.childSessionOrigin?.terminal) {
@@ -206,6 +228,7 @@ export function planChildSessionRecovery(input: {
     if (externalAttempt) return { kind: 'reconcile_unknown_child', intent };
     if (
       !input.isParentRunLive(intent.originRunId) &&
+      !independentTurnDeadline &&
       !(
         intent.disposition === 'after_turn' &&
         input.isAfterTurnOriginCompleted?.(intent.originRunId) === true
@@ -267,6 +290,7 @@ export function planChildSessionRecovery(input: {
         intent,
         grant,
         nowMs: input.nowMs,
+        independentTurnDeadline,
       });
       if (firstTurn.kind === 'terminal') return { kind: 'import_terminal', intent };
       if (firstTurn.kind === 'begin_first_turn') return { kind: 'begin_first_turn', intent };
@@ -309,6 +333,7 @@ export function planChildSessionRecovery(input: {
         : { ...intent, dispatchAckEventId: 'recovery-check' },
       grant,
       nowMs: input.nowMs,
+      independentTurnDeadline,
     });
     if (firstTurn.kind === 'recovery_required') return required(firstTurn.reason);
     if (firstTurn.kind === 'terminal') return { kind: 'import_terminal', intent };

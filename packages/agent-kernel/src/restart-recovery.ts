@@ -539,6 +539,54 @@ export function verifiedPendingFollowupReservationIds(
       backup.parentReservationId !== undefined
     )
       throw new Error('TriggerTurn backup recovery proof conflicts with State.');
+    if (backup.executableUpperBound.independentFollowupTurn === true) {
+      if (
+        backup.executableUpperBound.unboundedToolInvocations !== true ||
+        backup.executableUpperBound.gauges.elapsedRunMs !== 30 * 60_000 ||
+        proof.turnReservationId !== null ||
+        proof.modelReservationId !== null ||
+        (proof.stage !== 'accepted' && proof.stage !== 'activated')
+      )
+        throw new Error('Independent TriggerTurn recovery proof conflicts with State.');
+      if (proof.stage === 'accepted') {
+        if (
+          (backup.state !== 'reserved' && backup.state !== 'queued') ||
+          proof.modelInvocationId !== null ||
+          proof.targetPreparedNoAttempt
+        )
+          throw new Error('Independent TriggerTurn accepted stage conflicts with State.');
+        preserved.add(backup.reservationId);
+        continue;
+      }
+      const target = proof.targetPreparedNoAttempt;
+      if (backup.state !== 'dispatch_started') {
+        if (target)
+          throw new Error('Independent TriggerTurn no-attempt proof conflicts with State.');
+        continue;
+      }
+      if (
+        target &&
+        (!proof.modelInvocationId ||
+          target.submissionId !== proof.submissionId ||
+          target.invocationId !== proof.modelInvocationId ||
+          !target.targetRunId ||
+          !target.modelReservationId ||
+          !Number.isSafeInteger(target.activationSourceRevision) ||
+          target.activationSourceRevision < 1 ||
+          !Number.isSafeInteger(target.preparedStateRevision) ||
+          target.preparedStateRevision < 1 ||
+          target.surfaceRef.kind !== 'model_surface' ||
+          target.surfaceRef.integrityIdentifier !== target.surfaceDigest ||
+          !Number.isSafeInteger(target.estimatedInputTokens) ||
+          target.estimatedInputTokens < 0)
+      )
+        throw new Error('Independent TriggerTurn no-attempt proof conflicts with State.');
+      // The v2 backup is accounting only. Target Model recovery owns the
+      // no-replay decision after an attempt, so keep source funding until the
+      // target settles completed, unknown, or pre-dispatch released.
+      preserved.add(backup.reservationId);
+      continue;
+    }
     if (proof.stage === 'accepted') {
       if (
         (backup.state !== 'reserved' && backup.state !== 'queued') ||

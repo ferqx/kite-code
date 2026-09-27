@@ -468,6 +468,24 @@ export type RuntimeCrossSessionAgentMailMutation =
       }>;
     }>
   | Readonly<{
+      kind: 'activate_independent_followup_turn';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      grantDigest: string;
+      targetRevision: number;
+      createdAtMs: number;
+    }>
+  | Readonly<{
+      kind: 'settle_independent_followup_funding';
+      targetSessionId: string;
+      submissionId: string;
+      targetRunId: string;
+      targetRevision: number;
+      disposition: 'completed' | 'unknown' | 'pre_dispatch_released';
+      createdAtMs: number;
+    }>
+  | Readonly<{
       kind: 'request_interrupt';
       commandId: string;
       requestDigest: string;

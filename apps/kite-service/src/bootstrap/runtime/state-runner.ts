@@ -47,6 +47,33 @@ type RuntimeEffectExecutor = HostStateRuntimeEffectExecutor<
   RuntimeEffect
 >;
 
+/** Only versioned, independently timed child grants can pause the parent Run. */
+function independentlyTimedRequiredChildIds(
+  state: Readonly<RuntimeState>,
+  taskIds: readonly string[],
+): readonly string[] | null {
+  if (state.resourceBudget.status !== 'active' || taskIds.length === 0) return null;
+  const ids = [...new Set(taskIds)].sort();
+  if (ids.length !== taskIds.length) return null;
+  for (const taskId of ids) {
+    const matches = Object.values(state.capabilities.invocations).filter(
+      (invocation) => invocation.subagentProviderLifecycle?.childInvocationId === taskId,
+    );
+    if (matches.length !== 1) return null;
+    const link = matches[0]!.subagentProviderLifecycle?.childSession;
+    const reservation = link && state.resourceBudget.reservations[link.delegatedReservationId];
+    if (
+      link?.disposition !== 'required' ||
+      link.fundingRunId !== state.resourceBudget.runId ||
+      reservation?.resourceKind !== 'subagent' ||
+      reservation.executableUpperBound.independentChildTurnDeadline !== true ||
+      !['queued', 'reserved', 'dispatch_started'].includes(reservation.state)
+    )
+      return null;
+  }
+  return ids;
+}
+
 export interface RuntimeAgentMailboxCommandCommitInput {
   readonly events: readonly RuntimeEvent[];
   readonly mutations: readonly RuntimeAgentMailboxMutation[];
@@ -1237,9 +1264,48 @@ export async function* runStateRuntimeLoop(
             throw new Error('Runtime completion wait port is unavailable.');
           }
           kernel.processEvent(blocked);
+          const blockedState = kernel.getState();
+          let waitStarted: RuntimeEvent | undefined;
+          if (
+            effect.decision.nextAction === 'wait_for_background' &&
+            blockedState.resourceBudget.status === 'active' &&
+            !blockedState.resourceBudget.requiredChildWait
+          ) {
+            const taskIds = independentlyTimedRequiredChildIds(
+              blockedState,
+              blockedState.completionGuard.waitingReason?.kind === 'required_background'
+                ? blockedState.completionGuard.waitingReason.taskIds
+                : [],
+            );
+            if (taskIds) {
+              waitStarted = {
+                type: 'resource_budget.required_child_wait_started',
+                runId: blockedState.resourceBudget.runId,
+                at: new Date().toISOString(),
+                taskIds: [...taskIds],
+              };
+              kernel.processEvent(waitStarted);
+            }
+          }
           const waitState = kernel.getState();
           yield blocked;
+          if (waitStarted) yield waitStarted;
           if (!(await waitForCompletionFacts(effect.decision.nextAction, waitState))) return;
+          const resumed = kernel.getState();
+          if (
+            resumed.resourceBudget.status === 'active' &&
+            resumed.resourceBudget.requiredChildWait &&
+            requiredBackgroundTaskIds(resumed).length === 0
+          ) {
+            const waitEnded: RuntimeEvent = {
+              type: 'resource_budget.required_child_wait_ended',
+              runId: resumed.resourceBudget.runId,
+              at: new Date().toISOString(),
+              taskIds: [...resumed.resourceBudget.requiredChildWait.taskIds],
+            };
+            kernel.processEvent(waitEnded);
+            yield waitEnded;
+          }
           completionWaitSatisfied = true;
           continue;
         }

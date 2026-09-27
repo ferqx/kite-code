@@ -11,17 +11,20 @@ import {
   resumeBuiltinPreparedPrimaryModelEffect,
   verifyCompletedModelInvocationEvidence,
 } from '@kite-ai/builtin-runtime/model';
+import { getRoleConfig } from '@kite-ai/builtin-runtime/subagent';
 import {
   createRuntimeAbortReason,
   getAgentPhase,
   RUNTIME_NOTIFICATION_SCHEMA_,
   type RuntimeNotification,
   type RuntimeSessionProjection,
+  runtimeAbortCause,
 } from '@kite-ai/runtime-contract';
 import type { RuntimeHostLeasePort } from '@kite-ai/runtime-host';
 import {
   type CrossSessionFollowupAdmission,
   type CrossSessionFollowupPolicy,
+  type CrossSessionIndependentTurnPolicyProof,
   type CrossSessionTargetFollowupPolicyProof,
   committedResourceUsage,
   createAgentMessageContextFrame,
@@ -29,10 +32,14 @@ import {
   fundingBudgetForRun,
   planCrossSessionFirstModelReplacement,
   planCrossSessionFollowupSlotAcquisition,
+  planCrossSessionIndependentTurnActivation,
   runtimeHostStateActivePlanning,
   runtimeHostStateDecideCompletion,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED } from '@kite-ai/runtime-host/storage';
+import {
+  CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED,
+  childDelegatedUpperBoundDigest,
+} from '@kite-ai/runtime-host/storage';
 import type { RuntimeJsonValue, SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { appSandboxBackendAvailable } from '#kite-service/sandbox/types';
@@ -58,6 +65,7 @@ import { completedTerminalOutcome, failedTerminalOutcome } from '../terminal-out
 import type { RuntimeTurnInput } from '../turn-coordinator';
 import { backgroundSubagentOwnerKey } from './background-runtime';
 import { createChildApprovalProxyOwner } from './child-approval-owner';
+import { classifyChildApprovalRecovery } from './child-approval-proxy';
 import { settleAcceptedChildCreationFailure } from './child-creation-failure';
 import {
   classifyChildApprovalFirstTurnRecovery,
@@ -518,6 +526,23 @@ export function createChildSessionOrchestrator(input: {
         );
       }
       if (resumedState?.activeFollowupTurn) return false;
+      const latestSettled = input.owner.storage.sessions
+        .loadEventsStrict(targetSessionId)
+        .map(({ event }) => event)
+        .filter(
+          (event): event is Extract<RuntimeEvent, { type: 'agent.followup_turn_settled' }> =>
+            event.type === 'agent.followup_turn_settled' &&
+            event.sourceSessionId === input.parentSessionId,
+        )
+        .at(-1);
+      if (latestSettled && latestSettled.submissionId !== submissionId) {
+        const funded = input.detachedScope.runInAsyncScope(() =>
+          input.owner.runWithSessionExecution(input.parentSessionId, () =>
+            mail.readFollowupTerminalForSource(input.parentSessionId, latestSettled.submissionId),
+          ),
+        );
+        if (!funded) return false;
+      }
       const pending = mail.readUnroutedFollowupMessage(
         targetSessionId,
         input.parentSessionId,
@@ -544,7 +569,8 @@ export function createChildSessionOrchestrator(input: {
         return false;
       const payload = JSON.parse(accepted.admission.canonicalJson) as Record<string, unknown>;
       if (
-        payload.schema !== 'kite.cross-session-followup-admission.v1' ||
+        (payload.schema !== 'kite.cross-session-followup-admission.v1' &&
+          payload.schema !== 'kite.cross-session-followup-admission.v2') ||
         payload.messageId !== accepted.messageId ||
         payload.submissionId !== submissionId ||
         payload.sourceSessionId !== input.parentSessionId ||
@@ -583,6 +609,63 @@ export function createChildSessionOrchestrator(input: {
         admission.policy.phaseCeiling === 'planning' || latestPhase === 'planning'
           ? 'planning'
           : 'building';
+      let allowedTools: readonly string[] | undefined;
+      if (admission.policy.executionMode === 'independent_turn_v2') {
+        const origin = state.childSessionOrigin;
+        const sealed = input.detachedScope.runInAsyncScope(() =>
+          input.owner.runWithSessionExecution(input.parentSessionId, () =>
+            input.owner.readChildSealedGrant(targetSessionId),
+          ),
+        );
+        if (
+          !origin ||
+          !sealed ||
+          sealed.sealedGrantDigest !== origin.grantDigest ||
+          admission.policy.targetGrantDigest !== origin.grantDigest ||
+          admission.policy.targetRole !== origin.role
+        )
+          throw new Error('Independent followup has no exact original child grant.');
+        const original = JSON.parse(sealed.sealedGrantJson) as SubagentDelegationGrant;
+        const originalNames = original.capabilityCeiling.allowedTools;
+        if (
+          original.role !== origin.role ||
+          !Array.isArray(originalNames) ||
+          originalNames.some((name) => typeof name !== 'string') ||
+          new Set(originalNames).size !== originalNames.length
+        )
+          throw new Error('Independent followup original Tool ceiling is invalid.');
+        const roleNames = getRoleConfig(origin.role).allowedTools;
+        const initialCodeAll = origin.role === 'code' && originalNames.length === 0;
+        allowedTools = runtime.builtinToolCatalog.entries
+          .filter((entry) => entry.visibility === 'model')
+          .map((entry) => entry.name)
+          .filter(
+            (name) =>
+              name !== 'task' &&
+              (!roleNames || roleNames.has(name)) &&
+              (initialCodeAll || originalNames.includes(name)),
+          )
+          .sort();
+        if (allowedTools.length === 0 || new Set(allowedTools).size !== allowedTools.length)
+          throw new Error('Independent followup has no explicit role-authorized Tool names.');
+        const acquired = input.detachedScope.runInAsyncScope(() =>
+          input.owner.runWithSessionExecution(input.parentSessionId, () => {
+            const parent = ensureParent();
+            const slot = planCrossSessionFollowupSlotAcquisition({
+              sourceState: parent.getState(),
+              sourceSessionId: input.parentSessionId,
+              fundingRunId: admission.fundingRunId,
+              submissionId,
+              backupReservationId: admission.backupReservationId,
+            });
+            if (slot.status === 'already_acquired') return true;
+            if (slot.status !== 'ready') return false;
+            parent.commitChildSlotAcquisition(admission.backupReservationId);
+            return true;
+          }),
+        );
+        if (!acquired) return false;
+      }
       const plan = planChildFollowupTurn({
         state,
         admission,
@@ -590,6 +673,7 @@ export function createChildSessionOrchestrator(input: {
         sourceAdmissionDigest: accepted.admission.digest,
         checkpoint,
         nowMs: Date.now(),
+        ...(allowedTools ? { allowedTools } : {}),
         targetPolicy: {
           workspaceDigest: state.session.canonicalWorkspaceDigest ?? '',
           interactionModeRevision: state.interactionModeRevision,
@@ -600,6 +684,92 @@ export function createChildSessionOrchestrator(input: {
       const committed = child.session.commitChildFollowupRunStart(plan.events, plan.mutation);
       return committed.length === plan.events.length;
     });
+  };
+  const activateIndependentFollowup = (targetSessionId: string, submissionId: string): boolean => {
+    const mail = input.owner.storage.crossSessionQueueMail;
+    if (!mail) return false;
+    const accepted = mail.readAcceptedIndependentFollowupSourcePolicyProof(
+      targetSessionId,
+      input.parentSessionId,
+      submissionId,
+    );
+    if (!accepted) return false;
+    const target = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+    const active = target?.activeFollowupTurn;
+    const grant = active
+      ? mail.readFollowupGrantForTarget(targetSessionId, active.grantRef.artifactId)
+      : null;
+    const current =
+      target && input.readCurrentTargetPolicyContext?.({ targetState: target, submissionId });
+    if (
+      !target ||
+      !active ||
+      active.submissionId !== submissionId ||
+      !grant ||
+      grant.ref.integrityIdentifier !== active.grantDigest ||
+      !current ||
+      !verifiedTargetFollowupCatalog({ state: target, ...current })
+    )
+      return false;
+    const sealed = JSON.parse(grant.canonicalJson) as {
+      schema?: string;
+      originRole?: 'explore' | 'plan' | 'code' | 'review';
+      denyTools?: boolean;
+      allowedTools?: string[];
+    };
+    if (
+      sealed.schema !== 'kite.child-followup-grant.v2' ||
+      !sealed.originRole ||
+      sealed.originRole !== target.childSessionOrigin?.role ||
+      sealed.denyTools !== false ||
+      !Array.isArray(sealed.allowedTools) ||
+      sealed.allowedTools.length === 0
+    )
+      return false;
+    const targetPolicyProof: CrossSessionIndependentTurnPolicyProof = {
+      observedTargetRevision: target.revision,
+      grantDigest: active.grantDigest,
+      capabilityDigest: target.capabilities.catalogRevision,
+      interactionModeRevision: target.interactionModeRevision,
+      phaseCeiling: getAgentPhase(runtimeHostStateActivePlanning(target)),
+      mode: target.mode,
+      workspaceAccess: target.workspaceAccess,
+      originRole: sealed.originRole,
+      denyTools: false,
+      allowedTools: sealed.allowedTools,
+    };
+    const committed = input.detachedScope.runInAsyncScope(() =>
+      input.owner.runWithSessionExecution(input.parentSessionId, () => {
+        const source = ensureParent();
+        const planned = planCrossSessionIndependentTurnActivation({
+          fundingState: source.getState(),
+          targetState: target,
+          admission: accepted.admission as unknown as CrossSessionFollowupAdmission,
+          currentPolicy: accepted.policy as unknown as CrossSessionFollowupPolicy,
+          targetPolicyProof,
+          nowMs: Date.now(),
+        });
+        if (planned.status === 'already_activated') return true;
+        const applied = source.session.commitCrossSessionFollowupFunding([planned.event], {
+          kind: 'activate_independent_followup_turn',
+          targetSessionId,
+          submissionId,
+          targetRunId: active.targetRunId,
+          grantDigest: active.grantDigest,
+          targetRevision: target.revision,
+          createdAtMs: Date.now(),
+        });
+        return applied.length === 1;
+      }),
+    );
+    return (
+      committed &&
+      mail.readIndependentFollowupActivationForTarget(
+        targetSessionId,
+        input.parentSessionId,
+        submissionId,
+      ) !== null
+    );
   };
   const assertCurrentSourceFollowupPolicy = (
     source: Readonly<RuntimeState>,
@@ -941,6 +1111,104 @@ export function createChildSessionOrchestrator(input: {
       return committed.length === 2;
     });
   };
+  const routePreparedIndependentFollowup = (
+    targetSessionId: string,
+    submissionId: string,
+  ): boolean => {
+    const mail = input.owner.storage.crossSessionQueueMail;
+    if (!mail) return false;
+    return input.owner.runWithSessionExecution(targetSessionId, () => {
+      if (mail.readFollowupRoute(targetSessionId, submissionId)) return true;
+      const accepted = mail.readFollowupAdmissionForTarget(
+        targetSessionId,
+        input.parentSessionId,
+        submissionId,
+      );
+      const message = accepted
+        ? mail.readUnroutedFollowupMessage(
+            targetSessionId,
+            input.parentSessionId,
+            submissionId,
+            accepted.messageId,
+          )
+        : null;
+      const state = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+      const followup = state?.activeFollowupTurn;
+      const models = state
+        ? Object.values(state.modelInvocations).filter(
+            (item) =>
+              item.status === 'prepared' &&
+              item.attempts === 0 &&
+              item.purpose === 'primary_agent' &&
+              item.budget.kind === 'reservation' &&
+              state.resourceBudget.status === 'active' &&
+              state.resourceBudget.reservations[item.budget.reservationId]?.resourceKind ===
+                'model',
+          )
+        : [];
+      if (
+        !accepted ||
+        !message ||
+        !state ||
+        !followup ||
+        followup.submissionId !== submissionId ||
+        models.length !== 1 ||
+        state.resourceBudget.status !== 'active'
+      )
+        return false;
+      const model = models[0]!;
+      if (model.budget.kind !== 'reservation') return false;
+      const reservationId = model.budget.reservationId;
+      const admission = JSON.parse(accepted.admission.canonicalJson) as {
+        fundingRunId?: string;
+        schema?: string;
+      };
+      if (
+        admission.schema !== 'kite.cross-session-followup-admission.v2' ||
+        !admission.fundingRunId
+      )
+        return false;
+      const routed: Extract<RuntimeEvent, { type: 'agent.followup_routed' }> = {
+        type: 'agent.followup_routed',
+        submissionId,
+        targetAgentId: targetSessionId,
+        route: 'new_turn',
+        taskId: followup.taskId,
+        invocationId: model.invocationId,
+        modelAdmissionId: reservationId,
+        reservationId,
+        fundingRunId: admission.fundingRunId,
+        sequence: message.sequence,
+      };
+      const prepared: Extract<RuntimeEvent, { type: 'agent.mail_input_prepared' }> = {
+        type: 'agent.mail_input_prepared',
+        targetAgentId: targetSessionId,
+        invocationId: model.invocationId,
+        modelAdmissionId: reservationId,
+        fromSequence: message.sequence - 1,
+        throughSequence: message.sequence,
+        messageIds: [accepted.messageId],
+      };
+      const child = ensureChild(
+        targetSessionId,
+        input.modelRuntimeFactory(input.bridgeInput.workspace),
+      );
+      const committed = child.session.commitCrossSessionFollowupRoute([routed, prepared], {
+        kind: 'route_followup',
+        sourceSessionId: input.parentSessionId,
+        messageId: accepted.messageId,
+        submissionId,
+        route: 'new_turn',
+        targetRunId: followup.targetRunId,
+        taskId: followup.taskId,
+        invocationId: model.invocationId,
+        modelAdmissionId: reservationId,
+        reservationId,
+        createdAtMs: Date.now(),
+      });
+      return committed.length === 2;
+    });
+  };
   const activateRoutedFollowup = (targetSessionId: string, submissionId: string): boolean => {
     const mail = input.owner.storage.crossSessionQueueMail;
     if (!mail || stoppingRecovery) return false;
@@ -997,6 +1265,136 @@ export function createChildSessionOrchestrator(input: {
       );
     });
   };
+  const continueIndependentFollowup = async (
+    targetSessionId: string,
+    submissionId: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> => {
+    const mail = input.owner.storage.crossSessionQueueMail;
+    if (!mail) return false;
+    const runtime = input.modelRuntimeFactory(input.bridgeInput.workspace);
+    const config = targetModelConfig(targetSessionId);
+    if (!config) return false;
+    const child = ensureChild(targetSessionId, runtime);
+    const state = child.getState();
+    const followup = state.activeFollowupTurn;
+    const taskId = state.childSessionOrigin?.childInvocationId;
+    if (!followup || followup.submissionId !== submissionId || !taskId) return false;
+    const stored = mail.readFollowupGrantForTarget(targetSessionId, followup.grantRef.artifactId);
+    const grant = stored
+      ? (JSON.parse(stored.canonicalJson) as {
+          schema?: string;
+          originRole?: string;
+          allowedTools?: string[];
+        })
+      : null;
+    if (
+      stored?.ref.integrityIdentifier !== followup.grantDigest ||
+      grant?.schema !== 'kite.child-followup-grant.v2' ||
+      grant.originRole !== state.childSessionOrigin?.role ||
+      !Array.isArray(grant.allowedTools) ||
+      grant.allowedTools.length === 0
+    )
+      return false;
+    const original = input.detachedScope.runInAsyncScope(() =>
+      input.owner.runWithSessionExecution(input.parentSessionId, () =>
+        input.owner.readChildSealedGrant(targetSessionId),
+      ),
+    );
+    const originalGrant = original
+      ? (JSON.parse(original.sealedGrantJson) as SubagentDelegationGrant)
+      : null;
+    if (
+      !original ||
+      !originalGrant ||
+      original.sealedGrantDigest !== state.childSessionOrigin?.grantDigest ||
+      originalGrant.role !== state.childSessionOrigin.role
+    )
+      return false;
+    const approvals = [...state.pendingApprovals.values()].filter((approval) => {
+      const tool = state.tools.calls[approval.toolCallId];
+      return tool && ['awaiting_approval', 'authorized_queued', 'rejected'].includes(tool.status);
+    });
+    if (approvals.length > 1) return false;
+    const approval = approvals[0];
+    if (approval) {
+      const proxyId = input.owner.childApprovalProxyId({
+        childThreadId: targetSessionId,
+        childInteractionId: approval.interactionId,
+        childGeneration: approval.generation,
+      });
+      const source = input.detachedScope.runInAsyncScope(() =>
+        input.owner.runWithSessionExecution(input.parentSessionId, () => ({
+          state: ensureParent().getState(),
+          proxy: input.owner.readChildApprovalProxy(input.parentSessionId, proxyId),
+        })),
+      );
+      if (!source.proxy) return false;
+      const classified = classifyChildApprovalRecovery({
+        parentState: source.state,
+        childState: state,
+        proxy: source.proxy,
+      });
+      if (classified.kind === 'recovery_required') return false;
+      if (classified.kind === 'wait_for_parent') approvalProxy.publishRequested(source.proxy);
+      if (classified.kind === 'apply_parent_decision') {
+        approvalProxy.publishDecided(proxyId);
+        approvalProxy.activateDecision(proxyId);
+      }
+    }
+    child.session.activateRun(followup.targetRunId);
+    const identity = { runId: followup.targetRunId, taskId };
+    for await (const event of child.executeTurn(
+      {
+        ...childTurnFor(child.getState(), runtime, signal ?? new AbortController().signal),
+        config,
+        model: createChatModel(config),
+        task: '',
+        initialSkillActivations: [],
+        resumeCommittedInteraction: true,
+        childToolCeiling: {
+          grantDigest: followup.grantDigest,
+          role: state.childSessionOrigin.role,
+          allowedTools: grant.allowedTools,
+        },
+        crossSessionChildIdentity: {
+          parentSessionId: input.parentSessionId,
+          taskId,
+          grantId: originalGrant.grantId,
+          grantDigest: state.childSessionOrigin.grantDigest,
+        },
+      },
+      createChildApprovalActionProvider({
+        owner: input.owner,
+        parentSessionId: input.parentSessionId,
+        proxyOwner: approvalProxy,
+        signal: signal ?? new AbortController().signal,
+        onProxyOpened: (opened) => approvalProxy.publishRequested(opened),
+      }),
+    )) {
+      const revision = child.revisionForEvent?.(event);
+      if (revision === undefined) publishChildPresentation(child, event, identity);
+      else publishChildCommittedThrough(child, revision, identity);
+    }
+    await child.waitForIdle();
+    const terminal = child.getState();
+    if (terminal.turn.status !== 'completed' || terminal.terminalOutcome?.status !== 'completed')
+      return false;
+    if (
+      !child.session.commitChildFollowupTurnSettlement({
+        type: 'agent.followup_turn_settled',
+        sourceSessionId: input.parentSessionId,
+        submissionId,
+        targetRunId: followup.targetRunId,
+        taskId: followup.taskId,
+        status: 'completed',
+      }).length
+    )
+      return false;
+    if (!settleTerminalFollowupFunding(targetSessionId, submissionId)) return false;
+    clearSettledChildStream(child, followup.targetRunId);
+    return true;
+  };
   const executeAcceptedFollowupFirstModel = async (
     targetSessionId: string,
     submissionId: string,
@@ -1042,11 +1440,103 @@ export function createChildSessionOrchestrator(input: {
         if (!storedGrant || storedGrant.ref.integrityIdentifier !== followup.grantDigest)
           throw new Error('Child followup fresh grant is unavailable.');
         const grant = JSON.parse(storedGrant.canonicalJson) as {
+          schema?: string;
           originRole?: string;
           denyTools?: boolean;
-          allowedTools?: unknown;
+          allowedTools?: string[];
           firstAttemptTimeoutMs?: number;
         };
+        if (grant.schema === 'kite.child-followup-grant.v2') {
+          if (
+            grant.originRole !== state.childSessionOrigin?.role ||
+            grant.denyTools !== false ||
+            !Array.isArray(grant.allowedTools) ||
+            grant.allowedTools.length === 0 ||
+            grant.allowedTools.some((name) => !name || name === 'task') ||
+            !Number.isSafeInteger(grant.firstAttemptTimeoutMs) ||
+            !activateIndependentFollowup(targetSessionId, submissionId)
+          )
+            throw new Error('Independent followup has no activated role-bound grant.');
+          child.session.activateRun(followup.targetRunId);
+          const persistence = Object.freeze({
+            getState: () => child.getState(),
+            persistEvents: async (events: RuntimeEvent[]): Promise<boolean> => {
+              if (events.length === 0) return true;
+              const prepared = events.filter((event) => event.type === 'model.invocation_prepared');
+              if (prepared.length > 1) return false;
+              if (
+                events.some((event) => event.type === 'model.invocation_attempt_started') &&
+                (mail.readIndependentFollowupActivationForTarget(
+                  targetSessionId,
+                  input.parentSessionId,
+                  submissionId,
+                ) === null ||
+                  mail.readFollowupRoute(targetSessionId, submissionId)?.route !== 'new_turn')
+              )
+                return false;
+              const applied = child.session.processEventBatch(events);
+              if (applied.length !== events.length) return false;
+              if (prepared.length === 1)
+                return routePreparedIndependentFollowup(targetSessionId, submissionId);
+              return true;
+            },
+          });
+          const identity = { runId: followup.targetRunId, taskId };
+          try {
+            const modeled = await projectPrimaryModelEffect({
+              model: createChatModel(config),
+              state: child.getState() as RuntimeState,
+              config,
+              builtinToolCatalog: runtime.builtinToolCatalog,
+              modelEffectCoordinator: runtime.modelEffects,
+              modelInvocationPersistence: persistence,
+              delegatedTaskArtifacts: runtime.delegatedTaskArtifacts,
+              childToolCeiling: {
+                grantDigest: followup.grantDigest,
+                role: state.childSessionOrigin!.role,
+                allowedTools: grant.allowedTools,
+              },
+              firstAttemptTimeoutMs: grant.firstAttemptTimeoutMs,
+              prepareAgentMail: async () => ({
+                frames: [
+                  humanMessage({
+                    id: frame.messageId,
+                    name: 'agent_message',
+                    content: frame.content,
+                    response_metadata: { source: 'agent_message' },
+                  }),
+                ],
+              }),
+              emitRuntimeEvent: (event) => {
+                if (
+                  event.type === 'model.text_delta' ||
+                  event.type === 'model.reasoning_delta' ||
+                  event.type === 'model.reasoning_completed'
+                ) {
+                  publishChildPresentation(child, event, identity);
+                  return;
+                }
+                throw new Error('Independent followup Model emitted an uncommitted event.');
+              },
+              signal,
+            });
+            if (modeled.length !== 0)
+              throw new Error('Independent followup Model returned uncommitted events.');
+            if (completeFollowupTurn(child, followup, targetSessionId, submissionId)) {
+              publishChildCommittedThrough(child, child.getState().revision, identity);
+              clearSettledChildStream(child, followup.targetRunId);
+              return true;
+            }
+            if (child.getState().turn.status !== 'active')
+              throw new Error('Independent followup terminal funding was not acknowledged.');
+            return continueIndependentFollowup(targetSessionId, submissionId, signal);
+          } catch (error) {
+            if (markAttemptedFollowupUnknown(targetSessionId, submissionId)) return false;
+            if (!signal?.aborted && markUnattemptedFollowupFailed(targetSessionId, submissionId))
+              return false;
+            throw error;
+          }
+        }
         if (
           grant.originRole !== state.childSessionOrigin?.role ||
           grant.denyTools !== true ||
@@ -1241,7 +1731,7 @@ export function createChildSessionOrchestrator(input: {
       }).length !== 1
     )
       return false;
-    return settleCompletedFollowupFunding(targetSessionId, submissionId);
+    return settleTerminalFollowupFunding(targetSessionId, submissionId);
   };
   const resumePreparedFollowupFirstModel = async (
     targetSessionId: string,
@@ -1448,6 +1938,139 @@ export function createChildSessionOrchestrator(input: {
       return true;
     });
   };
+  const settleIndependentFollowupFunding = (
+    targetSessionId: string,
+    submissionId: string,
+  ): boolean => {
+    const mail = input.owner.storage.crossSessionQueueMail;
+    if (!mail) return false;
+    const accepted = mail.readAcceptedIndependentFollowupSourcePolicyProof(
+      targetSessionId,
+      input.parentSessionId,
+      submissionId,
+    );
+    const target = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+    const followup = target?.activeFollowupTurn;
+    const route = mail.readFollowupRoute(targetSessionId, submissionId);
+    const prepared = input.owner.storage.sessions
+      .loadEventsStrict(targetSessionId)
+      .map(({ event }) => event)
+      .filter(
+        (event): event is Extract<RuntimeEvent, { type: 'agent.followup_turn_prepared' }> =>
+          event.type === 'agent.followup_turn_prepared' &&
+          event.sourceSessionId === input.parentSessionId &&
+          event.submissionId === submissionId,
+      );
+    if (prepared.length !== 1) return false;
+    const targetRunId =
+      followup?.targetRunId ??
+      (route?.route === 'new_turn' ? route.targetRunId : prepared[0]!.targetRunId);
+    if (
+      !accepted ||
+      !target ||
+      (followup !== undefined && followup.submissionId !== submissionId) ||
+      !targetRunId ||
+      targetRunId !== prepared[0]!.targetRunId ||
+      (route !== null && (route.route !== 'new_turn' || route.targetRunId !== targetRunId)) ||
+      target.resourceBudget.status !== 'active' ||
+      target.resourceBudget.runId !== targetRunId
+    )
+      return false;
+    const disposition =
+      target.turn.status === 'completed' && target.terminalOutcome?.status === 'completed'
+        ? 'completed'
+        : target.terminalOutcome?.status === 'unknown'
+          ? 'unknown'
+          : target.turn.status === 'aborted'
+            ? 'pre_dispatch_released'
+            : null;
+    if (!disposition) return false;
+    const receipt = input.detachedScope.runInAsyncScope(() =>
+      input.owner.runWithSessionExecution(input.parentSessionId, () =>
+        mail.readFollowupTerminalForSource(input.parentSessionId, submissionId),
+      ),
+    );
+    if (receipt) return true;
+    const admission = accepted.admission;
+    const backupId = String(admission.backupReservationId);
+    const sourceLedger = input.detachedScope.runInAsyncScope(() =>
+      input.owner.runWithSessionExecution(input.parentSessionId, () =>
+        fundingBudgetForRun(ensureParent().getState(), String(admission.fundingRunId)),
+      ),
+    );
+    const backup = sourceLedger?.reservations[backupId];
+    if (!backup) return false;
+    const targetEvidence = mail.readTargetSnapshotEvidence(targetSessionId, target.revision);
+    if (!targetEvidence || targetEvidence.revision !== target.revision) return false;
+    const audit: Extract<RuntimeEvent, { type: 'agent.followup_independent_settled' }> = {
+      type: 'agent.followup_independent_settled',
+      submissionId,
+      targetAgentId: targetSessionId,
+      targetRunId,
+      targetRevision: target.revision,
+      disposition,
+      evidenceDigest: targetEvidence.digest,
+      createdAtMs: Date.now(),
+    };
+    const events: RuntimeEvent[] = [];
+    if (disposition === 'completed') {
+      if (backup.state !== 'dispatch_started') return false;
+      events.push({
+        type: 'resource_budget.reconciled',
+        reservationId: backupId,
+        actual: {
+          ...target.resourceBudget.reconciledUsage,
+          counters: {
+            ...target.resourceBudget.reconciledUsage.counters,
+            turns: 1,
+          },
+          gauges: { ...target.resourceBudget.reconciledUsage.gauges, activeSubagents: 1 },
+        },
+      });
+    } else if (disposition === 'unknown') {
+      if (backup.state === 'dispatch_started')
+        events.push({ type: 'resource_budget.unknown', reservationId: backupId });
+      else if (backup.state !== 'unknown') return false;
+    } else {
+      if (backup.state !== 'reserved' && backup.state !== 'dispatch_started') return false;
+      events.push({
+        type: 'resource_budget.released',
+        reservationId: backupId,
+        proof: 'local_pre_dispatch_failure',
+      });
+    }
+    events.push(audit);
+    const committed = input.detachedScope.runInAsyncScope(() =>
+      input.owner.runWithSessionExecution(input.parentSessionId, () =>
+        ensureParent().session.commitCrossSessionFollowupFunding(events, {
+          kind: 'settle_independent_followup_funding',
+          targetSessionId,
+          submissionId,
+          targetRunId,
+          targetRevision: target.revision,
+          disposition,
+          createdAtMs: audit.createdAtMs,
+        }),
+      ),
+    );
+    if (committed.length !== events.length) return false;
+    if (
+      !input.detachedScope.runInAsyncScope(() =>
+        input.owner.runWithSessionExecution(input.parentSessionId, () =>
+          mail.readFollowupTerminalForSource(input.parentSessionId, submissionId),
+        ),
+      )
+    )
+      return false;
+    const reply = mail.acceptFollowupTerminalReply(
+      targetSessionId,
+      input.parentSessionId,
+      submissionId,
+      Date.now(),
+    );
+    input.scheduleTerminalReplyDelivery?.(targetSessionId, reply.messageId);
+    return true;
+  };
   const settleTerminalFollowupFunding = (
     targetSessionId: string,
     submissionId: string,
@@ -1455,6 +2078,14 @@ export function createChildSessionOrchestrator(input: {
     const mail = input.owner.storage.crossSessionQueueMail;
     if (!mail) return false;
     return input.owner.runWithSessionExecution(targetSessionId, () => {
+      if (
+        mail.readAcceptedIndependentFollowupSourcePolicyProof(
+          targetSessionId,
+          input.parentSessionId,
+          submissionId,
+        )
+      )
+        return settleIndependentFollowupFunding(targetSessionId, submissionId);
       const target = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
       if (!target) return false;
       if (target.turn.status === 'completed' && target.terminalOutcome?.status === 'completed')
@@ -1657,6 +2288,81 @@ export function createChildSessionOrchestrator(input: {
     const mail = input.owner.storage.crossSessionQueueMail;
     if (!mail) return false;
     return input.owner.runWithSessionExecution(targetSessionId, () => {
+      if (
+        mail.readAcceptedIndependentFollowupSourcePolicyProof(
+          targetSessionId,
+          input.parentSessionId,
+          submissionId,
+        )
+      ) {
+        const durable = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+        const child = ensureChild(
+          targetSessionId,
+          input.modelRuntimeFactory(input.bridgeInput.workspace),
+        );
+        const state = child.getState();
+        const followup = state.activeFollowupTurn;
+        if (
+          !durable ||
+          durable.revision !== state.revision ||
+          !followup ||
+          followup.submissionId !== submissionId ||
+          state.turn.status !== 'active' ||
+          state.resourceBudget.status !== 'active'
+        )
+          return false;
+        const prepared = Object.values(state.modelInvocations).filter(
+          (model) =>
+            model.purpose === 'primary_agent' &&
+            model.budget.kind === 'reservation' &&
+            model.status === 'prepared' &&
+            model.attempts === 0 &&
+            state.resourceBudget.reservations[model.budget.reservationId]?.runId ===
+              followup.targetRunId,
+        );
+        if (prepared.length !== 1 || prepared[0]!.budget.kind !== 'reservation') return false;
+        const local = state.resourceBudget.reservations[prepared[0]!.budget.reservationId];
+        if (local?.state !== 'reserved') return false;
+        const failure = classifyFailure(
+          'provider_unavailable',
+          'Independent followup could not dispatch its first Model attempt.',
+        );
+        const events: RuntimeEvent[] = [
+          {
+            type: 'resource_budget.released',
+            reservationId: local.reservationId,
+            proof: 'local_pre_dispatch_failure',
+          },
+          { type: 'task.failed', taskId: followup.taskId, reason: failure.message },
+          {
+            type: 'turn.aborted',
+            turnId: followup.targetRunId,
+            reason: failure.message,
+            cause: 'error',
+          },
+          {
+            type: 'run.error',
+            turnId: followup.targetRunId,
+            message: failure.message,
+            recoverable: false,
+            failure,
+            outcome: failedTerminalOutcome(failure, { knownExternalEffects: 'known' }),
+          },
+        ];
+        if (child.session.processEventBatch(events).length !== events.length) return false;
+        if (
+          child.session.commitChildFollowupTurnSettlement({
+            type: 'agent.followup_turn_settled',
+            sourceSessionId: input.parentSessionId,
+            submissionId,
+            targetRunId: followup.targetRunId,
+            taskId: followup.taskId,
+            status: 'failed',
+          }).length !== 1
+        )
+          return false;
+        return settleTerminalFollowupFunding(targetSessionId, submissionId);
+      }
       const funding = mail.readFollowupFundingForTarget(
         targetSessionId,
         input.parentSessionId,
@@ -1788,6 +2494,90 @@ export function createChildSessionOrchestrator(input: {
     const mail = input.owner.storage.crossSessionQueueMail;
     if (!mail) return false;
     return input.owner.runWithSessionExecution(targetSessionId, () => {
+      if (
+        mail.readAcceptedIndependentFollowupSourcePolicyProof(
+          targetSessionId,
+          input.parentSessionId,
+          submissionId,
+        )
+      ) {
+        const child = ensureChild(
+          targetSessionId,
+          input.modelRuntimeFactory(input.bridgeInput.workspace),
+        );
+        const state = child.getState();
+        const followup = state.activeFollowupTurn;
+        if (
+          !followup ||
+          followup.submissionId !== submissionId ||
+          state.resourceBudget.status !== 'active' ||
+          state.turn.status !== 'active'
+        )
+          return false;
+        const attempted = Object.values(state.modelInvocations).filter(
+          (model) =>
+            model.purpose === 'primary_agent' &&
+            model.budget.kind === 'reservation' &&
+            model.attempts > 0 &&
+            (model.status === 'dispatching' || model.status === 'interrupted') &&
+            state.resourceBudget.reservations[model.budget.reservationId]?.runId ===
+              followup.targetRunId,
+        );
+        if (attempted.length !== 1 || attempted[0]!.budget.kind !== 'reservation') return false;
+        const model = attempted[0]!;
+        const local =
+          state.resourceBudget.reservations[
+            model.budget.kind === 'reservation' ? model.budget.reservationId : ''
+          ];
+        if (local?.state !== 'dispatch_started' && local?.state !== 'unknown') return false;
+        const failure = classifyFailure(
+          'unknown',
+          'Independent followup Model attempt ended without verifiable Provider usage.',
+        );
+        const events: RuntimeEvent[] = [
+          ...(model.status === 'dispatching'
+            ? ([
+                {
+                  type: 'model.invocation_interrupted',
+                  invocationId: model.invocationId,
+                  dispatchCertainty: 'unknown',
+                  reasonCode: 'persistence_unavailable',
+                },
+              ] as const)
+            : []),
+          ...(local.state === 'dispatch_started'
+            ? ([{ type: 'resource_budget.unknown', reservationId: local.reservationId }] as const)
+            : []),
+          { type: 'task.failed', taskId: followup.taskId, reason: failure.message },
+          {
+            type: 'turn.aborted',
+            turnId: followup.targetRunId,
+            reason: failure.message,
+            cause: 'error',
+          },
+          {
+            type: 'run.error',
+            turnId: followup.targetRunId,
+            message: failure.message,
+            recoverable: false,
+            failure,
+            outcome: failedTerminalOutcome(failure, { knownExternalEffects: 'unknown' }),
+          },
+        ];
+        if (child.session.processEventBatch(events).length !== events.length) return false;
+        if (
+          child.session.commitChildFollowupTurnSettlement({
+            type: 'agent.followup_turn_settled',
+            sourceSessionId: input.parentSessionId,
+            submissionId,
+            targetRunId: followup.targetRunId,
+            taskId: followup.taskId,
+            status: 'unknown',
+          }).length !== 1
+        )
+          return false;
+        return settleTerminalFollowupFunding(targetSessionId, submissionId);
+      }
       const funding = mail.readFollowupFundingForTarget(
         targetSessionId,
         input.parentSessionId,
@@ -1892,13 +2682,14 @@ export function createChildSessionOrchestrator(input: {
         ),
       );
       if (!admission) throw new Error('Accepted followup admission is unavailable.');
-      const admitted = JSON.parse(admission.admission.canonicalJson) as { deadlineAt?: unknown };
+      const admitted = JSON.parse(admission.admission.canonicalJson) as {
+        schema?: string;
+        deadlineAt?: unknown;
+      };
       if (typeof admitted.deadlineAt !== 'number' || !Number.isSafeInteger(admitted.deadlineAt))
         throw new Error('Accepted followup deadline is invalid.');
       for (;;) {
         if (signal.aborted) throw new Error('Followup source Tool wait was aborted.');
-        const remainingMs = admitted.deadlineAt - Date.now();
-        if (remainingMs <= 0) throw new Error('Accepted followup source Tool deadline expired.');
         const facts = input.owner.runWithSessionExecution(input.parentSessionId, () => {
           const outbox = mail.readOutbox(input.parentSessionId, row.messageId);
           const parent = ensureParent();
@@ -1921,9 +2712,20 @@ export function createChildSessionOrchestrator(input: {
             tool.name !== 'followup_task'
           )
             throw new Error('Accepted followup source Tool identity is unavailable.');
-          return { parent, revision: state.revision, invocation, tool };
+          const funding = fundingBudgetForRun(state, row.fundingRunId);
+          const waitDeadline = outbox
+            ? outbox.acceptedAtMs + Math.max(60_000, funding?.budget.maxConcurrencyWaitMs ?? 0)
+            : NaN;
+          return { parent, revision: state.revision, invocation, tool, waitDeadline };
         });
         if (facts.invocation.status === 'succeeded' && facts.tool.status === 'succeeded') return;
+        const deadline =
+          admitted.schema === 'kite.cross-session-followup-admission.v2'
+            ? facts.waitDeadline
+            : admitted.deadlineAt;
+        const remainingMs = deadline - Date.now();
+        if (!Number.isSafeInteger(deadline) || remainingMs <= 0)
+          throw new Error('Accepted followup source Tool deadline expired.');
         if (
           !['recorded', 'running'].includes(facts.invocation.status) ||
           !['queued', 'running'].includes(facts.tool.status)
@@ -2009,15 +2811,26 @@ export function createChildSessionOrchestrator(input: {
         mail.readFollowupTarget(input.parentSessionId, row.targetSessionId),
       );
       if (target?.status === 'context_unavailable') return 'context_unavailable';
-      const admission = input.owner.runWithSessionExecution(row.targetSessionId, () =>
-        mail.readFollowupAdmissionForTarget(
+      const acceptedProof = input.owner.runWithSessionExecution(row.targetSessionId, () =>
+        mail.readAcceptedIndependentFollowupSourcePolicyProof(
           row.targetSessionId,
           input.parentSessionId,
           row.submissionId,
         ),
       );
-      if (!admission) return null;
-      const payload = JSON.parse(admission.admission.canonicalJson) as {
+      const admission = acceptedProof
+        ? null
+        : input.owner.runWithSessionExecution(row.targetSessionId, () =>
+            mail.readFollowupAdmissionForTarget(
+              row.targetSessionId,
+              input.parentSessionId,
+              row.submissionId,
+            ),
+          );
+      if (!acceptedProof && !admission) return null;
+      const payload = (acceptedProof?.admission ??
+        JSON.parse(admission!.admission.canonicalJson)) as {
+        schema?: string;
         backupReservationId?: string;
         deadlineAt?: number;
         policy?: {
@@ -2028,13 +2841,16 @@ export function createChildSessionOrchestrator(input: {
           capabilityDigest?: string;
         };
       };
+      const independent = payload.schema === 'kite.cross-session-followup-admission.v2';
       if (
         payload.backupReservationId !== undefined &&
         payload.backupReservationId !== row.backupReservationId
       )
         return null;
       const now = Date.now();
-      if (Number.isSafeInteger(payload.deadlineAt) && now >= payload.deadlineAt!) return 'expired';
+      if (!independent && Number.isSafeInteger(payload.deadlineAt) && now >= payload.deadlineAt!)
+        return 'expired';
+      if (independent && !acceptedProof) return null;
       const parent = input.owner.runWithSessionExecution(input.parentSessionId, () =>
         ensureParent().getState(),
       );
@@ -2049,11 +2865,15 @@ export function createChildSessionOrchestrator(input: {
       )
         return 'tool_failed';
       if (
-        payload.policy?.interactionMode !== parent.mode ||
-        payload.policy?.interactionModeRevision !== parent.interactionModeRevision ||
-        payload.policy?.workspaceAccess !== parent.workspaceAccess ||
-        payload.policy?.workspaceDigest !== parent.session.canonicalWorkspaceDigest ||
-        payload.policy?.capabilityDigest !== parent.capabilities.catalogRevision
+        (!independent ||
+          (parent.turn.status === 'active' &&
+            parent.resourceBudget.status === 'active' &&
+            parent.resourceBudget.runId === row.fundingRunId)) &&
+        (payload.policy?.interactionMode !== parent.mode ||
+          payload.policy?.interactionModeRevision !== parent.interactionModeRevision ||
+          payload.policy?.workspaceAccess !== parent.workspaceAccess ||
+          payload.policy?.workspaceDigest !== parent.session.canonicalWorkspaceDigest ||
+          payload.policy?.capabilityDigest !== parent.capabilities.catalogRevision)
       )
         return 'authorization_changed';
       const ledger = fundingBudgetForRun(parent, row.fundingRunId);
@@ -2086,6 +2906,13 @@ export function createChildSessionOrchestrator(input: {
           if (releaseUndispatchedAcceptedBackup(row, reason)) return false;
           throw new Error('Accepted followup could not release its undispatched backup.');
         }
+        const independent = input.owner.runWithSessionExecution(row.targetSessionId, () =>
+          mail.readAcceptedIndependentFollowupSourcePolicyProof(
+            row.targetSessionId,
+            input.parentSessionId,
+            row.submissionId,
+          ),
+        );
         const source = input.owner.runWithSessionExecution(input.parentSessionId, () => {
           const parent = ensureParent();
           const state = parent.getState();
@@ -2103,10 +2930,12 @@ export function createChildSessionOrchestrator(input: {
             parent,
             revision: state.revision,
             plan,
-            waitUntil: Math.min(
-              Date.parse(ledger.deadlineAt),
-              outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs,
-            ),
+            waitUntil: independent
+              ? outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs
+              : Math.min(
+                  Date.parse(ledger.deadlineAt),
+                  outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs,
+                ),
           };
         });
         if (source.plan.status === 'already_acquired') return true;
@@ -2206,6 +3035,10 @@ export function createChildSessionOrchestrator(input: {
       return readCurrentTurnRelease(row)?.invocationId === routed.invocationId;
     };
     const recoverFollowupTargetOwner = async (row: (typeof rows)[number]): Promise<void> => {
+      const durable = input.owner.storage.sessions.loadSnapshot<RuntimeState>(row.targetSessionId);
+      const resident = input.coordinators.get(row.targetSessionId);
+      if (durable && resident && resident.getState().revision < durable.revision)
+        await input.coordinators.release(row.targetSessionId);
       const proof =
         row.stage === 'activated'
           ? input.owner.runWithSessionExecution(input.parentSessionId, () =>
@@ -2316,6 +3149,37 @@ export function createChildSessionOrchestrator(input: {
       const target = input.owner.runWithSessionExecution(targetSessionId, () =>
         input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId),
       );
+      const independentProof = input.owner.runWithSessionExecution(targetSessionId, () =>
+        mail.readAcceptedIndependentFollowupSourcePolicyProof(
+          targetSessionId,
+          input.parentSessionId,
+          submissionId,
+        ),
+      );
+      if (independentProof && target && target.turn.status !== 'active') {
+        const route = input.owner.runWithSessionExecution(targetSessionId, () =>
+          mail.readFollowupRoute(targetSessionId, submissionId),
+        );
+        const prepared = input.owner.storage.sessions
+          .loadEventsStrict(targetSessionId)
+          .map(({ event }) => event)
+          .filter(
+            (event): event is Extract<RuntimeEvent, { type: 'agent.followup_turn_prepared' }> =>
+              event.type === 'agent.followup_turn_prepared' &&
+              event.sourceSessionId === input.parentSessionId &&
+              event.submissionId === submissionId,
+          );
+        if (
+          prepared.length === 1 &&
+          prepared[0]!.targetRunId === target.turn.turnId &&
+          (route === null ||
+            (route.route === 'new_turn' && route.targetRunId === target.turn.turnId))
+        ) {
+          if (!settleTerminalFollowupFunding(targetSessionId, submissionId))
+            throw new Error('Terminal independent followup has no source funding ACK.');
+          return;
+        }
+      }
       if (target?.activeFollowupTurn && target.activeFollowupTurn.submissionId !== submissionId)
         throw new Error('Followup target is owned by another submission.');
       if (
@@ -2356,6 +3220,62 @@ export function createChildSessionOrchestrator(input: {
       const current = input.owner.runWithSessionExecution(targetSessionId, () =>
         input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId),
       );
+      if (independentProof) {
+        if (
+          !current?.activeFollowupTurn ||
+          current.activeFollowupTurn.submissionId !== submissionId
+        )
+          throw new Error('Independent followup lost its active target Run.');
+        const localModels = Object.values(current.modelInvocations).filter(
+          (candidate) =>
+            candidate.purpose === 'primary_agent' &&
+            candidate.budget.kind === 'reservation' &&
+            current.resourceBudget.status === 'active' &&
+            current.resourceBudget.reservations[candidate.budget.reservationId]?.runId ===
+              current.activeFollowupTurn!.targetRunId,
+        );
+        if (localModels.length === 0) {
+          if (!(await executeAcceptedFollowupFirstModel(targetSessionId, submissionId, signal)))
+            throw new Error('Independent followup first Model did not complete.');
+          return;
+        }
+        if (localModels.some((candidate) => candidate.status !== 'completed')) {
+          if (
+            localModels.length === 1 &&
+            localModels[0]?.status === 'prepared' &&
+            localModels[0].attempts === 0
+          ) {
+            if (await resumePreparedFollowupFirstModel(targetSessionId, submissionId, signal))
+              return;
+            const recovered =
+              input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
+            if (recovered?.turn.status !== 'active') return;
+          }
+          if (markAttemptedFollowupUnknown(targetSessionId, submissionId)) return;
+          throw new Error('Independent followup prepared Model requires exact Surface recovery.');
+        }
+        const child = ensureChild(
+          targetSessionId,
+          input.modelRuntimeFactory(input.bridgeInput.workspace),
+        );
+        if (
+          input.owner.runWithSessionExecution(targetSessionId, () =>
+            completeFollowupTurn(child, current.activeFollowupTurn!, targetSessionId, submissionId),
+          )
+        )
+          return;
+        if (child.getState().turn.status !== 'active')
+          throw new Error('Independent followup terminal lacks a source funding ACK.');
+        if (
+          !(await input.enqueueSessionWork(targetSessionId, () =>
+            input.owner.runWithSessionExecution(targetSessionId, () =>
+              continueIndependentFollowup(targetSessionId, submissionId, signal),
+            ),
+          ))
+        )
+          throw new Error('Independent followup tool loop did not reach a durable terminal.');
+        return;
+      }
       const belongsToFollowup = (model: RuntimeState['modelInvocations'][string]): boolean =>
         current?.activeFollowupTurn?.submissionId === submissionId &&
         current.resourceBudget.status === 'active' &&
@@ -2522,9 +3442,11 @@ export function createChildSessionOrchestrator(input: {
           );
           if (!accepted) return false;
           const admission = JSON.parse(accepted.admission.canonicalJson) as {
+            schema?: unknown;
             policy?: { interactionMode?: unknown };
           };
           return (
+            admission.schema === 'kite.cross-session-followup-admission.v1' &&
             admission.policy?.interactionMode === target.mode &&
             mail.readUnroutedFollowupMessage(
               targetSessionId,
@@ -2560,7 +3482,18 @@ export function createChildSessionOrchestrator(input: {
     firstAttemptTimeoutMs: () => {
       const mail = input.owner.storage.crossSessionQueueMail;
       if (!mail || stoppingRecovery) return undefined;
-      return acceptedFollowupsForTarget(targetSessionId).length > 0 ? 60_000 : undefined;
+      return acceptedFollowupsForTarget(targetSessionId).some((row) => {
+        const accepted = mail.readFollowupAdmissionForTarget(
+          targetSessionId,
+          input.parentSessionId,
+          row.submissionId,
+        );
+        if (!accepted) return false;
+        const admission = JSON.parse(accepted.admission.canonicalJson) as { schema?: unknown };
+        return admission.schema === 'kite.cross-session-followup-admission.v1';
+      })
+        ? 60_000
+        : undefined;
     },
     prepareAgentMail: async ({ invocationId }) => {
       const mail = input.owner.storage.crossSessionQueueMail;
@@ -2606,10 +3539,12 @@ export function createChildSessionOrchestrator(input: {
           );
           if (!accepted) return [];
           const payload = JSON.parse(accepted.admission.canonicalJson) as {
+            schema?: unknown;
             policy?: { interactionMode?: unknown };
             backupReservationId?: unknown;
           };
           if (
+            payload.schema !== 'kite.cross-session-followup-admission.v1' ||
             target.interactionModeRevision !== 0 ||
             payload.policy?.interactionMode !== target.mode ||
             typeof payload.backupReservationId !== 'string'
@@ -3198,6 +4133,19 @@ export function createChildSessionOrchestrator(input: {
     if (!sealed) throw new Error('Accepted child sealed grant is unavailable.');
     const fullIntent = { ...intent, ...sealed };
     const modelRuntime = input.modelRuntimeFactory(input.bridgeInput.workspace);
+    const funding = fundingBudgetForRun(parent.getState(), intent.fundingRunId);
+    const allotment = funding?.reservations[intent.delegatedReservationId];
+    const independentTurn =
+      allotment?.resourceKind === 'subagent' &&
+      allotment.runId === intent.fundingRunId &&
+      allotment.executableUpperBound.independentChildTurnDeadline === true &&
+      childDelegatedUpperBoundDigest(allotment.executableUpperBound) ===
+        intent.delegatedUpperBoundDigest;
+    const queuedDeadlineAt = independentTurn
+      ? (JSON.parse(sealed.sealedGrantJson) as { expiresAtMs?: number }).expiresAtMs
+      : Date.parse(intent.deadlineAt);
+    if (typeof queuedDeadlineAt !== 'number' || !Number.isSafeInteger(queuedDeadlineAt))
+      throw new Error('Accepted child has no finite signed queue deadline.');
     if (intent.failureReceiptDigest || intent.parentClaimSettledEventId)
       throw new Error('Accepted child is already settled.');
     if (!intent.dispatchAckEventId && !intent.childSessionCreated) {
@@ -3228,9 +4176,13 @@ export function createChildSessionOrchestrator(input: {
         if (reservation?.state !== 'queued' || !funding)
           throw new Error('Queued child lost its exact parent allotment.');
         if (
-          parentSignal?.aborted ||
+          (parentSignal?.aborted &&
+            (!independentTurn || runtimeAbortCause(parentSignal.reason) === 'user')) ||
           queuedAbort?.signal.aborted ||
-          Date.now() >= Math.min(Date.parse(intent.deadlineAt), Date.parse(funding.deadlineAt))
+          Date.now() >=
+            (independentTurn
+              ? queuedDeadlineAt
+              : Math.min(Date.parse(intent.deadlineAt), Date.parse(funding.deadlineAt)))
         )
           throw new Error('Queued child was stopped or its deadline elapsed.');
         const committed = committedResourceUsage(funding);
@@ -3254,14 +4206,17 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Queued child has no parent revision wait port.');
         const wait = new AbortController();
         const abort = () => wait.abort();
-        parentSignal?.addEventListener('abort', abort, { once: true });
+        const abortFromParentWait = () => {
+          if (!independentTurn || runtimeAbortCause(parentSignal?.reason) === 'user') abort();
+        };
+        parentSignal?.addEventListener('abort', abortFromParentWait, { once: true });
         queuedAbort?.signal.addEventListener('abort', abort, { once: true });
-        const timer = setTimeout(abort, Math.min(1000, Date.parse(intent.deadlineAt) - Date.now()));
+        const timer = setTimeout(abort, Math.min(1000, queuedDeadlineAt - Date.now()));
         try {
           await parent.session.waitForRevisionChange(current.revision, wait.signal);
         } finally {
           clearTimeout(timer);
-          parentSignal?.removeEventListener('abort', abort);
+          parentSignal?.removeEventListener('abort', abortFromParentWait);
           queuedAbort?.signal.removeEventListener('abort', abort);
         }
       }
@@ -3328,10 +4283,12 @@ export function createChildSessionOrchestrator(input: {
           });
         })();
     const childAbort = new AbortController();
-    const abortFromParent = () =>
+    const abortFromParent = () => {
+      if (independentTurn && runtimeAbortCause(parentSignal?.reason) !== 'user') return;
       input.detachedScope.runInAsyncScope(() => {
         childAbort.abort(parentSignal?.reason);
       });
+    };
     if (parentSignal?.aborted) abortFromParent();
     else parentSignal?.addEventListener('abort', abortFromParent, { once: true });
     const child = ensureChild(accepted.childThreadId, modelRuntime);

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
 import type { KiteChildApprovalProxyRecord } from '@kite-ai/runtime-storage-sqlite';
+import { followupChildApprovalParentToolCallId } from '@kite-ai/runtime-storage-sqlite';
 import {
   classifyChildApprovalRecovery,
   projectChildApprovalProxy,
@@ -213,6 +214,79 @@ test('child approval projection is parent scoped and fails closed on stale linea
       proxy: { ...input.proxy, grantDigest: 'sha256:forged' },
     }),
   ).toEqual({ kind: 'recovery_required', reason: 'child_approval_lineage_changed' });
+});
+
+test('completed parent can decide an exact active independent followup approval', async () => {
+  const input = fixture();
+  const parentState = {
+    ...input.parentState,
+    turn: { ...input.parentState.turn, status: 'completed' as const },
+    resourceBudget: { status: 'completed' as const },
+  } as unknown as Input['parentState'];
+  const childState = {
+    ...input.childState,
+    resourceBudget: { status: 'active', runId: 'child-run' },
+    childSessionOrigin: {
+      ...input.childState.childSessionOrigin,
+      terminal: { status: 'completed', cleanupConfirmed: true },
+    },
+    activeFollowupTurn: {
+      sourceSessionId: 'parent',
+      submissionId: 'submission',
+      targetRunId: 'child-run',
+      taskId: 'followup-task',
+      grantDigest: `sha256:${'e'.repeat(64)}`,
+    },
+  } as Input['childState'];
+  const proxy = {
+    ...input.proxy,
+    grantDigest: `sha256:${'e'.repeat(64)}`,
+    parentToolCallId: followupChildApprovalParentToolCallId({
+      submissionId: 'submission',
+      targetRunId: 'child-run',
+      sourceToolCallId: 'source-followup-tool',
+    }),
+  };
+  expect(projectChildApprovalProxy({ parentState, childState, proxy })).toMatchObject({
+    kind: 'approval',
+    owner: { subagentId: 'child-invocation', toolCallId: 'child-tool' },
+  });
+  expect(classifyChildApprovalRecovery({ parentState, childState, proxy })).toEqual({
+    kind: 'wait_for_parent',
+  });
+  const provider = createChildApprovalActionProvider({
+    owner: { listPendingChildApprovalProxies: () => [proxy] } as never,
+    parentSessionId: 'parent',
+    proxyOwner: {
+      waitForDecision: async () => ({
+        ...proxy,
+        status: 'decided',
+        decision: 'approve_once',
+        parentCommandId: 'decision',
+        parentCommandDigest: 'a'.repeat(64),
+        parentDecisionRevision: parentState.revision,
+      }),
+    },
+  });
+  const committed: unknown[] = [];
+  await provider.requestAction(
+    { type: 'request_tool_approval', interactionId: 'child-approval', toolCallId: 'child-tool' },
+    childState,
+    {
+      commit: (action, evidence, revision) => {
+        committed.push({ action, evidence, revision });
+        return { descriptor: { kind: 'precommitted_interaction_action' } } as never;
+      },
+    },
+  );
+  expect(committed).toHaveLength(1);
+  expect(
+    projectChildApprovalProxy({
+      parentState,
+      childState,
+      proxy: { ...proxy, parentToolCallId: 'followup:forged' },
+    }),
+  ).toBeNull();
 });
 
 test('child tool remains blocked until the exact parent decision is durable', async () => {

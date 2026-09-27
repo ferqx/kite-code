@@ -6,7 +6,10 @@ import type {
   RuntimeStoredRun,
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
-import { CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED } from '@kite-ai/runtime-host/storage';
+import {
+  CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED,
+  childDelegatedUpperBoundDigest,
+} from '@kite-ai/runtime-host/storage';
 import { readChildSealedGrant, readChildSessionIntent } from './kite-child-session-intents';
 import {
   acceptCrossSessionQueueMailInTransaction,
@@ -309,6 +312,136 @@ export function sealChildTerminalCheckpointInTransaction(
   createKiteHomeArtifactStore(database).readSubagentCheckpoint(ref);
 }
 
+const FOLLOWUP_TURN_DURATION_MS = 30 * 60 * 1000;
+const READ_ONLY_FOLLOWUP_TOOLS = new Set([
+  'read_file',
+  'search_content',
+  'search_files',
+  'shell_execute',
+  'read_mcp_resource',
+]);
+
+function validIndependentFollowupGrant(
+  database: Database,
+  input: {
+    sourceSessionId: string;
+    targetSessionId: string;
+    submissionId: string;
+    intentRole: string;
+    origin: RecordValue;
+    targetLedger: RecordValue;
+    grantPayload: RecordValue;
+    grantBudget: RecordValue;
+    admission: RecordValue;
+    backupState: 'reserved' | 'dispatch_started';
+  },
+): boolean {
+  const { sourceSessionId, targetSessionId, submissionId, intentRole, origin, targetLedger } =
+    input;
+  const { grantPayload, grantBudget, admission } = input;
+  const policy = record(admission.policy);
+  const upper = record(admission.executableUpperBound);
+  const upperCounters = record(upper.counters);
+  const upperGauges = record(upper.gauges);
+  const allowed = Array.isArray(grantPayload.allowedTools) ? grantPayload.allowedTools : [];
+  const original = readChildSealedGrant(database, sourceSessionId, targetSessionId);
+  const originalGrant = original ? parse(original.sealedGrantJson) : {};
+  const originalCeiling = record(originalGrant.capabilityCeiling);
+  const originalAllowed = Array.isArray(originalCeiling.allowedTools)
+    ? originalCeiling.allowedTools
+    : [];
+  const sourceRow = database
+    .query<{ state_json: string }, [string]>(
+      'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+    )
+    .get(sourceSessionId);
+  const sourceState = sourceRow ? parse(sourceRow.state_json) : {};
+  const active = record(sourceState.resourceBudget);
+  const retained = record(sourceState.retainedResourceBudgets);
+  const funding =
+    active.runId === admission.fundingRunId
+      ? active
+      : record(retained[String(admission.fundingRunId)]);
+  const backup = record(record(funding.reservations)[String(admission.backupReservationId)]);
+  const startedAt = Date.parse(String(targetLedger.startedAt));
+  const deadlineAt = Date.parse(String(targetLedger.deadlineAt));
+  const duration = deadlineAt - startedAt;
+  const limits: readonly [string, unknown][] = [
+    ['maxTurns', upperCounters.turns],
+    ['maxModelRequests', upperCounters.modelRequests],
+    ['maxRunInputTokens', upperCounters.inputTokens],
+    ['maxRunOutputTokens', upperCounters.outputTokens],
+    ['maxArtifactBytes', upperCounters.artifactBytes],
+    ['maxConcurrentWriters', upperGauges.activeWriters],
+    ['maxConcurrentToolInvocations', upperGauges.activeToolInvocations],
+    ['maxConcurrentShellInvocations', upperGauges.activeShellInvocations],
+  ];
+  return (
+    admission.schema === 'kite.cross-session-followup-admission.v2' &&
+    policy.executionMode === 'independent_turn_v2' &&
+    policy.targetRole === intentRole &&
+    policy.targetGrantDigest === original?.sealedGrantDigest &&
+    origin.grantDigest === original?.sealedGrantDigest &&
+    originalGrant.role === intentRole &&
+    ['explore', 'plan', 'review', 'code'].includes(intentRole) &&
+    grantPayload.schema === 'kite.child-followup-grant.v2' &&
+    grantPayload.originRole === intentRole &&
+    grantPayload.denyTools === false &&
+    Array.isArray(grantPayload.allowedTools) &&
+    allowed.length > 0 &&
+    allowed.every((name) => typeof name === 'string' && name.length > 0 && name !== 'task') &&
+    new Set(allowed).size === allowed.length &&
+    Array.isArray(originalCeiling.allowedTools) &&
+    (intentRole === 'code'
+      ? originalAllowed.length === 0 || allowed.every((name) => originalAllowed.includes(name))
+      : allowed.every(
+          (name) => READ_ONLY_FOLLOWUP_TOOLS.has(name) && originalAllowed.includes(name),
+        )) &&
+    grantPayload.sourceBackupUpperDigest ===
+      childDelegatedUpperBoundDigest(
+        upper as unknown as Parameters<typeof childDelegatedUpperBoundDigest>[0],
+      ) &&
+    upper.source === 'versioned_upper_bound' &&
+    upper.independentFollowupTurn === true &&
+    upper.unboundedToolInvocations === true &&
+    upperCounters.toolInvocations === 0 &&
+    upperGauges.elapsedRunMs === FOLLOWUP_TURN_DURATION_MS &&
+    admission.sourceSessionId === sourceSessionId &&
+    admission.targetSessionId === targetSessionId &&
+    admission.submissionId === submissionId &&
+    admission.sourceRunId === admission.fundingRunId &&
+    /^backup_[a-f0-9]{64}$/u.test(String(admission.backupReservationId)) &&
+    funding.status === 'active' &&
+    funding.runId === admission.fundingRunId &&
+    backup.reservationId === admission.backupReservationId &&
+    backup.runId === admission.fundingRunId &&
+    backup.invocationId === submissionId &&
+    backup.resourceKind === 'subagent' &&
+    backup.parentReservationId === undefined &&
+    backup.state === input.backupState &&
+    sameCanonicalValue(backup.executableUpperBound, upper) &&
+    grantBudget.version === 1 &&
+    grantBudget.unboundedToolInvocations === true &&
+    grantBudget.maxToolInvocations === 0 &&
+    grantBudget.maxConcurrentSubagents === 0 &&
+    grantBudget.maxRunDurationMs === FOLLOWUP_TURN_DURATION_MS &&
+    Number.isSafeInteger(startedAt) &&
+    Number.isSafeInteger(deadlineAt) &&
+    duration === FOLLOWUP_TURN_DURATION_MS &&
+    grantBudget.deadlineAt === targetLedger.deadlineAt &&
+    limits.every(
+      ([key, maximum]) =>
+        Number.isSafeInteger(grantBudget[key]) &&
+        Number.isSafeInteger(maximum) &&
+        Number(grantBudget[key]) >= 0 &&
+        Number(grantBudget[key]) <= Number(maximum),
+    ) &&
+    (intentRole === 'code'
+      ? grantBudget.maxConcurrentWriters === 1
+      : grantBudget.maxConcurrentWriters === 0)
+  );
+}
+
 export function assertCrossSessionFollowupRunStartInTransaction(
   database: Database,
   input: {
@@ -388,6 +521,53 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     : null;
   const admission = admissionRow ? parse(admissionRow.canonical_json) : {};
   const policy = record(admission.policy);
+  const independentV2 = grantPayload.schema === 'kite.child-followup-grant.v2';
+  const unsettledEarlierIndependent = independentV2
+    ? (database
+        .query<{ count: number }, [string, string]>(
+          `SELECT count(*) AS count FROM agent_mail_outbox prior
+           JOIN agent_followup_admission_artifacts admission
+             ON admission.artifact_id=prior.followup_admission_artifact_id
+           JOIN runtime_runs prior_run ON prior_run.session_id=prior.target_session_id
+             AND prior_run.start_command_id='followup:'||prior.submission_id
+           WHERE prior.target_session_id=? AND prior.submission_id<>?
+             AND prior.mode='trigger_turn'
+             AND json_extract(admission.canonical_json,'$.schema')
+               ='kite.cross-session-followup-admission.v2'
+             AND EXISTS (SELECT 1 FROM runtime_events settled
+               WHERE settled.session_id=prior.target_session_id
+                 AND json_extract(settled.event_json,'$.type')='agent.followup_turn_settled'
+                 AND json_extract(settled.event_json,'$.submissionId')=prior.submission_id
+                 AND json_extract(settled.event_json,'$.targetRunId')=prior_run.run_id)
+             AND NOT EXISTS (SELECT 1 FROM runtime_events audit
+               WHERE audit.session_id=prior.source_session_id
+                 AND json_extract(audit.event_json,'$.type')='agent.followup_independent_settled'
+                 AND json_extract(audit.event_json,'$.submissionId')=prior.submission_id
+                 AND json_extract(audit.event_json,'$.targetAgentId')=prior.target_session_id
+                 AND json_extract(audit.event_json,'$.targetRunId')=prior_run.run_id)`,
+        )
+        .get(targetSessionId, mutation.submissionId)?.count ?? 0)
+    : 0;
+  const validGrantBudget = independentV2
+    ? validIndependentFollowupGrant(database, {
+        sourceSessionId: mutation.sourceSessionId,
+        targetSessionId,
+        submissionId: mutation.submissionId,
+        intentRole: intent?.role ?? '',
+        origin: record(targetState.childSessionOrigin),
+        targetLedger,
+        grantPayload,
+        grantBudget,
+        admission,
+        backupState: 'reserved',
+      })
+    : grantPayload.schema === 'kite.child-followup-grant.v1' &&
+      grantPayload.denyTools === true &&
+      Array.isArray(grantPayload.allowedTools) &&
+      grantPayload.allowedTools.length === 0 &&
+      boundedDelegatedBudget(grantBudget, record(admission.executableUpperBound)) &&
+      Number.isFinite(Date.parse(String(grantBudget.deadlineAt))) &&
+      Date.parse(String(grantBudget.deadlineAt)) <= Number(admission.deadlineAt);
   if (
     target?.parent_session_id !== mutation.sourceSessionId ||
     !intent ||
@@ -424,7 +604,8 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     mutation.grantDigest !== grantHash ||
     !Number.isSafeInteger(grant.createdAt) ||
     grant.createdAt < 0 ||
-    grantPayload.schema !== 'kite.child-followup-grant.v1' ||
+    !validGrantBudget ||
+    unsettledEarlierIndependent !== 0 ||
     grantPayload.sourceSessionId !== mutation.sourceSessionId ||
     grantPayload.targetSessionId !== targetSessionId ||
     grantPayload.submissionId !== mutation.submissionId ||
@@ -451,9 +632,6 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     }) ||
     grantPayload.sourceAdmissionDigest !== outbox.followup_admission_digest ||
     admissionRow?.integrity_identifier !== outbox.followup_admission_digest ||
-    grantPayload.denyTools !== true ||
-    !Array.isArray(grantPayload.allowedTools) ||
-    grantPayload.allowedTools.length !== 0 ||
     grantPayload.firstAttemptTimeoutMs !== policy.firstAttemptTimeoutMs ||
     targetLedger.status !== 'active' ||
     targetLedger.runId !== mutation.targetRunId ||
@@ -464,12 +642,7 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     activeFollowup.grantDigest !== mutation.grantDigest ||
     !sameCanonicalValue(activeFollowup.grantRef, grant.ref) ||
     !sameCanonicalValue(activeFollowup.checkpointRef, mutation.checkpointRef) ||
-    !boundedDelegatedBudget(grantBudget, record(admission.executableUpperBound)) ||
-    !Object.entries(record(targetLedger.budget)).every(
-      ([key, value]) => grantBudget[key] === value,
-    ) ||
-    !Number.isFinite(Date.parse(String(grantBudget.deadlineAt))) ||
-    Date.parse(String(grantBudget.deadlineAt)) > Number(admission.deadlineAt)
+    !Object.entries(record(targetLedger.budget)).every(([key, value]) => grantBudget[key] === value)
   )
     invalid();
   const existing = database
@@ -707,6 +880,135 @@ export function readCrossSessionFollowupAdmissionBySubmissionForTarget(
   );
 }
 
+/** Reconstruct the accepted v2 policy only from source-owned immutable receipts. */
+export function readAcceptedIndependentFollowupSourcePolicyProof(
+  database: Database,
+  targetSessionId: string,
+  sourceSessionId: string,
+  submissionId: string,
+): Readonly<{ admission: RecordValue; policy: RecordValue }> | null {
+  const outbox = database
+    .query<
+      {
+        message_id: string;
+        command_id: string;
+        request_digest: string;
+        source_run_id: string;
+        source_turn_id: string;
+        source_model_invocation_id: string;
+        source_tool_call_id: string;
+        source_effect_attempt_id: string;
+        source_task_id: string | null;
+        source_revision: number;
+        followup_admission_artifact_id: string;
+        followup_admission_digest: string;
+        canonical_json: string;
+        integrity_identifier: string;
+        byte_length: number;
+      },
+      [string, string, string]
+    >(
+      `SELECT o.message_id,o.command_id,o.request_digest,o.source_run_id,o.source_turn_id,
+       o.source_model_invocation_id,o.source_tool_call_id,o.source_effect_attempt_id,
+       o.source_task_id,o.source_revision,o.followup_admission_artifact_id,
+       o.followup_admission_digest,a.canonical_json,a.integrity_identifier,a.byte_length
+       FROM agent_mail_outbox o
+       JOIN runtime_sessions source ON source.session_id=o.source_session_id
+       JOIN runtime_sessions target ON target.session_id=o.target_session_id
+       JOIN agent_followup_admission_artifacts a
+         ON a.artifact_id=o.followup_admission_artifact_id
+       WHERE o.source_session_id=? AND o.submission_id=?
+       AND o.target_session_id=? AND o.mode='trigger_turn'
+       AND o.accepted_release_source_revision IS NULL
+       AND target.parent_session_id=source.session_id
+       AND source.workspace_id=target.workspace_id AND source.project_id=target.project_id
+       AND source.workspace_digest=target.workspace_digest`,
+    )
+    .get(sourceSessionId, submissionId, targetSessionId);
+  if (!outbox) return null;
+  const admissionDigest = `sha256:${createHash('sha256').update(outbox.canonical_json).digest('hex')}`;
+  if (
+    admissionDigest !== outbox.followup_admission_digest ||
+    outbox.integrity_identifier !== admissionDigest ||
+    outbox.followup_admission_artifact_id !== `pa_${admissionDigest.slice(7)}` ||
+    outbox.byte_length !== Buffer.byteLength(outbox.canonical_json, 'utf8')
+  )
+    return null;
+  const admission = parse(outbox.canonical_json);
+  const policy = record(admission.policy);
+  const source = record(admission.source);
+  const preparedTool = record(admission.preparedTool);
+  const command = database
+    .query<{ request_digest: string; committed_revision: number }, [string, string]>(
+      'SELECT request_digest,committed_revision FROM runtime_command_receipts WHERE scope_session_id=? AND command_id=?',
+    )
+    .get(sourceSessionId, outbox.command_id);
+  const accepted = database
+    .query<{ sequence: number; event_json: string }, [string, string]>(
+      `SELECT sequence,event_json FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='agent.mail_accepted'
+       AND json_extract(event_json,'$.messageId')=?`,
+    )
+    .all(sourceSessionId, outbox.message_id);
+  const reserved = database
+    .query<{ sequence: number; event_json: string }, [string, string]>(
+      `SELECT sequence,event_json FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='resource_budget.reserved'
+       AND json_extract(event_json,'$.reservation.reservationId')=?`,
+    )
+    .all(sourceSessionId, String(admission.backupReservationId));
+  if (accepted.length !== 1 || reserved.length !== 1) return null;
+  const acceptedEvent = parse(accepted[0]!.event_json);
+  const reservedEvent = parse(reserved[0]!.event_json);
+  const backup = record(reservedEvent.reservation);
+  const eventSource = record(acceptedEvent.source);
+  if (
+    admission.schema !== 'kite.cross-session-followup-admission.v2' ||
+    policy.executionMode !== 'independent_turn_v2' ||
+    admissionDigest !== outbox.followup_admission_digest ||
+    admission.messageId !== outbox.message_id ||
+    admission.submissionId !== submissionId ||
+    admission.sourceSessionId !== sourceSessionId ||
+    admission.targetSessionId !== targetSessionId ||
+    admission.sourceRunId !== outbox.source_run_id ||
+    admission.sourceTurnId !== outbox.source_turn_id ||
+    admission.sourceModelInvocationId !== outbox.source_model_invocation_id ||
+    admission.sourceToolCallId !== outbox.source_tool_call_id ||
+    admission.sourceEffectAttemptId !== outbox.source_effect_attempt_id ||
+    source.runId !== outbox.source_run_id ||
+    source.turnId !== outbox.source_turn_id ||
+    source.modelInvocationId !== outbox.source_model_invocation_id ||
+    source.toolCallId !== outbox.source_tool_call_id ||
+    source.effectAttemptId !== outbox.source_effect_attempt_id ||
+    (source.sourceTaskId ?? null) !== outbox.source_task_id ||
+    !validPreparedFollowupTool(preparedTool, source, policy) ||
+    command?.request_digest !== outbox.request_digest ||
+    command.committed_revision !== outbox.source_revision ||
+    accepted[0]!.sequence > outbox.source_revision ||
+    reserved[0]!.sequence > outbox.source_revision ||
+    acceptedEvent.mode !== 'trigger_turn' ||
+    acceptedEvent.messageId !== outbox.message_id ||
+    acceptedEvent.submissionId !== submissionId ||
+    acceptedEvent.followupAdmissionDigest !== admissionDigest ||
+    acceptedEvent.senderAgentId !== sourceSessionId ||
+    acceptedEvent.targetAgentId !== targetSessionId ||
+    eventSource.runId !== outbox.source_run_id ||
+    eventSource.turnId !== outbox.source_turn_id ||
+    eventSource.modelInvocationId !== outbox.source_model_invocation_id ||
+    eventSource.toolCallId !== outbox.source_tool_call_id ||
+    eventSource.effectAttemptId !== outbox.source_effect_attempt_id ||
+    (eventSource.sourceTaskId ?? null) !== outbox.source_task_id ||
+    backup.reservationId !== admission.backupReservationId ||
+    backup.runId !== admission.fundingRunId ||
+    backup.invocationId !== submissionId ||
+    !sameCanonicalValue(backup.executableUpperBound, admission.executableUpperBound) ||
+    !DIGEST.test(String(policy.targetGrantDigest)) ||
+    !['explore', 'plan', 'code', 'review'].includes(String(policy.targetRole))
+  )
+    return null;
+  return Object.freeze({ admission, policy });
+}
+
 export type CrossSessionFollowupDeliveryForTarget =
   | Readonly<{
       status: 'received';
@@ -801,7 +1103,8 @@ export function readCrossSessionFollowupDeliveryForTarget(
     invalid();
   const payload = parse(row.admission_json);
   if (
-    payload.schema !== 'kite.cross-session-followup-admission.v1' ||
+    (payload.schema !== 'kite.cross-session-followup-admission.v1' &&
+      payload.schema !== 'kite.cross-session-followup-admission.v2') ||
     payload.sourceSessionId !== sourceSessionId ||
     payload.targetSessionId !== targetSessionId ||
     payload.submissionId !== submissionId ||
@@ -940,7 +1243,8 @@ export function verifyPersistedCrossSessionFollowupRunStart(
     prepared.targetRunId === run.runId &&
     grant.ref.integrityIdentifier === grantRef.integrityIdentifier &&
     grant.ref.byteLength === grantRef.byteLength &&
-    grantPayload.schema === 'kite.child-followup-grant.v1' &&
+    (grantPayload.schema === 'kite.child-followup-grant.v1' ||
+      grantPayload.schema === 'kite.child-followup-grant.v2') &&
     grantPayload.sourceSessionId === sourceSessionId &&
     grantPayload.targetSessionId === run.sessionId &&
     grantPayload.submissionId === submissionId &&
@@ -968,12 +1272,419 @@ export function verifyPersistedCrossSessionFollowupRunStart(
   );
 }
 
-/** The sole Store13 exception for an already sealed child doing its first followup Model. */
+/** An independent followup is funded by one durable source backup for its entire target Run. */
+function verifyIndependentChildFollowupWork(
+  database: Database,
+  targetSessionId: string,
+  state: RecordValue,
+  events: readonly RecordValue[],
+  grant: NonNullable<ReturnType<typeof readCrossSessionFollowupGrant>>,
+): boolean {
+  const active = record(state.activeFollowupTurn);
+  const origin = record(state.childSessionOrigin);
+  const terminal = record(origin.terminal);
+  const sourceSessionId = String(active.sourceSessionId ?? '');
+  const submissionId = String(active.submissionId ?? '');
+  const targetRunId = String(active.targetRunId ?? '');
+  const grantPayload = parse(grant.canonicalJson);
+  const grantBudget = record(grantPayload.budget);
+  const grantRef = record(active.grantRef);
+  const admissionRow = readCrossSessionFollowupAdmissionBySubmissionForTarget(
+    database,
+    targetSessionId,
+    sourceSessionId,
+    submissionId,
+  );
+  const admission = admissionRow ? parse(admissionRow.admission.canonicalJson) : {};
+  const run = database
+    .query<
+      { status: string; start_command_id: string; created_revision: number },
+      [string, string]
+    >(
+      'SELECT status,start_command_id,created_revision FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(targetSessionId, targetRunId);
+  const ledger = record(state.resourceBudget);
+  const allowed = Array.isArray(grantPayload.allowedTools) ? grantPayload.allowedTools : [];
+  const external = events.filter((event) =>
+    ['model.invocation_prepared', 'model.invocation_attempt_started', 'tool.started'].includes(
+      String(event.type),
+    ),
+  );
+  if (
+    external.length !== 1 ||
+    events.some((event) => event.type === 'capability.subagent_dispatch_intent_recorded') ||
+    !run ||
+    !['running', 'waiting'].includes(run.status) ||
+    run.start_command_id !== `followup:${submissionId}` ||
+    !verifyPersistedCrossSessionFollowupRunStart(database, {
+      sessionId: targetSessionId,
+      runId: targetRunId,
+      startCommandId: run.start_command_id,
+      createdRevision: run.created_revision,
+    }) ||
+    terminal.status !== 'completed' ||
+    sourceSessionId !== origin.parentSessionId ||
+    record(state.turn).turnId !== targetRunId ||
+    record(state.turn).status !== 'active' ||
+    state.activeTaskId !== active.taskId ||
+    ledger.runId !== targetRunId ||
+    ledger.status !== 'active' ||
+    active.grantDigest !== grant.ref.integrityIdentifier ||
+    grantRef.integrityIdentifier !== grant.ref.integrityIdentifier ||
+    !admissionRow ||
+    !validIndependentFollowupGrant(database, {
+      sourceSessionId,
+      targetSessionId,
+      submissionId,
+      intentRole: String(origin.role ?? ''),
+      origin,
+      targetLedger: ledger,
+      grantPayload,
+      grantBudget,
+      admission,
+      backupState: 'dispatch_started',
+    })
+  )
+    return false;
+  if (!hasIndependentFollowupSourceActivation(database, sourceSessionId, admission)) return false;
+  const work = external[0]!;
+  if (work.type === 'tool.started') {
+    const toolCallId = String(work.toolCallId ?? '');
+    const call = record(record(record(state.tools).calls)[toolCallId]);
+    const parentModel = record(record(state.modelInvocations)[String(call.modelInvocationId)]);
+    const parentModelReservation = record(
+      record(ledger.reservations)[String(record(parentModel.budget).reservationId)],
+    );
+    const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
+    return (
+      toolCallId.length > 0 &&
+      call.toolCallId === toolCallId &&
+      typeof call.name === 'string' &&
+      allowed.includes(call.name) &&
+      call.name !== 'task' &&
+      call.createdAtTurnId === targetRunId &&
+      call.taskId === active.taskId &&
+      typeof call.modelMessageId === 'string' &&
+      call.modelMessageId.length > 0 &&
+      parentModel.invocationId === call.modelInvocationId &&
+      parentModel.status === 'completed' &&
+      record(parentModel.responseArtifact).kind === 'model_response' &&
+      parentModelReservation.runId === targetRunId &&
+      parentModelReservation.resourceKind === 'model' &&
+      parentModelReservation.state === 'reconciled' &&
+      route?.route === 'new_turn' &&
+      route.targetRunId === targetRunId
+    );
+  }
+  const invocationId = String(work.invocationId ?? '');
+  const model = record(record(state.modelInvocations)[invocationId]);
+  const modelBudget = record(model.budget);
+  const reservationId = String(modelBudget.reservationId ?? '');
+  const local = record(record(ledger.reservations)[reservationId]);
+  if (
+    !invocationId ||
+    model.invocationId !== invocationId ||
+    modelBudget.kind !== 'reservation' ||
+    local.reservationId !== reservationId ||
+    local.runId !== targetRunId ||
+    local.resourceKind !== 'model' ||
+    local.invocationId !== `model-invocation:${invocationId}`
+  )
+    return false;
+  if (work.type === 'model.invocation_prepared') {
+    const surface = record(model.surfaceArtifact);
+    if (
+      work.purpose !== 'primary_agent' ||
+      model.status !== 'prepared' ||
+      model.attempts !== 0 ||
+      local.state !== 'reserved' ||
+      surface.kind !== 'model_surface' ||
+      !DIGEST.test(String(surface.integrityIdentifier))
+    )
+      return false;
+    try {
+      const stored = createKiteHomeArtifactStore(database).readModel({
+        artifactId: String(surface.artifactId),
+        kind: 'model_surface',
+        integrityIdentifier: String(surface.integrityIdentifier),
+        byteLength: Number(surface.byteLength),
+      });
+      return matchesModelArtifactReference('model_surface', stored.canonicalJson, surface);
+    } catch {
+      return false;
+    }
+  }
+  const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
+  return (
+    route?.route === 'new_turn' &&
+    route.targetRunId === targetRunId &&
+    Number(model.attempts) >= 1 &&
+    local.state === 'dispatch_started' &&
+    events.some(
+      (event) =>
+        event.type === 'resource_budget.dispatch_started' && event.reservationId === reservationId,
+    )
+  );
+}
+
+function hasIndependentFollowupSourceActivation(
+  database: Database,
+  sourceSessionId: string,
+  admission: RecordValue,
+): boolean {
+  const count = database
+    .query<{ count: number }, [string, string]>(
+      `SELECT count(*) AS count FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='resource_budget.dispatch_started'
+       AND json_extract(event_json,'$.reservationId')=?`,
+    )
+    .get(sourceSessionId, String(admission.backupReservationId))?.count;
+  return count === 1;
+}
+
+export interface IndependentCrossSessionFollowupActivation {
+  readonly sourceSessionId: string;
+  readonly targetSessionId: string;
+  readonly submissionId: string;
+  readonly targetRunId: string;
+  readonly backupReservationId: string;
+  readonly grantDigest: string;
+  readonly sourceRevision: number;
+  readonly createdAtMs: number;
+}
+
+/** The source's single dispatch Event is the immutable v2 activation receipt. */
+export function activateIndependentCrossSessionFollowupTurnInTransaction(
+  database: Database,
+  input: Readonly<{
+    sourceSessionId: string;
+    targetSessionId: string;
+    submissionId: string;
+    targetRunId: string;
+    grantDigest: string;
+    targetRevision: number;
+    sourceRevision: number;
+    createdAtMs: number;
+    sourceSnapshot: Readonly<RecordValue>;
+    events: readonly Readonly<RecordValue>[];
+  }>,
+): IndependentCrossSessionFollowupActivation {
+  requireTransaction(database);
+  const targetRow = database
+    .query<{ revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
+       ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(input.targetSessionId);
+  const target = targetRow ? parse(targetRow.state_json) : {};
+  const followup = record(target.activeFollowupTurn);
+  const origin = record(target.childSessionOrigin);
+  const ledger = record(target.resourceBudget);
+  const ref = record(followup.grantRef);
+  const grant = readCrossSessionFollowupGrant(database, String(ref.artifactId));
+  const payload = grant ? parse(grant.canonicalJson) : {};
+  const admissionRow = readCrossSessionFollowupAdmissionBySubmissionForTarget(
+    database,
+    input.targetSessionId,
+    input.sourceSessionId,
+    input.submissionId,
+  );
+  const admission = admissionRow ? parse(admissionRow.admission.canonicalJson) : {};
+  const acceptedProof = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    input.targetSessionId,
+    input.sourceSessionId,
+    input.submissionId,
+  );
+  const sourceTool = record(
+    record(record(input.sourceSnapshot.tools).calls)[String(admission.sourceToolCallId)],
+  );
+  const sourceInvocation = record(
+    record(record(input.sourceSnapshot.capabilities).invocations)[
+      String(record(admission.preparedTool).invocationId)
+    ],
+  );
+  const intent = database
+    .query<{ role: string }, [string]>(
+      'SELECT role FROM child_session_intents WHERE child_thread_id=?',
+    )
+    .get(input.targetSessionId);
+  const sourceActive = record(input.sourceSnapshot.resourceBudget);
+  const sourceRow = database
+    .query<{ revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
+       ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(input.sourceSessionId);
+  const sourceLedger =
+    sourceActive.runId === admission.fundingRunId
+      ? sourceActive
+      : record(
+          record(input.sourceSnapshot.retainedResourceBudgets)[String(admission.fundingRunId)],
+        );
+  const backup = record(record(sourceLedger.reservations)[String(admission.backupReservationId)]);
+  const run = database
+    .query<
+      { status: string; start_command_id: string; created_revision: number },
+      [string, string]
+    >(
+      'SELECT status,start_command_id,created_revision FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(input.targetSessionId, input.targetRunId);
+  if (
+    !targetRow ||
+    targetRow.revision !== input.targetRevision ||
+    !sourceRow ||
+    sourceRow.revision !== input.sourceRevision ||
+    !sameCanonicalValue(parse(sourceRow.state_json), input.sourceSnapshot) ||
+    !run ||
+    !['queued', 'running', 'waiting'].includes(run.status) ||
+    run.start_command_id !== `followup:${input.submissionId}` ||
+    !verifyPersistedCrossSessionFollowupRunStart(database, {
+      sessionId: input.targetSessionId,
+      runId: input.targetRunId,
+      startCommandId: run.start_command_id,
+      createdRevision: run.created_revision,
+    }) ||
+    !grant ||
+    grant.ref.integrityIdentifier !== input.grantDigest ||
+    followup.grantDigest !== input.grantDigest ||
+    ref.integrityIdentifier !== input.grantDigest ||
+    followup.targetRunId !== input.targetRunId ||
+    followup.submissionId !== input.submissionId ||
+    !admissionRow ||
+    !acceptedProof ||
+    sourceTool.name !== 'followup_task' ||
+    sourceTool.status !== 'succeeded' ||
+    sourceTool.modelInvocationId !== admission.sourceModelInvocationId ||
+    sourceInvocation.status !== 'succeeded' ||
+    sourceInvocation.toolCallId !== admission.sourceToolCallId ||
+    sourceInvocation.capabilityId !== 'builtin:followup_task' ||
+    !Number.isSafeInteger(input.sourceRevision) ||
+    input.sourceRevision < 1 ||
+    !Number.isSafeInteger(input.createdAtMs) ||
+    input.createdAtMs < 0 ||
+    input.events.length !== 1 ||
+    input.events[0]?.type !== 'resource_budget.dispatch_started' ||
+    input.events[0]?.reservationId !== admission.backupReservationId ||
+    !validIndependentFollowupGrant(database, {
+      sourceSessionId: input.sourceSessionId,
+      targetSessionId: input.targetSessionId,
+      submissionId: input.submissionId,
+      intentRole: intent?.role ?? '',
+      origin,
+      targetLedger: ledger,
+      grantPayload: payload,
+      grantBudget: record(payload.budget),
+      admission,
+      backupState: 'dispatch_started',
+    }) ||
+    backup.state !== 'dispatch_started'
+  )
+    invalid();
+  return Object.freeze({
+    sourceSessionId: input.sourceSessionId,
+    targetSessionId: input.targetSessionId,
+    submissionId: input.submissionId,
+    targetRunId: input.targetRunId,
+    backupReservationId: String(admission.backupReservationId),
+    grantDigest: input.grantDigest,
+    sourceRevision: input.sourceRevision,
+    createdAtMs: input.createdAtMs,
+  });
+}
+
+/** Active-turn recovery proof. Historical turns use the immutable terminal audit Event. */
+export function readIndependentCrossSessionFollowupActivation(
+  database: Database,
+  sourceSessionId: string,
+  submissionId: string,
+): IndependentCrossSessionFollowupActivation | null {
+  const row = database
+    .query<
+      { target_session_id: string; canonical_json: string; source_run_id: string },
+      [string, string]
+    >(
+      `SELECT o.target_session_id,a.canonical_json,o.source_run_id FROM agent_mail_outbox o
+       JOIN agent_followup_admission_artifacts a
+         ON a.artifact_id=o.followup_admission_artifact_id
+       WHERE o.source_session_id=? AND o.submission_id=? AND o.mode='trigger_turn'`,
+    )
+    .get(sourceSessionId, submissionId);
+  if (!row) return null;
+  const admission = parse(row.canonical_json);
+  if (admission.schema !== 'kite.cross-session-followup-admission.v2') return null;
+  const eventRow = database
+    .query<{ sequence: number; event_json: string; created_at: number }, [string, string]>(
+      `SELECT sequence,event_json,created_at FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='resource_budget.dispatch_started'
+       AND json_extract(event_json,'$.reservationId')=?`,
+    )
+    .all(sourceSessionId, String(admission.backupReservationId));
+  if (eventRow.length !== 1) return null;
+  const sourceRow = database
+    .query<{ state_json: string }, [string]>(
+      'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+    )
+    .get(sourceSessionId);
+  const source = sourceRow ? parse(sourceRow.state_json) : {};
+  const active = record(source.resourceBudget);
+  const ledger =
+    active.runId === row.source_run_id
+      ? active
+      : record(record(source.retainedResourceBudgets)[row.source_run_id]);
+  const backup = record(record(ledger.reservations)[String(admission.backupReservationId)]);
+  if (!['dispatch_started', 'reconciled', 'unknown'].includes(String(backup.state))) return null;
+  const targetRow = database
+    .query<{ state_json: string }, [string]>(
+      'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+    )
+    .get(row.target_session_id);
+  const target = targetRow ? parse(targetRow.state_json) : {};
+  const followup = record(target.activeFollowupTurn);
+  const grant = readCrossSessionFollowupGrant(
+    database,
+    String(record(followup.grantRef).artifactId),
+  );
+  if (
+    !grant ||
+    followup.submissionId !== submissionId ||
+    followup.grantDigest !== grant.ref.integrityIdentifier ||
+    parse(grant.canonicalJson).schema !== 'kite.child-followup-grant.v2'
+  )
+    return null;
+  return Object.freeze({
+    sourceSessionId,
+    targetSessionId: row.target_session_id,
+    submissionId,
+    targetRunId: String(followup.targetRunId),
+    backupReservationId: String(admission.backupReservationId),
+    grantDigest: grant.ref.integrityIdentifier,
+    sourceRevision: eventRow[0]!.sequence,
+    createdAtMs: eventRow[0]!.created_at * 1000,
+  });
+}
+
+/** Store13 exception for already sealed children, preserving v1 first-model replay. */
 export function verifyCompletedChildFollowupModelWork<Event, State>(
   database: Database,
   transaction: RuntimeTransactionInput<Event, State>,
 ): boolean {
   const events = transaction.events.map((event) => record(event));
+  const state = record(transaction.snapshot);
+  const active = record(state.activeFollowupTurn);
+  const grantRef = record(active.grantRef);
+  const grant = readCrossSessionFollowupGrant(database, String(grantRef.artifactId));
+  if (grant && parse(grant.canonicalJson).schema === 'kite.child-followup-grant.v2') {
+    return verifyIndependentChildFollowupWork(
+      database,
+      transaction.sessionId,
+      state,
+      events,
+      grant,
+    );
+  }
   if (
     events.some(
       (event) =>
@@ -990,10 +1701,8 @@ export function verifyCompletedChildFollowupModelWork<Event, State>(
     attempted.length > 1
   )
     return false;
-  const state = record(transaction.snapshot);
   const origin = record(state.childSessionOrigin);
   const terminal = record(origin.terminal);
-  const active = record(state.activeFollowupTurn);
   const sourceSessionId = String(active.sourceSessionId ?? '');
   const submissionId = String(active.submissionId ?? '');
   const targetRunId = String(active.targetRunId ?? '');
@@ -1026,8 +1735,6 @@ export function verifyCompletedChildFollowupModelWork<Event, State>(
     })
   )
     return false;
-  const grantRef = record(active.grantRef);
-  const grant = readCrossSessionFollowupGrant(database, String(grantRef.artifactId));
   const admission = readCrossSessionFollowupAdmissionBySubmissionForTarget(
     database,
     transaction.sessionId,
@@ -1424,6 +2131,20 @@ export function readPreparedCrossSessionFollowupRecoveryProof(
   sourceSessionId: string,
   submissionId: string,
 ): CrossSessionPreparedFollowupRecoveryProof | null {
+  const accepted = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    targetSessionId,
+    sourceSessionId,
+    submissionId,
+  );
+  if (accepted)
+    return readPreparedIndependentFollowupRecoveryProof(
+      database,
+      targetSessionId,
+      sourceSessionId,
+      submissionId,
+      accepted,
+    );
   const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
   const funding = readCrossSessionFollowupFundingReceipt(database, sourceSessionId, submissionId);
   const activation = readCrossSessionFollowupActivationReceipt(
@@ -1474,8 +2195,11 @@ export function readPreparedCrossSessionFollowupRecoveryProof(
   const local = record(record(ledger.reservations)[route.reservationId]);
   const active = record(state.activeFollowupTurn);
   const run = database
-    .query<{ status: string; start_command_id: string }, [string, string]>(
-      'SELECT status,start_command_id FROM runtime_runs WHERE session_id=? AND run_id=?',
+    .query<
+      { status: string; start_command_id: string; created_revision: number },
+      [string, string]
+    >(
+      'SELECT status,start_command_id,created_revision FROM runtime_runs WHERE session_id=? AND run_id=?',
     )
     .get(targetSessionId, route.targetRunId);
   const inbox = database
@@ -1564,6 +2288,193 @@ export function readPreparedCrossSessionFollowupRecoveryProof(
     preparedStateRevision: target.revision,
     surfaceRef: Object.freeze(surfaceRef),
     surfaceDigest: funding.surfaceDigest,
+    estimatedInputTokens: Number(model.estimatedInputTokens),
+    activationSourceRevision: activation.sourceRevision,
+  });
+}
+
+/** A v2 target may retry only its still-reserved first Model Surface before any attempt. */
+function readPreparedIndependentFollowupRecoveryProof(
+  database: Database,
+  targetSessionId: string,
+  sourceSessionId: string,
+  submissionId: string,
+  accepted: NonNullable<ReturnType<typeof readAcceptedIndependentFollowupSourcePolicyProof>>,
+): CrossSessionPreparedFollowupRecoveryProof | null {
+  const activation = readIndependentCrossSessionFollowupActivation(
+    database,
+    sourceSessionId,
+    submissionId,
+  );
+  const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
+  const terminal = readCrossSessionFollowupTerminalReceipt(database, sourceSessionId, submissionId);
+  const target = database
+    .query<
+      {
+        revision: number;
+        snapshot_revision: number;
+        parent_session_id: string | null;
+        state_json: string;
+      },
+      [string]
+    >(
+      `SELECT s.revision,p.revision AS snapshot_revision,s.parent_session_id,p.state_json
+       FROM runtime_sessions s JOIN runtime_snapshots p ON p.session_id=s.session_id
+       WHERE s.session_id=?`,
+    )
+    .get(targetSessionId);
+  if (
+    !activation ||
+    activation.targetSessionId !== targetSessionId ||
+    !route ||
+    route.route !== 'new_turn' ||
+    route.sourceSessionId !== sourceSessionId ||
+    route.targetRunId !== activation.targetRunId ||
+    terminal ||
+    !target ||
+    target.parent_session_id !== sourceSessionId ||
+    target.revision !== target.snapshot_revision ||
+    target.revision < route.routedRevision
+  )
+    return null;
+  const state = parse(target.state_json);
+  const active = record(state.activeFollowupTurn);
+  const origin = record(state.childSessionOrigin);
+  const ledger = record(state.resourceBudget);
+  const model = record(record(state.modelInvocations)[route.invocationId]);
+  const modelBudget = record(model.budget);
+  const local = record(record(ledger.reservations)[route.reservationId]);
+  const surface = record(model.surfaceArtifact);
+  const grant = readCrossSessionFollowupGrant(database, String(record(active.grantRef).artifactId));
+  const grantPayload = grant ? parse(grant.canonicalJson) : {};
+  const run = database
+    .query<
+      { status: string; start_command_id: string; created_revision: number },
+      [string, string]
+    >(
+      'SELECT status,start_command_id,created_revision FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(targetSessionId, route.targetRunId);
+  const inbox = database
+    .query<
+      {
+        source_session_id: string;
+        target_run_id: string | null;
+        prepared_invocation_id: string | null;
+        prepared_model_admission_id: string | null;
+      },
+      [string, string]
+    >(
+      `SELECT source_session_id,target_run_id,prepared_invocation_id,prepared_model_admission_id
+       FROM agent_mail_inbox WHERE target_session_id=? AND message_id=?`,
+    )
+    .get(targetSessionId, route.messageId);
+  const prepared = database
+    .query<{ count: number }, [string, string]>(
+      `SELECT count(*) AS count FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='model.invocation_prepared'
+       AND json_extract(event_json,'$.invocationId')=?`,
+    )
+    .get(targetSessionId, route.invocationId)?.count;
+  const attempted = database
+    .query<{ found: number }, [string, string, string]>(
+      `SELECT 1 AS found FROM runtime_events WHERE session_id=?
+       AND ((json_extract(event_json,'$.type')='model.invocation_attempt_started'
+         AND json_extract(event_json,'$.invocationId')=?)
+       OR (json_extract(event_json,'$.type')='resource_budget.dispatch_started'
+         AND json_extract(event_json,'$.reservationId')=?)) LIMIT 1`,
+    )
+    .get(targetSessionId, route.invocationId, route.reservationId);
+  const effect = database
+    .query<{ found: number }, [string]>(
+      'SELECT 1 AS found FROM runtime_effect_leases WHERE session_id=? LIMIT 1',
+    )
+    .get(targetSessionId);
+  if (
+    !run ||
+    !['running', 'waiting'].includes(run.status) ||
+    run.start_command_id !== `followup:${submissionId}` ||
+    !verifyPersistedCrossSessionFollowupRunStart(database, {
+      sessionId: targetSessionId,
+      runId: route.targetRunId,
+      startCommandId: run.start_command_id,
+      createdRevision: run.created_revision,
+    }) ||
+    active.sourceSessionId !== sourceSessionId ||
+    active.submissionId !== submissionId ||
+    active.targetRunId !== route.targetRunId ||
+    active.taskId !== route.taskId ||
+    active.grantDigest !== activation.grantDigest ||
+    !grant ||
+    grant.ref.integrityIdentifier !== activation.grantDigest ||
+    grantPayload.schema !== 'kite.child-followup-grant.v2' ||
+    !validIndependentFollowupGrant(database, {
+      sourceSessionId,
+      targetSessionId,
+      submissionId,
+      intentRole: String(origin.role ?? ''),
+      origin,
+      targetLedger: ledger,
+      grantPayload,
+      grantBudget: record(grantPayload.budget),
+      admission: accepted.admission,
+      backupState: 'dispatch_started',
+    }) ||
+    record(state.turn).turnId !== route.targetRunId ||
+    record(state.turn).status !== 'active' ||
+    state.activeTaskId !== route.taskId ||
+    model.status !== 'prepared' ||
+    model.purpose !== 'primary_agent' ||
+    model.invocationId !== route.invocationId ||
+    model.attempts !== 0 ||
+    !Number.isSafeInteger(model.estimatedInputTokens) ||
+    modelBudget.kind !== 'reservation' ||
+    modelBudget.reservationId !== route.reservationId ||
+    ledger.status !== 'active' ||
+    ledger.runId !== route.targetRunId ||
+    local.state !== 'reserved' ||
+    local.runId !== route.targetRunId ||
+    local.invocationId !== `model-invocation:${route.invocationId}` ||
+    local.resourceKind !== 'model' ||
+    surface.kind !== 'model_surface' ||
+    !DIGEST.test(String(surface.integrityIdentifier)) ||
+    model.surfaceIntegrityIdentifier !== surface.integrityIdentifier ||
+    !Number.isSafeInteger(surface.byteLength) ||
+    Number(surface.byteLength) < 0 ||
+    !inbox ||
+    inbox.source_session_id !== sourceSessionId ||
+    inbox.target_run_id !== route.targetRunId ||
+    inbox.prepared_invocation_id !== route.invocationId ||
+    inbox.prepared_model_admission_id !== route.modelAdmissionId ||
+    prepared !== 1 ||
+    attempted ||
+    effect
+  )
+    return null;
+  const surfaceRef = {
+    artifactId: String(surface.artifactId),
+    kind: 'model_surface' as const,
+    integrityIdentifier: String(surface.integrityIdentifier),
+    byteLength: Number(surface.byteLength),
+  };
+  try {
+    const stored = createKiteHomeArtifactStore(database).readModel(surfaceRef);
+    if (
+      stored.artifactFormatVersion !== 1 ||
+      !matchesModelArtifactReference('model_surface', stored.canonicalJson, surfaceRef)
+    )
+      return null;
+  } catch {
+    return null;
+  }
+  return Object.freeze({
+    submissionId,
+    targetRunId: route.targetRunId,
+    invocationId: route.invocationId,
+    modelReservationId: route.reservationId,
+    preparedStateRevision: target.revision,
+    surfaceRef: Object.freeze(surfaceRef),
+    surfaceDigest: surfaceRef.integrityIdentifier,
     estimatedInputTokens: Number(model.estimatedInputTokens),
     activationSourceRevision: activation.sourceRevision,
   });
@@ -2126,6 +3037,15 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
   )
     invalid();
   const admission = parse(admissionRow.canonical_json);
+  const independent = admission.schema === 'kite.cross-session-followup-admission.v2';
+  const acceptedIndependent = independent
+    ? readAcceptedIndependentFollowupSourcePolicyProof(
+        database,
+        input.targetSessionId,
+        input.sourceSessionId,
+        input.submissionId,
+      )
+    : null;
   const state = input.sourceSnapshot;
   const active = record(state.resourceBudget);
   const ledger =
@@ -2173,6 +3093,7 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
   const reasonProven =
     (input.reason === 'tool_failed' && failed) ||
     (input.reason === 'expired' &&
+      !independent &&
       Number.isSafeInteger(deadlineAt) &&
       input.createdAtMs >= deadlineAt) ||
     (input.reason === 'context_unavailable' &&
@@ -2183,7 +3104,12 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
     (input.reason === 'capacity_timeout' &&
       provenQueuedCapacityTimeout(database, input, outbox, ledger, backupId));
   if (
-    admission.schema !== 'kite.cross-session-followup-admission.v1' ||
+    (admission.schema !== 'kite.cross-session-followup-admission.v1' && !independent) ||
+    (independent &&
+      (!acceptedIndependent ||
+        acceptedIndependent.admission.backupReservationId !== backupId ||
+        record(backup.executableUpperBound).independentFollowupTurn !== true ||
+        record(backup.executableUpperBound).unboundedToolInvocations !== true)) ||
     admission.sourceSessionId !== input.sourceSessionId ||
     admission.targetSessionId !== input.targetSessionId ||
     admission.submissionId !== input.submissionId ||
@@ -3196,6 +4122,38 @@ export function readLastFollowupOutcomeForDirectChild(
     ORDER BY source_revision DESC,
       coalesce(f.terminal_at_ms,o.accepted_released_at_ms) DESC,o.submission_id DESC LIMIT 1`)
     .get(sourceSessionId, currentRunId, childSessionId);
+  const independent = database
+    .query<
+      {
+        submission_id: string;
+        source_revision: number;
+        event_json: string;
+        task_id: string | null;
+      },
+      [string, string, string]
+    >(
+      `SELECT o.submission_id,e.sequence AS source_revision,e.event_json,r.task_id
+       FROM agent_mail_outbox o JOIN runtime_events e ON e.session_id=o.source_session_id
+       LEFT JOIN agent_followup_routes r ON r.source_session_id=o.source_session_id
+         AND r.submission_id=o.submission_id
+       WHERE o.source_session_id=? AND o.source_run_id=? AND o.target_session_id=?
+         AND o.mode='trigger_turn'
+         AND json_extract(e.event_json,'$.type')='agent.followup_independent_settled'
+         AND json_extract(e.event_json,'$.submissionId')=o.submission_id
+       ORDER BY e.sequence DESC LIMIT 1`,
+    )
+    .get(sourceSessionId, currentRunId, childSessionId);
+  if (independent && (!row || independent.source_revision > row.source_revision)) {
+    const audit = parse(independent.event_json);
+    if (!['completed', 'unknown', 'pre_dispatch_released'].includes(String(audit.disposition)))
+      invalid();
+    return Object.freeze({
+      submissionId: independent.submission_id,
+      status: audit.disposition as 'completed' | 'unknown' | 'pre_dispatch_released',
+      ...(independent.task_id ? { taskId: independent.task_id } : {}),
+      sourceRevision: independent.source_revision,
+    });
+  }
   if (!row) return null;
   if (row.accepted_release_source_revision !== null && row.terminal_disposition !== null) invalid();
   return Object.freeze({
@@ -3232,7 +4190,19 @@ export function readDirectChildFollowupOutcomeWatermark(
     )
     .get(sourceSessionId, currentRunId);
   if (row?.conflicts) invalid();
-  return Object.freeze({ count: row?.count ?? 0, throughRevision: row?.through_revision ?? 0 });
+  const independent = database
+    .query<{ count: number; through_revision: number }, [string, string]>(
+      `SELECT count(*) AS count,coalesce(max(e.sequence),0) AS through_revision
+       FROM agent_mail_outbox o JOIN runtime_events e ON e.session_id=o.source_session_id
+       WHERE o.source_session_id=? AND o.source_run_id=? AND o.mode='trigger_turn'
+         AND json_extract(e.event_json,'$.type')='agent.followup_independent_settled'
+         AND json_extract(e.event_json,'$.submissionId')=o.submission_id`,
+    )
+    .get(sourceSessionId, currentRunId);
+  return Object.freeze({
+    count: (row?.count ?? 0) + (independent?.count ?? 0),
+    throughRevision: Math.max(row?.through_revision ?? 0, independent?.through_revision ?? 0),
+  });
 }
 
 export interface CrossSessionFollowupTerminalReceipt {
@@ -3246,6 +4216,28 @@ export interface CrossSessionFollowupTerminalReceipt {
   readonly disposition: CrossSessionFollowupTerminalIntent['disposition'];
   readonly evidenceDigest: string;
   readonly createdAtMs: number;
+}
+
+/** Hash the exact persisted snapshot bytes used by terminal settlement validation. */
+export function readTargetSnapshotEvidence(
+  database: Database,
+  targetSessionId: string,
+  expectedRevision: number,
+): Readonly<{ revision: number; digest: string }> | null {
+  if (!targetSessionId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1)
+    return null;
+  const row = database
+    .query<{ revision: number; snapshot_revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.revision AS snapshot_revision,p.state_json FROM runtime_sessions s
+       JOIN runtime_snapshots p ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(targetSessionId);
+  if (!row || row.revision !== expectedRevision || row.snapshot_revision !== expectedRevision)
+    return null;
+  return Object.freeze({
+    revision: expectedRevision,
+    digest: `sha256:${createHash('sha256').update(row.state_json).digest('hex')}`,
+  });
 }
 
 /** Source owner settles its two held reservations from durable target evidence. */
@@ -3448,6 +4440,191 @@ export function settleCrossSessionFollowupFundingInTransaction(
     targetSessionId: input.targetSessionId,
     targetRunId: input.targetRunId,
     modelInvocationId: input.modelInvocationId,
+    targetRevision: input.targetRevision,
+    sourceRevision: input.sourceRevision,
+    disposition: input.disposition,
+    evidenceDigest,
+    createdAtMs: input.createdAtMs,
+  });
+}
+
+/** Settle the v2 source backup against the entire durable target Run ledger. */
+export function settleIndependentCrossSessionFollowupFundingInTransaction(
+  database: Database,
+  input: Readonly<{
+    sourceSessionId: string;
+    targetSessionId: string;
+    submissionId: string;
+    targetRunId: string;
+    targetRevision: number;
+    disposition: 'completed' | 'unknown' | 'pre_dispatch_released';
+    sourceRevision: number;
+    createdAtMs: number;
+    sourceSnapshot: Readonly<RecordValue>;
+    events: readonly Readonly<RecordValue>[];
+  }>,
+): CrossSessionFollowupTerminalReceipt {
+  requireTransaction(database);
+  const proof = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    input.targetSessionId,
+    input.sourceSessionId,
+    input.submissionId,
+  );
+  const targetRow = database
+    .query<{ revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
+       ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(input.targetSessionId);
+  const target = targetRow ? parse(targetRow.state_json) : {};
+  const targetLedger = record(target.resourceBudget);
+  const targetUsage = record(targetLedger.reconciledUsage);
+  const targetCounters = record(targetUsage.counters);
+  const sourceActive = record(input.sourceSnapshot.resourceBudget);
+  const sourceRow = database
+    .query<{ revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
+       ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(input.sourceSessionId);
+  const admission = proof?.admission ?? {};
+  const sourceLedger =
+    sourceActive.runId === admission.fundingRunId
+      ? sourceActive
+      : record(
+          record(input.sourceSnapshot.retainedResourceBudgets)[String(admission.fundingRunId)],
+        );
+  const backup = record(record(sourceLedger.reservations)[String(admission.backupReservationId)]);
+  const route = readCrossSessionFollowupRoute(database, input.targetSessionId, input.submissionId);
+  const run = database
+    .query<
+      { status: string; start_command_id: string; created_revision: number },
+      [string, string]
+    >(
+      'SELECT status,start_command_id,created_revision FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(input.targetSessionId, input.targetRunId);
+  const targetSettlement = database
+    .query<{ event_json: string }, [string, number]>(
+      `SELECT event_json FROM runtime_events WHERE session_id=? AND sequence=?
+       AND json_extract(event_json,'$.type')='agent.followup_turn_settled'`,
+    )
+    .get(input.targetSessionId, input.targetRevision);
+  const settled = targetSettlement ? parse(targetSettlement.event_json) : {};
+  const budgetEvents = input.events.filter((item) =>
+    ['resource_budget.reconciled', 'resource_budget.unknown', 'resource_budget.released'].includes(
+      String(item.type),
+    ),
+  );
+  const auditEvents = input.events.filter(
+    (item) => item.type === 'agent.followup_independent_settled',
+  );
+  const event = record(budgetEvents[0]);
+  const audit = record(auditEvents[0]);
+  const actual = record(event.actual);
+  const actualCounters = record(actual.counters);
+  const evidenceDigest = targetRow
+    ? `sha256:${createHash('sha256').update(targetRow.state_json).digest('hex')}`
+    : '';
+  const expectedEvent =
+    input.disposition === 'completed'
+      ? 'resource_budget.reconciled'
+      : input.disposition === 'unknown'
+        ? 'resource_budget.unknown'
+        : 'resource_budget.released';
+  if (
+    !proof ||
+    !targetRow ||
+    targetRow.revision !== input.targetRevision ||
+    !sourceRow ||
+    sourceRow.revision !== input.sourceRevision ||
+    !sameCanonicalValue(parse(sourceRow.state_json), input.sourceSnapshot) ||
+    !run ||
+    run.start_command_id !== `followup:${input.submissionId}` ||
+    settled.sourceSessionId !== input.sourceSessionId ||
+    settled.submissionId !== input.submissionId ||
+    settled.targetRunId !== input.targetRunId ||
+    settled.status !== run.status ||
+    (route !== null && settled.taskId !== route.taskId) ||
+    !Number.isSafeInteger(input.sourceRevision) ||
+    input.sourceRevision < 1 ||
+    !Number.isSafeInteger(input.createdAtMs) ||
+    input.createdAtMs < 0 ||
+    sourceLedger.runId !== admission.fundingRunId ||
+    backup.reservationId !== admission.backupReservationId ||
+    !sameCanonicalValue(backup.executableUpperBound, admission.executableUpperBound) ||
+    auditEvents.length !== 1 ||
+    input.events.length !== budgetEvents.length + 1 ||
+    budgetEvents.length > 1 ||
+    (budgetEvents.length === 0 && input.disposition !== 'unknown') ||
+    (budgetEvents.length === 1 && event.type !== expectedEvent) ||
+    (budgetEvents.length === 1 && event.reservationId !== admission.backupReservationId) ||
+    audit.submissionId !== input.submissionId ||
+    audit.targetAgentId !== input.targetSessionId ||
+    audit.targetRunId !== input.targetRunId ||
+    audit.targetRevision !== input.targetRevision ||
+    audit.disposition !== input.disposition ||
+    audit.evidenceDigest !== evidenceDigest ||
+    audit.createdAtMs !== input.createdAtMs ||
+    (input.disposition === 'completed' && backup.state !== 'reconciled') ||
+    (input.disposition === 'unknown' && backup.state !== 'unknown') ||
+    (input.disposition === 'pre_dispatch_released' && backup.state !== 'released')
+  )
+    invalid();
+  if (input.disposition === 'completed') {
+    const checkpoint = readChildTerminalCheckpoint(database, input.targetSessionId);
+    const checkpointPayload = checkpoint ? parse(checkpoint.canonicalJson) : {};
+    if (
+      !checkpoint ||
+      ![input.targetRevision - 1, input.targetRevision].includes(checkpoint.terminalRevision) ||
+      checkpointPayload.terminalRunId !== input.targetRunId ||
+      checkpointPayload.terminalStatus !== 'completed' ||
+      (checkpoint.terminalRevision === input.targetRevision &&
+        checkpointPayload.stateDigest !== evidenceDigest) ||
+      run.status !== 'completed' ||
+      record(target.turn).status !== 'completed' ||
+      record(target.terminalOutcome).status !== 'completed' ||
+      budgetEvents.length !== 1 ||
+      actual.source !== 'actual' ||
+      !sameCanonicalValue(backup.actual, actual) ||
+      !boundedUsage(actual, record(backup.executableUpperBound)) ||
+      actualCounters.turns !== 1 ||
+      record(actual.gauges).activeSubagents !== 1 ||
+      !['modelRequests', 'toolInvocations', 'inputTokens', 'outputTokens', 'artifactBytes'].every(
+        (key) =>
+          Number.isSafeInteger(targetCounters[key]) && actualCounters[key] === targetCounters[key],
+      )
+    )
+      invalid();
+  } else if (input.disposition === 'unknown') {
+    if (
+      run.status !== 'unknown' ||
+      !hasIndependentFollowupSourceActivation(database, input.sourceSessionId, admission)
+    )
+      invalid();
+  } else {
+    const attempts = database
+      .query<{ count: number }, [string, number]>(
+        `SELECT count(*) AS count FROM runtime_events WHERE session_id=?
+         AND json_extract(event_json,'$.type')='model.invocation_attempt_started'
+         AND sequence>?`,
+      )
+      .get(input.targetSessionId, run.created_revision)?.count;
+    if (
+      !['failed', 'cancelled'].includes(run.status) ||
+      budgetEvents.length !== 1 ||
+      event.proof !== 'local_pre_dispatch_failure' ||
+      attempts !== 0
+    )
+      invalid();
+  }
+  return Object.freeze({
+    sourceSessionId: input.sourceSessionId,
+    submissionId: input.submissionId,
+    targetSessionId: input.targetSessionId,
+    targetRunId: input.targetRunId,
+    modelInvocationId: route?.invocationId ?? '',
     targetRevision: input.targetRevision,
     sourceRevision: input.sourceRevision,
     disposition: input.disposition,
@@ -3727,7 +4904,11 @@ export function readCrossSessionFollowupTerminalReceipt(
     !row.terminal_evidence_digest ||
     row.terminal_at_ms === null
   )
-    return null;
+    return readIndependentCrossSessionFollowupTerminalReceipt(
+      database,
+      sourceSessionId,
+      submissionId,
+    );
   return Object.freeze({
     sourceSessionId,
     submissionId,
@@ -3739,6 +4920,57 @@ export function readCrossSessionFollowupTerminalReceipt(
     disposition: row.terminal_disposition,
     evidenceDigest: row.terminal_evidence_digest,
     createdAtMs: row.terminal_at_ms,
+  });
+}
+
+function readIndependentCrossSessionFollowupTerminalReceipt(
+  database: Database,
+  sourceSessionId: string,
+  submissionId: string,
+): CrossSessionFollowupTerminalReceipt | null {
+  const rows = database
+    .query<{ sequence: number; event_json: string }, [string, string]>(
+      `SELECT sequence,event_json FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='agent.followup_independent_settled'
+       AND json_extract(event_json,'$.submissionId')=?`,
+    )
+    .all(sourceSessionId, submissionId);
+  if (rows.length !== 1) return null;
+  const audit = parse(rows[0]!.event_json);
+  const targetSessionId = String(audit.targetAgentId ?? '');
+  const proof = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    targetSessionId,
+    sourceSessionId,
+    submissionId,
+  );
+  const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
+  const run = database
+    .query<{ start_command_id: string }, [string, string]>(
+      'SELECT start_command_id FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(targetSessionId, String(audit.targetRunId));
+  if (
+    !proof ||
+    !run ||
+    run.start_command_id !== `followup:${submissionId}` ||
+    !DIGEST.test(String(audit.evidenceDigest)) ||
+    !Number.isSafeInteger(audit.targetRevision) ||
+    !Number.isSafeInteger(audit.createdAtMs) ||
+    !['completed', 'unknown', 'pre_dispatch_released'].includes(String(audit.disposition))
+  )
+    return null;
+  return Object.freeze({
+    sourceSessionId,
+    submissionId,
+    targetSessionId,
+    targetRunId: String(audit.targetRunId),
+    modelInvocationId: route?.invocationId ?? '',
+    targetRevision: Number(audit.targetRevision),
+    sourceRevision: rows[0]!.sequence,
+    disposition: audit.disposition as CrossSessionFollowupTerminalIntent['disposition'],
+    evidenceDigest: String(audit.evidenceDigest),
+    createdAtMs: Number(audit.createdAtMs),
   });
 }
 
@@ -3808,6 +5040,10 @@ export function listPendingCrossSessionFollowupFunding(
       AND o.accepted_release_source_revision IS NULL
       AND o.current_turn_release_source_revision IS NULL
       AND (f.terminal_disposition IS NULL OR f.submission_id IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM runtime_events terminal
+        WHERE terminal.session_id=o.source_session_id
+          AND json_extract(terminal.event_json,'$.type')='agent.followup_independent_settled'
+          AND json_extract(terminal.event_json,'$.submissionId')=o.submission_id)
       ${afterSubmissionId ? 'AND o.submission_id>?' : ''}
     ORDER BY o.submission_id LIMIT ?`)
     .all(sourceSessionId, ...(afterSubmissionId ? [afterSubmissionId] : []), limit);
@@ -3834,6 +5070,46 @@ export function listPendingCrossSessionFollowupFunding(
         : record(record(state.retainedResourceBudgets)[row.source_run_id]);
     const reservations = record(ledger.reservations);
     const backup = record(reservations[backupId]);
+    if (admission.schema === 'kite.cross-session-followup-admission.v2') {
+      const accepted = readAcceptedIndependentFollowupSourcePolicyProof(
+        database,
+        row.target_session_id,
+        sourceSessionId,
+        row.submission_id,
+      );
+      const route = readCrossSessionFollowupRoute(
+        database,
+        row.target_session_id,
+        row.submission_id,
+      );
+      if (
+        !accepted ||
+        backup.reservationId !== backupId ||
+        backup.runId !== row.source_run_id ||
+        record(backup.executableUpperBound).independentFollowupTurn !== true ||
+        record(backup.executableUpperBound).unboundedToolInvocations !== true ||
+        row.turn_reservation_id ||
+        row.model_reservation_id ||
+        !['queued', 'reserved', 'dispatch_started', 'unknown'].includes(String(backup.state))
+      )
+        invalid();
+      return Object.freeze({
+        submissionId: row.submission_id,
+        messageId: row.message_id,
+        targetSessionId: row.target_session_id,
+        targetRunId: route?.targetRunId ?? row.target_run_id,
+        modelInvocationId: route?.invocationId ?? row.model_invocation_id,
+        backupReservationId: backupId,
+        turnReservationId: null,
+        modelReservationId: null,
+        stage:
+          backup.state === 'dispatch_started' || backup.state === 'unknown'
+            ? ('activated' as const)
+            : ('accepted' as const),
+        fundingRunId: row.source_run_id,
+        reservationIds: Object.freeze([backupId]),
+      });
+    }
     if (
       admission.submissionId !== row.submission_id ||
       admission.fundingRunId !== row.source_run_id ||
@@ -3913,6 +5189,10 @@ export function listPendingCrossSessionFollowupSources(
        ON f.source_session_id=o.source_session_id AND f.submission_id=o.submission_id
      WHERE o.mode='trigger_turn' AND o.accepted_release_source_revision IS NULL
        AND (f.submission_id IS NULL OR f.terminal_disposition IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM runtime_events terminal
+         WHERE terminal.session_id=o.source_session_id
+           AND json_extract(terminal.event_json,'$.type')='agent.followup_independent_settled'
+           AND json_extract(terminal.event_json,'$.submissionId')=o.submission_id)
        ${afterSessionId ? 'AND o.source_session_id>?' : ''}
      ORDER BY o.source_session_id LIMIT ?`,
     )
@@ -4647,6 +5927,166 @@ function routeCurrentTurnFollowupInTransaction(
   return receipt;
 }
 
+function routeIndependentCrossSessionFollowupInTransaction(
+  database: Database,
+  input: CrossSessionFollowupRouteIntent,
+): CrossSessionFollowupRouteReceipt {
+  const proof = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    input.targetSessionId,
+    input.sourceSessionId,
+    input.submissionId,
+  );
+  const activation = readIndependentCrossSessionFollowupActivation(
+    database,
+    input.sourceSessionId,
+    input.submissionId,
+  );
+  const inbox = database
+    .query<
+      {
+        source_session_id: string;
+        target_run_id: string | null;
+        sequence: number;
+        prepared_invocation_id: string | null;
+        prepared_model_admission_id: string | null;
+      },
+      [string, string]
+    >(
+      `SELECT source_session_id,target_run_id,sequence,prepared_invocation_id,
+       prepared_model_admission_id FROM agent_mail_inbox WHERE target_session_id=? AND message_id=?`,
+    )
+    .get(input.targetSessionId, input.messageId);
+  const row = database
+    .query<{ revision: number; state_json: string }, [string]>(
+      `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
+       ON p.session_id=s.session_id WHERE s.session_id=?`,
+    )
+    .get(input.targetSessionId);
+  const state = row ? parse(row.state_json) : {};
+  const followup = record(state.activeFollowupTurn);
+  const ledger = record(state.resourceBudget);
+  const model = record(record(state.modelInvocations)[input.invocationId]);
+  const local = record(record(ledger.reservations)[input.reservationId]);
+  const grant = readCrossSessionFollowupGrant(
+    database,
+    String(record(followup.grantRef).artifactId),
+  );
+  const run = database
+    .query<{ status: string; start_command_id: string }, [string, string]>(
+      'SELECT status,start_command_id FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(input.targetSessionId, input.targetRunId);
+  const event = input.routedEvent;
+  const prepared = input.preparedEvent;
+  if (
+    input.route !== 'new_turn' ||
+    !proof ||
+    !activation ||
+    activation.targetSessionId !== input.targetSessionId ||
+    activation.targetRunId !== input.targetRunId ||
+    proof.admission.messageId !== input.messageId ||
+    !inbox ||
+    inbox.source_session_id !== input.sourceSessionId ||
+    inbox.prepared_invocation_id !== null ||
+    inbox.prepared_model_admission_id !== null ||
+    !row ||
+    row.revision !== input.routedRevision ||
+    !sameCanonicalValue(state, input.targetSnapshot) ||
+    !run ||
+    !['running', 'waiting'].includes(run.status) ||
+    run.start_command_id !== `followup:${input.submissionId}` ||
+    !grant ||
+    grant.ref.integrityIdentifier !== activation.grantDigest ||
+    followup.grantDigest !== grant.ref.integrityIdentifier ||
+    followup.sourceSessionId !== input.sourceSessionId ||
+    followup.submissionId !== input.submissionId ||
+    followup.targetRunId !== input.targetRunId ||
+    followup.taskId !== input.taskId ||
+    ledger.status !== 'active' ||
+    ledger.runId !== input.targetRunId ||
+    model.invocationId !== input.invocationId ||
+    model.status !== 'prepared' ||
+    model.attempts !== 0 ||
+    record(model.budget).reservationId !== input.reservationId ||
+    local.reservationId !== input.reservationId ||
+    local.runId !== input.targetRunId ||
+    local.resourceKind !== 'model' ||
+    local.state !== 'reserved' ||
+    local.invocationId !== `model-invocation:${input.invocationId}` ||
+    input.modelAdmissionId !== input.reservationId ||
+    event.type !== 'agent.followup_routed' ||
+    event.route !== 'new_turn' ||
+    event.submissionId !== input.submissionId ||
+    event.targetAgentId !== input.targetSessionId ||
+    event.taskId !== input.taskId ||
+    event.invocationId !== input.invocationId ||
+    event.modelAdmissionId !== input.modelAdmissionId ||
+    event.reservationId !== input.reservationId ||
+    event.fundingRunId !== proof.admission.fundingRunId ||
+    event.sequence !== inbox.sequence ||
+    prepared.type !== 'agent.mail_input_prepared' ||
+    prepared.targetAgentId !== input.targetSessionId ||
+    prepared.invocationId !== input.invocationId ||
+    prepared.modelAdmissionId !== input.modelAdmissionId ||
+    prepared.fromSequence !== inbox.sequence - 1 ||
+    prepared.throughSequence !== inbox.sequence ||
+    !sameCanonicalValue(prepared.messageIds, [input.messageId])
+  )
+    invalid();
+  const checkpoint = readChildTerminalCheckpoint(database, input.targetSessionId);
+  if (!checkpoint) unavailable();
+  const changed = database
+    .query(`UPDATE agent_mail_inbox SET
+      target_run_id=?,prepared_invocation_id=?,prepared_model_admission_id=?
+      WHERE target_session_id=? AND message_id=? AND source_session_id=?
+        AND target_run_id IS ? AND prepared_invocation_id IS NULL
+        AND prepared_model_admission_id IS NULL`)
+    .run(
+      input.targetRunId,
+      input.invocationId,
+      input.modelAdmissionId,
+      input.targetSessionId,
+      input.messageId,
+      input.sourceSessionId,
+      inbox.target_run_id,
+    ).changes;
+  if (changed !== 1) conflict();
+  const receipt: CrossSessionFollowupRouteReceipt = Object.freeze({
+    sourceSessionId: input.sourceSessionId,
+    targetSessionId: input.targetSessionId,
+    messageId: input.messageId,
+    submissionId: input.submissionId,
+    route: 'new_turn',
+    targetRunId: input.targetRunId,
+    taskId: input.taskId,
+    invocationId: input.invocationId,
+    modelAdmissionId: input.modelAdmissionId,
+    reservationId: input.reservationId,
+    routedRevision: input.routedRevision,
+    createdAtMs: input.createdAtMs,
+  });
+  database
+    .query(`INSERT INTO agent_followup_routes(target_session_id,source_session_id,message_id,
+      submission_id,route,target_run_id,task_id,invocation_id,model_admission_id,
+      reservation_id,routed_revision,created_at_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(
+      receipt.targetSessionId,
+      receipt.sourceSessionId,
+      receipt.messageId,
+      receipt.submissionId,
+      receipt.route,
+      receipt.targetRunId,
+      receipt.taskId,
+      receipt.invocationId,
+      receipt.modelAdmissionId,
+      receipt.reservationId,
+      receipt.routedRevision,
+      receipt.createdAtMs,
+    );
+  return receipt;
+}
+
 /** The target owner writes one route receipt with its own Run and model budget decision. */
 export function routeCrossSessionFollowupInTransaction(
   database: Database,
@@ -4753,6 +6193,9 @@ export function routeCrossSessionFollowupInTransaction(
   )
     invalid();
   const payload = parse(artifactRow.canonical_json);
+  if (payload.schema === 'kite.cross-session-followup-admission.v2') {
+    return routeIndependentCrossSessionFollowupInTransaction(database, input);
+  }
   const policy = record(payload.policy);
   const snapshot = input.targetSnapshot;
   const event = input.routedEvent;
@@ -5064,14 +6507,38 @@ export function acceptCrossSessionFollowupInTransaction(
   const counters = record(upper.counters);
   const gauges = record(upper.gauges);
   const deadlineAt = Date.parse(String(budget.deadlineAt));
-  const minimumWindow = Math.max(60_000, Number(policy.firstAttemptTimeoutMs) + 5_000);
+  const independentV2 = policy.executionMode === 'independent_turn_v2';
+  const minimumWindow = independentV2
+    ? 1
+    : Math.max(60_000, Number(policy.firstAttemptTimeoutMs) + 5_000);
+  const originalGrant = independentV2
+    ? readChildSealedGrant(database, input.sourceSessionId, input.targetSessionId)
+    : null;
   const bodyDigest = `sha256:${createHash('sha256').update(input.bodyText).digest('hex')}`;
   const accepted = input.acceptedEvent;
   const eventSource = record(accepted.source);
   const eventBodyRef = record(accepted.bodyRef);
   const eventAdmissionRef = record(accepted.followupAdmissionRef);
   if (
-    payload.schema !== 'kite.cross-session-followup-admission.v1' ||
+    payload.schema !==
+      (independentV2
+        ? 'kite.cross-session-followup-admission.v2'
+        : 'kite.cross-session-followup-admission.v1') ||
+    (independentV2 &&
+      (!originalGrant ||
+        !['explore', 'plan', 'code', 'review'].includes(String(policy.targetRole)) ||
+        policy.targetGrantDigest !== originalGrant.sealedGrantDigest ||
+        parse(originalGrant.sealedGrantJson).role !== policy.targetRole ||
+        upper.independentFollowupTurn !== true ||
+        upper.unboundedToolInvocations !== true ||
+        counters.toolInvocations !== 0 ||
+        Number(counters.artifactBytes) < 1 ||
+        gauges.elapsedRunMs !== FOLLOWUP_TURN_DURATION_MS ||
+        gauges.activeToolInvocations !== 1 ||
+        gauges.activeShellInvocations !== 1 ||
+        gauges.activeWriters !== (policy.targetRole === 'code' ? 1 : 0))) ||
+    (!independentV2 &&
+      (upper.independentFollowupTurn === true || upper.unboundedToolInvocations === true)) ||
     payload.submissionId !== input.submissionId ||
     payload.messageId !== input.messageId ||
     payload.sourceSessionId !== input.sourceSessionId ||
@@ -5139,14 +6606,19 @@ export function acceptCrossSessionFollowupInTransaction(
     !sameCanonicalValue(reservation, storedReservation) ||
     !sameCanonicalValue(payload.executableUpperBound, upper) ||
     counters.turns !== 1 ||
-    counters.modelRequests !== 1 ||
+    (independentV2 ? Number(counters.modelRequests) < 1 : counters.modelRequests !== 1) ||
     !Number.isSafeInteger(counters.inputTokens) ||
     Number(counters.inputTokens) < 1 ||
-    Number(counters.inputTokens) >
-      2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens)) ||
+    (independentV2
+      ? Number(counters.inputTokens) <
+        2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))
+      : Number(counters.inputTokens) >
+        2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))) ||
     !Number.isSafeInteger(counters.outputTokens) ||
     Number(counters.outputTokens) < 1 ||
-    Number(counters.outputTokens) > Number(policy.maxOutputTokens) ||
+    (independentV2
+      ? Number(counters.outputTokens) < Number(policy.maxOutputTokens)
+      : Number(counters.outputTokens) > Number(policy.maxOutputTokens)) ||
     gauges.activeSubagents !== 1 ||
     accepted.type !== 'agent.mail_accepted' ||
     accepted.mode !== 'trigger_turn' ||
@@ -5316,6 +6788,14 @@ function boundedUsage(candidate: RecordValue, upper: RecordValue): boolean {
     const first = record(candidate[group]);
     const limit = record(upper[group]);
     for (const key of new Set([...Object.keys(first), ...Object.keys(limit)])) {
+      if (
+        group === 'counters' &&
+        key === 'toolInvocations' &&
+        upper.unboundedToolInvocations === true
+      ) {
+        if (!Number.isSafeInteger(first[key]) || Number(first[key]) < 0) return false;
+        continue;
+      }
       if (
         !Number.isSafeInteger(first[key]) ||
         !Number.isSafeInteger(limit[key]) ||

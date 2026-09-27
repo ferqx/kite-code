@@ -88,6 +88,8 @@ function fixture(bindPrepared = true) {
   let targetParent = 'parent';
   let targetStatus: 'active' | 'completed' = 'active';
   let checkpointReady = false;
+  let originRole: 'explore' | 'plan' | 'code' | 'review' | undefined = 'explore';
+  let originalGrantDigest: string | undefined = `sha256:${'c'.repeat(64)}`;
   let policyAvailable = true;
   let policyRevisionOverride: string | null = null;
   let acceptCount = 0;
@@ -116,6 +118,9 @@ function fixture(bindPrepared = true) {
             parentSessionId: targetParent,
             status: targetStatus,
             checkpointReady,
+            originRole,
+            originalGrantDigest,
+            observedTargetRevision: 4,
           }
         : null,
     lookupFollowupReceipt: ({ scopeSessionId, commandId, requestDigest }) => {
@@ -245,10 +250,14 @@ function fixture(bindPrepared = true) {
     setCheckpointReady(value: boolean) {
       checkpointReady = value;
     },
+    setOriginProof(role: typeof originRole, grantDigest: string | undefined) {
+      originRole = role;
+      originalGrantDigest = grantDigest;
+    },
   };
 }
 
-test('source TriggerTurn accepts one bounded reservation, mail fact, artifact and receipt tuple', async () => {
+test('source TriggerTurn seals a full independent child turn from trusted origin proof', async () => {
   const f = fixture();
   expect(await f.port.submitMessage(f.request)).toEqual({ ok: true });
   expect(f.acceptCount).toBe(1);
@@ -264,9 +273,15 @@ test('source TriggerTurn accepts one bounded reservation, mail fact, artifact an
   });
   expect(accepted.reservationEvent.reservation.executableUpperBound.counters).toMatchObject({
     turns: 1,
-    modelRequests: 1,
-    inputTokens: 1_800,
-    outputTokens: 100,
+    modelRequests: 30,
+    toolInvocations: 0,
+    inputTokens: 250_000,
+    outputTokens: 62_500,
+  });
+  expect(accepted.reservationEvent.reservation.executableUpperBound).toMatchObject({
+    unboundedToolInvocations: true,
+    independentFollowupTurn: true,
+    gauges: { elapsedRunMs: 30 * 60_000, activeWriters: 0 },
   });
   expect(accepted.receipt).toMatchObject({
     scopeSessionId: 'parent',
@@ -278,13 +293,19 @@ test('source TriggerTurn accepts one bounded reservation, mail fact, artifact an
     `sha256:${createHash('sha256').update(admission.canonicalJson).digest('hex')}`,
   );
   expect(JSON.parse(admission.canonicalJson)).toMatchObject({
-    schema: 'kite.cross-session-followup-admission.v1',
+    schema: 'kite.cross-session-followup-admission.v2',
     sourceSessionId: 'parent',
     targetSessionId: 'child',
     sourceRunId: 'run',
     bodyDigest: accepted.event.bodyDigest,
     source: { effectAttemptId: 'follow-invocation:attempt:1', toolCallId: 'follow' },
-    policy: { authorizationDigest: 'authorization-v1', boundedContext: true },
+    policy: {
+      authorizationDigest: 'authorization-v1',
+      boundedContext: true,
+      executionMode: 'independent_turn_v2',
+      targetRole: 'explore',
+      targetGrantDigest: `sha256:${'c'.repeat(64)}`,
+    },
     preparedTool: {
       invocationId: 'follow-invocation',
       operationId: 'builtin:followup_task',
@@ -299,6 +320,25 @@ test('source TriggerTurn accepts one bounded reservation, mail fact, artifact an
   expect(JSON.parse(admission.canonicalJson).policy.preparedTool).toBeUndefined();
   expect(JSON.stringify(accepted.event)).not.toContain('Resume this child.');
   expect(accepted.intent.bodyText).toBe('Resume this child.');
+});
+
+test('source TriggerTurn refuses missing persisted target origin proof', async () => {
+  const f = fixture();
+  f.setOriginProof(undefined, undefined);
+  expect(await f.port.submitMessage(f.request)).toEqual({ ok: false, code: 'target_unavailable' });
+  expect(f.acceptCount).toBe(0);
+});
+
+test('source TriggerTurn reserves a writer only for an original code child', async () => {
+  const f = fixture();
+  f.setOriginProof('code', `sha256:${'d'.repeat(64)}`);
+  expect(await f.port.submitMessage(f.request)).toEqual({ ok: true });
+  const accepted = f.accepted[0]!;
+  expect(accepted.reservationEvent.reservation.executableUpperBound.gauges.activeWriters).toBe(1);
+  expect(JSON.parse(accepted.intent.admission.canonicalJson).policy).toMatchObject({
+    targetRole: 'code',
+    targetGrantDigest: `sha256:${'d'.repeat(64)}`,
+  });
 });
 
 test('source receipt replay precedes policy and budget planning; conflicts fail closed', async () => {

@@ -286,6 +286,151 @@ test('closed parent Run settles only a reserved child without dispatch ACK', () 
   });
 });
 
+test('marked child can be recovered after parent deadline while its signed grant remains live', () => {
+  const f = fixture();
+  const parentDeadlineAt = new Date(NOW + 30_000).toISOString();
+  const reservationId = 'child-allotment:child';
+  const funding = f.input.parentState.resourceBudget;
+  if (funding.status !== 'active') throw new Error('missing parent budget');
+  const original = funding.reservations.reservation!;
+  const upper = {
+    ...original.executableUpperBound,
+    unboundedToolInvocations: true as const,
+    independentChildTurnDeadline: true as const,
+    counters: { ...original.executableUpperBound.counters, toolInvocations: 0 },
+    gauges: { ...original.executableUpperBound.gauges, elapsedRunMs: 30 * 60_000 },
+  };
+  const intent: Intent = {
+    ...f.intent,
+    delegatedReservationId: reservationId,
+    delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(upper),
+    delegatedUpperBoundJson: JSON.stringify(upper),
+    deadlineAt: parentDeadlineAt,
+  };
+  f.setIntent(intent);
+  const parentState: RuntimeState = {
+    ...f.input.parentState,
+    resourceBudget: {
+      ...funding,
+      deadlineAt: parentDeadlineAt,
+      reservations: {
+        [reservationId]: {
+          ...original,
+          reservationId,
+          invocationId: reservationId,
+          executableUpperBound: upper,
+        },
+      },
+    },
+  };
+  const recovery = { ...f.input, parentState, nowMs: NOW + 40_000, isParentRunLive: () => false };
+  expect(planChildSessionRecovery(recovery).actions[0]).toMatchObject({ kind: 'create_child' });
+  expect(
+    planChildSessionRecovery({
+      ...recovery,
+      parentState: {
+        ...parentState,
+        turn: {
+          turnId: 'parent-run',
+          turnIndex: 1,
+          status: 'aborted',
+          abortCause: 'user',
+          abortReason: 'cancelled',
+        },
+      },
+    }).actions[0],
+  ).toMatchObject({ kind: 'abandon_unstartable_child' });
+  expect(planChildSessionRecovery({ ...recovery, nowMs: NOW + 60_000 }).actions[0]).toMatchObject({
+    kind: 'abandon_unstartable_child',
+  });
+});
+
+test('marked activated child resumes its first turn against its own deadline', () => {
+  const f = fixture();
+  const funding = f.input.parentState.resourceBudget;
+  if (funding.status !== 'active') throw new Error('missing parent budget');
+  const parentDeadlineAt = new Date(NOW + 30_000).toISOString();
+  const reservationId = 'child-allotment:child';
+  const original = funding.reservations.reservation!;
+  const upper = {
+    ...original.executableUpperBound,
+    unboundedToolInvocations: true as const,
+    independentChildTurnDeadline: true as const,
+    counters: { ...original.executableUpperBound.counters, toolInvocations: 0 },
+    gauges: { ...original.executableUpperBound.gauges, elapsedRunMs: 30 * 60_000 },
+  };
+  const intent: Intent = {
+    ...f.intent,
+    delegatedReservationId: reservationId,
+    delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(upper),
+    delegatedUpperBoundJson: JSON.stringify(upper),
+    deadlineAt: parentDeadlineAt,
+    childSessionCreated: true,
+    childBudgetActivatedRunId: 'child-run',
+    childBudgetActivatedEventId: 'activation',
+    dispatchAckEventId: 'ack',
+  };
+  f.setIntent(intent);
+  const child = f.childState;
+  child.childSessionOrigin = {
+    ...child.childSessionOrigin!,
+    delegatedReservationId: reservationId,
+    delegatedUpperBoundDigest: intent.delegatedUpperBoundDigest,
+    deadlineAt: parentDeadlineAt,
+    taskInputAdmitted: true,
+  };
+  child.turn = { turnId: 'child-run', turnIndex: 1, status: 'active' };
+  child.activeTaskId = intent.childInvocationId;
+  child.tasks = {
+    [intent.childInvocationId]: {
+      taskId: intent.childInvocationId,
+      userGoal: CHILD_SESSION_TASK_USER_GOAL,
+      status: 'active',
+      startedAtTurnId: 'child-run',
+    } as never,
+  };
+  child.resourceBudget = {
+    status: 'active',
+    runId: 'child-run',
+    startedAt: new Date(NOW + 35_000).toISOString(),
+    deadlineAt: new Date(NOW + 35_000 + 30 * 60_000).toISOString(),
+    budget: {
+      ...LIMITED_RESOURCE_BUDGET_,
+      maxToolInvocations: 0,
+      unboundedToolInvocations: true,
+    },
+    reconciledUsage: createZeroResourceUsage(),
+    reservations: {},
+    waiters: {},
+    nextWaiterSequence: 0,
+  };
+  f.setChild(child);
+  const parentState: RuntimeState = {
+    ...f.input.parentState,
+    resourceBudget: {
+      ...funding,
+      deadlineAt: parentDeadlineAt,
+      reservations: {
+        [reservationId]: {
+          ...original,
+          reservationId,
+          invocationId: reservationId,
+          executableUpperBound: upper,
+          state: 'dispatch_started',
+        },
+      },
+    },
+  };
+  const recovery = { ...f.input, parentState, nowMs: NOW + 40_000, isParentRunLive: () => false };
+  expect(planChildSessionRecovery(recovery).actions[0]).toMatchObject({ kind: 'begin_first_turn' });
+  expect(
+    planChildSessionRecovery({
+      ...recovery,
+      nowMs: NOW + 35_000 + 30 * 60_000,
+    }).actions[0],
+  ).toMatchObject({ kind: 'recovery_required' });
+});
+
 test('expired grant after ACK retains a diagnostic instead of releasing a dispatched allotment', () => {
   const f = fixture();
   f.setIntent({ ...f.intent, childSessionCreated: true, dispatchAckEventId: 'ack' });

@@ -69,7 +69,11 @@ export {
   type SqliteWorkspaceDirectoryOutboxPage,
 } from './directory-outbox';
 export type { KiteChildApprovalProxyRecord } from './kite-child-approval-proxy';
-export { childApprovalProxyId } from './kite-child-approval-proxy';
+export {
+  childApprovalProxyId,
+  followupChildApprovalParentToolCallId,
+  parseFollowupChildApprovalParentToolCallId,
+} from './kite-child-approval-proxy';
 export type {
   CrossSessionInboxReceipt,
   CrossSessionMailOutboxRecord,

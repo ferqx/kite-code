@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialAgentState } from '@kite-ai/agent-kernel';
+import { type AgentState, createInitialAgentState } from '@kite-ai/agent-kernel';
 import { getAgentPhase } from '@kite-ai/runtime-contract';
 import {
   planCrossSessionFirstModelReplacement,
   planCrossSessionFollowupSlotAcquisition,
+  planCrossSessionIndependentTurnActivation,
   planCrossSessionTriggerTurnBackup,
 } from '../../src/kernel-adapter/cross-session-followup';
 import { getActivePlanning } from '../../src/kernel-adapter/initial';
@@ -178,6 +179,165 @@ function replacementInput() {
 }
 
 describe('pure cross-Session TriggerTurn budget admission', () => {
+  test('v2 holds a full child turn and activates it after the source deadline', () => {
+    const sourceState = source();
+    const originalGrantDigest = `sha256:${'e'.repeat(64)}`;
+    const currentPolicy = {
+      ...policy(sourceState),
+      executionMode: 'independent_turn_v2' as const,
+      targetRole: 'explore' as const,
+      targetGrantDigest: originalGrantDigest,
+    };
+    const planned = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState,
+      policy: currentPolicy,
+    });
+    if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
+    const upper = planned.admission.executableUpperBound;
+    expect(upper).toMatchObject({
+      independentFollowupTurn: true,
+      unboundedToolInvocations: true,
+      counters: { turns: 1, modelRequests: 30, toolInvocations: 0 },
+      gauges: { elapsedRunMs: 1_800_000, activeSubagents: 1 },
+    });
+    const funded = {
+      ...sourceState,
+      resourceBudget: acquireBackup(sourceState.resourceBudget, planned.reservationEvent),
+    };
+    const target = initial('target');
+    const targetStartedAt = deadlineAt;
+    const targetDeadlineAt = '2026-09-25T00:33:00.000Z';
+    const grantDigest = `sha256:${'d'.repeat(64)}`;
+    const targetState = {
+      ...target,
+      childSessionOrigin: {
+        parentSessionId: 'source',
+        role: 'explore' as const,
+        grantDigest: originalGrantDigest,
+      },
+      activeFollowupTurn: {
+        sourceSessionId: 'source',
+        submissionId: 'submission',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        grantDigest,
+        grantRef: {
+          kind: 'agent_followup_grant' as const,
+          artifactId: `pa_${'d'.repeat(64)}`,
+          integrityIdentifier: grantDigest,
+          byteLength: 1,
+        },
+      },
+      resourceBudget: reduceResourceBudgetState(target.resourceBudget, {
+        type: 'resource_budget.configured',
+        runId: 'followup-run',
+        startedAt: targetStartedAt,
+        deadlineAt: targetDeadlineAt,
+        budget: {
+          ...LIMITED_RESOURCE_BUDGET_,
+          maxRunDurationMs: 1_800_000,
+          maxTurns: 1,
+          maxModelRequests: upper.counters.modelRequests,
+          maxToolInvocations: 0,
+          unboundedToolInvocations: true,
+          maxRunInputTokens: upper.counters.inputTokens,
+          maxRunOutputTokens: upper.counters.outputTokens,
+          maxArtifactBytes: upper.counters.artifactBytes,
+          maxConcurrentSubagents: 0,
+          maxConcurrentWriters: 0,
+          maxConcurrentToolInvocations: 1,
+          maxConcurrentShellInvocations: 1,
+        },
+      }),
+    } as unknown as AgentState;
+    if (targetState.resourceBudget.status !== 'active')
+      throw new Error('Target budget was not configured.');
+    const activeTargetBudget = targetState.resourceBudget;
+    const proof = {
+      observedTargetRevision: targetState.revision,
+      grantDigest,
+      capabilityDigest: targetState.capabilities.catalogRevision,
+      interactionModeRevision: targetState.interactionModeRevision,
+      phaseCeiling: getAgentPhase(getActivePlanning(targetState)),
+      mode: targetState.mode,
+      workspaceAccess: targetState.workspaceAccess,
+      originRole: 'explore' as const,
+      denyTools: false as const,
+      allowedTools: ['read_file'],
+    };
+    const input = {
+      fundingState: funded,
+      targetState,
+      admission: planned.admission,
+      currentPolicy,
+      targetPolicyProof: proof,
+      nowMs: Date.parse(targetStartedAt) + 1_000,
+    };
+    const activation = planCrossSessionIndependentTurnActivation(input);
+    expect(activation).toEqual({
+      status: 'planned',
+      event: {
+        type: 'resource_budget.dispatch_started',
+        reservationId: planned.admission.backupReservationId,
+      },
+    });
+    if (activation.status !== 'planned') throw new Error('V2 activation was not planned.');
+    const activated = {
+      ...funded,
+      resourceBudget: reduceResourceBudgetState(funded.resourceBudget, activation.event),
+    };
+    expect(
+      planCrossSessionIndependentTurnActivation({ ...input, fundingState: activated }),
+    ).toEqual({ status: 'already_activated' });
+    expect(() =>
+      planCrossSessionIndependentTurnActivation({
+        ...input,
+        targetPolicyProof: { ...proof, allowedTools: ['task'] },
+      }),
+    ).toThrow('original child role');
+    expect(() =>
+      planCrossSessionIndependentTurnActivation({
+        ...input,
+        currentPolicy: { ...currentPolicy, targetGrantDigest: `sha256:${'f'.repeat(64)}` },
+      }),
+    ).toThrow('immutable policy');
+    expect(() =>
+      planCrossSessionIndependentTurnActivation({
+        ...input,
+        admission: { ...planned.admission, backupReservationId: `backup_${'f'.repeat(64)}` },
+      }),
+    ).toThrow('source or immutable policy');
+    expect(() =>
+      planCrossSessionIndependentTurnActivation({
+        ...input,
+        targetState: {
+          ...targetState,
+          resourceBudget: {
+            ...activeTargetBudget,
+            deadlineAt: '2026-09-25T00:33:00.001Z',
+          },
+        },
+      }),
+    ).toThrow('source envelope');
+  });
+  test('v2 code followup reserves one writer under the original role', () => {
+    const sourceState = source();
+    const planned = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState,
+      policy: {
+        ...policy(sourceState),
+        executionMode: 'independent_turn_v2',
+        targetRole: 'code',
+        targetGrantDigest: `sha256:${'c'.repeat(64)}`,
+      },
+    });
+    if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
+    expect(planned.admission.executableUpperBound.gauges.activeWriters).toBe(1);
+    expect(planned.admission.executableUpperBound.counters.toolInvocations).toBe(0);
+    expect(planned.admission.executableUpperBound.unboundedToolInvocations).toBe(true);
+  });
   test('plans one deterministic source-funded backup after receipt preflight', () => {
     const input = backupInput();
     const first = planCrossSessionTriggerTurnBackup(input);

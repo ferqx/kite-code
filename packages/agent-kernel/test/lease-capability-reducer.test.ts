@@ -94,6 +94,202 @@ function reservation(
 }
 
 describe('State lease reducer', () => {
+  test('retains child Tool audit separately from the parent Tool allowance', () => {
+    let state = configure(undefined, 2);
+    const upper = usage('versioned_upper_bound');
+    (upper.gauges as Record<string, number>).activeSubagents = 1;
+    upper.unboundedToolInvocations = true;
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        version: 1,
+        reservationId: 'child-allotment:audited',
+        runId: 'run-1',
+        invocationId: 'child-allotment:audited',
+        resourceKind: 'subagent',
+        executableUpperBound: upper,
+        state: 'reserved',
+      },
+    } as KernelEvent);
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'child-allotment:audited',
+    } as KernelEvent);
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'child-allotment:audited',
+      actual: { ...usage('actual', 300), gauges: usage('actual').gauges },
+    } as KernelEvent);
+    expect(
+      state.resourceBudget.status === 'active' &&
+        state.resourceBudget.reservations['child-allotment:audited']?.actual?.counters
+          .toolInvocations,
+    ).toBe(300);
+    expect(
+      state.resourceBudget.status === 'active' &&
+        state.resourceBudget.reconciledUsage.counters.toolInvocations,
+    ).toBe(300);
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
+    state = reduceLeaseState(state, reservation('parent-own', 'parent-own', 2));
+    expect(() => reduceLeaseState(state, reservation('parent-excess', 'parent-excess'))).toThrow(
+      /budget exhausted/u,
+    );
+    if (state.resourceBudget.status !== 'active') throw new Error('Budget was not active.');
+    const activeBudget = state.resourceBudget;
+    expect(() =>
+      assertAgentStateInvariants({
+        ...state,
+        resourceBudget: {
+          ...activeBudget,
+          reservations: {
+            ...activeBudget.reservations,
+            'child-allotment:audited': {
+              ...activeBudget.reservations['child-allotment:audited']!,
+              actual: {
+                ...activeBudget.reservations['child-allotment:audited']!.actual!,
+                counters: {
+                  ...activeBudget.reservations['child-allotment:audited']!.actual!.counters,
+                  toolInvocations: 301,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toThrow(/delegated Tool audit/u);
+  });
+  test('required child wait shifts only accepted funded background time and replays idempotently', () => {
+    let state = configure();
+    const upper = usage('versioned_upper_bound', 0, 60_000);
+    (upper.gauges as Record<string, number>).activeSubagents = 1;
+    upper.unboundedToolInvocations = true;
+    upper.independentChildTurnDeadline = true;
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        version: 1,
+        reservationId: 'child-allotment:child-1',
+        runId: 'run-1',
+        invocationId: 'child-allotment:child-1',
+        resourceKind: 'subagent',
+        executableUpperBound: upper,
+        state: 'reserved',
+      },
+    } as KernelEvent);
+    const started = {
+      type: 'resource_budget.required_child_wait_started',
+      runId: 'run-1',
+      at: '2026-08-20T00:00:10.000Z',
+      taskIds: ['child-task'],
+    } as KernelEvent;
+    expect(() => reduceLeaseState(state, started)).toThrow('accepted funded completion blocker');
+    state = {
+      ...state,
+      completionGuard: {
+        ...state.completionGuard,
+        waitingReason: { kind: 'required_background', taskIds: ['child-task'] },
+      },
+      tools: {
+        ...state.tools,
+        calls: {
+          'task-call': {
+            toolCallId: 'task-call',
+            name: 'task',
+            createdAtTurnId: 'turn-1',
+            status: 'succeeded',
+            args: { background: true, result_disposition: 'required' },
+            result: { ok: true, resultMeta: { taskId: 'child-task', taskStatus: 'running' } },
+          },
+        },
+      },
+      capabilities: {
+        ...state.capabilities,
+        invocations: {
+          'task-invocation': {
+            invocationId: 'task-invocation',
+            toolCallId: 'task-call',
+            subagentProviderLifecycle: {
+              childSession: {
+                originToolCallId: 'task-call',
+                originRunId: 'run-1',
+                disposition: 'required',
+                delegatedReservationId: 'child-allotment:child-1',
+              },
+            },
+          },
+        },
+      },
+    } as unknown as AgentState;
+    const waiting = reduceLeaseState(state, started);
+    expect(reduceLeaseState(waiting, started)).toBe(waiting);
+    const ended = {
+      type: 'resource_budget.required_child_wait_ended',
+      runId: 'run-1',
+      at: '2026-08-20T00:05:10.000Z',
+      taskIds: ['child-task'],
+    } as KernelEvent;
+    expect(() => reduceLeaseState(waiting, ended)).toThrow('cannot end before');
+    const settled = {
+      ...waiting,
+      tools: {
+        ...waiting.tools,
+        calls: {
+          ...waiting.tools.calls,
+          'task-read': {
+            toolCallId: 'task-read',
+            name: 'task_read',
+            createdAtTurnId: 'turn-1',
+            status: 'succeeded',
+            result: { ok: true, resultMeta: { taskId: 'child-task', taskStatus: 'completed' } },
+          },
+        },
+      },
+    } as unknown as AgentState;
+    const resumed = reduceLeaseState(settled, ended);
+    expect(resumed.resourceBudget.status === 'active' && resumed.resourceBudget.deadlineAt).toBe(
+      '2026-08-20T00:06:00.000Z',
+    );
+    expect(reduceLeaseState(resumed, ended)).toBe(resumed);
+  });
+  test('uncapped Tool budget preserves audit counts and old numeric limits', () => {
+    const initial = reduceLeaseState(initialState(), {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: STARTED_AT,
+      deadlineAt: DEADLINE_AT,
+      budget: { ...budget(0), unboundedToolInvocations: true },
+    } as KernelEvent);
+    let state = initial;
+    for (const id of ['first-tool', 'second-tool']) {
+      state = reduceLeaseState(state, reservation(id, id));
+      state = reduceLeaseState(state, {
+        type: 'resource_budget.dispatch_started',
+        reservationId: id,
+      } as KernelEvent);
+      state = reduceLeaseState(state, {
+        type: 'resource_budget.reconciled',
+        reservationId: id,
+        actual: usage('actual', 1),
+      } as KernelEvent);
+    }
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
+    expect(
+      state.resourceBudget.status === 'active' &&
+        state.resourceBudget.reconciledUsage.counters.toolInvocations,
+    ).toBe(2);
+    expect(() =>
+      reduceLeaseState(configure(undefined, 0), reservation('denied', 'denied')),
+    ).toThrow(/budget exhausted/u);
+    expect(() =>
+      reduceLeaseState(initialState(), {
+        type: 'resource_budget.configured',
+        runId: 'run-1',
+        startedAt: STARTED_AT,
+        deadlineAt: DEADLINE_AT,
+        budget: { ...budget(1), unboundedToolInvocations: true },
+      } as KernelEvent),
+    ).toThrow('zero numeric placeholder');
+  });
   test('kernel invariants count concurrent elapsed time once', () => {
     let state = configure();
     state = reduceLeaseState(state, reservation('first', 'first', 1, 60_000));

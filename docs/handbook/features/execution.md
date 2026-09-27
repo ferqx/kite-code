@@ -26,9 +26,9 @@
 
 有限命令可通过 `shell_execute` 的 `yield_ms` 进入受管后台状态，并用 `shell_read` 读取增量输出或等待终态、用 `shell_stop` 精确停止。输出有界且支持独立读取游标；等待可因新引导让出，但不会因此杀死进程或重置原期限。本轮必需的有限 Shell 或子 Agent 尚未收尾时，Run 保持同一身份并进入受管等待，而不是空转调用模型或先完成再重开。多个有限 Shell 与子 Agent 错峰完成时，局部终态只更新对应卡片和结果；其他必需工作继续等待，不消耗模型纠错次数。Shell 的 `sleep` 能力没有被全局移除，但不能代替受管后台通知。
 
-开发配置需启用 `resourceBudget` 与 `boundedCancellation` 才能运行独立后台子 Agent。新派发的子 Agent 最多可运行 30 分钟，仍须在父 Run 的剩余期限内完成；默认 Limited 预算为三个可受理子任务各预留 30 次模型请求，并保留父 Run 的 30 次模型请求。工具、token 等额度仍各自有界，耗尽后不会自动重试已失败的子任务。当前 Run 没有活动预算时，派发在接纳前明确失败，不创建子 Session，也不把未派发任务标记为外部结果未知。
+开发配置需启用 `resourceBudget` 与 `boundedCancellation` 才能运行独立后台子 Agent。新受理的子 Agent 在自己的 Run 激活时开始独立的最长 30 分钟执行期限；排队和父 Run 先行耗时不扣减该期限。父 Run 必须在受理时仍有活动预算与有效期限。默认 Limited 预算为三个可受理子任务各预留 30 次模型请求，并保留父 Run 的 30 次模型请求；模型请求、token、产物量和并发仍受有限额度约束。新委派的子 Run 没有累计工具调用次数上限，单次工具调用仍须满足角色、策略、审批和执行权限；旧委派按已持久化的原上界执行。额度耗尽后不会自动重试已失败的子任务。当前 Run 没有活动预算时，派发在接纳前明确失败，不创建子 Session，也不把未派发任务标记为外部结果未知。
 
-独立子 Agent 默认异步派发；未声明结果处置时仍为本轮 `required`。模型提交完成候选而唯一剩余条件是 required child 时，Runtime 将同一 Run 投影为等待后台结果，并以关联的 task ID 说明原因；这组 ID 表示进入等待时的必需任务，当前剩余工作以各任务卡的状态为准，该原因不复制 child 生命周期。进度、心跳或日志水位变化只刷新投影，不再次请求模型；终态、失败、取消、需处理的交互或新用户输入等可行动事实才恢复同一 Run。后台子 Agent 的结果 Artifact 写入后，只有 Kernel 接纳并形成 settlement proof，才公开该任务终态并解除对应等待；写入与接纳之间的短暂间隙仍显示为进行中。`task_read` 用于用户主动查询、诊断或读取完整报告，不是等待 primitive 或确认生命周期结束的额外门禁。相同执行 revision 的 `running` 快照不会被反复送回模型驱动轮询。
+独立子 Agent 默认异步派发；未声明结果处置时仍为本轮 `required`。模型提交完成候选而唯一剩余条件是 required child 时，Runtime 将同一 Run 投影为等待后台结果，并以关联的 task ID 说明原因；这组 ID 表示进入等待时的必需任务，当前剩余工作以各任务卡的状态为准，该原因不复制 child 生命周期。对新委派的 required child，父 Run 在这段受管等待中暂停自身执行期限，解除等待时补回实际等待时长，继续原 Run；旧委派保留原期限规则。进度、心跳或日志水位变化只刷新投影，不再次请求模型；终态、失败、取消、需处理的交互或新用户输入等可行动事实才恢复同一 Run。后台子 Agent 的结果 Artifact 写入后，只有 Kernel 接纳并形成 settlement proof，才公开该任务终态并解除对应等待；写入与接纳之间的短暂间隙仍显示为进行中。`task_read` 用于用户主动查询、诊断或读取完整报告，不是等待 primitive 或确认生命周期结束的额外门禁。相同执行 revision 的 `running` 快照不会被反复送回模型驱动轮询。
 
 macOS 与 Linux 上的受管 Shell 不作为 login shell 启动，并移除 `BASH_ENV`、`ENV` 等非交互启动注入，不会在命令之外隐式执行用户的 shell profile、rc 或环境指定的启动文件。命令继承应用已经提供的受控工具链环境；启动文件的权限或内容不会污染本次命令输出，也不会绕过该次工具审批。
 
@@ -38,7 +38,7 @@ Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，�
 
 [后台 Agent 与 Shell 会话协调方案](../../plans/background-agent-shell-conversation-coordination.md)中的多结果等待与工具调用指引已接入独立父子 Session。`send_message` 只把直接父子之间的消息受理进持久邮箱，不启动空闲目标 Run；绑定目标当前 Run 的消息在下一次模型请求作为低信任 Agent 消息输入。`followup_task` 显式请求直接子 Agent 继续：成功的空工具回执表示来源请求已持久受理，目标可能在安全时沿当前 Run 继续，也可能在原 Run 完成后从 checkpoint 开始新 Run；回执不表示目标已读取或完成。`interrupt_agent` 针对直接子 Agent 的当前准确任务提交停止请求，清理确认或 unknown 以服务端持久结果为准，不影响其他子任务。`list_agents` 可读取直接子 Agent、当前 Run 未读计数、已有续轮的最近一次持久终态，以及预派发失败时已结算的具名原因；`wait_agent` 可等待调用者邮箱或该 Run 的 Agent 终态更新，返回 `agent_update` 也不消费邮件。两者不会推进模型已读水位，也不会启动或取消子 Run。`task_id` 仍只代表一次 child 执行，续轮使用新的 task ID。
 
-当前轮续行要求子 Agent 原 Run 仍有准确的未派发模型预算和输入边界；消息在下一次模型请求进入原 Run，已派发的模型请求与工具不会被改写。受限的 `explore`／`plan`／`review` 子 Agent 即使旧 grant 包含工具，也只在可证明的静态只读 `read_file`、`search_content`、`search_files` 模型 Surface 上接纳当前轮消息，之后原 Run 的工具调用继续受这组上界约束；其他情况等待原 Run 终态后尝试新轮。新轮等待并发位时保持已受理状态；在原期限及有界等待内取得执行位才启动目标 Run，等待超期则以 `capacity_timeout` 结算且不派发目标模型。发送方可通过 `list_agents` 或 `wait_agent` 查看具名失败；成功受理本身不承诺目标已经开始执行。
+当前轮续行要求子 Agent 原 Run 仍有准确的未派发模型预算和输入边界；消息在下一次模型请求进入原 Run，已派发的模型请求与工具不会被改写。受限的 `explore`／`plan`／`review` 子 Agent 即使旧 grant 包含工具，也只在可证明的静态只读 `read_file`、`search_content`、`search_files` 模型 Surface 上接纳当前轮消息，之后原 Run 的工具调用继续受这组上界约束；其他情况等待原 Run 终态后尝试新轮。新委派的后续新 turn 在目标 Run 启动时独立开始最长 30 分钟期限，可使用原角色和现行策略共同允许的工具，没有累计工具调用次数上限；每次模型请求、token、产物量和并发仍由发送方 Run 在受理时预留的有限资金约束。父 Run 随后结束不取消已受理的后续新 turn，结果以持久回执和邮箱回复查看。旧 v1 会话继续按原期限、单次模型请求和零工具的持久 grant 回放。新轮等待并发位时保持已受理状态；在有界等待内取得执行位才启动目标 Run，等待超期则以 `capacity_timeout` 结算且不派发目标模型。发送方可通过 `list_agents` 或 `wait_agent` 查看具名失败；成功受理本身不承诺目标已经开始执行。
 
 首轮 required 子任务的结果由原父 Run 以具名 `<subagent_result>` 接纳一次；已结算的 `followup_task` 无论沿当前轮还是开启新轮，均向发送方邮箱发送一次来源明确的状态回复，完整结果仍由 `task_read` 读取。当前轮沿用原 task ID，原父 Run 的 required 结果不会因此重复导入。父 Run 已结束时，回复保留为可查邮件，不自动开启父 Run，也不注入以后的人类 Run。回复进入活动父 Run 的模型输入时仍按低信任 Agent 消息处理。
 

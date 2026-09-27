@@ -27,6 +27,7 @@ test('followup deadline after first Model preparation prevents Provider dispatch
       const { accepted, raw } = await submitRealParentFollowup(
         fixture,
         'Do not dispatch the prepared Model after the original deadline.',
+        true,
       );
       expect(
         await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),

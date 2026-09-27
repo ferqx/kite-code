@@ -67,7 +67,7 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     .get(input.childSessionId);
   if (child?.parent_session_id !== input.parentSessionId) invalidSource();
   assertPair(database, input.childSessionId, input.parentSessionId);
-  const route = database
+  const persistedRoute = database
     .query<
       {
         source_session_id: string;
@@ -83,6 +83,42 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
        FROM agent_followup_routes WHERE target_session_id=? AND submission_id=?`,
     )
     .get(input.childSessionId, input.submissionId);
+  // A failed independent turn can settle before preparing its first Model route.
+  const preDispatch = persistedRoute
+    ? null
+    : database
+        .query<
+          { message_id: string; target_run_id: string; task_id: string; event_id: string },
+          [string, string, string]
+        >(
+          `SELECT o.message_id,r.run_id AS target_run_id,
+           json_extract(e.event_json,'$.taskId') AS task_id,e.event_id
+           FROM agent_mail_outbox o JOIN runtime_runs r
+             ON r.session_id=o.target_session_id
+             AND r.start_command_id='followup:'||o.submission_id
+           JOIN runtime_events e ON e.session_id=o.target_session_id
+             AND json_extract(e.event_json,'$.type')='agent.followup_turn_settled'
+             AND json_extract(e.event_json,'$.submissionId')=o.submission_id
+             AND json_extract(e.event_json,'$.sourceSessionId')=o.source_session_id
+             AND json_extract(e.event_json,'$.targetRunId')=r.run_id
+             AND json_extract(e.event_json,'$.status') IN ('failed','cancelled')
+           WHERE o.target_session_id=? AND o.source_session_id=? AND o.submission_id=?
+             AND o.mode='trigger_turn'`,
+        )
+        .get(input.childSessionId, input.parentSessionId, input.submissionId);
+  const route =
+    persistedRoute ??
+    (preDispatch
+      ? {
+          source_session_id: input.parentSessionId,
+          message_id: preDispatch.message_id,
+          route: 'new_turn',
+          target_run_id: preDispatch.target_run_id,
+          task_id: preDispatch.task_id,
+          invocation_id: preDispatch.event_id,
+        }
+      : null);
+  if (preDispatch && (!preDispatch.task_id || !preDispatch.event_id)) invalidSource();
   if (route?.source_session_id !== input.parentSessionId) invalidSource();
   if (route.route === 'current_turn') return acceptCurrentTurnTerminalReply(database, input, route);
   if (route.route !== 'new_turn') invalidSource();
@@ -93,10 +129,13 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
         submission_id: string | null;
         mode: string;
         source_run_id: string;
+        followup_admission_artifact_id: string | null;
+        followup_admission_digest: string | null;
       },
       [string, string]
     >(
-      `SELECT target_session_id,submission_id,mode,source_run_id FROM agent_mail_outbox
+      `SELECT target_session_id,submission_id,mode,source_run_id,
+       followup_admission_artifact_id,followup_admission_digest FROM agent_mail_outbox
        WHERE source_session_id=? AND message_id=?`,
     )
     .get(input.parentSessionId, route.message_id);
@@ -106,7 +145,12 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     submitted.mode !== 'trigger_turn'
   )
     invalidSource();
-  const funding = database
+  if (
+    preDispatch &&
+    (!submitted.followup_admission_artifact_id || !submitted.followup_admission_digest)
+  )
+    invalidSource();
+  const legacyFunding = database
     .query<
       {
         target_session_id: string;
@@ -130,6 +174,46 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
        WHERE source_session_id=? AND submission_id=?`,
     )
     .get(input.parentSessionId, input.submissionId);
+  const independentAudits = legacyFunding
+    ? []
+    : database
+        .query<{ sequence: number; event_json: string }, [string, string]>(
+          `SELECT sequence,event_json FROM runtime_events WHERE session_id=?
+           AND json_extract(event_json,'$.type')='agent.followup_independent_settled'
+           AND json_extract(event_json,'$.submissionId')=?`,
+        )
+        .all(input.parentSessionId, input.submissionId);
+  if (!legacyFunding && independentAudits.length !== 1) invalidSource();
+  const independent = independentAudits[0];
+  const audit = independent
+    ? (JSON.parse(independent.event_json) as Record<string, unknown>)
+    : null;
+  if (
+    audit &&
+    (audit.targetAgentId !== input.childSessionId ||
+      audit.targetRunId !== route.target_run_id ||
+      !Number.isSafeInteger(audit.targetRevision) ||
+      !Number.isSafeInteger(independent?.sequence) ||
+      !/^sha256:[a-f0-9]{64}$/u.test(String(audit.evidenceDigest)))
+  )
+    invalidSource();
+  const funding =
+    legacyFunding ??
+    (audit && independent
+      ? {
+          target_session_id: input.childSessionId,
+          message_id: route.message_id,
+          target_run_id: route.target_run_id,
+          funding_run_id: submitted.source_run_id,
+          model_invocation_id: route.invocation_id,
+          turn_reservation_id: '',
+          model_reservation_id: '',
+          terminal_disposition: String(audit.disposition),
+          terminal_target_revision: Number(audit.targetRevision),
+          terminal_source_revision: independent.sequence,
+          terminal_evidence_digest: String(audit.evidenceDigest),
+        }
+      : null);
   const parent = database
     .query<{ revision: number }, [string]>(
       'SELECT revision FROM runtime_sessions WHERE session_id=?',
@@ -210,7 +294,7 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     run.last_revision > settledRow.sequence
   )
     invalidSource();
-  if (released) {
+  if (released && !independent) {
     const releases = database
       .query<{ reservation_id: string }, [string, number, string, string]>(
         `SELECT json_extract(event_json,'$.reservationId') AS reservation_id
@@ -834,7 +918,10 @@ export function acceptCrossSessionAcceptedReleaseNoticeInTransaction(
     : null;
   if (
     !admission ||
-    admission.schema !== 'kite.cross-session-followup-admission.v1' ||
+    (admission.schema !== 'kite.cross-session-followup-admission.v1' &&
+      (admission.schema !== 'kite.cross-session-followup-admission.v2' ||
+        (admission.policy as Record<string, unknown> | undefined)?.executionMode !==
+          'independent_turn_v2')) ||
     admission.messageId !== original.message_id ||
     admission.submissionId !== input.submissionId ||
     admission.sourceSessionId !== input.parentSessionId ||
@@ -1598,6 +1685,52 @@ export function listUnrepliedSettledFollowupTerminalSources(
       parentSessionId: row.parent_session_id,
       submissionId: row.submission_id,
     }));
+  const independentTurns = database
+    .query<
+      { child_session_id: string; parent_session_id: string; submission_id: string },
+      (string | number)[]
+    >(
+      `SELECT o.target_session_id AS child_session_id,
+       o.source_session_id AS parent_session_id,o.submission_id
+       FROM agent_mail_outbox o
+       JOIN runtime_sessions child ON child.session_id=o.target_session_id
+       JOIN runtime_sessions parent ON parent.session_id=o.source_session_id
+       JOIN runtime_events audit ON audit.session_id=o.source_session_id
+         AND json_extract(audit.event_json,'$.type')='agent.followup_independent_settled'
+         AND json_extract(audit.event_json,'$.submissionId')=o.submission_id
+         AND json_extract(audit.event_json,'$.targetAgentId')=o.target_session_id
+       JOIN runtime_runs terminal_run ON terminal_run.session_id=o.target_session_id
+         AND terminal_run.run_id=json_extract(audit.event_json,'$.targetRunId')
+       WHERE o.mode='trigger_turn'
+         AND json_extract(audit.event_json,'$.disposition') IN
+           ('completed','pre_dispatch_released')
+         AND child.parent_session_id=parent.session_id
+         AND child.workspace_id=parent.workspace_id AND child.project_id=parent.project_id
+         AND child.workspace_digest=parent.workspace_digest
+         AND EXISTS (SELECT 1 FROM runtime_events settled
+           WHERE settled.session_id=o.target_session_id
+             AND settled.sequence=json_extract(audit.event_json,'$.targetRevision')
+             AND json_extract(settled.event_json,'$.type')='agent.followup_turn_settled'
+             AND json_extract(settled.event_json,'$.sourceSessionId')=o.source_session_id
+             AND json_extract(settled.event_json,'$.submissionId')=o.submission_id
+             AND json_extract(settled.event_json,'$.targetRunId')=terminal_run.run_id
+             AND json_extract(settled.event_json,'$.status')=terminal_run.status)
+         AND ((json_extract(audit.event_json,'$.disposition')='completed'
+             AND terminal_run.status='completed')
+           OR (json_extract(audit.event_json,'$.disposition')='pre_dispatch_released'
+             AND terminal_run.status IN ('failed','cancelled')))
+         AND NOT EXISTS (SELECT 1 FROM agent_mail_outbox reply
+           WHERE reply.source_session_id=o.target_session_id AND reply.mode='reply'
+             AND reply.source_effect_attempt_id=o.submission_id)
+         ${after ? 'AND (o.target_session_id>? OR (o.target_session_id=? AND o.submission_id>?))' : ''}
+       ORDER BY o.target_session_id,o.submission_id LIMIT ?`,
+    )
+    .all(...(after ? [after.childSessionId, after.childSessionId, after.submissionId] : []), limit)
+    .map((row) => ({
+      childSessionId: row.child_session_id,
+      parentSessionId: row.parent_session_id,
+      submissionId: row.submission_id,
+    }));
   const currentTurns = database
     .query<
       { child_session_id: string; parent_session_id: string; submission_id: string },
@@ -1640,7 +1773,7 @@ export function listUnrepliedSettledFollowupTerminalSources(
       parentSessionId: row.parent_session_id,
       submissionId: row.submission_id,
     }));
-  return [...newTurns, ...currentTurns]
+  return [...newTurns, ...independentTurns, ...currentTurns]
     .sort(
       (a, b) =>
         a.childSessionId.localeCompare(b.childSessionId) ||

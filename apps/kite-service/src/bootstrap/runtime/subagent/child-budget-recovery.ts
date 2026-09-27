@@ -1,3 +1,4 @@
+import { DEFAULT_SUBAGENT_TIMEOUT_MS } from '@kite-ai/builtin-runtime/subagent';
 import {
   assertChildBudgetWithinDelegation,
   assertResourceBudget,
@@ -38,9 +39,12 @@ export function recoverChildDelegatedBudget(input: {
     throw new Error('Child budget recovery has no valid persisted upper bound.');
   }
   const upper = reservation?.executableUpperBound;
+  const independentTurnDeadline = upper?.independentChildTurnDeadline === true;
   const parentDeadlineMs = Date.parse(intent.deadlineAt);
   const maximumChildDeadlineMs = grantIssuedAtMs + (upper?.gauges.elapsedRunMs ?? NaN);
-  const deadlineMs = Math.min(parentDeadlineMs, maximumChildDeadlineMs);
+  const deadlineMs = independentTurnDeadline
+    ? nowMs + (upper?.gauges.elapsedRunMs ?? NaN)
+    : Math.min(parentDeadlineMs, maximumChildDeadlineMs);
   const duration = deadlineMs - nowMs;
   if (
     (intent.disposition !== 'required' && intent.disposition !== 'after_turn') ||
@@ -62,6 +66,13 @@ export function recoverChildDelegatedBudget(input: {
     nowMs < grantIssuedAtMs ||
     !Number.isSafeInteger(parentDeadlineMs) ||
     !Number.isSafeInteger(maximumChildDeadlineMs) ||
+    // The parent ledger remains finite. Only its exact, digest-bound child-allotment
+    // reservation may delegate an uncapped child Tool counter (Host/Kernel enforce this).
+    (independentTurnDeadline &&
+      (reservation?.reservationId !== `child-allotment:${intent.childThreadId}` ||
+        reservation.invocationId !== reservation.reservationId ||
+        upper?.unboundedToolInvocations !== true ||
+        upper.gauges.elapsedRunMs !== DEFAULT_SUBAGENT_TIMEOUT_MS)) ||
     !Number.isSafeInteger(duration) ||
     duration < 1
   )
@@ -72,7 +83,10 @@ export function recoverChildDelegatedBudget(input: {
     maxRunDurationMs: Math.min(upper.gauges.elapsedRunMs, duration),
     maxTurns: Math.min(upper.counters.turns, ledger.budget.maxTurns),
     maxModelRequests: Math.min(upper.counters.modelRequests, ledger.budget.maxModelRequests),
-    maxToolInvocations: Math.min(upper.counters.toolInvocations, ledger.budget.maxToolInvocations),
+    maxToolInvocations: independentTurnDeadline
+      ? 0
+      : Math.min(upper.counters.toolInvocations, ledger.budget.maxToolInvocations),
+    ...(independentTurnDeadline ? { unboundedToolInvocations: true as const } : {}),
     maxRunInputTokens: Math.min(upper.counters.inputTokens, ledger.budget.maxRunInputTokens),
     maxRunOutputTokens: Math.min(upper.counters.outputTokens, ledger.budget.maxRunOutputTokens),
     maxArtifactBytes: Math.min(upper.counters.artifactBytes, ledger.budget.maxArtifactBytes),

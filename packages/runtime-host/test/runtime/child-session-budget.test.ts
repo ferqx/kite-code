@@ -17,6 +17,77 @@ const startedAt = '2026-09-23T00:00:00.000Z';
 const deadlineAt = '2026-09-23T00:01:00.000Z';
 
 describe('independent child funding', () => {
+  test('new child turn may have 30 minutes from activation while legacy deadlines stay inherited', () => {
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'child-turn-v1');
+    upper.counters.turns = 1;
+    upper.counters.modelRequests = 1;
+    upper.counters.inputTokens = 1;
+    upper.counters.outputTokens = 1;
+    upper.counters.artifactBytes = 1;
+    upper.gauges.elapsedRunMs = 30 * 60 * 1000;
+    upper.gauges.activeSubagents = 1;
+    upper.gauges.activeToolInvocations = 1;
+    upper.gauges.activeShellInvocations = 1;
+    const reservation = {
+      version: 1 as const,
+      reservationId: 'child-allotment:child',
+      runId: 'parent-run',
+      invocationId: 'child-allotment:child',
+      resourceKind: 'subagent' as const,
+      executableUpperBound: {
+        ...upper,
+        unboundedToolInvocations: true as const,
+        independentChildTurnDeadline: true as const,
+      },
+      state: 'reserved' as const,
+    };
+    const budget = {
+      ...INTERNAL_RESOURCE_BUDGET_,
+      maxRunDurationMs: 30 * 60 * 1000,
+      maxTurns: 1,
+      maxModelRequests: 1,
+      maxToolInvocations: 0,
+      unboundedToolInvocations: true as const,
+      maxRunInputTokens: 1,
+      maxRunOutputTokens: 1,
+      maxArtifactBytes: 1,
+      maxConcurrentSubagents: 1,
+      maxConcurrentWriters: 1,
+      maxConcurrentToolInvocations: 1,
+      maxConcurrentShellInvocations: 1,
+    };
+    const input = {
+      reservation,
+      childBudget: budget,
+      childStartedAt: '2026-09-23T00:00:30.000Z',
+      childDeadlineAt: '2026-09-23T00:30:30.000Z',
+      fundingDeadlineAt: '2026-09-23T00:01:00.000Z',
+      childMaySpawn: false,
+      childMayWrite: false,
+    };
+    expect(() => assertChildBudgetWithinDelegation(input)).not.toThrow();
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        reservation: { ...reservation, executableUpperBound: upper },
+      }),
+    ).toThrow('exceeds its parent delegation');
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        childDeadlineAt: '2026-09-23T00:30:30.001Z',
+      }),
+    ).toThrow('exceeds its parent delegation');
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        reservation: {
+          ...reservation,
+          executableUpperBound: { ...upper, independentChildTurnDeadline: true as const },
+        },
+      }),
+    ).toThrow('exceeds its parent delegation');
+  });
   test('unknown terminal receipt is distinct from a clean terminal receipt', () => {
     const identity = {
       childThreadId: `child_${'a'.repeat(64)}`,

@@ -8,6 +8,7 @@ export type RuntimeClientEventCoverageDecision =
 
 const CLIENT_VISIBLE = [
   'agent.followup_turn_settled',
+  'agent.followup_independent_settled',
   'agent.mail_accepted',
   'agent.mail_input_prepared',
   'approval.granted',
@@ -141,6 +142,8 @@ const INTERNAL_ONLY = [
   'resource_budget.dispatch_started',
   'resource_budget.reconciled',
   'resource_budget.released',
+  'resource_budget.required_child_wait_ended',
+  'resource_budget.required_child_wait_started',
   'resource_budget.reserved',
   'resource_budget.child_slot_acquired',
   'resource_budget.unknown',

@@ -587,6 +587,7 @@ async function executeCoreSubagentToolAdapter(
     if (!input.modelEffectCoordinator || !input.modelInvocationPersistence) {
       throw new Error('ModelInvocationGateway execution context is unavailable.');
     }
+    const resourceBudget = input.modelInvocationPersistence.getState().resourceBudget;
     const modelLoop = createBuiltinSubagentModelLoopEngine<
       RuntimeState,
       RuntimeEvent,
@@ -595,7 +596,9 @@ async function executeCoreSubagentToolAdapter(
       coordinator: input.modelEffectCoordinator,
       initialMessages: messages,
       startModelInvocationOrdinal: modelInvocationOrdinal,
-      maxToolRounds: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS,
+      ...(resourceBudget.status === 'active' && resourceBudget.budget.unboundedToolInvocations
+        ? {}
+        : { maxToolRounds: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }),
       model,
       config: input.config,
       tools,

@@ -431,6 +431,42 @@ describe('Builtin subagent model loop engine', () => {
     expect(fixture.calls[2]!.messages.at(-1)?.content).toContain('Return the concise final result');
   });
 
+  test('keeps tools available beyond twelve rounds when no round ceiling is supplied', async () => {
+    const rounds = DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS + 1;
+    const responses = [
+      ...Array.from({ length: rounds }, (_, index) =>
+        aiMessage({
+          tool_calls: [{ id: `call-${index}`, name: 'read_file', args: { path: 'sample.ts' } }],
+        }),
+      ),
+      aiMessage({ content: 'completed after the thirteenth tool round' }),
+    ];
+    const fixture = coordinatorFor(responses);
+    const tools: ToolSet = Object.freeze({ read_file: {} as ToolSet[string] });
+    const { maxToolRounds: _legacyLimit, ...unlimited } = inputFor(fixture.coordinator);
+    const result = await createBuiltinSubagentModelLoopEngine({
+      ...unlimited,
+      tools,
+      consumer: {
+        consume: ({ append, response }) => {
+          append([toolMessage({ content: 'ok', tool_call_id: response.tool_calls![0]!.id! })]);
+          return { kind: 'continue' };
+        },
+      },
+    }).run();
+
+    expect(result).toMatchObject({
+      kind: 'completed',
+      summary: 'completed after the thirteenth tool round',
+      modelInvocationOrdinal: rounds + 1,
+    });
+    expect(fixture.calls).toHaveLength(rounds + 1);
+    expect(fixture.calls.every((call) => call.tools === tools)).toBe(true);
+    expect(fixture.calls.at(-1)!.messages.at(-1)?.content).not.toContain(
+      'Return the concise final result',
+    );
+  });
+
   test('fails closed when the tool-free finalization still returns a tool call', async () => {
     const toolRound = (id: string) =>
       aiMessage({ tool_calls: [{ id, name: 'read_file', args: { path: `${id}.ts` } }] });

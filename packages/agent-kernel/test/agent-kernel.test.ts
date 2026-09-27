@@ -1183,9 +1183,9 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(165);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(168);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
-    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(20);
+    expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(21);
   });
 
   test('validates and decodes every current State event discriminant', () => {
@@ -1415,10 +1415,10 @@ describe('agent kernel package boundary', () => {
 
   test('classifies all current events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(165);
-    expect(new Set(covered).size).toBe(165);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(145);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(165);
+    expect(covered).toHaveLength(168);
+    expect(new Set(covered).size).toBe(168);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(147);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(168);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -1472,6 +1472,8 @@ describe('agent kernel package boundary', () => {
       const initial = corpusState(type);
       if (
         type === 'resource_budget.child_slot_acquired' ||
+        type === 'resource_budget.required_child_wait_started' ||
+        type === 'resource_budget.required_child_wait_ended' ||
         type === 'subagent.child_session_adopted' ||
         type === 'subagent.child_terminal_sealed' ||
         type === 'subagent.child_task_input_admitted'

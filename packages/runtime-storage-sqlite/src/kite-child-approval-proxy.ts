@@ -1,5 +1,55 @@
 import type { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
+import {
+  readAcceptedIndependentFollowupSourcePolicyProof,
+  readCrossSessionFollowupGrant,
+  readIndependentCrossSessionFollowupActivation,
+  verifyPersistedCrossSessionFollowupRunStart,
+} from './kite-cross-session-followup';
+
+const FOLLOWUP_PROXY_PARENT_TOOL_PREFIX = 'followup-approval:v2:';
+
+export interface FollowupChildApprovalParentToolIdentity {
+  readonly submissionId: string;
+  readonly targetRunId: string;
+  readonly sourceToolCallId: string;
+}
+
+export function followupChildApprovalParentToolCallId(
+  input: FollowupChildApprovalParentToolIdentity,
+): string {
+  const parts = [input.submissionId, input.targetRunId, input.sourceToolCallId];
+  if (parts.some((part) => !part || part.length > 4096))
+    throw new Error('Followup approval source identity is invalid.');
+  return `${FOLLOWUP_PROXY_PARENT_TOOL_PREFIX}${Buffer.from(JSON.stringify(parts)).toString('base64url')}`;
+}
+
+export function parseFollowupChildApprovalParentToolCallId(
+  value: string,
+): FollowupChildApprovalParentToolIdentity | null {
+  if (!value.startsWith(FOLLOWUP_PROXY_PARENT_TOOL_PREFIX)) return null;
+  try {
+    const parts = JSON.parse(
+      Buffer.from(value.slice(FOLLOWUP_PROXY_PARENT_TOOL_PREFIX.length), 'base64url').toString(
+        'utf8',
+      ),
+    ) as unknown;
+    if (
+      !Array.isArray(parts) ||
+      parts.length !== 3 ||
+      parts.some((part) => typeof part !== 'string' || !part || part.length > 4096)
+    )
+      return null;
+    const identity = {
+      submissionId: parts[0] as string,
+      targetRunId: parts[1] as string,
+      sourceToolCallId: parts[2] as string,
+    };
+    return followupChildApprovalParentToolCallId(identity) === value ? identity : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Private parent-visible approval routing facts. No client query may return a row. */
 export const KITE_CHILD_APPROVAL_PROXY_COLUMNS = [
@@ -91,6 +141,211 @@ interface Row {
   child_applied_revision: number | null;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function activeFollowupApprovalIdentity(
+  database: Database,
+  childThreadId: string,
+  postState: unknown,
+  toolCallId: string,
+  interactionId: string,
+  generation: number,
+  requestRevision: number,
+): Readonly<{
+  parentSessionId: string;
+  childInvocationId: string;
+  parentToolCallId: string;
+  grantDigest: string;
+}> | null {
+  const state = record(postState);
+  const session = record(state.session);
+  const origin = record(state.childSessionOrigin);
+  const terminal = record(origin.terminal);
+  const active = record(state.activeFollowupTurn);
+  const turn = record(state.turn);
+  const budget = record(state.resourceBudget);
+  const tool = record(record(record(state.tools).calls)[toolCallId]);
+  const pending =
+    state.pendingApprovals instanceof Map ? record(state.pendingApprovals.get(interactionId)) : {};
+  const parentSessionId = String(active.sourceSessionId ?? '');
+  const submissionId = String(active.submissionId ?? '');
+  const targetRunId = String(active.targetRunId ?? '');
+  const grantDigest = String(active.grantDigest ?? '');
+  if (
+    session.threadId !== childThreadId ||
+    origin.parentSessionId !== parentSessionId ||
+    !origin.childInvocationId ||
+    terminal.status !== 'completed' ||
+    terminal.cleanupConfirmed !== true ||
+    turn.turnId !== targetRunId ||
+    turn.status !== 'active' ||
+    budget.runId !== targetRunId ||
+    budget.status !== 'active' ||
+    tool.toolCallId !== toolCallId ||
+    tool.createdAtTurnId !== targetRunId ||
+    pending.toolCallId !== toolCallId ||
+    pending.generation !== generation ||
+    pending.route !== 'user' ||
+    pending.status !== 'awaiting_user' ||
+    !Number.isSafeInteger(state.revision) ||
+    (state.revision as number) < requestRevision ||
+    !parentSessionId ||
+    !submissionId ||
+    !targetRunId ||
+    !/^sha256:[a-f0-9]{64}$/u.test(grantDigest)
+  )
+    return null;
+  const activation = readIndependentCrossSessionFollowupActivation(
+    database,
+    parentSessionId,
+    submissionId,
+  );
+  const accepted = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    childThreadId,
+    parentSessionId,
+    submissionId,
+  );
+  const grantRef = record(active.grantRef);
+  const grant = readCrossSessionFollowupGrant(database, String(grantRef.artifactId ?? ''));
+  const payload = grant ? record(JSON.parse(grant.canonicalJson)) : {};
+  const sourceToolCallId = accepted?.admission.sourceToolCallId;
+  if (
+    !activation ||
+    !accepted ||
+    !grant ||
+    accepted.policy.targetGrantDigest !== origin.grantDigest ||
+    accepted.policy.targetRole !== origin.role ||
+    activation.targetSessionId !== childThreadId ||
+    activation.targetRunId !== targetRunId ||
+    activation.grantDigest !== grantDigest ||
+    grant.ref.integrityIdentifier !== grantDigest ||
+    payload.schema !== 'kite.child-followup-grant.v2' ||
+    payload.sourceSessionId !== parentSessionId ||
+    payload.targetSessionId !== childThreadId ||
+    payload.submissionId !== submissionId ||
+    payload.targetRunId !== targetRunId ||
+    payload.originRole !== origin.role ||
+    payload.denyTools !== false ||
+    !Array.isArray(payload.allowedTools) ||
+    !payload.allowedTools.includes(tool.name) ||
+    typeof sourceToolCallId !== 'string' ||
+    !sourceToolCallId
+  )
+    return null;
+  return Object.freeze({
+    parentSessionId,
+    childInvocationId: String(origin.childInvocationId),
+    parentToolCallId: followupChildApprovalParentToolCallId({
+      submissionId,
+      targetRunId,
+      sourceToolCallId,
+    }),
+    grantDigest,
+  });
+}
+
+function validHistoricalFollowupApprovalIdentity(
+  database: Database,
+  proxy: Readonly<KiteChildApprovalProxyRecord>,
+): boolean {
+  const identity = parseFollowupChildApprovalParentToolCallId(proxy.parentToolCallId);
+  if (!identity) return false;
+  const run = database
+    .query<{ created_revision: number; start_command_id: string }, [string, string]>(
+      'SELECT created_revision,start_command_id FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(proxy.childThreadId, identity.targetRunId);
+  if (
+    !run ||
+    run.start_command_id !== `followup:${identity.submissionId}` ||
+    run.created_revision >= proxy.childRequestRevision ||
+    !verifyPersistedCrossSessionFollowupRunStart(database, {
+      sessionId: proxy.childThreadId,
+      runId: identity.targetRunId,
+      startCommandId: run.start_command_id,
+      createdRevision: run.created_revision,
+      originSessionId: undefined,
+    })
+  )
+    return false;
+  const intervening = database
+    .query<{ count: number }, [string, number, number]>(
+      `SELECT count(*) AS count FROM runtime_runs WHERE session_id=?
+       AND created_revision>? AND created_revision<=?`,
+    )
+    .get(proxy.childThreadId, run.created_revision, proxy.childRequestRevision)?.count;
+  if (intervening !== 0) return false;
+  const preparedRows = database
+    .query<{ event_json: string }, [string, string, string]>(
+      `SELECT event_json FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='agent.followup_turn_prepared'
+       AND json_extract(event_json,'$.submissionId')=?
+       AND json_extract(event_json,'$.targetRunId')=?`,
+    )
+    .all(proxy.childThreadId, identity.submissionId, identity.targetRunId);
+  if (preparedRows.length !== 1) return false;
+  const prepared = record(JSON.parse(preparedRows[0]!.event_json));
+  const grant = readCrossSessionFollowupGrant(
+    database,
+    String(record(prepared.grantRef).artifactId ?? ''),
+  );
+  const payload = grant ? record(JSON.parse(grant.canonicalJson)) : {};
+  const outbox = database
+    .query<
+      { source_tool_call_id: string; followup_admission_artifact_id: string | null },
+      [string, string, string]
+    >(
+      `SELECT source_tool_call_id,followup_admission_artifact_id FROM agent_mail_outbox
+       WHERE source_session_id=? AND target_session_id=? AND submission_id=? AND mode='trigger_turn'`,
+    )
+    .get(proxy.parentSessionId, proxy.childThreadId, identity.submissionId);
+  const admissionRow = outbox?.followup_admission_artifact_id
+    ? database
+        .query<{ canonical_json: string }, [string]>(
+          'SELECT canonical_json FROM agent_followup_admission_artifacts WHERE artifact_id=?',
+        )
+        .get(outbox.followup_admission_artifact_id)
+    : null;
+  const admission = admissionRow ? record(JSON.parse(admissionRow.canonical_json)) : {};
+  const request = database
+    .query<{ event_json: string }, [string, number]>(
+      'SELECT event_json FROM runtime_events WHERE session_id=? AND sequence=?',
+    )
+    .get(proxy.childThreadId, proxy.childRequestRevision);
+  const approval = request ? record(record(JSON.parse(request.event_json)).approval) : {};
+  const dispatches = admission.backupReservationId
+    ? database
+        .query<{ count: number }, [string, string]>(
+          `SELECT count(*) AS count FROM runtime_events WHERE session_id=?
+           AND json_extract(event_json,'$.type')='resource_budget.dispatch_started'
+           AND json_extract(event_json,'$.reservationId')=?`,
+        )
+        .get(proxy.parentSessionId, String(admission.backupReservationId))?.count
+    : 0;
+  return Boolean(
+    prepared.sourceSessionId === proxy.parentSessionId &&
+      prepared.grantDigest === proxy.grantDigest &&
+      grant?.ref.integrityIdentifier === proxy.grantDigest &&
+      payload.schema === 'kite.child-followup-grant.v2' &&
+      payload.sourceSessionId === proxy.parentSessionId &&
+      payload.targetSessionId === proxy.childThreadId &&
+      payload.submissionId === identity.submissionId &&
+      payload.targetRunId === identity.targetRunId &&
+      payload.denyTools === false &&
+      Array.isArray(payload.allowedTools) &&
+      payload.allowedTools.includes(approval.tool) &&
+      outbox?.source_tool_call_id === identity.sourceToolCallId &&
+      admission.sourceToolCallId === identity.sourceToolCallId &&
+      admission.schema === 'kite.cross-session-followup-admission.v2' &&
+      dispatches === 1,
+  );
+}
+
 function rowToRecord(row: Row): KiteChildApprovalProxyRecord {
   return Object.freeze({
     proxyInteractionId: row.proxy_interaction_id,
@@ -140,6 +395,7 @@ export function openChildApprovalProxyInTransaction(
     readonly childRequestRevision: number;
     readonly childToolCallId: string;
     readonly approvalDigest: string;
+    readonly postState?: unknown;
   },
 ): KiteChildApprovalProxyRecord {
   if (
@@ -164,9 +420,40 @@ export function openChildApprovalProxyInTransaction(
       [string]
     >(`SELECT parent_session_id,child_invocation_id,origin_tool_call_id,grant_digest
     FROM child_session_intents WHERE child_thread_id=? AND dispatch_ack_event_id IS NOT NULL
-      AND failure_receipt_digest IS NULL AND parent_claim_settled_event_id IS NULL LIMIT 1`)
+      AND failure_receipt_digest IS NULL LIMIT 1`)
     .get(input.childThreadId);
-  if (!intent) throw new Error('Child approval proxy lacks an active acknowledged child intent.');
+  if (!intent) throw new Error('Child approval proxy lacks an acknowledged child intent.');
+  const followup = activeFollowupApprovalIdentity(
+    database,
+    input.childThreadId,
+    input.postState,
+    input.childToolCallId,
+    input.childInteractionId,
+    input.childGeneration,
+    input.childRequestRevision,
+  );
+  if (
+    followup &&
+    (followup.parentSessionId !== intent.parent_session_id ||
+      followup.childInvocationId !== intent.child_invocation_id ||
+      record(record(input.postState).childSessionOrigin).grantDigest !== intent.grant_digest)
+  )
+    throw new Error('Followup approval changed the original parent lineage.');
+  if (record(input.postState).activeFollowupTurn && !followup)
+    throw new Error('Followup approval lacks its exact active Run and source activation.');
+  if (!followup) {
+    const unsettled = database
+      .query<{ count: number }, [string]>(
+        `SELECT count(*) AS count FROM child_session_intents WHERE child_thread_id=?
+         AND parent_claim_settled_event_id IS NULL`,
+      )
+      .get(input.childThreadId)?.count;
+    if (unsettled !== 1)
+      throw new Error('Child approval proxy lacks an active acknowledged child intent.');
+  }
+  const parentSessionId = followup?.parentSessionId ?? intent.parent_session_id;
+  const parentToolCallId = followup?.parentToolCallId ?? intent.origin_tool_call_id;
+  const grantDigest = followup?.grantDigest ?? intent.grant_digest;
   const event = database
     .query<{ event_json: string }, [string, number]>(
       'SELECT event_json FROM runtime_events WHERE session_id=? AND sequence=? LIMIT 1',
@@ -183,7 +470,7 @@ export function openChildApprovalProxyInTransaction(
   )
     throw new Error('Child approval request differs from the canonical Event.');
   const proxyInteractionId = childApprovalProxyId(input);
-  const existing = readChildApprovalProxy(database, intent.parent_session_id, proxyInteractionId);
+  const existing = readChildApprovalProxy(database, parentSessionId, proxyInteractionId);
   if (existing) {
     if (
       existing.childThreadId !== input.childThreadId ||
@@ -192,7 +479,8 @@ export function openChildApprovalProxyInTransaction(
       existing.childRequestRevision !== input.childRequestRevision ||
       existing.childToolCallId !== input.childToolCallId ||
       existing.approvalDigest !== input.approvalDigest ||
-      existing.grantDigest !== intent.grant_digest
+      existing.grantDigest !== grantDigest ||
+      existing.parentToolCallId !== parentToolCallId
     )
       throw new Error('Child approval proxy replay conflicts with its original request.');
     return existing;
@@ -204,18 +492,18 @@ export function openChildApprovalProxyInTransaction(
     approval_digest,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending')`)
     .run(
       proxyInteractionId,
-      intent.parent_session_id,
+      parentSessionId,
       input.childThreadId,
       intent.child_invocation_id,
-      intent.origin_tool_call_id,
+      parentToolCallId,
       input.childToolCallId,
-      intent.grant_digest,
+      grantDigest,
       input.childInteractionId,
       input.childGeneration,
       input.childRequestRevision,
       input.approvalDigest,
     );
-  return readChildApprovalProxy(database, intent.parent_session_id, proxyInteractionId)!;
+  return readChildApprovalProxy(database, parentSessionId, proxyInteractionId)!;
 }
 
 export function readChildApprovalProxy(
@@ -439,6 +727,7 @@ export function synchronizeChildApprovalProxyInTransaction(
         childRequestRevision: revision,
         childToolCallId: event.toolCallId,
         approvalDigest: `sha256:${createHash('sha256').update(canonical.event_json).digest('hex')}`,
+        postState: transaction.snapshot,
       });
     } else if (event.type === 'approval.granted' || event.type === 'approval.rejected') {
       if (!Number.isSafeInteger(event.generation))
@@ -498,8 +787,10 @@ export function validateChildApprovalProxyContinuity(database: Database): void {
       !intent ||
       intent.parent_session_id !== proxy.parentSessionId ||
       intent.child_invocation_id !== proxy.childInvocationId ||
-      intent.origin_tool_call_id !== proxy.parentToolCallId ||
-      intent.grant_digest !== proxy.grantDigest ||
+      (parseFollowupChildApprovalParentToolCallId(proxy.parentToolCallId)
+        ? !validHistoricalFollowupApprovalIdentity(database, proxy)
+        : intent.origin_tool_call_id !== proxy.parentToolCallId ||
+          intent.grant_digest !== proxy.grantDigest) ||
       !intent.dispatch_ack_event_id
     )
       throw new Error('Child approval proxy lost its acknowledged parent intent.');

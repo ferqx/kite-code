@@ -129,7 +129,11 @@ test('three read-only child allotments reconcile transient Tools and coexist und
     expect(plan.childBudget.maxTurns).toBe(8);
     expect(plan.childBudget.maxModelRequests).toBe(30);
     expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
-    expect(Date.parse(plan.deadlineAt)).toBeLessThanOrEqual(Date.parse(DEADLINE));
+    expect(plan.childBudget.unboundedToolInvocations).toBe(true);
+    expect(plan.childBudget.maxToolInvocations).toBe(0);
+    expect(plan.reservation.executableUpperBound.unboundedToolInvocations).toBe(true);
+    expect(plan.reservation.executableUpperBound.independentChildTurnDeadline).toBe(true);
+    expect(Date.parse(plan.deadlineAt)).toBe(NOW + 30 * 60_000);
     reservations.push(plan.reservation);
     state = applyPlanned(state, plan.events);
   }
@@ -138,7 +142,7 @@ test('three read-only child allotments reconcile transient Tools and coexist und
     [1, 2, 3].map((index) => `child-allotment:${childId(index)}`),
   );
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
-  expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(252);
+  expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(3);
 });
 
 test('LIMITED budget queues a third finite child allotment and promotes it after one settles', () => {
@@ -217,7 +221,7 @@ test('LIMITED budget queues a third finite child allotment and promotes it after
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(2);
 });
 
-test('short remaining parent deadline tightens a positive child share', () => {
+test('short remaining parent deadline does not shorten the new child turn', () => {
   const base = initialState(LIMITED_RESOURCE_BUDGET_);
   if (base.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
   const deadlineAt = new Date(NOW + 25).toISOString();
@@ -234,9 +238,9 @@ test('short remaining parent deadline tightens a positive child share', () => {
     taskArtifactBytes: 1,
     now: NOW + 10,
   });
-  expect(plan.childBudget.maxRunDurationMs).toBe(15);
-  expect(plan.deadlineAt).toBe(deadlineAt);
-  expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(15);
+  expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
+  expect(plan.deadlineAt).toBe(new Date(NOW + 10 + 30 * 60_000).toISOString());
+  expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(30 * 60_000);
 });
 
 test('code children consume the parent writer gauge without overbooking', () => {
@@ -322,7 +326,7 @@ test('same facts produce the same child allotment identity and stale input is re
   ).toThrow('transient reservation is not reconcilable');
 });
 
-test('delayed child activation tightens duration without changing the parent allotment', () => {
+test('delayed child activation starts its own 30-minute clock without changing parent allotment', () => {
   const plan = planChildDelegatedAllotment({
     state: withTransient(initialState(), 1),
     transientReservationId: transientId(1),
@@ -337,15 +341,23 @@ test('delayed child activation tightens duration without changing the parent all
     childBudget: plan.childBudget,
     deadlineAt: plan.deadlineAt,
     startedAt,
+    independentTurnDeadline: true,
   });
-  expect(activated.maxRunDurationMs).toBe(Date.parse(plan.deadlineAt) - startedAt);
-  expect(activated.maxRunDurationMs).toBeLessThan(plan.childBudget.maxRunDurationMs);
+  expect(activated.maxRunDurationMs).toBe(30 * 60_000);
   expect(plan.childBudget.maxRunDurationMs).toBe(
     plan.reservation.executableUpperBound.gauges.elapsedRunMs,
   );
-  expect(() =>
+  expect(
     childBudgetAtActivation({
       childBudget: plan.childBudget,
+      deadlineAt: plan.deadlineAt,
+      startedAt: Date.parse(plan.deadlineAt),
+      independentTurnDeadline: true,
+    }).maxRunDurationMs,
+  ).toBe(30 * 60_000);
+  expect(() =>
+    childBudgetAtActivation({
+      childBudget: { ...plan.childBudget, unboundedToolInvocations: undefined },
       deadlineAt: plan.deadlineAt,
       startedAt: Date.parse(plan.deadlineAt),
     }),

@@ -427,6 +427,97 @@ describe('State restart recovery projection', () => {
     ).toThrow('no-attempt proof conflicts');
   });
 
+  test('retains v2 source funding while target recovery owns Model certainty', () => {
+    const initial = createInitialAgentState({
+      threadId: 'funding-session',
+      userId: 'user-1',
+      workspace: '/workspace',
+      turnId: 'funding-run',
+      recoveryIdentityKey: RECOVERY_KEY,
+    });
+    const configured = reduceAgentState(initial, {
+      type: 'resource_budget.configured',
+      runId: 'funding-run',
+      startedAt: '2026-09-25T00:00:00.000Z',
+      deadlineAt: '2026-09-25T00:30:00.000Z',
+      budget: {
+        version: 1,
+        maxRunDurationMs: 30 * 60_000,
+        maxTurns: 2,
+        maxModelRequests: 40,
+        maxToolInvocations: 1,
+        maxRunInputTokens: 1_000,
+        maxRunOutputTokens: 1_000,
+        maxArtifactBytes: 10,
+        maxConcurrentSubagents: 2,
+        maxConcurrentWriters: 1,
+        maxConcurrentToolInvocations: 1,
+        maxConcurrentShellInvocations: 1,
+        maxConcurrencyWaitMs: 1_000,
+      },
+    });
+    const reserved = reduceAgentState(configured, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        version: 1,
+        reservationId: backupId,
+        runId: 'funding-run',
+        invocationId: 'submission-1',
+        resourceKind: 'subagent',
+        executableUpperBound: {
+          source: 'versioned_upper_bound',
+          estimatorVersion: 'cross-session-followup-backup-v2',
+          independentFollowupTurn: true,
+          unboundedToolInvocations: true,
+          counters: {
+            turns: 1,
+            modelRequests: 5,
+            toolInvocations: 0,
+            inputTokens: 100,
+            outputTokens: 50,
+            artifactBytes: 1,
+          },
+          gauges: {
+            elapsedRunMs: 30 * 60_000,
+            activeSubagents: 1,
+            activeWriters: 0,
+            activeToolInvocations: 1,
+            activeShellInvocations: 1,
+          },
+        },
+        state: 'reserved',
+      },
+    });
+    const activated = reduceAgentState(reserved, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: backupId,
+    });
+    const proof = {
+      fundingRunId: 'funding-run',
+      submissionId: 'submission-1',
+      stage: 'activated' as const,
+      backupReservationId: backupId,
+      turnReservationId: null,
+      modelReservationId: null,
+      modelInvocationId: 'model-1',
+    };
+    expect([...verifiedPendingFollowupReservationIds(activated, [proof])]).toEqual([backupId]);
+    expect(
+      projectStateRestartRecoveryEvents(activated, {
+        ...noOtherRecovery,
+        preservePendingFollowupFunding: [proof],
+      }).filter((event) => event.type === 'resource_budget.unknown'),
+    ).toEqual([]);
+    expect(
+      projectStateRestartRecoveryEvents(activated, noOtherRecovery).filter(
+        (event) => event.type === 'resource_budget.unknown',
+      ),
+    ).toContainEqual({ type: 'resource_budget.unknown', reservationId: backupId });
+    expect(() =>
+      verifiedPendingFollowupReservationIds(activated, [{ ...proof, stage: 'replaced' }]),
+    ).toThrow('Independent TriggerTurn recovery proof conflicts');
+  });
+
   test('retains one dispatched child allotment only with routed no-attempt proof', () => {
     const childThreadId = `child_${'a'.repeat(64)}`;
     const reservationId = `child-allotment:${childThreadId}`;

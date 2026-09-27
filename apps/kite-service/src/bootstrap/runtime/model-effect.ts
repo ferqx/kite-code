@@ -108,9 +108,25 @@ export function delegatedToolSurface<T extends Record<string, unknown>>(
   )
     throw new Error('Child Session model surface lacks its exact sealed grant ceiling.');
   if (followup) {
-    if (ceiling.denyTools !== true || ceiling.allowedTools.length !== 0)
-      throw new Error('Child followup Model surface must deny every Tool.');
-    return {} as T;
+    if (
+      state.resourceBudget.status !== 'active' ||
+      state.resourceBudget.budget.unboundedToolInvocations !== true
+    ) {
+      if (ceiling.denyTools !== true || ceiling.allowedTools.length !== 0)
+        throw new Error('Child followup Model surface must deny every Tool.');
+      return {} as T;
+    }
+    if (ceiling.denyTools === true) {
+      if (ceiling.allowedTools.length !== 0)
+        throw new Error('Legacy child followup must deny every Tool.');
+      return {} as T;
+    }
+    if (
+      ceiling.allowedTools.length === 0 ||
+      new Set(ceiling.allowedTools).size !== ceiling.allowedTools.length ||
+      ceiling.allowedTools.includes('task')
+    )
+      throw new Error('Independent child followup lacks an exact Tool grant.');
   }
   const allowed = getRoleConfig(origin.role).allowedTools;
   const unrestrictedCode = origin.role === 'code' && ceiling.allowedTools.length === 0;

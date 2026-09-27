@@ -574,11 +574,31 @@ export async function* executeRuntimeTurn(
   };
   if (input.signal?.aborted) forwardExternalAbort();
   else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
-  const scheduleRunDeadline = (deadlineAt: string): void => {
-    if (runDeadlineTimer) return;
-    const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
+  const scheduleRunDeadline = (): void => {
+    if (runDeadlineTimer) {
+      clearTimeout(runDeadlineTimer);
+      runDeadlineTimer = undefined;
+    }
+    const current = kernel.getState();
+    const budget = current.resourceBudget;
+    if (
+      runCancelled ||
+      current.turn.status !== 'active' ||
+      budget.status !== 'active' ||
+      budget.requiredChildWait
+    )
+      return;
+    const remainingMs = Math.max(0, Date.parse(budget.deadlineAt) - Date.now());
     runDeadlineTimer = setTimeout(() => {
-      if (runCancelled || kernel.getState().turn.status !== 'active') return;
+      runDeadlineTimer = undefined;
+      const latest = kernel.getState();
+      if (runCancelled || latest.turn.status !== 'active') return;
+      if (latest.resourceBudget.status !== 'active' || latest.resourceBudget.requiredChildWait)
+        return;
+      if (Date.now() < Date.parse(latest.resourceBudget.deadlineAt)) {
+        scheduleRunDeadline();
+        return;
+      }
       deadlineCancellationEvents = cancelForDeadline();
     }, remainingMs);
   };
@@ -660,7 +680,7 @@ export async function* executeRuntimeTurn(
           budget: LIMITED_RESOURCE_BUDGET_,
         };
         const applied = kernel.processEventBatch([event]);
-        scheduleRunDeadline(event.deadlineAt);
+        scheduleRunDeadline();
         for (const accepted of applied) {
           collector.recordRuntime(accepted);
           yield accepted;
@@ -668,7 +688,7 @@ export async function* executeRuntimeTurn(
       }
     }
     const activeBudget = kernel.getState().resourceBudget;
-    if (activeBudget.status === 'active') scheduleRunDeadline(activeBudget.deadlineAt);
+    if (activeBudget.status === 'active') scheduleRunDeadline();
     if (hasPendingSubagentProviderRecovery(kernel.getState())) {
       const recovery = await reconcilePendingSubagentProviders();
       for (const event of recovery.events) {
@@ -1076,6 +1096,11 @@ export async function* executeRuntimeTurn(
       }
       const event = step.value;
       collector.recordRuntime(event);
+      if (
+        event.type === 'resource_budget.required_child_wait_started' ||
+        event.type === 'resource_budget.required_child_wait_ended'
+      )
+        scheduleRunDeadline();
       let abortReasonAfterProjection: string | undefined;
       if (event.type === 'approval.rejected' && event.failure?.kind === 'approval_rejected') {
         runCancelled = true;

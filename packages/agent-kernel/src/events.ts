@@ -449,6 +449,8 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'registeredAt',
   ],
   'resource_budget.configured': ['runId', 'startedAt', 'deadlineAt', 'budget'],
+  'resource_budget.required_child_wait_started': ['runId', 'at', 'taskIds'],
+  'resource_budget.required_child_wait_ended': ['runId', 'at', 'taskIds'],
   'resource_budget.dispatch_started': ['reservationId'],
   'resource_budget.reconciled': ['reservationId', 'actual'],
   'resource_budget.released': ['reservationId'],
@@ -477,6 +479,15 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'targetRunId',
     'taskId',
     'status',
+  ],
+  'agent.followup_independent_settled': [
+    'submissionId',
+    'targetAgentId',
+    'targetRunId',
+    'targetRevision',
+    'disposition',
+    'evidenceDigest',
+    'createdAtMs',
   ],
   'agent.mail_accepted': [
     'messageId',
@@ -692,7 +703,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
 /** Count of current State event discriminants; read-only compatibility remains separate. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 165 as const;
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 168 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -732,6 +743,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
   'agent.turn_started',
   'agent.mail_accepted',
   'agent.followup_routed',
+  'agent.followup_independent_settled',
   'agent.mail_input_prepared',
   'agent.task_settled',
   'background_execution.stop_settled',
@@ -754,7 +766,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 165 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 168 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -1025,6 +1037,18 @@ type ResourceBudgetEventMap = {
     deadlineAt: string;
     budget: ResourceBudget;
   };
+  'resource_budget.required_child_wait_started': {
+    type: 'resource_budget.required_child_wait_started';
+    runId: string;
+    at: string;
+    taskIds: string[];
+  };
+  'resource_budget.required_child_wait_ended': {
+    type: 'resource_budget.required_child_wait_ended';
+    runId: string;
+    at: string;
+    taskIds: string[];
+  };
   'resource_budget.reserved': {
     type: 'resource_budget.reserved';
     reservation: ResourceReservation;
@@ -1096,6 +1120,16 @@ export interface AgentFollowupAdmissionArtifactRef {
 }
 
 type AgentEventMap = {
+  'agent.followup_independent_settled': {
+    type: 'agent.followup_independent_settled';
+    submissionId: string;
+    targetAgentId: string;
+    targetRunId: string;
+    targetRevision: number;
+    disposition: 'completed' | 'unknown' | 'pre_dispatch_released';
+    evidenceDigest: string;
+    createdAtMs: number;
+  };
   'agent.followup_turn_settled': {
     type: 'agent.followup_turn_settled';
     sourceSessionId: string;

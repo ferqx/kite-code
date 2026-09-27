@@ -64,18 +64,30 @@ export function assertChildBudgetWithinDelegation(input: {
     childMayWrite,
   } = input;
   const upper = reservation.executableUpperBound;
+  assertResourceBudget(childBudget);
+  assertResourceUsage(upper);
+  const childTurnDurationMs = Date.parse(childDeadlineAt) - Date.parse(childStartedAt);
+  const independentTurn = upper.independentChildTurnDeadline === true;
   if (
     reservation.resourceKind !== 'subagent' ||
+    (independentTurn &&
+      (!reservation.reservationId.startsWith('child-allotment:') ||
+        reservation.invocationId !== reservation.reservationId)) ||
     (reservation.state !== 'reserved' && reservation.state !== 'dispatch_started') ||
     upper.source !== 'versioned_upper_bound' ||
     !Number.isFinite(Date.parse(childStartedAt)) ||
     !Number.isFinite(Date.parse(childDeadlineAt)) ||
     Date.parse(childDeadlineAt) <= Date.parse(childStartedAt) ||
-    Date.parse(childDeadlineAt) > Date.parse(fundingDeadlineAt) ||
+    (independentTurn
+      ? childTurnDurationMs > Math.min(upper.gauges.elapsedRunMs, 30 * 60 * 1000)
+      : Date.parse(childDeadlineAt) > Date.parse(fundingDeadlineAt)) ||
     childBudget.maxRunDurationMs > Date.parse(childDeadlineAt) - Date.parse(childStartedAt) ||
     childBudget.maxTurns > upper.counters.turns ||
     childBudget.maxModelRequests > upper.counters.modelRequests ||
-    childBudget.maxToolInvocations > upper.counters.toolInvocations ||
+    (childBudget.unboundedToolInvocations === true
+      ? upper.unboundedToolInvocations !== true
+      : upper.unboundedToolInvocations !== true &&
+        childBudget.maxToolInvocations > upper.counters.toolInvocations) ||
     childBudget.maxRunInputTokens > upper.counters.inputTokens ||
     childBudget.maxRunOutputTokens > upper.counters.outputTokens ||
     childBudget.maxArtifactBytes > upper.counters.artifactBytes ||
@@ -96,6 +108,10 @@ type MutableResourceUsage = {
 
 type ResourceBudgetEventOf<T extends KernelEvent['type']> = Extract<KernelEvent, { type: T }>;
 export type ResourceBudgetConfiguredEvent = ResourceBudgetEventOf<'resource_budget.configured'>;
+export type ResourceBudgetRequiredChildWaitStartedEvent =
+  ResourceBudgetEventOf<'resource_budget.required_child_wait_started'>;
+export type ResourceBudgetRequiredChildWaitEndedEvent =
+  ResourceBudgetEventOf<'resource_budget.required_child_wait_ended'>;
 export type ResourceBudgetReservedEvent = ResourceBudgetEventOf<'resource_budget.reserved'>;
 export type ResourceBudgetChildSlotAcquiredEvent =
   ResourceBudgetEventOf<'resource_budget.child_slot_acquired'>;
@@ -116,6 +132,8 @@ export type ResourceBudgetWaiterTimedOutEvent =
   ResourceBudgetEventOf<'resource_budget.waiter_timed_out'>;
 export type ResourceBudgetEvent =
   | ResourceBudgetConfiguredEvent
+  | ResourceBudgetRequiredChildWaitStartedEvent
+  | ResourceBudgetRequiredChildWaitEndedEvent
   | ResourceBudgetReservedEvent
   | ResourceBudgetChildSlotAcquiredEvent
   | ResourceBudgetBoundedReplacedEvent
@@ -199,6 +217,21 @@ function nonEmpty(value: string, field: string): void {
   if (value.trim().length === 0) throw new Error(`${field} must be non-empty.`);
 }
 
+function exactTaskIds(value: readonly string[], expected?: readonly string[]): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    (expected === undefined || value.length === expected.length) &&
+    value.every(
+      (id, index) =>
+        typeof id === 'string' &&
+        id.length > 0 &&
+        (index === 0 || value[index - 1]! < id) &&
+        (expected === undefined || id === expected[index]),
+    )
+  );
+}
+
 export function assertResourceBudget(value: ResourceBudget): void {
   if (value.version !== 1) throw new Error(`Unsupported ResourceBudget version.`);
   const zeroAllowed = new Set<keyof ResourceBudget>([
@@ -213,6 +246,11 @@ export function assertResourceBudget(value: ResourceBudget): void {
     if (!Number.isSafeInteger(value[field]) || value[field] < (zeroAllowed.has(field) ? 0 : 1))
       throw new Error(`${field} must be a safe integer within its capability ceiling.`);
   }
+  if (
+    value.unboundedToolInvocations !== undefined &&
+    (value.unboundedToolInvocations !== true || value.maxToolInvocations !== 0)
+  )
+    throw new Error('Unbounded Tool budget must use a zero numeric placeholder.');
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
   if (value.maxConcurrentWriters > value.maxConcurrentToolInvocations)
@@ -226,6 +264,17 @@ export function assertResourceUsage(value: ResourceUsage): void {
     nonEmpty(value.estimatorVersion ?? '', 'estimatorVersion');
   if (value.source === 'actual' && value.estimatorVersion !== undefined)
     throw new Error('Actual usage must not declare estimatorVersion.');
+  if (
+    (value.unboundedToolInvocations !== undefined &&
+      (value.source !== 'versioned_upper_bound' ||
+        value.unboundedToolInvocations !== true ||
+        value.counters.toolInvocations !== 0)) ||
+    (value.independentChildTurnDeadline !== undefined &&
+      (value.source !== 'versioned_upper_bound' || value.independentChildTurnDeadline !== true)) ||
+    (value.independentFollowupTurn !== undefined &&
+      (value.source !== 'versioned_upper_bound' || value.independentFollowupTurn !== true))
+  )
+    throw new Error('Resource usage authority markers are invalid.');
 }
 
 export function createZeroResourceUsage(
@@ -267,6 +316,8 @@ export function tightenResourceBudget(
     if (requested != null && requested > base[field])
       throw new Error(`${field} can only be lowered from the effective release budget.`);
   }
+  if (tightening.unboundedToolInvocations === true && base.unboundedToolInvocations !== true)
+    throw new Error('Unbounded Tool authority cannot be added by tightening.');
   const result = { ...base, ...tightening, version: 1 as const };
   assertResourceBudget(result);
   return result;
@@ -296,23 +347,39 @@ function addUsage(left: ResourceUsage, right: ResourceUsage): ResourceUsage {
     },
     source,
     ...(source === 'versioned_upper_bound'
-      ? { estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1' }
+      ? {
+          estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1',
+          ...(left.unboundedToolInvocations || right.unboundedToolInvocations
+            ? { unboundedToolInvocations: true as const }
+            : {}),
+        }
       : {}),
   };
 }
 
 function withinUpperBound(actual: ResourceUsage, upper: ResourceUsage): boolean {
   return (
-    COUNTER_FIELDS.every((field) => actual.counters[field] <= upper.counters[field]) &&
-    GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
+    COUNTER_FIELDS.every(
+      (field) =>
+        (field === 'toolInvocations' && upper.unboundedToolInvocations === true) ||
+        actual.counters[field] <= upper.counters[field],
+    ) && GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
   );
 }
 
-function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
+function withinBudget(
+  usage: ResourceUsage,
+  budget: ResourceBudget,
+  delegatedToolInvocations = 0,
+): boolean {
   return (
+    Number.isSafeInteger(delegatedToolInvocations) &&
+    delegatedToolInvocations >= 0 &&
+    delegatedToolInvocations <= usage.counters.toolInvocations &&
     usage.counters.turns <= budget.maxTurns &&
     usage.counters.modelRequests <= budget.maxModelRequests &&
-    usage.counters.toolInvocations <= budget.maxToolInvocations &&
+    (budget.unboundedToolInvocations === true ||
+      usage.counters.toolInvocations - delegatedToolInvocations <= budget.maxToolInvocations) &&
     usage.counters.inputTokens <= budget.maxRunInputTokens &&
     usage.counters.outputTokens <= budget.maxRunOutputTokens &&
     usage.counters.artifactBytes <= budget.maxArtifactBytes &&
@@ -321,6 +388,18 @@ function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
     usage.gauges.activeWriters <= budget.maxConcurrentWriters &&
     usage.gauges.activeToolInvocations <= budget.maxConcurrentToolInvocations &&
     usage.gauges.activeShellInvocations <= budget.maxConcurrentShellInvocations
+  );
+}
+
+function delegatedToolInvocations(active: AgentResourceBudgetActiveState): number {
+  return Object.values(active.reservations).reduce(
+    (total, reservation) =>
+      total +
+      (reservation.state === 'reconciled' &&
+      reservation.executableUpperBound.unboundedToolInvocations === true
+        ? (reservation.actual?.counters.toolInvocations ?? 0)
+        : 0),
+    0,
   );
 }
 
@@ -356,6 +435,31 @@ function assertReservation(value: BudgetReservation): void {
   assertResourceUsage(value.executableUpperBound);
   if (value.executableUpperBound.source !== 'versioned_upper_bound')
     throw new Error('executableUpperBound must use versioned_upper_bound usage.');
+  if (
+    value.executableUpperBound.unboundedToolInvocations === true &&
+    !(
+      value.resourceKind === 'subagent' &&
+      ((value.reservationId.startsWith('child-allotment:') &&
+        value.invocationId === value.reservationId) ||
+        (/^backup_[a-f0-9]{64}$/u.test(value.reservationId) &&
+          value.executableUpperBound.independentFollowupTurn === true))
+    )
+  )
+    throw new Error('Unbounded Tool upper bound requires an exact child funding reservation.');
+  if (
+    value.executableUpperBound.independentFollowupTurn === true &&
+    (value.resourceKind !== 'subagent' ||
+      !/^backup_[a-f0-9]{64}$/u.test(value.reservationId) ||
+      value.executableUpperBound.unboundedToolInvocations !== true)
+  )
+    throw new Error('Independent followup turn requires an exact marked backup.');
+  if (
+    value.executableUpperBound.independentChildTurnDeadline === true &&
+    (value.resourceKind !== 'subagent' ||
+      !value.reservationId.startsWith('child-allotment:') ||
+      value.invocationId !== value.reservationId)
+  )
+    throw new Error('Independent child deadline requires an exact child allotment.');
   if (
     value.state === 'queued' &&
     (value.resourceKind !== 'subagent' ||
@@ -432,6 +536,63 @@ export function reduceResourceBudgetState(
   }
 
   const active = activeState(state);
+  if (event.type === 'resource_budget.required_child_wait_started') {
+    if (event.runId !== active.runId || !exactTaskIds(event.taskIds))
+      throw new Error('Required child wait identity is invalid.');
+    if (
+      active.requiredChildWait?.startedAt === event.at &&
+      JSON.stringify(active.requiredChildWait.taskIds) === JSON.stringify(event.taskIds)
+    )
+      return active;
+    if (active.requiredChildWait) throw new Error('Required child wait is already active.');
+    const started = Date.parse(event.at);
+    if (
+      !Number.isSafeInteger(started) ||
+      started < Date.parse(active.startedAt) ||
+      started > Date.parse(active.deadlineAt)
+    )
+      throw new Error('Required child wait start is outside the active Run deadline.');
+    return {
+      ...active,
+      requiredChildWait: { startedAt: event.at, taskIds: [...event.taskIds] },
+    };
+  }
+  if (event.type === 'resource_budget.required_child_wait_ended') {
+    if (event.runId !== active.runId || !exactTaskIds(event.taskIds))
+      throw new Error('Required child wait identity is invalid.');
+    const previous = active.requiredChildWait;
+    if (
+      active.lastRequiredChildWait?.endedAt === event.at &&
+      JSON.stringify(active.lastRequiredChildWait.taskIds) === JSON.stringify(event.taskIds)
+    )
+      return active;
+    if (!previous || !exactTaskIds(event.taskIds, previous.taskIds))
+      throw new Error('Required child wait has no matching start.');
+    const ended = Date.parse(event.at);
+    const elapsed = ended - Date.parse(previous.startedAt);
+    const total = (active.totalRequiredChildWaitMs ?? 0) + elapsed;
+    const deadline = Date.parse(active.deadlineAt) + elapsed;
+    if (
+      !Number.isSafeInteger(ended) ||
+      !Number.isSafeInteger(elapsed) ||
+      elapsed < 0 ||
+      !Number.isSafeInteger(total) ||
+      !Number.isSafeInteger(deadline) ||
+      !Number.isFinite(new Date(deadline).getTime())
+    )
+      throw new Error('Required child wait duration is invalid.');
+    return {
+      ...active,
+      deadlineAt: new Date(deadline).toISOString(),
+      totalRequiredChildWaitMs: total,
+      requiredChildWait: undefined,
+      lastRequiredChildWait: {
+        startedAt: previous.startedAt,
+        endedAt: event.at,
+        taskIds: [...previous.taskIds],
+      },
+    };
+  }
   if (event.type === 'resource_budget.waiter_enqueued') {
     const waiter = event.waiter;
     nonEmpty(waiter.runId, 'runId');
@@ -480,6 +641,8 @@ export function reduceResourceBudgetState(
     };
   }
   if (event.type === 'resource_budget.reserved') {
+    if (active.requiredChildWait)
+      throw new Error('Parent resource dispatch is suspended for required child turns.');
     const candidate = event.reservation;
     assertReservation(candidate);
     if (candidate.replacesReservationId)
@@ -501,7 +664,7 @@ export function reduceResourceBudgetState(
     )
       throw new Error('Invocation already has a non-released reservation.');
     const next = replaceReservation(active, candidate);
-    if (!withinBudget(committedResourceUsage(next), active.budget))
+    if (!withinBudget(committedResourceUsage(next), next.budget, delegatedToolInvocations(next)))
       throw new Error('Resource budget exhausted before dispatch.');
     return next;
   }
@@ -612,7 +775,7 @@ export function reduceResourceBudgetState(
         [replacement.reservationId]: replacement,
       },
     };
-    if (!withinBudget(committedResourceUsage(next), active.budget))
+    if (!withinBudget(committedResourceUsage(next), next.budget, delegatedToolInvocations(next)))
       throw new Error('Resource budget exhausted before bounded replacement.');
     return next;
   }
@@ -625,7 +788,7 @@ export function reduceResourceBudgetState(
       if (reservation.state !== 'queued' || reservation.resourceKind !== 'subagent')
         throw new Error('Only a queued sub-agent reservation can acquire a slot.');
       const next = replaceReservation(active, { ...reservation, state: 'reserved' });
-      if (!withinBudget(committedResourceUsage(next), active.budget))
+      if (!withinBudget(committedResourceUsage(next), next.budget, delegatedToolInvocations(next)))
         throw new Error('Child concurrency slot is unavailable.');
       return next;
     }
@@ -655,7 +818,7 @@ export function reduceResourceBudgetState(
         }),
         reconciledUsage: addUsage(active.reconciledUsage, event.actual),
       };
-      if (!withinBudget(committedResourceUsage(next), active.budget))
+      if (!withinBudget(committedResourceUsage(next), next.budget, delegatedToolInvocations(next)))
         throw new Error('Reconciled usage exceeds the effective resource budget.');
       return next;
     }
@@ -681,15 +844,43 @@ export function assertResourceBudgetRuntimeState(state: ResourceBudgetRuntimeSta
   if (state.status === 'unconfigured') return;
   assertResourceBudget(state.budget);
   nonEmpty(state.runId, 'runId');
+  const totalWait = state.totalRequiredChildWaitMs ?? 0;
+  if (
+    !Number.isSafeInteger(totalWait) ||
+    totalWait < 0 ||
+    Date.parse(state.deadlineAt) - Date.parse(state.startedAt) >
+      state.budget.maxRunDurationMs + totalWait ||
+    (state.requiredChildWait &&
+      (!exactTaskIds(state.requiredChildWait.taskIds) ||
+        !Number.isSafeInteger(Date.parse(state.requiredChildWait.startedAt)))) ||
+    (state.lastRequiredChildWait &&
+      (!exactTaskIds(state.lastRequiredChildWait.taskIds) ||
+        !Number.isSafeInteger(Date.parse(state.lastRequiredChildWait.startedAt)) ||
+        !Number.isSafeInteger(Date.parse(state.lastRequiredChildWait.endedAt)) ||
+        Date.parse(state.lastRequiredChildWait.endedAt) <
+          Date.parse(state.lastRequiredChildWait.startedAt)))
+  )
+    throw new Error('Required child wait budget state is invalid.');
   assertResourceUsage(state.reconciledUsage);
   if (state.reconciledUsage.source !== 'actual')
     throw new Error('reconciledUsage must contain actual usage.');
+  let delegatedToolInvocations = 0;
   for (const reservation of Object.values(state.reservations)) {
     assertReservation(reservation);
     if (reservation.runId !== state.runId) throw new Error('Reservation belongs to another run.');
     if (reservation.parentReservationId && !state.reservations[reservation.parentReservationId])
       throw new Error('Reservation parent is absent from the shared ledger.');
+    if (
+      reservation.state === 'reconciled' &&
+      reservation.executableUpperBound.unboundedToolInvocations === true
+    )
+      delegatedToolInvocations += reservation.actual?.counters.toolInvocations ?? 0;
   }
+  if (
+    !Number.isSafeInteger(delegatedToolInvocations) ||
+    delegatedToolInvocations > state.reconciledUsage.counters.toolInvocations
+  )
+    throw new Error('Delegated Tool audit total disagrees with reconciled child receipts.');
   const sequences = new Set<number>();
   for (const waiter of Object.values(state.waiters ?? {})) {
     if (waiter.version !== 1 || waiter.runId !== state.runId)
@@ -700,6 +891,6 @@ export function assertResourceBudgetRuntimeState(state: ResourceBudgetRuntimeSta
     sequences.add(waiter.sequence);
   }
   nonNegativeInteger(state.nextWaiterSequence ?? 0, 'nextWaiterSequence');
-  if (!withinBudget(committedResourceUsage(state), state.budget))
+  if (!withinBudget(committedResourceUsage(state), state.budget, delegatedToolInvocations))
     throw new Error('Committed resource usage exceeds the effective budget.');
 }

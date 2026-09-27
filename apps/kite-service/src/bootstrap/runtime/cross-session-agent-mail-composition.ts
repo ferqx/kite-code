@@ -308,6 +308,11 @@ export function createCrossSessionAgentMailComposition(input: {
         parentSessionId: sourceSessionId,
         status: target.status,
         checkpointReady: target.checkpointReady,
+        ...(target.originRole ? { originRole: target.originRole } : {}),
+        ...(target.originalGrantDigest ? { originalGrantDigest: target.originalGrantDigest } : {}),
+        ...(target.observedTargetRevision !== undefined
+          ? { observedTargetRevision: target.observedTargetRevision }
+          : {}),
       };
     },
     lookupFollowupReceipt: (input) =>

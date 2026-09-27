@@ -72,6 +72,7 @@ import {
 import {
   acceptCrossSessionFollowupInTransaction,
   activateCrossSessionFollowupFundingInTransaction,
+  activateIndependentCrossSessionFollowupTurnInTransaction,
   assertCrossSessionFollowupRunStartInTransaction,
   type CrossSessionFollowupActivationReceipt,
   type CrossSessionFollowupFundingReceipt,
@@ -81,6 +82,7 @@ import {
   listPendingCrossSessionFollowupFunding,
   listPendingCrossSessionFollowupSources,
   type PendingCrossSessionFollowupFunding,
+  readAcceptedIndependentFollowupSourcePolicyProof,
   readChildTerminalCheckpoint,
   readCrossSessionCurrentTurnBackupReleaseForTarget,
   readCrossSessionCurrentTurnPreparedNoAttemptProof,
@@ -95,9 +97,11 @@ import {
   readCurrentTurnRoutedNoAttemptChildProofForSource,
   readDirectChildFollowupOutcomeWatermark,
   readDirectChildFollowupReleaseWatermark,
+  readIndependentCrossSessionFollowupActivation,
   readLastFollowupOutcomeForDirectChild,
   readLastReleasedFollowupForDirectChild,
   readPreparedCrossSessionFollowupRecoveryProof,
+  readTargetSnapshotEvidence,
   readUnroutedCrossSessionFollowupMessage,
   receiveCrossSessionFollowupInTransaction,
   releaseAcceptedCrossSessionFollowupBackupInTransaction,
@@ -108,6 +112,7 @@ import {
   settleCancelledAcceptedFollowupsInTransaction,
   settleCrossSessionFollowupFundingAfterUnknownRecoveryInTransaction,
   settleCrossSessionFollowupFundingInTransaction,
+  settleIndependentCrossSessionFollowupFundingInTransaction,
   verifyPersistedCrossSessionFollowupRunStart,
 } from './kite-cross-session-followup';
 import type { KiteHomeArtifactStore } from './kite-home-artifacts';
@@ -391,6 +396,20 @@ export interface KiteCrossSessionQueueMailPort {
     sourceSessionId: string,
     submissionId: string,
   ): ReturnType<typeof readCrossSessionFollowupAdmissionBySubmissionForTarget>;
+  readAcceptedIndependentFollowupSourcePolicyProof(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readAcceptedIndependentFollowupSourcePolicyProof>;
+  readIndependentFollowupActivationForTarget(
+    targetSessionId: string,
+    sourceSessionId: string,
+    submissionId: string,
+  ): ReturnType<typeof readIndependentCrossSessionFollowupActivation>;
+  readTargetSnapshotEvidence(
+    targetSessionId: string,
+    expectedRevision: number,
+  ): ReturnType<typeof readTargetSnapshotEvidence>;
   readUnroutedFollowupMessage(
     targetSessionId: string,
     sourceSessionId: string,
@@ -436,6 +455,9 @@ export interface KiteCrossSessionQueueMailPort {
     status: 'active' | 'idle' | 'waiting' | 'context_unavailable';
     targetRunId: string | null;
     checkpointReady: boolean;
+    originRole?: 'explore' | 'plan' | 'code' | 'review';
+    originalGrantDigest?: string;
+    observedTargetRevision?: number;
   }> | null;
   readChildTerminalCheckpoint(
     targetSessionId: string,
@@ -1251,6 +1273,22 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           sourceSnapshot: transaction.snapshot as Record<string, unknown>,
           events,
         });
+      } else if (crossMail.kind === 'activate_independent_followup_turn') {
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          events.length !== 1 ||
+          events[0]?.type !== 'resource_budget.dispatch_started'
+        )
+          unsupported('Independent followup activation requires one source backup dispatch.');
+        activateIndependentCrossSessionFollowupTurnInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          events,
+        });
       } else if (crossMail.kind === 'settle_followup_funding') {
         if (
           channel !== 'decision' ||
@@ -1268,6 +1306,34 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
         )
           unsupported('Followup funding settlement requires two exact source budget events.');
         settleCrossSessionFollowupFundingInTransaction(database, {
+          ...crossMail,
+          sourceSessionId: transaction.sessionId,
+          sourceRevision: revision!,
+          sourceSnapshot: transaction.snapshot as Record<string, unknown>,
+          events,
+        });
+      } else if (crossMail.kind === 'settle_independent_followup_funding') {
+        const budgetEvents = events.filter((event) =>
+          [
+            'resource_budget.reconciled',
+            'resource_budget.unknown',
+            'resource_budget.released',
+          ].includes(String(event.type)),
+        );
+        const auditEvents = events.filter(
+          (event) => event.type === 'agent.followup_independent_settled',
+        );
+        if (
+          channel !== 'decision' ||
+          transaction.commandReceipt ||
+          transaction.requiredEffectLease ||
+          auditEvents.length !== 1 ||
+          budgetEvents.length > 1 ||
+          events.length !== budgetEvents.length + 1 ||
+          (budgetEvents.length === 0 && crossMail.disposition !== 'unknown')
+        )
+          unsupported('Independent followup settlement requires exact budget and audit Events.');
+        settleIndependentCrossSessionFollowupFundingInTransaction(database, {
           ...crossMail,
           sourceSessionId: transaction.sessionId,
           sourceRevision: revision!,
@@ -1696,6 +1762,39 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           submissionId,
         );
       }),
+    readAcceptedIndependentFollowupSourcePolicyProof: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readAcceptedIndependentFollowupSourcePolicyProof(
+          database,
+          targetSessionId,
+          sourceSessionId,
+          submissionId,
+        );
+      }),
+    readIndependentFollowupActivationForTarget: (
+      targetSessionId: string,
+      sourceSessionId: string,
+      submissionId: string,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        const receipt = readIndependentCrossSessionFollowupActivation(
+          database,
+          sourceSessionId,
+          submissionId,
+        );
+        return receipt?.targetSessionId === targetSessionId ? receipt : null;
+      }),
+    readTargetSnapshotEvidence: (targetSessionId: string, expectedRevision: number) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(targetSessionId);
+        return readTargetSnapshotEvidence(database, targetSessionId, expectedRevision);
+      }),
     readUnroutedFollowupMessage: (
       targetSessionId: string,
       sourceSessionId: string,
@@ -1803,6 +1902,29 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
             AND source.workspace_digest=child.workspace_digest`)
           .get(sourceSessionId, targetSessionId);
         if (!target) return null;
+        const snapshot = database
+          .query<{ state_json: string }, [string]>(
+            'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+          )
+          .get(targetSessionId);
+        const targetState = snapshot
+          ? (JSON.parse(snapshot.state_json) as {
+              revision?: unknown;
+              childSessionOrigin?: {
+                parentSessionId?: unknown;
+                role?: unknown;
+                grantDigest?: unknown;
+              };
+            })
+          : null;
+        const origin = targetState?.childSessionOrigin;
+        const role = origin?.role;
+        const exactOrigin =
+          origin?.parentSessionId === sourceSessionId &&
+          (role === 'explore' || role === 'plan' || role === 'code' || role === 'review') &&
+          typeof origin.grantDigest === 'string' &&
+          /^sha256:[a-f0-9]{64}$/u.test(origin.grantDigest) &&
+          Number.isSafeInteger(targetState?.revision);
         const run = database
           .query<{ run_id: string; status: string }, [string]>(
             `SELECT run_id,status FROM runtime_runs WHERE session_id=?
@@ -1836,6 +1958,13 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
                     : ('context_unavailable' as const),
           targetRunId: active ? run.run_id : null,
           checkpointReady,
+          ...(exactOrigin
+            ? {
+                originRole: role as 'explore' | 'plan' | 'code' | 'review',
+                originalGrantDigest: origin!.grantDigest as string,
+                observedTargetRevision: targetState!.revision as number,
+              }
+            : {}),
         });
       }),
     readChildTerminalCheckpoint: (targetSessionId: string) =>
@@ -2021,13 +2150,42 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           .get(sourceSessionId, submissionId);
         if (
           !pair ||
+          !outbox ||
+          outbox.target_session_id !== targetSessionId ||
+          outbox.mode !== 'trigger_turn'
+        )
+          return null;
+        if (
+          readAcceptedIndependentFollowupSourcePolicyProof(
+            database,
+            targetSessionId,
+            sourceSessionId,
+            submissionId,
+          )
+        ) {
+          const independent = readIndependentCrossSessionFollowupActivation(
+            database,
+            sourceSessionId,
+            submissionId,
+          );
+          if (
+            !independent ||
+            independent.targetSessionId !== targetSessionId ||
+            independent.sourceRevision > pair.source_revision
+          )
+            return null;
+          return readPreparedCrossSessionFollowupRecoveryProof(
+            database,
+            targetSessionId,
+            sourceSessionId,
+            submissionId,
+          );
+        }
+        if (
           !funding ||
           !activation ||
-          !outbox ||
           funding.targetSessionId !== targetSessionId ||
           activation.targetSessionId !== targetSessionId ||
-          outbox.target_session_id !== targetSessionId ||
-          outbox.mode !== 'trigger_turn' ||
           outbox.message_id !== funding.messageId ||
           funding.sourceRevision > pair.source_revision ||
           activation.sourceRevision > pair.source_revision ||

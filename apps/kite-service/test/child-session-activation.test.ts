@@ -7,9 +7,10 @@ import { activateAcceptedChildSession } from '../src/bootstrap/runtime/subagent/
 
 type Activation = Parameters<typeof activateAcceptedChildSession>[0];
 
-function fixture(persistAck: boolean) {
+function fixture(persistAck: boolean, independentTurnDeadline = false) {
   const calls: string[] = [];
   let childRunOrigin: { originSessionId?: string; originRunId?: string } | undefined;
+  let configuredDeadlineAt: string | undefined;
   const now = Date.now();
   const childThreadId = `child_${'a'.repeat(64)}`;
   const parentSessionId = 'parent';
@@ -43,6 +44,12 @@ function fixture(persistAck: boolean) {
   upper.gauges.activeSubagents = 1;
   upper.gauges.activeToolInvocations = 1;
   upper.gauges.activeShellInvocations = 1;
+  if (independentTurnDeadline) {
+    upper.counters.toolInvocations = 0;
+    upper.gauges.elapsedRunMs = 30 * 60_000;
+    upper.unboundedToolInvocations = true;
+    upper.independentChildTurnDeadline = true;
+  }
   const reservation = {
     version: 1,
     reservationId: `child-allotment:${childThreadId}`,
@@ -136,9 +143,12 @@ function fixture(persistAck: boolean) {
     ensureChild: () => ({
       sessionId: childThreadId,
       getState: () => ({}) as ReturnType<ReturnType<Activation['ensureChild']>['getState']>,
-      commitChildBudgetActivation: (_events, _mutation, evidence) => {
+      commitChildBudgetActivation: (events, _mutation, evidence) => {
         calls.push('activate');
         childRunOrigin = evidence.runStart;
+        configuredDeadlineAt = events.find(
+          (event) => event.type === 'resource_budget.configured',
+        )?.deadlineAt;
         intent.childBudgetActivatedRunId = childRunId;
         return {} as ReturnType<
           ReturnType<Activation['ensureChild']>['commitChildBudgetActivation']
@@ -146,7 +156,14 @@ function fixture(persistAck: boolean) {
       },
     }),
     creation,
-    childBudget: budget,
+    childBudget: independentTurnDeadline
+      ? {
+          ...budget,
+          maxRunDurationMs: 30 * 60_000,
+          maxToolInvocations: 0,
+          unboundedToolInvocations: true,
+        }
+      : budget,
     childDeadlineAt: new Date(now + 20_000).toISOString(),
     childRunId,
     evidence: {
@@ -160,9 +177,16 @@ function fixture(persistAck: boolean) {
       calls.push('inspect');
       return value as SubagentDelegationGrant;
     },
-    startedAt: now,
+    startedAt: now + (independentTurnDeadline ? 25_000 : 0),
   };
-  return { input, calls, grant, intent, childRunOrigin: () => childRunOrigin };
+  return {
+    input,
+    calls,
+    grant,
+    intent,
+    childRunOrigin: () => childRunOrigin,
+    configuredDeadlineAt: () => configuredDeadlineAt,
+  };
 }
 
 test('child activation orders Store creation, Run activation and durable parent ACK before returning grant', () => {
@@ -185,4 +209,10 @@ test('recovery of a created and activated child skips both transactions and comm
   intent.childBudgetActivatedRunId = input.childRunId;
   expect(activateAcceptedChildSession(input)).toEqual(grant);
   expect(calls).toEqual(['inspect', 'ack']);
+});
+
+test('new child grant configures 30 minutes from activation, beyond the parent funding deadline', () => {
+  const { input, grant, configuredDeadlineAt } = fixture(true, true);
+  expect(activateAcceptedChildSession(input)).toEqual(grant);
+  expect(configuredDeadlineAt()).toBe(new Date(input.startedAt + 30 * 60_000).toISOString());
 });

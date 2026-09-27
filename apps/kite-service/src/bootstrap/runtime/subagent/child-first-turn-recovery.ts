@@ -87,6 +87,8 @@ export function classifyChildFirstTurnRecovery(input: {
   /** Exact sealed grant read from Store and inspected against current policy by the caller. */
   readonly grant: Readonly<SubagentDelegationGrant>;
   readonly nowMs: number;
+  /** Re-proven from the exact parent allotment by the recovery planner. */
+  readonly independentTurnDeadline?: boolean;
 }): ChildFirstTurnRecovery {
   const { childState: state, intent, grant, nowMs } = input;
   const origin = state.childSessionOrigin;
@@ -169,7 +171,10 @@ export function classifyChildFirstTurnRecovery(input: {
     !Number.isSafeInteger(nowMs) ||
     nowMs < 0 ||
     grant.expiresAtMs <= nowMs ||
-    Date.parse(intent.deadlineAt) <= nowMs
+    (input.independentTurnDeadline
+      ? state.resourceBudget.budget.unboundedToolInvocations !== true ||
+        Date.parse(state.resourceBudget.deadlineAt) <= nowMs
+      : Date.parse(intent.deadlineAt) <= nowMs)
   )
     return stale('sealed_grant_expired_or_mismatch');
 

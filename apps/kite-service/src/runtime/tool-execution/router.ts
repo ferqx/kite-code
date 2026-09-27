@@ -373,9 +373,19 @@ export async function executeAppRuntimeTools(params: {
   if (childOrigin) {
     const ceiling = params.childToolCeiling;
     const roleTools = getRoleConfig(childOrigin.role).allowedTools;
+    const followup = currentState.activeFollowupTurn;
+    const inFollowupTurn = followup?.targetRunId === currentState.turn.turnId;
+    const followupGrantMatches =
+      inFollowupTurn &&
+      followup.sourceSessionId === childOrigin.parentSessionId &&
+      followup.grantDigest === ceiling?.grantDigest &&
+      followup.grantRef.integrityIdentifier === ceiling?.grantDigest &&
+      currentState.resourceBudget.status === 'active' &&
+      currentState.resourceBudget.runId === followup.targetRunId &&
+      currentState.resourceBudget.budget.unboundedToolInvocations === true;
     const invalidCeiling =
       !ceiling ||
-      ceiling.grantDigest !== childOrigin.grantDigest ||
+      (inFollowupTurn ? !followupGrantMatches : ceiling.grantDigest !== childOrigin.grantDigest) ||
       ceiling.role !== childOrigin.role ||
       !Array.isArray(ceiling.allowedTools) ||
       ceiling.allowedTools.some((name) => typeof name !== 'string' || !name);

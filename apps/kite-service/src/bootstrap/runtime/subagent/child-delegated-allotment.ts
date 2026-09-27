@@ -18,15 +18,13 @@ type ChildRole = 'explore' | 'plan' | 'code' | 'review';
 const COUNTERS = [
   ['maxTurns', 'turns'],
   ['maxModelRequests', 'modelRequests'],
-  ['maxToolInvocations', 'toolInvocations'],
   ['maxRunInputTokens', 'inputTokens'],
   ['maxRunOutputTokens', 'outputTokens'],
   ['maxArtifactBytes', 'artifactBytes'],
 ] as const;
 
 /** Pure parent-ledger admission for one independently budgeted child Session.
- * childBudget is an upper ceiling at the parent Tool receipt. At child activation,
- * tighten maxRunDurationMs to the remaining time before deadlineAt.
+ * The receipt reserves a 30-minute ceiling; the child Run clock starts at activation.
  */
 export function planChildDelegatedAllotment(input: {
   readonly state: Readonly<RuntimeState>;
@@ -70,17 +68,17 @@ export function planChildDelegatedAllotment(input: {
   )
     throw new Error('Child allotment transient reservation is not reconcilable.');
   const originalDeadline = Date.parse(ledger.deadlineAt);
-  // Elapsed time is a max gauge in the parent ledger, so concurrent children
-  // may each use the remaining parent deadline up to the role's 30-minute cap.
-  // Counters remain additive and reserve a finite share for each child and
-  // the parent. Limited admits two active children and one queued sibling.
+  // The parent must still own a live funding Run when it accepts the Task.
+  // Each child Run later starts its own 30-minute clock at activation.
+  // Finite counters remain additive. Limited admits two active children and
+  // one queued sibling.
   const divisor = ledger.budget.maxConcurrentSubagents + 2;
-  const duration = Math.min(
-    DEFAULT_SUBAGENT_TIMEOUT_MS,
-    ledger.budget.maxRunDurationMs,
-    originalDeadline - now,
-  );
-  if (!Number.isSafeInteger(duration) || duration <= 0 || !Number.isSafeInteger(now + duration))
+  const duration = DEFAULT_SUBAGENT_TIMEOUT_MS;
+  if (
+    !Number.isSafeInteger(originalDeadline) ||
+    originalDeadline <= now ||
+    !Number.isSafeInteger(now + duration)
+  )
     throw new Error('Child allotment parent deadline has expired.');
   const deadlineAt = new Date(now + duration).toISOString();
   const toolActual = actualUsageForReservation(state, transient, [toolFinished]);
@@ -123,7 +121,8 @@ export function planChildDelegatedAllotment(input: {
     maxRunDurationMs: duration,
     maxTurns: allotments.maxTurns,
     maxModelRequests: allotments.maxModelRequests,
-    maxToolInvocations: allotments.maxToolInvocations,
+    maxToolInvocations: 0,
+    unboundedToolInvocations: true,
     maxRunInputTokens: allotments.maxRunInputTokens,
     maxRunOutputTokens: allotments.maxRunOutputTokens,
     maxArtifactBytes: allotments.maxArtifactBytes,
@@ -137,10 +136,11 @@ export function planChildDelegatedAllotment(input: {
   const reservationId = `child-allotment:${childThreadId}`;
   if (projected.reservations[reservationId])
     throw new Error('Child allotment identity is already reserved.');
-  const upper = createZeroResourceUsage('versioned_upper_bound', 'child-delegated-allotment-v1');
+  const upper = createZeroResourceUsage('versioned_upper_bound', 'child-delegated-allotment-v2');
   upper.counters.turns = childBudget.maxTurns;
   upper.counters.modelRequests = childBudget.maxModelRequests;
-  upper.counters.toolInvocations = childBudget.maxToolInvocations;
+  upper.unboundedToolInvocations = true;
+  upper.independentChildTurnDeadline = true;
   upper.counters.inputTokens = childBudget.maxRunInputTokens;
   upper.counters.outputTokens = childBudget.maxRunOutputTokens;
   upper.counters.artifactBytes = childBudget.maxArtifactBytes;
@@ -168,11 +168,12 @@ export function planChildDelegatedAllotment(input: {
   });
 }
 
-/** Shrink the parent-receipt ceiling at the actual child activation clock. */
+/** Preserve the new child Run's full clock while retaining legacy receipt deadlines. */
 export function childBudgetAtActivation(input: {
   readonly childBudget: ResourceBudget;
   readonly deadlineAt: string;
   readonly startedAt: number;
+  readonly independentTurnDeadline?: boolean;
 }): ResourceBudget {
   const deadline = Date.parse(input.deadlineAt);
   const remaining = deadline - input.startedAt;
@@ -180,10 +181,12 @@ export function childBudgetAtActivation(input: {
     !Number.isSafeInteger(input.startedAt) ||
     input.startedAt < 0 ||
     !Number.isSafeInteger(remaining) ||
-    remaining < 1
+    (!input.independentTurnDeadline && remaining < 1)
   )
     throw new Error('Child activation deadline has expired.');
-  const maxRunDurationMs = Math.min(input.childBudget.maxRunDurationMs, remaining);
+  const maxRunDurationMs = input.independentTurnDeadline
+    ? input.childBudget.maxRunDurationMs
+    : Math.min(input.childBudget.maxRunDurationMs, remaining);
   const result: ResourceBudget = {
     ...input.childBudget,
     maxRunDurationMs,

@@ -398,6 +398,11 @@ function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
     // Store ref byte length at the parent receipt before child activation.
     return SUBAGENT_TASK_ARTIFACT_MAX_BYTES;
   }
+  if (call.name === 'followup_task') {
+    // The Tool writes no workspace Artifact. Its child turn has a separate
+    // source-owned backup; charging the remaining bytes here would count them twice.
+    return 0;
+  }
   if (!call.sideEffect) return 0;
   if (call.name === 'write_file') {
     const content =

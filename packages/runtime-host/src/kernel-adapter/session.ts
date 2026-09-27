@@ -686,7 +686,9 @@ export interface StateRuntimeSession {
           | 'activate_followup_funding'
           | 'settle_followup_funding'
           | 'release_accepted_followup_backup'
-          | 'release_current_turn_backup';
+          | 'release_current_turn_backup'
+          | 'activate_independent_followup_turn'
+          | 'settle_independent_followup_funding';
       }
     >,
   ): readonly KernelEvent[];
@@ -1611,31 +1613,45 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
           | 'activate_followup_funding'
           | 'settle_followup_funding'
           | 'release_accepted_followup_backup'
-          | 'release_current_turn_backup';
+          | 'release_current_turn_backup'
+          | 'activate_independent_followup_turn'
+          | 'settle_independent_followup_funding';
       }
     >,
   ): readonly KernelEvent[] {
-    if (
-      !mutation.submissionId ||
-      !mutation.targetSessionId ||
-      (mutation.kind === 'replace_followup_backup'
-        ? events.length !== 1 || events[0]?.type !== 'resource_budget.bounded_replaced'
-        : mutation.kind === 'release_accepted_followup_backup' ||
-            mutation.kind === 'release_current_turn_backup'
-          ? events.length !== 1 || events[0]?.type !== 'resource_budget.released'
-          : events.length !== 2 ||
-            events.some(
-              (event) =>
-                event.type !==
-                (mutation.kind === 'activate_followup_funding'
-                  ? 'resource_budget.dispatch_started'
-                  : mutation.disposition === 'completed'
-                    ? 'resource_budget.reconciled'
-                    : mutation.disposition === 'unknown'
-                      ? 'resource_budget.unknown'
-                      : 'resource_budget.released'),
-            ))
-    )
+    const invalidEvents =
+      mutation.kind === 'activate_independent_followup_turn'
+        ? events.length !== 1 || events[0]?.type !== 'resource_budget.dispatch_started'
+        : mutation.kind === 'settle_independent_followup_funding'
+          ? events.length < 1 ||
+            events.length > 2 ||
+            events.at(-1)?.type !== 'agent.followup_independent_settled' ||
+            (events.length === 1
+              ? mutation.disposition !== 'unknown'
+              : events[0]?.type !==
+                (mutation.disposition === 'completed'
+                  ? 'resource_budget.reconciled'
+                  : mutation.disposition === 'unknown'
+                    ? 'resource_budget.unknown'
+                    : 'resource_budget.released'))
+          : mutation.kind === 'replace_followup_backup'
+            ? events.length !== 1 || events[0]?.type !== 'resource_budget.bounded_replaced'
+            : mutation.kind === 'release_accepted_followup_backup' ||
+                mutation.kind === 'release_current_turn_backup'
+              ? events.length !== 1 || events[0]?.type !== 'resource_budget.released'
+              : events.length !== 2 ||
+                events.some(
+                  (event) =>
+                    event.type !==
+                    (mutation.kind === 'activate_followup_funding'
+                      ? 'resource_budget.dispatch_started'
+                      : mutation.disposition === 'completed'
+                        ? 'resource_budget.reconciled'
+                        : mutation.disposition === 'unknown'
+                          ? 'resource_budget.unknown'
+                          : 'resource_budget.released'),
+                );
+    if (!mutation.submissionId || !mutation.targetSessionId || invalidEvents)
       throw new Error('Cross-Session followup funding transition is invalid.');
     return this.#processEventBatch(
       events,

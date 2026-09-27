@@ -271,7 +271,7 @@ test('three sibling receipts serialize fresh parent budget planning', async () =
   expect(new Set(accepted).size).toBe(3);
   if (state.resourceBudget.status !== 'active') throw new Error('Parent budget closed.');
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
-  expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(252);
+  expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(3);
   expect(
     Object.keys(state.resourceBudget.reservations).filter((id) =>
       id.startsWith('child-allotment:'),

@@ -37,6 +37,7 @@ async function exerciseCurrentTurn(sourceAutoRevision: boolean): Promise<void> {
       const { accepted, raw } = await submitRealParentFollowup(
         fixture,
         'Resume the active child before its first model.',
+        true,
       );
       expect(
         await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
@@ -120,6 +121,7 @@ test('an old child final before delivery routes the frozen mail through a new tu
       const { accepted, raw } = await submitRealParentFollowup(
         fixture,
         'Resume after the old child final wins.',
+        true,
       );
       expect(
         owner.runWithSessionExecution(parentSessionId, () =>

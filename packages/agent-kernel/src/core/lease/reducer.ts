@@ -1,3 +1,4 @@
+import { requiredBackgroundTaskIds } from '../../completion';
 import type { KernelEvent } from '../../events';
 import { eventRecord, stringField } from '../../reducer-utils';
 import type {
@@ -69,6 +70,47 @@ function positiveInteger(value: unknown, field: string): asserts value is number
     throw new Error(`${field} must be a positive safe integer.`);
 }
 
+function exactTaskIds(value: readonly string[], expected: readonly string[]): boolean {
+  return (
+    value.length > 0 &&
+    value.length === expected.length &&
+    value.every(
+      (id, index) =>
+        typeof id === 'string' &&
+        id.length > 0 &&
+        (index === 0 || value[index - 1]! < id) &&
+        id === expected[index],
+    )
+  );
+}
+
+function hasMarkedRequiredChildFunding(
+  state: AgentState,
+  ledger: AgentResourceBudgetActiveState,
+  taskId: string,
+): boolean {
+  return Object.values(state.tools.calls).some((call) => {
+    if (call.name !== 'task' || call.result?.resultMeta?.taskId !== taskId) return false;
+    return Object.values(state.capabilities.invocations).some((invocation) => {
+      const link = invocation.subagentProviderLifecycle?.childSession;
+      if (
+        invocation.toolCallId !== call.toolCallId ||
+        !link ||
+        link.originToolCallId !== call.toolCallId ||
+        link.originRunId !== ledger.runId ||
+        link.disposition !== 'required'
+      )
+        return false;
+      const delegated = ledger.reservations[link.delegatedReservationId];
+      return (
+        delegated?.resourceKind === 'subagent' &&
+        delegated.executableUpperBound.independentChildTurnDeadline === true &&
+        ['queued', 'reserved', 'dispatch_started'].includes(delegated.state)
+      );
+    });
+  });
+}
+
 function assertResourceBudget(value: ResourceBudget): void {
   if (value == null || typeof value !== 'object' || value.version !== 1)
     throw new Error('Unsupported ResourceBudget version.');
@@ -84,6 +126,11 @@ function assertResourceBudget(value: ResourceBudget): void {
   for (const field of BUDGET_FIELDS)
     if (zeroAllowed.has(field)) nonNegativeInteger(candidate[field], field);
     else positiveInteger(candidate[field], field);
+  if (
+    value.unboundedToolInvocations !== undefined &&
+    (value.unboundedToolInvocations !== true || value.maxToolInvocations !== 0)
+  )
+    throw new Error('Unbounded Tool budget must use a zero numeric placeholder.');
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
   if (value.maxConcurrentWriters > value.maxConcurrentToolInvocations)
@@ -109,20 +156,42 @@ function assertResourceUsage(value: ResourceUsage): void {
     throw new Error('Actual usage must not declare estimatorVersion.');
   if (value.source !== 'actual' && value.source !== 'versioned_upper_bound')
     throw new Error('Resource usage source is invalid.');
+  if (
+    (value.unboundedToolInvocations !== undefined &&
+      (value.source !== 'versioned_upper_bound' ||
+        value.unboundedToolInvocations !== true ||
+        value.counters.toolInvocations !== 0)) ||
+    (value.independentChildTurnDeadline !== undefined &&
+      (value.source !== 'versioned_upper_bound' || value.independentChildTurnDeadline !== true)) ||
+    (value.independentFollowupTurn !== undefined &&
+      (value.source !== 'versioned_upper_bound' || value.independentFollowupTurn !== true))
+  )
+    throw new Error('Resource usage authority markers are invalid.');
 }
 
 function withinUpperBound(actual: ResourceUsage, upper: ResourceUsage): boolean {
   return (
-    COUNTER_FIELDS.every((field) => actual.counters[field] <= upper.counters[field]) &&
-    GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
+    COUNTER_FIELDS.every(
+      (field) =>
+        (field === 'toolInvocations' && upper.unboundedToolInvocations === true) ||
+        actual.counters[field] <= upper.counters[field],
+    ) && GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
   );
 }
 
-function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
+function withinBudget(
+  usage: ResourceUsage,
+  budget: ResourceBudget,
+  delegatedToolInvocations = 0,
+): boolean {
   return (
+    Number.isSafeInteger(delegatedToolInvocations) &&
+    delegatedToolInvocations >= 0 &&
+    delegatedToolInvocations <= usage.counters.toolInvocations &&
     usage.counters.turns <= budget.maxTurns &&
     usage.counters.modelRequests <= budget.maxModelRequests &&
-    usage.counters.toolInvocations <= budget.maxToolInvocations &&
+    (budget.unboundedToolInvocations === true ||
+      usage.counters.toolInvocations - delegatedToolInvocations <= budget.maxToolInvocations) &&
     usage.counters.inputTokens <= budget.maxRunInputTokens &&
     usage.counters.outputTokens <= budget.maxRunOutputTokens &&
     usage.counters.artifactBytes <= budget.maxArtifactBytes &&
@@ -131,6 +200,18 @@ function withinBudget(usage: ResourceUsage, budget: ResourceBudget): boolean {
     usage.gauges.activeWriters <= budget.maxConcurrentWriters &&
     usage.gauges.activeToolInvocations <= budget.maxConcurrentToolInvocations &&
     usage.gauges.activeShellInvocations <= budget.maxConcurrentShellInvocations
+  );
+}
+
+function delegatedToolInvocations(active: AgentResourceBudgetActiveState): number {
+  return Object.values(active.reservations).reduce(
+    (total, reservation) =>
+      total +
+      (reservation.state === 'reconciled' &&
+      reservation.executableUpperBound.unboundedToolInvocations === true
+        ? (reservation.actual?.counters.toolInvocations ?? 0)
+        : 0),
+    0,
   );
 }
 
@@ -179,7 +260,12 @@ function addUsage(left: ResourceUsage, right: ResourceUsage): ResourceUsage {
     },
     source,
     ...(source === 'versioned_upper_bound'
-      ? { estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1' }
+      ? {
+          estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1',
+          ...(left.unboundedToolInvocations || right.unboundedToolInvocations
+            ? { unboundedToolInvocations: true as const }
+            : {}),
+        }
       : {}),
   };
 }
@@ -219,6 +305,31 @@ function assertReservation(value: ResourceReservation): void {
   assertResourceUsage(value.executableUpperBound);
   if (value.executableUpperBound.source !== 'versioned_upper_bound')
     throw new Error('executableUpperBound must use versioned_upper_bound usage.');
+  if (
+    value.executableUpperBound.unboundedToolInvocations === true &&
+    !(
+      value.resourceKind === 'subagent' &&
+      ((value.reservationId.startsWith('child-allotment:') &&
+        value.invocationId === value.reservationId) ||
+        (/^backup_[a-f0-9]{64}$/u.test(value.reservationId) &&
+          value.executableUpperBound.independentFollowupTurn === true))
+    )
+  )
+    throw new Error('Unbounded Tool upper bound requires an exact child funding reservation.');
+  if (
+    value.executableUpperBound.independentFollowupTurn === true &&
+    (value.resourceKind !== 'subagent' ||
+      !/^backup_[a-f0-9]{64}$/u.test(value.reservationId) ||
+      value.executableUpperBound.unboundedToolInvocations !== true)
+  )
+    throw new Error('Independent followup turn requires an exact marked backup.');
+  if (
+    value.executableUpperBound.independentChildTurnDeadline === true &&
+    (value.resourceKind !== 'subagent' ||
+      !value.reservationId.startsWith('child-allotment:') ||
+      value.invocationId !== value.reservationId)
+  )
+    throw new Error('Independent child deadline requires an exact child allotment.');
   if (
     value.state === 'queued' &&
     (value.resourceKind !== 'subagent' ||
@@ -317,6 +428,15 @@ function budgetLedgerForEvent(
   event: KernelEvent,
 ): AgentResourceBudgetActiveState {
   const payload = eventRecord(event);
+  if (
+    event.type === 'resource_budget.required_child_wait_started' ||
+    event.type === 'resource_budget.required_child_wait_ended'
+  ) {
+    const runId = stringField(payload, 'runId');
+    const ledger = runId ? ledgerForRun(state, runId) : undefined;
+    if (!ledger) throw new Error('Required child wait funding Run is unavailable.');
+    return ledger;
+  }
   if (event.type === 'resource_budget.reserved') {
     const candidate = payload.reservation as ResourceReservation;
     const ledger = ledgerForRun(state, candidate.runId);
@@ -412,6 +532,82 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
     }
 
     const active = activeState(budgetLedgerForEvent(state, event));
+    if (event.type === 'resource_budget.required_child_wait_started') {
+      if (
+        state.resourceBudget.status !== 'active' ||
+        state.resourceBudget.runId !== event.runId ||
+        state.turn.status !== 'active'
+      )
+        throw new Error('Required child wait needs the current active Run.');
+      const waiting = state.completionGuard.waitingReason;
+      const expected = waiting?.kind === 'required_background' ? [...waiting.taskIds].sort() : [];
+      if (
+        !Array.isArray(event.taskIds) ||
+        !exactTaskIds(event.taskIds, expected) ||
+        !exactTaskIds(event.taskIds, [...requiredBackgroundTaskIds(state)].sort()) ||
+        event.taskIds.some((taskId) => !hasMarkedRequiredChildFunding(state, active, taskId))
+      )
+        throw new Error('Required child wait needs an accepted funded completion blocker.');
+      if (
+        active.requiredChildWait?.startedAt === event.at &&
+        JSON.stringify(active.requiredChildWait.taskIds) === JSON.stringify(event.taskIds)
+      )
+        return state;
+      if (active.requiredChildWait) throw new Error('Required child wait is already active.');
+      const started = Date.parse(event.at);
+      if (
+        !Number.isSafeInteger(started) ||
+        started < Date.parse(active.startedAt) ||
+        started > Date.parse(active.deadlineAt)
+      )
+        throw new Error('Required child wait start is outside the active Run deadline.');
+      return withBudgetLedger(state, {
+        ...active,
+        requiredChildWait: { startedAt: event.at, taskIds: [...event.taskIds] },
+      });
+    }
+    if (event.type === 'resource_budget.required_child_wait_ended') {
+      const previous = active.requiredChildWait;
+      if (
+        active.lastRequiredChildWait?.endedAt === event.at &&
+        JSON.stringify(active.lastRequiredChildWait.taskIds) === JSON.stringify(event.taskIds)
+      )
+        return state;
+      if (
+        state.resourceBudget.status !== 'active' ||
+        state.resourceBudget.runId !== event.runId ||
+        state.turn.status !== 'active' ||
+        !previous ||
+        !Array.isArray(event.taskIds) ||
+        !exactTaskIds(event.taskIds, previous.taskIds) ||
+        requiredBackgroundTaskIds(state).length > 0
+      )
+        throw new Error('Required child wait cannot end before its children settle.');
+      const ended = Date.parse(event.at);
+      const elapsed = ended - Date.parse(previous.startedAt);
+      const total = (active.totalRequiredChildWaitMs ?? 0) + elapsed;
+      const deadline = Date.parse(active.deadlineAt) + elapsed;
+      if (
+        !Number.isSafeInteger(ended) ||
+        !Number.isSafeInteger(elapsed) ||
+        elapsed < 0 ||
+        !Number.isSafeInteger(total) ||
+        !Number.isSafeInteger(deadline) ||
+        !Number.isFinite(new Date(deadline).getTime())
+      )
+        throw new Error('Required child wait duration is invalid.');
+      return withBudgetLedger(state, {
+        ...active,
+        deadlineAt: new Date(deadline).toISOString(),
+        totalRequiredChildWaitMs: total,
+        requiredChildWait: undefined,
+        lastRequiredChildWait: {
+          startedAt: previous.startedAt,
+          endedAt: event.at,
+          taskIds: [...previous.taskIds],
+        },
+      });
+    }
     if (event.type === 'resource_budget.waiter_enqueued') {
       const waiter = payload.waiter as ResourceWaiter;
       if (waiter == null || typeof waiter !== 'object')
@@ -475,6 +671,8 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
     }
 
     if (event.type === 'resource_budget.reserved') {
+      if (active.requiredChildWait)
+        throw new Error('Parent resource dispatch is suspended for required child turns.');
       const candidate = payload.reservation as ResourceReservation;
       assertReservation(candidate);
       if (candidate.replacesReservationId)
@@ -498,7 +696,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       )
         throw new Error('Invocation already has a non-released reservation.');
       const next = replaceReservation(active, candidate);
-      if (!withinBudget(committedUsage(next), active.budget))
+      if (!withinBudget(committedUsage(next), next.budget, delegatedToolInvocations(next)))
         throw new Error('Resource budget exhausted before dispatch.');
       return withBudgetLedger(state, next);
     }
@@ -626,7 +824,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
           [replacement.reservationId]: replacement,
         },
       };
-      if (!withinBudget(committedUsage(next), active.budget))
+      if (!withinBudget(committedUsage(next), next.budget, delegatedToolInvocations(next)))
         throw new Error('Resource budget exhausted before bounded replacement.');
       return withBudgetLedger(state, next);
     }
@@ -642,7 +840,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
         if (reservation.state !== 'queued' || reservation.resourceKind !== 'subagent')
           throw new Error('Only a queued sub-agent reservation can acquire a slot.');
         next = replaceReservation(active, { ...reservation, state: 'reserved' });
-        if (!withinBudget(committedUsage(next), active.budget))
+        if (!withinBudget(committedUsage(next), next.budget, delegatedToolInvocations(next)))
           throw new Error('Child concurrency slot is unavailable.');
         break;
       }
@@ -670,7 +868,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
           ...replaceReservation(active, { ...reservation, actual, state: 'reconciled' }),
           reconciledUsage: addUsage(active.reconciledUsage, actual),
         };
-        if (!withinBudget(committedUsage(next), active.budget))
+        if (!withinBudget(committedUsage(next), next.budget, delegatedToolInvocations(next)))
           throw new Error('Reconciled usage exceeds the effective resource budget.');
         break;
       }

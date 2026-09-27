@@ -253,6 +253,8 @@ for (const stage of ['prepared', 'activated', 'attempt_started'] as const)
           throw new Error(
             JSON.stringify({
               commandErrorName: error instanceof Error ? error.name : typeof error,
+              commandErrorMessage: error instanceof Error ? error.message : String(error),
+              protocolError: (error as { protocol?: { data?: unknown } }).protocol?.data,
               sourceEvents: storage!.storage.sessions
                 .loadEventsStrict(parentSessionId)
                 .slice(-14)

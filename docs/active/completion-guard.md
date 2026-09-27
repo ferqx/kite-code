@@ -80,6 +80,8 @@ document 与 revision feedback；不得写 `run.completed`、`task.completed` �
 
 `wait_for_background` 与有证据的 required finite Shell 等待是上述纠错规则的专用例外。重进从持久 waiting reason 与 canonical obligation 恢复；终态、失败、取消、需父级处理的交互或新用户输入可恢复同一 Run，纯进度／心跳／日志 revision 不触发模型。Shell 的 waiting reason 只记录准确 Shell ID 与完成等待后模型是否已回复，不替代 Shell owner 的执行与清理事实。完成等待 port 缺失会明确失败，不能把仍需等待的状态落入通用 `Completion blocked...` 终态。owner generation 更替、execution authority 失效、settlement admission 失败、deadline 或取消竞争必须进入既有 unknown／recovery／取消边界，不得永久等待或把未接纳结果视为完成。
 
+新标记的独立 required child 是唯一 blocker 时，父 Run 为准确 task ID 持久记录预算暂停，结果接纳并结束等待后补回等待实耗；旧委派保持原 deadline。暂停期间不能派发新的父资源 reservation。预算暂停不改变 child 终态与 canonical result 的接纳要求，取消或未知清理仍按原恢复边界处理。
+
 显式 `task_wait` 是普通的有界只读工具调用，不替代该自动等待决定，也不解除 required obligation；其返回只能帮助模型协调，canonical background result 仍是完成守卫接受的唯一 child 终态事实。
 
 已实施的[Codex 式 Agent 通信设计](../plans/background-agent-shell-conversation-coordination.md#4-codex-式-agent-通信kite-接线决定)把 `followup_task` 视为显式 Agent 消息与续轮触发，不在发送方 Run 为每条 followup 建立 required claim；现有 `task(background=true)` 的原 required 义务及本节的结果接纳规则不变。跨 Run 邮箱消息有独立低权限输入身份，不能伪装原 task 的 `subagent.background_result_persisted`。

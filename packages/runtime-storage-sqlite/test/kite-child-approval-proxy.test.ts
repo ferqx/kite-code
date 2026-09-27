@@ -3,11 +3,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   decideChildApprovalProxyInTransaction,
+  followupChildApprovalParentToolCallId,
   KITE_CHILD_APPROVAL_PROXY_DDL,
   KITE_CHILD_APPROVAL_PROXY_PARENT_INDEX,
   listPendingChildApprovalProxies,
   markChildApprovalAppliedInTransaction,
   openChildApprovalProxyInTransaction,
+  parseFollowupChildApprovalParentToolCallId,
   readChildApprovalProxy,
   synchronizeChildApprovalProxyInTransaction,
   validateChildApprovalProxyContinuity,
@@ -69,6 +71,18 @@ function fixture() {
 }
 
 describe('private child approval proxy', () => {
+  test('canonical followup proxy identity binds submission, target Run, and source Tool', () => {
+    const identity = {
+      submissionId: 'submission:1',
+      targetRunId: 'run:2',
+      sourceToolCallId: 'tool:3',
+    };
+    const encoded = followupChildApprovalParentToolCallId(identity);
+    expect(parseFollowupChildApprovalParentToolCallId(encoded)).toEqual(identity);
+    expect(parseFollowupChildApprovalParentToolCallId(`${encoded}=`)).toBeNull();
+    expect(parseFollowupChildApprovalParentToolCallId('followup-approval:v2:forged')).toBeNull();
+    expect(parseFollowupChildApprovalParentToolCallId('parent-task-tool')).toBeNull();
+  });
   test('binds a canonical child request to exact parent lineage and replays only an identical tuple', () => {
     const { database, open, approvalDigest } = fixture();
     const proxy = open();

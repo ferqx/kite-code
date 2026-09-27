@@ -6,17 +6,31 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED,
+  childDelegatedUpperBoundDigest,
   sealChildGrantPayload,
 } from '@kite-ai/runtime-host/storage';
-import { receiveCrossSessionQueueMailInTransaction } from '../src/kite-cross-session-agent-mail';
+import {
+  decideChildApprovalProxyInTransaction,
+  followupChildApprovalParentToolCallId,
+  markChildApprovalAppliedInTransaction,
+  openChildApprovalProxyInTransaction,
+  validateChildApprovalProxyContinuity,
+} from '../src/kite-child-approval-proxy';
+import {
+  acceptCrossSessionFollowupTerminalReplyInTransaction,
+  listUnrepliedSettledFollowupTerminalSources,
+  receiveCrossSessionQueueMailInTransaction,
+} from '../src/kite-cross-session-agent-mail';
 import {
   acceptCrossSessionFollowupInTransaction,
   activateCrossSessionFollowupFundingInTransaction,
+  activateIndependentCrossSessionFollowupTurnInTransaction,
   assertCrossSessionFollowupRunStartInTransaction,
   isAdmittedQueuedChildFollowupTarget,
   KiteCrossSessionFollowupError,
   listPendingCrossSessionFollowupFunding,
   listPendingCrossSessionFollowupSources,
+  readAcceptedIndependentFollowupSourcePolicyProof,
   readCrossSessionCurrentTurnBackupReleaseForTarget,
   readCrossSessionCurrentTurnPreparedNoAttemptProof,
   readCrossSessionFollowupActivationReceipt,
@@ -30,9 +44,11 @@ import {
   readCurrentTurnRoutedNoAttemptChildProofForSource,
   readDirectChildFollowupOutcomeWatermark,
   readDirectChildFollowupReleaseWatermark,
+  readIndependentCrossSessionFollowupActivation,
   readLastFollowupOutcomeForDirectChild,
   readLastReleasedFollowupForDirectChild,
   readPreparedCrossSessionFollowupRecoveryProof,
+  readTargetSnapshotEvidence,
   readUnroutedCrossSessionFollowupMessage,
   receiveCrossSessionFollowupInTransaction,
   releaseAcceptedCrossSessionFollowupBackupInTransaction,
@@ -43,6 +59,8 @@ import {
   settleCancelledAcceptedFollowupsInTransaction,
   settleCrossSessionFollowupFundingAfterUnknownRecoveryInTransaction,
   settleCrossSessionFollowupFundingInTransaction,
+  settleIndependentCrossSessionFollowupFundingInTransaction,
+  verifyCompletedChildFollowupModelWork,
 } from '../src/kite-cross-session-followup';
 import { readProvenUnfundedExpiredFollowupRelease } from '../src/kite-cross-session-followup-proof';
 import { createKiteHomeArtifactStore } from '../src/kite-home-artifacts';
@@ -314,6 +332,1168 @@ function fixture(path = ':memory:') {
 }
 
 describe('Store13 cross-Session TriggerTurn source', () => {
+  test('accepts a versioned independent-turn backup and reconstructs the sealed source policy', () => {
+    const { db, input } = fixture();
+    try {
+      const sealed = sealChildGrantPayload({
+        role: 'explore',
+        capabilityCeiling: { allowedTools: ['read_file'], bindingIds: [] },
+      });
+      db.query(`INSERT INTO subagent_task_artifacts(artifact_id,kind,integrity_identifier,
+        artifact_format_version,canonical_json,byte_length,created_at)
+        VALUES (?,'subagent_task',?,1,'{}',2,1)`).run(
+        `pa_${'1'.repeat(64)}`,
+        `sha256:${'1'.repeat(64)}`,
+      );
+      db.query(`INSERT INTO child_session_intents(child_thread_id,parent_session_id,parent_invocation_id,
+        origin_run_id,origin_turn_id,origin_tool_call_id,attempt,child_invocation_id,
+        grant_digest,sealed_grant_json,sealed_grant_byte_length,sealed_grant_digest,
+        task_artifact_digest,task_text_digest,task_artifact_id,task_artifact_byte_length,
+        disposition,role,tool_event_id,tool_event_revision,funding_run_id,
+        delegated_reservation_id,delegated_upper_bound_digest,delegated_upper_bound_json,deadline_at)
+        VALUES ('child','parent','origin-inv','run-1','turn-1','spawn-tool',1,'child-task',
+        ?,?,?,?,'task','text',?,2,'required','explore','event',1,
+        'run-1','delegated','upper','{}','2099-01-01T00:00:00.000Z')`).run(
+        'original-grant',
+        sealed.sealedGrantJson,
+        sealed.sealedGrantByteLength,
+        sealed.sealedGrantDigest,
+        `pa_${'1'.repeat(64)}`,
+      );
+      const v2 = structuredClone(input);
+      const backupId = `backup_${'a'.repeat(64)}`;
+      const upper = {
+        source: 'versioned_upper_bound' as const,
+        estimatorVersion: 'cross-session-followup-backup-v2',
+        independentFollowupTurn: true as const,
+        unboundedToolInvocations: true as const,
+        counters: {
+          turns: 1,
+          modelRequests: 3,
+          toolInvocations: 0,
+          inputTokens: 500,
+          outputTokens: 60,
+          artifactBytes: 4096,
+        },
+        gauges: {
+          elapsedRunMs: 30 * 60_000,
+          activeSubagents: 1,
+          activeWriters: 0,
+          activeToolInvocations: 1,
+          activeShellInvocations: 1,
+        },
+      };
+      Object.assign(v2.reservationEvent.reservation, {
+        reservationId: backupId,
+        executableUpperBound: upper,
+      });
+      const sourceReservations = v2.sourceSnapshot.resourceBudget.reservations as Record<
+        string,
+        typeof v2.reservationEvent.reservation
+      >;
+      delete sourceReservations['backup-1'];
+      sourceReservations[backupId] = v2.reservationEvent.reservation;
+      const admission = JSON.parse(v2.admission.canonicalJson);
+      admission.schema = 'kite.cross-session-followup-admission.v2';
+      admission.backupReservationId = backupId;
+      admission.executableUpperBound = upper;
+      admission.policy = {
+        ...admission.policy,
+        executionMode: 'independent_turn_v2',
+        targetRole: 'explore',
+        targetGrantDigest: sealed.sealedGrantDigest,
+      };
+      const canonicalJson = JSON.stringify(admission);
+      const digest = `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`;
+      Object.assign(v2.admission, {
+        canonicalJson,
+        digest,
+        ref: {
+          artifactId: `pa_${digest.slice(7)}`,
+          kind: 'agent_followup_admission',
+          integrityIdentifier: digest,
+          byteLength: Buffer.byteLength(canonicalJson),
+        },
+      });
+      v2.acceptedEvent.followupAdmissionRef = v2.admission.ref;
+      v2.acceptedEvent.followupAdmissionDigest = digest;
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','v2-backup',0,27,?,10),('parent','v2-accepted',1,27,?,10)`).run(
+        JSON.stringify(v2.reservationEvent),
+        JSON.stringify(v2.acceptedEvent),
+      );
+      db.transaction(() => acceptCrossSessionFollowupInTransaction(db, v2))();
+      expect(
+        db
+          .query<{ count: number }, []>(
+            "SELECT count(*) AS count FROM agent_mail_inbox WHERE target_session_id='child'",
+          )
+          .get()?.count,
+      ).toBe(0);
+      expect(
+        readAcceptedIndependentFollowupSourcePolicyProof(db, 'child', 'parent', 'submission-1')
+          ?.policy,
+      ).toMatchObject({ executionMode: 'independent_turn_v2' });
+      db.run("UPDATE runtime_sessions SET revision=2 WHERE session_id='child'");
+      db.transaction(() =>
+        receiveCrossSessionQueueMailInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          messageId: 'mail-1',
+          targetRevision: 2,
+          receivedAtMs: 20,
+        }),
+      )();
+      const proof = readAcceptedIndependentFollowupSourcePolicyProof(
+        db,
+        'child',
+        'parent',
+        'submission-1',
+      );
+      expect(proof?.policy).toMatchObject({
+        executionMode: 'independent_turn_v2',
+        targetRole: 'explore',
+        targetGrantDigest: sealed.sealedGrantDigest,
+      });
+      const oldCheckpointJson = JSON.stringify({
+        artifactFormatVersion: 1,
+        childSessionId: 'child',
+        terminalRunId: 'child-run',
+        terminalTaskId: 'old-task',
+        terminalRevision: 2,
+        terminalStatus: 'completed',
+        stateDigest: 'old',
+        transcriptDigest: 'old',
+        transcript: { messages: [] },
+      });
+      const oldCheckpointHex = createHash('sha256').update(oldCheckpointJson).digest('hex');
+      const oldCheckpointRef = {
+        artifactId: `pa_${oldCheckpointHex}`,
+        kind: 'subagent_checkpoint' as const,
+        integrityIdentifier: `sha256:${oldCheckpointHex}`,
+        byteLength: Buffer.byteLength(oldCheckpointJson),
+      };
+      createKiteHomeArtifactStore(db).writeSubagentCheckpoint({
+        ref: oldCheckpointRef,
+        artifactFormatVersion: 1,
+        canonicalJson: oldCheckpointJson,
+        createdAt: 21,
+      });
+      db.query(`UPDATE agent_nodes SET latest_checkpoint_artifact_id=?,
+        latest_checkpoint_integrity_identifier=?,latest_checkpoint_byte_length=?
+        WHERE session_id='child'`).run(
+        oldCheckpointRef.artifactId,
+        oldCheckpointRef.integrityIdentifier,
+        oldCheckpointRef.byteLength,
+      );
+      db.run(
+        "UPDATE runtime_runs SET status='completed',finished_at_ms=21,last_revision=2 WHERE session_id='child'",
+      );
+      db.run("UPDATE runtime_sessions SET revision=3 WHERE session_id='child'");
+      db.run(`INSERT INTO runtime_runs(session_id,run_id,start_command_id,phase,status,
+        created_revision,last_revision,created_at_ms)
+        VALUES ('child','followup-run','followup:submission-1','building','queued',3,3,30)`);
+      const grantBudget = {
+        version: 1,
+        maxRunDurationMs: 30 * 60_000,
+        maxTurns: 1,
+        maxModelRequests: 3,
+        maxToolInvocations: 0,
+        unboundedToolInvocations: true,
+        maxRunInputTokens: 500,
+        maxRunOutputTokens: 60,
+        maxArtifactBytes: 4096,
+        maxConcurrentSubagents: 0,
+        maxConcurrentWriters: 0,
+        maxConcurrentToolInvocations: 1,
+        maxConcurrentShellInvocations: 1,
+        maxConcurrencyWaitMs: 15_000,
+        deadlineAt: new Date(30_000 + 30 * 60_000).toISOString(),
+      };
+      const grantJson = JSON.stringify({
+        schema: 'kite.child-followup-grant.v2',
+        sourceSessionId: 'parent',
+        targetSessionId: 'child',
+        submissionId: 'submission-1',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        checkpointRef: oldCheckpointRef,
+        originRole: 'explore',
+        workspaceDigest: `sha256:${'b'.repeat(64)}`,
+        interactionModeRevision: 1,
+        capabilityDigest: 'catalog-1',
+        phaseCeiling: 'building',
+        sourceAdmissionRef: v2.admission.ref,
+        sourceAdmissionDigest: v2.admission.digest,
+        sourceBackupUpperDigest: childDelegatedUpperBoundDigest(upper),
+        denyTools: false,
+        allowedTools: ['read_file'],
+        budget: grantBudget,
+        firstAttemptTimeoutMs: 1000,
+      });
+      const grantHex = createHash('sha256').update(grantJson).digest('hex');
+      const grantRef = {
+        artifactId: `pa_${grantHex}`,
+        kind: 'agent_followup_grant' as const,
+        integrityIdentifier: `sha256:${grantHex}`,
+        byteLength: Buffer.byteLength(grantJson),
+      };
+      const preparedEvent = {
+        type: 'agent.followup_turn_prepared',
+        sourceSessionId: 'parent',
+        submissionId: 'submission-1',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        checkpointRef: oldCheckpointRef,
+        grantRef,
+        grantDigest: grantRef.integrityIdentifier,
+      };
+      const targetState = {
+        session: { canonicalWorkspaceDigest: `sha256:${'b'.repeat(64)}` },
+        childSessionOrigin: {
+          role: 'explore',
+          parentSessionId: 'parent',
+          grantDigest: sealed.sealedGrantDigest,
+          terminal: { status: 'completed' },
+        },
+        activeFollowupTurn: {
+          sourceSessionId: 'parent',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          taskId: 'followup-task',
+          checkpointRef: oldCheckpointRef,
+          grantRef,
+          grantDigest: grantRef.integrityIdentifier,
+        },
+        interactionModeRevision: 1,
+        capabilities: { catalogRevision: 'catalog-1' },
+        mode: 'accept_edits',
+        workspaceAccess: 'workspace_only',
+        activeTaskId: 'followup-task',
+        turn: { turnId: 'followup-run', status: 'active' },
+        resourceBudget: {
+          status: 'active',
+          runId: 'followup-run',
+          startedAt: new Date(30_000).toISOString(),
+          deadlineAt: grantBudget.deadlineAt,
+          budget: grantBudget,
+          reservations: {},
+        },
+      };
+      const parentState = structuredClone(v2.sourceSnapshot);
+      const parentReservations = parentState.resourceBudget.reservations as Record<
+        string,
+        typeof v2.reservationEvent.reservation & { actual?: unknown }
+      >;
+      db.query(`INSERT INTO runtime_snapshots(session_id,schema_version,format_epoch,revision,
+        state_json,event_position,state_checksum,created_at)
+        VALUES ('parent',27,'test',1,?,1,'checksum',10),
+               ('child',27,'test',3,?,3,'checksum',30)`).run(
+        JSON.stringify(parentState),
+        JSON.stringify(targetState),
+      );
+      expect(readTargetSnapshotEvidence(db, 'child', 3)).toEqual({
+        revision: 3,
+        digest: `sha256:${createHash('sha256').update(JSON.stringify(targetState)).digest('hex')}`,
+      });
+      expect(readTargetSnapshotEvidence(db, 'child', 2)).toBeNull();
+      db.query("UPDATE child_session_intents SET grant_digest=? WHERE child_thread_id='child'").run(
+        'different-new-grant',
+      );
+      const mutation = {
+        sourceSessionId: 'parent',
+        submissionId: 'submission-1',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        phase: 'building' as const,
+        checkpointRef: oldCheckpointRef,
+        grantDigest: grantRef.integrityIdentifier,
+        grant: { ref: grantRef, canonicalJson: grantJson, createdAt: 30 },
+      };
+      db.transaction(() =>
+        assertCrossSessionFollowupRunStartInTransaction(db, {
+          targetSessionId: 'child',
+          mutation,
+          preparedEvent,
+        }),
+      )();
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('child','v2-run-prepared',3,27,?,30)`).run(JSON.stringify(preparedEvent));
+      db.run('SAVEPOINT v2_pre_dispatch');
+      const releasedSource = structuredClone(parentState);
+      (releasedSource.resourceBudget.reservations as Record<string, { state: string }>)[
+        backupId
+      ]!.state = 'released';
+      const failedTarget = {
+        ...targetState,
+        activeTaskId: null,
+        turn: { turnId: 'followup-run', status: 'aborted' },
+        terminalOutcome: { status: 'failed' },
+      };
+      const failedDigest = `sha256:${createHash('sha256')
+        .update(JSON.stringify(failedTarget))
+        .digest('hex')}`;
+      const preRelease = {
+        type: 'resource_budget.released',
+        reservationId: backupId,
+        proof: 'local_pre_dispatch_failure',
+      };
+      const failedSettlement = {
+        type: 'agent.followup_turn_settled',
+        sourceSessionId: 'parent',
+        submissionId: 'submission-1',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        status: 'failed',
+      };
+      const failedAudit = {
+        type: 'agent.followup_independent_settled',
+        submissionId: 'submission-1',
+        targetAgentId: 'child',
+        targetRunId: 'followup-run',
+        targetRevision: 4,
+        disposition: 'pre_dispatch_released',
+        evidenceDigest: failedDigest,
+        createdAtMs: 31,
+      };
+      db.run("UPDATE runtime_sessions SET revision=3 WHERE session_id='parent'");
+      db.query(
+        "UPDATE runtime_snapshots SET revision=3,state_json=? WHERE session_id='parent'",
+      ).run(JSON.stringify(releasedSource));
+      db.run("UPDATE runtime_sessions SET revision=4 WHERE session_id='child'");
+      db.query("UPDATE runtime_snapshots SET revision=4,state_json=? WHERE session_id='child'").run(
+        JSON.stringify(failedTarget),
+      );
+      db.query(
+        "UPDATE runtime_runs SET status='failed',started_at_ms=30,finished_at_ms=31,last_revision=4,terminal_json=? WHERE session_id='child' AND run_id='followup-run'",
+      ).run(JSON.stringify({ status: 'failed' }));
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','v2-pre-release',2,27,?,31),
+               ('parent','v2-pre-audit',3,27,?,31),
+               ('child','v2-pre-settled',4,27,?,31)`).run(
+        JSON.stringify(preRelease),
+        JSON.stringify(failedAudit),
+        JSON.stringify(failedSettlement),
+      );
+      db.transaction(() =>
+        settleIndependentCrossSessionFollowupFundingInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          targetRevision: 4,
+          disposition: 'pre_dispatch_released',
+          sourceRevision: 3,
+          createdAtMs: 31,
+          sourceSnapshot: releasedSource,
+          events: [preRelease, failedAudit],
+        }),
+      )();
+      expect(readCrossSessionFollowupRoute(db, 'child', 'submission-1')).toBeNull();
+      expect(
+        db.transaction(() =>
+          acceptCrossSessionFollowupTerminalReplyInTransaction(db, {
+            childSessionId: 'child',
+            parentSessionId: 'parent',
+            submissionId: 'submission-1',
+            acceptedAtMs: 32,
+          }),
+        )().mode,
+      ).toBe('reply');
+      db.run('ROLLBACK TO v2_pre_dispatch');
+      db.run('RELEASE v2_pre_dispatch');
+      parentState.tools.calls['tool-1'].status = 'succeeded';
+      parentState.capabilities.invocations['invocation-1'].status = 'succeeded';
+      parentReservations[backupId]!.state = 'dispatch_started';
+      db.query(
+        "UPDATE runtime_snapshots SET revision=2,state_json=? WHERE session_id='parent'",
+      ).run(JSON.stringify(parentState));
+      db.run("UPDATE runtime_sessions SET revision=2 WHERE session_id='parent'");
+      const dispatch = { type: 'resource_budget.dispatch_started', reservationId: backupId };
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','v2-dispatch',2,27,?,31)`).run(JSON.stringify(dispatch));
+      db.transaction(() =>
+        activateIndependentCrossSessionFollowupTurnInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          grantDigest: grantRef.integrityIdentifier,
+          targetRevision: 3,
+          sourceRevision: 2,
+          createdAtMs: 31,
+          sourceSnapshot: parentState,
+          events: [dispatch],
+        }),
+      )();
+      expect(
+        readIndependentCrossSessionFollowupActivation(db, 'parent', 'submission-1'),
+      ).toMatchObject({
+        targetRunId: 'followup-run',
+        backupReservationId: backupId,
+      });
+      db.run('SAVEPOINT v2_unknown');
+      const unknownSource = structuredClone(parentState);
+      (unknownSource.resourceBudget.reservations as Record<string, { state: string }>)[
+        backupId
+      ]!.state = 'unknown';
+      const unknownTarget = {
+        ...targetState,
+        activeTaskId: null,
+        turn: { turnId: 'followup-run', status: 'aborted' },
+        terminalOutcome: { status: 'unknown' },
+      };
+      const unknownEvidenceDigest = `sha256:${createHash('sha256')
+        .update(JSON.stringify(unknownTarget))
+        .digest('hex')}`;
+      const unknownBudget = { type: 'resource_budget.unknown', reservationId: backupId };
+      const unknownAudit = {
+        type: 'agent.followup_independent_settled',
+        submissionId: 'submission-1',
+        targetAgentId: 'child',
+        targetRunId: 'followup-run',
+        targetRevision: 4,
+        disposition: 'unknown',
+        evidenceDigest: unknownEvidenceDigest,
+        createdAtMs: 32,
+      };
+      db.run("UPDATE runtime_sessions SET revision=4 WHERE session_id='parent'");
+      db.query(
+        "UPDATE runtime_snapshots SET revision=4,state_json=? WHERE session_id='parent'",
+      ).run(JSON.stringify(unknownSource));
+      db.run("UPDATE runtime_sessions SET revision=4 WHERE session_id='child'");
+      db.query("UPDATE runtime_snapshots SET revision=4,state_json=? WHERE session_id='child'").run(
+        JSON.stringify(unknownTarget),
+      );
+      db.query(
+        "UPDATE runtime_runs SET status='unknown',started_at_ms=30,finished_at_ms=32,last_revision=4,terminal_json=? WHERE session_id='child' AND run_id='followup-run'",
+      ).run(JSON.stringify({ status: 'unknown' }));
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','v2-source-unknown',3,27,?,32),
+               ('parent','v2-unknown-audit',4,27,?,32),
+               ('child','v2-unknown-settled',4,27,?,32)`).run(
+        JSON.stringify(unknownBudget),
+        JSON.stringify(unknownAudit),
+        JSON.stringify({
+          type: 'agent.followup_turn_settled',
+          sourceSessionId: 'parent',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          taskId: 'followup-task',
+          status: 'unknown',
+        }),
+      );
+      db.transaction(() =>
+        settleIndependentCrossSessionFollowupFundingInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          targetRevision: 4,
+          disposition: 'unknown',
+          sourceRevision: 4,
+          createdAtMs: 32,
+          sourceSnapshot: unknownSource,
+          events: [unknownBudget, unknownAudit],
+        }),
+      )();
+      expect(
+        db.transaction(() =>
+          settleIndependentCrossSessionFollowupFundingInTransaction(db, {
+            sourceSessionId: 'parent',
+            targetSessionId: 'child',
+            submissionId: 'submission-1',
+            targetRunId: 'followup-run',
+            targetRevision: 4,
+            disposition: 'unknown',
+            sourceRevision: 4,
+            createdAtMs: 32,
+            sourceSnapshot: unknownSource,
+            events: [unknownAudit],
+          }),
+        )().disposition,
+      ).toBe('unknown');
+      expect(readCrossSessionFollowupTerminalReceipt(db, 'parent', 'submission-1')).toMatchObject({
+        disposition: 'unknown',
+        evidenceDigest: unknownEvidenceDigest,
+      });
+      expect(listUnrepliedSettledFollowupTerminalSources(db, 10)).toEqual([]);
+      db.run('ROLLBACK TO v2_unknown');
+      db.run('RELEASE v2_unknown');
+      const retainedState = {
+        ...parentState,
+        resourceBudget: { ...parentState.resourceBudget, runId: 'run-2', reservations: {} },
+        retainedResourceBudgets: { 'run-1': parentState.resourceBudget },
+      };
+      db.run(
+        "UPDATE runtime_runs SET status='completed',finished_at_ms=35,last_revision=3 WHERE session_id='parent' AND run_id='run-1'",
+      );
+      db.run(`INSERT INTO runtime_runs(session_id,run_id,start_command_id,phase,status,
+        created_revision,last_revision,created_at_ms,started_at_ms)
+        VALUES ('parent','run-2','next-turn','building','running',3,3,35,35)`);
+      db.run("UPDATE runtime_sessions SET revision=3 WHERE session_id='parent'");
+      db.query(
+        "UPDATE runtime_snapshots SET revision=3,state_json=? WHERE session_id='parent'",
+      ).run(JSON.stringify(retainedState));
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','parent-next-turn',3,27,?,35)`).run(
+        JSON.stringify({ type: 'turn.completed', turnId: 'turn-1' }),
+      );
+      expect(
+        readIndependentCrossSessionFollowupActivation(db, 'parent', 'submission-1'),
+      ).toMatchObject({
+        targetRunId: 'followup-run',
+      });
+      db.run('SAVEPOINT v2_approval_probe');
+      try {
+        db.query(`UPDATE child_session_intents SET dispatch_ack_event_id='original-ack',
+          parent_claim_settled_event_id='original-settled',grant_digest=?
+          WHERE child_thread_id='child'`).run(sealed.sealedGrantDigest);
+        const approvalEvent = {
+          type: 'approval.requested',
+          interactionId: 'v2-approval',
+          toolCallId: 'v2-approved-tool',
+          owner: { kind: 'root_tool', toolCallId: 'v2-approved-tool' },
+          approval: { tool: 'read_file', summary: 'Read outside workspace' },
+        };
+        const approvalJson = JSON.stringify(approvalEvent);
+        const approvalDigest = `sha256:${createHash('sha256').update(approvalJson).digest('hex')}`;
+        const approvalState = {
+          ...targetState,
+          revision: 4,
+          session: { ...targetState.session, threadId: 'child' },
+          childSessionOrigin: {
+            ...targetState.childSessionOrigin,
+            childInvocationId: 'child-task',
+            terminal: { status: 'completed', cleanupConfirmed: true },
+          },
+          tools: {
+            calls: {
+              'v2-approved-tool': {
+                toolCallId: 'v2-approved-tool',
+                name: 'read_file',
+                createdAtTurnId: 'followup-run',
+                status: 'awaiting_approval',
+              },
+            },
+          },
+          pendingApprovals: new Map([
+            [
+              'v2-approval',
+              {
+                toolCallId: 'v2-approved-tool',
+                generation: 1,
+                route: 'user',
+                status: 'awaiting_user',
+              },
+            ],
+          ]),
+        };
+        db.run("UPDATE runtime_sessions SET revision=4 WHERE session_id='child'");
+        db.query(
+          "UPDATE runtime_snapshots SET revision=4,state_json=? WHERE session_id='child'",
+        ).run(JSON.stringify(approvalState));
+        db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+          VALUES ('child','v2-approval-request',4,27,?,36)`).run(approvalJson);
+        const proxy = db.transaction(() =>
+          openChildApprovalProxyInTransaction(db, {
+            childThreadId: 'child',
+            childInteractionId: 'v2-approval',
+            childGeneration: 1,
+            childRequestRevision: 4,
+            childToolCallId: 'v2-approved-tool',
+            approvalDigest,
+            postState: approvalState,
+          }),
+        )();
+        expect(proxy).toMatchObject({
+          grantDigest: grantRef.integrityIdentifier,
+          parentToolCallId: followupChildApprovalParentToolCallId({
+            submissionId: 'submission-1',
+            targetRunId: 'followup-run',
+            sourceToolCallId: 'tool-1',
+          }),
+          status: 'pending',
+        });
+        expect(() =>
+          openChildApprovalProxyInTransaction(db, {
+            childThreadId: 'child',
+            childInteractionId: 'v2-approval',
+            childGeneration: 1,
+            childRequestRevision: 4,
+            childToolCallId: 'v2-approved-tool',
+            approvalDigest,
+            postState: {
+              ...approvalState,
+              activeFollowupTurn: {
+                ...approvalState.activeFollowupTurn,
+                grantDigest: `sha256:${'f'.repeat(64)}`,
+              },
+            },
+          }),
+        ).toThrow('source activation');
+        db.query(`INSERT INTO runtime_command_receipts(scope_session_id,command_id,workspace_id,
+          project_id,workspace_digest,request_digest,target_session_id,original_receipt_json,
+          committed_revision,committed_at) VALUES ('parent','v2-approve','workspace','project',?,
+          ?,'parent','{}',3,37)`).run(`sha256:${'b'.repeat(64)}`, 'a'.repeat(64));
+        expect(
+          db.transaction(() =>
+            decideChildApprovalProxyInTransaction(db, {
+              parentSessionId: 'parent',
+              proxyInteractionId: proxy.proxyInteractionId,
+              childRequestRevision: 4,
+              childGeneration: 1,
+              approvalDigest,
+              decision: 'approve_once',
+              parentCommandId: 'v2-approve',
+              parentCommandDigest: 'a'.repeat(64),
+              parentDecisionRevision: 3,
+            }),
+          )().status,
+        ).toBe('decided');
+        const granted = {
+          type: 'approval.granted',
+          interactionId: 'v2-approval',
+          toolCallId: 'v2-approved-tool',
+          generation: 1,
+          grant: 'approve_once',
+        };
+        db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+          VALUES ('child','v2-approval-granted',5,27,?,38)`).run(JSON.stringify(granted));
+        expect(
+          db.transaction(() =>
+            markChildApprovalAppliedInTransaction(db, {
+              parentSessionId: 'parent',
+              proxyInteractionId: proxy.proxyInteractionId,
+              decision: 'approve_once',
+              childAppliedRevision: 5,
+            }),
+          )().status,
+        ).toBe('applied');
+        const rejectionEvent = {
+          ...approvalEvent,
+          interactionId: 'v2-rejection',
+          toolCallId: 'v2-rejected-tool',
+          owner: { kind: 'root_tool', toolCallId: 'v2-rejected-tool' },
+        };
+        const rejectionJson = JSON.stringify(rejectionEvent);
+        const rejectionDigest = `sha256:${createHash('sha256').update(rejectionJson).digest('hex')}`;
+        const rejectionState = {
+          ...approvalState,
+          revision: 6,
+          tools: {
+            calls: {
+              ...approvalState.tools.calls,
+              'v2-rejected-tool': {
+                toolCallId: 'v2-rejected-tool',
+                name: 'read_file',
+                createdAtTurnId: 'followup-run',
+                status: 'awaiting_approval',
+              },
+            },
+          },
+          pendingApprovals: new Map([
+            [
+              'v2-rejection',
+              {
+                toolCallId: 'v2-rejected-tool',
+                generation: 2,
+                route: 'user',
+                status: 'awaiting_user',
+              },
+            ],
+          ]),
+        };
+        db.run("UPDATE runtime_sessions SET revision=6 WHERE session_id='child'");
+        db.query(
+          "UPDATE runtime_snapshots SET revision=6,state_json=? WHERE session_id='child'",
+        ).run(JSON.stringify(rejectionState));
+        db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+          VALUES ('child','v2-approval-rejection-request',6,27,?,39)`).run(rejectionJson);
+        const rejectedProxy = db.transaction(() =>
+          openChildApprovalProxyInTransaction(db, {
+            childThreadId: 'child',
+            childInteractionId: 'v2-rejection',
+            childGeneration: 2,
+            childRequestRevision: 6,
+            childToolCallId: 'v2-rejected-tool',
+            approvalDigest: rejectionDigest,
+            postState: rejectionState,
+          }),
+        )();
+        db.query(`INSERT INTO runtime_command_receipts(scope_session_id,command_id,workspace_id,
+          project_id,workspace_digest,request_digest,target_session_id,original_receipt_json,
+          committed_revision,committed_at) VALUES ('parent','v2-reject','workspace','project',?,
+          ?,'parent','{}',3,40)`).run(`sha256:${'b'.repeat(64)}`, 'b'.repeat(64));
+        expect(
+          db.transaction(() =>
+            decideChildApprovalProxyInTransaction(db, {
+              parentSessionId: 'parent',
+              proxyInteractionId: rejectedProxy.proxyInteractionId,
+              childRequestRevision: 6,
+              childGeneration: 2,
+              approvalDigest: rejectionDigest,
+              decision: 'reject',
+              parentCommandId: 'v2-reject',
+              parentCommandDigest: 'b'.repeat(64),
+              parentDecisionRevision: 3,
+            }),
+          )().status,
+        ).toBe('decided');
+        db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+          VALUES ('child','v2-approval-rejected',7,27,?,41)`).run(
+          JSON.stringify({
+            type: 'approval.rejected',
+            interactionId: 'v2-rejection',
+            toolCallId: 'v2-rejected-tool',
+            generation: 2,
+          }),
+        );
+        expect(
+          db.transaction(() =>
+            markChildApprovalAppliedInTransaction(db, {
+              parentSessionId: 'parent',
+              proxyInteractionId: rejectedProxy.proxyInteractionId,
+              decision: 'reject',
+              childAppliedRevision: 7,
+            }),
+          )().status,
+        ).toBe('applied');
+        expect(() => validateChildApprovalProxyContinuity(db)).not.toThrow();
+        db.query(`INSERT INTO runtime_runs(session_id,run_id,start_command_id,phase,status,
+          created_revision,last_revision,created_at_ms,started_at_ms)
+          VALUES ('child','later-run','later-command','building','running',8,8,42,42)`).run();
+        expect(() => validateChildApprovalProxyContinuity(db)).not.toThrow();
+      } finally {
+        db.run('ROLLBACK TO v2_approval_probe');
+        db.run('RELEASE v2_approval_probe');
+      }
+      const surfaceJson = JSON.stringify({ surface: 'v2-first' });
+      const surfaceRef = modelRef('model_surface', surfaceJson);
+      createKiteHomeArtifactStore(db).writeModel({
+        ref: surfaceRef,
+        artifactFormatVersion: 1,
+        canonicalJson: surfaceJson,
+        createdAt: 33,
+      });
+      const localModel = {
+        reservationId: 'v2-model-1',
+        runId: 'followup-run',
+        invocationId: 'model-invocation:v2-model-1',
+        resourceKind: 'model',
+        state: 'reserved',
+        executableUpperBound: usage(0, 1, 100, 30, 0),
+      };
+      const workingState = {
+        ...targetState,
+        modelInvocations: {
+          'v2-model-1': {
+            invocationId: 'v2-model-1',
+            status: 'prepared',
+            purpose: 'primary_agent',
+            attempts: 0,
+            estimatedInputTokens: 40,
+            budget: { kind: 'reservation', reservationId: 'v2-model-1' },
+            surfaceArtifact: surfaceRef,
+            surfaceIntegrityIdentifier: surfaceRef.integrityIdentifier,
+          },
+        },
+        resourceBudget: {
+          ...targetState.resourceBudget,
+          reservations: { 'v2-model-1': localModel },
+        },
+      };
+      db.run(
+        "UPDATE runtime_runs SET status='running',started_at_ms=32,last_revision=4 WHERE session_id='child' AND run_id='followup-run'",
+      );
+      db.run("UPDATE runtime_sessions SET revision=4 WHERE session_id='child'");
+      db.query("UPDATE runtime_snapshots SET revision=4,state_json=? WHERE session_id='child'").run(
+        JSON.stringify(workingState),
+      );
+      expect(
+        verifyCompletedChildFollowupModelWork(db, {
+          sessionId: 'child',
+          snapshot: workingState,
+          events: [
+            {
+              type: 'model.invocation_prepared',
+              invocationId: 'v2-model-1',
+              purpose: 'primary_agent',
+            },
+          ],
+        } as unknown as Parameters<typeof verifyCompletedChildFollowupModelWork>[1]),
+      ).toBe(true);
+      const routeEvent = {
+        type: 'agent.followup_routed',
+        submissionId: 'submission-1',
+        targetAgentId: 'child',
+        route: 'new_turn',
+        taskId: 'followup-task',
+        invocationId: 'v2-model-1',
+        modelAdmissionId: 'v2-model-1',
+        reservationId: 'v2-model-1',
+        fundingRunId: 'run-1',
+        sequence: 1,
+      };
+      db.transaction(() =>
+        routeCrossSessionFollowupInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          messageId: 'mail-1',
+          submissionId: 'submission-1',
+          route: 'new_turn',
+          targetRunId: 'followup-run',
+          taskId: 'followup-task',
+          invocationId: 'v2-model-1',
+          modelAdmissionId: 'v2-model-1',
+          reservationId: 'v2-model-1',
+          routedRevision: 4,
+          createdAtMs: 34,
+          routedEvent: routeEvent,
+          preparedEvent: {
+            type: 'agent.mail_input_prepared',
+            targetAgentId: 'child',
+            invocationId: 'v2-model-1',
+            modelAdmissionId: 'v2-model-1',
+            fromSequence: 0,
+            throughSequence: 1,
+            messageIds: ['mail-1'],
+          },
+          targetSnapshot: workingState,
+        }),
+      )();
+      expect(readCrossSessionFollowupRoute(db, 'child', 'submission-1')?.route).toBe('new_turn');
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('child','v2-first-model-prepared',4,27,?,34)`).run(
+        JSON.stringify({
+          type: 'model.invocation_prepared',
+          invocationId: 'v2-model-1',
+          purpose: 'primary_agent',
+        }),
+      );
+      expect(
+        readPreparedCrossSessionFollowupRecoveryProof(db, 'child', 'parent', 'submission-1'),
+      ).toMatchObject({
+        invocationId: 'v2-model-1',
+        modelReservationId: 'v2-model-1',
+        surfaceDigest: surfaceRef.integrityIdentifier,
+        preparedStateRevision: 4,
+      });
+      db.run('SAVEPOINT v2_surface_tamper');
+      db.query("UPDATE runtime_snapshots SET state_json=? WHERE session_id='child'").run(
+        JSON.stringify({
+          ...workingState,
+          modelInvocations: {
+            'v2-model-1': {
+              ...workingState.modelInvocations['v2-model-1'],
+              surfaceArtifact: {
+                ...surfaceRef,
+                integrityIdentifier: `sha256:${'f'.repeat(64)}`,
+              },
+            },
+          },
+        }),
+      );
+      expect(
+        readPreparedCrossSessionFollowupRecoveryProof(db, 'child', 'parent', 'submission-1'),
+      ).toBeNull();
+      db.run('ROLLBACK TO v2_surface_tamper');
+      db.run('RELEASE v2_surface_tamper');
+      db.run('SAVEPOINT v2_attempted_recovery');
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('child','v2-first-attempt',5,27,?,35)`).run(
+        JSON.stringify({ type: 'model.invocation_attempt_started', invocationId: 'v2-model-1' }),
+      );
+      expect(
+        readPreparedCrossSessionFollowupRecoveryProof(db, 'child', 'parent', 'submission-1'),
+      ).toBeNull();
+      db.run('ROLLBACK TO v2_attempted_recovery');
+      db.run('RELEASE v2_attempted_recovery');
+      const attemptedState = structuredClone(workingState);
+      attemptedState.modelInvocations['v2-model-1'].attempts = 1;
+      attemptedState.resourceBudget.reservations['v2-model-1'].state = 'dispatch_started';
+      expect(
+        verifyCompletedChildFollowupModelWork(db, {
+          sessionId: 'child',
+          snapshot: attemptedState,
+          events: [
+            { type: 'resource_budget.dispatch_started', reservationId: 'v2-model-1' },
+            { type: 'model.invocation_attempt_started', invocationId: 'v2-model-1' },
+          ],
+        } as unknown as Parameters<typeof verifyCompletedChildFollowupModelWork>[1]),
+      ).toBe(true);
+      const responseRef = modelRef('model_response', JSON.stringify({ response: 'read it' }));
+      const toolState = {
+        ...attemptedState,
+        modelInvocations: {
+          'v2-model-1': {
+            ...attemptedState.modelInvocations['v2-model-1'],
+            status: 'completed',
+            responseArtifact: responseRef,
+          },
+        },
+        resourceBudget: {
+          ...attemptedState.resourceBudget,
+          reservations: {
+            'v2-model-1': {
+              ...attemptedState.resourceBudget.reservations['v2-model-1'],
+              state: 'reconciled',
+            },
+          },
+        },
+        tools: {
+          calls: {
+            'v2-tool': {
+              toolCallId: 'v2-tool',
+              name: 'read_file',
+              taskId: 'followup-task',
+              createdAtTurnId: 'followup-run',
+              modelInvocationId: 'v2-model-1',
+              modelMessageId: 'v2-message-1',
+              status: 'running',
+            },
+          },
+        },
+      };
+      expect(
+        verifyCompletedChildFollowupModelWork(db, {
+          sessionId: 'child',
+          snapshot: toolState,
+          events: [{ type: 'tool.started', toolCallId: 'v2-tool' }],
+        } as unknown as Parameters<typeof verifyCompletedChildFollowupModelWork>[1]),
+      ).toBe(true);
+      expect(
+        verifyCompletedChildFollowupModelWork(db, {
+          sessionId: 'child',
+          snapshot: {
+            ...toolState,
+            tools: { calls: { 'v2-tool': { ...toolState.tools.calls['v2-tool'], name: 'task' } } },
+          },
+          events: [{ type: 'tool.started', toolCallId: 'v2-tool' }],
+        } as unknown as Parameters<typeof verifyCompletedChildFollowupModelWork>[1]),
+      ).toBe(false);
+      const nextSurfaceJson = JSON.stringify({ surface: 'v2-second' });
+      const nextSurfaceRef = modelRef('model_surface', nextSurfaceJson);
+      createKiteHomeArtifactStore(db).writeModel({
+        ref: nextSurfaceRef,
+        artifactFormatVersion: 1,
+        canonicalJson: nextSurfaceJson,
+        createdAt: 36,
+      });
+      const nextState = {
+        ...toolState,
+        modelInvocations: {
+          ...toolState.modelInvocations,
+          'v2-model-2': {
+            invocationId: 'v2-model-2',
+            status: 'prepared',
+            attempts: 0,
+            budget: { kind: 'reservation', reservationId: 'v2-model-2' },
+            surfaceArtifact: nextSurfaceRef,
+          },
+        },
+        resourceBudget: {
+          ...toolState.resourceBudget,
+          reservations: {
+            ...toolState.resourceBudget.reservations,
+            'v2-model-2': {
+              reservationId: 'v2-model-2',
+              runId: 'followup-run',
+              invocationId: 'model-invocation:v2-model-2',
+              resourceKind: 'model',
+              state: 'reserved',
+              executableUpperBound: usage(0, 1, 100, 30, 0),
+            },
+          },
+        },
+      };
+      expect(
+        verifyCompletedChildFollowupModelWork(db, {
+          sessionId: 'child',
+          snapshot: nextState,
+          events: [
+            {
+              type: 'model.invocation_prepared',
+              invocationId: 'v2-model-2',
+              purpose: 'primary_agent',
+            },
+          ],
+        } as unknown as Parameters<typeof verifyCompletedChildFollowupModelWork>[1]),
+      ).toBe(true);
+      const actual = {
+        source: 'actual',
+        estimatorVersion: 'v2-test',
+        counters: {
+          turns: 1,
+          modelRequests: 2,
+          toolInvocations: 14,
+          inputTokens: 180,
+          outputTokens: 40,
+          artifactBytes: 100,
+        },
+        gauges: {
+          elapsedRunMs: 12_000,
+          activeSubagents: 1,
+          activeWriters: 0,
+          activeToolInvocations: 1,
+          activeShellInvocations: 0,
+        },
+      };
+      const finishedState = {
+        ...nextState,
+        activeTaskId: null,
+        turn: { turnId: 'followup-run', status: 'completed' },
+        terminalOutcome: { status: 'completed' },
+        resourceBudget: {
+          ...nextState.resourceBudget,
+          reconciledUsage: {
+            ...actual,
+            counters: { ...actual.counters, turns: 0 },
+            gauges: { ...actual.gauges, activeSubagents: 0 },
+          },
+        },
+      };
+      const finishedJson = JSON.stringify(finishedState);
+      const evidenceDigest = `sha256:${createHash('sha256').update(finishedJson).digest('hex')}`;
+      const terminalCheckpointJson = JSON.stringify({
+        artifactFormatVersion: 1,
+        childSessionId: 'child',
+        terminalRunId: 'followup-run',
+        terminalTaskId: 'followup-task',
+        submissionId: 'submission-1',
+        terminalRevision: 5,
+        terminalStatus: 'completed',
+        stateDigest: evidenceDigest,
+        transcriptDigest: 'transcript',
+        transcript: { messages: [] },
+      });
+      const terminalHex = createHash('sha256').update(terminalCheckpointJson).digest('hex');
+      const terminalRef = {
+        artifactId: `pa_${terminalHex}`,
+        kind: 'subagent_checkpoint' as const,
+        integrityIdentifier: `sha256:${terminalHex}`,
+        byteLength: Buffer.byteLength(terminalCheckpointJson),
+      };
+      createKiteHomeArtifactStore(db).writeSubagentCheckpoint({
+        ref: terminalRef,
+        artifactFormatVersion: 1,
+        canonicalJson: terminalCheckpointJson,
+        createdAt: 50,
+      });
+      db.query(`UPDATE agent_nodes SET latest_checkpoint_artifact_id=?,
+        latest_checkpoint_integrity_identifier=?,latest_checkpoint_byte_length=?
+        WHERE session_id='child'`).run(
+        terminalRef.artifactId,
+        terminalRef.integrityIdentifier,
+        terminalRef.byteLength,
+      );
+      db.run(
+        "UPDATE runtime_runs SET status='completed',finished_at_ms=50,last_revision=5 WHERE session_id='child' AND run_id='followup-run'",
+      );
+      db.run("UPDATE runtime_sessions SET revision=5 WHERE session_id='child'");
+      db.query("UPDATE runtime_snapshots SET revision=5,state_json=? WHERE session_id='child'").run(
+        finishedJson,
+      );
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('child','v2-turn-settled',5,27,?,50)`).run(
+        JSON.stringify({
+          type: 'agent.followup_turn_settled',
+          sourceSessionId: 'parent',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          taskId: 'followup-task',
+          status: 'completed',
+        }),
+      );
+      parentReservations[backupId]!.state = 'reconciled';
+      Object.assign(parentReservations[backupId]!, { actual });
+      db.run("UPDATE runtime_sessions SET revision=5 WHERE session_id='parent'");
+      db.query(
+        "UPDATE runtime_snapshots SET revision=5,state_json=? WHERE session_id='parent'",
+      ).run(JSON.stringify(retainedState));
+      const reconciled = { type: 'resource_budget.reconciled', reservationId: backupId, actual };
+      const audit = {
+        type: 'agent.followup_independent_settled',
+        submissionId: 'submission-1',
+        targetAgentId: 'child',
+        targetRunId: 'followup-run',
+        targetRevision: 5,
+        disposition: 'completed',
+        evidenceDigest,
+        createdAtMs: 60,
+      };
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','v2-reconciled',4,27,?,60),('parent','v2-terminal',5,27,?,60)`).run(
+        JSON.stringify(reconciled),
+        JSON.stringify(audit),
+      );
+      db.transaction(() =>
+        settleIndependentCrossSessionFollowupFundingInTransaction(db, {
+          sourceSessionId: 'parent',
+          targetSessionId: 'child',
+          submissionId: 'submission-1',
+          targetRunId: 'followup-run',
+          targetRevision: 5,
+          disposition: 'completed',
+          sourceRevision: 5,
+          createdAtMs: 60,
+          sourceSnapshot: retainedState,
+          events: [reconciled, audit],
+        }),
+      )();
+      expect(readCrossSessionFollowupTerminalReceipt(db, 'parent', 'submission-1')).toMatchObject({
+        disposition: 'completed',
+        evidenceDigest,
+        sourceRevision: 5,
+      });
+      expect(readLastFollowupOutcomeForDirectChild(db, 'parent', 'run-1', 'child')).toMatchObject({
+        status: 'completed',
+        sourceRevision: 5,
+        submissionId: 'submission-1',
+      });
+      expect(readDirectChildFollowupOutcomeWatermark(db, 'parent', 'run-1')).toEqual({
+        count: 1,
+        throughRevision: 5,
+      });
+      expect(listPendingCrossSessionFollowupFunding(db, 'parent', 10)).toEqual([]);
+      expect(listUnrepliedSettledFollowupTerminalSources(db, 10)).toEqual([
+        {
+          childSessionId: 'child',
+          parentSessionId: 'parent',
+          submissionId: 'submission-1',
+        },
+      ]);
+      expect(
+        db.transaction(() =>
+          acceptCrossSessionFollowupTerminalReplyInTransaction(db, {
+            childSessionId: 'child',
+            parentSessionId: 'parent',
+            submissionId: 'submission-1',
+            acceptedAtMs: 61,
+          }),
+        )().mode,
+      ).toBe('reply');
+      expect(listUnrepliedSettledFollowupTerminalSources(db, 10)).toEqual([]);
+      db.query("UPDATE runtime_snapshots SET state_json=? WHERE session_id='child'").run(
+        JSON.stringify({ ...finishedState, activeFollowupTurn: { submissionId: 'later-turn' } }),
+      );
+      expect(readCrossSessionFollowupTerminalReceipt(db, 'parent', 'submission-1')).toMatchObject({
+        disposition: 'completed',
+        evidenceDigest,
+      });
+      expect(
+        readIndependentCrossSessionFollowupActivation(db, 'parent', 'submission-1'),
+      ).toBeNull();
+      db.query(
+        "UPDATE runtime_command_receipts SET request_digest=? WHERE command_id='mail-1'",
+      ).run('f'.repeat(64));
+      expect(
+        readAcceptedIndependentFollowupSourcePolicyProof(db, 'child', 'parent', 'submission-1'),
+      ).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
   test('accepts a queued backup and releases capacity timeout only after a proven full-slot wait', () => {
     const { db, input } = fixture();
     try {

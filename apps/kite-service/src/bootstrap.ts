@@ -2060,10 +2060,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 throw new Error('Followup restart funding index is incomplete.');
               return pending.map((entry) => {
                 const targetProof =
-                  entry.stage === 'activated' &&
-                  entry.targetRunId &&
-                  entry.modelInvocationId &&
-                  mailOwner.storage.sessions.loadSnapshot<RuntimeState>(entry.targetSessionId)
+                  entry.stage === 'activated' && entry.targetRunId && entry.modelInvocationId
                     ? mailOwner.storage.crossSessionQueueMail.readActivatedNoAttemptTargetProofForSource(
                         sourceSessionId,
                         entry.targetSessionId,

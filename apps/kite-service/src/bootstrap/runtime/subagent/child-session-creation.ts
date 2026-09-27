@@ -31,6 +31,8 @@ export function buildChildSessionCreation(input: {
       : parentState.retainedResourceBudgets[intent.fundingRunId];
   const reservation = ledger?.reservations[intent.delegatedReservationId];
   const deadlineMs = Date.parse(intent.deadlineAt);
+  const independentTurnDeadline =
+    reservation?.executableUpperBound.independentChildTurnDeadline === true;
   if (
     (intent.disposition !== 'required' && intent.disposition !== 'after_turn') ||
     parent.threadId !== intent.parentSessionId ||
@@ -46,7 +48,10 @@ export function buildChildSessionCreation(input: {
     !Number.isSafeInteger(input.nowMs) ||
     input.nowMs < 0 ||
     !Number.isSafeInteger(deadlineMs) ||
-    deadlineMs <= input.nowMs ||
+    (!independentTurnDeadline && deadlineMs <= input.nowMs) ||
+    (independentTurnDeadline &&
+      (reservation?.reservationId !== `child-allotment:${intent.childThreadId}` ||
+        reservation.executableUpperBound.unboundedToolInvocations !== true)) ||
     ledger?.deadlineAt !== intent.deadlineAt ||
     (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
     reservation.runId !== intent.fundingRunId ||
@@ -98,7 +103,11 @@ export function buildChildSessionCreation(input: {
       JSON.stringify(['kite.child-session-create.v1', intent.childThreadId, intent.grantDigest]),
     )
     .digest('hex');
-  const expiryMs = Math.min(deadlineMs, input.nowMs + 60_000);
+  const expiryMs = independentTurnDeadline
+    ? input.nowMs + 60_000
+    : Math.min(deadlineMs, input.nowMs + 60_000);
+  if (!Number.isSafeInteger(expiryMs) || expiryMs <= input.nowMs)
+    throw new Error('Child Session controller lease has no live deadline.');
   return {
     childSessionIntent: intent,
     runtime: {

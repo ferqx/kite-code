@@ -103,6 +103,7 @@ export async function exerciseChildOrchestration(
   zeroToolChild = false,
   childDeadlineMs = 120_000,
   failChildModel = false,
+  shellApprovalChild = false,
 ): Promise<void> {
   const durableHome = process.env.KITE_D3_SIGKILL_HOME;
   const localModelBaseURL = process.env.KITE_D3_SIGKILL_MOCK_URL;
@@ -233,7 +234,8 @@ export async function exerciseChildOrchestration(
           haltAfterCommittedStage('prepared');
         if (
           acknowledgement === 'decision' &&
-          transaction.crossSessionAgentMailMutation?.kind === 'activate_followup_funding'
+          transaction.crossSessionAgentMailMutation?.kind === 'route_followup' &&
+          transaction.crossSessionAgentMailMutation.route === 'new_turn'
         )
           haltAfterCommittedStage('activated');
         if (
@@ -392,8 +394,8 @@ export async function exerciseChildOrchestration(
           toolCallId: parentToolCallId,
           name: 'task',
           args: {
-            name: 'Review',
-            subagent_type: 'review',
+            name: shellApprovalChild ? 'Code' : 'Review',
+            subagent_type: shellApprovalChild ? 'code' : 'review',
             task: 'ORCHESTRATED_CHILD_TASK',
             background: true,
             result_disposition: 'required',
@@ -466,11 +468,15 @@ export async function exerciseChildOrchestration(
       admissionDigest: '2'.repeat(64),
       effectiveEffectsDigest: '3'.repeat(64),
       childInvocationId,
-      role: 'review',
+      role: shellApprovalChild ? 'code' : 'review',
       taskArtifact: task.ref,
       taskDigest: task.taskDigest,
       capabilityCeiling: {
-        allowedTools: zeroToolChild ? [] : ['read_file'],
+        allowedTools: zeroToolChild
+          ? []
+          : shellApprovalChild
+            ? ['read_file', 'shell_execute']
+            : ['read_file'],
         bindingIds: [],
         bindingRevision: '4'.repeat(64),
         ceilingDigest: '5'.repeat(64),
@@ -504,7 +510,7 @@ export async function exerciseChildOrchestration(
         modelKwargs: { maxOutputTokens: 64 },
         modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
         features: { resourceBudget: true },
-        sandbox: { enabled: false },
+        sandbox: { enabled: shellApprovalChild },
       },
       shellExecutor: async ({ command }: { command: string }) => ({
         ok: true as const,
@@ -514,7 +520,7 @@ export async function exerciseChildOrchestration(
         stderr: '',
       }),
       interactionMode: 'accept_edits' as const,
-      sandboxBackend: 'none' as const,
+      sandboxBackend: shellApprovalChild ? ('seatbelt' as const) : ('none' as const),
       skillOptions: {
         userKiteCodeSkillsDir: join(workspace, 'user-kite-skills'),
         userAgentsSkillsDir: join(workspace, 'user-agent-skills'),
@@ -609,8 +615,8 @@ export async function exerciseChildOrchestration(
     });
     stage.stage({
       grant,
-      name: 'Independent reviewer',
-      role: 'review',
+      name: shellApprovalChild ? 'Independent coder' : 'Independent reviewer',
+      role: shellApprovalChild ? 'code' : 'review',
       originRunId: parentRunId,
       originTurnId: parentRunId,
       disposition: 'required',
@@ -1116,7 +1122,9 @@ export async function exerciseChildOrchestration(
     expect(child.resourceBudget.budget.maxRunDurationMs).toBeLessThanOrEqual(
       accepted[0]!.childBudget.maxRunDurationMs,
     );
-    expect(Date.parse(child.resourceBudget.deadlineAt)).toBeLessThanOrEqual(Date.parse(deadlineAt));
+    expect(Date.parse(child.resourceBudget.deadlineAt)).toBe(
+      Date.parse(child.resourceBudget.startedAt) + child.resourceBudget.budget.maxRunDurationMs,
+    );
     expect(
       parentCoordinator.getState().capabilities.invocations[parentInvocationId]
         ?.subagentProviderLifecycle?.childSession?.terminalImport?.status,

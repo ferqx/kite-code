@@ -98,6 +98,37 @@ function assertResourceBudget(state: AgentState): void {
       validTimestamp(active.deadlineAt),
     'active resource budget identity/timestamps are invalid.',
   );
+  const totalWait = active.totalRequiredChildWaitMs ?? 0;
+  assert(
+    Number.isSafeInteger(totalWait) &&
+      totalWait >= 0 &&
+      Date.parse(active.deadlineAt) - Date.parse(active.startedAt) <=
+        active.budget.maxRunDurationMs + totalWait,
+    'required child wait exceeds the active Run duration.',
+  );
+  const validTaskIds = (ids: readonly string[]): boolean =>
+    Array.isArray(ids) &&
+    ids.length > 0 &&
+    ids.every(
+      (id, index) =>
+        typeof id === 'string' && id.length > 0 && (index === 0 || ids[index - 1]! < id),
+    );
+  if (active.requiredChildWait)
+    assert(
+      validTimestamp(active.requiredChildWait.startedAt) &&
+        Date.parse(active.requiredChildWait.startedAt) >= Date.parse(active.startedAt) &&
+        validTaskIds(active.requiredChildWait.taskIds),
+      'active required child wait is invalid.',
+    );
+  if (active.lastRequiredChildWait)
+    assert(
+      validTimestamp(active.lastRequiredChildWait.startedAt) &&
+        validTimestamp(active.lastRequiredChildWait.endedAt) &&
+        Date.parse(active.lastRequiredChildWait.endedAt) >=
+          Date.parse(active.lastRequiredChildWait.startedAt) &&
+        validTaskIds(active.lastRequiredChildWait.taskIds),
+      'last required child wait is invalid.',
+    );
   const budget = record(active.budget);
   assert(budget?.version === 1, 'resource budget version is invalid.');
   const budgetFields = [
@@ -131,6 +162,11 @@ function assertResourceBudget(state: AgentState): void {
     'resource budget limits are invalid.',
   );
   assert(
+    budget.unboundedToolInvocations === undefined ||
+      (budget.unboundedToolInvocations === true && budget.maxToolInvocations === 0),
+    'unbounded Tool budget marker is invalid.',
+  );
+  assert(
     (numberValue(budget, 'maxConcurrentShellInvocations') ?? 0) <=
       (numberValue(budget, 'maxConcurrentToolInvocations') ?? -1),
     'shell concurrency exceeds tool concurrency.',
@@ -146,6 +182,7 @@ function assertResourceBudget(state: AgentState): void {
     'resource budget waiter sequence is invalid.',
   );
   const sequences = new Set<number>();
+  let delegatedToolInvocations = 0;
   for (const [reservationId, reservationValue] of Object.entries(active.reservations)) {
     const reservation = record(reservationValue);
     assert(
@@ -220,6 +257,30 @@ function assertResourceBudget(state: AgentState): void {
       'reservation upper bound',
       'versioned_upper_bound',
     );
+    const childUpper = recordValue(reservation, 'executableUpperBound');
+    if (childUpper?.unboundedToolInvocations === true)
+      assert(
+        reservation.resourceKind === 'subagent' &&
+          ((reservation.reservationId === reservation.invocationId &&
+            (stringValue(reservation, 'reservationId') ?? '').startsWith('child-allotment:')) ||
+            (/^backup_[a-f0-9]{64}$/u.test(stringValue(reservation, 'reservationId') ?? '') &&
+              childUpper.independentFollowupTurn === true)),
+        'unbounded Tool upper bound requires exact child funding.',
+      );
+    if (childUpper?.independentFollowupTurn === true)
+      assert(
+        reservation.resourceKind === 'subagent' &&
+          /^backup_[a-f0-9]{64}$/u.test(stringValue(reservation, 'reservationId') ?? '') &&
+          childUpper.unboundedToolInvocations === true,
+        'independent followup turn requires exact backup funding.',
+      );
+    if (childUpper?.independentChildTurnDeadline === true)
+      assert(
+        reservation.resourceKind === 'subagent' &&
+          reservation.reservationId === reservation.invocationId &&
+          (stringValue(reservation, 'reservationId') ?? '').startsWith('child-allotment:'),
+        'independent child deadline requires an exact child allotment.',
+      );
     const actual = recordValue(reservation, 'actual');
     if (actual) {
       assertUsage(actual, 'reservation actual usage', 'actual');
@@ -228,6 +289,9 @@ function assertResourceBudget(state: AgentState): void {
         recordValue(reservation, 'executableUpperBound'),
         'reservation actual exceeds executable upper bound.',
       );
+      if (childUpper?.unboundedToolInvocations === true && reservation.state === 'reconciled')
+        delegatedToolInvocations +=
+          numberValue(recordValue(actual, 'counters'), 'toolInvocations') ?? 0;
     }
     const parent = stringValue(reservation, 'parentReservationId');
     if (parent)
@@ -244,6 +308,11 @@ function assertResourceBudget(state: AgentState): void {
         'resource reservation replacement is invalid.',
       );
   }
+  assert(
+    Number.isSafeInteger(delegatedToolInvocations) &&
+      delegatedToolInvocations <= active.reconciledUsage.counters.toolInvocations,
+    'delegated Tool audit total disagrees with reconciled child receipts.',
+  );
   for (const [waiterId, waiterValue] of Object.entries(active.waiters)) {
     const waiter = record(waiterValue);
     assert(
@@ -342,8 +411,19 @@ function assertUsage(
   source: 'actual' | 'versioned_upper_bound',
 ): void {
   assert(
-    (value != null && exactShape(value, ['counters', 'gauges', 'source'])) ||
-      (value != null && exactShape(value, ['counters', 'gauges', 'source', 'estimatorVersion'])),
+    value != null &&
+      ['counters', 'gauges', 'source'].every((key) => Object.hasOwn(value, key)) &&
+      Object.keys(value).every((key) =>
+        [
+          'counters',
+          'gauges',
+          'source',
+          'estimatorVersion',
+          'unboundedToolInvocations',
+          'independentChildTurnDeadline',
+          'independentFollowupTurn',
+        ].includes(key),
+      ),
     `${label} shape is invalid.`,
   );
   assert(stringValue(value, 'source') === source, `${label} source is invalid.`);
@@ -378,6 +458,17 @@ function assertUsage(
       value.estimatorVersion === undefined,
       `${label} actual usage cannot have estimator version.`,
     );
+  assert(
+    (value.unboundedToolInvocations === undefined ||
+      (source === 'versioned_upper_bound' &&
+        value.unboundedToolInvocations === true &&
+        numberValue(counters, 'toolInvocations') === 0)) &&
+      (value.independentChildTurnDeadline === undefined ||
+        (source === 'versioned_upper_bound' && value.independentChildTurnDeadline === true)) &&
+      (value.independentFollowupTurn === undefined ||
+        (source === 'versioned_upper_bound' && value.independentFollowupTurn === true)),
+    `${label} authority marker is invalid.`,
+  );
 }
 
 function assertUsageWithin(
@@ -394,11 +485,12 @@ function assertUsageWithin(
     'outputTokens',
     'artifactBytes',
   ])
-    assert(
-      (numberValue(recordValue(actual, 'counters'), field) ?? 0) <=
-        (numberValue(recordValue(upper, 'counters'), field) ?? -1),
-      message,
-    );
+    if (field !== 'toolInvocations' || upper.unboundedToolInvocations !== true)
+      assert(
+        (numberValue(recordValue(actual, 'counters'), field) ?? 0) <=
+          (numberValue(recordValue(upper, 'counters'), field) ?? -1),
+        message,
+      );
   for (const field of [
     'elapsedRunMs',
     'activeSubagents',
@@ -477,9 +569,21 @@ function committedUsageWithinBudget(
       );
     }
   }
+  const delegatedToolInvocations = Object.values(active.reservations).reduce(
+    (total, reservation) =>
+      total +
+      (reservation.state === 'reconciled' &&
+      reservation.executableUpperBound.unboundedToolInvocations === true
+        ? (reservation.actual?.counters.toolInvocations ?? 0)
+        : 0),
+    0,
+  );
   return (
     Object.entries(counterLimits).every(
-      ([field, limit]) => counterSums[field]! <= (numberValue(budget, limit) ?? -1),
+      ([field, limit]) =>
+        (field === 'toolInvocations' && budget.unboundedToolInvocations === true) ||
+        counterSums[field]! - (field === 'toolInvocations' ? delegatedToolInvocations : 0) <=
+          (numberValue(budget, limit) ?? -1),
     ) &&
     Object.entries(gaugeLimits).every(
       ([field, limit]) => gaugeSums[field]! <= (numberValue(budget, limit) ?? -1),

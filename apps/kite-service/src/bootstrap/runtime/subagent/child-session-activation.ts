@@ -111,15 +111,26 @@ export function activateAcceptedChildSession(input: {
     !input.childRunId
   )
     throw new Error('Child activation has no live finite parent allotment.');
+  const independentTurnDeadline =
+    reservation.executableUpperBound.independentChildTurnDeadline === true;
+  if (
+    independentTurnDeadline !== (input.childBudget.unboundedToolInvocations === true) ||
+    independentTurnDeadline !== (reservation.executableUpperBound.unboundedToolInvocations === true)
+  )
+    throw new Error('Child activation budget conflicts with its persisted delegation.');
   const budget = childBudgetAtActivation({
     childBudget: input.childBudget,
     deadlineAt: input.childDeadlineAt,
     startedAt: input.startedAt,
+    independentTurnDeadline,
   });
   const startedAt = new Date(input.startedAt).toISOString();
-  const deadlineAt = new Date(
-    Math.min(Date.parse(input.childDeadlineAt), input.startedAt + budget.maxRunDurationMs),
-  ).toISOString();
+  const deadlineMs = independentTurnDeadline
+    ? input.startedAt + budget.maxRunDurationMs
+    : Math.min(Date.parse(input.childDeadlineAt), input.startedAt + budget.maxRunDurationMs);
+  if (!Number.isSafeInteger(deadlineMs))
+    throw new Error('Child activation deadline exceeds the supported clock.');
+  const deadlineAt = new Date(deadlineMs).toISOString();
   assertChildBudgetWithinDelegation({
     reservation,
     childBudget: budget,

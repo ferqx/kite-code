@@ -115,7 +115,7 @@ test('user-cancelled followup before dispatch releases funding and replies with 
         const result = originalCommit(acknowledgement, transaction, requiredLease);
         if (
           !activated &&
-          transaction.crossSessionAgentMailMutation?.kind === 'activate_followup_funding'
+          transaction.crossSessionAgentMailMutation?.kind === 'activate_independent_followup_turn'
         ) {
           activated = true;
           controller.abort();
@@ -135,37 +135,32 @@ test('user-cancelled followup before dispatch releases funding and replies with 
       }
       expect(activated).toBe(true);
       expect(model.getRequestCount()).toBe(requestsBefore);
-      const fundingBeforeSettlement = owner.runWithSessionExecution(childSessionId, () =>
-        raw.readFollowupFundingForTarget(childSessionId, parentSessionId, accepted.submissionId),
-      );
+      const child = coordinators.get(childSessionId);
+      const followup = child?.getState().activeFollowupTurn;
+      if (!child || !followup) throw new Error('Fixture followup turn was not started.');
+      expect(child.getState().turn.status).toBe('active');
       const route = owner.runWithSessionExecution(childSessionId, () =>
         raw.readFollowupRoute(childSessionId, accepted.submissionId),
       );
-      const child = coordinators.get(childSessionId);
-      if (!fundingBeforeSettlement || !route || !child)
-        throw new Error('Fixture followup is not funded.');
-      expect(child.getState().turn.status).toBe('active');
-      expect(
-        child.getState().modelInvocations[fundingBeforeSettlement.modelInvocationId]?.attempts,
-      ).toBe(0);
+      expect(route?.route).toBe('new_turn');
+      expect(child.getState().modelInvocations[route!.invocationId]?.attempts).toBe(0);
       const failure = classifyFailure('user_input_cancelled', 'User cancelled before dispatch.');
       owner.runWithSessionExecution(childSessionId, () =>
         child.control.processEventBatch([
           {
-            type: 'resource_budget.released',
-            reservationId: fundingBeforeSettlement.targetModelReservationId,
-            proof: 'local_pre_dispatch_failure',
+            type: 'task.failed',
+            taskId: followup.taskId,
+            reason: 'User cancelled before dispatch.',
           },
-          { type: 'task.failed', taskId: route.taskId, reason: 'User cancelled before dispatch.' },
           {
             type: 'turn.aborted',
-            turnId: route.targetRunId,
+            turnId: followup.targetRunId,
             reason: failure.message,
             cause: 'user',
           },
           {
             type: 'run.error',
-            turnId: route.targetRunId,
+            turnId: followup.targetRunId,
             message: failure.message,
             recoverable: false,
             failure,
@@ -173,6 +168,18 @@ test('user-cancelled followup before dispatch releases funding and replies with 
           },
         ]),
       );
+      expect(
+        owner.runWithSessionExecution(childSessionId, () =>
+          child.session.commitChildFollowupTurnSettlement({
+            type: 'agent.followup_turn_settled',
+            sourceSessionId: parentSessionId,
+            submissionId: accepted.submissionId,
+            targetRunId: followup.targetRunId,
+            taskId: followup.taskId,
+            status: 'cancelled',
+          }),
+        ),
+      ).toHaveLength(1);
       expect(
         orchestrator.settleTerminalFollowupFunding(childSessionId, accepted.submissionId),
       ).toBe(true);
@@ -248,7 +255,7 @@ test('committed first Model attempt keeps uncertain followup fail closed without
         owner.runWithSessionExecution(parentSessionId, () =>
           raw.readFollowupTerminalForSource(parentSessionId, accepted.submissionId),
         ),
-      ).toBeNull();
+      ).toMatchObject({ disposition: 'unknown' });
       expect(
         owner.runWithSessionExecution(childSessionId, () =>
           raw.listPendingTerminalReplies(childSessionId, 8),
@@ -606,7 +613,7 @@ async function exerciseRealFollowup(
       expect(parentCoordinator.session.getLifecycleProjection().currentRun?.runId).toBe(
         parentRunId,
       );
-      expect(model.getRequestCount()).toBe(3);
+      if (!process.env.KITE_D3_SIGKILL_MOCK_URL) expect(model.getRequestCount()).toBe(3);
       const targetEvents = owner.storage.sessions
         .loadEventsStrict(childSessionId)
         .map(({ event }) => event);
@@ -635,7 +642,7 @@ async function exerciseRealFollowup(
       expect(
         await orchestrator.executeAcceptedFollowupFirstModel(childSessionId, accepted.submissionId),
       ).toBe(false);
-      expect(model.getRequestCount()).toBe(3);
+      if (!process.env.KITE_D3_SIGKILL_MOCK_URL) expect(model.getRequestCount()).toBe(3);
     },
     sourceAutoRevision,
   );

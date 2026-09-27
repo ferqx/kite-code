@@ -68,6 +68,165 @@ function configured() {
 }
 
 describe('ResourceBudget', () => {
+  test('persists required child wait as active-time deadline suspension', () => {
+    const started = {
+      type: 'resource_budget.required_child_wait_started' as const,
+      runId: 'run-1',
+      at: '2026-07-30T00:00:10Z',
+      taskIds: ['child-1'],
+    };
+    const ended = {
+      type: 'resource_budget.required_child_wait_ended' as const,
+      runId: 'run-1',
+      at: '2026-07-30T00:05:10Z',
+      taskIds: ['child-1'],
+    };
+    const suspended = reduceResourceBudgetState(configured(), started);
+    expect(suspended.status === 'active' && suspended.requiredChildWait?.startedAt).toBe(
+      started.at,
+    );
+    expect(reduceResourceBudgetState(suspended, started)).toBe(suspended);
+    expect(() =>
+      reduceResourceBudgetState(suspended, {
+        type: 'resource_budget.reserved',
+        reservation: reservation('parent-tool', 'parent-tool'),
+      }),
+    ).toThrow('suspended');
+    expect(() =>
+      reduceResourceBudgetState(suspended, { ...ended, taskIds: ['other-child'] }),
+    ).toThrow('no matching start');
+    const resumed = reduceResourceBudgetState(suspended, ended);
+    expect(resumed.status === 'active' && resumed.deadlineAt).toBe('2026-07-30T00:35:00.000Z');
+    expect(resumed.status === 'active' && resumed.totalRequiredChildWaitMs).toBe(300_000);
+    expect(reduceResourceBudgetState(resumed, ended)).toBe(resumed);
+  });
+  test('new unbounded Tool authority counts completed calls without imposing a total', () => {
+    const initial = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'unbounded-child',
+      userId: 'u',
+      workspace: '/',
+    });
+    let active = reduceResourceBudgetState(initial.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: '2026-07-30T00:00:00Z',
+      deadlineAt: '2026-07-30T00:01:00Z',
+      budget: {
+        ...LIMITED_RESOURCE_BUDGET_,
+        maxToolInvocations: 0,
+        unboundedToolInvocations: true,
+      },
+    });
+    for (const id of ['first', 'second']) {
+      active = reduceResourceBudgetState(active, {
+        type: 'resource_budget.reserved',
+        reservation: reservation(id, id),
+      });
+      active = reduceResourceBudgetState(active, {
+        type: 'resource_budget.dispatch_started',
+        reservationId: id,
+      });
+      active = reduceResourceBudgetState(active, {
+        type: 'resource_budget.reconciled',
+        reservationId: id,
+        actual: actual({ toolInvocations: 1 }),
+      });
+    }
+    const childUpper: ResourceUsage = {
+      ...usage(),
+      unboundedToolInvocations: true,
+      gauges: { ...usage().gauges, activeSubagents: 1 },
+    };
+    const childReservation: BudgetReservation = {
+      ...reservation('child-allotment:child', 'child-allotment:child', childUpper),
+      resourceKind: 'subagent',
+    };
+    active = reduceResourceBudgetState(active, {
+      type: 'resource_budget.reserved',
+      reservation: childReservation,
+    });
+    active = reduceResourceBudgetState(active, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: childReservation.reservationId,
+    });
+    active = reduceResourceBudgetState(active, {
+      type: 'resource_budget.reconciled',
+      reservationId: childReservation.reservationId,
+      actual: actual({ toolInvocations: 3 }),
+    });
+    expect(active.status === 'active' && active.reconciledUsage.counters.toolInvocations).toBe(5);
+    // Parent spends only its one Task Tool receipt; child Tool count belongs to
+    // the independent child ledger and does not reserve a speculative parent total.
+    expect(() =>
+      reduceResourceBudgetState(configured(), {
+        type: 'resource_budget.reserved',
+        reservation: childReservation,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      reduceResourceBudgetState(configured(), {
+        type: 'resource_budget.reserved',
+        reservation: reservation('over', 'over', usage({ toolInvocations: 251 })),
+      }),
+    ).toThrow('Resource budget exhausted');
+    const denied = reduceResourceBudgetState(initial.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: '2026-07-30T00:00:00Z',
+      deadlineAt: '2026-07-30T00:01:00Z',
+      budget: {
+        ...LIMITED_RESOURCE_BUDGET_,
+        maxToolInvocations: 0,
+        unboundedToolInvocations: undefined,
+      },
+    });
+    expect(() =>
+      reduceResourceBudgetState(denied, {
+        type: 'resource_budget.reserved',
+        reservation: reservation('denied', 'denied'),
+      }),
+    ).toThrow('Resource budget exhausted');
+  });
+  test('audits delegated child Tool calls without spending the parent Tool count', () => {
+    const childUpper: ResourceUsage = {
+      ...usage(),
+      unboundedToolInvocations: true,
+      gauges: { ...usage().gauges, activeSubagents: 1 },
+    };
+    const child = {
+      ...reservation('child-allotment:many-tools', 'child-allotment:many-tools', childUpper),
+      resourceKind: 'subagent' as const,
+    };
+    let parent = reduceResourceBudgetState(configured(), {
+      type: 'resource_budget.reserved',
+      reservation: child,
+    });
+    parent = reduceResourceBudgetState(parent, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: child.reservationId,
+    });
+    parent = reduceResourceBudgetState(parent, {
+      type: 'resource_budget.reconciled',
+      reservationId: child.reservationId,
+      actual: actual({ toolInvocations: 300 }),
+    });
+    expect(parent.status === 'active' && parent.reconciledUsage.counters.toolInvocations).toBe(300);
+    expect(
+      parent.status === 'active' &&
+        parent.reservations[child.reservationId]?.actual?.counters.toolInvocations,
+    ).toBe(300);
+    parent = reduceResourceBudgetState(parent, {
+      type: 'resource_budget.reserved',
+      reservation: reservation('parent-own', 'parent-own', usage({ toolInvocations: 250 })),
+    });
+    expect(() =>
+      reduceResourceBudgetState(parent, {
+        type: 'resource_budget.reserved',
+        reservation: reservation('parent-excess', 'parent-excess'),
+      }),
+    ).toThrow('Resource budget exhausted');
+  });
   test('admits a one-model zero-capability child ceiling and rejects Tool, Shell, writer, and child reservations', () => {
     const childBudget = {
       ...LIMITED_RESOURCE_BUDGET_,

@@ -109,8 +109,8 @@ export interface BuiltinSubagentModelLoopInput<
     childIdentity: NonNullable<BuiltinSubagentModelStepInput['childIdentity']>;
     prepareAgentMail: NonNullable<BuiltinSubagentModelStepInput['prepareAgentMail']>;
   }>;
-  /** Successful tool-bearing model rounds allowed before one tool-free finalization call. */
-  readonly maxToolRounds: number;
+  /** Optional legacy cap. When omitted, the Run's time and resource budget govern the loop. */
+  readonly maxToolRounds?: number;
   readonly consumer?: BuiltinSubagentModelLoopConsumerPort<TTerminal>;
   readonly signal?: AbortSignal;
 }
@@ -334,7 +334,7 @@ async function runLoop<
     while (true) {
       failureStage = 'next_round_preparation';
       throwIfAborted(input.signal);
-      const finalizing = toolRounds >= input.maxToolRounds;
+      const finalizing = input.maxToolRounds !== undefined && toolRounds >= input.maxToolRounds;
       const transcript = freezeTranscript(
         finalizing ? [...messages, humanMessage(FINALIZATION_PROMPT)] : messages,
       );
@@ -607,7 +607,10 @@ function validateLoopInput<
       'Subagent tool round cursor is invalid.',
     );
   }
-  if (!Number.isSafeInteger(input.maxToolRounds) || input.maxToolRounds < 1) {
+  if (
+    input.maxToolRounds !== undefined &&
+    (!Number.isSafeInteger(input.maxToolRounds) || input.maxToolRounds < 1)
+  ) {
     throw new BuiltinSubagentModelLoopError(
       'invalid_input',
       'Subagent maxToolRounds must be a positive safe integer.',

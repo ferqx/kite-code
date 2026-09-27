@@ -197,6 +197,58 @@ test('recovery rejects a changed persisted ceiling and never extends its duratio
   ).toThrow();
 });
 
+test('recovery grants a new 30-minute child turn after the parent deadline only with the persisted marker', () => {
+  const base = fixture();
+  const upper = {
+    ...base.upper,
+    unboundedToolInvocations: true as const,
+    independentChildTurnDeadline: true as const,
+    counters: { ...base.upper.counters, toolInvocations: 0 },
+    gauges: { ...base.upper.gauges, elapsedRunMs: 30 * 60_000 },
+  };
+  const reservationId = `child-allotment:${base.intent.childThreadId}`;
+  const parentState: RuntimeState = {
+    ...base.parentState,
+    resourceBudget: {
+      ...base.parentState.resourceBudget,
+      budget: INTERNAL_RESOURCE_BUDGET_,
+      reservations: {
+        [reservationId]: {
+          ...base.parentState.resourceBudget.reservations[base.intent.delegatedReservationId]!,
+          reservationId,
+          invocationId: reservationId,
+          executableUpperBound: upper,
+        },
+      },
+    } as RuntimeState['resourceBudget'],
+  };
+  const intent = {
+    ...base.intent,
+    delegatedReservationId: reservationId,
+    delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(upper),
+    delegatedUpperBoundJson: JSON.stringify(upper),
+  };
+  const nowMs = NOW + 130_000;
+  const result = recoverChildDelegatedBudget({
+    intent,
+    parentState,
+    grantIssuedAtMs: NOW,
+    nowMs,
+  });
+  expect(result.childDeadlineAt).toBe(new Date(nowMs + 30 * 60_000).toISOString());
+  expect(result.childBudget.maxRunDurationMs).toBe(30 * 60_000);
+  expect(result.childBudget.maxToolInvocations).toBe(0);
+  expect(result.childBudget.unboundedToolInvocations).toBe(true);
+  expect(() =>
+    recoverChildDelegatedBudget({
+      intent: { ...intent, delegatedUpperBoundJson: JSON.stringify(base.upper) },
+      parentState,
+      grantIssuedAtMs: NOW,
+      nowMs,
+    }),
+  ).toThrow();
+});
+
 test('child creation rejects stale authority, workspace mismatch and altered grant', () => {
   const base = fixture();
   expect(() => buildChildSessionCreation({ ...base, admittedWorkspace: '/other' })).toThrow();
@@ -208,4 +260,47 @@ test('child creation rejects stale authority, workspace mismatch and altered gra
     }),
   ).toThrow();
   expect(() => buildChildSessionCreation({ ...base, parentModelRoute: null })).toThrow();
+});
+
+test('marked child creation can occur after the parent deadline with a fresh controller lease', () => {
+  const base = fixture();
+  const reservationId = `child-allotment:${base.intent.childThreadId}`;
+  const upper = {
+    ...base.upper,
+    unboundedToolInvocations: true as const,
+    independentChildTurnDeadline: true as const,
+    counters: { ...base.upper.counters, toolInvocations: 0 },
+    gauges: { ...base.upper.gauges, elapsedRunMs: 30 * 60_000 },
+  };
+  const parentState: RuntimeState = {
+    ...base.parentState,
+    resourceBudget: {
+      ...base.parentState.resourceBudget,
+      budget: INTERNAL_RESOURCE_BUDGET_,
+      reservations: {
+        [reservationId]: {
+          ...base.parentState.resourceBudget.reservations[base.intent.delegatedReservationId]!,
+          reservationId,
+          invocationId: reservationId,
+          executableUpperBound: upper,
+        },
+      },
+    } as RuntimeState['resourceBudget'],
+  };
+  const nowMs = NOW + 130_000;
+  const creation = buildChildSessionCreation({
+    ...base,
+    intent: {
+      ...base.intent,
+      delegatedReservationId: reservationId,
+      delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(upper),
+    },
+    parentState,
+    nowMs,
+  });
+  expect(creation.controller.executionLeaseUntilMs).toBe(nowMs + 60_000);
+  expect(creation.controller.resumeExpiresAtMs).toBe(nowMs + 60_000);
+  expect(() => buildChildSessionCreation({ ...base, nowMs })).toThrow(
+    'Child Session creation lacks exact admitted parent authority',
+  );
 });

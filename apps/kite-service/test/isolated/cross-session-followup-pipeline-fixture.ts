@@ -1,10 +1,15 @@
 import { expect } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
 } from '@kite-ai/builtin-runtime';
 import { createChatModel } from '@kite-ai/builtin-runtime/model';
 import { createRuntimeHostToolCallSnapshot } from '@kite-ai/runtime-host';
+import {
+  type CrossSessionFollowupPolicy,
+  planCrossSessionTriggerTurnBackup,
+} from '@kite-ai/runtime-host/kernel-adapter';
 import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 import {
   type CrossSessionQueueMailPort,
@@ -32,6 +37,7 @@ export async function submitRealParentFollowup(
     capabilities,
   }: CompletedChildOrchestrationFixture,
   body: string,
+  legacyV1Admission = false,
 ) {
   model.setResponses([
     {
@@ -112,6 +118,13 @@ export async function submitRealParentFollowup(
           parentSessionId: sourceSessionId,
           status: target.status,
           checkpointReady: target.checkpointReady,
+          ...(target.originRole ? { originRole: target.originRole } : {}),
+          ...(target.originalGrantDigest
+            ? { originalGrantDigest: target.originalGrantDigest }
+            : {}),
+          ...(target.observedTargetRevision !== undefined
+            ? { observedTargetRevision: target.observedTargetRevision }
+            : {}),
         }
       );
     },
@@ -120,6 +133,79 @@ export async function submitRealParentFollowup(
         owner.storage.commandReceipts.lookup(input),
       ),
     acceptFollowupCommand: async (value) => {
+      // Replay coverage must persist a genuine v1 admission without reopening
+      // legacy dispatch through the production mailbox entry point.
+      let command = value;
+      if (legacyV1Admission) {
+        const payload = JSON.parse(value.intent.admission.canonicalJson) as Record<string, unknown>;
+        const storedPolicy = payload.policy as Record<string, unknown>;
+        const {
+          executionMode: _executionMode,
+          targetRole: _targetRole,
+          targetGrantDigest: _targetGrantDigest,
+          interactionMode: _interactionMode,
+          workspaceAccess: _workspaceAccess,
+          ...sourcePolicy
+        } = storedPolicy;
+        const planned = planCrossSessionTriggerTurnBackup({
+          sourceState: parentCoordinator.getState(),
+          trustedCurrentRunId: value.intent.sourceRunId,
+          sourceSessionId: value.intent.sourceSessionId,
+          targetSessionId: value.intent.targetSessionId,
+          submissionId: value.intent.submissionId,
+          requestDigest: value.intent.requestDigest,
+          receipt: { status: 'missing' },
+          policy: sourcePolicy as unknown as CrossSessionFollowupPolicy,
+          nowMs: value.intent.acceptedAtMs,
+        });
+        if (planned.status !== 'planned')
+          throw new Error('Legacy followup backup was not planned.');
+        const normalize = (item: unknown): unknown =>
+          Array.isArray(item)
+            ? item.map(normalize)
+            : item !== null && typeof item === 'object'
+              ? Object.fromEntries(
+                  Object.entries(item)
+                    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+                    .map(([key, nested]) => [key, normalize(nested)]),
+                )
+              : item;
+        const canonicalJson = JSON.stringify(
+          normalize({
+            ...payload,
+            schema: 'kite.cross-session-followup-admission.v1',
+            deadlineAt: planned.admission.deadlineAt,
+            executableUpperBound: planned.admission.executableUpperBound,
+            policy: {
+              ...planned.admission.policy,
+              interactionMode: parentCoordinator.getState().mode,
+              workspaceAccess: parentCoordinator.getState().workspaceAccess,
+            },
+          }),
+        );
+        const digest = `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`;
+        const admission = {
+          ref: {
+            artifactId: `pa_${digest.slice('sha256:'.length)}`,
+            kind: 'agent_followup_admission' as const,
+            integrityIdentifier: digest,
+            byteLength: Buffer.byteLength(canonicalJson, 'utf8'),
+          },
+          digest,
+          canonicalJson,
+          createdAt: value.intent.acceptedAtMs,
+        };
+        command = {
+          ...value,
+          event: {
+            ...value.event,
+            followupAdmissionRef: admission.ref,
+            followupAdmissionDigest: admission.digest,
+          },
+          reservationEvent: planned.reservationEvent,
+          intent: { ...value.intent, admission },
+        };
+      }
       const effectId = `cross-agent-followup-command:${value.receipt.commandId}`;
       const ownerId = 'followup-test-owner';
       expect(
@@ -129,24 +215,24 @@ export async function submitRealParentFollowup(
         owner.runWithSessionExecution(parentSessionId, () =>
           parentCoordinator.session.commitCrossSessionFollowupCommand(
             lease,
-            value.reservationEvent,
-            value.event,
+            command.reservationEvent,
+            command.event,
             {
               kind: 'accept_followup',
-              messageId: value.event.messageId,
-              targetSessionId: value.intent.targetSessionId,
+              messageId: command.event.messageId,
+              targetSessionId: command.intent.targetSessionId,
               commandId: value.receipt.commandId,
               requestDigest: value.receipt.requestDigest,
-              sourceRunId: value.intent.sourceRunId,
-              sourceTurnId: value.intent.sourceTurnId,
-              sourceModelInvocationId: value.intent.sourceModelInvocationId,
-              sourceToolCallId: value.intent.sourceToolCallId,
-              sourceEffectAttemptId: value.intent.sourceEffectAttemptId,
-              sourceSequence: value.intent.sourceSequence,
-              bodyText: value.intent.bodyText,
-              acceptedAtMs: value.intent.acceptedAtMs,
-              submissionId: value.intent.submissionId,
-              admission: value.intent.admission,
+              sourceRunId: command.intent.sourceRunId,
+              sourceTurnId: command.intent.sourceTurnId,
+              sourceModelInvocationId: command.intent.sourceModelInvocationId,
+              sourceToolCallId: command.intent.sourceToolCallId,
+              sourceEffectAttemptId: command.intent.sourceEffectAttemptId,
+              sourceSequence: command.intent.sourceSequence,
+              bodyText: command.intent.bodyText,
+              acceptedAtMs: command.intent.acceptedAtMs,
+              submissionId: command.intent.submissionId,
+              admission: command.intent.admission,
             },
             value.receipt,
             { sessionId: parentSessionId, effectId, ownerId },

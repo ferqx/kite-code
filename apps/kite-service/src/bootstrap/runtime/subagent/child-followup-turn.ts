@@ -12,7 +12,10 @@ import type {
   RuntimeAgentArtifactRef,
   RuntimeFollowupRunStartMutation,
 } from '@kite-ai/runtime-host/storage';
-import { CHILD_SESSION_TASK_USER_GOAL } from '@kite-ai/runtime-host/storage';
+import {
+  CHILD_SESSION_TASK_USER_GOAL,
+  childDelegatedUpperBoundDigest,
+} from '@kite-ai/runtime-host/storage';
 import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 
 const sha256 = (value: string): `sha256:${string}` =>
@@ -66,6 +69,8 @@ export function planChildFollowupTurn(input: {
   readonly sourceAdmissionDigest: string;
   readonly checkpoint: VerifiedChildFollowupCheckpoint;
   readonly nowMs: number;
+  /** Exact model-visible target tools after role, original grant and catalog attenuation. */
+  readonly allowedTools?: readonly string[];
   readonly targetPolicy: Readonly<{
     workspaceDigest: string;
     interactionModeRevision: number;
@@ -110,8 +115,9 @@ export function planChildFollowupTurn(input: {
     admission.policy.firstAttemptTimeoutMs <= 0
   )
     throw new Error('Child followup lacks a current settled checkpoint and restricted policy.');
+  const independent = admission.policy.executionMode === 'independent_turn_v2';
   const remaining = admission.deadlineAt - input.nowMs;
-  if (remaining < admission.policy.firstAttemptTimeoutMs + 5_000)
+  if (!independent && remaining < admission.policy.firstAttemptTimeoutMs + 5_000)
     throw new Error('Child followup funding deadline cannot cover its first Model attempt.');
   const upper = admission.executableUpperBound;
   if (
@@ -119,34 +125,56 @@ export function planChildFollowupTurn(input: {
     upper.counters.modelRequests < 1 ||
     upper.counters.inputTokens < 1 ||
     upper.counters.outputTokens < 1 ||
-    upper.counters.toolInvocations !== 0 ||
-    upper.counters.artifactBytes !== 0
+    upper.counters.toolInvocations !== 0
   )
-    throw new Error('Child followup source backup lacks a bounded zero-Tool ceiling.');
-  const duration = Math.min(remaining, upper.gauges.elapsedRunMs || remaining);
+    throw new Error('Child followup source backup lacks a bounded turn envelope.');
+  if (independent) {
+    const allowed = input.allowedTools;
+    if (
+      admission.policy.targetRole !== origin.role ||
+      admission.policy.targetGrantDigest !== origin.grantDigest ||
+      upper.independentFollowupTurn !== true ||
+      upper.unboundedToolInvocations !== true ||
+      upper.gauges.elapsedRunMs !== 30 * 60_000 ||
+      upper.counters.artifactBytes < 1 ||
+      !allowed ||
+      allowed.length === 0 ||
+      new Set(allowed).size !== allowed.length ||
+      allowed.some((name) => !name || name === 'task')
+    )
+      throw new Error('Child followup lacks a role-bound independent turn grant.');
+  } else if (upper.counters.artifactBytes !== 0) {
+    throw new Error('Legacy child followup source backup is not zero-Tool.');
+  }
+  const duration = independent
+    ? 30 * 60_000
+    : Math.min(remaining, upper.gauges.elapsedRunMs || remaining);
   if (!Number.isSafeInteger(duration) || duration < admission.policy.firstAttemptTimeoutMs + 5_000)
     throw new Error('Child followup delegated duration is unavailable.');
   const budget: ResourceBudget = {
     version: 1,
     maxRunDurationMs: duration,
     maxTurns: 1,
-    maxModelRequests: 1,
+    maxModelRequests: independent ? upper.counters.modelRequests : 1,
     maxToolInvocations: 0,
+    ...(independent ? { unboundedToolInvocations: true as const } : {}),
     maxRunInputTokens: upper.counters.inputTokens,
-    maxRunOutputTokens: Math.min(upper.counters.outputTokens, admission.policy.maxOutputTokens),
-    maxArtifactBytes: 0,
+    maxRunOutputTokens: independent
+      ? upper.counters.outputTokens
+      : Math.min(upper.counters.outputTokens, admission.policy.maxOutputTokens),
+    maxArtifactBytes: independent ? upper.counters.artifactBytes : 0,
     maxConcurrentSubagents: 0,
-    maxConcurrentWriters: 0,
-    maxConcurrentToolInvocations: 0,
-    maxConcurrentShellInvocations: 0,
-    maxConcurrencyWaitMs: 1,
+    maxConcurrentWriters: independent ? upper.gauges.activeWriters : 0,
+    maxConcurrentToolInvocations: independent ? upper.gauges.activeToolInvocations : 0,
+    maxConcurrentShellInvocations: independent ? upper.gauges.activeShellInvocations : 0,
+    maxConcurrencyWaitMs: independent ? 15_000 : 1,
   };
   const targetRunId = derived('run', admission.submissionId);
   const taskId = derived('task', admission.submissionId);
   const startedAt = new Date(input.nowMs).toISOString();
   const deadlineAt = new Date(input.nowMs + duration).toISOString();
   const grantCanonicalJson = JSON.stringify({
-    schema: 'kite.child-followup-grant.v1',
+    schema: independent ? 'kite.child-followup-grant.v2' : 'kite.child-followup-grant.v1',
     sourceSessionId: admission.sourceSessionId,
     targetSessionId: admission.targetSessionId,
     submissionId: admission.submissionId,
@@ -160,8 +188,9 @@ export function planChildFollowupTurn(input: {
     phaseCeiling: input.targetPolicy.phaseCeiling,
     sourceAdmissionRef: input.sourceAdmissionRef,
     sourceAdmissionDigest: input.sourceAdmissionDigest,
-    denyTools: true,
-    allowedTools: [],
+    ...(independent ? { sourceBackupUpperDigest: childDelegatedUpperBoundDigest(upper) } : {}),
+    denyTools: !independent,
+    allowedTools: independent ? [...input.allowedTools!] : [],
     budget: { ...budget, deadlineAt },
     firstAttemptTimeoutMs: admission.policy.firstAttemptTimeoutMs,
   });

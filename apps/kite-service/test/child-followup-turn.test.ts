@@ -241,4 +241,100 @@ test('settled child plans one fresh zero-Tool followup Run from its exact checkp
       allowedTools: [],
     }),
   ).toThrow('deny every Tool');
+
+  const independentUpper = createZeroResourceUsage('versioned_upper_bound', 'followup-test-v2');
+  independentUpper.counters.turns = 1;
+  independentUpper.counters.modelRequests = 12;
+  independentUpper.counters.inputTokens = 20_000;
+  independentUpper.counters.outputTokens = 8_000;
+  independentUpper.counters.artifactBytes = 10_000;
+  independentUpper.gauges.elapsedRunMs = 30 * 60_000;
+  independentUpper.gauges.activeSubagents = 1;
+  independentUpper.gauges.activeWriters = 1;
+  independentUpper.gauges.activeToolInvocations = 1;
+  independentUpper.gauges.activeShellInvocations = 1;
+  independentUpper.unboundedToolInvocations = true;
+  independentUpper.independentFollowupTurn = true;
+  const startedAt = Date.parse('2026-09-25T01:00:00.000Z');
+  const independent = planChildFollowupTurn({
+    state,
+    admission: {
+      sourceSessionId: 'parent-followup-test',
+      targetSessionId: childThreadId,
+      sourceRunId: 'parent-run',
+      submissionId: 'submission-v2',
+      fundingRunId: 'parent-run',
+      backupReservationId: `backup_${'f'.repeat(64)}`,
+      deadlineAt: Date.parse('2026-09-25T00:01:00.000Z'),
+      executableUpperBound: independentUpper,
+      policy: {
+        phaseCeiling: 'building',
+        authorizationDigest: `sha256:${'1'.repeat(64)}`,
+        admissionDigest: `sha256:${'2'.repeat(64)}`,
+        effectiveEffectsDigest: `sha256:${'3'.repeat(64)}`,
+        capabilityDigest: 'source-catalog',
+        workspaceDigest,
+        policyRevision: `sha256:${'4'.repeat(64)}`,
+        interactionModeRevision: 0,
+        boundedContext: true,
+        contextWindowTokens: 4_096,
+        maxOutputTokens: 64,
+        firstAttemptTimeoutMs: 10_000,
+        executionMode: 'independent_turn_v2',
+        targetRole: 'code',
+        targetGrantDigest: state.childSessionOrigin!.grantDigest,
+      },
+    },
+    sourceAdmissionRef: {
+      artifactId: `pa_${'5'.repeat(64)}`,
+      kind: 'agent_followup_admission',
+      integrityIdentifier: `sha256:${'5'.repeat(64)}`,
+      byteLength: 100,
+    },
+    sourceAdmissionDigest: `sha256:${'5'.repeat(64)}`,
+    checkpoint: {
+      ref: {
+        artifactId: `pa_${digest.slice(7)}`,
+        kind: 'subagent_checkpoint',
+        integrityIdentifier: digest,
+        byteLength: Buffer.byteLength(checkpointJson, 'utf8'),
+      },
+      canonicalJson: checkpointJson,
+      terminalRevision: 1,
+    },
+    nowMs: startedAt,
+    allowedTools: ['read_file', 'shell_execute'],
+    targetPolicy: {
+      workspaceDigest,
+      interactionModeRevision: state.interactionModeRevision,
+      capabilityDigest: state.capabilities.catalogRevision,
+      phaseCeiling: 'building',
+    },
+  });
+  expect(Date.parse(independent.deadlineAt) - startedAt).toBe(30 * 60_000);
+  expect(independent.budget).toMatchObject({
+    maxModelRequests: 12,
+    maxToolInvocations: 0,
+    unboundedToolInvocations: true,
+    maxConcurrentToolInvocations: 1,
+  });
+  expect(JSON.parse(independent.mutation.grant.canonicalJson)).toMatchObject({
+    schema: 'kite.child-followup-grant.v2',
+    denyTools: false,
+    allowedTools: ['read_file', 'shell_execute'],
+  });
+  const independentState = independent.events.reduce<AgentState>(
+    (current, event) => reduceAgentState(current, event),
+    state,
+  );
+  assertAgentStateInvariants(independentState);
+  expect(
+    Object.keys(
+      delegatedToolSurface({ task: {}, read_file: {}, shell_execute: {} }, independentState, {
+        grantDigest: independent.mutation.grantDigest,
+        role: 'code',
+        allowedTools: ['read_file', 'shell_execute'],
+      }),
+    ),
+  ).toEqual(['read_file', 'shell_execute']);
 });
