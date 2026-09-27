@@ -20,11 +20,10 @@ Workspace Trust 只确认 canonical Workspace，不解析 Git metadata，也不�
 Git metadata 新增、损坏或路径漂移不会使已信任 Workspace 变回 unknown。
 
 历史记录中的 `externalReadScopeDigest` 是此前明确确认的外部只读授权，保留其原值。仅在 native Shell
-preparation 需要构造文件范围时，Service 解析当前 canonical `gitDir/commondir` 并核对摘要，完全匹配才提供
+preparation 需要构造精确文件范围时，Service 解析当前 canonical `gitDir/commondir` 并核对摘要，完全匹配才提供
 exact read-only roots；不匹配、解析失败或没有既有 grant 均提供零外部 root。再次信任 Workspace 不扩大该授权。
-新外部访问仍受现有 Shell invocation 权限与 scope 流程约束，不自动放开父目录或降级为不受限执行。
-当前没有新的 metadata 专用授权入口：没有历史 grant 的 linked worktree 中，隐式 `git status/log` 读取会被受限沙箱拒绝；
-显式外部 `--git-dir` 等命令按现有 Shell scope expansion 提请批准。普通消息与工作区文件操作仍可继续。
+封存生产的受限 read scope 继续使用这些 roots；没有历史 grant 的 linked worktree 中，隐式 Git metadata 读取会被受限沙箱拒绝。
+开发期 Native Shell 使用广泛只读视图，已批准的 Git 命令可按宿主权限读取外部 metadata，不依赖该历史 grant；显式外部目标仍由 Shell Policy 审查。普通消息与工作区文件操作仍可继续。
 metadata discovery 只读取有界 4 KiB、普通非 symlink 的 Git identity files，不读取 repository 正文、config、objects 或 refs。
 
 `apps/kite-cli/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
@@ -102,7 +101,7 @@ release/manager 注入的 exact validated code root，不是 Workspace 或 ambie
 
 - map key 必须等于记录的 `workspaceKey`，`records` 必须是对象（数组等形式判 `corrupt`），否则整个存储视为损坏（防手工篡改误放）。
 - `workspacePath` 仅供审计，不参与判定；目录移动或改名后 key 变化，信任自然失效。
-- `externalReadScopeDigest` 仅保留历史明确批准的 exact roots 摘要；新 Workspace Trust 记录不生成此字段，重复信任保留原值。普通 trust 不依赖该字段。实际 sandbox preparation 重新解析路径并精确匹配，不从 store 反向恢复或扩大 authority。
+- `externalReadScopeDigest` 仅保留历史明确批准的 exact roots 摘要；新 Workspace Trust 记录不生成此字段，重复信任保留原值。普通 trust 不依赖该字段。受限 read-scope preparation 重新解析路径并精确匹配，不从 store 反向恢复或扩大 authority；开发期 broad read 不消费此字段来决定默认可读范围。
 - 写入使用fsync + 原子rename，文件权限0o600，与MCP项目批准存储同一模式。`trustWorkspace()`在读取-合并-写入前获取
   owner-specific `.kite-lock`并在持锁后重新读取expected revision。锁绑定PID、process-start identity、随机nonce与inode；不再按固定wall-clock
   年龄删除，只有能证明exact owner已死亡才回收，alive/uncertain/malformed全部fail closed。多进程并发信任不同目录不会覆盖已有记录。

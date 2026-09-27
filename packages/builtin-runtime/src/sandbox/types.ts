@@ -12,6 +12,9 @@ export type ShellFilesystemMode = 'workspace_only' | 'allow_all';
 /** Filesystem authority carried by the release-pinned execution boundary. */
 export type FilesystemScope = 'read_only' | 'workspace_write' | 'full_access';
 
+/** Native sandbox read visibility; write authority remains in FilesystemScope. */
+export type SandboxReadScope = 'restricted' | 'broad';
+
 /** Network authority carried by the release-pinned execution boundary. */
 export type ExecutionNetworkMode = 'off' | 'allowlist';
 

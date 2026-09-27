@@ -11,6 +11,7 @@ import type {
 import {
   composeAppSandboxExecutor,
   createPreparedAppShellExecutor,
+  nativeShellReadScope,
   SANDBOX_PREPARATION_ABORTED_REASON,
 } from '#kite-service/sandbox/composition';
 import {
@@ -140,6 +141,16 @@ async function waitForPidExit(pid: number): Promise<boolean> {
 }
 
 describe('App sandbox composition', () => {
+  test('selects broad reads only without a release-pinned execution boundary', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-read-scope-composition-'));
+    try {
+      expect(nativeShellReadScope(undefined)).toBe('broad');
+      expect(nativeShellReadScope(boundary(workspace, 'off'))).toBe('restricted');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('runs and cancels a no-deadline service through the real host process tree', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-service-shell-'));
     const controller = new AbortController();

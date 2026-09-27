@@ -3,6 +3,7 @@ import type {
   BuiltinPreparedShellExecutionConsumerOptions,
   ResourceLimits,
   SandboxBackend,
+  SandboxReadScope,
   ShellExecutor,
   ShellResult,
 } from '@kite-ai/builtin-runtime/sandbox';
@@ -284,6 +285,7 @@ export function createSandboxExecutor(
     enabled: boolean;
     workspace: string;
     filesystemScope?: 'read_only' | 'workspace_write';
+    readScope?: SandboxReadScope;
     unavailableFallback?: 'bare_shell' | 'fail';
     runtimeReadOnlyRoots?: readonly string[];
     resourceLimits?: Partial<ResourceLimits>;
@@ -311,6 +313,7 @@ export function createSandboxExecutor(
     backend,
     canonicalWorkspace: options.workspace,
     filesystemScope: options.filesystemScope,
+    readScope: options.readScope,
     runtimeReadOnlyRoots: options.runtimeReadOnlyRoots,
     startupProbe: options.startupProbe,
     bubblewrapPath: backend === 'bubblewrap' ? (findUsableBubblewrap() ?? undefined) : undefined,

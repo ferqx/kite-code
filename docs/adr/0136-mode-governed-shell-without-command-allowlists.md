@@ -2,6 +2,8 @@
 
 状态：accepted
 
+适用范围更新（2026-09-27）：[ADR-0192](0192-development-shell-read-visibility.md)调整开发期 Native Shell 的默认读取投影；本 ADR 的命令级审批、只读证明及非授权分类原则保持适用。
+
 日期：2026-08-24
 
 决策者：用户直接指令

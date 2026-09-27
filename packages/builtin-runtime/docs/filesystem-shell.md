@@ -12,6 +12,8 @@ POSIX Host Shell 以非 login 的 `-c` 方式启动，并在创建外层进程�
 
 平台能力、用户模式、精确审批与工作区信任分别生效。Full 不是配置出任意平台能力的手段，Auto 的不确定结果也不能凭工具说明静默放行。
 
+Native Shell 的读取投影由 App composition 选择，独立于写入 scope：开发期使用 `broad`，release-pinned `ExecutionBoundary` 使用 `restricted`。Seatbelt broad 允许文件读取但不扩大 `file-map-executable`，批准 IP 网络仍拒绝 Unix socket；bubblewrap broad 使用只读主机根挂载，之后覆盖 Workspace/runtime 可写目录、隔离 `/tmp`、遮蔽 Host-control 根。Linux broad 还要求 `apply-seccomp` 拦截 AF_UNIX；缺失时 Provider 在 spawn 前拒绝。Windows direct restricted-token 保持现有普通用户读取能力。Shell 命令仍须通过 Policy／审批；结构化文件工具不继承 Shell 的 broad read。
+
 修改后核对生产 dispatcher、policy 与实际 filesystem/process 测试。规范见[文件边界](../../../docs/active/file-reading-shared-boundary.md)、[执行边界](../../../docs/active/execution-boundary.md)、[Shell 平台](../../../docs/active/shell-platform-compatibility.md)。
 
 验证：[read dispatcher](../test/filesystem-read-dispatcher.test.ts)、[mutation dispatcher](../test/filesystem-mutation-dispatcher.test.ts)、[preimage](../test/persistence/filesystem-preimage-artifacts.test.ts)。

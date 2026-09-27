@@ -15,7 +15,7 @@ import { generateBwrapArgs } from '../bwrap';
 import type { CgroupPidsRunner } from '../cgroup-pids-contract';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from '../profile';
 import { findApplySeccomp, resolveSeccompPath } from '../seccomp';
-import type { ResourceLimits } from '../types';
+import type { ResourceLimits, SandboxReadScope } from '../types';
 import { sandboxBackendCapabilities } from './backend-capabilities';
 import type { SandboxExecutionGrantVerifier } from './grant-authority';
 import { sandboxCleanupDigest, sandboxPreparedPlanDigest } from './grant-authority';
@@ -39,6 +39,7 @@ export interface LocalSandboxExecutionProviderOptions {
   readonly backend: Exclude<SandboxExecutionBackend, 'none'>;
   readonly canonicalWorkspace: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
+  readonly readScope?: SandboxReadScope;
   readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
   readonly startupProbe?: boolean;
   readonly bubblewrapPath?: string;
@@ -267,6 +268,7 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
     if (this.#options.backend === 'seatbelt') {
       const profile = generateSandboxProfile(workspace, {
         network: preparation.networkMode,
+        readScope: this.#options.readScope,
         filesystemScope:
           preparation.filesystemMode === 'allow_all'
             ? 'full_access'
@@ -280,8 +282,14 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
       const bwrap = this.#options.bubblewrapPath;
       if (!bwrap) throw new Error('bubblewrap_unusable');
       const seccomp = resolveSeccompPath(findApplySeccomp(), workspace, runtimeRoots.dataRoot);
+      // A broad read-only bind exposes host Unix socket paths. Network
+      // namespaces do not isolate AF_UNIX, so the syscall filter is required.
+      if (this.#options.readScope === 'broad' && !seccomp) {
+        throw new Error('broad_read_requires_seccomp');
+      }
       const args = generateBwrapArgs(workspace, {
         network: preparation.networkMode,
+        readScope: this.#options.readScope,
         sandboxRuntimeDir: runtimeRoots.dataRoot,
         sandboxControlBase: dirname(runtimeRoots.controlRoot),
         runtimeReadOnlyRoots,

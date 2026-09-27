@@ -29,6 +29,8 @@ Accept/Auto 进入 user/reviewer queue。Plan + Full 直接执行 Full scope 但
 `sandbox_denied`，不换更宽 backend replay；只有 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 才允许一次 host
 availability。
 
+这组 filesystem scope 表示写入上限。无 release-pinned `ExecutionBoundary` 的开发期 Native Shell 使用广泛只读文件视图；带 sealed boundary 的生产路径仍使用精确读取 roots。macOS Seatbelt 对 broad read 保留可执行映射和 Host-control 限制，批准 IP 网络也不开放 Unix socket；Linux bubblewrap 先只读挂载 `/`，再覆盖可写 Workspace/runtime、隔离 `/tmp` 和 Host-control 遮蔽，并要求拦截 AF_UNIX 的 seccomp helper。缺少 helper 时在启动用户命令前拒绝 broad Native Shell。Windows direct restricted-token 维持现有读取能力。这一开发策略不构成 production qualification 证据。
+
 ## 当前支持集合
 
 当前 effectful execution 的 production-supported platform/backend 集合为空，D-04 已按“空支持集”
@@ -54,7 +56,7 @@ owner-only DACL与non-reparse verifier，并把ACL drift负向测试接入Window
 推导Windows process support。Service可被打包也不表示Shell、writer、Skill child或local stdio MCP获得production
 execution admission。
 
-专用 Git Broker、typed schema 与发布 probe 已退役。Git 命令通过普通 Shell 治理；发行证据仍需证明原生沙箱对受保护 `.git` 路径的读取和写入约束。linked worktree 的外部 metadata 仅在 Workspace Trust 精确授权后作为只读 root 提供，不由 Git 命令名自动放开。
+专用 Git Broker、typed schema 与发布 probe 已退役。Git 命令通过普通 Shell 治理；发行证据仍需证明原生沙箱对受保护 `.git` 路径的读取和写入约束。封存生产的 restricted read scope 仅在 Workspace Trust 历史精确授权后加入 linked worktree 外部 metadata root；开发期 broad read 不按 Git 命令名追加权限。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
 安装器，不要求目标机预装 Node。开发依赖安装不再执行仓库自定义 root `postinstall`；Git hook 安装由

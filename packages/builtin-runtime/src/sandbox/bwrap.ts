@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { FilesystemScope } from './types';
+import type { FilesystemScope, SandboxReadScope } from './types';
 
 /**
  * 生成 Bubblewrap 参数，创建最小化 Linux 容器
@@ -19,28 +19,31 @@ export function generateBwrapArgs(
     sandboxControlBase?: string;
     runtimeReadOnlyRoots?: readonly string[];
     filesystemScope?: FilesystemScope;
+    readScope?: SandboxReadScope;
   },
 ): string[] {
   const args: string[] = [];
   const networkMode = options?.network ?? 'disabled';
   const workspaceRoot = realpathSync.native(resolve(workspace));
 
-  if (options?.filesystemScope === 'full_access') {
+  const fullAccess = options?.filesystemScope === 'full_access';
+  const broadRead = !fullAccess && options?.readScope === 'broad';
+
+  if (fullAccess) {
     // Keep the process/PID/network namespace while projecting the approved
     // filesystem into this invocation's mount namespace.
     args.push('--bind', '/', '/');
-    const controlBase = options?.sandboxControlBase;
-    if (controlBase && dirExists(controlBase)) {
-      // Hide every current and future invocation's Host-control identity from
-      // this mount namespace, including concurrent supervisor allocations.
-      const hostControlBase = realpathSync.native(resolve(controlBase));
-      args.push('--tmpfs', hostControlBase, '--remount-ro', hostControlBase);
-    }
   } else {
-    // 系统路径：只读绑定 / System paths: read-only bind
-    for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
-      if (dirExists(path)) {
-        args.push('--ro-bind', path, path);
+    if (broadRead) {
+      // Development Shell can read host files, while the root bind remains
+      // read-only. Writable directories are deliberately overlaid below.
+      args.push('--ro-bind', '/', '/');
+    } else {
+      // 系统路径：只读绑定 / System paths: read-only bind
+      for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
+        if (dirExists(path)) {
+          args.push('--ro-bind', path, path);
+        }
       }
     }
 
@@ -52,9 +55,11 @@ export function generateBwrapArgs(
     const workspaceBind = options?.filesystemScope === 'read_only' ? '--ro-bind' : '--bind';
     args.push(workspaceBind, workspaceRoot, workspaceRoot);
 
-    for (const root of canonicalReadOnlyRoots(options?.runtimeReadOnlyRoots ?? [])) {
-      if (root === workspaceRoot || root.startsWith(`${workspaceRoot}/`)) continue;
-      args.push('--ro-bind', root, root);
+    if (!broadRead) {
+      for (const root of canonicalReadOnlyRoots(options?.runtimeReadOnlyRoots ?? [])) {
+        if (root === workspaceRoot || root.startsWith(`${workspaceRoot}/`)) continue;
+        args.push('--ro-bind', root, root);
+      }
     }
   }
   // 沙箱运行时目录：读写绑定（存放 TMPDIR、bun cache 等）
@@ -62,6 +67,16 @@ export function generateBwrapArgs(
   if (runtimeDir && dirExists(runtimeDir)) {
     const runtimeRoot = realpathSync.native(resolve(runtimeDir));
     args.push('--bind', runtimeRoot, runtimeRoot);
+  }
+
+  if (fullAccess || broadRead) {
+    const controlBase = options?.sandboxControlBase;
+    if (controlBase && dirExists(controlBase)) {
+      // A host-wide root bind would otherwise reveal the supervisor's
+      // identities and sockets. Keep this mask after writable child binds.
+      const hostControlBase = realpathSync.native(resolve(controlBase));
+      args.push('--tmpfs', hostControlBase, '--remount-ro', hostControlBase);
+    }
   }
 
   // 最小设备节点和 proc

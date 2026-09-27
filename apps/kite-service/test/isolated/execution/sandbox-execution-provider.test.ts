@@ -1300,6 +1300,57 @@ describe('SandboxExecutionProvider', () => {
   );
 
   test.skipIf(process.platform === 'win32')(
+    'Local POSIX preparation preserves the selected read scope without widening writes',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-read-scope-'));
+      try {
+        const preparation = samplePreparation(workspace);
+        for (const readScope of ['restricted', 'broad'] as const) {
+          const grants = new SandboxExecutionGrantAuthority();
+          const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
+            backend: 'seatbelt',
+            canonicalWorkspace: workspace,
+            readScope,
+          });
+          const result = await provider.prepare({
+            grant: grants.issue({
+              preparation,
+              resourceSemantics: 'allocating',
+              preparationIntentDigest: intentDigest(preparation),
+            }),
+          });
+          expect(result.ok).toBe(true);
+          if (!result.ok) throw new Error(result.failure.message);
+          const profile = result.observation.argv[2] ?? '';
+          expect(profile.includes('(allow file-read* file-read-metadata)')).toBe(
+            readScope === 'broad',
+          );
+          expect(profile).not.toContain(
+            '(allow file-write* file-write-create file-write-unlink file-ioctl)',
+          );
+          expect(profile).toContain('(deny network*)');
+          expect(
+            (
+              await provider.dispose({
+                grant: grants.issueCleanup({
+                  purpose: 'dispose',
+                  prepared: result.observation,
+                  lifecycleIntentDigest: `read-scope-${readScope}`,
+                  cleanupAttempt: 1,
+                  cleanupConfirmed: true,
+                }),
+                prepared: result.observation,
+              })
+            ).ok,
+          ).toBe(true);
+        }
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
     'Seatbelt preparation admits a canonical workspace without a synthetic containment gate',
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-canonical-'));

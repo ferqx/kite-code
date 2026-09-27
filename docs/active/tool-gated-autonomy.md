@@ -192,7 +192,7 @@ typed pre-dispatch unavailable 且 cleanup receipt 已确认后，为同一条�
 命令选择一次 host Shell。该 availability 路径不属于 Provider fallback，也不改变 schema/format epoch。
 
 Development Shell 的文件系统能力是逐 invocation 的：Planning 非 Full 使用 Workspace read-only baseline，Building 非 Full 使用
-Workspace read/write baseline；默认 baseline 使用 native backend。`externalRead`、`externalWrite`在命令启动前按phase/mode
+Workspace read/write baseline；默认 baseline 使用 native backend。这里的 baseline 限定写入：开发期 Native Shell 的 read scope 默认广泛只读，封存生产仍使用 exact roots。`externalRead`、`externalWrite`在命令启动前按phase/mode
 路由；`uncertainEffects`在Auto中先进入审批模型，在Accept Edits/Full中请求exact真人审批，批准后仍只投影backend实际可兑现的sealed scope。该选择本身不是
 host fallback；ADR-0119 的 App availability 仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
 模式由自动审批模型先判断；模型可批准、拒绝或请求真人审批，技术异常和无效响应升级真人审批；此前审查的 circuit breaker 不让新的 Shell 命令跳过模型。

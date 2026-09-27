@@ -242,6 +242,7 @@ export type {
   ProductionPlatformQualification,
   ProtectedPathPolicy,
   ResourceLimits,
+  SandboxReadScope,
   SandboxUnavailablePolicy,
   ShellFilesystemMode,
   ShellNetworkMode,

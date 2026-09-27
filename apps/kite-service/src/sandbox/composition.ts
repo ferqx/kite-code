@@ -3,6 +3,7 @@ import type {
   ExecutionBoundary,
   ExecutionCapabilitySurface,
   ProductionExecutionEntrypoint,
+  SandboxReadScope,
   ShellExecutor,
 } from '@kite-ai/builtin-runtime/sandbox';
 import {
@@ -30,6 +31,11 @@ export interface AppSandboxCompositionConfig {
   sandbox: { enabled: boolean };
   executionBoundary?: ExecutionBoundary;
   executionCapabilitySurface?: ExecutionCapabilitySurface;
+}
+
+/** Development read visibility never flows into a release-pinned boundary. */
+export function nativeShellReadScope(boundary: ExecutionBoundary | undefined): SandboxReadScope {
+  return boundary ? 'restricted' : 'broad';
 }
 
 export type AppShellRuntimeMode = 'sandbox' | 'host_shell' | 'denied';
@@ -361,6 +367,9 @@ export function composeAppSandboxExecutor(input: {
       createGovernedLocalSandboxExecutor({
         backend,
         canonicalWorkspace: workspace,
+        // Development Shell can inspect host files through a read-only view.
+        // Release-pinned execution boundaries keep their exact read roots.
+        readScope: nativeShellReadScope(boundary),
         runtimeReadOnlyRoots: () =>
           getTrustedWorkspaceExternalReadRoots(workspace, input.workspaceTrustStorePath),
         executionBoundaryDigest: boundary

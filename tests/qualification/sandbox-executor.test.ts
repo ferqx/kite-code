@@ -72,7 +72,13 @@ describe('sandbox executor integration', () => {
       process.env.HOME = home;
       process.env.BASH_ENV = join(home, '.bashrc');
       process.env.ENV = join(home, '.bashrc');
-      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const executor = createSandboxExecutor({
+        enabled: true,
+        workspace: ws,
+        selectedBackend: 'seatbelt',
+        unavailableFallback: 'fail',
+        readScope: 'broad',
+      });
       const result = await executor({ workspace: ws, command: 'sleep 0.01; printf command-ok' });
       expect(result.ok).toBe(true);
       expect(result.stdout).toBe('command-ok');
@@ -100,6 +106,41 @@ describe('sandbox executor integration', () => {
       expect(result.stdout).toContain('hello sandbox');
     } finally {
       cleanupWorkspace(ws);
+    }
+  });
+
+  test('broad read allows an external config file while denying external writes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-broad-read-'));
+    const workspace = join(root, 'workspace');
+    const external = join(root, 'external');
+    mkdirSync(workspace);
+    mkdirSync(external);
+    const config = join(external, '.gitconfig');
+    const forbiddenWrite = join(external, 'blocked');
+    writeFileSync(config, 'sandbox-config-fixture');
+    try {
+      const executor = createSandboxExecutor({
+        enabled: true,
+        workspace,
+        selectedBackend: 'seatbelt',
+        unavailableFallback: 'fail',
+        readScope: 'broad',
+      });
+      const read = await executor({ workspace, command: `cat '${config}'` });
+      expect(read.ok).toBe(true);
+      expect(read.stdout).toBe('sandbox-config-fixture');
+      const write = await executor({ workspace, command: `touch '${forbiddenWrite}'` });
+      expect(write.ok).toBe(false);
+      expect(existsSync(forbiddenWrite)).toBe(false);
+      const approvedNetwork = await executor({
+        workspace,
+        command: 'printf network-profile-ok',
+        networkMode: 'allow_all',
+      });
+      expect(approvedNetwork.ok).toBe(true);
+      expect(approvedNetwork.stdout).toBe('network-profile-ok');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

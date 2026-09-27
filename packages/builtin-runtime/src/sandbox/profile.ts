@@ -1,10 +1,11 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, parse, resolve } from 'node:path';
-import type { FilesystemScope } from './types';
+import type { FilesystemScope, SandboxReadScope } from './types';
 
 export interface SandboxProfileOptions {
   network?: 'disabled' | 'allow_all';
   filesystemScope?: FilesystemScope;
+  readScope?: SandboxReadScope;
   sandboxRuntimeDir?: string;
   sandboxControlBase?: string;
   runtimeReadOnlyRoots?: readonly string[];
@@ -30,10 +31,20 @@ export function generateSandboxProfile(
 
   return [
     SEATBELT_BASE_POLICY,
-    fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots, filesystemScope),
+    fileReadPolicy(
+      workspaceRoot,
+      runtimeRoot,
+      runtimeReadOnlyRoots,
+      filesystemScope,
+      options.readScope ?? 'restricted',
+    ),
     fileWritePolicy(workspaceRoot, runtimeRoot, filesystemScope),
     hostControlPolicy(controlBase),
-    networkPolicy(options.network ?? 'disabled'),
+    networkPolicy(
+      options.network ?? 'disabled',
+      options.readScope ?? 'restricted',
+      filesystemScope,
+    ),
   ]
     .filter(Boolean)
     .join('\n');
@@ -181,6 +192,7 @@ function fileReadPolicy(
   runtimeRoot: string | undefined,
   runtimeReadOnlyRoots: readonly string[],
   filesystemScope: FilesystemScope,
+  readScope: SandboxReadScope,
 ): string {
   if (filesystemScope === 'full_access') {
     return `;; User-approved filesystem scope; process and network sandboxing remain active.
@@ -207,6 +219,13 @@ function fileReadPolicy(
   ]
     .map(subpathFilter)
     .join('\n  ');
+  if (readScope === 'broad') {
+    return `;; Development Shell may read host files while executable mappings stay scoped.
+(allow file-read* file-read-metadata)
+;; Writable runtime temp is intentionally absent from executable-map roots.
+(allow file-map-executable
+  ${executableFilters})`;
+  }
   return `;; Read only the Workspace, controlled runtime temp, and system runtime dependencies.
 (allow file-read*
   ${readFilters})
@@ -256,10 +275,20 @@ function hostControlPolicy(controlBase: string | undefined): string {
   ${subpathFilter(controlBase)})`;
 }
 
-function networkPolicy(mode: 'disabled' | 'allow_all'): string {
+function networkPolicy(
+  mode: 'disabled' | 'allow_all',
+  readScope: SandboxReadScope,
+  filesystemScope: FilesystemScope,
+): string {
   if (mode === 'disabled') {
     return `;; Network disabled.
 (deny network*)`;
+  }
+  if (readScope === 'broad' && filesystemScope !== 'full_access') {
+    return `;; Approved IP networking does not grant host Unix-socket authority.
+(allow network*)
+(deny network-bind (local unix-socket))
+(deny network-outbound (remote unix-socket))`;
   }
   return `;; Legacy development-only unrestricted network mode.
 (allow network*)`;

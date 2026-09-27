@@ -140,16 +140,16 @@ Git linked worktree或external gitfile的Workspace内`.git`会指向canonical Wo
 Builtin scope discovery 只解析 Git 实际需要读取的 canonical `gitDir/commondir`，不授予权限；普通 Workspace
 Trust 不调用该解析。Service 在 sandbox preparation 中单独核验历史明确授权的 exact roots 摘要；没有授权、
 解析失败或 identity drift 时提供零外部 root，但普通 Runtime transport 与模型会话仍可运行。
-未获 metadata grant 的 linked worktree 不自动扩权；隐式 Git 读取返回沙箱错误，显式外部 Git 路径按已有 Shell scope expansion 审批。
-已授权 roots 在 Seatbelt 只增加 `file-read`，Linux bubblewrap 只增加 exact `--ro-bind`，不授权 primary
-working tree 或外部 metadata 写入。新外部访问走现有 invocation 权限与 scope，不能从 Workspace trust 推导 Full。
+封存生产路径中，未获 metadata grant 的 linked worktree 不自动扩权；隐式 Git 读取返回沙箱错误，显式外部 Git 路径按已有 Shell scope expansion 审批。
+该路径的已授权 roots 在 Seatbelt 只增加 `file-read`，Linux bubblewrap 只增加 exact `--ro-bind`，不授权 primary
+working tree 或外部 metadata 写入。开发期 Native Shell 的只读视图另按下文 broad read scope 投影；Workspace trust 仍不能推导 Full 或批准命令。
 每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
 process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
 遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。最后一个
 invocation 还会用不递归的 `rmdir` 回收空的共享 runtime 容器；并发 invocation 使容器非空时该步骤
 安全跳过。并发调用不能共享 invocation 目录，writable temp 也不进入 executable-map
-allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
-显式只读 root；默认 scope 之外的 Workspace 外 read/write/create/unlink 与指向外部的 symlink 继续拒绝。
+allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。
+Service composition 对无 release-pinned `ExecutionBoundary` 的开发期 Native Shell 选择 `broad` read scope：Seatbelt 放开文件读取但不放开可执行映射，批准 IP 网络也不开放 Unix socket；bubblewrap 只读挂载主机根目录、再覆盖允许写入的 Workspace/runtime 与隔离 `/tmp`，并遮蔽 Host-control 根。Linux broad read 必须有 AF_UNIX syscall filter；缺失时在命令启动前拒绝。带 release-pinned boundary 的封存生产路径选 `restricted`，只读取 Workspace、runtime、显式系统／已授权外部 roots；默认范围外的读写和 symlink escape 继续拒绝。Windows development restricted-token 的普通用户读取能力维持现状。两种 read scope 都不扩大非 Full 写入、网络、进程或宿主 ACL／TCC。
 若 Policy 对 exact invocation 依据完整 effects/scope facts 密封
 `filesystem=full_access` scope，则可访问 Workspace 外敏感 identity，native profile 不再
 按名称二次拒绝；网络、进程、资源和真实宿主 ACL/TCC 边界保持不变。
@@ -302,7 +302,7 @@ kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating �
 
 专用 Broker 实现、Git mechanism/SPI、配置与资格字段已退役。release probe 继续验证普通 Shell 的 protected path 与沙箱边界，不再发布专用 Git 能力资格。
 
-Seatbelt 不再由 `brokeredGitFeatureRevision` 推导是否读取用户 `.gitconfig` 或 `.config/git/config`，也不隐式添加这些文件。外部读取仅按既有明确的 scope/已授权 runtime roots 投影。只读 Shell 的中性 HOME、Git config 禁用规则不变。
+Seatbelt 不再由 `brokeredGitFeatureRevision` 或 Git 命令名决定是否读取用户 `.gitconfig` 或 `.config/git/config`。开发期普通 Shell 使用 broad read scope，可在宿主权限允许时读取这些配置；封存生产 Shell 仍仅按明确 scope／已授权 roots 投影。`policy_proven_read_only` Shell 的中性 HOME、Git config 禁用规则不变。
 
 按 ADR-0136，direct `git status`、无 patch `git log` 和其他 raw Git invocation 都先按当前 mode 审查；闭集
 classifier 不再产生免审授权。批准后，匹配 ADR-0134 grammar 的 status/log 仍可使用 hardened Shell
@@ -311,7 +311,7 @@ optional locks与repository fsmonitor，并且不从Runtime环境注入`GIT_EXTE
 空helper，不能用于关闭。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
 reviewer 与 sandbox scope 的结构化事实。
 普通 Shell 的 Planning、关键系统 destructive 和 capability admission 继续独立治理；不按 raw Git token
-强制转交已退役的 `git_inspect`。Git config 不因 Broker revision 获得隐式读取权限。
+强制转交已退役的 `git_inspect`。开发期 Git config 的读取来自通用 Shell read scope，不来自 Broker revision 或 Git 特判。
 
 `createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
 `tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`

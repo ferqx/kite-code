@@ -2,6 +2,7 @@ import type {
   BuiltinPreparedShellExecutionInput,
   ResourceLimits,
   SandboxBackend,
+  SandboxReadScope,
 } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createBuiltinPreparedShellExecutionConsumer,
@@ -28,6 +29,7 @@ export interface GovernedLocalSandboxCompositionOptions {
   readonly executionBoundaryDigest: string;
   readonly protectedPathRevision: string;
   readonly filesystemScope?: 'read_only' | 'workspace_write';
+  readonly readScope?: SandboxReadScope;
   readonly runtimeReadOnlyRoots?: readonly string[] | (() => readonly string[]);
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;
@@ -64,6 +66,7 @@ export function createGovernedLocalSandboxExecutor(
         backend: options.backend,
         canonicalWorkspace: options.canonicalWorkspace,
         filesystemScope: options.filesystemScope,
+        readScope: options.readScope,
         runtimeReadOnlyRoots: options.runtimeReadOnlyRoots,
         bubblewrapPath,
         cgroupPidsRunner,

@@ -2,6 +2,8 @@
 
 状态：accepted
 
+适用范围更新（2026-09-27）：[ADR-0192](0192-development-shell-read-visibility.md)限定下文 Workspace 外默认拒绝的**开发期 Native Shell 读取**部分；写入边界、封存生产读取范围与当时的历史理由保留。
+
 日期：2026-08-24
 
 决策者：用户直接指令

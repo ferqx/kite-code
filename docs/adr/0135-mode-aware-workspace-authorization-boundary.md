@@ -2,6 +2,8 @@
 
 状态：accepted
 
+适用范围更新（2026-09-27）：[ADR-0192](0192-development-shell-read-visibility.md)将开发期 Native Shell 默认读取改为广泛只读；下文审批规则与显式外部 effects 分类仍适用，不能把历史 native read-scope 扩展描述当作当前机制。
+
 日期：2026-08-24
 
 决策者：用户直接指令
