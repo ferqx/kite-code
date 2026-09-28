@@ -1850,6 +1850,39 @@ test('workspace sessions reveal five then ten at a time and reset independently 
   expect(rows(0)).toHaveLength(15);
 });
 
+test('workspace controls appear only when actions are supplied and target the correct space', async () => {
+  const workspaces = [
+    { id: 'a', label: '空间 A', sessions: [], sessionCount: 0, state: 'loaded' as const },
+    { id: 'b', label: '空间 B', sessions: [], sessionCount: 0, state: 'loaded' as const },
+  ];
+  await render(<Sidebar workspaces={workspaces} actions={{}} connectionLabel="" />);
+  expect(document.querySelector('[aria-label="添加空间"]')).toBeNull();
+  expect(document.querySelector('[aria-label="移除 空间 A"]')).toBeNull();
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  await act(() =>
+    root!.render(
+      <Sidebar
+        workspaces={workspaces}
+        actions={{
+          addWorkspace: () => added.push('add'),
+          removeWorkspace: (id) => removed.push(id),
+        }}
+        connectionLabel=""
+      />,
+    ),
+  );
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="添加空间"]')!);
+  expect(added).toEqual(['add']);
+  expect(removed).toEqual([]);
+  const space = button('空间 B');
+  const expanded = space.getAttribute('aria-expanded');
+  await click(document.querySelector<HTMLButtonElement>('[aria-label="移除 空间 B"]')!);
+  expect(removed).toEqual(['b']);
+  expect(space.getAttribute('aria-expanded')).toBe(expanded);
+});
+
 test('workspace sorts by latest timestamp before paging and responds to updated directory data', async () => {
   const sessions = [
     { sessionId: 'missing', displayName: '缺少时间', status: 'idle' },

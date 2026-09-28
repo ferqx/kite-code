@@ -499,7 +499,8 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     }
     // Retained background owners can outlive the last Run. Quiesce them before
     // deleting State so terminal callbacks cannot target a deleted Session.
-    await this.#bridge.shutdownSession(
+    await (this.#bridge.shutdownSettledSessionForDeletion ?? this.#bridge.shutdownSession).call(
+      this.#bridge,
       command.sessionId,
       'Runtime session deleted.',
       (notification) => this.#notifications.publish(notification),

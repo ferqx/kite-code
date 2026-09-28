@@ -13,6 +13,35 @@ import type { SubAgentResult } from './types';
 type TerminalSeal = Extract<RuntimeEvent, { type: 'subagent.child_terminal_sealed' }>;
 type TerminalImport = Parameters<StateRuntimeSession['commitChildSessionTerminalImport']>[0];
 
+export type ChildCancellationExecutionFacts = Readonly<{
+  localEventChannelClosed: boolean;
+  activeRun: boolean;
+  unknownRun: boolean;
+  pendingEffects: boolean;
+  unknownEffects: boolean;
+}>;
+
+function hasUnsettledModelInvocation(child: Readonly<RuntimeState>): boolean {
+  return Object.values(child.modelInvocations).some(
+    (invocation) => invocation.status === 'prepared' || invocation.status === 'dispatching',
+  );
+}
+
+function cleanCancellationExecutionConfirmed(
+  child: Readonly<RuntimeState>,
+  readFacts: ((sessionId: string) => ChildCancellationExecutionFacts) | undefined,
+): boolean {
+  if (!readFacts || hasUnsettledModelInvocation(child)) return false;
+  const facts = readFacts(child.session.threadId);
+  return (
+    facts.localEventChannelClosed &&
+    !facts.activeRun &&
+    !facts.unknownRun &&
+    !facts.pendingEffects &&
+    !facts.unknownEffects
+  );
+}
+
 function sameRef(left: SubagentResultArtifactRef, right: SubagentResultArtifactRef): boolean {
   return (
     left.artifactId === right.artifactId &&
@@ -44,16 +73,22 @@ export function sealChildTerminalResult(input: {
   readonly cancelRequested: boolean;
   readonly terminalReceiptId: string;
   readonly commitSeal: (event: TerminalSeal) => readonly RuntimeEvent[];
+  readonly readCancellationExecutionFacts?: (sessionId: string) => ChildCancellationExecutionFacts;
 }): Readonly<{ ref: SubagentResultArtifactRef; sealedRevision: number }> {
   const child = input.getChildState();
   const origin = child.childSessionOrigin;
   const status = input.result.terminalStatus;
+  const cancelledExecutionConfirmed =
+    status !== 'cancelled' ||
+    !input.cleanupConfirmed ||
+    cleanCancellationExecutionConfirmed(child, input.readCancellationExecutionFacts);
   const cleanCancellation =
     status === 'cancelled' &&
     input.cleanupConfirmed &&
     child.turn.status === 'aborted' &&
     child.turn.abortCause === 'user' &&
-    !child.terminalOutcome;
+    !child.terminalOutcome &&
+    cancelledExecutionConfirmed;
   const unknownRecovery =
     status === 'unknown' &&
     !input.cleanupConfirmed &&
@@ -66,6 +101,8 @@ export function sealChildTerminalResult(input: {
     (!child.terminalOutcome && !cleanCancellation) ||
     child.resourceBudget.status !== 'active' ||
     (!input.cleanupConfirmed && !unknownRecovery) ||
+    (input.cleanupConfirmed && hasUnsettledModelInvocation(child)) ||
+    !cancelledExecutionConfirmed ||
     !input.terminalReceiptId ||
     !status ||
     (status === 'completed') !== input.result.ok ||
@@ -119,6 +156,7 @@ export function importChildTerminalResult(input: {
   readonly artifacts: SubagentResultArtifactAccess;
   readonly afterTurnPhase?: 'planning' | 'building';
   readonly commitImport: (proof: TerminalImport) => readonly RuntimeEvent[];
+  readonly readCancellationExecutionFacts?: (sessionId: string) => ChildCancellationExecutionFacts;
 }): readonly RuntimeEvent[] {
   const { parentState, childThreadId, parentInvocationId } = input;
   const childState = input.readChildState(childThreadId);
@@ -128,12 +166,17 @@ export function importChildTerminalResult(input: {
   const origin = childState.childSessionOrigin;
   const terminal = origin?.terminal;
   const unknownRecovery = terminal?.status === 'unknown' && terminal.cleanupConfirmed === false;
+  const cancelledExecutionConfirmed =
+    terminal?.status !== 'cancelled' ||
+    !terminal.cleanupConfirmed ||
+    cleanCancellationExecutionConfirmed(childState, input.readCancellationExecutionFacts);
   const cleanCancellation =
     terminal?.status === 'cancelled' &&
     terminal.cleanupConfirmed &&
     childState.turn.status === 'aborted' &&
     childState.turn.abortCause === 'user' &&
-    !childState.terminalOutcome;
+    !childState.terminalOutcome &&
+    cancelledExecutionConfirmed;
   if (
     !link ||
     !origin ||
@@ -143,6 +186,8 @@ export function importChildTerminalResult(input: {
     origin.parentSessionId !== parentState.session.threadId ||
     origin.parentInvocationId !== parentInvocationId ||
     (!terminal.cleanupConfirmed && !unknownRecovery) ||
+    (terminal.cleanupConfirmed && hasUnsettledModelInvocation(childState)) ||
+    !cancelledExecutionConfirmed ||
     (unknownRecovery &&
       (childState.terminalOutcome?.status !== 'unknown' ||
         childState.terminalOutcome.knownExternalEffects !== 'unknown' ||

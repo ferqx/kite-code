@@ -91,6 +91,7 @@ export interface KiteServiceRuntimeComposition extends AsyncDisposable {
   readonly server: RuntimeServer;
   readonly history: RuntimeHistoryClient;
   readonly storage: KiteMultiWorkspaceRuntimeServerOwner['storage'];
+  readonly removeWorkspace: KiteMultiWorkspaceRuntimeServerOwner['removeWorkspace'];
 }
 
 const CLAIMED_SERVICE_STORES = new Set<string>();
@@ -337,6 +338,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
     server: owner.server,
     history,
     storage: owner.storage,
+    removeWorkspace: owner.removeWorkspace,
     [Symbol.asyncDispose]: () => {
       if (!disposePromise) disposePromise = Promise.resolve(application[Symbol.asyncDispose]());
       return disposePromise;

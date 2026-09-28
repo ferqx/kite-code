@@ -111,6 +111,10 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
     if (!path) return null;
     return options.host.rememberPickedWorkspace(path);
   });
+  handle(DESKTOP_IPC_CHANNELS.removeWorkspace, (_event, payload) => {
+    const { path } = pathPayload(payload);
+    return options.host.removeWorkspace(path);
+  });
   handle(DESKTOP_IPC_CHANNELS.activateWorkspace, (_event, payload) => {
     const { path } = pathPayload(payload);
     return options.host.activateWorkspace(path);
@@ -174,7 +178,7 @@ export function registerDesktopIpc(options: DesktopIpcOptions): void {
       title: confirm.title,
       message: confirm.message,
       buttons: [confirm.okLabel ?? '确定', confirm.cancelLabel ?? '取消'],
-      defaultId: 0,
+      defaultId: confirm.defaultCancel ? 1 : 0,
       cancelId: 1,
       noLink: true,
       normalizeAccessKeys: true,

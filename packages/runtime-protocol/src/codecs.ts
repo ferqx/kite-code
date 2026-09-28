@@ -550,6 +550,7 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'history/list_events',
   'history/load_session',
   'history/load_child_session',
+  'app/workspace/remove',
   'app/workspace_trust/query',
   'app/workspace_trust/decide',
   'app/provider_model/snapshot',
@@ -584,9 +585,31 @@ export type RuntimeProtocolAppControlMethod = z.infer<
 >;
 export const RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_ = z.enum([
   ...RUNTIME_PROTOCOL_APP_CONTROL_METHOD_SCHEMA_.options,
+  'app/workspace/remove',
   'app/provider_credential/write',
 ]);
 export type RuntimeProtocolAppMethod = z.infer<typeof RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_>;
+const workspaceRemovalIdentity = {
+  workspace: z
+    .string()
+    .min(1)
+    .max(4096)
+    .regex(/^(?:\/|[A-Za-z]:[\\/])/u)
+    .optional(),
+  workspaceDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+};
+export const RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_REQUEST_SCHEMA_ = z.discriminatedUnion('phase', [
+  z.object({ phase: z.literal('remove'), ...workspaceRemovalIdentity, token: identifier }).strict(),
+  z
+    .object({ phase: z.literal('finalize'), ...workspaceRemovalIdentity, token: identifier })
+    .strict(),
+]);
+export type RuntimeProtocolWorkspaceRemovalRequest = z.infer<
+  typeof RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_REQUEST_SCHEMA_
+>;
+export const RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_RESULT_SCHEMA_ = z
+  .object({ deletedSessions: safeRevision, token: identifier })
+  .strict();
 export const RUNTIME_PROTOCOL_SERVER_CONTROL_METHOD_SCHEMA_ = z.enum([
   'server/status',
   'server/shutdown',
@@ -703,6 +726,13 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
       })
       .strict(),
   ),
+  z
+    .object({
+      ...requestBase,
+      method: z.literal('app/workspace/remove'),
+      params: z.object({ request: RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_REQUEST_SCHEMA_ }).strict(),
+    })
+    .strict(),
   z
     .object({
       ...requestBase,

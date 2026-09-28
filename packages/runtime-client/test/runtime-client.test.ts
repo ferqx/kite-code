@@ -958,6 +958,52 @@ describe('RuntimeClient protocol state machine', () => {
     }
   });
 
+  test('observes Session removal without replacing a live Session snapshot', async () => {
+    const connection = respondingConnection('server-1');
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    const iterator = client.observeSessionIndex()[Symbol.asyncIterator]();
+    await until(() => connection.requests('runtime/subscribe').length === 1);
+    await tick();
+    connection.push(
+      subscriptionUpdate(1, {
+        type: 'index_reset_begin',
+        serverInstanceId: 'server-1',
+        generation: 1,
+        indexRevision: 1,
+      }),
+    );
+    connection.push(
+      subscriptionUpdate(1, {
+        type: 'index_reset_end',
+        serverInstanceId: 'server-1',
+        generation: 1,
+        indexRevision: 1,
+      }),
+    );
+    connection.push(
+      subscriptionUpdate(1, {
+        type: 'session_remove',
+        serverInstanceId: 'server-1',
+        generation: 1,
+        indexRevision: 2,
+        sessionId: 'session-1',
+      }),
+    );
+    expect((await iterator.next()).value).toMatchObject({ type: 'index_reset_begin' });
+    expect((await iterator.next()).value).toMatchObject({ type: 'index_reset_end' });
+    expect((await iterator.next()).value).toMatchObject({
+      type: 'session_remove',
+      sessionId: 'session-1',
+    });
+    expect(client.snapshotStore.getSnapshot().index.ready).toBe(false);
+    await iterator.return?.();
+    await client.close();
+  });
+
   test('does not let a previous connection subscription identity accept messages on its replacement', async () => {
     const first = respondingConnection('server-1');
     let deferredSubscribe: Request | undefined;

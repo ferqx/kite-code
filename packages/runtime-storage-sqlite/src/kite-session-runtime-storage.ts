@@ -157,6 +157,7 @@ import {
 } from './kite-session-runtime-file';
 import { inspectKiteSessionPublication } from './kite-session-store-publication';
 import { assertKiteSessionStoreSourcesReconciled } from './kite-session-store-sources';
+import { createKiteWorkspaceDeletionFence } from './kite-workspace-deletion-fence';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 import {
@@ -225,6 +226,11 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
     readonly currentExecutionGeneration: (sessionId: string) => string;
   };
   readonly admissions: KiteHomeWorkspaceAdmissionPort;
+  getAdmittedWorkspace(workspaceId: string): ReturnType<KiteHomeWorkspaceAdmissionPort['get']>;
+  getAdmittedWorkspaceByDigest(
+    workspaceDigest: string,
+  ): ReturnType<KiteHomeWorkspaceAdmissionPort['get']>;
+  readonly workspaceDeletion: ReturnType<typeof createKiteWorkspaceDeletionFence>;
   readonly directory: KiteHomeDirectoryQueryPort;
   readonly openHistoryLogs: import('./kite-home-runtime-storage').KiteHomeRuntimeStorageOwner<
     Event,
@@ -627,6 +633,10 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
 }): KiteSessionRuntimeStorageOwner<Event, State> {
   const database = openKiteSessionStoreDatabase(input.databasePath);
   const rawWriter = createKiteHomeWriteTransactionPort(database, assertKiteSessionStoreSchema);
+  const workspaceDeletion = createKiteWorkspaceDeletionFence(database, rawWriter);
+  const selectWorkspaceByDigest = database.query<{ workspace_id: string }, [string]>(
+    'SELECT workspace_id FROM workspaces WHERE workspace_digest=? LIMIT 2',
+  );
   const authority = createKiteSessionExecutionAuthority({
     database,
     writer: rawWriter,
@@ -1525,6 +1535,24 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       removeSessionAuthorityInTransaction: () => {
         const handle = currentHandle();
         authority.removeInTransaction(handle.current);
+      },
+      removeSettledChildAuthorityInTransaction: (sessionId) => {
+        const child = authority.read(sessionId);
+        if (
+          child.status === 'active' ||
+          child.status === 'recovery_required' ||
+          !child.cleanupConfirmed ||
+          effectPort.listPrepared(sessionId).length !== 0 ||
+          effectPort.listUnknown(sessionId).length !== 0 ||
+          storage.runs.getActive(sessionId) !== null ||
+          storage.runs.list({ sessionId, status: 'unknown', limit: 1 }).entries.length !== 0
+        ) {
+          throw new KiteSessionRuntimeStorageError(
+            'session_busy',
+            'Internal child Session cleanup is not confirmed.',
+          );
+        }
+        database.query('DELETE FROM kite_meta WHERE key = ?').run(`session_execution/${sessionId}`);
       },
       createForkTargetAuthorityInTransaction: (targetSessionId) => {
         const handle = currentHandle();
@@ -2483,6 +2511,15 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       currentExecutionGeneration,
     }),
     admissions: base.admissions,
+    getAdmittedWorkspace: (workspaceId) => base.admissions.get(workspaceId),
+    getAdmittedWorkspaceByDigest: (workspaceDigest) => {
+      if (!/^sha256:[a-f0-9]{64}$/u.test(workspaceDigest))
+        throw new TypeError('Workspace digest is invalid.');
+      const matches = selectWorkspaceByDigest.all(workspaceDigest);
+      if (matches.length > 1) throw new Error('Workspace digest is ambiguous.');
+      return matches[0] ? base.admissions.get(matches[0].workspace_id) : null;
+    },
+    workspaceDeletion,
     directory: base.directory,
     openHistoryLogs: base.openHistoryLogs,
     artifactStore,

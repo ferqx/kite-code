@@ -23,6 +23,8 @@ Gateway 组织 model invocation identity、resource preparation、attempt 与 re
 
 模型流是累计 reasoning/text 与完成边界。partial tool call 不作为完整工具调用执行，完整响应再交给工具解析。取消、Provider 错误、surface 改变或持久化不可用分别形成明确结果，不用猜测填补缺失证据。
 
+持久 attempt acknowledgement 后、真正进入 Provider transport 前再检查一次取消信号；信号已取消就不发起 HTTP 请求。请求已经发出时，服务商仍可能继续处理并产生用量；本地取消后 Gateway 忽略迟到的文本和 reasoning 流回调，已关闭的 Runtime 事件通道不接收迟到的持久事实。
+
 ## 压缩
 
 context compaction 通过独立的预算、预检、摘要和验证机制生成后续输入；手动/自动入口和开关分开。reset 先检查完整上下文是否安全，再清 active checkpoint，不删除历史。实现见[manual compaction](../src/model/context-compaction-manual.ts)及 Service 的[compaction service](../../../apps/kite-service/src/runtime/session/context-compaction-service.ts)。

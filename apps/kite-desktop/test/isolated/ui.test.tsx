@@ -272,6 +272,8 @@ class UiClient extends DesktopClient {
       ) as RuntimeSessionProjection | undefined,
       messages: [],
       cacheMetrics: undefined,
+      ready: true,
+      loadingSession: false,
     });
   }
   override async send(
@@ -1719,6 +1721,71 @@ test('space new conversation icon targets that project without toggling its list
   expect(client.selectedModes).toEqual([]);
 });
 
+test('space controls open the picker and require confirmation before removal', async () => {
+  const client = new UiClient();
+  client.view.projects = [
+    { path: '/project', lastOpenedAt: 2 },
+    { path: '/another', lastOpenedAt: 1 },
+  ];
+  let picked = 0;
+  client.pickProject = async () => {
+    picked++;
+    return null;
+  };
+  const confirmations: Array<Parameters<DesktopClient['confirm']>[0]> = [];
+  let allow = false;
+  client.confirm = async (options) => {
+    confirmations.push(options);
+    return allow;
+  };
+  const removed: string[] = [];
+  client.removeProject = async (id) => {
+    removed.push(id);
+    client.update({ projects: client.view.projects?.filter((project) => project.path !== id) });
+    return { selectedRemoved: false, workspace: '/project' };
+  };
+  await render(<App client={client} />);
+  await click(button('添加空间'));
+  expect(picked).toBe(1);
+  await click(button('移除 another'));
+  expect(removed).toEqual([]);
+  expect(confirmations[0]).toMatchObject({
+    kind: 'warning',
+    okLabel: '移除空间',
+    defaultCancel: true,
+  });
+  expect(confirmations[0]?.message).toContain('停止');
+  expect(confirmations[0]?.message).toContain('永久删除');
+  allow = true;
+  await click(button('移除 another'));
+  expect(removed).toEqual(['/another']);
+  expect(document.querySelector('[aria-label="移除 another"]')).toBeNull();
+});
+
+test('server removal of the visible session closes its page and clears saved navigation', async () => {
+  const client = new UiClient();
+  window.sessionStorage.setItem(
+    'kite.desktop.navigation',
+    JSON.stringify({ workspace: '/project', sessionId: 's0' }),
+  );
+  await render(<App client={client} />);
+
+  await act(() => {
+    client.update({
+      selected: undefined,
+      projection: undefined,
+      sessions: client.view.sessions.filter((entry) => entry.sessionId !== 's0'),
+      messages: [],
+      ready: false,
+    });
+  });
+
+  expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
+  expect(JSON.parse(window.sessionStorage.getItem('kite.desktop.navigation')!)).toEqual({
+    workspace: '/project',
+  });
+});
+
 test('workspace switching keeps the existing session list mounted and visually enabled', async () => {
   const client = new UiClient();
   client.view.projects = [
@@ -1873,6 +1940,34 @@ test('a reloaded page automatically restores its selected conversation without c
   expect(document.body.textContent).not.toContain('清理旧连接');
   expect(restored.created).toBe(0);
   expect(restored.sent).toEqual([]);
+});
+
+test('reload drops navigation to a session deleted while the page was closed', async () => {
+  window.sessionStorage.setItem(
+    'kite.desktop.navigation',
+    JSON.stringify({ workspace: '/project', sessionId: 's1' }),
+  );
+  const client = new UiClient();
+  client.view = {
+    ...client.view,
+    connected: false,
+    selected: undefined,
+    projection: undefined,
+    ready: false,
+    sessions: client.view.sessions.filter((entry) => entry.sessionId !== 's1'),
+  };
+  client.restoreWorkspace = async () => client.update({ connected: true });
+  client.selectSession = async (id) => {
+    client.selectedIds.push(id);
+    throw new Error('会话已不可用');
+  };
+
+  await render(<App client={client} />);
+  expect(client.selectedIds).toEqual(['s1']);
+  expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
+  expect(JSON.parse(window.sessionStorage.getItem('kite.desktop.navigation')!)).toEqual({
+    workspace: '/project',
+  });
 });
 
 test('clicking switches sessions immediately and restores each draft', async () => {

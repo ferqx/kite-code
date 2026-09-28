@@ -107,6 +107,7 @@ export function App({ client }: { client: DesktopClient }) {
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
+  const previousSelected = useRef(selected);
   const preparing = newConversation || !selected;
   const childSessions =
     !preparing && view.childSessions?.parentSessionId === selected ? view.childSessions : undefined;
@@ -142,6 +143,23 @@ export function App({ client }: { client: DesktopClient }) {
       ? newConversationBranch
       : view.branch;
   const preparingActiveWorkspace = !preparing || conversationWorkspace === workspace;
+
+  useEffect(() => {
+    if (
+      previousSelected.current &&
+      !selected &&
+      !(directorySnapshot ?? view.sessions).some(
+        (session) => session.sessionId === previousSelected.current,
+      )
+    ) {
+      setNewConversation(true);
+      setNewConversationWorkspace(undefined);
+      setNewConversationBranch(undefined);
+      setNewConversationTargetBranch(undefined);
+      rememberNavigation(workspace);
+    }
+    previousSelected.current = selected;
+  }, [selected, workspace, directorySnapshot, view.sessions]);
 
   useEffect(() => {
     if (startup === 'ready') return;
@@ -305,6 +323,40 @@ export function App({ client }: { client: DesktopClient }) {
       rememberNavigation(target);
     });
   const openProject = () => chooseProject();
+  const removeProject = (id: string) =>
+    void act(async () => {
+      const label =
+        projects
+          ?.find((project) => project.path === id)
+          ?.path.split('/')
+          .filter(Boolean)
+          .pop() ??
+        directorySnapshot?.find((session) => (session.workspace ?? session.workspaceDigest) === id)
+          ?.workspaceName ??
+        id;
+      const confirmed = await client.confirm({
+        title: `移除空间“${label}”？`,
+        message:
+          '这会停止该空间中正在运行的会话，永久删除相关会话历史与项目登记。此操作无法撤销；工作目录中的文件不会被删除。',
+        kind: 'warning',
+        okLabel: '移除空间',
+        cancelLabel: '保留空间',
+        defaultCancel: true,
+      });
+      if (!confirmed) return;
+      const result = await client.removeProject(id);
+      navigationRevision.current++;
+      if (result.selectedRemoved || newConversationWorkspace === id || workspace === id) {
+        client.leaveChildSession();
+        setNewConversation(true);
+        setNewConversationWorkspace(undefined);
+        setNewConversationBranch(undefined);
+        setNewConversationTargetBranch(undefined);
+        setWorkbenchView(false);
+        setScheduledTasksView(false);
+        rememberNavigation(result.workspace);
+      }
+    });
   useEffect(() => {
     void startupAttempt;
     let cancelled = false;
@@ -324,7 +376,11 @@ export function App({ client }: { client: DesktopClient }) {
         navigation?.sessionId
       ) {
         await client.selectSession(navigation.sessionId).catch((error) => client.report(error));
-        if (!cancelled) setNewConversation(false);
+        const restored = client.getSnapshot();
+        if (!cancelled && restored.selected === navigation.sessionId && restored.ready)
+          setNewConversation(false);
+        else if (!cancelled && restored.selected !== navigation.sessionId)
+          rememberNavigation(restored.workspace);
       }
       if (!cancelled) setStartup('ready');
     })().catch((error) => {
@@ -490,14 +546,17 @@ export function App({ client }: { client: DesktopClient }) {
           ...(projects ?? []).map((project) => project.path),
           ...(workspace ? [workspace] : []),
           ...directory
-            .map((session) => session.workspace ?? session.workspaceId)
+            .map((session) => session.workspace ?? session.workspaceDigest ?? session.workspaceId)
             .filter((id): id is string => !!id),
         ]),
       ].map((path) => ({
         id: path,
         muted: projects?.find((project) => project.path === path)?.directoryMissing,
         label:
-          directory.find((session) => session.workspaceId === path)?.workspaceName ??
+          directory.find(
+            (session) =>
+              (session.workspace ?? session.workspaceDigest ?? session.workspaceId) === path,
+          )?.workspaceName ??
           (path.split('/').filter(Boolean).pop() || path),
         state: directoryErrors?.[path]
           ? 'unavailable'
@@ -505,10 +564,14 @@ export function App({ client }: { client: DesktopClient }) {
             ? 'loaded'
             : 'loading',
         sessionCount: directory.filter(
-          (session) => (session.workspace ?? session.workspaceId) === path,
+          (session) =>
+            (session.workspace ?? session.workspaceDigest ?? session.workspaceId) === path,
         ).length,
         sessions: directory
-          .filter((session) => (session.workspace ?? session.workspaceId) === path)
+          .filter(
+            (session) =>
+              (session.workspace ?? session.workspaceDigest ?? session.workspaceId) === path,
+          )
           .map((session) => ({
             sessionId: session.sessionId,
             displayName: session.displayName || '新会话',
@@ -595,7 +658,10 @@ export function App({ client }: { client: DesktopClient }) {
       readOnlyReason={childDetail ? '子 Agent 会话仅供查看。' : undefined}
       actions={{
         newSession,
-        newWorkspaceSession: (id) => chooseProject(id),
+        newWorkspaceSession: (id) =>
+          chooseProject(projects?.some((project) => project.path === id) ? id : undefined),
+        addWorkspace: openProject,
+        removeWorkspace: removeProject,
         workbench: () => {
           client.leaveChildSession();
           navigationRevision.current++;

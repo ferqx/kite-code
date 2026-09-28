@@ -79,7 +79,11 @@ import { buildChildSessionCreation } from './child-session-creation';
 import { planChildSessionRecovery } from './child-session-recovery';
 import { createChildApprovalActionProvider, runAcceptedChildSession } from './child-session-runner';
 import { createChildSessionTaskControl } from './child-session-task-control';
-import { importChildTerminalResult, sealChildTerminalResult } from './child-terminal-bridge';
+import {
+  type ChildCancellationExecutionFacts,
+  importChildTerminalResult,
+  sealChildTerminalResult,
+} from './child-terminal-bridge';
 import { recoverUnknownChildTerminal } from './child-unknown-recovery';
 import type { SubAgentResult } from './types';
 
@@ -4068,6 +4072,25 @@ export function createChildSessionOrchestrator(input: {
       );
     },
   });
+  const readCancellationExecutionFacts = (sessionId: string): ChildCancellationExecutionFacts => {
+    const recovery = input.owner.recovery;
+    const runs = input.owner.storage.runs;
+    if (!recovery || !runs) throw new Error('Child cancellation execution facts are unavailable.');
+    const facts = recovery.inspect(sessionId);
+    const coordinator = input.coordinators.get(sessionId);
+    const localEventChannelClosed = coordinator
+      ? !coordinator.isTurnActive()
+      : !activeChildren.has(sessionId) &&
+        facts.authority.status === 'idle' &&
+        facts.authority.cleanupConfirmed;
+    return {
+      localEventChannelClosed,
+      activeRun: runs.getActive(sessionId) !== null,
+      unknownRun: runs.list({ sessionId, status: 'unknown', limit: 1 }).entries.length !== 0,
+      pendingEffects: facts.pendingEffects.length !== 0,
+      unknownEffects: facts.unknownEffects.length !== 0,
+    };
+  };
   const importSealed = async (
     childThreadId: string,
     preDispatchAlreadyImported = false,
@@ -4107,6 +4130,7 @@ export function createChildSessionOrchestrator(input: {
           parentInvocationId: intent.parentInvocationId,
           parentOwnerKey,
           artifacts: runtime.childResultArtifacts,
+          readCancellationExecutionFacts,
           ...(intent.disposition === 'after_turn' ? { afterTurnPhase } : {}),
           commitImport: (proof) => parent.commitChildSessionTerminalImport(proof),
         }),
@@ -4482,6 +4506,7 @@ export function createChildSessionOrchestrator(input: {
           ),
           result,
           cleanupConfirmed: true,
+          readCancellationExecutionFacts,
           cancelRequested: state.turn.abortCause === 'user',
           terminalReceiptId: `child-terminal:${accepted.childThreadId}:${state.revision}`,
           commitSeal: (event) => child.session.commitChildSessionTerminalSeal(event),
@@ -4908,6 +4933,7 @@ export function createChildSessionOrchestrator(input: {
               : 0,
         },
         cleanupConfirmed: true,
+        readCancellationExecutionFacts,
         cancelRequested: false,
         terminalReceiptId: `child-terminal:${targetSessionId}:${state.revision}`,
         commitSeal: (event) => child.session.commitChildSessionTerminalSeal(event),
@@ -4976,6 +5002,7 @@ export function createChildSessionOrchestrator(input: {
             durationMs: 0,
           },
           cleanupConfirmed: true,
+          readCancellationExecutionFacts,
           cancelRequested: true,
           terminalReceiptId: `child-stopped:${intent.childThreadId}`,
           commitSeal: (event) => child.session.commitChildSessionTerminalSeal(event),
@@ -5136,6 +5163,7 @@ export function createChildSessionOrchestrator(input: {
           parentOwnerKey,
           result: childTerminalResult(state, output),
           cleanupConfirmed: true,
+          readCancellationExecutionFacts,
           cancelRequested: state.turn.abortCause === 'user',
           terminalReceiptId: `child-terminal:${intent.childThreadId}:${state.revision}`,
           commitSeal: (event) => child.session.commitChildSessionTerminalSeal(event),

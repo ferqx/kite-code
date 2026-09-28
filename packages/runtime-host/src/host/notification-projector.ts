@@ -59,6 +59,7 @@ export class NotificationProjector {
   readonly #subscribers = new Set<Subscriber>();
   readonly #streamCursors = new Map<string, StreamCursor>();
   readonly #closedEphemeralRuns = new Map<string, ClosedEphemeralRun>();
+  readonly #deletedSessions = new Set<string>();
   readonly #stopRegistryListener: () => void;
   #indexRevision = 0;
   #nextGeneration = 0;
@@ -73,7 +74,7 @@ export class NotificationProjector {
   }
 
   publish(notification: RuntimeNotification): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#deletedSessions.has(notification.sessionId)) return;
     if (notification.durability === 'durable') {
       if (
         notification.schema !== RUNTIME_NOTIFICATION_SCHEMA_ ||
@@ -154,7 +155,7 @@ export class NotificationProjector {
 
   /** Observer-only child stream. The child is owned outside this Host's lifecycle registry. */
   publishExternal(notification: RuntimeNotification): void {
-    if (this.#closed) return;
+    if (this.#closed || this.#deletedSessions.has(notification.sessionId)) return;
     if (notification.schema !== RUNTIME_NOTIFICATION_SCHEMA_) {
       throw new Error('External Runtime notification schema is inconsistent.');
     }
@@ -188,9 +189,14 @@ export class NotificationProjector {
     }
   }
 
-  /** Explicit tombstone seam for a future Session lifecycle owner. */
+  /** Stop local delivery after the Store has committed the Session tombstone. */
   removeSession(sessionId: string): boolean {
     if (this.#closed) return false;
+    this.#deletedSessions.add(sessionId);
+    for (const subscriber of [...this.#subscribers]) {
+      if (subscriber.scope === 'session' && subscriber.sessionId === sessionId)
+        this.#closeSubscriber(subscriber);
+    }
     this.#history.delete(sessionId);
     this.#deleteClosedEphemeralRuns(sessionId);
     for (const key of this.#streamCursors.keys()) {
@@ -226,7 +232,11 @@ export class NotificationProjector {
 
     const close = (): void => this.#closeSubscriber(subscriber);
     subscriber.onAbort = close;
-    if (this.#closed || subscription.signal?.aborted) {
+    if (
+      this.#closed ||
+      subscription.signal?.aborted ||
+      (subscriber.scope === 'session' && this.#deletedSessions.has(subscriber.sessionId!))
+    ) {
       this.#closeSubscriber(subscriber);
     } else {
       // Register before the synchronous seed. A subsequent publish therefore
@@ -251,6 +261,7 @@ export class NotificationProjector {
     this.#history.clear();
     this.#streamCursors.clear();
     this.#closedEphemeralRuns.clear();
+    this.#deletedSessions.clear();
   }
 
   #seedSession(subscriber: Subscriber, afterRevision: number | undefined): void {

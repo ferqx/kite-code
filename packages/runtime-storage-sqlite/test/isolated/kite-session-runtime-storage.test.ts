@@ -72,6 +72,197 @@ const codec = {
 };
 
 describe('multi-connection Kite Session Runtime storage', () => {
+  test('deletes a root without children using a retained receipt', () => {
+    const fixture = createFixture(['parent']);
+    const owner = openOwner(fixture.path);
+    try {
+      const parent = owner.bindExecution(acquire(owner, 'parent', 'delete-owner'));
+      const receipt = createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'parent',
+          commandId: 'delete-root',
+          requestDigest: 'f'.repeat(64),
+          targetSessionId: 'parent',
+          committedAt: Date.now(),
+        },
+        0,
+      );
+      owner.runWithExecution(parent, () =>
+        owner.storage.sessions.deleteSession('parent', {
+          expectedRevision: 0,
+          commandReceipt: receipt,
+        }),
+      );
+      expect(
+        owner.storage.commandReceipts.lookup({
+          scopeSessionId: 'parent',
+          commandId: 'delete-root',
+          requestDigest: 'f'.repeat(64),
+        }),
+      ).toEqual({ status: 'replay', receipt });
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+  test('atomically deletes a settled child tree with its root receipt', () => {
+    const fixture = createFixture(['parent', 'child', 'grandchild', 'other']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id='child'")
+        .run();
+      seed
+        .query(
+          "UPDATE runtime_sessions SET parent_session_id='child' WHERE session_id='grandchild'",
+        )
+        .run();
+      const artifacts = [
+        ['1', 'parent'],
+        ['2', 'child'],
+        ['3', 'shared'],
+        ['4', 'orphan'],
+      ] as const;
+      for (const [digit] of artifacts) {
+        seed
+          .query(`INSERT INTO model_artifacts(artifact_id,kind,integrity_identifier,
+          artifact_format_version,canonical_json,byte_length,created_at)
+          VALUES (?,'model_surface',?,1,'{}',2,1)`)
+          .run(`pa_${digit.repeat(64)}`, `sha256:${digit.repeat(64)}`);
+      }
+      for (const [sessionId, digits] of [
+        ['parent', ['1', '3']],
+        ['child', ['2']],
+        ['other', ['3']],
+      ] as const) {
+        const json = JSON.stringify({
+          ...state(0, `recovery-${sessionId === 'parent' ? 0 : sessionId === 'child' ? 1 : 3}`),
+          refs: digits.map((digit) => ({ artifactId: `pa_${digit.repeat(64)}` })),
+        });
+        seed
+          .query('UPDATE runtime_snapshots SET state_json=?, state_checksum=? WHERE session_id=?')
+          .run(json, checksum(json), sessionId);
+      }
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const parent = owner.bindExecution(acquire(owner, 'parent', 'delete-owner'));
+      const receipt = createRuntimeStoredCommandReceipt(
+        {
+          scopeSessionId: 'parent',
+          commandId: 'delete-tree',
+          requestDigest: 'd'.repeat(64),
+          targetSessionId: 'parent',
+          committedAt: Date.now(),
+        },
+        0,
+      );
+      owner.runWithExecution(parent, () =>
+        owner.storage.sessions.deleteSession('parent', {
+          expectedRevision: 0,
+          commandReceipt: receipt,
+        }),
+      );
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(
+          read
+            .query<{ session_id: string }, []>(
+              'SELECT session_id FROM runtime_sessions ORDER BY session_id',
+            )
+            .all(),
+        ).toEqual([{ session_id: 'other' }]);
+        expect(
+          read
+            .query<{ artifact_id: string }, []>(
+              'SELECT artifact_id FROM model_artifacts ORDER BY artifact_id',
+            )
+            .all()
+            .map((row) => row.artifact_id),
+        ).toEqual([`pa_${'3'.repeat(64)}`, `pa_${'4'.repeat(64)}`]);
+        expect(read.query('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally {
+        read.close(false);
+      }
+      expect(
+        owner.storage.commandReceipts.lookup({
+          scopeSessionId: 'parent',
+          commandId: 'delete-tree',
+          requestDigest: 'd'.repeat(64),
+        }),
+      ).toEqual({ status: 'replay', receipt });
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+  test('rejects an active child and a cross-tree reference without deleting any Session', () => {
+    const fixture = createFixture(['parent', 'child', 'other']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id='child'")
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    const receipt = createRuntimeStoredCommandReceipt(
+      {
+        scopeSessionId: 'parent',
+        commandId: 'delete-blocked',
+        requestDigest: 'e'.repeat(64),
+        targetSessionId: 'parent',
+        committedAt: Date.now(),
+      },
+      0,
+    );
+    try {
+      const parent = owner.bindExecution(acquire(owner, 'parent', 'delete-owner'));
+      const child = acquire(owner, 'child', 'child-owner');
+      const remove = () =>
+        owner.runWithExecution(parent, () =>
+          owner.storage.sessions.deleteSession('parent', {
+            expectedRevision: 0,
+            commandReceipt: receipt,
+          }),
+        );
+      expect(remove).toThrow();
+      expect(owner.storage.sessions.loadSnapshot('child')).not.toBeNull();
+      owner.authority.release({
+        sessionId: 'child',
+        expectedRevision: child.revision,
+        controllerGeneration: child.controllerGeneration,
+        hostInstanceId: 'child-owner',
+        cleanupConfirmed: true,
+      });
+      const links = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        links
+          .query(`INSERT INTO agent_mail_inbox
+          (target_session_id,message_id,source_session_id,sequence,target_revision,received_at_ms)
+          VALUES ('other','cross-mail','child',1,1,1)`)
+          .run();
+      } finally {
+        links.close(false);
+      }
+      expect(remove).toThrow();
+      expect(owner.storage.sessions.loadSnapshot('parent')).not.toBeNull();
+      expect(owner.storage.sessions.loadSnapshot('child')).not.toBeNull();
+      expect(
+        owner.storage.commandReceipts.lookup({
+          scopeSessionId: 'parent',
+          commandId: 'delete-blocked',
+          requestDigest: 'e'.repeat(64),
+        }).status,
+      ).toBe('missing');
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
   test('fences cross-Session QueueOnly acceptance, target receipt and source confirmation', () => {
     const fixture = createFixture(['parent', 'child']);
     const seed = openKiteSessionStoreDatabase(fixture.path);
@@ -1580,6 +1771,135 @@ describe('multi-connection Kite Session Runtime storage', () => {
       ).toThrow();
       expect(owner.storage.sessions.loadSnapshot('rollback-session')).toBeNull();
       expect(() => owner.authority.read('rollback-session')).toThrow();
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('durably fences new Session insertion during Workspace deletion and releases by token', () => {
+    const fixture = createFixture([]);
+    const deleting = openOwner(fixture.path);
+    const creating = openOwner(fixture.path);
+    try {
+      expect(creating.getAdmittedWorkspace(WORKSPACE_ID)).toMatchObject({
+        workspaceId: WORKSPACE_ID,
+        canonicalPath: WORKSPACE_PATH,
+      });
+      expect(creating.getAdmittedWorkspace(`workspace_${'0'.repeat(64)}`)).toBeNull();
+      expect(creating.getAdmittedWorkspaceByDigest(WORKSPACE_DIGEST)).toMatchObject({
+        workspaceId: WORKSPACE_ID,
+        canonicalPath: WORKSPACE_PATH,
+      });
+      expect(creating.getAdmittedWorkspaceByDigest(`sha256:${'0'.repeat(64)}`)).toBeNull();
+      expect(deleting.workspaceDeletion.begin(WORKSPACE_ID, 'first-remove', 'first-claim')).toBe(
+        'acquired',
+      );
+      expect(creating.workspaceDeletion.isActive(WORKSPACE_ID)).toBe(true);
+      expect(creating.workspaceDeletion.owns(WORKSPACE_ID, 'first-claim')).toBe(true);
+      expect(() =>
+        creating
+          .sessionCreationForWorkspace(WORKSPACE_ID)
+          .create(creationInput('blocked-session', 'a', Date.now() + 60_000)),
+      ).toThrow();
+      expect(creating.storage.sessions.loadSnapshot('blocked-session')).toBeNull();
+      expect(() =>
+        creating.workspaceDeletion.begin(WORKSPACE_ID, 'retry-remove', 'retry-claim'),
+      ).toThrow();
+      expect(() =>
+        creating.workspaceDeletion.begin(WORKSPACE_ID, 'first-remove', 'retry-claim'),
+      ).toThrow();
+      expect(() => deleting.workspaceDeletion.end(WORKSPACE_ID, 'first-remove')).toThrow();
+      deleting.workspaceDeletion.complete(WORKSPACE_ID, 'first-claim');
+      expect(deleting.workspaceDeletion.owns(WORKSPACE_ID, 'first-claim')).toBe(false);
+      expect(creating.workspaceDeletion.begin(WORKSPACE_ID, 'retry-remove', 'retry-claim')).toBe(
+        'completed',
+      );
+      expect(() => deleting.workspaceDeletion.end(WORKSPACE_ID, 'first-remove')).toThrow();
+      creating.workspaceDeletion.end(WORKSPACE_ID, 'retry-remove');
+      expect(deleting.workspaceDeletion.isActive(WORKSPACE_ID)).toBe(false);
+      expect(deleting.workspaceDeletion.owns(WORKSPACE_ID, 'retry-remove')).toBe(false);
+      expect(
+        creating
+          .sessionCreationForWorkspace(WORKSPACE_ID)
+          .create(creationInput('created-session', 'b', Date.now() + 60_000)).status,
+      ).toBe('applied');
+    } finally {
+      creating.close();
+      deleting.close();
+      fixture.remove();
+    }
+  });
+
+  test('recovers a Workspace fence when its Store owner closed in the same process', () => {
+    const fixture = createFixture([]);
+    const oldOwner = openOwner(fixture.path);
+    try {
+      expect(oldOwner.workspaceDeletion.begin(WORKSPACE_ID, 'old-token', 'old-claim')).toBe(
+        'acquired',
+      );
+    } finally {
+      oldOwner.close();
+    }
+    const nextOwner = openOwner(fixture.path);
+    try {
+      expect(nextOwner.workspaceDeletion.begin(WORKSPACE_ID, 'new-token', 'new-claim')).toBe(
+        'acquired',
+      );
+      expect(nextOwner.workspaceDeletion.owns(WORKSPACE_ID, 'new-claim')).toBe(true);
+      nextOwner.workspaceDeletion.complete(WORKSPACE_ID, 'new-claim');
+      nextOwner.workspaceDeletion.end(WORKSPACE_ID, 'new-token');
+      expect(nextOwner.workspaceDeletion.isActive(WORKSPACE_ID)).toBe(false);
+    } finally {
+      nextOwner.close();
+      fixture.remove();
+    }
+  });
+
+  test('does not replace an invalid persisted Workspace deletion fence', () => {
+    const fixture = createFixture([]);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
+        .run(`workspace_deletion:${WORKSPACE_ID}`, '{invalid');
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      expect(owner.workspaceDeletion.isActive(WORKSPACE_ID)).toBe(true);
+      expect(() => owner.workspaceDeletion.begin(WORKSPACE_ID, 'new-token', 'new-claim')).toThrow();
+      expect(() => owner.workspaceDeletion.end(WORKSPACE_ID, 'new-token')).toThrow();
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('rejects ambiguous persisted Workspace digests', () => {
+    const fixture = createFixture([]);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query(`INSERT INTO workspaces(workspace_id,canonical_path,workspace_identity_digest,
+        project_id,workspace_digest,display_name,created_at,updated_at)
+        VALUES (?,?,?,?,?,'Other',1,1)`)
+        .run(
+          `workspace_${'9'.repeat(64)}`,
+          '/other-workspace',
+          `sha256:${'9'.repeat(64)}`,
+          `project_${'9'.repeat(64)}`,
+          WORKSPACE_DIGEST,
+        );
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      expect(() => owner.getAdmittedWorkspaceByDigest(WORKSPACE_DIGEST)).toThrow(
+        'Workspace digest is ambiguous.',
+      );
     } finally {
       owner.close();
       fixture.remove();

@@ -284,6 +284,102 @@ describe('Runtime stdio carrier', () => {
     await carrier.done;
   });
 
+  test('routes exact Workspace removal phases through the App Server callback', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const requests: unknown[] = [];
+    const digest = `sha256:${'a'.repeat(64)}`;
+    const carrier = createCarrier({
+      input,
+      output,
+      removeWorkspace: async (request) => {
+        requests.push(request);
+        return { deletedSessions: request.phase === 'remove' ? 2 : 0, token: 'removal-1' };
+      },
+    });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    expect(protocolFrames(output)[0]).toMatchObject({
+      result: { capabilities: { methods: expect.arrayContaining(['app/workspace/remove']) } },
+    });
+    const send = (id: string, request: Record<string, unknown>) =>
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', id, method: 'app/workspace/remove', params: { request } })}\n`,
+      );
+    send('remove', {
+      phase: 'remove',
+      workspace: '/trusted/workspace',
+      workspaceDigest: digest,
+      token: 'removal-1',
+    });
+    await eventually(() => protocolFrames(output).length === 2);
+    expect(protocolFrames(output)[1]).toMatchObject({
+      id: 'remove',
+      result: {
+        method: 'app/workspace/remove',
+        response: { deletedSessions: 2, token: 'removal-1' },
+      },
+    });
+    send('extra', {
+      phase: 'remove',
+      workspace: '/trusted/workspace',
+      workspaceDigest: digest,
+      token: 'removal-1',
+      extra: true,
+    });
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[2]).toMatchObject({
+      id: 'extra',
+      error: { data: { code: 'invalid_params' } },
+    });
+    send('finalize', {
+      phase: 'finalize',
+      workspace: '/trusted/workspace',
+      workspaceDigest: digest,
+      token: 'removal-1',
+    });
+    await eventually(() => protocolFrames(output).length === 4);
+    expect(protocolFrames(output)[3]).toMatchObject({
+      id: 'finalize',
+      result: {
+        method: 'app/workspace/remove',
+        response: { deletedSessions: 0, token: 'removal-1' },
+      },
+    });
+    send('history-only', { phase: 'remove', workspaceDigest: digest, token: 'removal-1' });
+    await eventually(() => protocolFrames(output).length === 5);
+    expect(protocolFrames(output)[4]).toMatchObject({
+      id: 'history-only',
+      result: {
+        method: 'app/workspace/remove',
+        response: { deletedSessions: 2, token: 'removal-1' },
+      },
+    });
+    send('missing-token', { phase: 'remove', workspaceDigest: digest });
+    await eventually(() => protocolFrames(output).length === 6);
+    expect(protocolFrames(output)[5]).toMatchObject({
+      id: 'missing-token',
+      error: { data: { code: 'invalid_params' } },
+    });
+    expect(requests).toEqual([
+      {
+        phase: 'remove',
+        workspace: '/trusted/workspace',
+        workspaceDigest: digest,
+        token: 'removal-1',
+      },
+      {
+        phase: 'finalize',
+        workspace: '/trusted/workspace',
+        workspaceDigest: digest,
+        token: 'removal-1',
+      },
+      { phase: 'remove', workspaceDigest: digest, token: 'removal-1' },
+    ]);
+    input.close();
+    await carrier.done;
+  });
+
   test('a pending capability read cannot block History or Runtime frames', async () => {
     const input = new BytesInput();
     const output = new FakeOutput();
@@ -604,6 +700,7 @@ function createCarrier(options: {
   readonly drainDeadlineMs?: number;
   readonly shutdownComposition?: () => void | Promise<void>;
   readonly appControl?: KiteAppControlClient;
+  readonly removeWorkspace?: import('#kite-service/carrier/runtime-server-stdio').RuntimeStdioCarrierOptions['removeWorkspace'];
   readonly credential?: NativeProviderCredentialClient;
   readonly history?: import('@kite-ai/runtime-client').RuntimeHistoryClient;
 }) {
@@ -611,7 +708,9 @@ function createCarrier(options: {
     { runtime: new FakeRuntime(), admission: allowAdmission },
     {
       serverInfo: { version: 'test', instanceId: 'server-1' },
-      ...(options.appControl || options.credential ? { appMethods: true } : {}),
+      ...(options.appControl || options.credential || options.removeWorkspace
+        ? { appMethods: true }
+        : {}),
     },
   );
   const carrier = createRuntimeStdioCarrier({
@@ -624,6 +723,7 @@ function createCarrier(options: {
     drainDeadlineMs: options.drainDeadlineMs,
     shutdownComposition: options.shutdownComposition,
     appControl: options.appControl,
+    removeWorkspace: options.removeWorkspace,
     credential: options.credential,
     history: options.history,
   });

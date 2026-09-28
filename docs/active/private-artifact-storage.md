@@ -61,6 +61,8 @@ KASD Session Store复用相同typed table/ref contract，每次Artifact mutation
 Artifact表没有可证明完整的跨Session reachability snapshot，多App Server owner显式禁用全部Artifact GC；首次真实GC需求必须另行设计
 maintenance barrier，不能由任一App Server自行扫描后删除。
 
+带回执的根 Session 树删除是窄范围例外：Store 在同一写事务中收集树内已保存的 typed Artifact ref，删除整棵树后只清理可证明不再被保留 Store 行引用的候选正文。共享 ref、归属不明的孤立正文保留；该操作不启用常规全库 GC，也不承诺物理覆写。当前实现与验证见 [SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+
 单个 Model/Capability Artifact 默认上限为 16 MiB。具体领域可以更严格，但不能扩大到无界 payload。
 
 ## Runtime 生命周期

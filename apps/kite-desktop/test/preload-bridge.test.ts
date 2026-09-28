@@ -37,6 +37,7 @@ test('preload exposes only frozen named methods with fixed channels and payloads
   await bridge.runtimeStartupStatus();
   await bridge.saveStartupDiagnostic();
   await bridge.pickWorkspace();
+  await bridge.removeWorkspace('/project');
   await bridge.activateWorkspace('/project');
   await bridge.checkWorkspace('/project');
   await bridge.queryWorkspaceBranch('/project');
@@ -64,6 +65,7 @@ test('preload exposes only frozen named methods with fixed channels and payloads
     { channel: DESKTOP_IPC_CHANNELS.runtimeStartupStatus, payload: undefined },
     { channel: DESKTOP_IPC_CHANNELS.saveStartupDiagnostic, payload: undefined },
     { channel: DESKTOP_IPC_CHANNELS.pickWorkspace, payload: undefined },
+    { channel: DESKTOP_IPC_CHANNELS.removeWorkspace, payload: { path: '/project' } },
     { channel: DESKTOP_IPC_CHANNELS.activateWorkspace, payload: { path: '/project' } },
     { channel: DESKTOP_IPC_CHANNELS.checkWorkspace, payload: { path: '/project' } },
     {

@@ -1169,6 +1169,26 @@ describe('Runtime Server', () => {
     ).toBeTrue();
   });
 
+  test('keeps the logical connection when a deleted Session ends its stream', async () => {
+    const runtime = new FakeRuntime();
+    runtime.endAfterNotifications = true;
+    const transport = new TestConnection();
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+    transport.push(initialize);
+    await eventually(() => transport.sent.length === 1);
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'subscribe-deleted',
+      method: 'runtime/subscribe',
+      params: { subscription: { scope: 'session', sessionId: 'session-1' } },
+    });
+    await eventually(() => runtime.iteratorReturns === 1);
+    expect(connection.state).toBe('active');
+    expect(transport.closed).toBeFalse();
+    await server.beginDraining();
+  });
+
   test('closes only a slow logical connection and returns its iterator', async () => {
     const runtime = new FakeRuntime();
     runtime.notifications = [durableNotification(1)];

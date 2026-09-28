@@ -11,6 +11,7 @@ export function createTestDesktopBridge(call: DesktopTestCall): KiteDesktopBridg
     runtimeStartupStatus: () => call('runtime_startup_status'),
     saveStartupDiagnostic: () => call('save_startup_diagnostic'),
     pickWorkspace: () => call('pick_workspace'),
+    removeWorkspace: (path) => call('remove_workspace', { path }),
     activateWorkspace: (path) => call('activate_workspace', { path }),
     checkWorkspace: (path) => call('check_workspace', { path }),
     queryWorkspaceBranch: (workspace) => call('query_workspace_branch', { workspace }),

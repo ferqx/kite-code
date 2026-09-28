@@ -36,6 +36,7 @@ export const KITE_APP_SERVER_PROTOCOL_METHODS_ = Object.freeze([
   'history/list_sessions',
   'history/list_events',
   'history/load_session',
+  'app/workspace/remove',
   'app/workspace_trust/query',
   'app/workspace_trust/decide',
   'app/provider_model/snapshot',

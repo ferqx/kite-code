@@ -48,6 +48,7 @@ export interface DesktopConfirmOptions {
   kind: 'warning' | 'info';
   okLabel?: string;
   cancelLabel?: string;
+  defaultCancel?: boolean;
 }
 
 export type DesktopIpcResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -60,6 +61,7 @@ export interface KiteDesktopBridge {
   runtimeStartupStatus(): Promise<DesktopStartupStatus>;
   saveStartupDiagnostic(): Promise<boolean>;
   pickWorkspace(): Promise<string | null>;
+  removeWorkspace(path: string): Promise<string | null>;
   activateWorkspace(path: string): Promise<string>;
   checkWorkspace(path: string): Promise<void>;
   queryWorkspaceBranch(workspace: string): Promise<BranchSnapshot>;
@@ -82,6 +84,7 @@ export const DESKTOP_IPC_CHANNELS = {
   runtimeStartupStatus: 'kite:desktop:runtime-startup-status',
   saveStartupDiagnostic: 'kite:desktop:save-startup-diagnostic',
   pickWorkspace: 'kite:desktop:pick-workspace',
+  removeWorkspace: 'kite:desktop:remove-workspace',
   activateWorkspace: 'kite:desktop:activate-workspace',
   checkWorkspace: 'kite:desktop:check-workspace',
   queryWorkspaceBranch: 'kite:desktop:query-workspace-branch',

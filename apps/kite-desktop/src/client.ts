@@ -187,6 +187,7 @@ export class DesktopClient {
   #mcpRead = 0;
   #skillsRead = 0;
   #unsubscribe?: () => void;
+  #indexSubscription?: AbortController;
   #backgroundRefreshTimer?: ReturnType<typeof setInterval>;
   #backgroundRefreshSessionId?: string;
   #backgroundRefreshInFlight?: {
@@ -195,6 +196,7 @@ export class DesktopClient {
     readonly promise: Promise<unknown>;
   };
   #admitted = new Set<string>();
+  readonly #workspaceRemovalTokens = new Map<string, string>();
   #connecting?: Promise<void>;
   #recovering?: Promise<void>;
   #wakeRecovery?: () => void;
@@ -302,6 +304,157 @@ export class DesktopClient {
     if (path) await this.refreshProjects();
     return path;
   }
+  async removeProject(id: string): Promise<{ selectedRemoved: boolean; workspace: string }> {
+    if (!this.#view.projects) await this.refreshProjects();
+    const project = this.#view.projects?.find((entry) => entry.path === id);
+    const digest = project ? await pathDigest(project.path) : id;
+    if (!/^sha256:[a-f0-9]{64}$/.test(digest))
+      throw new Error('无法确认空间身份，请刷新目录后重试。');
+    if (!project && !this.#view.directory?.some((entry) => entry.workspaceDigest === digest))
+      throw new Error('空间已不在目录中，请刷新后重试。');
+    const connection = this.#requireConnection();
+    const roots = await this.#listWorkspaceSessions(connection, digest);
+    const selectedRemoved = Boolean(
+      this.#view.selected &&
+        (roots.includes(this.#view.selected) || this.#view.projection?.workspaceDigest === digest),
+    );
+    let deleted = 0;
+    const token = this.#workspaceRemovalTokens.get(digest) ?? crypto.randomUUID();
+    this.#workspaceRemovalTokens.set(digest, token);
+    let removeConfirmed = false;
+    const finalize = async () => {
+      await (this.#connection ?? connection).runtime.requestApp('app/workspace/remove', {
+        phase: 'finalize',
+        workspaceDigest: digest,
+        token,
+        ...(project ? { workspace: project.path } : {}),
+      });
+      this.#workspaceRemovalTokens.delete(digest);
+    };
+    try {
+      const response = await connection.runtime.requestApp('app/workspace/remove', {
+        phase: 'remove',
+        workspaceDigest: digest,
+        token,
+        ...(project ? { workspace: project.path } : {}),
+      });
+      if (response.token !== token || typeof response.deletedSessions !== 'number')
+        throw new Error('服务端空间移除回执无效。');
+      removeConfirmed = true;
+      deleted = response.deletedSessions;
+      for (const sessionId of roots) this.#removeDeletedSessionFromView(sessionId);
+      if ((await this.#listWorkspaceSessions(connection, digest)).length)
+        throw new Error('空间中出现新的会话，请重新核对后再移除。');
+    } catch (error) {
+      if (removeConfirmed) await finalize();
+      // A lost remove response is retryable with this operation token. The
+      // registration stays visible so the user can repeat the same removal.
+      throw new Error(`空间移除未完成，已删除 ${deleted} 条会话；项目仍保留。${messageOf(error)}`);
+    }
+    if (this.#connection !== connection) {
+      await finalize();
+      throw new Error('连接已改变，项目仍保留，请刷新后核对。');
+    }
+    // Keep the native registration available until the durable deletion gate
+    // has been released. A failed finalize can then be retried with this token.
+    try {
+      await finalize();
+    } catch (error) {
+      throw new Error(
+        `空间历史已删除，但服务端收尾尚未确认；项目仍保留，请稍后重试。${messageOf(error)}`,
+      );
+    }
+    if (project) {
+      await this.#native().removeWorkspace(project.path);
+      // The native registration is already gone. Keep the confirmed result in
+      // the view even when a follow-up read of the project list fails.
+      this.#publish({
+        projects: this.#view.projects?.filter((entry) => entry.path !== project.path),
+      });
+      try {
+        await this.refreshProjects();
+        if (!this.#view.projectError) this.#publish({ projectError: undefined });
+      } catch (error) {
+        this.#publish({ projectError: `空间已移除，项目列表暂时无法刷新：${messageOf(error)}` });
+      }
+    }
+    this.#publish({
+      directory: this.#view.directory?.filter((entry) => entry.workspaceDigest !== digest),
+      ...(selectedRemoved ? { selected: undefined } : {}),
+    });
+    if (selectedRemoved || (project && this.#view.workspace === project.path)) {
+      await this.#detach();
+      this.#publish({
+        selected: undefined,
+        projection: undefined,
+        messages: [],
+        workspace: '',
+        trust: undefined,
+        branch: undefined,
+        ready: false,
+      });
+      await this.connect();
+    }
+    await this.refreshDirectory();
+    return { selectedRemoved, workspace: this.#view.workspace };
+  }
+
+  #removeDeletedSessionFromView(sessionId: string) {
+    this.#admitted.delete(sessionId);
+    this.#historyCache.take(sessionId);
+    ++this.#directoryRead;
+    const selected = this.#view.selected === sessionId;
+    if (selected) {
+      this.#stopBackgroundRefresh();
+      this.#selection?.abort();
+      this.#selection = undefined;
+      this.#selectionLoad = undefined;
+      this.#calibratedSelection = undefined;
+      this.#childRestore = undefined;
+      this.#childRead?.abort();
+      this.#childRead = undefined;
+      this.#calibratedChild = undefined;
+      ++this.#childListRead;
+      this.#childListRefreshInFlight = undefined;
+      this.#historyConnection = undefined;
+      this.#historyWorkspaceDigest = undefined;
+    }
+    this.#publish({
+      directory: this.#view.directory?.filter((entry) => entry.sessionId !== sessionId),
+      directoryLoading: undefined,
+      sessions: this.#view.sessions.filter((entry) => entry.sessionId !== sessionId),
+      ...(selected
+        ? {
+            selected: undefined,
+            projection: undefined,
+            messages: [],
+            cacheMetrics: undefined,
+            ready: false,
+            loadingSession: false,
+            hasLoadedHistory: false,
+            childSessions: undefined,
+            childDetail: undefined,
+          }
+        : {}),
+    });
+  }
+
+  async #listWorkspaceSessions(
+    connection: KiteAppServerConnection,
+    digest: string,
+  ): Promise<string[]> {
+    const entries = await readCompleteSessionDirectory((cursor) =>
+      connection.history.listSessions({
+        limit: 100,
+        workspaceDigest: digest,
+        ...(cursor ? { cursor } : {}),
+      }),
+    );
+    if (entries.some((entry) => entry.workspace?.workspaceDigest !== digest))
+      throw new Error('会话空间身份不一致，未继续删除。');
+    return entries.map((entry) => entry.sessionId);
+  }
+
   async activateProject(path: string) {
     if (this.#connection && this.#view.workspace !== path) await this.#detach();
     if (!this.#connection) {
@@ -577,6 +730,57 @@ export class DesktopClient {
       await this.#detach().catch(() => undefined);
       throw error;
     }
+    const indexSubscription = new AbortController();
+    this.#indexSubscription = indexSubscription;
+    void (async () => {
+      while (!indexSubscription.signal.aborted && this.#connection === connection) {
+        let resetSessions: Set<string> | undefined;
+        try {
+          for await (const notification of connection.runtime.observeSessionIndex(
+            indexSubscription.signal,
+          )) {
+            if (indexSubscription.signal.aborted || this.#connection !== connection) break;
+            if (!('type' in notification)) continue;
+            switch (notification.type) {
+              case 'index_reset_begin':
+                resetSessions = new Set();
+                break;
+              case 'session_upsert':
+                resetSessions?.add(notification.session.sessionId);
+                break;
+              case 'session_remove':
+                this.#removeDeletedSessionFromView(notification.sessionId);
+                break;
+              case 'index_reset_end': {
+                const selected = this.#view.selected;
+                if (resetSessions && selected && !resetSessions.has(selected)) {
+                  const result = await connection.runtime.query({
+                    schema: 'kite.runtime-query.v1',
+                    type: 'get_session_projection',
+                    sessionId: selected,
+                  });
+                  if (
+                    result.status === 'not_found' &&
+                    this.#connection === connection &&
+                    this.#view.selected === selected
+                  )
+                    this.#removeDeletedSessionFromView(selected);
+                }
+                resetSessions = undefined;
+                break;
+              }
+            }
+          }
+        } catch (error) {
+          if (!indexSubscription.signal.aborted && this.#connection === connection)
+            this.report(error);
+        }
+        if (indexSubscription.signal.aborted || this.#connection !== connection) break;
+        // The runtime client closes the iterator when subscription acquisition
+        // fails. Reacquire it so a later reset can catch offline deletions.
+        await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      }
+    })();
     this.#publish({ connected: true });
     // Independent read capabilities cannot tear down a healthy protocol peer.
     if (refreshDirectory) await this.refreshDirectory().catch(() => undefined);
@@ -653,6 +857,8 @@ export class DesktopClient {
   }
   async #detach() {
     this.#stopBackgroundRefresh();
+    this.#indexSubscription?.abort();
+    this.#indexSubscription = undefined;
     this.#selection?.abort();
     this.#childRead?.abort();
     this.#childRead = undefined;
@@ -1655,8 +1861,10 @@ export class DesktopClient {
         deadline,
       ]);
       if (controller.signal.aborted || this.#connection !== connection) return;
-      if (result.status === 'not_found')
+      if (result.status === 'not_found') {
+        this.#removeDeletedSessionFromView(sessionId);
         throw new InvalidHistoryIdentity('会话已不可用，请刷新目录。');
+      }
       if (result.status !== 'ok') throw new Error('会话暂时无法更新，请重新加载会话。');
       if (!result.session?.workspaceDigest)
         throw new InvalidHistoryIdentity('会话所属空间不可用，请刷新目录。');

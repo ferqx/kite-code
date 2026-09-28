@@ -23,6 +23,7 @@ import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
+import { isUnknownRunOnlyCancelledChildModelUsage } from '../../src/bootstrap/runtime/session-deletion-proof';
 import { createKiteRuntimeObserverHistoryClient } from '../../src/runtime-client/history-adapter';
 import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
 
@@ -568,6 +569,56 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
       expect(child?.childSessionOrigin?.terminal?.status).toBe(
         terminalAction === 'stop' ? 'cancelled' : 'completed',
       );
+      if (terminalAction === 'stop') {
+        const childModels = Object.values(child?.modelInvocations ?? {});
+        expect(childModels).toHaveLength(1);
+        expect(childModels[0]).toMatchObject({
+          status: 'interrupted',
+          dispatchCertainty: 'attempted',
+          interruptionReason: 'cancelled',
+        });
+        expect(storage.recovery.inspect(childThreadId).authority).toMatchObject({
+          status: 'idle',
+          cleanupConfirmed: true,
+        });
+        expect(storage.storage.runs?.get(childThreadId, child?.turn.turnId ?? '')).toMatchObject({
+          status: 'cancelled',
+        });
+        const childUnknownReservations =
+          child?.resourceBudget.status === 'active'
+            ? Object.values(child.resourceBudget.reservations).filter(
+                (reservation) => reservation.state === 'unknown',
+              )
+            : [];
+        expect(childUnknownReservations).toHaveLength(1);
+        expect(childUnknownReservations[0]).toMatchObject({
+          resourceKind: 'model',
+          invocationId: `model-invocation:${childModels[0]?.invocationId}`,
+        });
+        const parent = storage.loadCurrentSnapshot(parentSessionId);
+        const links = Object.values(parent?.capabilities.invocations ?? {}).filter(
+          (invocation) =>
+            invocation.subagentProviderLifecycle?.childSession?.childThreadId === childThreadId,
+        );
+        expect(links).toHaveLength(1);
+        expect(links[0]?.subagentProviderLifecycle?.childSession).toMatchObject({
+          delegatedReservationId: intent?.delegatedReservationId,
+          terminalImport: {
+            status: 'cancelled',
+            terminalRevision: child?.childSessionOrigin?.terminal?.sealedRevision,
+          },
+        });
+        const importIndex = parentEvents().findIndex(
+          (event) =>
+            event.type === 'subagent.child_terminal_imported' &&
+            event.childThreadId === childThreadId,
+        );
+        expect(importIndex).toBeGreaterThan(0);
+        expect(parentEvents()[importIndex - 1]).toMatchObject({
+          type: 'resource_budget.unknown',
+          reservationId: intent?.delegatedReservationId,
+        });
+      }
       const checkpointDb = new Database(databasePath, { readonly: true });
       try {
         const row = checkpointDb
@@ -636,6 +687,115 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
           cleanupConfirmed: true,
         });
         expect(childModelRequests).toBe(1);
+      }
+      stage = 'delete_parent_with_child';
+      await until(() => storage.loadCurrentSnapshot(parentSessionId)?.turn.status !== 'active');
+      if (terminalAction === 'stop') {
+        const parent = storage.loadCurrentSnapshot(parentSessionId);
+        expect(parent?.turn.abortReason).toBe(
+          'Runtime resource admission denied: reconciliation_required.',
+        );
+        expect(parent?.terminalOutcome?.status).toBe('unknown');
+        const parentUnknownReservations =
+          parent?.resourceBudget.status === 'active'
+            ? Object.values(parent.resourceBudget.reservations).filter(
+                (reservation) => reservation.state === 'unknown',
+              )
+            : [];
+        expect(parentUnknownReservations).toHaveLength(1);
+        expect(parentUnknownReservations[0]).toMatchObject({
+          reservationId: intent?.delegatedReservationId,
+          resourceKind: 'subagent',
+        });
+        expect(storage.storage.runs?.getActive(parentSessionId)).toBeNull();
+        expect(
+          storage.storage.runs?.list({ sessionId: parentSessionId, status: 'unknown', limit: 2 })
+            .entries,
+        ).toHaveLength(1);
+        expect(storage.recovery.inspect(parentSessionId).authority.status).toBe('active');
+        expect(storage.ownsSessionExecution(parentSessionId)).toBe(true);
+        if (!parent) throw new Error('Parent snapshot disappeared before deletion.');
+        const unknownRuns =
+          storage.storage.runs?.list({ sessionId: parentSessionId, status: 'unknown', limit: 2 })
+            .entries ?? [];
+        const child = storage.loadCurrentSnapshot(childThreadId);
+        if (!child) throw new Error('Child snapshot disappeared before deletion.');
+        const proof = {
+          parent,
+          unknownRuns,
+          readSettledChild: (sessionId: string) =>
+            sessionId === childThreadId ? child : undefined,
+        };
+        expect(isUnknownRunOnlyCancelledChildModelUsage(proof)).toBe(true);
+        expect(
+          isUnknownRunOnlyCancelledChildModelUsage({
+            ...proof,
+            readSettledChild: () => undefined,
+          }),
+        ).toBe(false);
+        expect(
+          isUnknownRunOnlyCancelledChildModelUsage({
+            ...proof,
+            parent: {
+              ...parent,
+              turn: { ...parent.turn, abortReason: 'Unknown external tool outcome.' },
+            },
+          }),
+        ).toBe(false);
+        const childBudget = child.resourceBudget;
+        if (childBudget.status !== 'active')
+          throw new Error('Cancelled child budget is unavailable.');
+        const unknownChildReservation = Object.values(childBudget.reservations).find(
+          (reservation) => reservation.state === 'unknown',
+        );
+        if (!unknownChildReservation)
+          throw new Error('Cancelled child model reservation is unavailable.');
+        expect(
+          isUnknownRunOnlyCancelledChildModelUsage({
+            ...proof,
+            readSettledChild: () => ({
+              ...child,
+              resourceBudget: {
+                ...childBudget,
+                reservations: {
+                  ...childBudget.reservations,
+                  [unknownChildReservation.reservationId]: {
+                    ...unknownChildReservation,
+                    resourceKind: 'tool',
+                  },
+                },
+              },
+            }),
+          }),
+        ).toBe(false);
+      }
+      let deleted: Awaited<ReturnType<typeof client.command>> | undefined;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const beforeDelete = await client.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId: parentSessionId,
+        });
+        if (beforeDelete.status !== 'ok' || !beforeDelete.session)
+          throw new Error('Parent projection disappeared before deletion.');
+        deleted = await client.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'delete_session',
+          commandId: `delete-independent-${terminalAction}-${attempt}`,
+          sessionId: parentSessionId,
+          expectedRevision: beforeDelete.session.revision,
+        });
+        if (deleted.status !== 'rejected' || deleted.code !== 'runtime_busy') break;
+        await Bun.sleep(50);
+      }
+      expect(deleted).toMatchObject({ status: 'applied' });
+      expect(storage.loadCurrentSnapshot(parentSessionId)).toBeNull();
+      expect(storage.loadCurrentSnapshot(childThreadId)).toBeNull();
+      const afterDelete = new Database(databasePath, { readonly: true });
+      try {
+        expect(afterDelete.query('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally {
+        afterDelete.close();
       }
       reachedTerminal = true;
     } catch (error) {

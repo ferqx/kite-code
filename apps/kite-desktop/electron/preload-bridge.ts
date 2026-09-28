@@ -48,6 +48,7 @@ export function createPreloadBridge(
     runtimeStartupStatus: () => invoke(DESKTOP_IPC_CHANNELS.runtimeStartupStatus),
     saveStartupDiagnostic: () => invoke(DESKTOP_IPC_CHANNELS.saveStartupDiagnostic),
     pickWorkspace: () => invoke(DESKTOP_IPC_CHANNELS.pickWorkspace),
+    removeWorkspace: (path) => invoke(DESKTOP_IPC_CHANNELS.removeWorkspace, { path }),
     activateWorkspace: (path) => invoke(DESKTOP_IPC_CHANNELS.activateWorkspace, { path }),
     checkWorkspace: (path) => invoke(DESKTOP_IPC_CHANNELS.checkWorkspace, { path }),
     queryWorkspaceBranch: (workspace) =>

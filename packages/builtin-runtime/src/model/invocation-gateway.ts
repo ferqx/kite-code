@@ -669,14 +669,16 @@ export class ModelInvocationGateway {
               surface_digest: initialSurfaceDigest,
             }),
             signal: attemptAbort.signal,
-            attempt: () =>
-              this.#source.attempt({
+            attempt: () => {
+              if (attemptAbort.signal.aborted) throw abortReason(attemptAbort.signal);
+              return this.#source.attempt({
                 model: input.model,
                 surface: compiled.surface,
                 attemptOrdinal: attempt,
                 signal: attemptAbort.signal,
                 onActivity: attemptAbort.refresh,
                 onTextCumulative: (text) => {
+                  if (attemptAbort.signal.aborted) return;
                   attemptText = text;
                   const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
                   if (visible) {
@@ -690,6 +692,7 @@ export class ModelInvocationGateway {
                   }
                 },
                 onReasoningCumulative: (text, segmentId) => {
+                  if (attemptAbort.signal.aborted) return;
                   attemptReasoning = text;
                   const visible = visibleRetryPrefix(text, attempt, retryBaselineReasoning);
                   const delta = visible.slice(visibleReasoningLength);
@@ -707,6 +710,7 @@ export class ModelInvocationGateway {
                   );
                 },
                 onReasoningCompleted: (_text, segmentId) => {
+                  if (attemptAbort.signal.aborted) return;
                   const segment = visibleReasoningSegments.get(segmentId);
                   visibleReasoningSegments.delete(segmentId);
                   if (!segment) return;
@@ -719,7 +723,8 @@ export class ModelInvocationGateway {
                     }),
                   );
                 },
-              }),
+              });
+            },
           }),
           attemptAbort.signal,
         );

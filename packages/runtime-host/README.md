@@ -62,8 +62,8 @@
   必须返回busy；该方法不创建第二份Run registry、不取消Session，也不把terminal projection误报为active。
 - prepared execution只允许command类型对应的封闭operation。`respond_interaction`仅在Service从durable State恢复pending
   interaction并原子提交applied receipt后，作为同一Turn的single-use continuation调度；其他command不得借此启动Turn。
-- `delete_session` 由 Host 串行化并委托 SessionStore 在一个 transaction 中提交 retained receipt 与删除；
-  删除后 registry/lifecycle 不得再 flush snapshot 重建该 Session。
+- `delete_session` 由 Host 串行化，先要求当前 Run 停止并通过 Service bridge 结算后台资源，再委托 SessionStore 在一个 transaction 中删除根 Session 的内部子树并提交 retained receipt；
+  未确认清理或跨子树持久引用拒绝删除，删除后 registry/lifecycle 不得再 flush snapshot 重建该 Session。
 - command context 不是新的 Runtime authority：只有 App-owned admission 可以提供 opaque binding reference；Worker effect composition
   必须按该 reference 与当前 Controller/resource authority 验证，缺失或漂移时 fail closed。
 - Run neutral validator固定phase/status、Session-scoped identity、origin pair、revision/time monotonic与terminal closed shape；resource result固定

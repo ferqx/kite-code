@@ -237,6 +237,7 @@ export {
   convertKiteSessionStore11To10,
   KiteStore11ConversionUnsupported,
 } from './kite-session-store11-conversion';
+export { KiteSessionTreeDeletionError } from './kite-session-tree-deletion';
 export {
   admitNewWorkspaceStore,
   assertSqliteCoordinatorCatalogActive,

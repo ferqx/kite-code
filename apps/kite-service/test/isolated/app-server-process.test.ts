@@ -30,6 +30,120 @@ import { createKiteSessionAppServerStorageComposition } from '../../src/bootstra
 import { trustWorkspace } from '../../src/config/workspace-trust';
 
 describe('KASD parent-owned App Server process', () => {
+  test('removes an active Workspace Session and keeps the App connection usable', async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-workspace-removal-')));
+    for (const name of ['home', 'runtime', 'config', 'workspace'])
+      mkdirSync(join(root, name), { mode: 0o700 });
+    const workspace = join(root, 'workspace');
+    const model = createMockModelServer();
+    model.setResponses([{ delay: 400, message: { content: 'late remote response' } }]);
+    writeAppServerConfig(join(root, 'config'), model.baseURL);
+    expect(
+      trustWorkspace({
+        workspace,
+        source: 'test',
+        storePath: join(root, 'config/workspace-trust.jsonc'),
+      }).status,
+    ).toBe('recorded');
+    const connection = createAppServerProtocolConnection(
+      createBunStdioChildRuntimeClientTransport({
+        argv: [
+          process.execPath,
+          join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+          'app-server',
+          'run-stdio',
+        ],
+        cwd: '/',
+        env: {
+          KITE_CODE_HOME: join(root, 'runtime'),
+          KITE_CODE_CONFIG_HOME: join(root, 'config'),
+          KITE_APP_SERVER_WORKSPACE: workspace,
+          KITE_APP_SERVER_BUILD_ID: 'workspace-removal',
+          HOME: join(root, 'home'),
+          USERPROFILE: join(root, 'home'),
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+        },
+      }),
+      kiteAppServerVersion('workspace-removal'),
+      { name: 'workspace-removal', version: '1', instanceId: crypto.randomUUID() },
+      KITE_APP_SERVER_PROTOCOL_METHODS_,
+    );
+    try {
+      await connection.prepareAppControl();
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'workspace-remove-create',
+          type: 'create_session',
+          workspace,
+          bootstrapSessionId: 'workspace-remove-session',
+        }),
+      ).toMatchObject({ status: 'applied' });
+      const stream = await connection.runtime.subscribeReady({
+        spec: { scope: 'session', sessionId: 'workspace-remove-session' },
+      });
+      const iterator = stream[Symbol.asyncIterator]();
+      expect(
+        await connection.runtime.command({
+          schema: 'kite.runtime-command.v1',
+          commandId: 'workspace-remove-start',
+          type: 'start_turn',
+          sessionId: 'workspace-remove-session',
+          expectedRevision: 0,
+          input: 'Wait for a response',
+        }),
+      ).toMatchObject({ status: 'applied' });
+      await eventually(() => model.getRequests().length === 1, 400);
+      const digest = `sha256:${createHash('sha256').update(workspace).digest('hex')}`;
+      const token = 'workspace-remove-token';
+      await expect(
+        connection.runtime.requestApp('app/workspace/remove', {
+          phase: 'finalize',
+          workspace,
+          workspaceDigest: digest,
+          token,
+        }),
+      ).rejects.toThrow();
+      expect(
+        await connection.runtime.requestApp('app/workspace/remove', {
+          phase: 'remove',
+          workspace,
+          workspaceDigest: digest,
+          token,
+        }),
+      ).toEqual({ deletedSessions: 1, token });
+      await Bun.sleep(600);
+      expect(
+        await connection.runtime.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId: 'workspace-remove-session',
+        }),
+      ).toMatchObject({ status: 'not_found' });
+      expect(
+        await connection.runtime.requestApp('app/workspace/remove', {
+          phase: 'remove',
+          workspace,
+          workspaceDigest: digest,
+          token,
+        }),
+      ).toEqual({ deletedSessions: 0, token });
+      expect(
+        await connection.runtime.requestApp('app/workspace/remove', {
+          phase: 'finalize',
+          workspace,
+          workspaceDigest: digest,
+          token,
+        }),
+      ).toEqual({ deletedSessions: 0, token });
+      await iterator.return?.();
+    } finally {
+      await connection.close();
+      model.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 25_000);
+
   test('changes a persisted Session policy across Workspaces without stopping another Turn', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-session-policy-')));
     for (const name of ['home', 'runtime', 'config', 'a', 'b'])

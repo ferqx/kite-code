@@ -25,6 +25,8 @@ Electron `before-quit` 先经 renderer 使用既有 Runtime 连接完整查询�
 
 桌面[新对话准备](../../apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
 
+桌面空间移除由 Service 的持久 Workspace 门禁和 Store writer 共同保护：同一空间的活跃删除不能被第二个请求接管，首次 Session 插入在同一 Store writer 中检查门禁。Service 只在该空间目录已清空后把删除标记为完成；`finalize` 仅释放已完成且 token 匹配的门禁。Desktop 在解除门禁确认成功后才移除本机项目登记；请求超时或收尾失败保留登记供重试。被删会话的实时订阅关闭，Desktop 在索引重置或重新连接时再核对当前会话是否仍存在，避免离线删除后恢复旧页面。具体失败与恢复见 [Service owner](../../apps/kite-service/docs/runtime-application.md)和[桌面历史](../../apps/kite-desktop/docs/history-and-recovery.md)。
+
 ```text
 default:
 TUI/CLI build X -- parent-owned stdio --> App Server build X

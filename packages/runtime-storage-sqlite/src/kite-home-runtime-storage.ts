@@ -78,6 +78,7 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   readonly writer?: KiteHomeWriteTransactionPort;
   readonly sessionWriter?: KiteHomeWriteTransactionPort;
   readonly removeSessionAuthorityInTransaction?: (sessionId: string) => void;
+  readonly removeSettledChildAuthorityInTransaction?: (sessionId: string) => void;
   readonly createForkTargetAuthorityInTransaction?: (targetSessionId: string) => void;
   readonly hasEffectLease?: (
     sessionId: string,
@@ -197,6 +198,12 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
       assertStoreSchema,
       ...(input.removeSessionAuthorityInTransaction
         ? { removeSessionAuthorityInTransaction: input.removeSessionAuthorityInTransaction }
+        : {}),
+      ...(input.removeSettledChildAuthorityInTransaction
+        ? {
+            removeSettledChildAuthorityInTransaction:
+              input.removeSettledChildAuthorityInTransaction,
+          }
         : {}),
       ...(input.createForkTargetAuthorityInTransaction
         ? { createForkTargetAuthorityInTransaction: input.createForkTargetAuthorityInTransaction }

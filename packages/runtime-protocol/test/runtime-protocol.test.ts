@@ -38,6 +38,52 @@ const initializeRequest = {
 };
 
 describe('Runtime Protocol', () => {
+  test('requires exact Workspace removal phase and identity', () => {
+    const identity = {
+      workspace: '/trusted/workspace',
+      workspaceDigest: `sha256:${'a'.repeat(64)}`,
+    };
+    const request = (value: unknown) => ({
+      jsonrpc: '2.0',
+      id: 'remove-workspace',
+      method: 'app/workspace/remove',
+      params: { request: value },
+    });
+    expect(
+      safeDecodeRuntimeProtocolMessage(
+        request({ phase: 'remove', ...identity, token: 'removal-1' }),
+      ).success,
+    ).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage(
+        request({ phase: 'remove', workspaceDigest: identity.workspaceDigest, token: 'removal-1' }),
+      ).success,
+    ).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage(
+        request({ phase: 'finalize', ...identity, token: 'removal-1' }),
+      ).success,
+    ).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage(
+        request({
+          phase: 'finalize',
+          workspaceDigest: identity.workspaceDigest,
+          token: 'removal-1',
+        }),
+      ).success,
+    ).toBeTrue();
+    for (const value of [
+      { phase: 'remove', ...identity },
+      { phase: 'finalize', ...identity },
+      { phase: 'remove', ...identity, token: 'removal-1', extra: true },
+      { phase: 'remove', ...identity, token: 'removal-1', workspace: 'relative' },
+      { phase: 'remove', ...identity, token: 'removal-1', workspaceDigest: 'invalid' },
+      { phase: 'remove', ...identity, token: '' },
+    ]) {
+      expect(safeDecodeRuntimeProtocolMessage(request(value)).success).toBeFalse();
+    }
+  });
   test('requires exact parent and child identities for a child live subscription', () => {
     const request = {
       jsonrpc: '2.0',
@@ -1279,7 +1325,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '89dcc15b:001e8d83';
+    const expectedDigest = 'ad5fb600:0ba630f3';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -1287,6 +1333,7 @@ describe('Runtime Protocol', () => {
     expect(generated.typeScript).toContain("method: 'initialize'");
     expect(generated.typeScript).toContain("method: 'runtime/command'");
     expect(generated.typeScript).toContain("method: 'history/list_sessions'");
+    expect(generated.typeScript).toContain("method: 'app/workspace/remove'");
     expect(generated.typeScript).toContain("method: 'app/workspace_trust/query'");
     expect(generated.typeScript).toContain("method: 'app/provider_credential/write'");
     expect(generated.typeScript).toContain("method: 'server/ping'");

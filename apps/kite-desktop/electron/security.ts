@@ -114,8 +114,14 @@ export function switchPayload(value: unknown): { expected: BranchSnapshot; branc
 }
 
 export function confirmPayload(value: unknown): DesktopConfirmOptions {
-  const record = exactRecord(value, ['message', 'title', 'kind'], ['okLabel', 'cancelLabel']);
+  const record = exactRecord(
+    value,
+    ['message', 'title', 'kind'],
+    ['okLabel', 'cancelLabel', 'defaultCancel'],
+  );
   if (record.kind !== 'warning' && record.kind !== 'info') throw new Error('桌面 IPC 参数无效。');
+  if (record.defaultCancel !== undefined && typeof record.defaultCancel !== 'boolean')
+    throw new Error('桌面 IPC 参数无效。');
   return {
     message: boundedString(record.message, 4096),
     title: boundedString(record.title, 256),
@@ -124,6 +130,7 @@ export function confirmPayload(value: unknown): DesktopConfirmOptions {
     ...(record.cancelLabel === undefined
       ? {}
       : { cancelLabel: boundedString(record.cancelLabel, 128) }),
+    ...(record.defaultCancel === undefined ? {} : { defaultCancel: record.defaultCancel }),
   };
 }
 

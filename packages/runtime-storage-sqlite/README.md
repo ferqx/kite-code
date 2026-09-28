@@ -38,6 +38,8 @@
 ## 数据、事务与读取
 
 - command receipt 主键为 `(scope_session_id, command_id)`，绑定 digest 与原决定；applied receipt 与事件、State/snapshot 同事务。close/delete 保留 receipt，fork 不复制 source receipt；无 TTL 或容量裁剪。
+- 带 receipt 的根 Session 删除在同一受执行权 fence 的事务中枚举内部子树、验证每个子 Session 的 cleanup、effect 与 Run 终态，删除子树关联行并保留根 command receipt。跨树 Session 外键引用拒绝整次删除；公开 child ID 仍不能直接作为删除目标。恢复未知或仍有活动 authority 的 child 不能由 Store 推测为已清理。
+- Workspace 删除门禁使用 `kite_meta` 中的持久键，由 Session Store owner 原子设置 running／completed 状态。新根或子 Session 的首次插入在同一 writer transaction 检查门禁；活跃 running claim 拒绝并发接管，只有其 owner 已退出才可由新 claim 接续。完成标记要求准确 claim，按 token 解除要求 completed；新 token 可接续已完成但未 finalize 的门禁。无法解析的记录拒绝接管或解除。门禁不会更改现有物理 schema／epoch。
 - Store 11 的 Agent tree、私有 mail body、按 Session 顺序的 inbox 及 prepared 水位复用同一 Session 事务；显式 `send_message` 的确定性 `messageId` 是 command receipt key，正文只存于私有表。metadata-only Agent 读取按同一 Session 祖先／后代树范围过滤；正文只通过当前执行 handle、准确活动 task 与模型输入 invocation 绑定的窄接口交给可信 Service，不经普通列表暴露。
 - 上一条是未发布的单 Session 候选机制。D0 的子线程必须各自持有 execution authority 和 revision；父创建意图、子终态 outbox、父结果接纳／投递 receipt 分属各自 Session 事务，跨线程投递按确定性身份重放。候选私有 Artifact/ref 规则可复用，不能把同 Session mail mutation 直接当成跨线程原子协议。
 - Run insert/transition 与所属 State/event/receipt 提交一致。start 后的 queued→running row-only activation 可以复用相同 State revision；其他 transition 仍按 revision/lifecycle 校验。Run list 使用稳定 keyset，单页最多 200 项。

@@ -1,6 +1,7 @@
 import {
   Add01Icon,
   CalendarClockIcon,
+  Delete02Icon,
   Folder01Icon,
   Folder02Icon,
   Home03Icon,
@@ -62,6 +63,7 @@ function Workspace({
 }: Omit<DirectoryProps, 'workspaces'> & {
   workspace: WorkspaceSummary;
   onNewSession?: (workspaceId: string) => void;
+  onRemove?: (workspaceId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(props.defaultExpanded ?? workspace.state === 'loaded');
   const [visibleCount, setVisibleCount] = useState(5);
@@ -106,6 +108,19 @@ function Workspace({
                 onClick={() => props.onNewSession?.(workspace.id)}
               >
                 <HugeiconsIcon icon={Add01Icon} />
+              </Button>
+            )}
+            {props.onRemove && (
+              <Button
+                className="ghost space-remove"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`移除 ${workspace.label}`}
+                title="移除空间"
+                disabled={props.mutationBusy}
+                onClick={() => props.onRemove?.(workspace.id)}
+              >
+                <HugeiconsIcon icon={Delete02Icon} />
               </Button>
             )}
           </div>
@@ -208,6 +223,8 @@ function Workspace({
 export interface PageActions {
   newSession?: () => void;
   newWorkspaceSession?: (workspaceId: string) => void;
+  addWorkspace?: () => void;
+  removeWorkspace?: (workspaceId: string) => void;
   workbench?: () => void;
   scheduledTasks?: () => void;
   settings?: () => void;
@@ -269,6 +286,19 @@ export function Sidebar({
       )}
       <div className="nav-label">
         <span>空间</span>
+        {actions.addWorkspace && (
+          <Button
+            className="ghost space-add"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="添加空间"
+            title="添加空间"
+            disabled={props.mutationBusy}
+            onClick={actions.addWorkspace}
+          >
+            <HugeiconsIcon icon={Add01Icon} />
+          </Button>
+        )}
       </div>
       <TooltipProvider delayDuration={500} skipDelayDuration={300}>
         <ScrollArea className="workspace-directory">
@@ -279,6 +309,7 @@ export function Sidebar({
                 {...props}
                 workspace={workspace}
                 onNewSession={actions.newWorkspaceSession}
+                onRemove={actions.removeWorkspace}
               />
             ))}
           </div>

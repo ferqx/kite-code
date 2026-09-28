@@ -329,5 +329,144 @@ test('child seal persists exact result and parent import presents one terminal c
         unknownRecovery: true,
       }),
     });
+
+    const cancelledBase = childState();
+    child = {
+      ...cancelledBase,
+      turn: {
+        ...cancelledBase.turn,
+        status: 'aborted',
+        abortCause: 'user',
+        abortReason: 'Cancelled by user.',
+      },
+      terminalOutcome: undefined,
+      modelInvocations: {
+        model: { status: 'dispatching' } as RuntimeState['modelInvocations'][string],
+      },
+    };
+    const cancelledResult = {
+      ok: false,
+      summary: 'Child Session cancelled.',
+      terminalStatus: 'cancelled' as const,
+      toolCallCount: 0,
+      durationMs: 0,
+    };
+    const settledFacts = {
+      localEventChannelClosed: true,
+      activeRun: false,
+      unknownRun: false,
+      pendingEffects: false,
+      unknownEffects: false,
+    };
+    const sealCancelled = () =>
+      sealChildTerminalResult({
+        getChildState: () => child,
+        artifacts,
+        parentOwnerKey: 'parent-cancelled',
+        result: cancelledResult,
+        cleanupConfirmed: true,
+        cancelRequested: true,
+        terminalReceiptId: 'cancelled-terminal',
+        readCancellationExecutionFacts: () => settledFacts,
+        commitSeal: (event) => {
+          child = {
+            ...child,
+            revision: child.revision + 1,
+            childSessionOrigin: {
+              ...child.childSessionOrigin!,
+              terminal: { ...event, sealedRevision: child.revision + 1 },
+            },
+          };
+          return [event];
+        },
+      });
+    expect(sealCancelled).toThrow('not sealed and cleaned up');
+    expect(child.childSessionOrigin?.terminal).toBeUndefined();
+
+    child = {
+      ...child,
+      modelInvocations: {
+        model: { status: 'interrupted' } as RuntimeState['modelInvocations'][string],
+      },
+    };
+    expect(() =>
+      sealChildTerminalResult({
+        getChildState: () => child,
+        artifacts,
+        parentOwnerKey: 'parent-cancelled',
+        result: cancelledResult,
+        cleanupConfirmed: true,
+        cancelRequested: true,
+        terminalReceiptId: 'cancelled-terminal',
+        commitSeal: () => {
+          throw new Error('must not commit');
+        },
+      }),
+    ).toThrow('not sealed and cleaned up');
+    for (const outstanding of [
+      'localEventChannelClosed',
+      'activeRun',
+      'unknownRun',
+      'pendingEffects',
+      'unknownEffects',
+    ] as const) {
+      expect(() =>
+        sealChildTerminalResult({
+          getChildState: () => child,
+          artifacts,
+          parentOwnerKey: 'parent-cancelled',
+          result: cancelledResult,
+          cleanupConfirmed: true,
+          cancelRequested: true,
+          terminalReceiptId: 'cancelled-terminal',
+          readCancellationExecutionFacts: () => ({
+            ...settledFacts,
+            [outstanding]: outstanding === 'localEventChannelClosed' ? false : true,
+          }),
+          commitSeal: () => {
+            throw new Error('must not commit');
+          },
+        }),
+      ).toThrow('not sealed and cleaned up');
+    }
+    sealCancelled();
+    const cancelledSealed = child;
+    child = {
+      ...child,
+      modelInvocations: {
+        model: { status: 'dispatching' } as RuntimeState['modelInvocations'][string],
+      },
+    };
+    const importCancelled = () =>
+      importChildTerminalResult({
+        parentState: parent,
+        readChildState: () => child,
+        childThreadId,
+        parentInvocationId,
+        parentOwnerKey: 'parent-cancelled',
+        artifacts,
+        readCancellationExecutionFacts: () => settledFacts,
+        commitImport: (proof) => [proof.resourceEvent, proof.importEvent, proof.resultEvent],
+      });
+    expect(importCancelled).toThrow('exact sealed Session');
+    child = cancelledSealed;
+    expect(() =>
+      importChildTerminalResult({
+        parentState: parent,
+        readChildState: () => child,
+        childThreadId,
+        parentInvocationId,
+        parentOwnerKey: 'parent-cancelled',
+        artifacts,
+        commitImport: () => {
+          throw new Error('must not commit');
+        },
+      }),
+    ).toThrow('exact sealed Session');
+    expect(importCancelled().map((event) => event.type)).toEqual([
+      'resource_budget.reconciled',
+      'subagent.child_terminal_imported',
+      'subagent.background_result_persisted',
+    ]);
   }
 });

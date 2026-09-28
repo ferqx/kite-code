@@ -53,6 +53,12 @@ test('IPC payload decoders reject unknown fields and malformed capabilities', ()
       cancelLabel: '返回',
     }),
   ).toMatchObject({ kind: 'warning', okLabel: '继续' });
+  expect(
+    confirmPayload({ title: '移除？', message: '确认', kind: 'warning', defaultCancel: true }),
+  ).toMatchObject({ defaultCancel: true });
+  expect(() =>
+    confirmPayload({ title: 'x', message: 'y', kind: 'warning', defaultCancel: 'yes' }),
+  ).toThrow('参数无效');
   expect(() => confirmPayload({ title: 'x', message: 'y', kind: 'error' })).toThrow('参数无效');
 
   const expected = {

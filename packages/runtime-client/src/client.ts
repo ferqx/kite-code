@@ -191,6 +191,7 @@ interface SubscriptionState {
   readonly spec: RuntimeProtocolSubscriptionSpec;
   readonly queue: RuntimeNotificationQueue;
   readonly signal?: AbortSignal;
+  readonly indexObserverOnly?: boolean;
   readonly ready?: Readonly<{
     promise: Promise<void>;
     resolve: () => void;
@@ -555,6 +556,15 @@ export class RuntimeClient implements AsyncDisposable {
     });
   }
 
+  /** Observe index removals without replacing the selected Session's live snapshot. */
+  observeSessionIndex(signal?: AbortSignal): AsyncIterable<RuntimeAccessNotification> {
+    const state = this.#createSubscription({ scope: 'sessions' }, signal, false, true);
+    void this.#activateSubscription(state).catch(() => this.#closeSubscription(state, false));
+    return state.queue.iterable(() => {
+      void this.#closeSubscription(state, true).catch(() => undefined);
+    });
+  }
+
   /**
    * Acquire a stream only after the remote initial watermark is ready. This
    * prevents a command from racing the Server's initial subscription phase
@@ -639,6 +649,7 @@ export class RuntimeClient implements AsyncDisposable {
     spec: RuntimeProtocolSubscriptionSpec,
     signal?: AbortSignal,
     waitForReady = false,
+    indexObserverOnly = false,
   ): SubscriptionState {
     let ready: SubscriptionState['ready'];
     if (waitForReady) {
@@ -656,6 +667,7 @@ export class RuntimeClient implements AsyncDisposable {
       spec,
       queue: new RuntimeNotificationQueue(),
       signal,
+      ...(indexObserverOnly ? { indexObserverOnly: true } : {}),
       ...(ready ? { ready } : {}),
     };
     this.#subscriptions.set(state.id, state);
@@ -1120,6 +1132,16 @@ export class RuntimeClient implements AsyncDisposable {
     message: RuntimeSubscriptionMessage,
   ): void {
     const { spec } = state;
+    if (
+      state.indexObserverOnly &&
+      (message.type === 'index_reset_begin' ||
+        message.type === 'session_upsert' ||
+        message.type === 'session_remove' ||
+        message.type === 'index_reset_end')
+    ) {
+      this.#pushSubscriptionNotification(state, message, connectionGeneration);
+      return;
+    }
     switch (message.type) {
       case 'index_reset_begin':
         if (

@@ -74,6 +74,7 @@ import {
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeProtocolMessage,
   type RuntimeSubscriptionSpec as RuntimeProtocolSubscriptionSpec,
+  type RuntimeProtocolWorkspaceRemovalRequest,
 } from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
@@ -99,6 +100,7 @@ import {
   KiteSessionMutationError,
   KiteSessionRuntimeStorageError,
   KiteSessionStoreOpenError,
+  KiteSessionTreeDeletionError,
   openKiteSessionRuntimeStorage,
   prepareKiteSessionStore,
   resolveSqliteRuntimeLayoutPaths,
@@ -140,12 +142,14 @@ import {
   type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
   readBackgroundExecutionSnapshot,
+  shutdownSettledSessionWithoutConfig,
 } from './bootstrap/runtime/CliRuntimeBridge';
 import { commitInteractionModeCommand } from './bootstrap/runtime/command-control-decision';
 import { createCrossSessionAgentMailBinding } from './bootstrap/runtime/cross-session-agent-mail-composition';
 import { previewFilesToCheckpoint } from './bootstrap/runtime/file-checkpoints';
 import { KITE_RUNTIME_OPERATION_IDS_ } from './bootstrap/runtime/KiteRuntimeExecutionModule';
 import { createRuntimeSessionCoordinatorBinding } from './bootstrap/runtime/RuntimeSessionCoordinator';
+import { isUnknownRunOnlyCancelledChildModelUsage } from './bootstrap/runtime/session-deletion-proof';
 import type {
   RuntimeEvent,
   RuntimeState,
@@ -390,6 +394,10 @@ export interface KiteMultiWorkspaceRuntimeServerOwner extends AsyncDisposable {
   readonly runtime: RuntimeAccess;
   readonly storage: RuntimeStorage<RuntimeEvent, RuntimeState>;
   readonly cancelAllSessions: (reason: string) => Promise<void>;
+  /** Server-owned stop, delete, and durable Workspace admission fence. */
+  readonly removeWorkspace: (
+    request: RuntimeProtocolWorkspaceRemovalRequest,
+  ) => Promise<{ readonly deletedSessions: number; readonly token: string }>;
   /** Replays durable source outboxes after the Host starts; failures remain pending. */
   readonly recoverPendingAgentMail: () => Promise<void>;
   /** Bindings used by native carriers; disconnect only releases this client identity. */
@@ -920,6 +928,9 @@ export function suppressCompatibleKiteSession(checkpointPath: string, sessionId:
 
 export interface KiteRuntimeStorageOwner {
   readonly directory?: import('@kite-ai/runtime-storage-sqlite').KiteHomeDirectoryQueryPort;
+  readonly workspaceDeletion?: KiteSessionAppServerStorageOwner['workspaceDeletion'];
+  readonly getAdmittedWorkspace?: KiteSessionAppServerStorageOwner['getAdmittedWorkspace'];
+  readonly getAdmittedWorkspaceByDigest?: KiteSessionAppServerStorageOwner['getAdmittedWorkspaceByDigest'];
   readonly openHistoryLogs?: (
     currentEventTypes: readonly string[],
   ) => RuntimeLogQueryPort<RuntimeEvent>;
@@ -3122,6 +3133,180 @@ export function createKiteMultiWorkspaceRuntimeServer(
             ? Promise.resolve(owner.readSnapshot(() => queryStoredProjection(query.sessionId)))
             : router.query(query),
         shutdownSession: router.shutdownSession.bind(router),
+        shutdownSettledSessionForDeletion: async (sessionId, reason, publish) => {
+          const settleChildren = async () => {
+            if (!owner.listChildSessions || !owner.releaseSessionExecution || !owner.recovery)
+              throw new KiteSessionRuntimeStorageError(
+                'session_busy',
+                'Internal child Session cleanup port is unavailable.',
+              );
+            const seen = new Set([sessionId]);
+            const visit = async (parentSessionId: string): Promise<void> => {
+              let cursor: { updatedAt: number; sessionId: string } | undefined;
+              do {
+                const page = owner.listChildSessions!(parentSessionId, 100, cursor);
+                for (const child of page.entries) {
+                  if (seen.has(child.sessionId) || seen.size >= 10_000)
+                    throw new KiteSessionRuntimeStorageError(
+                      'session_busy',
+                      'Internal child Session tree is not bounded.',
+                    );
+                  seen.add(child.sessionId);
+                  await visit(child.sessionId);
+                  const childState = owner.loadCurrentSnapshot(child.sessionId);
+                  const childFacts = owner.recovery!.inspect(child.sessionId);
+                  if (
+                    childState?.childSessionOrigin?.terminal?.cleanupConfirmed !== true ||
+                    childState.turn.status === 'active' ||
+                    childState.terminalOutcome?.status === 'unknown' ||
+                    Object.values(childState.modelInvocations).some(
+                      (invocation) => invocation.status === 'dispatching',
+                    ) ||
+                    childFacts.pendingEffects.length !== 0 ||
+                    childFacts.unknownEffects.length !== 0 ||
+                    owner.storage.runs?.getActive(child.sessionId) ||
+                    owner.storage.runs?.list({
+                      sessionId: child.sessionId,
+                      status: 'unknown',
+                      limit: 1,
+                    }).entries.length !== 0
+                  )
+                    throw new KiteSessionRuntimeStorageError(
+                      'session_busy',
+                      'Internal child Session cleanup is not confirmed.',
+                    );
+                  if (childFacts.authority.status === 'active') {
+                    if (!owner.ownsSessionExecution?.(child.sessionId))
+                      throw new KiteSessionRuntimeStorageError(
+                        'session_busy',
+                        'Internal child Session is owned elsewhere.',
+                      );
+                    const released = await owner.releaseSessionExecution!(child.sessionId, () =>
+                      runtimeCoordinatorBinding.access().release(child.sessionId),
+                    );
+                    if (!released)
+                      throw new KiteSessionRuntimeStorageError(
+                        'session_busy',
+                        'Internal child Session execution has not settled.',
+                      );
+                  }
+                }
+                cursor = page.nextCursor;
+              } while (cursor);
+            };
+            await visit(sessionId);
+          };
+          const state = owner.loadCurrentSnapshot(sessionId);
+          const facts = state && owner.recovery?.inspect(sessionId);
+          const projection = state ? projectStoredSessionForOwner(sessionId, state) : undefined;
+          const recoveryIdentityKey = owner.storage.recoveryIdentities.read(sessionId);
+          const workspace = state?.session.workspace;
+          if (
+            !state ||
+            !facts ||
+            !projection ||
+            !recoveryIdentityKey ||
+            !workspace ||
+            (state.turn.status === 'active' &&
+              (state.turn.turnIndex !== 0 ||
+                projection.currentRun !== undefined ||
+                Object.keys(state.modelInvocations).length !== 0)) ||
+            state.terminalOutcome?.status === 'unknown' ||
+            Object.values(state.modelInvocations).some(
+              (invocation) => invocation.status === 'dispatching',
+            ) ||
+            ['queued', 'running', 'waiting'].includes(projection.currentRun?.status ?? '') ||
+            facts.pendingEffects.length !== 0 ||
+            facts.unknownEffects.length !== 0 ||
+            owner.storage.runs?.getActive(sessionId) ||
+            owner.storage.runs?.list({ sessionId, status: 'unknown', limit: 1 }).entries.length !==
+              0 ||
+            facts.authority.status !== 'active' ||
+            !owner.ownsSessionExecution?.(sessionId)
+          ) {
+            await router.shutdownSession(sessionId, reason, publish);
+          } else {
+            await shutdownSettledSessionWithoutConfig({
+              sessionId,
+              workspace,
+              recoveryIdentityKey,
+              modelInvocationRuntimeFactory,
+              runtimeSessionCoordinator: runtimeCoordinatorBinding.access(),
+            });
+          }
+          await settleChildren();
+          const settled = owner.loadCurrentSnapshot(sessionId);
+          const settledFacts = owner.recovery?.inspect(sessionId);
+          const settledProjection = settled
+            ? projectStoredSessionForOwner(sessionId, settled)
+            : undefined;
+          const unknownRuns =
+            owner.storage.runs?.list({
+              sessionId,
+              status: 'unknown',
+              limit: 2,
+            }).entries ?? [];
+          const unknownIsCancelledChildUsage =
+            settled &&
+            unknownRuns.length > 0 &&
+            isUnknownRunOnlyCancelledChildModelUsage({
+              parent: settled,
+              unknownRuns,
+              readSettledChild: (childSessionId) => {
+                const child = owner.loadCurrentSnapshot(childSessionId);
+                const facts = owner.recovery?.inspect(childSessionId);
+                if (
+                  !child ||
+                  !facts ||
+                  facts.authority.status !== 'idle' ||
+                  !facts.authority.cleanupConfirmed ||
+                  facts.pendingEffects.length > 0 ||
+                  facts.unknownEffects.length > 0 ||
+                  runtimeCoordinatorBinding.access().get(childSessionId)?.isTurnActive() ||
+                  owner.storage.runs?.getActive(childSessionId) ||
+                  owner.storage.runs?.list({
+                    sessionId: childSessionId,
+                    status: 'unknown',
+                    limit: 1,
+                  }).entries.length ||
+                  Object.values(child.modelInvocations).some(
+                    (invocation) =>
+                      invocation.status === 'prepared' || invocation.status === 'dispatching',
+                  )
+                )
+                  return undefined;
+                return child;
+              },
+            });
+          if (
+            !settled ||
+            !settledFacts ||
+            !settledProjection ||
+            (settled.turn.status === 'active' &&
+              (settled.turn.turnIndex !== 0 ||
+                settledProjection.currentRun !== undefined ||
+                Object.keys(settled.modelInvocations).length !== 0)) ||
+            Object.values(settled.modelInvocations).some(
+              (invocation) =>
+                invocation.status === 'prepared' || invocation.status === 'dispatching',
+            ) ||
+            ['queued', 'running', 'waiting'].includes(settledProjection.currentRun?.status ?? '') ||
+            settledFacts.pendingEffects.length > 0 ||
+            settledFacts.unknownEffects.length > 0 ||
+            owner.storage.runs?.getActive(sessionId) ||
+            runtimeCoordinatorBinding.access().get(sessionId)?.isTurnActive() ||
+            ((settled.terminalOutcome?.status === 'unknown' || unknownRuns.length > 0) &&
+              !unknownIsCancelledChildUsage) ||
+            settledFacts.authority.status !== 'active' ||
+            !owner.ownsSessionExecution?.(sessionId)
+          )
+            throw new KiteSessionRuntimeStorageError(
+              'session_busy',
+              'Runtime Session deletion lacks confirmed local cleanup.',
+            );
+          // The Store mutation that follows still requires this exact active
+          // execution handle and atomically retires its durable authority.
+        },
         close: async () => {
           interactionBroker.close('Runtime owner closed.');
           try {
@@ -3469,6 +3654,153 @@ export function createKiteMultiWorkspaceRuntimeServer(
         ),
     );
   };
+  const removeWorkspace = async (
+    request: RuntimeProtocolWorkspaceRemovalRequest,
+  ): Promise<{ readonly deletedSessions: number; readonly token: string }> => {
+    const fence = owner.workspaceDeletion;
+    if (!fence || !owner.directory)
+      throw new Error('Workspace removal requires the current Store owner.');
+    const stored = owner.getAdmittedWorkspaceByDigest?.(request.workspaceDigest);
+    const storedWorkspaceId = stored?.workspaceId;
+    const workspace = request.workspace ?? stored?.canonicalPath;
+    if (!workspace) throw new Error('Workspace removal identity is unavailable.');
+    const identity = persistedWorkspaceIdentity(workspace);
+    if (!identity || identity.workspaceDigest !== request.workspaceDigest)
+      throw new Error('Workspace removal identity does not match its canonical path.');
+    const admission: AdmittedWorkspace = {
+      canonicalPath: workspace,
+      projectId: identity.projectId,
+      workspaceDigest: identity.workspaceDigest,
+    };
+    const workspaceId = `workspace_${workspaceIdentityDigest(admission).slice('sha256:'.length)}`;
+    if (storedWorkspaceId && storedWorkspaceId !== workspaceId)
+      throw new Error('Workspace removal directory identity does not match its canonical path.');
+    const existing = owner.getAdmittedWorkspace?.(workspaceId);
+    if (
+      existing &&
+      (existing.canonicalPath !== admission.canonicalPath ||
+        existing.projectId !== admission.projectId ||
+        existing.workspaceDigest !== admission.workspaceDigest)
+    )
+      throw new Error('Workspace removal identity conflicts with the Store.');
+    if (request.phase === 'finalize') {
+      fence.end(workspaceId, request.token);
+      return { deletedSessions: 0, token: request.token };
+    }
+    const token = request.token;
+    const claimId = randomBytes(16).toString('hex');
+    if (fence.begin(workspaceId, token, claimId) === 'completed')
+      return { deletedSessions: 0, token };
+    let deletedSessions = 0;
+    const childSessionsInTree = (rootSessionId: string): readonly string[] => {
+      if (!owner.listChildSessions) return [];
+      const children: string[] = [];
+      const seen = new Set([rootSessionId]);
+      const visit = (parentSessionId: string): void => {
+        let cursor: { updatedAt: number; sessionId: string } | undefined;
+        do {
+          const page = owner.listChildSessions!(parentSessionId, 100, cursor);
+          for (const child of page.entries) {
+            if (seen.has(child.sessionId) || seen.size >= 10_000)
+              throw new Error('Workspace Session tree is not bounded.');
+            seen.add(child.sessionId);
+            children.push(child.sessionId);
+            visit(child.sessionId);
+          }
+          cursor = page.nextCursor;
+        } while (cursor);
+      };
+      visit(rootSessionId);
+      return children;
+    };
+    try {
+      await host.start();
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        const page = owner.directory.listSessions({
+          limit: 100,
+          workspaceDigest: request.workspaceDigest,
+        });
+        if (page.entries.length === 0) {
+          if (!fence.owns(workspaceId, claimId))
+            throw new Error('Workspace removal was superseded.');
+          fence.complete(workspaceId, claimId);
+          return { deletedSessions, token };
+        }
+        for (const entry of page.entries) {
+          if (!fence.owns(workspaceId, claimId))
+            throw new Error('Workspace removal was superseded.');
+          if (entry.workspace?.workspaceId !== workspaceId)
+            throw new Error('Workspace removal directory identity changed.');
+          const sessionId = entry.sessionId;
+          const childSessionIds = childSessionsInTree(sessionId);
+          while (Date.now() < deadline) {
+            const query = await runHostQuery({
+              schema: 'kite.runtime-query.v1',
+              type: 'get_session_projection',
+              sessionId,
+            });
+            if (query.status === 'not_found') break;
+            if (query.status !== 'ok' || !query.session)
+              throw new Error(`Session ${sessionId} is unavailable during Workspace removal.`);
+            if (!fence.owns(workspaceId, claimId))
+              throw new Error('Workspace removal was superseded.');
+            if (
+              query.session.currentRun &&
+              ['queued', 'running', 'waiting'].includes(query.session.currentRun.status)
+            ) {
+              const cancel = await runHostCommand({
+                schema: 'kite.runtime-command.v1',
+                commandId: `remove_cancel_${randomBytes(16).toString('hex')}`,
+                type: 'cancel_turn',
+                sessionId,
+                expectedRevision: query.session.revision,
+                runId: query.session.currentRun.runId,
+                turnId:
+                  query.session.currentRun.activeTurnId ?? query.session.currentRun.initialTurnId,
+              });
+              if (
+                cancel.status !== 'applied' &&
+                cancel.status !== 'idempotent_replay' &&
+                !(cancel.status === 'conflict' && cancel.code === 'revision_conflict') &&
+                !(cancel.status === 'rejected' && cancel.code === 'turn_not_found')
+              )
+                throw new Error(`Session ${sessionId} cancellation failed: ${cancel.code}.`);
+              continue;
+            }
+            const receipt = await runHostCommand({
+              schema: 'kite.runtime-command.v1',
+              commandId: `remove_${randomBytes(16).toString('hex')}`,
+              type: 'delete_session',
+              sessionId,
+              expectedRevision: query.session.revision,
+            });
+            if (receipt.status === 'applied' || receipt.status === 'idempotent_replay') break;
+            if (receipt.status === 'not_found') break;
+            if (
+              (receipt.status !== 'rejected' && receipt.status !== 'conflict') ||
+              !['revision_conflict', 'runtime_busy', 'session_cleanup_pending'].includes(
+                receipt.code,
+              )
+            )
+              throw new Error(`Session ${sessionId} deletion failed: ${receipt.code}.`);
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          if (owner.loadCurrentSnapshot(sessionId))
+            throw new Error(`Session ${sessionId} did not stop before Workspace removal deadline.`);
+          if (!fence.owns(workspaceId, claimId))
+            throw new Error('Workspace removal was superseded.');
+          for (const childSessionId of childSessionIds)
+            host.removeSessionProjection(childSessionId);
+          deletedSessions++;
+        }
+      }
+      throw new Error('Workspace removal timed out.');
+    } catch (error) {
+      fence.abandon(workspaceId, claimId);
+      throw error;
+    }
+  };
   const runtime: RuntimeAccess = input.operationGate
     ? Object.freeze({
         command: (command: RuntimeCommand, context?: Readonly<RuntimeCommandContext>) =>
@@ -3507,6 +3839,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
     runtime,
     storage: owner.storage,
     cancelAllSessions,
+    removeWorkspace,
     recoverPendingAgentMail: () => {
       if (mailRecoveryClosing) return Promise.resolve();
       pendingMailRecovery ??= mailDetachedScope
@@ -3667,7 +4000,10 @@ function appServerCommandFailure(
       code: 'session_not_found' as const,
     };
   }
-  if (error instanceof KiteSessionRuntimeStorageError && error.code === 'session_busy') {
+  if (
+    (error instanceof KiteSessionRuntimeStorageError && error.code === 'session_busy') ||
+    error instanceof KiteSessionTreeDeletionError
+  ) {
     return {
       status: 'rejected' as const,
       commandId: command.commandId,

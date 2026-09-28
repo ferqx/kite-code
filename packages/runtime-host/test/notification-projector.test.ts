@@ -350,6 +350,28 @@ describe('NotificationProjector session index subscriptions', () => {
     projector.close();
   });
 
+  test('ends deleted Session streams and rejects late notifications after the tombstone', async () => {
+    const registry = new SessionRegistry();
+    const projector = new NotificationProjector(registry);
+    projector.publish(durable('deleted-session', 1));
+    const stream = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'deleted-session' } })
+      [Symbol.asyncIterator]();
+    expect((await stream.next()).value).toMatchObject({ sessionId: 'deleted-session' });
+    const pending = stream.next();
+    expect(projector.removeSession('deleted-session')).toBe(true);
+    expect(await pending).toEqual({ done: true, value: undefined });
+
+    projector.publish(durable('deleted-session', 2));
+    projector.publishExternal(durable('deleted-session', 3));
+    expect(registry.projection('deleted-session')).toBeUndefined();
+    const late = projector
+      .subscribe({ spec: { scope: 'session', sessionId: 'deleted-session' } })
+      [Symbol.asyncIterator]();
+    expect(await late.next()).toEqual({ done: true, value: undefined });
+    projector.close();
+  });
+
   test('streams an index reset larger than the live subscriber queue without closing it', async () => {
     const registry = new SessionRegistry();
     const projector = new NotificationProjector(registry, {

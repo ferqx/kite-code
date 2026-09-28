@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import type { RuntimeSessionModelRoute } from '@kite-ai/runtime-host/storage';
 import { assertKiteHomeStoreSchema } from './kite-home-store';
 import { KiteHomeWriteError, type KiteHomeWriteTransactionPort } from './kite-home-write';
+import { workspaceDeletionFenceKey } from './kite-workspace-deletion-fence';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 import { hasSessionLineage } from './session-lineage';
 
@@ -238,6 +239,9 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
     { session_id: string; workspace_id: string },
     [string]
   >('SELECT session_id, workspace_id FROM runtime_session_tombstones WHERE session_id = ? LIMIT 1');
+  const selectDeletionFence = input.database.query<{ value: string }, [string]>(
+    'SELECT value FROM kite_meta WHERE key=?',
+  );
   const insertSession = input.database.query(
     `INSERT INTO runtime_sessions(
       session_id, workspace_id, project_id, workspace_digest, state_schema, format_epoch,
@@ -399,6 +403,12 @@ export function createKiteHomeWorkspaceSessionStore<State>(input: {
         input.workspace.workspaceId,
       );
       return;
+    }
+    if (selectDeletionFence.get(workspaceDeletionFenceKey(input.workspace.workspaceId))) {
+      throw new KiteHomeWorkspaceStoreError(
+        'workspace_conflict',
+        'Workspace deletion is in progress.',
+      );
     }
     const insertion = [
       sessionId,

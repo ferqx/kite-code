@@ -119,6 +119,11 @@ test('host preserves the Service across renderer generations and fences stale cl
     expect(fourth.expectedServerVersion).toBe(manifest.expectedServerVersion);
     await host.runtimeClose(fourth.connectionId);
 
+    await expect(host.removeWorkspace('/not-registered')).rejects.toThrow('已添加项目列表');
+    expect(await host.removeWorkspace(selected)).toBe(otherWorkspace);
+    expect(host.listProjects().map((project) => project.path)).toEqual([otherWorkspace]);
+    expect((await host.runtimeStatus()).workspace).toBe(otherWorkspace);
+
     writeFileSync(executable, 'tampered');
     await expect(host.runtimeOpen()).rejects.toThrow('服务制品校验失败');
   } finally {

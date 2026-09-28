@@ -28,6 +28,12 @@ import {
 } from './kite-home-workspaces';
 import type { KiteHomeWriteTransactionPort } from './kite-home-write';
 import {
+  prepareKiteSessionTreeArtifactDeletion,
+  prepareKiteSessionTreeDeletion,
+  removeKiteSessionTreeReferences,
+  removeUnreferencedKiteSessionTreeArtifacts,
+} from './kite-session-tree-deletion';
+import {
   SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSessionBinding,
   type SqliteRuntimeSnapshotCodec,
@@ -62,6 +68,8 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
   readonly writer: KiteHomeWriteTransactionPort;
   readonly assertStoreSchema?: (database: Database) => void;
   readonly removeSessionAuthorityInTransaction?: (sessionId: string) => void;
+  /** Store 11 only: verify a settled internal child and retire its authority. */
+  readonly removeSettledChildAuthorityInTransaction?: (sessionId: string) => void;
   readonly createForkTargetAuthorityInTransaction?: (targetSessionId: string) => void;
   readonly hasEffectLease?: (
     sessionId: string,
@@ -268,15 +276,34 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
         true,
       );
       input.writer.run(() => {
-        recoveryIdentities.removeInTransaction(sessionId);
-        removeKiteHomeWorkspaceAuthoritySessionInTransaction({
-          database: input.database,
-          writer: input.writer,
-          workspaceId: input.workspace.workspaceId,
-          sessionId,
-        });
-        input.removeSessionAuthorityInTransaction?.(sessionId);
-        sessionMetadata.deleteInTransaction(sessionId, deletion.expectedRevision);
+        const tree = hasSessionLineage(input.database)
+          ? prepareKiteSessionTreeDeletion(input.database, sessionId, input.workspace.workspaceId)
+          : [sessionId];
+        const artifactCandidates = hasSessionLineage(input.database)
+          ? prepareKiteSessionTreeArtifactDeletion(input.database)
+          : [];
+        if (tree.length > 1 && !input.removeSettledChildAuthorityInTransaction)
+          throw new Error('Internal child Session deletion authority is unavailable.');
+        for (const childSessionId of tree) {
+          if (childSessionId !== sessionId)
+            input.removeSettledChildAuthorityInTransaction?.(childSessionId);
+        }
+        if (tree.length > 1) removeKiteSessionTreeReferences(input.database);
+        for (const targetSessionId of tree) {
+          recoveryIdentities.removeInTransaction(targetSessionId);
+          removeKiteHomeWorkspaceAuthoritySessionInTransaction({
+            database: input.database,
+            writer: input.writer,
+            workspaceId: input.workspace.workspaceId,
+            sessionId: targetSessionId,
+          });
+          if (targetSessionId === sessionId) input.removeSessionAuthorityInTransaction?.(sessionId);
+          sessionMetadata.deleteInTransaction(
+            targetSessionId,
+            targetSessionId === sessionId ? deletion.expectedRevision : undefined,
+          );
+        }
+        removeUnreferencedKiteSessionTreeArtifacts(input.database, artifactCandidates);
         receipts.writer.insert(
           deletion.commandReceipt,
           sessionId,

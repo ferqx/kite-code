@@ -144,6 +144,7 @@ export async function runKiteAppServerMain(
       signals: createProcessRuntimeStdioSignals(signals),
       history: composition.history,
       appControl,
+      removeWorkspace: composition.removeWorkspace,
       credential: composition.appControl.credentialClient,
       shutdownComposition: () => Promise.resolve(composition[Symbol.asyncDispose]()),
     });

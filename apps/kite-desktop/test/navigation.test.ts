@@ -48,6 +48,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     }),
   );
   let workspace = join(root, 'a');
+  let registeredProjects = ['a', 'b'];
   let branch = 'main';
   let dirty = false;
   let branchSwitches = 0;
@@ -57,6 +58,9 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   let failGit = false;
   let historyReads = 0;
   let projectReads = 0;
+  let failProjectRefreshAfterRemove = false;
+  let failNextProjectRefresh = false;
+  let loseFinalizeResult = false;
   let modelReads = 0;
   const injectedFailures = new Set<unknown>();
   let loseBranchResult = false;
@@ -90,7 +94,19 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     if (command === 'check_workspace' || command === 'runtime_detach') return undefined as T;
     if (command === 'list_projects') {
       projectReads++;
-      return ['a', 'b'].map((name) => ({ path: join(root, name), lastOpenedAt: 1 })) as T;
+      if (failNextProjectRefresh) {
+        failNextProjectRefresh = false;
+        throw new Error('fixture project list unavailable');
+      }
+      return registeredProjects.map((name) => ({ path: join(root, name), lastOpenedAt: 1 })) as T;
+    }
+    if (command === 'remove_workspace') {
+      const path = args?.path;
+      registeredProjects = registeredProjects.filter((name) => join(root, name) !== path);
+      if (failProjectRefreshAfterRemove) failNextProjectRefresh = true;
+      if (workspace === path)
+        workspace = registeredProjects.length ? join(root, registeredProjects[0]!) : '';
+      return (workspace || null) as T;
     }
     if (command === 'switch_workspace_branch') {
       branchSwitches++;
@@ -164,6 +180,14 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
       }
       if (message.method === 'app/provider_model/snapshot' && failModel)
         injectedFailures.add(message.id);
+      if (
+        loseFinalizeResult &&
+        message.method === 'app/workspace/remove' &&
+        message.params?.request?.phase === 'finalize'
+      ) {
+        loseFinalizeResult = false;
+        injectedFailures.add(message.id);
+      }
       if (message.method === 'app/provider_model/snapshot') modelReads++;
       if (message.method === 'app/mcp/action') {
         mcpActions++;
@@ -530,6 +554,15 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
         client.getSnapshot().projection?.currentRun?.status === 'completed',
     );
     expect(client.getSnapshot().selected).toBe(first);
+    await waitFor(() =>
+      client
+        .getSnapshot()
+        .messages.some(
+          (message) =>
+            message.role === 'assistant' &&
+            message.text.includes('conversation continues after directory deletion'),
+        ),
+    );
     expect(
       client
         .getSnapshot()
@@ -553,6 +586,52 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(client.getSnapshot().ready).toBe(true);
     expect(client.getSnapshot().projection?.sessionId).toBe(first);
     expect(creations).toBe(beforeCreation + 1);
+    // A second renderer removes the historical Workspace while this renderer
+    // still displays one of its Sessions. The reconnecting index must close it.
+    workspace = join(root, 'b');
+    await client.activateProject(join(root, 'b'));
+    await client.selectSession(first);
+    expect(client.getSnapshot().workspace).toBe(join(root, 'b'));
+    const remover = new DesktopClient(createTestDesktopBridge(call));
+    const projectErrors: string[] = [];
+    const unsubscribeProjectErrors = remover.subscribe(() => {
+      const error = remover.getSnapshot().projectError;
+      if (error) projectErrors.push(error);
+    });
+    try {
+      await remover.refreshProjects();
+      await remover.restoreWorkspace();
+      loseFinalizeResult = true;
+      await expect(remover.removeProject(join(root, 'a'))).rejects.toThrow('服务端收尾尚未确认');
+      expect(registeredProjects).toEqual(['a', 'b']);
+      expect(remover.getSnapshot().projects?.map((project) => project.path)).toEqual([
+        join(root, 'a'),
+        join(root, 'b'),
+      ]);
+      failProjectRefreshAfterRemove = true;
+      const removed = await remover.removeProject(join(root, 'a'));
+      expect(removed.selectedRemoved).toBe(false);
+      expect(remover.getSnapshot().projects?.map((project) => project.path)).toEqual([
+        join(root, 'b'),
+      ]);
+    } finally {
+      unsubscribeProjectErrors();
+      await remover.disconnect();
+    }
+    expect(projectErrors.some((error) => error.includes('空间已移除'))).toBe(true);
+    await client.disconnect();
+    expect(client.getSnapshot().selected).toBe(first);
+    await client.connect();
+    await waitFor(() => client.getSnapshot().selected === undefined);
+    await client.refreshProjects();
+    expect(client.getSnapshot().projects?.map((project) => project.path)).toEqual([
+      join(root, 'b'),
+    ]);
+    expect(client.getSnapshot().workspace).toBe(join(root, 'b'));
+    expect(client.getSnapshot().directory?.some((entry) => entry.sessionId === first)).toBe(false);
+    expect(client.getSnapshot().selected).toBeUndefined();
+    expect(client.getSnapshot().messages).toEqual([]);
+    expect(client.getSnapshot().projection).toBeUndefined();
   } finally {
     release?.();
     await client.disconnect();

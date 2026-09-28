@@ -18,6 +18,7 @@
   Session registry、Storage daemon 或 build replacement。
 - `src/composition.ts` 组合 application domain；transport 由 stdio parent 或 daemon endpoint owner 持有。
 - 会话目录与历史投影保留 Store 已记录的 completed／failed／cancelled；服务重启后缺少执行权仅使未收尾运行显示 recovery_required，不改写已知终态。
+- 根 Session 删除前，Service 对已结算的 Session 和内部 child 执行与当前配置文件无关的后台资源清理；已删除工作区目录或无效 Provider 配置不阻止已经确认无运行和 effect 的历史删除。取消同一 Run 中已派发的 child 模型时，取消事实在持久事务中把调用结为 interrupted、用量标为 unknown；child clean terminal 还须证明本地事件通道关闭、模型不再 dispatching、Run 和 effect 均无未清理项。父 Run 仅因该 child 用量无法核算而变为 unknown 时，删除以准确 child terminal receipt、预算和模型调用关联为证明；其他 unknown Run、外部 effect 或本地清理未确认仍拒绝。
 - `bootstrap.ts` 打开 `kite-session.sqlite`，提供 multi-connection SQLite、Session execution fencing、revision CAS、
   effect receipt/recovery、checkpoint 与 typed Artifact backend。
 - 用户配置、Provider/model、MCP、Project approval 与 Workspace Trust 使用 owner-specific file lock、持锁重读和 atomic

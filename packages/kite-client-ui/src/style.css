@@ -297,6 +297,7 @@ body {
       .space-row,
       .session-row,
       .space-new-session,
+      .space-remove,
       .connection .button
     ) {
     height: 32px;
@@ -1302,13 +1303,13 @@ body {
   flex: 1;
   min-width: 0;
 }
-.kite-client .space-new-session {
+.kite-client :where(.space-new-session, .space-remove) {
   flex: none;
   width: 32px;
   height: 32px;
   padding: 8px;
 }
-.kite-client .space-new-session:disabled {
+.kite-client :where(.space-new-session, .space-remove):disabled {
   opacity: 1;
 }
 .kite-client .space-name-muted {

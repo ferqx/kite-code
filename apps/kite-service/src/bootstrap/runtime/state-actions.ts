@@ -409,6 +409,7 @@ export function eventsForRunCancellation(
   return [
     ...toolCancellations,
     ...userWaivers,
+    ...interruptedCurrentRunModels(state),
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
     {
@@ -418,6 +419,39 @@ export function eventsForRunCancellation(
       cause,
     },
   ];
+}
+
+function interruptedCurrentRunModels(state: Readonly<RuntimeState>): RuntimeEvent[] {
+  return Object.values(state.modelInvocations).flatMap((invocation) => {
+    if (invocation.status !== 'dispatching' || invocation.attempts < 1) return [];
+    if (invocation.budget.kind === 'reservation') {
+      if (state.resourceBudget.status !== 'active') return [];
+      const reservation = state.resourceBudget.reservations[invocation.budget.reservationId];
+      if (
+        reservation?.runId !== state.turn.turnId ||
+        reservation.invocationId !== `model-invocation:${invocation.invocationId}` ||
+        reservation.state !== 'dispatch_started'
+      )
+        return [];
+    } else if (
+      // Without a reservation there is no Run-linked budget row. Only the
+      // foreground primary attempt belongs to this cancelled Turn here.
+      invocation.purpose !== 'primary_agent' ||
+      invocation.parentInvocationId !== null ||
+      invocation.parentToolCallId !== null
+    )
+      return [];
+    // The attempt was durably dispatched. Cancellation closes the local model
+    // invocation; the separate budget event still records unknown Provider usage.
+    return [
+      {
+        type: 'model.invocation_interrupted' as const,
+        invocationId: invocation.invocationId,
+        dispatchCertainty: 'attempted' as const,
+        reasonCode: 'cancelled' as const,
+      },
+    ];
+  });
 }
 
 function resourceReservationCancellationEvents(

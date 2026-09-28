@@ -70,6 +70,20 @@ export function canonicalProject(value: string): string {
 export function rememberProject(directory: string, path: string): void {
   const projects = readProjects(directory).filter((project) => project.path !== path);
   projects.unshift({ path, lastOpenedAt: Date.now() });
+  writeProjects(directory, projects);
+}
+
+export function forgetProject(directory: string, path: string): void {
+  const projects = readProjects(directory);
+  if (!projects.some((project) => project.path === path))
+    throw new Error('空间已不在已添加项目列表中，请刷新后重试。');
+  writeProjects(
+    directory,
+    projects.filter((project) => project.path !== path),
+  );
+}
+
+function writeProjects(directory: string, projects: readonly StoredProject[]): void {
   try {
     mkdirSync(directory, { recursive: true });
   } catch {

@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { assertAgentStateInvariants } from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateInitialState,
+  createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
+  type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   eventsForRunCancellation,
@@ -599,6 +601,113 @@ test('bounded cancellation removes every durable waiter before aborting the turn
     status: 'active',
     waiters: { 'tool:queued': { state: 'cancelled' } },
   });
+});
+
+test('cancellation closes the exact dispatched model while retaining unknown usage', () => {
+  let state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId: 'model-cancel',
+    userId: 'u',
+    workspace: '/',
+  });
+  const runId = state.turn.turnId;
+  state = reduceRuntimeState(state, {
+    type: 'resource_budget.configured',
+    runId,
+    startedAt: '2026-09-28T00:00:00Z',
+    deadlineAt: '2026-09-28T00:30:00Z',
+    budget: LIMITED_RESOURCE_BUDGET_,
+  });
+  const upper = createZeroResourceUsage('versioned_upper_bound', 'cancel-model-v1');
+  upper.counters.modelRequests = 1;
+  state = reduceRuntimeState(state, {
+    type: 'resource_budget.reserved',
+    reservation: {
+      version: 1,
+      reservationId: 'model-reservation',
+      runId,
+      invocationId: 'model-invocation:model-1',
+      resourceKind: 'model',
+      executableUpperBound: upper,
+      state: 'reserved',
+    },
+  });
+  state = reduceRuntimeState(state, {
+    type: 'resource_budget.dispatch_started',
+    reservationId: 'model-reservation',
+  });
+  const artifact = {
+    kind: 'model_surface' as const,
+    artifactId: `pa_${'a'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+    byteLength: 1,
+  };
+  const withModel: RuntimeState = {
+    ...state,
+    modelInvocations: {
+      'model-1': {
+        invocationId: 'model-1',
+        purpose: 'primary_agent',
+        status: 'dispatching',
+        surfaceArtifact: artifact,
+        surfaceIntegrityIdentifier: artifact.integrityIdentifier,
+        routeFingerprint: `sha256:${'c'.repeat(64)}`,
+        budget: {
+          kind: 'reservation',
+          reservationId: 'model-reservation',
+          parentReservationId: null,
+        },
+        limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
+        preparedStateRevision: 1,
+        parentInvocationId: null,
+        parentToolCallId: null,
+        attempts: 1,
+        dispatchCertainty: 'attempted',
+      },
+    },
+  };
+  const events = eventsForRunCancellation(withModel);
+  expect(events).toContainEqual({
+    type: 'model.invocation_interrupted',
+    invocationId: 'model-1',
+    dispatchCertainty: 'attempted',
+    reasonCode: 'cancelled',
+  });
+  expect(events).toContainEqual({
+    type: 'resource_budget.unknown',
+    reservationId: 'model-reservation',
+  });
+  const cancelled = events.reduce(reduceRuntimeState, withModel);
+  expect(cancelled.modelInvocations['model-1']).toMatchObject({ status: 'interrupted' });
+  expect(cancelled.resourceBudget.reservations['model-reservation']).toMatchObject({
+    state: 'unknown',
+  });
+  const withoutBudget: RuntimeState = {
+    ...withModel,
+    resourceBudget: createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'model-cancel',
+      userId: 'u',
+      workspace: '/',
+    }).resourceBudget,
+    modelInvocations: {
+      'model-1': {
+        ...withModel.modelInvocations['model-1']!,
+        budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      },
+    },
+  };
+  expect(eventsForRunCancellation(withoutBudget)).toContainEqual({
+    type: 'model.invocation_interrupted',
+    invocationId: 'model-1',
+    dispatchCertainty: 'attempted',
+    reasonCode: 'cancelled',
+  });
+  expect(
+    eventsForRunCancellation(withoutBudget).some(
+      (event) => event.type === 'resource_budget.unknown',
+    ),
+  ).toBe(false);
 });
 
 test('process cancellation on one child approval settles deferred siblings without rewriting completed children', () => {

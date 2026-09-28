@@ -49,6 +49,18 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     RuntimeState
   >['artifactStore'];
   readonly directory: KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>['directory'];
+  readonly workspaceDeletion: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['workspaceDeletion'];
+  readonly getAdmittedWorkspace: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['getAdmittedWorkspace'];
+  readonly getAdmittedWorkspaceByDigest: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['getAdmittedWorkspaceByDigest'];
   readonly openHistoryLogs: KiteSessionRuntimeStorageOwner<
     RuntimeEvent,
     RuntimeState
@@ -714,6 +726,9 @@ export function createKiteSessionAppServerStorage(input: {
     storage,
     artifactStore: target.artifactStore,
     directory: target.directory,
+    workspaceDeletion: target.workspaceDeletion,
+    getAdmittedWorkspace: target.getAdmittedWorkspace,
+    getAdmittedWorkspaceByDigest: target.getAdmittedWorkspaceByDigest,
     openHistoryLogs: target.openHistoryLogs,
     readSessionLineage: (sessionId) => target.readSessionLineage(sessionId),
     listChildSessions: (parentSessionId, limit, cursor) =>

@@ -38,10 +38,12 @@ import {
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_REQUEST_SCHEMA_,
   RUNTIME_PROTOCOL_RESULT_SCHEMA_,
+  RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_RESULT_SCHEMA_,
   type RuntimeProtocolAppControlMethod,
   type RuntimeProtocolAppMethod,
   type RuntimeProtocolMessage,
   type RuntimeProtocolServerControlMethod,
+  type RuntimeProtocolWorkspaceRemovalRequest,
 } from '@kite-ai/runtime-protocol';
 import type {
   RuntimeServer,
@@ -106,6 +108,10 @@ export interface RuntimeStdioCarrierOptions {
   readonly history?: RuntimeHistoryClient;
   /** KASD App Server-only exact no-secret control surface on this connection. */
   readonly appControl?: KiteAppControlClient;
+  /** KASD App Server-only Workspace removal lifecycle. */
+  readonly removeWorkspace?: (
+    request: RuntimeProtocolWorkspaceRemovalRequest,
+  ) => Promise<{ readonly deletedSessions: number; readonly token: string }>;
   /** Native-only first-run credential owner; secret material is never returned. */
   readonly credential?: NativeProviderCredentialClient;
   readonly serverControl?: Readonly<{
@@ -510,7 +516,10 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     }
     if (
       (request.method === 'app/provider_credential/write' && !this.#options.credential) ||
-      (request.method !== 'app/provider_credential/write' && !this.#options.appControl)
+      (request.method === 'app/workspace/remove' && !this.#options.removeWorkspace) ||
+      (request.method !== 'app/provider_credential/write' &&
+        request.method !== 'app/workspace/remove' &&
+        !this.#options.appControl)
     ) {
       await this.#writeError(request.id, 'method_not_found');
       return true;
@@ -519,11 +528,15 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       const response =
         request.method === 'app/provider_credential/write'
           ? await dispatchProviderCredential(this.#options.credential!, request.params.request)
-          : await dispatchAppControl(
-              this.#options.appControl!,
-              request.method,
-              request.params.request,
-            );
+          : request.method === 'app/workspace/remove'
+            ? RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_RESULT_SCHEMA_.parse(
+                await this.#options.removeWorkspace!(request.params.request),
+              )
+            : await dispatchAppControl(
+                this.#options.appControl!,
+                request.method,
+                request.params.request,
+              );
       await this.#writeProtocol({
         jsonrpc: '2.0',
         id: request.id,

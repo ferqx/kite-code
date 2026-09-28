@@ -32,6 +32,7 @@ import { editorFileTarget, openEditor } from './editor';
 import { queryBranch, switchBranch } from './git';
 import {
   canonicalProject,
+  forgetProject,
   knownProject,
   readProjectDisplay,
   readProjects,
@@ -92,6 +93,16 @@ export class DesktopHost {
 
   listProjects(): DesktopProject[] {
     return readProjectDisplay(this.#options.appDataDirectory);
+  }
+
+  async removeWorkspace(path: string): Promise<string | null> {
+    return this.#lock.run(() => {
+      if (this.#quitting) throw new Error('应用正在退出。');
+      forgetProject(this.#options.appDataDirectory, path);
+      if (this.#workspace === path)
+        this.#workspace = readProjects(this.#options.appDataDirectory)[0]?.path;
+      return this.#workspace ?? null;
+    });
   }
 
   async activateWorkspace(value: string): Promise<string> {

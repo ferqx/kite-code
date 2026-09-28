@@ -86,6 +86,12 @@ export interface RuntimeHostExecutionBridge {
     reason: string,
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void>;
+  /** Cleanup for a Store-proven settled Session whose Workspace config is unavailable. */
+  shutdownSettledSessionForDeletion?(
+    sessionId: string,
+    reason: string,
+    publish: (notification: RuntimeNotification) => void,
+  ): Promise<void>;
   close(): Promise<void>;
 }
 

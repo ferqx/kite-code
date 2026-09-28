@@ -451,6 +451,7 @@ class ServerConnection implements RuntimeServerConnection {
           ...(this.#childHistoryMethods ? (['history/load_child_session'] as const) : []),
           ...(this.#appMethods
             ? ([
+                'app/workspace/remove',
                 'app/workspace_trust/query',
                 'app/workspace_trust/decide',
                 'app/provider_model/snapshot',
@@ -910,6 +911,29 @@ export class Subscription {
     }
   }
 
+  async #deletedSessionEndedStream(): Promise<boolean> {
+    if (this.#spec.scope === 'sessions') return false;
+    try {
+      const result = await this.#runtime.query(
+        this.#spec.scope === 'child_session'
+          ? {
+              schema: 'kite.runtime-query.v1',
+              type: 'get_child_session_projection',
+              sessionId: this.#spec.parentSessionId,
+              childSessionId: this.#spec.childSessionId,
+            }
+          : {
+              schema: 'kite.runtime-query.v1',
+              type: 'get_session_projection',
+              sessionId: this.#spec.sessionId,
+            },
+      );
+      return result.status === 'not_found' && result.code === 'session_not_found';
+    } catch {
+      return false;
+    }
+  }
+
   async #runSession(): Promise<void> {
     try {
       const watermark = this.#initialSessionRevision;
@@ -931,7 +955,7 @@ export class Subscription {
       while (!this.#closed) {
         const next = await this.#iterator?.next();
         if (!next || next.done) {
-          if (!this.#closed) this.#onFailure();
+          if (!this.#closed && !(await this.#deletedSessionEndedStream())) this.#onFailure();
           return;
         }
         if (!isRuntimeNotification(next.value)) {

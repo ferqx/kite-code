@@ -12,6 +12,8 @@
 
 Artifact 保存与执行有关的有界大内容、结果或恢复资料；引用、digest、可读权限与安装范围共同校验。读取引用失败不能从另一个 invocation 或 profile 补数据。文件 preimage 与模型输入证据各有 privacy owner，不混用同一公开下载接口。
 
+带 receipt 的 Session 树删除在同一 Store 写事务内，先收集树内行中的 typed Artifact ref，删除会话及子线程，再检查候选 Artifact ID 是否仍出现在保留的 Store 行中。只有可证明已无保留引用的候选私有正文才删除；共享正文及无法从树内 ref 证明归属的孤立 Artifact 保留。该窄范围删除不开放常规 Artifact GC，也不提供物理文件覆写保证。
+
 checkpoint metadata 可展示，不代表任意客户端获准恢复。真正恢复仍经过对应命令、数据校验及 execution authority。
 
 修改查询需同时核对结果字段、排序、访问限制和实际消费者；不因新增 UI 字段返回 raw Store event。规范见[日志查询](../../../docs/active/sqlite-runtime-log-query.md)、[私有 Artifact](../../../docs/active/private-artifact-storage.md)。
