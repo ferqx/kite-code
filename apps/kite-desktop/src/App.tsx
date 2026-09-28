@@ -86,6 +86,7 @@ export function App({ client }: { client: DesktopClient }) {
   const [startupError, setStartupError] = useState('');
   const [startupMessage, setStartupMessage] = useState<string | null>(null);
   const [diagnosticAvailable, setDiagnosticAvailable] = useState(false);
+  const [startupRetryable, setStartupRetryable] = useState(true);
   const [diagnosticSaveError, setDiagnosticSaveError] = useState('');
   const [startupAttempt, setStartupAttempt] = useState(0);
   const busyRef = useRef(false);
@@ -168,7 +169,18 @@ export function App({ client }: { client: DesktopClient }) {
         (status) => {
           if (active) {
             setStartupMessage(status?.message ?? null);
-            setDiagnosticAvailable(status?.diagnosticAvailable ?? false);
+            // A delayed status reply from before Service exit must not hide a
+            // validated report that became available during this attempt.
+            setDiagnosticAvailable((available) =>
+              startup === 'failed'
+                ? available || (status?.diagnosticAvailable ?? false)
+                : (status?.diagnosticAvailable ?? false),
+            );
+            setStartupRetryable((retryable) =>
+              startup === 'failed'
+                ? retryable && (status?.canRetry ?? true)
+                : (status?.canRetry ?? true),
+            );
           }
         },
         () => undefined,
@@ -382,6 +394,15 @@ export function App({ client }: { client: DesktopClient }) {
       if (cancelled) return;
       setStartupError(error instanceof Error ? error.message : String(error));
       setStartup('failed');
+      void client.readStartupStatus().then(
+        (status) => {
+          if (!cancelled && status?.diagnosticAvailable) {
+            setDiagnosticAvailable(true);
+            setStartupRetryable(status.canRetry);
+          }
+        },
+        () => undefined,
+      );
     });
     return () => {
       cancelled = true;
@@ -514,19 +535,22 @@ export function App({ client }: { client: DesktopClient }) {
                 </Button>
               )}
               {diagnosticSaveError && <p role="alert">{diagnosticSaveError}</p>}
-              <Button
-                onClick={() => {
-                  setStartup('loading');
-                  setStartupError('');
-                  setStartupMessage(null);
-                  setDiagnosticAvailable(false);
-                  setDiagnosticSaveError('');
-                  client.clearError();
-                  setStartupAttempt((attempt) => attempt + 1);
-                }}
-              >
-                重新尝试
-              </Button>
+              {startupRetryable && (
+                <Button
+                  onClick={() => {
+                    setStartup('loading');
+                    setStartupError('');
+                    setStartupMessage(null);
+                    setDiagnosticAvailable(false);
+                    setStartupRetryable(true);
+                    setDiagnosticSaveError('');
+                    client.clearError();
+                    setStartupAttempt((attempt) => attempt + 1);
+                  }}
+                >
+                  重新尝试
+                </Button>
+              )}
             </>
           )}
         </div>

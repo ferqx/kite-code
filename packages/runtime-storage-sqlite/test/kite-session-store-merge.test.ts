@@ -127,6 +127,77 @@ function effect(database: Database, sessionId: string, state: 'unknown' | 'prepa
 }
 
 describe('strict Session Store 10 merge', () => {
+  test('accepts identical Session events after one source rewrites and reverts content', () => {
+    using target = store();
+    using source = store();
+    workspace(target.database, 1, 1);
+    workspace(source.database, 1, 1);
+    session(target.database, 'shared');
+    session(source.database, 'shared');
+    for (const database of [target.database, source.database])
+      database.run(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('shared','event-1',1,27,'{"type":"original"}',1)`);
+    source.database.run(`UPDATE runtime_events SET event_json='{"type":"temporary"}'
+      WHERE session_id='shared' AND event_id='event-1'`);
+    source.database.run(`UPDATE runtime_events SET event_json='{"type":"original"}'
+      WHERE session_id='shared' AND event_id='event-1'`);
+    expect(
+      target.database
+        .query<{ history_generation: number }, []>(
+          "SELECT history_generation FROM runtime_sessions WHERE session_id='shared'",
+        )
+        .get()?.history_generation,
+    ).toBe(1);
+    mergeKiteSessionStores10({ target: target.database, source: source.database });
+    expect(
+      target.database
+        .query<{ history_generation: number }, []>(
+          "SELECT history_generation FROM runtime_sessions WHERE session_id='shared'",
+        )
+        .get()?.history_generation,
+    ).toBe(3);
+    target.database.run(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+      VALUES ('shared','event-2',2,27,'{"type":"next"}',1)`);
+    expect(
+      target.database
+        .query<{ history_generation: number }, []>(
+          "SELECT history_generation FROM runtime_sessions WHERE session_id='shared'",
+        )
+        .get()?.history_generation,
+    ).toBe(4);
+  });
+  test('preserves the source event generation while merging durable history', () => {
+    using target = store();
+    using source = store();
+    workspace(source.database, 1, 1);
+    session(source.database, 'history');
+    source.database.run(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+      VALUES ('history','event-1',1,27,'{"type":"one"}',1)`);
+    source.database.run(`UPDATE runtime_events SET event_json='{"type":"two"}'
+      WHERE session_id='history' AND event_id='event-1'`);
+    const expected = source.database
+      .query<{ history_generation: number }, []>(
+        "SELECT history_generation FROM runtime_sessions WHERE session_id='history'",
+      )
+      .get()!.history_generation;
+    expect(expected).toBe(2);
+    mergeKiteSessionStores10({ target: target.database, source: source.database });
+    expect(
+      target.database
+        .query<{ history_generation: number }, []>(
+          "SELECT history_generation FROM runtime_sessions WHERE session_id='history'",
+        )
+        .get()!.history_generation,
+    ).toBe(expected);
+    target.database.run("DELETE FROM runtime_events WHERE session_id='history'");
+    expect(
+      target.database
+        .query<{ history_generation: number }, []>(
+          "SELECT history_generation FROM runtime_sessions WHERE session_id='history'",
+        )
+        .get()!.history_generation,
+    ).toBe(expected + 1);
+  });
   test('copies cross-Session outbox and inbox after both Session identities', () => {
     using target = store();
     using source = store();
@@ -256,6 +327,80 @@ describe('strict Session Store 10 merge', () => {
         .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
         .get()?.count,
     ).toBe(1);
+  });
+
+  test('merges clean recovery owners accepted by single-source continuity', () => {
+    using target = store();
+    using source = store();
+    workspace(target.database, 1, 1);
+    workspace(source.database, 1, 1);
+    session(target.database, 'target-recovery');
+    session(source.database, 'source-recovery');
+    for (const [database, sessionId] of [
+      [target.database, 'target-recovery'],
+      [source.database, 'source-recovery'],
+    ] as const) {
+      recoveryRequired(database, sessionId);
+      const authority = createKiteSessionExecutionAuthority({
+        database,
+        writer: createKiteHomeWriteTransactionPort(database, assertKiteSessionStoreSchema),
+      });
+      const current = authority.read(sessionId);
+      expect(
+        authority.confirmRecoveryCleanup({
+          sessionId,
+          expectedRevision: current.revision,
+          retainRecoveryRequired: true,
+        }),
+      ).toMatchObject({ status: 'recovery_required', cleanupConfirmed: true });
+    }
+
+    expect(
+      mergeKiteSessionStores10({ target: target.database, source: source.database }),
+    ).toMatchObject({ insertedRows: { runtime_sessions: 1 } });
+    const merged = createKiteSessionExecutionAuthority({
+      database: target.database,
+      writer: createKiteHomeWriteTransactionPort(target.database, assertKiteSessionStoreSchema),
+    });
+    expect(merged.read('target-recovery')).toMatchObject({
+      status: 'recovery_required',
+      cleanupConfirmed: true,
+    });
+    expect(merged.read('source-recovery')).toMatchObject({
+      status: 'recovery_required',
+      cleanupConfirmed: true,
+    });
+  });
+
+  test('merges older Sessions without a materialized idle authority record', () => {
+    using target = store();
+    using source = store();
+    workspace(target.database, 1, 1);
+    workspace(source.database, 1, 1);
+    session(target.database, 'target-legacy');
+    session(source.database, 'source-legacy');
+    target.database
+      .query('DELETE FROM kite_meta WHERE key=?')
+      .run('session_execution/target-legacy');
+    source.database
+      .query('DELETE FROM kite_meta WHERE key=?')
+      .run('session_execution/source-legacy');
+
+    expect(
+      mergeKiteSessionStores10({ target: target.database, source: source.database }),
+    ).toMatchObject({ insertedRows: { runtime_sessions: 1 } });
+    const merged = createKiteSessionExecutionAuthority({
+      database: target.database,
+      writer: createKiteHomeWriteTransactionPort(target.database, assertKiteSessionStoreSchema),
+    });
+    for (const sessionId of ['target-legacy', 'source-legacy']) {
+      expect(merged.read(sessionId)).toMatchObject({ status: 'idle', cleanupConfirmed: true });
+      expect(
+        target.database
+          .query<{ value: string }, [string]>('SELECT value FROM kite_meta WHERE key=?')
+          .get(`session_execution/${sessionId}`),
+      ).toBeNull();
+    }
   });
 
   test('same Session ID with divergent content rolls back earlier copied rows', () => {

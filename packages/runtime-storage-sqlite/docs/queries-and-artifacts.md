@@ -8,6 +8,10 @@
 
 阶段 D0 的独立子 Agent Session 是内部线程。Store11 候选以持久父 Session 血缘识别它；Space/Workspace 目录、搜索、最近会话、History 索引及旧 `sessions.listSessions` 的根线程过滤已位于 SQL `WHERE`，先于排序、keyset cursor 和 LIMIT，防止子线程占满有界第一页或使根会话丢失。Store 公共日志读取拒绝已知子线程 ID；`listChildSessions`、`readChildSession` 和 `openChildSessionHistoryLogs` 则要求准确父 Session ID，History 每次读取重新核验血缘。子会话列表按不可变 `session_id` 倒序分页；现有 cursor 仍带 `updatedAt`，但只有 `sessionId` 决定下一页边界，避免分页期间子会话更新而漏项。客户端读完所有页后可按返回的 `updatedAt` 排列显示。候选迁移、重启和分页回归须随独立子 Session 路径一同验收。
 
+Directory 的 `hasRootSession(sessionId)` 直接按 `runtime_sessions` 主键查询；存在父子血缘列时同时要求 `parent_session_id IS NULL`。Browser 的 direct Session read 以此逐次核对可见性，不依赖有界目录页覆盖全部根线程，也不重复运行目录聚合查询。
+
+Store14 的 `runtime_sessions.history_generation` 随本 Session 的 Event 增删改在同一事务递增，也覆盖同序号重写。索引 `getSession` 只向内部 History adapter 返回代次，不加入客户端目录 DTO。重复进入父／子详情时，Service 先核验 Session 与准确父子血缘，再以代次决定能否复用首屏投影；旧读取端口没有代次时重扫。Store13→14 只在受维护保护的私有候选中转换，原库和 Event 内容保持；内建 trigger 的定义参与严格 schema 校验。[Store14 回归](../test/kite-session-store13-to14.test.ts)核对升级、同水位改写、级联删除和失败回滚。
+
 内部恢复可在同一 Store read snapshot 中按 childThreadId 查询不可变父 Tool 意图，或按 parentSessionId／childThreadId cursor 有界列出尚未失败、尚未结算的意图。返回创建、预算激活、父 dispatch ACK 和结算 marker，不返回 Task Artifact 正文或 sealed grant JSON。后者仅由准确父 Session execution／recovery handle scope 的私有 getter 读取并复核字节 digest；普通 Session 列表和客户端已知 ID 日志不使用此读口。
 
 Artifact 保存与执行有关的有界大内容、结果或恢复资料；引用、digest、可读权限与安装范围共同校验。读取引用失败不能从另一个 invocation 或 profile 补数据。文件 preimage 与模型输入证据各有 privacy owner，不混用同一公开下载接口。

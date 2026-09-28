@@ -73,10 +73,12 @@ App Server执行未sandboxed host Shell时，Runtime Host generic process port�
 
 同一stdio connection完成initialize后还承载三个根 Session durable History read；Store11 可另组合显式子 History read。carrier在把logical message交给Runtime Server前识别并验证
 `history/list_sessions`、`history/list_events`和`history/load_session`，调用App composition注入的`RuntimeHistoryClient`；每次调用的
-同步Store读取由同一个SQLite read snapshot包围。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知
+Store读取使用一致的SQLite只读快照；默认App Server的完整正文和分页正文在固定子进程中执行。未initialize返回`not_initialized`，未组合History owner返回`method_not_found`，未知
 `history/*`方法和malformed params不进入Store。Runtime Server只在该composition中声明History capability，不路由或持有History。
 
 `history/load_child_session` 要求同时携带父、子 Session ID；Store 的受限日志端口在每页读取时重新核验直属血缘，并使用与普通 History 相同的安全事件投影和固定 source sequence 分页。普通 `history/load_session(childId)` 仍拒绝；只有组合了该端口的 App Server 宣告新方法。
+
+History adapter 将首次读取投影出的固定水位 transcript 按根／准确父子作用域保留最多 30 秒，供后续分页请求复用；每页仍先从 Store 核对 Session 身份与子线程血缘。Store 提供每 Session 事件内容代次时，新导航的首个无水位请求只在代次不变时复用投影；事件同水位改写也会推进代次。旧读取端口不提供代次时仍重新读取。首次扫描限于读取 Session 时观察到的 source sequence。缓存最多 256 条、按 JSON 字节估算的合计上限为 128 MiB，单条估算超过 32 MiB 不保留；这不是 JS 堆内存上限。淘汰后按原路径重新读取；carrier 对已排序记录按 sequence 定位下一页，不再从第一条逐项跳过。每份投影带内容 digest，后续页携带首次 digest，版本变化时 carrier 拒绝该页并由客户端整次重试一次，不拼接新旧记录。缓存只减少重复只读投影，不取得 Session 执行权，也不改变固定水位和响应大小限制。取舍见[Agent Note](../../../.agents/notes/implemented/bug-fix/2026-09-28-bound-history-transcript-cache.md)；验证见[History adapter 回归](../test/runtime-history-client.test.ts)、[分页 carrier 回归](../test/isolated/runtime-stdio-carrier.test.ts)与[100 组父子线程验收](../test/isolated/history-100-pairs.test.ts)。
 
 同一connection还承载九个fixed App Control方法。Protocol只关闭方法名和外层envelope，carrier再用`kite-app-contract`既有的逐方法
 request/response codec验证Workspace Trust、Provider/model、MCP、Skill、execution与release payload；mutation仍只进入既有共享
@@ -97,4 +99,10 @@ development loopback/reference仅用于同一Protocol transport qualification，
 `bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/agent-api/context.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts`。
 这些local结果不构成KLSV1-07 Windows/三平台或全部PTY evidence。
 
-初始化后的 History 与明确只读辅助请求独立完成，最多 64 个待处理读取；超限返回 overloaded，stdout 仍串行且有背压。慢模型或项目查询不占据下一条历史／控制消息的输入处理。读取失败返回稳定 detailCode 与 retryable，不泄漏 SQLite 或路径错误；EOF 使用原有有界 drain，不增加进程或重放队列。
+初始化后的 History 与明确只读辅助请求使用独立容量。每连接 History 至多接纳 256 个未完成读取、3 MiB 排队输入；App 辅助读取至多接纳 64 个、1 MiB。共享同一 History owner 的全部连接再受总计 8 个执行中、1024 个未完成读取、12 MiB 输入帧约束；同一 Runtime Server 的 App 辅助读取受总计 16 个执行中、256 个未完成读取、4 MiB 输入帧约束。两类读取分别按连接轮转，每次启动前让出一轮事件循环。达到任一上限返回 `overloaded`；排队及过载响应不阻塞后续帧解析，单个输入块每解析 64 帧还会让出事件循环。只有可处理取消通知且注入 History owner 的 stdio carrier 才声明 `history/cancel`；generic InProcess 连接不声明。客户端可按同连接原 RPC id 取消等待中或执行中的 History 读取；连接关闭也取消该连接的排队读取。执行中读取若 10 秒未结束，返回可重试的固定错误；若响应已进入有界输出队列，超时不再生成第二个响应。App Control owner 不接受取消信号，因此其执行名额直到实际调用结束才释放；16 个永久不返回的 owner 调用会使新的 App 辅助读取过载或超时，不能声称该 owner 自动恢复，Runtime 与 History 容量不受此影响。stdout 按序写入，每连接积压超过 2048 帧或 8 MiB、同一 Runtime Server 的全部连接积压超过 8192 帧或 64 MiB 时关闭触发超额的连接，避免多连接背压使输出队列无限增长。读取失败返回稳定 detailCode 与 retryable，不泄漏 SQLite 或路径错误；这些额度是负载保护，不是 Store 的 Session 数量上限。
+
+排队超过 10 秒的 History 或 App 辅助读取返回可重试错误并释放排队名额；执行中读取的 10 秒超时从开始执行时另行计算。
+
+Store-backed App Server 的分页根／子 History 读取由固定两个内部子进程执行。每个进程只运行一个 SQLite 只读快照与事件投影，最多排队 64 个请求、保留 32 MiB 估算编码 transcript 缓存；单次正文读取限 9 秒、32 MiB source、32 MiB 投影及 50,000 条记录，完成后只返回一页。超预算返回 `history_too_large`，不返回截断内容。协议允许的无 `page` 根／子完整读取也交给该子进程；只有完整响应装入单个协议帧才返回，否则明确返回 `history_too_large`。带搜索词的列表也在此子进程中逐页筛选，达到结果页后停止，搜索取消或超时同样终止占用的进程。取消执行中的读取会终止该子进程并为后续请求重建，其他已排队读取仍可继续；子进程失败或超时返回可重试错误。这样大 History 的同步扫描不占用 Runtime 主事件循环。非 App Server 或测试注入的 History owner 仍可走直接读取 fallback，不享有此隔离。
+
+[载入预算取舍](../../../.agents/notes/implemented/architecture/2026-09-28-bound-history-read-admission.md)解释有界接纳、进程隔离和取消的原因。[carrier 回归](../test/isolated/runtime-stdio-carrier.test.ts)覆盖 5 条连接、1100 个 History 请求、轮转公平、控制请求继续响应、断连取消和堵塞 stdout 的过载收尾。[父子会话协议链路测试](../test/isolated/history-protocol-100-pairs.test.ts)默认核对 100 组，可用 `KITE_HISTORY_STRESS_GROUPS=1000` 或 `2000` 跑 2000/4000 个 Session；加 `KITE_HISTORY_STRESS_PROCESS_PAGES=1` 还会接入真实内部子进程页读取。测试覆盖完整内容、分页、反复切换、同水位改写、RPC 身份、明确过载后重试及并行 Runtime 查询。输入输出仍通过内存 stdio 桥接，不代表真实桌面界面延迟或无限规模保证。[子进程页测试](../test/isolated/history-page-pool.test.ts)另外覆盖作用域、成功后的失败回复、超大 History 明确拒绝后继续、取消与关闭。

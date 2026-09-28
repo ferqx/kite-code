@@ -12,9 +12,17 @@ flowchart TD
   C -->|持久读写| S[(canonical Kite Home / kite-session.sqlite)]
   D -->|持久读写| S
   X -->|持久读写| S
+  C -->|有界分页 History| HC[只读 History 子进程池]
+  D -->|有界分页 History| HD[只读 History 子进程池]
+  X -->|有界分页 History| HX[只读 History 子进程池]
+  HC -->|独立 SQLite 快照读| S
+  HD -->|独立 SQLite 快照读| S
+  HX -->|独立 SQLite 快照读| S
 ```
 
 图中箭头为运行时请求或持久数据访问，不是 package import；三类 Service 各自在自身进程组装 Host/Kernel/Builtin，不共享内存。默认 TUI/CLI child 不发现 daemon、不启用 HTTP listener；显式 daemon 提供 Native endpoint 与同源 Web；Desktop 是开发验证中的独立宿主，不能从 Web 共用页面推导其权限。
+
+分页 History 子进程由各自 Service 的 composition 按需启动，固定最多两个，只持有只读 SQLite 连接，不取得 Session 执行 authority；父 Service 关闭时一并终止。该路径服务 App Server 协议的详情分页，Web Agent API 与非分页 History 入口仍按各自组合读取。实现见[Service 历史组合](../../../apps/kite-service/docs/composition-and-execution.md)。
 
 | 图中连接 | 调用与接收依据 |
 | --- | --- |

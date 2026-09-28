@@ -63,12 +63,12 @@ protected DACL。路径或 owner 证据不确定时拒绝，不自动修复外�
 
 生命周期客户端位于 [lifecycle](src/client/lifecycle.ts)，只连接已选 owner-only endpoint，一次请求不自动重试 mutation；业务 codec 的升级不影响此入口。
 
-CLI 与 Desktop 共用 canonical config root，不再按 checkout 或 Store epoch 生成独立数据入口。`startup-diagnostic` 使用独立的封闭阶段记录与终止错误记录；错误只包含类别、可选阶段及 schema 数字。阶段不占终止错误保留窗口，初始化后停止处理。可保存的诊断由这些白名单事实生成，并附处理条件；不转发原始 stderr、路径、cause 或数据库内容。
+CLI 与 Desktop 共用 canonical config root，不再按 checkout 或 Store epoch 生成独立数据入口。`startup-diagnostic` 使用独立的封闭阶段记录与终止错误记录；错误包含类别、可选阶段及 schema 数字，维护准入拒绝另含有限的 `admissionReason`。旧错误记录仍可读取；其他类别不能夹带准入原因，未知原因或多余字段拒绝解析。阶段不占终止错误保留窗口，初始化后停止处理。可保存的诊断由这些白名单事实生成，并附处理条件；不转发原始 stderr、路径、cause 或数据库内容。
 
 
 ## 会话维护发行准入
 
-macOS的只读进程观测采用PID与精确OS起始身份。source CLI/TUI准入核对当前构建和同仓库父入口；paired Desktop核对Host内置manifest摘要、Service自身文件摘要与精确父Electron；installed CLI/TUI核对选中候选、父客户端与launcher链，并持有发行选择锁。三条入口都按目标canonical config home判断活动Kite进程；其他已核实数据目录的进程及其他发行入口的存在不阻断本Store迁移。同目录活动进程或无法核实数据目录的候选Kite进程仍拒绝。结果只是一项维护前提，必须与Service持有所有Store独占锁和源文件复核组合；不代替Session execution authority，不自动停止未知进程。进程观测仍识别自定义安装根下符合固定发行布局的同用户Kite进程；路径形状只用于拒绝，不构成父进程豁免或执行授权。此观测不保证任意旧launcher未来不能启动，未参与维护协议的历史入口仍受已声明的资格限制。
+macOS的只读进程观测采用PID与精确OS起始身份。source CLI/TUI准入核对当前构建和同仓库父入口；paired Desktop核对Host内置manifest摘要、Service自身文件摘要与精确父Electron；installed CLI/TUI核对选中候选、父客户端与launcher链，并持有发行选择锁。三条入口都按目标canonical config home判断活动Kite进程；没有显式Store目录的进程按其自身的`HOME`推导默认目录，不能使用观测者Service的`HOME`。其他已核实数据目录的进程及其他发行入口的存在不阻断本Store迁移。同目录活动进程或无法核实数据目录的候选Kite进程仍拒绝。结果只是一项维护前提，必须与Service持有所有Store独占锁和源文件复核组合；不代替Session execution authority，不自动停止未知进程。进程观测仍识别自定义安装根下符合固定发行布局的同用户Kite进程；路径形状只用于拒绝，不构成父进程豁免或执行授权。此观测不保证任意旧launcher未来不能启动，未参与维护协议的历史入口仍受已声明的资格限制。
 
 Desktop进程识别只匹配应用主程序或明确的source Electron主进程，不把Bun开发启动器和Electron renderer当作旧Store写入者。[观测器](src/service/legacy-store-processes.ts)在可执行路径及内核执行名能够共同确认进程无法承载受支持Kite入口时，可略过其参数读取失败；路径缺失时仅对代码签名和执行身份精确匹配的已知非Kite辅助进程放行。已退出但尚未被父进程回收的macOS僵尸进程，须经`KERN_PROC_PID`两次核对同一PID、启动身份及僵尸状态后略过；`kill(pid, 0)`成功不代表它仍能写Store。可能属于Kite或身份不明的活进程仍阻止维护准入。
 

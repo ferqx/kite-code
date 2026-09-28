@@ -2321,6 +2321,8 @@ function sameEnvironment(left: BranchSnapshot, right: BranchSnapshot) {
 
 function messageOf(error: unknown) {
   if (error instanceof RuntimeClientError) {
+    if (error.code === 'history_too_large') return '会话历史超过当前客户端的单次读取容量';
+    if (error.code === 'request_overloaded') return '历史读取请求过多，请稍后重试';
     const detail = error.protocol?.data.detailCode;
     if (detail)
       return {
@@ -2331,6 +2333,8 @@ function messageOf(error: unknown) {
         session_unavailable: '历史存储无法读取',
         corrupt_event: '会话中的历史记录损坏',
         invalid_request: '历史读取请求无效',
+        history_snapshot_changed: '会话历史在读取期间发生变化，请重试',
+        history_too_large: '会话历史超过当前客户端的单次读取容量',
       }[detail];
   }
   return error instanceof Error ? error.message : String(error);

@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initializeKiteHomeStoreSchema, KITE_SESSION_STORE10_DDL } from '../../src/kite-home-store';
+import {
+  assertKiteSessionStoreSchema,
+  initializeKiteHomeStoreSchema,
+  KITE_SESSION_STORE10_DDL,
+  KITE_SESSION_STORE13_DDL,
+} from '../../src/kite-home-store';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { createKiteSessionStoreCandidate } from '../../src/kite-session-store-candidate';
 import { KITE_SESSION_STORE11_DDL } from '../../src/kite-session-store11-conversion';
@@ -70,6 +75,44 @@ function fixture() {
 }
 
 describe('private known-format candidate preparation', () => {
+  test('upgrades a Store 13 backup to Store 14 without mutating its source', () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-candidate-13-')));
+    try {
+      const sourceDir = join(root, 'source');
+      const migrationDirectory = join(root, 'migration');
+      mkdirSync(sourceDir, { mode: 0o700 });
+      mkdirSync(migrationDirectory, { mode: 0o700 });
+      const databasePath = join(sourceDir, 'kite-session.sqlite');
+      const database = new Database(databasePath);
+      chmodSync(databasePath, 0o600);
+      for (const sql of KITE_SESSION_STORE13_DDL) database.run(sql);
+      database.run(
+        "INSERT INTO kite_meta VALUES ('schema_version', '13'), ('format_epoch', 'kite-session-cross-followup-2026-09-25')",
+      );
+      database.run('PRAGMA user_version=13');
+      database.close(false);
+      const original = readFileSync(databasePath);
+      const maintenance = acquireKiteSessionStoreMaintenance(databasePath, 'exclusive');
+      try {
+        const result = createKiteSessionStoreCandidate({
+          sources: [{ databasePath, maintenance }],
+          migrationDirectory,
+          codec,
+          isSettledState: () => true,
+          nowMs: 500,
+          validate: assertKiteSessionStoreSchema,
+        });
+        expect(result.backups[0]?.manifest.capture.schemaVersion).toBe(13);
+        using upgraded = new Database(result.databasePath, { readonly: true });
+        assertKiteSessionStoreSchema(upgraded);
+        expect(readFileSync(databasePath)).toEqual(original);
+      } finally {
+        maintenance.release();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   test('converts and merges known layouts while preserving the immutable source backups', () => {
     using data = fixture();
     const before = data.sources.map((source) => readFileSync(source.databasePath));

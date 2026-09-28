@@ -73,6 +73,20 @@ jobs:
         run: bun run release:smoke
       - name: TUI PTY startup smoke
         run: bun run scripts/run-tui-system-tests.ts startup
+      - if: runner.os == 'macOS'
+        name: Prepare paired Desktop Service
+        run: bun run scripts/release/prepare-desktop-service.ts dist/oss-candidate/kite-code-macos-arm64.tar.gz
+      - if: runner.os == 'macOS'
+        name: Build packaged Desktop
+        run: bun run --cwd apps/kite-desktop build:desktop
+      - if: runner.os == 'macOS'
+        name: Sign local Desktop test package
+        run: |
+          codesign --force --deep --sign - apps/kite-desktop/out/kite-darwin-arm64/kite.app
+          codesign --verify --strict apps/kite-desktop/out/kite-darwin-arm64/kite.app
+      - if: runner.os == 'macOS'
+        name: Qualify packaged Store upgrade
+        run: bun run --cwd apps/kite-desktop test:native:store-upgrade
       - name: Upload unsigned candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

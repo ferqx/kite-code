@@ -9,6 +9,7 @@ import {
   SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
   SERVICE_STARTUP_PHASES,
   SERVICE_STARTUP_PROGRESS_PREFIX,
+  SERVICE_STORE_ADMISSION_REASONS,
 } from '../src/service-startup-diagnostic';
 
 test('fixed progress phases accept complete records and reject hidden fields or arbitrary text', () => {
@@ -77,6 +78,42 @@ test('stage and new storage failures survive encoding without copying private er
   }
 });
 
+test('same-build preparation retry suppression has a fixed non-retryable diagnostic', () => {
+  const line = encodeServiceStartupDiagnostic({
+    name: 'KiteSessionStoreOpenError',
+    code: 'store_preparation_retry_blocked',
+    stage: 'preparing',
+    message: '/private/secret',
+  })!;
+  const diagnostic = parseServiceStartupDiagnostic(line)!;
+  expect(diagnostic).toEqual({
+    code: 'store_preparation_retry_blocked',
+    stage: 'preparing',
+    actualSchema: null,
+    expectedSchema: null,
+  });
+  expect(line).not.toContain('/private/secret');
+  const report = JSON.parse(formatServiceStartupReport(diagnostic));
+  expect(report.retryable).toBe(false);
+  expect(report.actions).toEqual(['use_updated_version_or_recovery', 'save_diagnostic']);
+  expect(new RuntimeClientStartupError(diagnostic).message).toContain('不会再次复制');
+});
+
+test('unclassified reconciliation failure does not recommend a same-build retry', () => {
+  const line = encodeServiceStartupDiagnostic({
+    name: 'KiteSessionStoreOpenError',
+    code: 'store_history_reconciliation_required',
+    stage: 'preparing',
+    message: '/private/secret',
+  })!;
+  const diagnostic = parseServiceStartupDiagnostic(line)!;
+  const report = JSON.parse(formatServiceStartupReport(diagnostic));
+  expect(report.retryable).toBe(false);
+  expect(report.actions).toEqual(['use_updated_version_or_recovery', 'save_diagnostic']);
+  expect(new RuntimeClientStartupError(diagnostic).message).toContain('不会重复建立备份');
+  expect(line).not.toContain('/private/secret');
+});
+
 test('legacy diagnostics remain valid; malformed categories and stage fields never escape parsing', () => {
   const legacy = { code: 'store_busy', actualSchema: null, expectedSchema: null } as const;
   expect(
@@ -101,4 +138,60 @@ test('legacy diagnostics remain valid; malformed categories and stage fields nev
       SERVICE_STARTUP_DIAGNOSTIC_PREFIX + JSON.stringify({ ...legacy, stage: 'waiting_for_store' }),
     ),
   ).toEqual({ ...legacy, stage: 'waiting_for_store' });
+});
+
+test('admission diagnostics expose only fixed reasons and actions', () => {
+  for (const admissionReason of SERVICE_STORE_ADMISSION_REASONS) {
+    const line = encodeServiceStartupDiagnostic({
+      name: 'KiteSessionStoreOpenError',
+      code: 'store_admission_failed',
+      admissionReason,
+      stage: 'acquiring_maintenance',
+      cause: new Error('secret-path and credential'),
+      message: 'secret-path',
+    })!;
+    const diagnostic = parseServiceStartupDiagnostic(line)!;
+    expect(diagnostic).toEqual({
+      code: 'store_admission_failed',
+      admissionReason,
+      stage: 'acquiring_maintenance',
+      actualSchema: null,
+      expectedSchema: null,
+    });
+    expect(line).not.toContain('secret-path');
+    expect(line).not.toContain('credential');
+    const client = new RuntimeClientStartupError(diagnostic);
+    expect(client.admissionReason).toBe(admissionReason);
+    expect(client.message).not.toContain('secret-path');
+    const report = JSON.parse(formatServiceStartupReport(diagnostic));
+    expect(report.admissionReason).toBe(admissionReason);
+    expect(report.retryable).toBe(false);
+    expect(report.actions).toContain('save_diagnostic');
+    expect(report.actions).not.toContain('retry_after_resolving_condition');
+  }
+  const base = { code: 'store_admission_failed', actualSchema: null, expectedSchema: null };
+  for (const extra of [
+    {},
+    { admissionReason: 'secret-path' },
+    { admissionReason: null },
+    { admissionReason: 'desktop_parent_unverified', path: '/private/secret' },
+  ]) {
+    const diagnostic = { ...base, ...extra };
+    expect(
+      parseServiceStartupDiagnostic(SERVICE_STARTUP_DIAGNOSTIC_PREFIX + JSON.stringify(diagnostic)),
+    ).toBeUndefined();
+    expect(() => new RuntimeClientStartupError(diagnostic as never)).toThrow();
+  }
+  const busyWithReason = {
+    code: 'store_busy',
+    actualSchema: null,
+    expectedSchema: null,
+    admissionReason: 'desktop_parent_unverified',
+  };
+  expect(
+    parseServiceStartupDiagnostic(
+      SERVICE_STARTUP_DIAGNOSTIC_PREFIX + JSON.stringify(busyWithReason),
+    ),
+  ).toBeUndefined();
+  expect(() => new RuntimeClientStartupError(busyWithReason as never)).toThrow();
 });

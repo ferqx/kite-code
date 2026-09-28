@@ -437,7 +437,7 @@ describe('KASD parent-owned App Server process', () => {
     }
   }, 15_000);
 
-  test('reports historical data before creating a replacement Store through the real client', async () => {
+  test('rejects an unverified source build before replacing historical Store data', async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-history-source-')));
     const home = join(root, 'home');
     const profile = join(home, 'source-profiles', 'a'.repeat(32));
@@ -462,7 +462,8 @@ describe('KASD parent-owned App Server process', () => {
     try {
       await expect(client.connect()).rejects.toMatchObject({
         code: 'startup_failure',
-        diagnosticCode: 'store_history_reconciliation_required',
+        diagnosticCode: 'store_admission_failed',
+        admissionReason: 'source_build_mismatch',
       });
       expect(existsSync(join(home, 'kite-session.sqlite'))).toBe(false);
       expect(readFileSync(source)).toEqual(original);

@@ -79,13 +79,23 @@ export function reviewSourceKiteStoreAdmission(input: {
   ) {
     return { admitted: false, reason: 'source_build_mismatch' };
   }
-  const parent = readKiteSourceClientParentIdentity(process.ppid, root);
+  let parent: LegacyKiteProcessIdentity | undefined;
+  try {
+    parent = readKiteSourceClientParentIdentity(process.ppid, root);
+  } catch {
+    return { admitted: false, reason: 'source_parent_unverified' };
+  }
   if (!parent) return { admitted: false, reason: 'source_parent_unverified' };
-  const observation = observeLegacyKiteStoreProcesses({
-    exclude: [parent],
-    managedInstallPrefixes: input.knownManagedPrefixes,
-    canonicalKiteHome: home,
-  });
+  let observation: ReturnType<typeof observeLegacyKiteStoreProcesses>;
+  try {
+    observation = observeLegacyKiteStoreProcesses({
+      exclude: [parent],
+      managedInstallPrefixes: input.knownManagedPrefixes,
+      canonicalKiteHome: home,
+    });
+  } catch {
+    return { admitted: false, reason: 'legacy_process_inspection_incomplete' };
+  }
   if (observation.status === 'busy') return { admitted: false, reason: 'legacy_process_busy' };
   if (observation.status !== 'complete') {
     return { admitted: false, reason: 'legacy_process_inspection_incomplete' };

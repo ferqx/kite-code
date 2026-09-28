@@ -6,8 +6,10 @@ import {
   assertKiteSessionStore10Schema,
   assertKiteSessionStore12Schema,
   assertKiteSessionStore13Schema,
+  assertKiteSessionStoreSchema,
   assertKiteSessionStore11Schema as assertLineageStore11Schema,
   KITE_HOME_STORE_DDL,
+  KITE_SESSION_STORE_DDL,
   KITE_SESSION_STORE10_DDL,
   KITE_SESSION_STORE11_DDL,
   KITE_SESSION_STORE12_DDL,
@@ -68,6 +70,13 @@ const formats = [
     ddl: KITE_SESSION_STORE13_DDL,
     digest: 'd8f310c86768af70eb85ed4562ad92cd94bba8f7e48425f3ab0410cbfbb3c9b9',
     assertSchema: assertKiteSessionStore13Schema,
+  },
+  {
+    version: 14,
+    epoch: 'kite-session-history-generation-2026-09-28',
+    ddl: KITE_SESSION_STORE_DDL,
+    digest: 'f6f46dfec2754afa265a9f26161b45a1507391d1ef98525153005be006e4803a',
+    assertSchema: assertKiteSessionStoreSchema,
   },
 ] as const;
 

@@ -38,6 +38,8 @@ drain/daemon restart关闭context。
 撤销session；Browser关闭不停止App Server daemon。Browser principal是
 App-Server-scoped read-only，但每个Session direct read必须在当前 Session Store Directory 中可见。
 
+Browser direct read 使用 Directory 对根 Session ID 的索引化 membership 查询；它在每次请求读取当前 Store 并排除内部子线程，不为每个 History 分页重新物化所有 Workspace 与 Session 摘要。
+
 真实浏览器的同源GET不保证发送`Origin`：Browser只读GET允许Origin缺失但存在时必须exact；session续建与logout要求exact Origin，且续建只在无body、无query时接受。Browser API请求都
 必须带`Sec-Fetch-Site: same-origin`与`cors|same-origin`mode，cross-site保持403。
 

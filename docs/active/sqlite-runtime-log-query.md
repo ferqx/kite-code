@@ -82,5 +82,7 @@ composition/focused evidence，KLSV1-07的三平台installed process/release qua
 
 Store 9 的 `openHistoryLogs` 在现有连接与只读快照内提供索引 `getSession` 和事件查询；单会话读取不扫描全局会话列表。目录分页使用 updatedAt/sessionId cursor 与持久 membership，并返回已保存的 Session 模型路由供客户端切换时直接展示，不打开项目路径。标题 fallback 只取首条用户正文并由 Service 投影脱敏和限长，不写回命名。
 
+当前 Session Store14 在 `runtime_sessions` 保存每 Session 的 `history_generation`，由精确内建 trigger 在 Event 增删改的同一事务推进。History adapter 在生产组合的同一 SQLite read snapshot 中核对代次和读取事件；代次不变的父／子详情首屏可复用有界投影，同序号内容重写必须失效。未提供代次的旧读取端口仍重扫。代次只用于本地缓存有效性，不是 History 内容或跨库 Session 相等性的证明；分页之间的完整内容 digest 另防止混合输出。Store13→14 的私有候选转换和严格 trigger 校验见[SQLite owner](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+
 
 默认 Session Store 的普通启动使用精确 schema/marker 检查，不重复执行 SQLite physical/FK 全库扫描或解码全部历史。完整 physical/FK 检查仍供显式 release preflight 使用；Session snapshot 恢复按所选 sessionId 在同一 read snapshot 验证绑定、事件、snapshot、Run/receipt，不因其他会话的内容损坏阻塞目录。Artifact 在 typed read 时校验；目录成功不宣称全库内容健康。性能取舍见 [Agent Note 0183](../../.agents/notes/implemented/testing/2026-09-11-bounded-startup-validation.md)。

@@ -199,6 +199,7 @@ export {
 } from './kite-session-recovery-backup';
 export {
   checkKiteSessionStoreCompatibility,
+  type KiteSessionStoreAdmissionReason,
   type KiteSessionStoreCompatibility,
   type KiteSessionStoreMetadata,
   KiteSessionStoreOpenError,
@@ -274,6 +275,7 @@ export {
 } from './layout';
 export {
   createSqliteRuntimeLogQueryPort,
+  createSqliteSessionHistoryReader,
   createSqliteWorkspaceRuntimeLogQueryPort,
   SqliteRuntimeLogQueryError,
   type SqliteRuntimeLogQueryInput,

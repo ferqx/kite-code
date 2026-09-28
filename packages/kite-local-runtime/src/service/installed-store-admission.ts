@@ -23,6 +23,8 @@ export type InstalledKiteStoreAdmission =
   | { readonly admitted: true; readonly lease: { revalidate(): void; release(): void } };
 
 class InstalledLegacyProcessBusyError extends Error {}
+class InstalledParentUnverifiedError extends Error {}
+class InstalledProcessInspectionIncompleteError extends Error {}
 
 /** macOS installed CLI/TUI stdio only; daemon has a separate pre-spawn format gate. */
 export function acquireInstalledKiteStoreAdmission(input: {
@@ -79,21 +81,40 @@ export function acquireInstalledKiteStoreAdmission(input: {
     const revalidate = () => {
       lock.revalidate();
       assertSelectedCandidate(installRoot, candidateRoot, executable);
-      const lineage = readKiteInstalledStdioLineage({
-        parentPid: process.ppid,
-        candidateRoot,
-        installRoot,
-      });
-      if (!lineage) throw new Error('Installed client and stable launcher lineage is unverified.');
-      const observed = observeLegacyKiteStoreProcesses({
-        exclude: lineage,
-        canonicalKiteHome: input.canonicalKiteHome,
-        managedInstallPrefixes: [installRoot],
-      });
+      let lineage: ReturnType<typeof readKiteInstalledStdioLineage>;
+      try {
+        lineage = readKiteInstalledStdioLineage({
+          parentPid: process.ppid,
+          candidateRoot,
+          installRoot,
+        });
+      } catch {
+        throw new InstalledParentUnverifiedError(
+          'Installed client and stable launcher lineage is unverified.',
+        );
+      }
+      if (!lineage)
+        throw new InstalledParentUnverifiedError(
+          'Installed client and stable launcher lineage is unverified.',
+        );
+      let observed: ReturnType<typeof observeLegacyKiteStoreProcesses>;
+      try {
+        observed = observeLegacyKiteStoreProcesses({
+          exclude: lineage,
+          canonicalKiteHome: input.canonicalKiteHome,
+          managedInstallPrefixes: [installRoot],
+        });
+      } catch {
+        throw new InstalledProcessInspectionIncompleteError(
+          'Old Store writer observation is incomplete.',
+        );
+      }
       if (observed.status === 'busy')
         throw new InstalledLegacyProcessBusyError('An earlier Kite Store writer is still running.');
       if (observed.status !== 'complete')
-        throw new Error(`Old Store writer observation is ${observed.status}.`);
+        throw new InstalledProcessInspectionIncompleteError(
+          `Old Store writer observation is ${observed.status}.`,
+        );
     };
     revalidate();
     return { admitted: true, lease: Object.freeze({ revalidate, release: () => lock.release() }) };
@@ -104,7 +125,11 @@ export function acquireInstalledKiteStoreAdmission(input: {
       reason:
         error instanceof InstalledLegacyProcessBusyError
           ? 'legacy_process_busy'
-          : 'installed_selection_or_process_unverified',
+          : error instanceof InstalledParentUnverifiedError
+            ? 'installed_parent_unverified'
+            : error instanceof InstalledProcessInspectionIncompleteError
+              ? 'installed_process_inspection_incomplete'
+              : 'release_selection_busy_or_unsafe',
     };
   }
 }

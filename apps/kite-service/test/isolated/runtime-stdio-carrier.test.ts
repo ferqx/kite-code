@@ -31,6 +31,47 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe('Runtime stdio carrier', () => {
+  test('advertises History cancellation only when this carrier has a History owner', async () => {
+    const server = new RuntimeServer(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { serverInfo: { version: 'test', instanceId: 'cancel-capability' }, historyMethods: true },
+    );
+    const peers = [false, true].map((hasHistory) => {
+      const input = new BytesInput();
+      const output = new FakeOutput();
+      const carrier = createRuntimeStdioCarrier({
+        server,
+        stdin: input,
+        stdout: output,
+        ...(hasHistory
+          ? {
+              history: {
+                listSessions: async () => ({ entries: [], hasMore: false }),
+                listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+                loadSession: async () => {
+                  throw new Error('unused');
+                },
+              },
+            }
+          : {}),
+      });
+      return { hasHistory, input, output, carrier };
+    });
+    try {
+      for (const peer of peers) peer.input.pushText(initializeLine());
+      await eventually(() => peers.every((peer) => protocolFrames(peer.output).length === 1));
+      for (const peer of peers) {
+        const frame = protocolFrames(peer.output)[0] as {
+          result: { capabilities: { methods: string[] } };
+        };
+        expect(frame.result.capabilities.methods.includes('history/cancel')).toBe(peer.hasHistory);
+      }
+    } finally {
+      for (const peer of peers) peer.input.close();
+      await Promise.all(peers.map((peer) => peer.carrier.done));
+    }
+  });
+
   test('closing an idle Node input releases the logical connection without another request', async () => {
     const input = new PassThrough();
     const output = new FakeOutput();
@@ -212,6 +253,603 @@ describe('Runtime stdio carrier', () => {
     expect(reads).toEqual(['parent/child']);
     input.close();
     await carrier.done;
+  });
+
+  test('routes paged root and child reads through the bounded page owner', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const seen: unknown[] = [];
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('Full transcript load must not run for a page.');
+        },
+        loadChildSession: async () => {
+          throw new Error('Full child transcript load must not run for a page.');
+        },
+        loadSessionPage: async (request, options) => {
+          seen.push(request);
+          expect(options?.signal).toBeInstanceOf(AbortSignal);
+          return {
+            type: 'history_session_page',
+            session: {
+              sessionId: request.sessionId,
+              displayName: request.sessionId,
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 1,
+            },
+            records: [{ sequence: 1, events: [] }],
+            interactionMode: 'auto',
+            recovery: 'normal',
+            snapshotDigest: 'a'.repeat(64),
+          };
+        },
+      },
+    });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'root',
+        method: 'history/load_session',
+        params: {
+          sessionId: 'root',
+          page: { throughSequence: 1 },
+        },
+      })}\n${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'child',
+        method: 'history/load_child_session',
+        params: {
+          parentSessionId: 'root',
+          childSessionId: 'child',
+          page: { afterSequence: 0, throughSequence: 1 },
+        },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output).slice(1)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'root',
+          result: expect.objectContaining({ type: 'history_session_page' }),
+        }),
+        expect.objectContaining({
+          id: 'child',
+          result: expect.objectContaining({ type: 'history_session_page' }),
+        }),
+      ]),
+    );
+    expect(seen).toEqual([
+      { sessionId: 'root', throughSequence: 1 },
+      { sessionId: 'child', parentSessionId: 'root', throughSequence: 1, afterSequence: 0 },
+    ]);
+    input.close();
+    await carrier.done;
+  });
+
+  test('routes unpaged root and child reads through the bounded full owner', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const seen: unknown[] = [];
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('Main-thread full transcript load must not run.');
+        },
+        loadChildSession: async () => {
+          throw new Error('Main-thread child transcript load must not run.');
+        },
+        loadSessionFull: async (request, options) => {
+          seen.push(request);
+          expect(options?.signal).toBeInstanceOf(AbortSignal);
+          return {
+            session: {
+              sessionId: request.sessionId,
+              displayName: request.sessionId,
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 1,
+            },
+            records: [{ sequence: 1, events: [] }],
+            events: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          };
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', id: 'root', method: 'history/load_session', params: { sessionId: 'root' } })}\n${JSON.stringify({ jsonrpc: '2.0', id: 'child', method: 'history/load_child_session', params: { parentSessionId: 'root', childSessionId: 'child' } })}\n`,
+      );
+      await eventually(() => protocolFrames(output).length === 3);
+      expect(protocolFrames(output).slice(1)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'root',
+            result: expect.objectContaining({ records: [{ sequence: 1, events: [] }] }),
+          }),
+          expect.objectContaining({
+            id: 'child',
+            result: expect.objectContaining({ records: [{ sequence: 1, events: [] }] }),
+          }),
+        ]),
+      );
+      expect(seen).toEqual([
+        { sessionId: 'root' },
+        { sessionId: 'child', parentSessionId: 'root' },
+      ]);
+    } finally {
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('routes searched Session lists through the cancellable read owner', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const seen: unknown[] = [];
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => {
+          throw new Error('Main-thread search must not run.');
+        },
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('Not used.');
+        },
+        searchSessions: async (request, options) => {
+          seen.push(request);
+          expect(options?.signal).toBeInstanceOf(AbortSignal);
+          return { entries: [], hasMore: false };
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', id: 'search', method: 'history/list_sessions', params: { request: { limit: 10, query: 'needle' } } })}\n`,
+      );
+      await eventually(() => protocolFrames(output).length === 2);
+      expect(protocolFrames(output)[1]).toMatchObject({
+        id: 'search',
+        result: { entries: [], hasMore: false },
+      });
+      expect(seen).toEqual([{ limit: 10, query: 'needle' }]);
+    } finally {
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('resumes a sparse History page after the exact source sequence', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let snapshotDigest = 'a'.repeat(64);
+    const records = Array.from({ length: 513 }, (_, index) => ({
+      sequence: index * 2 + 1,
+      events: [],
+    }));
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => ({
+          session: {
+            sessionId: 'sparse',
+            displayName: 'Sparse',
+            needsSmartName: false,
+            updatedAt: 1,
+            lastSequence: 1025,
+          },
+          records,
+          events: [],
+          interactionMode: 'auto',
+          recovery: 'normal',
+          snapshotDigest,
+        }),
+      },
+    });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'first-page',
+        method: 'history/load_session',
+        params: { sessionId: 'sparse', page: {} },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 2);
+    const firstPage = protocolFrames(output)[1] as {
+      result: { nextCursor?: number; records: readonly { sequence: number }[] };
+    };
+    expect(firstPage.result.nextCursor).toBe(1023);
+    expect(firstPage.result.records).toHaveLength(512);
+    expect(firstPage.result.records.at(-1)?.sequence).toBe(1023);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'next-page',
+        method: 'history/load_session',
+        params: {
+          sessionId: 'sparse',
+          page: { afterSequence: 1023, throughSequence: 1025, snapshotDigest },
+        },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 3);
+    expect(protocolFrames(output)[2]).toMatchObject({
+      result: { records: [{ sequence: 1025 }], session: { lastSequence: 1025 } },
+    });
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'legacy-next-page',
+        method: 'history/load_session',
+        params: { sessionId: 'sparse', page: { afterSequence: 1023, throughSequence: 1025 } },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 4);
+    expect(protocolFrames(output)[3]).toMatchObject({
+      id: 'legacy-next-page',
+      result: { records: [{ sequence: 1025 }] },
+    });
+    snapshotDigest = 'b'.repeat(64);
+    input.pushText(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'stale-page',
+        method: 'history/load_session',
+        params: {
+          sessionId: 'sparse',
+          page: {
+            afterSequence: 1023,
+            throughSequence: 1025,
+            snapshotDigest: 'a'.repeat(64),
+          },
+        },
+      })}\n`,
+    );
+    await eventually(() => protocolFrames(output).length === 5);
+    expect(protocolFrames(output)[4]).toMatchObject({
+      error: { data: { code: 'internal_error', detailCode: 'history_snapshot_changed' } },
+    });
+    input.close();
+    await carrier.done;
+  });
+
+  test('queues 100 parent and child History pairs without exceeding active read capacity', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let releaseReads!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let activeReads = 0;
+    let peakActiveReads = 0;
+    const load = async (sessionId: string) => {
+      activeReads++;
+      peakActiveReads = Math.max(peakActiveReads, activeReads);
+      await gate;
+      activeReads--;
+      const recordCount = sessionId.endsWith('-0') ? 513 : 1;
+      return {
+        session: {
+          sessionId,
+          displayName: sessionId,
+          needsSmartName: false,
+          updatedAt: 1,
+          lastSequence: recordCount,
+        },
+        records: Array.from({ length: recordCount }, (_, index) => ({
+          sequence: index + 1,
+          events: [],
+        })),
+        events: [],
+        interactionMode: 'auto' as const,
+        recovery: 'normal' as const,
+        snapshotDigest: 'a'.repeat(64),
+      };
+    };
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: load,
+        loadChildSession: async (parentSessionId, childSessionId) => {
+          if (parentSessionId !== `parent-${childSessionId.slice('child-'.length)}`)
+            throw new Error('unexpected child scope');
+          return load(childSessionId);
+        },
+      },
+    });
+    input.pushText(initializeLine());
+    await eventually(() => protocolFrames(output).length === 1);
+    const requests = Array.from({ length: 100 }, (_, index) => [
+      {
+        jsonrpc: '2.0',
+        id: `parent-${index}`,
+        method: 'history/load_session',
+        params: { sessionId: `parent-${index}`, page: {} },
+      },
+      {
+        jsonrpc: '2.0',
+        id: `child-${index}`,
+        method: 'history/load_child_session',
+        params: {
+          parentSessionId: `parent-${index}`,
+          childSessionId: `child-${index}`,
+          page: {},
+        },
+      },
+    ]).flat();
+    input.pushText(
+      `${requests.map((request) => JSON.stringify(request)).join('\n')}\n${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'marker',
+        method: 'server/ping',
+        params: {},
+      })}\n`,
+    );
+    await eventually(() =>
+      protocolFrames(output).some(
+        (frame) =>
+          typeof frame === 'object' && frame !== null && 'id' in frame && frame.id === 'marker',
+      ),
+    );
+    await eventually(() => activeReads === 8);
+    expect(peakActiveReads).toBe(8);
+    expect(
+      protocolFrames(output).filter(
+        (frame) => typeof frame === 'object' && frame !== null && 'error' in frame,
+      ),
+    ).toHaveLength(0);
+    releaseReads();
+    await eventually(() => protocolFrames(output).length === 202);
+    const frames = protocolFrames(output) as Array<{
+      id?: string;
+      result?: {
+        type?: string;
+        session?: { sessionId?: string };
+        records?: Array<{ sequence: number; events: unknown[] }>;
+        nextCursor?: number;
+      };
+      error?: unknown;
+    }>;
+    const historyFrames = frames.filter(
+      (frame) => frame.id?.startsWith('parent-') || frame.id?.startsWith('child-'),
+    );
+    expect(historyFrames).toHaveLength(200);
+    expect(new Set(historyFrames.map((frame) => frame.id)).size).toBe(200);
+    for (const frame of historyFrames) {
+      expect(frame.error).toBeUndefined();
+      expect(frame.result).toMatchObject({
+        type: 'history_session_page',
+        session: { sessionId: frame.id },
+      });
+      if (frame.id?.endsWith('-0')) {
+        expect(frame.result?.records).toHaveLength(512);
+        expect(frame.result?.records?.at(-1)?.sequence).toBe(512);
+        expect(frame.result?.nextCursor).toBe(512);
+      } else expect(frame.result?.records).toEqual([{ sequence: 1, events: [] }]);
+    }
+    for (const sessionId of ['parent-0', 'child-0'])
+      input.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: `continue-${sessionId}`,
+          method: sessionId.startsWith('parent-')
+            ? 'history/load_session'
+            : 'history/load_child_session',
+          params: {
+            ...(sessionId.startsWith('parent-')
+              ? { sessionId }
+              : { parentSessionId: 'parent-0', childSessionId: sessionId }),
+            page: { afterSequence: 512, throughSequence: 513, snapshotDigest: 'a'.repeat(64) },
+          },
+        })}\n`,
+      );
+    await eventually(() => protocolFrames(output).length === 204);
+    const continuations = protocolFrames(output).filter(
+      (
+        frame,
+      ): frame is {
+        id: string;
+        result: { records: Array<{ sequence: number; events: unknown[] }> };
+      } =>
+        typeof frame === 'object' &&
+        frame !== null &&
+        'id' in frame &&
+        typeof frame.id === 'string' &&
+        frame.id.startsWith('continue-'),
+    );
+    expect(continuations).toHaveLength(2);
+    for (const continuation of continuations)
+      expect(continuation.result.records).toEqual([{ sequence: 513, events: [] }]);
+    input.close();
+    await carrier.done;
+  });
+
+  test('bounds queued History input bytes while leaving control frames responsive', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let releaseReads!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async (sessionId) => {
+          await gate;
+          return {
+            session: {
+              sessionId,
+              displayName: sessionId,
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            events: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          };
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 64 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `held-${index}`,
+            method: 'history/load_session',
+            params: { sessionId: `held-${index}`, page: {} },
+          }),
+        ).join('\n')}\n`,
+      );
+      input.pushText(
+        `${Array.from({ length: 5 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `large-${index}`,
+            method: 'history/load_session',
+            params: { sessionId: 'large', padding: 'x'.repeat(900_000) },
+          }),
+        ).join('\n')}\n`,
+      );
+      input.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'byte-marker',
+          method: 'server/ping',
+          params: {},
+        })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'byte-marker',
+        ),
+      );
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({
+          id: 'large-4',
+          error: expect.objectContaining({ data: { code: 'overloaded' } }),
+        }),
+      );
+    } finally {
+      releaseReads();
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('closing a connection cancels queued History reads before they execute', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let releaseReads!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    let executed = 0;
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => ({ entries: [], hasMore: false }),
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async (sessionId) => {
+          executed++;
+          await gate;
+          return {
+            session: {
+              sessionId,
+              displayName: sessionId,
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            events: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          };
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 65 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `close-${index}`,
+            method: 'history/load_session',
+            params: { sessionId: `close-${index}`, page: {} },
+          }),
+        ).join('\n')}\n${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'queued-marker',
+          method: 'server/ping',
+          params: {},
+        })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'queued-marker',
+        ),
+      );
+      await eventually(() => executed === 8);
+      await carrier.connection.close('test_disconnect');
+      releaseReads();
+      await carrier.done;
+      expect(executed).toBe(8);
+      expect(
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' && frame !== null && 'id' in frame && frame.id === 'close-64',
+        ),
+      ).toBe(false);
+    } finally {
+      releaseReads();
+      input.close();
+    }
   });
 
   test('routes exact App Control after initialize and rejects malformed payloads', async () => {
@@ -452,7 +1090,7 @@ describe('Runtime stdio carrier', () => {
       );
       expect(protocolFrames(output)).toContainEqual(expect.objectContaining({ id: 'ping' }));
       expect(protocolFrames(output)).not.toContainEqual(expect.objectContaining({ id: 'slow' }));
-      for (let index = 0; index < 64; index++)
+      for (let index = 0; index < 256; index++)
         input.pushText(
           `${JSON.stringify({
             jsonrpc: '2.0',
@@ -461,18 +1099,791 @@ describe('Runtime stdio carrier', () => {
             params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
           })}\n`,
         );
-      await eventually(() => protocolFrames(output).length === 4);
-      expect(calls).toBe(64);
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'bounded-255',
+        ),
+      );
+      expect(calls).toBe(16);
       expect(protocolFrames(output)).toContainEqual(
         expect.objectContaining({
-          id: 'bounded-63',
+          id: 'bounded-255',
           error: expect.objectContaining({ data: { code: 'overloaded' } }),
+        }),
+      );
+      input.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'history-after-app-saturation',
+          method: 'history/list_sessions',
+          params: { request: { limit: 10 } },
+        })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'history-after-app-saturation',
+        ),
+      );
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({
+          id: 'history-after-app-saturation',
+          result: { entries: [], hasMore: false },
         }),
       );
     } finally {
       release();
       input.close();
       await carrier.done;
+    }
+  });
+
+  test('bounded overload replies do not stall later ping behind blocked stdout', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput({ blockFirstWrite: true });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async () => {
+          await held;
+          return { entries: [], hasMore: false };
+        },
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('unused');
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 1200 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `flood-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { limit: 1 } },
+          }),
+        ).join('\n')}\n${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'after-flood-ping',
+          method: 'server/ping',
+          params: {},
+        })}\n`,
+      );
+      await Bun.sleep(20);
+      output.drain();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'after-flood-ping',
+        ),
+      );
+      const frames = protocolFrames(output);
+      expect(frames).toContainEqual(expect.objectContaining({ id: 'after-flood-ping' }));
+      expect(
+        frames.filter(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'error' in frame &&
+            (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
+        ).length,
+      ).toBeGreaterThan(900);
+    } finally {
+      release();
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('closes a blocked connection before output responses can grow without bound', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput({ blockFirstWrite: true });
+    const diagnostics = new FakeDiagnostics();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const carrier = createCarrier({
+      input,
+      output,
+      diagnostics,
+      history: {
+        listSessions: async () => {
+          await held;
+          return { entries: [], hasMore: false };
+        },
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('unused');
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 3000 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `saturated-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { limit: 1 } },
+          }),
+        ).join('\n')}\n`,
+      );
+      await eventually(() => diagnostics.text().includes('stdout_overloaded'));
+      expect(output.writeCount).toBe(1);
+    } finally {
+      release();
+      output.drain();
+      input.close();
+      await carrier.done;
+    }
+    await eventually(() => carrier.server.connectionCount === 0);
+  });
+
+  test('a saturated History queue leaves capability status capacity available', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const carrier = createCarrier({
+      input,
+      output,
+      appControl: {
+        getReleaseStatus: async () => ({
+          schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+          revision: 'available',
+          active: true,
+          production: false,
+          capabilities: [],
+          execution: { admitted: false },
+        }),
+      } as unknown as KiteAppControlClient,
+      history: {
+        listSessions: async () => {
+          await held;
+          return { entries: [], hasMore: false };
+        },
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('unused');
+        },
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 256 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `history-held-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { limit: 1 } },
+          }),
+        ).join('\n')}\n${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'status-after-history-saturation',
+          method: 'app/release/status',
+          params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+        })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'status-after-history-saturation',
+        ),
+      );
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({
+          id: 'status-after-history-saturation',
+          result: expect.objectContaining({
+            method: 'app/release/status',
+            response: expect.objectContaining({ revision: 'available' }),
+          }),
+        }),
+      );
+    } finally {
+      release();
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('bounds and fairly schedules App reads across connections', async () => {
+    const server = new RuntimeServer(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { serverInfo: { version: 'test', instanceId: 'shared-app-reads' }, appMethods: true },
+    );
+    let held = true;
+    let active = 0;
+    let peak = 0;
+    const started: number[] = [];
+    const releases: Array<() => void> = [];
+    const peers = Array.from({ length: 3 }, (_, index) => {
+      const input = new BytesInput();
+      const output = new FakeOutput();
+      const appControl = {
+        getReleaseStatus: async () => {
+          started.push(index);
+          active++;
+          peak = Math.max(peak, active);
+          if (held) await new Promise<void>((resolve) => releases.push(resolve));
+          active--;
+          return {
+            schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+            revision: 'available',
+            active: true,
+            production: false,
+            capabilities: [],
+            execution: { admitted: false },
+          };
+        },
+      } as unknown as KiteAppControlClient;
+      const carrier = createRuntimeStdioCarrier({
+        server,
+        stdin: input,
+        stdout: output,
+        appControl,
+      });
+      return { index, input, output, carrier };
+    });
+    const read = (peer: number, index: number) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: `app-${peer}-${index}`,
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+      });
+    try {
+      for (const peer of peers) peer.input.pushText(initializeLine());
+      await eventually(() => peers.every((peer) => protocolFrames(peer.output).length === 1));
+      peers[0]!.input.pushText(
+        `${Array.from({ length: 40 }, (_, index) => read(0, index)).join('\n')}\n`,
+      );
+      await eventually(() => active === 16);
+      for (const peer of peers.slice(1))
+        peer.input.pushText(
+          `${Array.from({ length: 40 }, (_, index) => read(peer.index, index)).join('\n')}\n${JSON.stringify({ jsonrpc: '2.0', id: `ping-${peer.index}`, method: 'server/ping', params: {} })}\n`,
+        );
+      await eventually(() =>
+        peers
+          .slice(1)
+          .every((peer) =>
+            protocolFrames(peer.output).some(
+              (frame) =>
+                typeof frame === 'object' &&
+                frame !== null &&
+                'id' in frame &&
+                frame.id === `ping-${peer.index}`,
+            ),
+          ),
+      );
+      expect(peak).toBe(16);
+      for (const release of releases.splice(0)) release();
+      await eventually(() => started.length >= 32);
+      expect(new Set(started.slice(16, 32))).toEqual(new Set([0, 1, 2]));
+      expect(peak).toBeLessThanOrEqual(16);
+    } finally {
+      held = false;
+      for (const release of releases.splice(0)) release();
+      for (const peer of peers) peer.input.close();
+      await Promise.all(peers.map((peer) => peer.carrier.done));
+    }
+  });
+
+  test('times out held App reads once without releasing their physical execution slots', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started = 0;
+    const carrier = createCarrier({
+      input,
+      output,
+      appControl: {
+        getReleaseStatus: async () => {
+          started++;
+          await held;
+          return {
+            schema: RELEASE_STATUS_RESPONSE_SCHEMA_,
+            revision: 'available',
+            active: true,
+            production: false,
+            capabilities: [],
+            execution: { admitted: false },
+          };
+        },
+      } as unknown as KiteAppControlClient,
+    });
+    const read = (id: string) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'app/release/status',
+        params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
+      });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 16 }, (_, index) => read(`held-${index}`)).join('\n')}\n`,
+      );
+      await eventually(() => started === 16);
+      await Bun.sleep(10_100);
+      await eventually(() => protocolFrames(output).length === 17);
+      expect(protocolFrames(output).slice(1)).toHaveLength(16);
+      expect(
+        protocolFrames(output)
+          .slice(1)
+          .every(
+            (frame) =>
+              typeof frame === 'object' &&
+              frame !== null &&
+              'error' in frame &&
+              (frame.error as { data?: { detailCode?: string } }).data?.detailCode ===
+                'temporarily_unavailable',
+          ),
+      ).toBe(true);
+      input.pushText(
+        `${read('after-timeout')}\n${JSON.stringify({ jsonrpc: '2.0', id: 'ping-after-timeout', method: 'server/ping', params: {} })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'ping-after-timeout',
+        ),
+      );
+      expect(started).toBe(16);
+      release();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'after-timeout',
+        ),
+      );
+      expect(
+        protocolFrames(output).filter(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            typeof frame.id === 'string' &&
+            frame.id.startsWith('held-'),
+        ),
+      ).toHaveLength(16);
+    } finally {
+      release();
+      input.close();
+      await carrier.done;
+    }
+  }, 15_000);
+
+  test('shares a bounded fair History queue across connections and cancels disconnected reads', async () => {
+    const server = new RuntimeServer(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { serverInfo: { version: 'test', instanceId: 'shared-server' } },
+    );
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = 0;
+    let peak = 0;
+    const started: string[] = [];
+    const history: import('@kite-ai/runtime-client').RuntimeHistoryClient = {
+      listSessions: async (request) => {
+        const name = request.query ?? 'unknown';
+        started.push(name);
+        active++;
+        peak = Math.max(peak, active);
+        await held;
+        active--;
+        return { entries: [], hasMore: false };
+      },
+      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      loadSession: async () => {
+        throw new Error('unused');
+      },
+    };
+    const peers = Array.from({ length: 5 }, (_, index) => {
+      const input = new BytesInput();
+      const output = new FakeOutput();
+      const carrier = createRuntimeStdioCarrier({ server, stdin: input, stdout: output, history });
+      return { index, input, output, carrier };
+    });
+    try {
+      for (const peer of peers) peer.input.pushText(initializeLine());
+      await eventually(() => peers.every((peer) => protocolFrames(peer.output).length === 1));
+      for (const peer of peers.slice(0, 4)) {
+        peer.input.pushText(
+          `${Array.from({ length: 220 }, (_, index) =>
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: `peer-${peer.index}-read-${index}`,
+              method: 'history/list_sessions',
+              params: { request: { query: `peer-${peer.index}`, limit: 1 } },
+            }),
+          ).join('\n')}\n${JSON.stringify({
+            jsonrpc: '2.0',
+            id: `peer-${peer.index}-ping`,
+            method: 'server/ping',
+            params: {},
+          })}\n`,
+        );
+      }
+      await eventually(() =>
+        peers
+          .slice(0, 4)
+          .every((peer) =>
+            protocolFrames(peer.output).some(
+              (frame) =>
+                typeof frame === 'object' &&
+                frame !== null &&
+                'id' in frame &&
+                frame.id === `peer-${peer.index}-ping`,
+            ),
+          ),
+      );
+      const fifth = peers[4]!;
+      fifth.input.pushText(
+        `${Array.from({ length: 220 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `peer-4-read-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { query: 'peer-4', limit: 1 } },
+          }),
+        ).join('\n')}\n${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'peer-4-ping',
+          method: 'server/ping',
+          params: {},
+        })}\n`,
+      );
+      await eventually(() =>
+        peers.every((peer) =>
+          protocolFrames(peer.output).some(
+            (frame) =>
+              typeof frame === 'object' &&
+              frame !== null &&
+              'id' in frame &&
+              frame.id === `peer-${peer.index}-ping`,
+          ),
+        ),
+      );
+      await eventually(() => active === 8);
+      expect(peak).toBe(8);
+      expect(started.length).toBe(8);
+      const disconnected = peers[4]!;
+      void disconnected.carrier.connection.close('test_disconnect');
+      const startedBeforeRelease = started.filter((name) => name === 'peer-4').length;
+      release();
+      await eventually(() => active === 0);
+      await eventually(() =>
+        peers
+          .slice(0, 4)
+          .every(
+            (peer) =>
+              protocolFrames(peer.output).filter(
+                (frame) =>
+                  typeof frame === 'object' &&
+                  frame !== null &&
+                  'id' in frame &&
+                  typeof frame.id === 'string' &&
+                  frame.id.startsWith(`peer-${peer.index}-read-`),
+              ).length === 220,
+          ),
+      );
+      expect(peak).toBeLessThanOrEqual(8);
+      expect(started.filter((name) => name === 'peer-4')).toHaveLength(startedBeforeRelease);
+      expect(new Set(started.slice(8, 12))).toEqual(
+        new Set(['peer-0', 'peer-1', 'peer-2', 'peer-3']),
+      );
+      for (const peer of peers.slice(0, 4)) {
+        const frames = protocolFrames(peer.output) as Array<{ id?: string; error?: unknown }>;
+        expect(
+          frames
+            .filter((frame) => frame.id?.includes('-read-'))
+            .every((frame) => frame.id?.startsWith(`peer-${peer.index}-read-`)),
+        ).toBe(true);
+      }
+      const rejected = protocolFrames(disconnected.output).filter(
+        (frame) =>
+          typeof frame === 'object' &&
+          frame !== null &&
+          'error' in frame &&
+          (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
+      );
+      expect(rejected.length).toBeGreaterThan(0);
+    } finally {
+      release();
+      for (const peer of peers) peer.input.close();
+      await Promise.all(peers.map((peer) => peer.carrier.done));
+    }
+  });
+
+  test('History cancel notifications remove queued work and release active capacity', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started: string[] = [];
+    const carrier = createCarrier({
+      input,
+      output,
+      history: {
+        listSessions: async (request) => {
+          started.push(request.query ?? 'unknown');
+          await held;
+          return { entries: [], hasMore: false };
+        },
+        listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+        loadSession: async () => {
+          throw new Error('unused');
+        },
+      },
+    });
+    const read = (id: string, query: string) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method: 'history/list_sessions',
+        params: { request: { query, limit: 1 } },
+      });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${Array.from({ length: 8 }, (_, index) => read(`active-${index}`, `active-${index}`)).join('\n')}\n${read('cancel-me', 'cancel-me')}\n`,
+      );
+      await eventually(() => started.length === 8);
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', method: 'history/cancel', params: { requestId: 'cancel-me' } })}\n${JSON.stringify({ jsonrpc: '2.0', method: 'history/cancel', params: { requestId: 'active-0' } })}\n${read('keep-me', 'keep-me')}\n`,
+      );
+      await eventually(() => started.includes('keep-me'));
+      release();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' && frame !== null && 'id' in frame && frame.id === 'keep-me',
+        ),
+      );
+      expect(started).not.toContain('cancel-me');
+      expect(started).toContain('keep-me');
+      expect(protocolFrames(output)).not.toContainEqual(
+        expect.objectContaining({ id: 'cancel-me' }),
+      );
+      expect(protocolFrames(output)).not.toContainEqual(
+        expect.objectContaining({ id: 'active-0' }),
+      );
+    } finally {
+      release();
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('rejects an id-bearing History cancel request instead of silently consuming it', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    const carrier = createCarrier({ input, output });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      input.pushText(
+        `${JSON.stringify({ jsonrpc: '2.0', id: 'bad-cancel', method: 'history/cancel', params: { requestId: 'other' } })}\n`,
+      );
+      await eventually(() => protocolFrames(output).length === 2);
+      expect(protocolFrames(output)[1]).toMatchObject({
+        id: 'bad-cancel',
+        error: { data: { code: 'invalid_request' } },
+      });
+    } finally {
+      input.close();
+      await carrier.done;
+    }
+  });
+
+  test('closing stalled History reads releases the shared execution slots', async () => {
+    const server = new RuntimeServer(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { serverInfo: { version: 'test', instanceId: 'stalled-history' } },
+    );
+    let stalled = 0;
+    const history: import('@kite-ai/runtime-client').RuntimeHistoryClient = {
+      listSessions: (request) => {
+        if (request.query === 'stalled') {
+          stalled++;
+          return new Promise(() => undefined);
+        }
+        return Promise.resolve({ entries: [], hasMore: false });
+      },
+      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      loadSession: async () => {
+        throw new Error('unused');
+      },
+    };
+    const firstInput = new BytesInput();
+    const firstOutput = new FakeOutput();
+    const first = createRuntimeStdioCarrier({
+      server,
+      stdin: firstInput,
+      stdout: firstOutput,
+      history,
+    });
+    const secondInput = new BytesInput();
+    const secondOutput = new FakeOutput();
+    const second = createRuntimeStdioCarrier({
+      server,
+      stdin: secondInput,
+      stdout: secondOutput,
+      history,
+    });
+    try {
+      firstInput.pushText(initializeLine());
+      secondInput.pushText(initializeLine());
+      await eventually(() => protocolFrames(firstOutput).length === 1);
+      await eventually(() => protocolFrames(secondOutput).length === 1);
+      firstInput.pushText(
+        `${Array.from({ length: 8 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `stalled-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { query: 'stalled', limit: 1 } },
+          }),
+        ).join('\n')}\n`,
+      );
+      await eventually(() => stalled === 8);
+      await first.connection.close('test_disconnect');
+      secondInput.pushText(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'fresh',
+          method: 'history/list_sessions',
+          params: { request: { limit: 1 } },
+        })}\n`,
+      );
+      await eventually(() =>
+        protocolFrames(secondOutput).some(
+          (frame) =>
+            typeof frame === 'object' && frame !== null && 'id' in frame && frame.id === 'fresh',
+        ),
+      );
+    } finally {
+      firstInput.close();
+      secondInput.close();
+      await Promise.all([first.done, second.done]);
+    }
+  });
+
+  test('bounds aggregate queued History input bytes across connections', async () => {
+    const server = new RuntimeServer(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { serverInfo: { version: 'test', instanceId: 'byte-budget' } },
+    );
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = 0;
+    const history: import('@kite-ai/runtime-client').RuntimeHistoryClient = {
+      listSessions: async (request) => {
+        if (request.query === 'hold') {
+          active++;
+          await held;
+        }
+        return { entries: [], hasMore: false };
+      },
+      listEvents: async () => ({ entries: [], hasMore: false, observedLastSequence: 0 }),
+      loadSession: async () => {
+        throw new Error('unused');
+      },
+    };
+    const peers = Array.from({ length: 5 }, () => {
+      const input = new BytesInput();
+      const output = new FakeOutput();
+      const carrier = createRuntimeStdioCarrier({ server, stdin: input, stdout: output, history });
+      return { input, output, carrier };
+    });
+    try {
+      for (const peer of peers) peer.input.pushText(initializeLine());
+      await eventually(() => peers.every((peer) => protocolFrames(peer.output).length === 1));
+      peers[0]!.input.pushText(
+        `${Array.from({ length: 8 }, (_, index) =>
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: `hold-${index}`,
+            method: 'history/list_sessions',
+            params: { request: { query: 'hold', limit: 1 } },
+          }),
+        ).join('\n')}\n`,
+      );
+      await eventually(() => active === 8);
+      const largeQuery = 'x'.repeat(900_000);
+      for (const [index, peer] of peers.entries()) {
+        peer.input.pushText(
+          `${Array.from({ length: 3 }, (_, offset) =>
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: `large-${index}-${offset}`,
+              method: 'history/list_sessions',
+              params: { request: { query: largeQuery, limit: 1 } },
+            }),
+          ).join('\n')}\n`,
+        );
+      }
+      await eventually(() =>
+        peers.some((peer) =>
+          protocolFrames(peer.output).some(
+            (frame) =>
+              typeof frame === 'object' &&
+              frame !== null &&
+              'error' in frame &&
+              (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
+          ),
+        ),
+      );
+      expect(active).toBe(8);
+    } finally {
+      release();
+      for (const peer of peers) peer.input.close();
+      await Promise.all(peers.map((peer) => peer.carrier.done));
     }
   });
 
@@ -702,7 +2113,8 @@ function createCarrier(options: {
   readonly appControl?: KiteAppControlClient;
   readonly removeWorkspace?: import('#kite-service/carrier/runtime-server-stdio').RuntimeStdioCarrierOptions['removeWorkspace'];
   readonly credential?: NativeProviderCredentialClient;
-  readonly history?: import('@kite-ai/runtime-client').RuntimeHistoryClient;
+  readonly history?: import('@kite-ai/runtime-client').RuntimeHistoryClient &
+    Partial<import('../../src/runtime-client/history-page-pool').KiteHistoryPageClient>;
 }) {
   const server = new RuntimeServer(
     { runtime: new FakeRuntime(), admission: allowAdmission },

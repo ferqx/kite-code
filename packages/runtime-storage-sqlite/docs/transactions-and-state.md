@@ -26,6 +26,8 @@
 
 storage owner 使用 AsyncLocalStorage 传递本次 execution handle。runWithExecution 绑定精确 handle，foreign/stale/缺少 execution scope 的写入拒绝；readSnapshot 不因此获取写权限。
 
+App Server 的分页 History 子进程使用[只读连接工厂](../src/log-query.ts)打开当前 Session Store，先核验当前物理 schema，再在独立连接上以 `BEGIN` 固定 metadata、血缘与事件的读取快照，结束时提交或回滚并关闭连接。根查询不暴露 child Session；子查询要求准确的 `parent_session_id`，每个事件页重复核对。这个连接不共享 writer 的同步 `readSnapshot`，也不取得 execution handle 或写权限。
+
 start 对应 Run、command receipt、事件与 State 的关联更新必须在所属事务一致提交；后续 activation、interaction、terminal 同步 Run 索引，不能绕过 Store writer 直接改查询投影。
 
 ### D0 子 Session 创建意图
@@ -51,6 +53,8 @@ Store13 将跨 Session `TriggerTurn` 与 `QueueOnly` 按 outbox mode 分开恢�
 已受理的 TriggerTurn 若来源 Tool 确定失败，或尚未路由／派发时有可信的到期、目标上下文不可用、来源授权变化证据，来源在同一事务释放准确 backup，并在原 outbox 行写唯一带原因的 release receipt。Store 拒绝已有目标续轮、route 或资金替换的释放；后续目标受理与冷启动扫描排除该 submission。来源 Run 用户取消时，原取消事务按同批预算释放、`turn.aborted(cause=user)` 与 Run 终态写入 `source_cancelled` 回执，不执行第二次释放。目标 Model 已准备而未派发时，到期结算另核目标失败 Run、零 attempt／dispatch／effect、本地预算释放与准确固定终态理由；已尝试或用量未知时保持待核。来源 owner 按当前 Run 和直接子 Session 提供失败状态及只读 watermark，目标 History 不生成失败正文或虚构的新 Run。
 
 Store13 从完成态新续轮的目标 settlement／来源资金 ACK 派生确定性的 `reply` outbox；派发前失败或取消仅在目标终态、来源两笔资金释放及零模型尝试均匹配时派生相应状态回复；首轮 required 子结果沿原父 Run 具名结果帧交付，避免重复邮箱事件。回复复用跨 Session inbox 与未投递恢复；父 Run 已结束时回复不绑定后来 Run。只读漏写回复索引还覆盖已受理但未派发的具名失败／来源取消回执，供启动扫描恢复唯一通知；查询本身不创建会话或外部动作。来源备付可处于 `queued`，锁定有限计数但不占活动子位；取得执行位后准确 `resource_budget.child_slot_acquired` 才允许新轮资金替换。来源 Run 用户取消的同批预算释放也覆盖 queued 备付，Store 才写 `source_cancelled` 回执。`capacity_timeout` 要求受理时间加 `maxConcurrencyWaitMs` 已到、当前提交的槽数仍等于上限、准确备付仍 queued、无 slot acquisition／路由／目标 Run／派发，且来源同事务释放备付并记录唯一原因。已派发或 unknown 的资金不得按预派发失败释放。
+
+Store14 在 Session 行增添内部 History 内容代次，保留 Store13 的邮箱语义。`runtime_events` 的 INSERT／UPDATE／DELETE trigger 与事件写入同事务推进对应 Session 的 `history_generation`，使同水位回退重写也能失效首屏缓存；代次不作为跨库内容相等性的依据。Store13→14 使用受维护保护的私有候选并核对旧表内容；其中旧 active／detached 执行 owner 提升代次并转为未确认清理的 `recovery_required`，旧的已确认恢复状态继续保留，原 Store 不改写。合并仅在事务内暂停精确校验过的内建 trigger，复制后重建；未知 trigger／view 仍拒绝。每条事件写入多一次 Session 行更新，写入开销与读缓存命中收益都需按实际负载判断。[升级及代次测试](../test/kite-session-store13-to14.test.ts)和[合并测试](../test/kite-session-store-merge.test.ts)为当前验证入口。
 
 若来源通用重启恢复已把准确 followup turn/model 两笔 reservation 持久标为 unknown，目标同一 Run、模型、本地 reservation 与任务也封为 unknown，来源可在无新预算 Event 的 fenced decision 中写现有 funding row 的唯一 terminal ACK。Store 重读双方 State/Event、activation、route 和同一来源资金 Run；任何混合态、缺目标失败事实或既有 terminal receipt 均拒绝，不能重复未知用量事件。
 

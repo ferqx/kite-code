@@ -21,6 +21,19 @@ export interface KiteSessionExecutionAuthorityRecord {
   readonly revision: number;
 }
 
+/** An offline Store candidate has no live execution owner, even if recovery still needs work. */
+export function isKiteSessionExecutionAuthorityQuiescent(
+  record: KiteSessionExecutionAuthorityRecord,
+): boolean {
+  return (
+    (record.status === 'recovery_required' ||
+      (record.status === 'idle' && record.cleanupConfirmed)) &&
+    record.hostInstanceId === null &&
+    record.clientId === null &&
+    record.leaseUntilMs === null
+  );
+}
+
 export interface KiteSessionExecutionBinding {
   readonly sessionId: string;
   readonly controllerGeneration: number;

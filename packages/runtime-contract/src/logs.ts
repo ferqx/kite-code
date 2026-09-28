@@ -149,6 +149,8 @@ export interface RuntimeHistoryRecordIdentity {
  */
 export interface RuntimeHistorySessionTranscript {
   readonly session: RuntimeLogSessionEntry;
+  /** Internal fixed-history content digest used to reject mixed protocol pages. */
+  readonly snapshotDigest?: string;
   /** Durable source-sequence groups; History and live presentation fold the same event vocabulary. */
   readonly records: readonly {
     readonly sequence: number;

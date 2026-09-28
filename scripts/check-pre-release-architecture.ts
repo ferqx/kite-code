@@ -1,6 +1,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import ts from 'typescript';
+import {
+  violatesActiveDocumentationVersion,
+  violatesHistoricalProductionEntity,
+  violatesVersionedProductionPath,
+} from './pre-release-architecture-policy';
 
 const root = resolve(import.meta.dir, '..');
 const violations: string[] = [];
@@ -14,9 +19,6 @@ const productionRoots = [
   ...packageSources,
   join(root, 'native'),
 ].filter(existsSync);
-const versionedPath = /(?:^|[/_.-])(?:v\d+|state\d+|store\d+|rmv\d+|rav\d+)(?:[/_.-]|$)/iu;
-const versionedEntity = /(?:V\d+|State\d+|Store\d+|RMV\d+|RAV\d+)/iu;
-const historicalReadEntity = /(?:Legacy|Compat)/u;
 const oldRuntimePath = /\.runtime-(?:v\d+|state\d+-store\d+)\.db/iu;
 const sqliteFormatBranch = /\b(?:targetFormat|formatProfile|compatibilityMode|legacyStore)\b/u;
 const removedProductionNames =
@@ -134,11 +136,6 @@ function declarationName(node: ts.Node): ts.Identifier | undefined {
   return undefined;
 }
 
-function isVersionedEntity(name: string): boolean {
-  const withoutAlgorithmNames = name.replace(/IPv[46]|SHA(?:1|256|512)/giu, '');
-  return versionedEntity.test(withoutAlgorithmNames);
-}
-
 function containsIdentifier(source: ts.SourceFile, name: string): boolean {
   let found = false;
   const visit = (node: ts.Node): void => {
@@ -153,32 +150,13 @@ function containsIdentifier(source: ts.SourceFile, name: string): boolean {
   return found;
 }
 
-function ownsHistoricalSessionReadBoundary(relativePath: string): boolean {
-  return (
-    relativePath === 'packages/agent-kernel/src/state-migration.ts' ||
-    relativePath === 'packages/agent-kernel/src/state-codec.ts' ||
-    relativePath === 'packages/agent-kernel/src/index.ts' ||
-    relativePath === 'packages/runtime-host/src/storage/index.ts' ||
-    relativePath === 'packages/runtime-host/src/format/storage-binding.ts' ||
-    relativePath === 'packages/runtime-storage-sqlite/src/compatibility.ts' ||
-    relativePath === 'packages/runtime-storage-sqlite/src/index.ts' ||
-    relativePath === 'apps/kite-service/src/bootstrap/runtime/state-store-compatibility.ts' ||
-    relativePath === 'apps/kite-service/src/runtime-client/history-adapter.ts' ||
-    relativePath === 'apps/kite-service/src/bootstrap.ts'
-  );
-}
-
 function inspectSource(path: string): void {
   const relativePath = relative(root, path);
   const source = readFileSync(path, 'utf8');
   const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   const visitNode = (node: ts.Node): void => {
     const name = declarationName(node);
-    if (
-      name &&
-      (isVersionedEntity(name.text) || historicalReadEntity.test(name.text)) &&
-      !ownsHistoricalSessionReadBoundary(relativePath)
-    ) {
+    if (name && violatesHistoricalProductionEntity(relativePath, name.text)) {
       const position = sourceFile.getLineAndCharacterOfPosition(name.getStart(sourceFile));
       violations.push(
         `${relativePath}:${position.line + 1}: versioned production entity ${name.text}`,
@@ -336,7 +314,7 @@ function visit(path: string): void {
     return;
   }
   const relativePath = relative(root, path);
-  if (versionedPath.test(relativePath)) {
+  if (violatesVersionedProductionPath(relativePath)) {
     violations.push(`${relativePath}: versioned production path`);
   }
   if (/\.(?:ts|tsx|js|jsx)$/.test(path)) inspectSource(path);
@@ -348,7 +326,7 @@ const activeDocsRoot = join(root, 'docs/active');
 for (const name of readdirSync(activeDocsRoot)) {
   if (!name.endsWith('.md')) continue;
   const source = readFileSync(join(activeDocsRoot, name), 'utf8');
-  if (/\b(?:State|Store|RMV|RAV)\d+\b/u.test(source)) {
+  if (violatesActiveDocumentationVersion(`docs/active/${name}`, source)) {
     violations.push(`docs/active/${name}: versioned entity in active documentation`);
   }
   if (oldRuntimePath.test(source)) {
@@ -391,7 +369,6 @@ const requiredDomainFiles = [
   'packages/runtime-host/src/kernel-adapter/index.ts',
   'packages/runtime-host/src/format/storage-binding.ts',
   'packages/runtime-host/src/process/posix-supervisor.ts',
-  'packages/builtin-runtime/src/git/runtime-module.ts',
   'packages/builtin-runtime/src/model/runtime-module.ts',
   'packages/builtin-runtime/src/planning/runtime-module.ts',
   'packages/builtin-runtime/src/subagent/runtime-module.ts',

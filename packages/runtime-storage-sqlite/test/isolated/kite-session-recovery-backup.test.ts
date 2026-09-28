@@ -131,7 +131,7 @@ describe('known-format recovery backup', () => {
 
       const result = createKiteSessionRecoveryBackup(sourcePath, recoveryParent);
       expect(existsSync(result.manifestPath)).toBe(true);
-      expect(result.manifest.capture.schemaVersion).toBe(13);
+      expect(result.manifest.capture.schemaVersion).toBe(14);
       expect(result.manifest.source.mainSha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(lstatSync(result.directory).mode & 0o077).toBe(0);
       expect(lstatSync(result.databasePath).mode & 0o077).toBe(0);

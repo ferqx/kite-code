@@ -343,6 +343,8 @@ export interface RuntimeLogSessionRecord {
   readonly name: string;
   readonly updatedAt: number;
   readonly lastSequence: number;
+  /** Store-owned content generation, advanced by every event row mutation. */
+  readonly historyGeneration?: number;
   readonly model?: { readonly provider: string; readonly name: string };
 }
 export interface RuntimeLogSessionReadPage {

@@ -55,6 +55,16 @@ const NO_RUNTIME_FEATURES: RuntimeClientFeatures = Object.freeze({
   backgroundControl: false,
 });
 
+const MAX_ACTIVE_HISTORY_LOADS = 4;
+const MAX_WAITING_HISTORY_LOADS = 1024;
+const MAX_HISTORY_TRANSCRIPT_RECORDS = 50_000;
+const MAX_HISTORY_TRANSCRIPT_RECORD_BYTES = 40 * 1024 * 1024;
+
+interface WaitingHistoryLoad {
+  start(): void;
+  cancel(error: unknown): void;
+}
+
 export interface RuntimeClientOptions {
   readonly transport: RuntimeClientTransport;
   readonly clientInfo: RuntimeClientInfo;
@@ -86,7 +96,9 @@ export class RuntimeClientError extends Error {
     | 'server_mismatch'
     | 'unsupported_command'
     | 'unsupported_query'
-    | 'request_timeout';
+    | 'request_timeout'
+    | 'request_overloaded'
+    | 'history_too_large';
   readonly protocol?: RuntimeProtocolError;
 
   constructor(code: RuntimeClientError['code'], message: string, protocol?: RuntimeProtocolError) {
@@ -107,9 +119,25 @@ export class RuntimeClientStartupError extends RuntimeClientError {
     | 'store_corrupt'
     | 'store_preparation_cancelled'
     | 'store_busy'
+    | 'store_admission_failed'
+    | 'store_preparation_retry_blocked'
     | 'store_history_reconciliation_required';
   readonly actualSchema: number | null;
   readonly expectedSchema: number | null;
+  readonly admissionReason?:
+    | 'unsupported_platform'
+    | 'desktop_identity_mismatch'
+    | 'paired_manifest_mismatch'
+    | 'desktop_parent_unverified'
+    | 'source_identity_mismatch'
+    | 'source_build_mismatch'
+    | 'source_parent_unverified'
+    | 'installed_identity_mismatch'
+    | 'release_selection_busy_or_unsafe'
+    | 'installed_parent_unverified'
+    | 'installed_process_inspection_incomplete'
+    | 'legacy_process_inspection_incomplete'
+    | 'admission_unverified';
   readonly stage?:
     | 'inspecting'
     | 'acquiring_maintenance'
@@ -123,11 +151,14 @@ export class RuntimeClientStartupError extends RuntimeClientError {
     readonly actualSchema: number | null;
     readonly expectedSchema: number | null;
     readonly stage?: RuntimeClientStartupError['stage'];
+    readonly admissionReason?: RuntimeClientStartupError['admissionReason'];
   }) {
     const codes = [
       'store_incompatible',
       'store_migration_required',
       'store_busy',
+      'store_admission_failed',
+      'store_preparation_retry_blocked',
       'store_insufficient_space',
       'store_access_denied',
       'store_corrupt',
@@ -135,9 +166,16 @@ export class RuntimeClientStartupError extends RuntimeClientError {
       'store_history_reconciliation_required',
     ];
     if (
+      Object.keys(input).some(
+        (key) =>
+          !['code', 'actualSchema', 'expectedSchema', 'stage', 'admissionReason'].includes(key),
+      ) ||
       !codes.includes(input.code) ||
       !validStartupSchema(input.actualSchema) ||
       !validStartupSchema(input.expectedSchema) ||
+      (input.code === 'store_admission_failed'
+        ? !validStartupAdmissionReason(input.admissionReason)
+        : input.admissionReason !== undefined) ||
       (input.stage !== undefined &&
         ![
           'inspecting',
@@ -152,30 +190,83 @@ export class RuntimeClientStartupError extends RuntimeClientError {
     const actual = input.actualSchema === null ? '未知' : String(input.actualSchema);
     const expected = input.expectedSchema === null ? '未知' : String(input.expectedSchema);
     const message =
-      input.code === 'store_preparation_cancelled'
-        ? 'STORE_PREPARATION_CANCELLED：已在提交前取消会话数据整理，原会话数据保持不变，可以重新启动。'
-        : input.code === 'store_access_denied'
-          ? 'STORE_ACCESS_DENIED：无法访问会话数据。请检查数据目录的所有者、访问权限及磁盘可用状态后重新尝试；不要删除数据库。'
-          : input.code === 'store_corrupt'
-            ? 'STORE_CORRUPT：会话数据库未通过完整性检查。请保留当前数据库及恢复资料，保存诊断后通过恢复流程处理；不会自动清空或覆盖数据。'
-            : input.code === 'store_history_reconciliation_required'
-              ? 'STORE_HISTORY_RECONCILIATION_REQUIRED：会话数据自动整理尚未完成，原数据及恢复资料已保留。请关闭其他 Kite 客户端后重新尝试；若仍未完成，需要使用支持当前数据格式的版本继续整理。'
-              : input.code === 'store_insufficient_space'
-                ? 'STORE_INSUFFICIENT_SPACE：磁盘可用空间不足，暂时无法完成会话数据整理。请释放磁盘空间后重新尝试；不要删除 Kite 会话数据或恢复资料。'
-                : input.code === 'store_busy'
-                  ? 'STORE_BUSY：会话存储正忙，请稍后重试。'
-                  : `${input.code.toUpperCase()}：当前版本无法处理这份会话数据（数据格式 ${actual}，程序支持 ${expected}）。数据保持原样，请使用创建这份数据的版本或支持该格式的新版本后重新尝试。`;
+      input.code === 'store_admission_failed'
+        ? `STORE_ADMISSION_FAILED：${describeStartupAdmissionReason(input.admissionReason!)}会话数据及恢复资料保持不变。`
+        : input.code === 'store_preparation_retry_blocked'
+          ? 'STORE_PREPARATION_RETRY_BLOCKED：同一版本对未变化的会话数据已尝试整理且未完成；为避免重复占用磁盘，本版本不会再次复制。请使用修复版本或保存诊断进行恢复处理；原数据及恢复资料保持不变。'
+          : input.code === 'store_preparation_cancelled'
+            ? 'STORE_PREPARATION_CANCELLED：已在提交前取消会话数据整理，原会话数据保持不变，可以重新启动。'
+            : input.code === 'store_access_denied'
+              ? 'STORE_ACCESS_DENIED：无法访问会话数据。请检查数据目录的所有者、访问权限及磁盘可用状态后重新尝试；不要删除数据库。'
+              : input.code === 'store_corrupt'
+                ? 'STORE_CORRUPT：会话数据库未通过完整性检查。请保留当前数据库及恢复资料，保存诊断后通过恢复流程处理；不会自动清空或覆盖数据。'
+                : input.code === 'store_history_reconciliation_required'
+                  ? 'STORE_HISTORY_RECONCILIATION_REQUIRED：会话数据自动整理未通过校验，原数据及恢复资料已保留。请保存诊断并使用修复版本继续整理；同一版本对未变化的数据不会重复建立备份。'
+                  : input.code === 'store_insufficient_space'
+                    ? 'STORE_INSUFFICIENT_SPACE：磁盘可用空间不足，暂时无法完成会话数据整理。请释放磁盘空间后重新尝试；不要删除 Kite 会话数据或恢复资料。'
+                    : input.code === 'store_busy'
+                      ? 'STORE_BUSY：会话存储正忙，请稍后重试。'
+                      : `${input.code.toUpperCase()}：当前版本无法处理这份会话数据（数据格式 ${actual}，程序支持 ${expected}）。数据保持原样，请使用创建这份数据的版本或支持该格式的新版本后重新尝试。`;
     super('startup_failure', message);
     this.name = 'RuntimeClientStartupError';
     this.diagnosticCode = input.code;
     this.actualSchema = input.actualSchema;
     this.expectedSchema = input.expectedSchema;
+    this.admissionReason = input.admissionReason;
     this.stage = input.stage;
   }
 }
 
 function validStartupSchema(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+}
+
+function validStartupAdmissionReason(
+  value: unknown,
+): value is NonNullable<RuntimeClientStartupError['admissionReason']> {
+  return (
+    typeof value === 'string' &&
+    [
+      'unsupported_platform',
+      'desktop_identity_mismatch',
+      'paired_manifest_mismatch',
+      'desktop_parent_unverified',
+      'source_identity_mismatch',
+      'source_build_mismatch',
+      'source_parent_unverified',
+      'installed_identity_mismatch',
+      'release_selection_busy_or_unsafe',
+      'installed_parent_unverified',
+      'installed_process_inspection_incomplete',
+      'legacy_process_inspection_incomplete',
+      'admission_unverified',
+    ].includes(value)
+  );
+}
+
+function describeStartupAdmissionReason(
+  reason: NonNullable<RuntimeClientStartupError['admissionReason']>,
+): string {
+  switch (reason) {
+    case 'unsupported_platform':
+      return '此平台不支持自动整理会话数据。请使用支持的运行环境。';
+    case 'desktop_identity_mismatch':
+    case 'paired_manifest_mismatch':
+    case 'source_identity_mismatch':
+    case 'source_build_mismatch':
+    case 'installed_identity_mismatch':
+    case 'release_selection_busy_or_unsafe':
+      return '无法核实客户端与配套服务或安装版本。请检查安装并从受支持的入口重新启动。';
+    case 'desktop_parent_unverified':
+    case 'source_parent_unverified':
+    case 'installed_parent_unverified':
+      return '无法核实启动配套服务的客户端。请退出 Kite 后从受支持的入口重新启动。';
+    case 'legacy_process_inspection_incomplete':
+    case 'installed_process_inspection_incomplete':
+      return '无法完整核实其他客户端是否仍在使用会话数据。请退出其他 Kite 客户端并保存诊断。';
+    case 'admission_unverified':
+      return '无法完成会话数据维护准入核实。请保存诊断以便排查。';
+  }
 }
 
 interface PendingRequest {
@@ -230,6 +321,8 @@ export class RuntimeClient implements AsyncDisposable {
   readonly #requestTimeoutMs: number;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #subscriptions = new Map<string, SubscriptionState>();
+  readonly #activeHistoryLoads = new Set<AbortController>();
+  readonly #waitingHistoryLoads: WaitingHistoryLoad[] = [];
   #connection: RuntimeClientConnection | undefined;
   #connectionGeneration = 0;
   #nextRequest = 0;
@@ -237,6 +330,7 @@ export class RuntimeClient implements AsyncDisposable {
   #connectPromise: Promise<void> | undefined;
   #closed = false;
   #features: RuntimeClientFeatures = NO_RUNTIME_FEATURES;
+  #historyCancelSupported = false;
 
   constructor(options: RuntimeClientOptions) {
     this.#transport = options.transport;
@@ -248,6 +342,7 @@ export class RuntimeClient implements AsyncDisposable {
       throw new RangeError('requestTimeoutMs must be a positive integer.');
     }
     const requestHistory = this.#request.bind(this);
+    const scheduleHistoryLoad = this.#scheduleHistoryLoad.bind(this);
     this.#history =
       options.history === 'protocol'
         ? Object.freeze({
@@ -291,61 +386,117 @@ export class RuntimeClient implements AsyncDisposable {
       throughSequence?: number,
       options?: { readonly signal?: AbortSignal },
     ): Promise<RuntimeHistorySessionTranscript> {
+      return scheduleHistoryLoad(
+        (signal) => loadTranscriptPages(method, identity, throughSequence, signal),
+        options?.signal,
+      );
+    }
+
+    async function loadTranscriptPages(
+      method: 'history/load_session' | 'history/load_child_session',
+      identity:
+        | { readonly sessionId: string }
+        | { readonly parentSessionId: string; readonly childSessionId: string },
+      throughSequence: number | undefined,
+      signal: AbortSignal,
+    ): Promise<RuntimeHistorySessionTranscript> {
       const sessionId = 'sessionId' in identity ? identity.sessionId : identity.childSessionId;
-      const records: RuntimeHistorySessionTranscript['records'][number][] = [];
-      let afterSequence: number | undefined;
-      let snapshotSequence = throughSequence;
-      let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
-      for (;;) {
-        options?.signal?.throwIfAborted();
-        const result = await requestHistory(
-          method,
-          {
-            ...identity,
-            page: {
-              ...(afterSequence === undefined ? {} : { afterSequence }),
-              ...(snapshotSequence === undefined ? {} : { throughSequence: snapshotSequence }),
-            },
-          },
-          undefined,
-          options?.signal,
-        );
-        options?.signal?.throwIfAborted();
-        if (
-          !('type' in result) ||
-          result.type !== 'history_session_page' ||
-          result.session.sessionId !== sessionId ||
-          (snapshotSequence !== undefined && result.session.lastSequence !== snapshotSequence)
-        ) {
-          throw new RuntimeClientError('protocol_error', 'Protocol returned invalid History page.');
+      const encoder = new TextEncoder();
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const records: RuntimeHistorySessionTranscript['records'][number][] = [];
+        let recordBytes = 0;
+        let afterSequence: number | undefined;
+        let snapshotSequence = throughSequence;
+        let snapshotDigest: string | undefined;
+        let metadata: Omit<RuntimeHistorySessionTranscript, 'records' | 'events'> | undefined;
+        let localSnapshotChange = false;
+        try {
+          for (;;) {
+            signal.throwIfAborted();
+            const result = await requestHistory(
+              method,
+              {
+                ...identity,
+                page: {
+                  ...(afterSequence === undefined ? {} : { afterSequence }),
+                  ...(snapshotSequence === undefined ? {} : { throughSequence: snapshotSequence }),
+                  ...(snapshotDigest === undefined ? {} : { snapshotDigest }),
+                },
+              },
+              undefined,
+              signal,
+            );
+            signal.throwIfAborted();
+            if (
+              !('type' in result) ||
+              result.type !== 'history_session_page' ||
+              result.session.sessionId !== sessionId ||
+              (snapshotSequence !== undefined && result.session.lastSequence !== snapshotSequence)
+            ) {
+              throw new RuntimeClientError(
+                'protocol_error',
+                'Protocol returned invalid History page.',
+              );
+            }
+            if (
+              afterSequence !== undefined &&
+              snapshotDigest !== undefined &&
+              result.snapshotDigest !== snapshotDigest
+            ) {
+              localSnapshotChange = true;
+              throw new RuntimeClientError('protocol_error', 'History changed during pagination.');
+            }
+            snapshotSequence = result.session.lastSequence;
+            snapshotDigest ??= result.snapshotDigest;
+            metadata ??= {
+              session: result.session,
+              interactionMode: result.interactionMode,
+              recovery: result.recovery,
+            };
+            let previous = afterSequence ?? 0;
+            for (const record of result.records) {
+              if (record.sequence <= previous || record.sequence > snapshotSequence)
+                throw new RuntimeClientError(
+                  'protocol_error',
+                  'History records are out of sequence.',
+                );
+              previous = record.sequence;
+            }
+            if (records.length + result.records.length > MAX_HISTORY_TRANSCRIPT_RECORDS)
+              throw new RuntimeClientError(
+                'history_too_large',
+                'Runtime History transcript exceeds the record limit.',
+              );
+            recordBytes += encoder.encode(JSON.stringify(result.records)).byteLength;
+            if (recordBytes > MAX_HISTORY_TRANSCRIPT_RECORD_BYTES)
+              throw new RuntimeClientError(
+                'history_too_large',
+                'Runtime History transcript exceeds the byte limit.',
+              );
+            records.push(...result.records);
+            if (result.nextCursor === undefined)
+              return {
+                ...metadata,
+                records,
+                events: records.flatMap((record) => record.events),
+              };
+            if (
+              result.nextCursor !== previous ||
+              result.nextCursor <= (afterSequence ?? 0) ||
+              result.nextCursor >= snapshotSequence
+            )
+              throw new RuntimeClientError('protocol_error', 'History pagination did not advance.');
+            afterSequence = result.nextCursor;
+          }
+        } catch (error) {
+          signal.throwIfAborted();
+          const serverSnapshotChange =
+            error instanceof RuntimeClientError &&
+            error.protocol?.data.detailCode === 'history_snapshot_changed';
+          if (attempt === 1 || (!localSnapshotChange && !serverSnapshotChange)) throw error;
         }
-        snapshotSequence = result.session.lastSequence;
-        metadata ??= {
-          session: result.session,
-          interactionMode: result.interactionMode,
-          recovery: result.recovery,
-        };
-        let previous = afterSequence ?? 0;
-        for (const record of result.records) {
-          if (record.sequence <= previous || record.sequence > snapshotSequence)
-            throw new RuntimeClientError('protocol_error', 'History records are out of sequence.');
-          previous = record.sequence;
-        }
-        records.push(...result.records);
-        if (result.nextCursor === undefined)
-          return {
-            ...metadata,
-            records,
-            events: records.flatMap((record) => record.events),
-          };
-        if (
-          result.nextCursor !== previous ||
-          result.nextCursor <= (afterSequence ?? 0) ||
-          result.nextCursor >= snapshotSequence
-        )
-          throw new RuntimeClientError('protocol_error', 'History pagination did not advance.');
-        afterSequence = result.nextCursor;
       }
+      throw new RuntimeClientError('protocol_error', 'History changed during pagination.');
     }
   }
 
@@ -707,6 +858,7 @@ export class RuntimeClient implements AsyncDisposable {
   async close(reason = 'runtime_client_closed'): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#failHistoryLoads(closedError());
     this.#store.setConnection({ generation: this.#connectionGeneration, status: 'draining' });
     this.#rejectPending(this.#connectionGeneration, closedError());
     const connection = this.#connection;
@@ -732,12 +884,18 @@ export class RuntimeClient implements AsyncDisposable {
     status: Extract<RuntimeClientConnectionStatus, 'connecting' | 'reconnecting'>,
     resubscribe: boolean,
   ): Promise<void> {
+    if (status === 'reconnecting') {
+      this.#failHistoryLoads(
+        new RuntimeClientError('connection_closed', 'Runtime connection was replaced.'),
+      );
+    }
     const previous = this.#connection;
     const previousGeneration = this.#connectionGeneration;
     const generation = previousGeneration + 1;
     this.#connectionGeneration = generation;
     this.#connection = undefined;
     this.#features = NO_RUNTIME_FEATURES;
+    this.#historyCancelSupported = false;
     // A remote id belongs to the connection that created it. It must never be
     // matched, or unsubscribed, on the replacement connection.
     for (const state of this.#subscriptions.values()) {
@@ -792,6 +950,7 @@ export class RuntimeClient implements AsyncDisposable {
         );
       }
       this.#assertExpectedServer(initialize);
+      this.#historyCancelSupported = initialize.capabilities.methods.includes('history/cancel');
       this.#features = Object.freeze({
         steer: initialize.capabilities.features?.steer ?? false,
         backgroundQuery: initialize.capabilities.features?.backgroundQuery ?? false,
@@ -806,6 +965,7 @@ export class RuntimeClient implements AsyncDisposable {
         for (const state of this.#subscriptions.values()) await this.#activateSubscription(state);
       }
     } catch (error) {
+      if (generation === this.#connectionGeneration) this.#failHistoryLoads(error);
       if (openedConnection && openedConnection !== previous) {
         await openedConnection.close('runtime_client_initialize_failed').catch(() => undefined);
       }
@@ -956,6 +1116,23 @@ export class RuntimeClient implements AsyncDisposable {
       throw new RuntimeClientError('connection_closed', 'Runtime connection is unavailable.');
     const id = `rpc-${generation}-${++this.#nextRequest}`;
     let sendStarted = false;
+    const cancelRemoteHistoryRead = (): void => {
+      if (
+        !sendStarted ||
+        !method.startsWith('history/') ||
+        !this.#historyCancelSupported ||
+        this.#connection !== connection ||
+        this.#connectionGeneration !== generation
+      )
+        return;
+      try {
+        void connection
+          .send({ jsonrpc: '2.0', method: 'history/cancel', params: { requestId: id } })
+          .catch(() => undefined);
+      } catch {
+        // Cancellation is best-effort; the original request is already rejected locally.
+      }
+    };
     const response = new Promise<RuntimeProtocolResult>((resolve, reject) => {
       const finish = (): void => {
         this.#pending.delete(id);
@@ -965,6 +1142,7 @@ export class RuntimeClient implements AsyncDisposable {
       const onAbort = (): void => {
         finish();
         reject(signal?.reason ?? new Error('Runtime request cancelled.'));
+        cancelRemoteHistoryRead();
         // The Server may have created a subscription before its ack arrives.
         // Without a remote id, closing this logical connection is the only
         // way to release that subscription after cancellation.
@@ -978,6 +1156,7 @@ export class RuntimeClient implements AsyncDisposable {
           reject(
             new RuntimeClientError('request_timeout', `Runtime ${method} response timed out.`),
           );
+          cancelRemoteHistoryRead();
           // A subscribe may have succeeded remotely even though its ack was lost.
           // Closing this logical connection lets the Server release that identity.
           if (method === 'runtime/subscribe') {
@@ -1028,6 +1207,100 @@ export class RuntimeClient implements AsyncDisposable {
     return this.connect();
   }
 
+  #scheduleHistoryLoad<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (this.#closed) return Promise.reject(closedError());
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    if (
+      this.#activeHistoryLoads.size >= MAX_ACTIVE_HISTORY_LOADS &&
+      this.#waitingHistoryLoads.length >= MAX_WAITING_HISTORY_LOADS
+    ) {
+      return Promise.reject(
+        new RuntimeClientError('request_overloaded', 'Runtime History request queue is full.'),
+      );
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const controller = new AbortController();
+      const waitDeadline = Date.now() + this.#requestTimeoutMs;
+      let state: 'waiting' | 'active' | 'done' = 'waiting';
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const task: WaitingHistoryLoad = {
+        start: () => {
+          if (state !== 'waiting') return;
+          if (Date.now() >= waitDeadline) {
+            task.cancel(
+              new RuntimeClientError('request_timeout', 'Runtime History request wait timed out.'),
+            );
+            return;
+          }
+          state = 'active';
+          if (timer) clearTimeout(timer);
+          this.#activeHistoryLoads.add(controller);
+          void Promise.resolve()
+            .then(() => {
+              controller.signal.throwIfAborted();
+              return operation(controller.signal);
+            })
+            .then(resolve, reject)
+            .finally(() => {
+              state = 'done';
+              cleanup();
+              this.#activeHistoryLoads.delete(controller);
+              this.#drainHistoryLoads();
+            });
+        },
+        cancel: (error) => {
+          if (state === 'done') return;
+          controller.abort(error);
+          if (state === 'active') return;
+          state = 'done';
+          const index = this.#waitingHistoryLoads.indexOf(task);
+          if (index !== -1) this.#waitingHistoryLoads.splice(index, 1);
+          cleanup();
+          reject(error);
+        },
+      };
+      const onAbort = (): void => task.cancel(signal?.reason);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) {
+        task.cancel(signal.reason);
+      } else if (this.#activeHistoryLoads.size < MAX_ACTIVE_HISTORY_LOADS) {
+        task.start();
+      } else {
+        this.#waitingHistoryLoads.push(task);
+        timer = setTimeout(
+          () =>
+            task.cancel(
+              new RuntimeClientError('request_timeout', 'Runtime History request wait timed out.'),
+            ),
+          Math.max(0, waitDeadline - Date.now()),
+        );
+      }
+    });
+  }
+
+  #drainHistoryLoads(): void {
+    while (
+      this.#activeHistoryLoads.size < MAX_ACTIVE_HISTORY_LOADS &&
+      this.#waitingHistoryLoads.length > 0
+    ) {
+      this.#waitingHistoryLoads.shift()?.start();
+    }
+  }
+
+  #failHistoryLoads(error: unknown): void {
+    const waiting = this.#waitingHistoryLoads.splice(0);
+    for (const task of waiting) task.cancel(error);
+    for (const controller of this.#activeHistoryLoads) controller.abort(error);
+  }
+
   async #receive(connection: RuntimeClientConnection, generation: number): Promise<void> {
     let receiveError: unknown;
     try {
@@ -1054,6 +1327,9 @@ export class RuntimeClient implements AsyncDisposable {
         const status = this.#store.getSnapshot().status;
         const initializing = status === 'connecting' || status === 'reconnecting';
         this.#connection = undefined;
+        this.#failHistoryLoads(
+          new RuntimeClientError('connection_closed', 'Runtime connection closed.'),
+        );
         this.#store.setConnection({ generation, status: 'disconnected' });
         this.#rejectPending(
           generation,
@@ -1073,7 +1349,15 @@ export class RuntimeClient implements AsyncDisposable {
       this.#pending.delete(message.id);
       if ('error' in message) {
         pending.reject(
-          new RuntimeClientError('protocol_error', message.error.message, message.error),
+          new RuntimeClientError(
+            message.error.data.detailCode === 'history_too_large'
+              ? 'history_too_large'
+              : message.error.data.code === 'overloaded'
+                ? 'request_overloaded'
+                : 'protocol_error',
+            message.error.message,
+            message.error,
+          ),
         );
       } else {
         if (pending.subscriptionState && isSubscribeResult(message.result)) {

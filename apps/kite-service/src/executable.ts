@@ -9,6 +9,7 @@ import {
 } from '@kite-ai/runtime-host';
 import { type KiteAppServerMainDependencies, runKiteAppServerMain } from './app-server';
 import { runKiteAppServerDaemonMain } from './app-server-daemon';
+import { isHistoryPageWorker, runHistoryPageWorker } from './runtime-client/history-page-worker';
 
 export interface KiteServiceMainDependencies {
   readonly onStoreStartupProgress?: KiteAppServerMainDependencies['onStoreStartupProgress'];
@@ -26,6 +27,10 @@ export async function runKiteServiceMain(
   args: readonly string[] = process.argv.slice(2),
   dependencies: KiteServiceMainDependencies = {},
 ): Promise<void> {
+  if (isHistoryPageWorker(args)) {
+    await runHistoryPageWorker();
+    return;
+  }
   if (isKiteServiceMcpStdioInvocation(args)) {
     await runMcpStdioChildRuntime([MCP_STDIO_WRAPPER_ENTRYPOINT_]);
     return;

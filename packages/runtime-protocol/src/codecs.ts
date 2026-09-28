@@ -550,6 +550,7 @@ export const RUNTIME_PROTOCOL_METHOD_SCHEMA_ = z.enum([
   'history/list_events',
   'history/load_session',
   'history/load_child_session',
+  'history/cancel',
   'app/workspace/remove',
   'app/workspace_trust/query',
   'app/workspace_trust/decide',
@@ -690,6 +691,10 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
             .object({
               afterSequence: safeRevision.optional(),
               throughSequence: safeRevision.optional(),
+              snapshotDigest: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/u)
+                .optional(),
             })
             .strict()
             .optional(),
@@ -709,6 +714,10 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
             .object({
               afterSequence: safeRevision.optional(),
               throughSequence: safeRevision.optional(),
+              snapshotDigest: z
+                .string()
+                .regex(/^[a-f0-9]{64}$/u)
+                .optional(),
             })
             .strict()
             .optional(),
@@ -835,6 +844,8 @@ export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
             'session_unavailable',
             'corrupt_event',
             'invalid_request',
+            'history_snapshot_changed',
+            'history_too_large',
           ])
           .optional(),
       })
@@ -1498,6 +1509,10 @@ const historyTranscript = z
     events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
     interactionMode: z.enum(['accept_edits', 'auto', 'full']),
     recovery: z.enum(['normal', 'pending_interaction', 'restart_required']),
+    snapshotDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   })
   .strict();
 const historyTranscriptPage = historyTranscript
@@ -2113,6 +2128,13 @@ export const RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_ = z.union([
 ]);
 export type RuntimeSubscriptionMessage = z.infer<typeof RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_>;
 export const RUNTIME_PROTOCOL_NOTIFICATION_SCHEMA_ = z.discriminatedUnion('method', [
+  z
+    .object({
+      jsonrpc: z.literal('2.0'),
+      method: z.literal('history/cancel'),
+      params: z.object({ requestId: rpcId }).strict(),
+    })
+    .strict(),
   z
     .object({
       jsonrpc: z.literal('2.0'),

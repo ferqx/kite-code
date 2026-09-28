@@ -25,6 +25,10 @@ import {
   KITE_CROSS_SESSION_FOLLOWUP_ROUTE_DDL,
 } from './kite-cross-session-followup-schema';
 import {
+  KITE_HISTORY_GENERATION_TRIGGER_NAMES,
+  KITE_HISTORY_GENERATION_TRIGGERS,
+} from './kite-history-generation';
+import {
   KITE_SESSION_AGENT_CROSS_SESSION_DDL,
   KITE_SESSION_AGENT_INDEXES,
   KITE_SESSION_AGENT_STORE11_DDL,
@@ -290,7 +294,10 @@ export const KITE_SESSION_STORE13_TABLE_COLUMNS = Object.freeze({
   agent_followup_grant_artifacts: KITE_CROSS_SESSION_FOLLOWUP_GRANT_COLUMNS,
   agent_interrupt_intents: KITE_CROSS_SESSION_INTERRUPT_COLUMNS,
 } as const);
-export const KITE_SESSION_STORE_TABLE_COLUMNS = KITE_SESSION_STORE13_TABLE_COLUMNS;
+export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
+  ...KITE_SESSION_STORE13_TABLE_COLUMNS,
+  runtime_sessions: [...KITE_SESSION_STORE13_TABLE_COLUMNS.runtime_sessions, 'history_generation'],
+});
 
 const DIGEST_CHECK = "length(%s) = 64 AND %s NOT GLOB '*[^a-f0-9]*'";
 const digestCheck = (column: string): string => DIGEST_CHECK.replaceAll('%s', column);
@@ -580,7 +587,25 @@ export const KITE_SESSION_STORE13_DDL = Object.freeze([
   KITE_CROSS_SESSION_INTERRUPT_DDL,
   KITE_CROSS_SESSION_INTERRUPT_PENDING_INDEX,
 ]);
-export const KITE_SESSION_STORE_DDL = KITE_SESSION_STORE13_DDL;
+const historyGenerationSessionDdl = (statement: string): string => {
+  const ending = '\n  ) STRICT';
+  if (!statement.endsWith(ending))
+    throw new Error('Store 13 Session DDL cannot be extended with history generation.');
+  return (
+    statement.slice(0, -ending.length) +
+    ',\n    history_generation INTEGER NOT NULL DEFAULT 0 CHECK (history_generation >= 0)' +
+    ending
+  );
+};
+
+export const KITE_SESSION_STORE_DDL = Object.freeze([
+  ...KITE_SESSION_STORE13_DDL.map((statement) =>
+    statement.startsWith('CREATE TABLE runtime_sessions ')
+      ? historyGenerationSessionDdl(statement)
+      : statement,
+  ),
+  ...KITE_HISTORY_GENERATION_TRIGGERS,
+]);
 
 interface ExactKiteStoreProfile {
   readonly schemaVersion: number;
@@ -588,6 +613,7 @@ interface ExactKiteStoreProfile {
   readonly ddl: readonly string[];
   readonly tableColumns: Readonly<Record<string, readonly string[]>>;
   readonly indexes: readonly string[];
+  readonly triggers?: readonly string[];
 }
 
 const kiteHomeStoreProfile = (): ExactKiteStoreProfile => ({
@@ -610,6 +636,7 @@ const kiteSessionStoreProfile = (): ExactKiteStoreProfile => ({
     'child_approval_proxies_parent_pending',
     'agent_interrupt_intents_target_pending',
   ],
+  triggers: KITE_HISTORY_GENERATION_TRIGGER_NAMES,
 });
 
 const kiteSessionStore13Profile = (): ExactKiteStoreProfile => ({
@@ -847,6 +874,32 @@ function assertExactKiteStoreSchema(database: Database, profile: ExactKiteStoreP
   const expectedIndexes = [...profile.indexes].sort();
   if (JSON.stringify(indexes) !== JSON.stringify(expectedIndexes)) {
     fail('Kite Home Store index inventory is incompatible.');
+  }
+
+  if (profile.triggers) {
+    const triggers = database
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
+      )
+      .all()
+      .map((row) => row.name);
+    if (JSON.stringify(triggers) !== JSON.stringify([...profile.triggers].sort())) {
+      fail('Kite Home Store trigger inventory is incompatible.');
+    }
+    const expectedSql = new Map<string, string>(
+      KITE_HISTORY_GENERATION_TRIGGERS.map((sql, index) => [
+        KITE_HISTORY_GENERATION_TRIGGER_NAMES[index]!,
+        sql,
+      ]),
+    );
+    const actualSql = database
+      .query<{ name: string; sql: string }, []>(
+        "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'",
+      )
+      .all();
+    if (actualSql.some((row) => row.sql !== expectedSql.get(row.name))) {
+      fail('Kite Home Store trigger definition is incompatible.');
+    }
   }
 
   const metadata = new Map(

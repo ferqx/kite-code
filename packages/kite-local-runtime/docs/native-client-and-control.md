@@ -8,6 +8,8 @@ prepareAppControl 调用 RuntimeClient.connect，先初始化唯一协议连接�
 
 [环境无关 connection](../src/client/protocol-connection.ts)以 `/client/protocol` 导出，接收明确 transport、expected server version、client identity 与 required methods。现有 stdio/socket composition 和 Tauri 桌面端复用这一份 Runtime/History/App Control/credential 组合；文件不导入 Node/Bun I/O。Tauri renderer 经桌面 IPC 使用 Rust-owned stdio child，具体进程与队列由[桌面 owner](../../../apps/kite-desktop/README.md)维护。TUI/CLI 的配对、握手和关闭语义保持不变。
 
+stdio 与 socket transport 的接收队列保持有界；一个 OS 读取块内即使包含多条完整 JSONL 响应，也逐帧给活跃消费者处理机会，每 32 帧让出一次事件循环供定时器和 I/O 运行。socket 在处理该块时暂停读取，处理完再恢复；批量响应后立即 EOF 仍先交付已解码响应。验证见 [stdio transport](../test/bun-stdio-child-transport.test.ts) 与 [socket transport](../test/node-socket-transport.test.ts)。
+
 ## 配置写入与进程资料
 
 [config](../src/config/) 的 per-file lock 在锁内重读，再 atomic replace；它是共享 filesystem primitive，不定义 Provider 或权限语义。Service 状态 primitive 处理本机路径、权限和 process identity，不创建第二份 Session authority。

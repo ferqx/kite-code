@@ -123,6 +123,10 @@ macOS 的 `app.getPath('home')` 不受 shell HOME 覆盖，packaged Electron 也
 
 构建集成修复了 Bun 将源码 `__dirname` 固化到安装包、导致 preload 缺失的问题，当前从 `app.getAppPath()` 定位打包资源。标题栏修正了 Tauri 的偏移量在 Electron 中造成的交通灯／标识重叠。正式包只包含构建代码、页面资源与配套服务，不包含开发依赖和 source maps。
 
+2026-09-28 新增 [Store 13→14 打包升级回归](../scripts/session-store13-packaged-upgrade.test.ts)：隔离临时 HOME 中的旧库含 WAL、父子会话、Snapshot、Event，以及旧 active 父会话与已确认清理的 recovery 子会话；目标库在启动前没有打开句柄。进程准入改为按被观察进程自身 `HOME` 判断默认 Store 后，使用候选 `d5adbf4395c49b1f46258e81` 的配套 Service 和本机 Electron 44.3.0 缓存 ZIP 离线重包的 `.app`，`bun test --no-orphans apps/kite-desktop/scripts/session-store13-packaged-upgrade.test.ts` 在可启动原生窗口的本机环境中 4 项通过、37 个断言：首次启动转换到 Store 14，父会话旧 owner 被栅栏化、子会话恢复状态原样保留，原父子血缘及历史记录保留；`ready.json` 中的源 main/WAL 哈希与启动前一致，备份的哈希、历史和旧 authority 一致；二次启动的正式数据库字节与恢复目录条目不变。另由非 Desktop 父进程启动同一包内 Service，核对其在 `acquiring_maintenance` 阶段以 `desktop_parent_unverified` 拒绝，Store 13 主文件与 WAL 哈希不变且没有恢复或发布资产。测试也核对签名后包内 Service 的清单和 SHA-256；candidate archive SHA-256 为 `36e0f00bed252cba0b90ba03cf090b7f3ff5450c54db66b13d60a64fff294432`。离线重包使用与 `build:desktop` 相同的 packager 参数并做 ad-hoc 签名；常规打包因网络无法读取 Electron 校验文件而未完成。此证据覆盖隔离夹具的打包路径，不代表正式签名发布资格或高并发升级资格；用户原始 Store 未在测试中修改。
+
+发行候选的 macOS 作业必须运行此打包升级测试；测试同时锁定当前目标 schema 与 epoch。下次格式变更若没有更新旧版夹具和打包升级证明，会在候选门禁失败。旧 App Server 解耦基线只核对解耦边界，不固定当前 Store epoch。
+
 当前仍未重做系统中文输入法、用户操作目录／消息对话框、实际鼠标拖拽和标题栏双击、快速拉伸、外部编辑器及完整系统认证的人工验收；本轮也没有取得 Electron 主进程崩溃下工具进程树的 OS 级资格。它们不能从 DOM、主进程方法或 Tauri 历史证据推断。正式签名、公证、下载后 Gatekeeper、签名包升级、自动更新与其他平台不在本轮资格范围内。
 
 ### 开发窗口白屏修复

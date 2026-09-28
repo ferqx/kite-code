@@ -123,6 +123,8 @@ interface AgentApiDirectorySessionEntry {
 }
 
 export interface AgentApiDirectoryReadPort {
+  /** Store-backed indexed check when available; older read contexts use list(). */
+  hasRootSession?(sessionId: string): boolean;
   list(): readonly {
     readonly workspaceId: string;
     readonly displayName: string;
@@ -1337,11 +1339,16 @@ function requireNoQuery(url: URL): void {
 }
 
 function requireVisibleSession(context: AgentApiReadContext, sessionId: string): void {
+  const directory = context.directory;
   if (
-    context.directory &&
-    !context.directory
-      .list()
-      .some((workspace) => workspace.sessions.some((session) => session.sessionId === sessionId))
+    directory &&
+    !(directory.hasRootSession
+      ? directory.hasRootSession(sessionId)
+      : directory
+          .list()
+          .some((workspace) =>
+            workspace.sessions.some((session) => session.sessionId === sessionId),
+          ))
   ) {
     throw new ReadFailure(404, 'not_found', false);
   }

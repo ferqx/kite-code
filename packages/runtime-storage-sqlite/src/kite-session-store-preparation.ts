@@ -1,13 +1,17 @@
 import type { Database } from 'bun:sqlite';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readFileSync,
   realpathSync,
+  renameSync,
   statfsSync,
+  unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assertCanonicalKiteDatabasePath } from './kite-home-runtime-file';
@@ -31,12 +35,25 @@ import {
 import { inspectKiteSessionStoreSources } from './kite-session-store-sources';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 
+const ATTEMPT_NAME = 'preparation-attempt.json';
+const ATTEMPT_DIGEST = /^[a-f0-9]{64}$/u;
+const MAX_ATTEMPT_BYTES = 512;
+
+interface PreparationAttempt {
+  readonly version: 1;
+  readonly status: 'attempt_started';
+  readonly buildDigest: string;
+  readonly sourceDigest: string;
+}
+
 /**
- * One bounded startup preparation for the observed Store 9/10/11/12 paths. It never runs from a
+ * One bounded startup preparation for the observed Store 9–13 paths. It never runs from a
  * history query. Ordinary current-format startup only inspects metadata and known locations.
  */
 export async function prepareKiteSessionStore<Event, State>(input: {
   readonly databasePath: string;
+  /** Exact Service build identity; absent only for in-process callers without a release identity. */
+  readonly buildId?: string;
   readonly codec: SqliteRuntimeSnapshotCodec<Event, State>;
   readonly isSettledState: (state: State) => boolean;
   /** Service-owned admission: supported entrypoints gated and retired writers stopped. */
@@ -70,6 +87,7 @@ export async function prepareKiteSessionStore<Event, State>(input: {
       throw new KiteSessionStoreOpenError(error.code, error.message, {
         cause: error,
         ...(error.compatibility ? { compatibility: error.compatibility } : {}),
+        ...(error.admissionReason ? { admissionReason: error.admissionReason } : {}),
         stage,
       });
     if (isStorageSpaceFailure(error)) {
@@ -134,6 +152,10 @@ async function prepare<Event, State>(
             error.compatibility.actualEpoch === 'kite-session-accepted-runs-2026-09-15') ||
           (error.compatibility?.actualSchema === 11 &&
             error.compatibility.actualEpoch === 'kite-session-lineage-2026-09-24') ||
+          (error.compatibility?.actualSchema === 12 &&
+            error.compatibility.actualEpoch === 'kite-session-child-approval-2026-09-25') ||
+          (error.compatibility?.actualSchema === 13 &&
+            error.compatibility.actualEpoch === 'kite-session-cross-followup-2026-09-25') ||
           (error.compatibility?.actualSchema === 10 &&
             error.compatibility.actualEpoch === 'kite-session-app-server-2026-09-02')
         )
@@ -178,6 +200,7 @@ async function prepare<Event, State>(
           maintenance: locks.get(databasePath)!,
         })),
       });
+      clearCompletedAttempt(dirname(canonicalPath));
       return { status: 'resumed' };
     }
     report('preparing');
@@ -216,6 +239,21 @@ async function prepare<Event, State>(
         total + BigInt(source.files.main?.size ?? 0) + BigInt(source.files.wal?.size ?? 0),
       0n,
     );
+    const recoveryRoot = join(dirname(canonicalPath), 'session-store-recovery');
+    const attempt = input.buildId ? preparationAttempt(input.buildId, sources) : undefined;
+    if (attempt) {
+      ensurePrivateDirectory(recoveryRoot);
+      const existing = readPreparationAttempt(recoveryRoot);
+      if (
+        existing?.buildDigest === attempt.buildDigest &&
+        existing.sourceDigest === attempt.sourceDigest
+      ) {
+        throw new KiteSessionStoreOpenError(
+          'store_preparation_retry_blocked',
+          'This Service build already attempted preparation of these exact Store bytes. Retained recovery assets are unchanged; retry with a corrected build or changed source.',
+        );
+      }
+    }
     const space = statfsSync(dirname(canonicalPath), { bigint: true });
     // Budget for immutable backups, converted sources, merged candidate and SQLite scratch.
     // This conservative preflight does not replace handling ENOSPC at every write boundary.
@@ -225,51 +263,70 @@ async function prepare<Event, State>(
         'Insufficient free space for verified Store recovery assets and candidates.',
       );
     }
-    const recoveryRoot = join(dirname(canonicalPath), 'session-store-recovery');
     ensurePrivateDirectory(recoveryRoot);
+    if (attempt) writePreparationAttempt(recoveryRoot, attempt);
     const migrationDirectory = join(recoveryRoot, `migration-${randomBytes(12).toString('hex')}`);
-    mkdirSync(migrationDirectory, { mode: 0o700 });
-    fsyncDirectory(migrationDirectory);
-    fsyncDirectory(recoveryRoot);
-    const candidate = createKiteSessionStoreCandidate({
-      sources: nonempty,
-      migrationDirectory,
-      codec: input.codec,
-      isSettledState: input.isSettledState,
-      validate,
-      nowMs: input.nowMs ?? Date.now(),
-    });
-    if ((await input.beforePublication?.()) === 'cancel') {
-      throw new KiteSessionStoreOpenError(
-        'store_preparation_cancelled',
-        'Store preparation was cancelled before publication.',
-      );
-    }
-    if (admission) admission.revalidate();
-    else admission = input.assertRetiredWritersStopped();
-    const publicationSources = sources.map((source) => {
-      const files = captureKiteSessionPublicationSource(canonicalPath, source.databasePath);
-      // SQLite's read locks may update shared-memory bookkeeping. The committed main/WAL
-      // identity and bytes must remain unchanged; capture SHM only after all readers closed.
-      if (
-        JSON.stringify([files.main, files.wal]) !==
-        JSON.stringify([source.files.main, source.files.wal])
-      ) {
-        throw new Error('Original Store changed while its candidate was prepared.');
+    let admissionRevalidationFailed = false;
+    try {
+      mkdirSync(migrationDirectory, { mode: 0o700 });
+      fsyncDirectory(migrationDirectory);
+      fsyncDirectory(recoveryRoot);
+      const candidate = createKiteSessionStoreCandidate({
+        sources: nonempty,
+        migrationDirectory,
+        codec: input.codec,
+        isSettledState: input.isSettledState,
+        validate,
+        nowMs: input.nowMs ?? Date.now(),
+      });
+      if ((await input.beforePublication?.()) === 'cancel') {
+        throw new KiteSessionStoreOpenError(
+          'store_preparation_cancelled',
+          'Store preparation was cancelled before publication.',
+        );
       }
-      return { ...source, files };
-    });
-    report('publishing');
-    publishVerifiedKiteSessionCandidate({
-      canonicalPath,
-      canonicalMaintenance,
-      migrationDirectory,
-      candidatePath: candidate.databasePath,
-      candidateManifest: candidate.manifest,
-      validatePublished: validate,
-      sources: publicationSources,
-    });
-    return { status: 'prepared' };
+      try {
+        if (admission) admission.revalidate();
+        else admission = input.assertRetiredWritersStopped();
+      } catch (error) {
+        // Writer admission is external and may recover without a new Service build.
+        admissionRevalidationFailed = true;
+        throw error;
+      }
+      const publicationSources = sources.map((source) => {
+        const files = captureKiteSessionPublicationSource(canonicalPath, source.databasePath);
+        // SQLite's read locks may update shared-memory bookkeeping. The committed main/WAL
+        // identity and bytes must remain unchanged; capture SHM only after all readers closed.
+        if (
+          JSON.stringify([files.main, files.wal]) !==
+          JSON.stringify([source.files.main, source.files.wal])
+        ) {
+          throw new Error('Original Store changed while its candidate was prepared.');
+        }
+        return { ...source, files };
+      });
+      report('publishing');
+      publishVerifiedKiteSessionCandidate({
+        canonicalPath,
+        canonicalMaintenance,
+        migrationDirectory,
+        candidatePath: candidate.databasePath,
+        candidateManifest: candidate.manifest,
+        validatePublished: validate,
+        sources: publicationSources,
+      });
+      if (attempt) clearPreparationAttempt(recoveryRoot, attempt);
+      return { status: 'prepared' };
+    } catch (error) {
+      if (
+        attempt &&
+        (admissionRevalidationFailed || isTransientPreparationFailure(error)) &&
+        inspectKiteSessionPublication(canonicalPath).status === 'none'
+      ) {
+        clearPreparationAttempt(recoveryRoot, attempt);
+      }
+      throw error;
+    }
   } finally {
     try {
       for (const lock of [...locks.values()].reverse()) lock.release();
@@ -304,6 +361,142 @@ function fsyncDirectory(path: string): void {
   } finally {
     closeSync(fd);
   }
+}
+
+function preparationAttempt(
+  buildId: string,
+  sources: readonly {
+    readonly databasePath: string;
+    readonly files: ReturnType<typeof captureKiteSessionPublicationSource>;
+  }[],
+): PreparationAttempt {
+  if (!buildId || buildId.length > 4_096 || /\p{Cc}/u.test(buildId))
+    throw new Error('Store preparation requires a bounded Service build identity.');
+  return {
+    version: 1,
+    status: 'attempt_started',
+    buildDigest: createHash('sha256').update(buildId).digest('hex'),
+    sourceDigest: createHash('sha256')
+      .update(
+        JSON.stringify(
+          sources.map((source) => ({
+            path: source.databasePath,
+            main: source.files.main?.sha256 ?? null,
+            wal: source.files.wal?.sha256 ?? null,
+          })),
+        ),
+      )
+      .digest('hex'),
+  };
+}
+
+function readPreparationAttempt(recoveryRoot: string): PreparationAttempt | undefined {
+  const path = join(recoveryRoot, ATTEMPT_NAME);
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (!stat) return undefined;
+  if (
+    !stat.isFile() ||
+    stat.isSymbolicLink() ||
+    stat.uid !== process.getuid?.() ||
+    (stat.mode & 0o077) !== 0 ||
+    stat.size > MAX_ATTEMPT_BYTES ||
+    realpathSync.native(path) !== path
+  ) {
+    throw new Error('Store preparation attempt marker is not private and canonical.');
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    throw new Error('Store preparation attempt marker is malformed.');
+  }
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    JSON.stringify(Object.keys(value).sort()) !==
+      JSON.stringify(['buildDigest', 'sourceDigest', 'status', 'version'])
+  ) {
+    throw new Error('Store preparation attempt marker is malformed.');
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.version !== 1 ||
+    record.status !== 'attempt_started' ||
+    typeof record.buildDigest !== 'string' ||
+    !ATTEMPT_DIGEST.test(record.buildDigest) ||
+    typeof record.sourceDigest !== 'string' ||
+    !ATTEMPT_DIGEST.test(record.sourceDigest)
+  ) {
+    throw new Error('Store preparation attempt marker is malformed.');
+  }
+  return record as unknown as PreparationAttempt;
+}
+
+function writePreparationAttempt(recoveryRoot: string, attempt: PreparationAttempt): void {
+  // A durable marker must precede the first large backup, including process-kill windows.
+  const temp = join(recoveryRoot, `.preparation-attempt-${randomBytes(12).toString('hex')}.tmp`);
+  writeFileSync(temp, `${JSON.stringify(attempt)}\n`, { flag: 'wx', mode: 0o600 });
+  const fd = openSync(temp, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  fsyncDirectory(recoveryRoot);
+  renameSync(temp, join(recoveryRoot, ATTEMPT_NAME));
+  fsyncDirectory(recoveryRoot);
+}
+
+function clearPreparationAttempt(recoveryRoot: string, expected: PreparationAttempt): void {
+  const current = readPreparationAttempt(recoveryRoot);
+  if (
+    !current ||
+    current.buildDigest !== expected.buildDigest ||
+    current.sourceDigest !== expected.sourceDigest
+  ) {
+    throw new Error('Store preparation attempt marker changed during maintenance.');
+  }
+  unlinkSync(join(recoveryRoot, ATTEMPT_NAME));
+  fsyncDirectory(recoveryRoot);
+}
+
+function clearCompletedAttempt(canonicalRoot: string): void {
+  const recoveryRoot = join(canonicalRoot, 'session-store-recovery');
+  if (!lstatSync(recoveryRoot, { throwIfNoEntry: false })) return;
+  ensurePrivateDirectory(recoveryRoot);
+  const attempt = readPreparationAttempt(recoveryRoot);
+  if (attempt) clearPreparationAttempt(recoveryRoot, attempt);
+}
+
+function isTransientPreparationFailure(error: unknown): boolean {
+  if (
+    error instanceof KiteSessionStoreOpenError &&
+    [
+      'store_preparation_cancelled',
+      'store_busy',
+      'store_insufficient_space',
+      'store_access_denied',
+    ].includes(error.code)
+  )
+    return true;
+  return (
+    isStorageSpaceFailure(error) ||
+    hasFailureCode(error, [
+      'EINTR',
+      'ETIMEDOUT',
+      'EBUSY',
+      'EACCES',
+      'EPERM',
+      'EROFS',
+      'SQLITE_BUSY',
+      'SQLITE_LOCKED',
+      'SQLITE_CANTOPEN',
+      'SQLITE_PERM',
+      'SQLITE_READONLY',
+      'SQLITE_IOERR',
+    ])
+  );
 }
 
 function isStorageSpaceFailure(error: unknown): boolean {

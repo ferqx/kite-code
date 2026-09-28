@@ -35,6 +35,7 @@ export class KiteAppServerSessionError extends Error {
 }
 
 export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
+  readonly historyDatabasePath?: string;
   /** Exact instance identity that must own internally created child controllers. */
   readonly hostInstanceId: string;
   readonly executionClientId: string;
@@ -212,6 +213,7 @@ interface OwnedExecution {
 }
 
 export function createKiteSessionAppServerStorage(input: {
+  readonly databasePath?: string;
   readonly target: KiteSessionRuntimeStorageOwner<RuntimeEvent, RuntimeState>;
   readonly childApprovalProxyId: KiteSessionAppServerStorageOwner['childApprovalProxyId'];
   readonly hostInstanceId: string;
@@ -720,6 +722,7 @@ export function createKiteSessionAppServerStorage(input: {
   };
 
   return Object.freeze({
+    ...(input.databasePath ? { historyDatabasePath: input.databasePath } : {}),
     hostInstanceId: input.hostInstanceId,
     executionClientId: clientId,
     executionConnectionGeneration: connectionGeneration,

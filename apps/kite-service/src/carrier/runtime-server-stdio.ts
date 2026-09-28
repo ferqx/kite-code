@@ -36,6 +36,7 @@ import {
   RUNTIME_PROTOCOL_ERROR_NUMBERS,
   RUNTIME_PROTOCOL_ERROR_SCHEMA_,
   RUNTIME_PROTOCOL_LIMITS,
+  RUNTIME_PROTOCOL_NOTIFICATION_SCHEMA_,
   RUNTIME_PROTOCOL_REQUEST_SCHEMA_,
   RUNTIME_PROTOCOL_RESULT_SCHEMA_,
   RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_RESULT_SCHEMA_,
@@ -51,18 +52,257 @@ import type {
   RuntimeServerLogicalMessageConnection,
   RuntimeServerOpenOptions,
 } from '@kite-ai/runtime-server';
+import type { KiteHistoryPageClient } from '../runtime-client/history-page-pool';
 
 const DEFAULT_DRAIN_DEADLINE_MS = 5_000;
+const MAX_PENDING_HISTORY_READS = 256;
+const MAX_PENDING_APP_READS = 64;
+const MAX_QUEUED_HISTORY_READ_BYTES = 3 * 1024 * 1024;
+const MAX_QUEUED_APP_READ_BYTES = 1024 * 1024;
+const MAX_ACTIVE_HISTORY_READS = 48;
+const MAX_ACTIVE_APP_READS = 16;
+const MAX_GLOBAL_HISTORY_READS = 8;
+const MAX_GLOBAL_HISTORY_PENDING = 1024;
+const MAX_GLOBAL_HISTORY_PENDING_BYTES = 12 * 1024 * 1024;
+const MAX_GLOBAL_APP_READS = 16;
+const MAX_GLOBAL_APP_PENDING = 256;
+const MAX_GLOBAL_APP_PENDING_BYTES = 4 * 1024 * 1024;
+const MAX_HISTORY_READ_MS = 10_000;
+const MAX_QUEUED_OUTPUT_BYTES = 8 * 1024 * 1024;
+const MAX_QUEUED_OUTPUT_FRAMES = 2048;
+const MAX_GLOBAL_QUEUED_OUTPUT_BYTES = 64 * 1024 * 1024;
+const MAX_GLOBAL_QUEUED_OUTPUT_FRAMES = 8192;
+
+type CarrierReadKind = 'history' | 'app';
+
+type QueuedCarrierRead = Readonly<{
+  bytes: number;
+  kind: CarrierReadKind;
+  run: () => Promise<unknown>;
+  cancel: () => void;
+  expire: () => void;
+}>;
+
+// A daemon shares one History client among its socket carriers. Keep the
+// aggregate queue bounded and choose one request per connection per turn.
+const HISTORY_READ_SCHEDULERS = new WeakMap<RuntimeHistoryClient, FairReadScheduler>();
+const APP_READ_SCHEDULERS = new WeakMap<RuntimeServer, FairReadScheduler>();
+const OUTPUT_BUDGETS = new WeakMap<RuntimeServer, OutputBudget>();
+
+class OutputBudget {
+  #bytes = 0;
+  #frames = 0;
+
+  reserve(bytes: number): boolean {
+    if (
+      this.#bytes + bytes > MAX_GLOBAL_QUEUED_OUTPUT_BYTES ||
+      this.#frames >= MAX_GLOBAL_QUEUED_OUTPUT_FRAMES
+    )
+      return false;
+    this.#bytes += bytes;
+    this.#frames++;
+    return true;
+  }
+
+  release(bytes: number): void {
+    this.#bytes -= bytes;
+    this.#frames--;
+  }
+}
+
+function outputBudget(server: RuntimeServer): OutputBudget {
+  let budget = OUTPUT_BUDGETS.get(server);
+  if (!budget) {
+    budget = new OutputBudget();
+    OUTPUT_BUDGETS.set(server, budget);
+  }
+  return budget;
+}
+
+function historyReadScheduler(history: RuntimeHistoryClient): FairReadScheduler {
+  let scheduler = HISTORY_READ_SCHEDULERS.get(history);
+  if (!scheduler) {
+    scheduler = new FairReadScheduler(
+      MAX_GLOBAL_HISTORY_READS,
+      MAX_GLOBAL_HISTORY_PENDING,
+      MAX_GLOBAL_HISTORY_PENDING_BYTES,
+      true,
+    );
+    HISTORY_READ_SCHEDULERS.set(history, scheduler);
+  }
+  return scheduler;
+}
+
+function appReadScheduler(server: RuntimeServer): FairReadScheduler {
+  let scheduler = APP_READ_SCHEDULERS.get(server);
+  if (!scheduler) {
+    scheduler = new FairReadScheduler(
+      MAX_GLOBAL_APP_READS,
+      MAX_GLOBAL_APP_PENDING,
+      MAX_GLOBAL_APP_PENDING_BYTES,
+      false,
+    );
+    APP_READ_SCHEDULERS.set(server, scheduler);
+  }
+  return scheduler;
+}
+
+class FairReadScheduler {
+  readonly maxActive: number;
+  readonly maxPending: number;
+  readonly maxPendingBytes: number;
+  readonly releaseRunningOnCancel: boolean;
+  readonly #queues = new Map<object, QueuedCarrierRead[]>();
+  readonly #owners: object[] = [];
+  readonly #running = new Map<QueuedCarrierRead, { owner: object; finish: () => void }>();
+  readonly #waitTimers = new Map<QueuedCarrierRead, ReturnType<typeof setTimeout>>();
+  #pending = 0;
+  #pendingBytes = 0;
+  #active = 0;
+  #scheduled = false;
+
+  constructor(
+    maxActive: number,
+    maxPending: number,
+    maxPendingBytes: number,
+    releaseRunningOnCancel: boolean,
+  ) {
+    this.maxActive = maxActive;
+    this.maxPending = maxPending;
+    this.maxPendingBytes = maxPendingBytes;
+    this.releaseRunningOnCancel = releaseRunningOnCancel;
+  }
+
+  canAdmit(bytes: number): boolean {
+    return this.#pending < this.maxPending && this.#pendingBytes + bytes <= this.maxPendingBytes;
+  }
+
+  enqueue(owner: object, read: QueuedCarrierRead): boolean {
+    if (!this.canAdmit(read.bytes)) return false;
+    const queue = this.#queues.get(owner);
+    if (queue) queue.push(read);
+    else {
+      this.#queues.set(owner, [read]);
+      this.#owners.push(owner);
+    }
+    this.#pending++;
+    this.#pendingBytes += read.bytes;
+    this.#waitTimers.set(
+      read,
+      setTimeout(() => {
+        if (!this.remove(owner, read)) return;
+        read.expire();
+        this.#schedule();
+      }, MAX_HISTORY_READ_MS),
+    );
+    this.#schedule();
+    return true;
+  }
+
+  cancel(owner: object): void {
+    const queue = this.#queues.get(owner);
+    if (queue) {
+      this.#queues.delete(owner);
+      const index = this.#owners.indexOf(owner);
+      if (index >= 0) this.#owners.splice(index, 1);
+      for (const read of queue) {
+        this.#clearWaitTimer(read);
+        this.#pending--;
+        this.#pendingBytes -= read.bytes;
+        read.cancel();
+      }
+    }
+    for (const [read, running] of this.#running) {
+      if (running.owner !== owner) continue;
+      read.cancel();
+      if (this.releaseRunningOnCancel) running.finish();
+    }
+  }
+
+  remove(owner: object, read: QueuedCarrierRead): boolean {
+    const queue = this.#queues.get(owner);
+    const index = queue?.indexOf(read) ?? -1;
+    if (!queue || index < 0) return false;
+    queue.splice(index, 1);
+    this.#clearWaitTimer(read);
+    this.#pending--;
+    this.#pendingBytes -= read.bytes;
+    if (queue.length === 0) {
+      this.#queues.delete(owner);
+      const ownerIndex = this.#owners.indexOf(owner);
+      if (ownerIndex >= 0) this.#owners.splice(ownerIndex, 1);
+    }
+    return true;
+  }
+
+  cancelRead(owner: object, read: QueuedCarrierRead): void {
+    if (this.remove(owner, read)) {
+      read.cancel();
+      return;
+    }
+    const running = this.#running.get(read);
+    if (running?.owner !== owner) return;
+    read.cancel();
+    if (this.releaseRunningOnCancel) running.finish();
+  }
+
+  #schedule(): void {
+    if (this.#scheduled || this.#active >= this.maxActive || !this.#owners.length) return;
+    this.#scheduled = true;
+    setImmediate(() => {
+      this.#scheduled = false;
+      if (this.#active >= this.maxActive || !this.#owners.length) return;
+      const owner = this.#owners.shift()!;
+      const queue = this.#queues.get(owner)!;
+      const read = queue.shift()!;
+      this.#clearWaitTimer(read);
+      if (queue.length) this.#owners.push(owner);
+      else this.#queues.delete(owner);
+      this.#active++;
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timeout);
+        this.#running.delete(read);
+        this.#active--;
+        this.#pending--;
+        this.#pendingBytes -= read.bytes;
+        this.#schedule();
+      };
+      const timeout = setTimeout(() => {
+        read.expire();
+        if (this.releaseRunningOnCancel) finish();
+      }, MAX_HISTORY_READ_MS);
+      this.#running.set(read, { owner, finish });
+      void read.run().finally(finish);
+      this.#schedule();
+    });
+  }
+
+  #clearWaitTimer(read: QueuedCarrierRead): void {
+    const timer = this.#waitTimers.get(read);
+    if (timer) clearTimeout(timer);
+    this.#waitTimers.delete(read);
+  }
+}
 
 /** Keep source records intact and leave room for the JSON-RPC envelope. */
 function historyTranscriptPage(transcript: RuntimeHistorySessionTranscript, afterSequence = 0) {
   const { events: _events, records: source, ...metadata } = transcript;
   const records: RuntimeHistorySessionTranscript['records'][number][] = [];
   const page = { type: 'history_session_page' as const, ...metadata, records };
-  const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  const byteLength = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
   let bytes = byteLength(page);
-  for (const record of source) {
-    if (record.sequence <= afterSequence) continue;
+  let low = 0;
+  let high = source.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (source[middle]!.sequence <= afterSequence) low = middle + 1;
+    else high = middle;
+  }
+  for (let index = low; index < source.length; index++) {
+    const record = source[index]!;
     const size = byteLength(record) + 1;
     if (bytes + size > RUNTIME_PROTOCOL_LIMITS.maxMessageBytes - 65_536 || records.length === 512) {
       const last = records.at(-1);
@@ -105,7 +345,7 @@ export interface RuntimeStdioCarrierOptions {
   /** Only an App composition owner may release the Host/composition. */
   readonly shutdownComposition?: () => void | Promise<void>;
   /** KASD App Server-only durable reads on this same JSON-RPC connection. */
-  readonly history?: RuntimeHistoryClient;
+  readonly history?: RuntimeHistoryClient & Partial<KiteHistoryPageClient>;
   /** KASD App Server-only exact no-secret control surface on this connection. */
   readonly appControl?: KiteAppControlClient;
   /** KASD App Server-only Workspace removal lifecycle. */
@@ -201,6 +441,7 @@ export function createRuntimeStdioCarrier(
 ): RuntimeStdioCarrier {
   const session = new RuntimeStdioSession(options);
   const connection = options.server.open(session, {
+    historyCancellation: options.history !== undefined,
     ...(options.admission === undefined ? {} : { admission: options.admission }),
     ...(options.onClose === undefined ? {} : { onClose: options.onClose }),
   });
@@ -216,6 +457,9 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   readonly incoming = this.#readIncoming();
   readonly done: Promise<void>;
   readonly #options: RuntimeStdioCarrierOptions;
+  readonly #historyScheduler: FairReadScheduler | undefined;
+  readonly #appScheduler: FairReadScheduler;
+  readonly #outputBudget: OutputBudget;
   readonly #maxLineBytes: number;
   readonly #drainDeadlineMs: number;
   #source: AsyncIterator<Uint8Array> | undefined;
@@ -227,9 +471,19 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   #resolveDone!: () => void;
   #unsubscribeSignals: (() => void)[] = [];
   #pendingReads = new Set<Promise<unknown>>();
+  #historyReadsById = new Map<string, QueuedCarrierRead>();
+  #queuedReads: Record<CarrierReadKind, QueuedCarrierRead[]> = { history: [], app: [] };
+  #queuedReadBytes: Record<CarrierReadKind, number> = { history: 0, app: 0 };
+  #pendingReadCount: Record<CarrierReadKind, number> = { history: 0, app: 0 };
+  #activeReads: Record<CarrierReadKind, number> = { history: 0, app: 0 };
+  #queuedOutputBytes = 0;
+  #queuedOutputFrames = 0;
 
   constructor(options: RuntimeStdioCarrierOptions) {
     this.#options = options;
+    this.#historyScheduler = options.history ? historyReadScheduler(options.history) : undefined;
+    this.#appScheduler = appReadScheduler(options.server);
+    this.#outputBudget = outputBudget(options.server);
     this.#maxLineBytes = options.maxLineBytes ?? RUNTIME_PROTOCOL_LIMITS.maxMessageBytes;
     this.#drainDeadlineMs = options.drainDeadlineMs ?? DEFAULT_DRAIN_DEADLINE_MS;
     if (!Number.isSafeInteger(this.#maxLineBytes) || this.#maxLineBytes <= 0) {
@@ -269,6 +523,9 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#historyScheduler?.cancel(this);
+    this.#appScheduler.cancel(this);
+    this.#drainQueuedReads();
     if (!this.#readingComplete) {
       try {
         await this.#source?.return?.();
@@ -306,6 +563,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     // lookahead so a max-sized JSON payload may still use CRLF.
     const line = new Uint8Array(this.#maxLineBytes + 1);
     let length = 0;
+    let framesSinceYield = 0;
     try {
       this.#source = chunkIterator(this.#options.stdin);
       while (!this.#closed) {
@@ -316,12 +574,21 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
           return;
         }
         for (const byte of next.value) {
+          if (this.#closed) return;
           if (byte === 0x0a) {
+            // One OS read may contain thousands of JSONL requests. Yield to
+            // Runtime responses, timers, and other connections periodically.
+            if (++framesSinceYield === 64) {
+              framesSinceYield = 0;
+              await new Promise<void>((resolve) => setImmediate(resolve));
+              if (this.#closed) return;
+            }
             const payloadLength = length > 0 && line[length - 1] === 0x0d ? length - 1 : length;
             const parsed = await this.#parseLine(line.subarray(0, payloadLength));
             length = 0;
             if (parsed === undefined) continue;
-            if (await this.#dispatchRead(parsed)) continue;
+            if (this.#handleHistoryCancellation(parsed)) continue;
+            if (await this.#dispatchRead(parsed, payloadLength)) continue;
             if (await this.#handleHistory(parsed)) continue;
             if (await this.#handleAppControl(parsed)) continue;
             if (await this.#handleServerControl(parsed)) continue;
@@ -344,7 +611,8 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         const parsed = await this.#parseLine(line.subarray(0, payloadLength));
         if (
           parsed !== undefined &&
-          !(await this.#dispatchRead(parsed)) &&
+          !this.#handleHistoryCancellation(parsed) &&
+          !(await this.#dispatchRead(parsed, payloadLength)) &&
           !(await this.#handleHistory(parsed)) &&
           !(await this.#handleAppControl(parsed)) &&
           !(await this.#handleServerControl(parsed))
@@ -359,6 +627,26 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       );
       this.#readingComplete = true;
     }
+  }
+
+  #handleHistoryCancellation(value: unknown): boolean {
+    const candidate = value as { readonly method?: unknown; readonly id?: unknown };
+    if (candidate?.method !== 'history/cancel') return false;
+    const decoded = RUNTIME_PROTOCOL_NOTIFICATION_SCHEMA_.safeParse(value);
+    if (!decoded.success) {
+      if (candidate && Object.hasOwn(candidate, 'id'))
+        void this.#writeError(
+          typeof candidate.id === 'string' ? candidate.id : null,
+          'invalid_request',
+        ).catch(() => this.#diagnose('stdout_failure'));
+      return true;
+    }
+    if (this.#connection?.state !== 'active' || decoded.data.method !== 'history/cancel')
+      return true;
+    const read = this.#historyReadsById.get(decoded.data.params.requestId);
+    if (!read) return true;
+    this.#historyScheduler?.cancelRead(this, read);
+    return true;
   }
 
   async #parseLine(line: Uint8Array): Promise<unknown | undefined> {
@@ -381,7 +669,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     }
   }
 
-  async #dispatchRead(value: unknown): Promise<boolean> {
+  #dispatchRead(value: unknown, frameBytes: number): boolean {
     const candidate = value as { readonly method?: unknown; readonly id?: unknown };
     const method = candidate?.method;
     if (
@@ -399,31 +687,158 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       )
     )
       return false;
-    // Reads have no ordering dependency on each other. A slow capability must not
-    // hold up History, cancellation, or the next frame. Mutations keep their existing gates.
-    if (this.#pendingReads.size >= RUNTIME_PROTOCOL_LIMITS.maxInFlightRequests) {
-      await this.#writeError(
+    // Keep separate execution and admission reservations so slow capability
+    // reads cannot consume History capacity, and long History reads leave room
+    // for capability status. Neither queue blocks protocol frame parsing.
+    const kind: CarrierReadKind = method.startsWith('history/') ? 'history' : 'app';
+    if (
+      kind === 'history' &&
+      typeof candidate.id === 'string' &&
+      this.#historyReadsById.has(candidate.id)
+    ) {
+      void this.#writeError(candidate.id, 'invalid_request').catch(() =>
+        this.#diagnose('stdout_failure'),
+      );
+      return true;
+    }
+    const maxPending = kind === 'history' ? MAX_PENDING_HISTORY_READS : MAX_PENDING_APP_READS;
+    const maxQueuedBytes =
+      kind === 'history' ? MAX_QUEUED_HISTORY_READ_BYTES : MAX_QUEUED_APP_READ_BYTES;
+    const scheduler = kind === 'history' ? this.#historyScheduler : this.#appScheduler;
+    if (
+      this.#pendingReadCount[kind] >= maxPending ||
+      this.#queuedReadBytes[kind] + frameBytes > maxQueuedBytes ||
+      (scheduler !== undefined && !scheduler.canAdmit(frameBytes))
+    ) {
+      void this.#writeError(
         typeof candidate.id === 'string' ? candidate.id : null,
         'overloaded',
       ).catch(() => this.#diagnose('stdout_failure'));
       return true;
     }
-    const pending = (
-      method.startsWith('history/') ? this.#handleHistory(value) : this.#handleAppControl(value)
-    )
-      .catch(() => this.#diagnose('read_failure'))
-      .finally(() => this.#pendingReads.delete(pending));
+    let resolvePending!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      resolvePending = resolve;
+    });
+    const complete = () => {
+      if (!this.#pendingReads.delete(pending)) return;
+      this.#pendingReadCount[kind]--;
+      resolvePending();
+    };
     this.#pendingReads.add(pending);
+    this.#pendingReadCount[kind]++;
+    let started = false;
+    let cancelled = false;
+    let settled = false;
+    let responseQueued = false;
+    const abort = kind === 'history' ? new AbortController() : undefined;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (started) this.#activeReads[kind]--;
+      if (
+        kind === 'history' &&
+        typeof candidate.id === 'string' &&
+        this.#historyReadsById.get(candidate.id) === queued
+      )
+        this.#historyReadsById.delete(candidate.id);
+      complete();
+      this.#drainQueuedReads();
+    };
+    const queued: QueuedCarrierRead = {
+      bytes: frameBytes,
+      kind,
+      run: () => {
+        started = true;
+        this.#queuedReadBytes[kind] -= frameBytes;
+        this.#activeReads[kind]++;
+        return (
+          kind === 'history'
+            ? this.#handleHistory(
+                value,
+                () => cancelled,
+                abort?.signal,
+                () => {
+                  responseQueued = true;
+                },
+              )
+            : this.#handleAppControl(
+                value,
+                () => cancelled,
+                () => {
+                  responseQueued = true;
+                },
+              )
+        )
+          .catch(() => this.#diagnose('read_failure'))
+          .finally(settle);
+      },
+      cancel: () => {
+        cancelled = true;
+        abort?.abort();
+        if (!started) this.#queuedReadBytes[kind] -= frameBytes;
+        settle();
+      },
+      expire: () => {
+        cancelled = true;
+        abort?.abort();
+        if (!started) this.#queuedReadBytes[kind] -= frameBytes;
+        settle();
+        if (typeof candidate.id === 'string' && !responseQueued)
+          void this.#writeError(candidate.id, 'internal_error', {
+            detailCode: 'temporarily_unavailable',
+            retryable: true,
+          }).catch(() => this.#diagnose('stdout_failure'));
+      },
+    };
+    this.#queuedReadBytes[kind] += frameBytes;
+    if (kind === 'history' && typeof candidate.id === 'string')
+      this.#historyReadsById.set(candidate.id, queued);
+    if (scheduler) {
+      if (!scheduler.enqueue(this, queued)) {
+        queued.cancel();
+        void this.#writeError(
+          typeof candidate.id === 'string' ? candidate.id : null,
+          'overloaded',
+        ).catch(() => this.#diagnose('stdout_failure'));
+      }
+    } else {
+      this.#queuedReads[kind].push(queued);
+      this.#drainQueuedReads();
+    }
     return true;
   }
 
-  async #handleHistory(value: unknown): Promise<boolean> {
+  #drainQueuedReads(): void {
+    if (this.#closed) {
+      for (const kind of ['history', 'app'] as const) {
+        for (const queued of this.#queuedReads[kind].splice(0)) queued.cancel();
+      }
+      return;
+    }
+    for (const kind of ['history', 'app'] as const) {
+      const maxActive = kind === 'history' ? MAX_ACTIVE_HISTORY_READS : MAX_ACTIVE_APP_READS;
+      while (this.#activeReads[kind] < maxActive && this.#queuedReads[kind].length > 0) {
+        const queued = this.#queuedReads[kind].shift()!;
+        void queued.run();
+      }
+    }
+  }
+
+  async #handleHistory(
+    value: unknown,
+    isCancelled: () => boolean = () => false,
+    signal?: AbortSignal,
+    onResponseQueued: () => void = () => undefined,
+  ): Promise<boolean> {
+    if (isCancelled()) return true;
     const candidate = value as { readonly method?: unknown; readonly id?: unknown };
     if (typeof candidate.method !== 'string' || !candidate.method.startsWith('history/')) {
       return false;
     }
     const decoded = RUNTIME_PROTOCOL_REQUEST_SCHEMA_.safeParse(value);
     if (!decoded.success || !decoded.data.method.startsWith('history/')) {
+      onResponseQueued();
       await this.#writeError(
         typeof candidate.id === 'string' ? candidate.id : null,
         'invalid_params',
@@ -432,41 +847,107 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     }
     const request = decoded.data;
     if (this.#connection?.state !== 'active') {
+      onResponseQueued();
       await this.#writeError(request.id, 'not_initialized');
       return true;
     }
     const history = this.#options.history;
     if (!history) {
+      onResponseQueued();
       await this.#writeError(request.id, 'method_not_found');
       return true;
     }
     if (request.method === 'history/load_child_session' && !history.loadChildSession) {
+      onResponseQueued();
       await this.#writeError(request.id, 'method_not_found');
       return true;
     }
     try {
-      const result =
-        request.method === 'history/list_sessions'
-          ? await history.listSessions(request.params.request)
-          : request.method === 'history/list_events'
-            ? await history.listEvents(request.params.request)
-            : request.method === 'history/load_session'
-              ? await history.loadSession(
-                  request.params.sessionId,
-                  request.params.page?.throughSequence,
-                )
-              : request.method === 'history/load_child_session'
-                ? await history.loadChildSession!(
-                    request.params.parentSessionId,
-                    request.params.childSessionId,
+      const pageRead =
+        (request.method === 'history/load_session' ||
+          request.method === 'history/load_child_session') &&
+        request.params.page !== undefined &&
+        history.loadSessionPage !== undefined;
+      const fullRead =
+        (request.method === 'history/load_session' ||
+          request.method === 'history/load_child_session') &&
+        request.params.page === undefined &&
+        history.loadSessionFull !== undefined;
+      const result = pageRead
+        ? await history.loadSessionPage!(
+            {
+              sessionId:
+                request.method === 'history/load_session'
+                  ? request.params.sessionId
+                  : request.params.childSessionId,
+              ...(request.method === 'history/load_child_session'
+                ? { parentSessionId: request.params.parentSessionId }
+                : {}),
+              ...(request.params.page?.throughSequence === undefined
+                ? {}
+                : { throughSequence: request.params.page.throughSequence }),
+              ...(request.params.page?.afterSequence === undefined
+                ? {}
+                : { afterSequence: request.params.page.afterSequence }),
+              ...(request.params.page?.snapshotDigest === undefined
+                ? {}
+                : { snapshotDigest: request.params.page.snapshotDigest }),
+            },
+            { signal },
+          )
+        : fullRead
+          ? await history.loadSessionFull!(
+              {
+                sessionId:
+                  request.method === 'history/load_session'
+                    ? request.params.sessionId
+                    : request.params.childSessionId,
+                ...(request.method === 'history/load_child_session'
+                  ? { parentSessionId: request.params.parentSessionId }
+                  : {}),
+              },
+              { signal },
+            )
+          : request.method === 'history/list_sessions'
+            ? request.params.request.query?.trim() && history.searchSessions
+              ? await history.searchSessions(request.params.request, { signal })
+              : await history.listSessions(request.params.request)
+            : request.method === 'history/list_events'
+              ? await history.listEvents(request.params.request)
+              : request.method === 'history/load_session'
+                ? await history.loadSession(
+                    request.params.sessionId,
                     request.params.page?.throughSequence,
                   )
-                : undefined;
+                : request.method === 'history/load_child_session'
+                  ? await history.loadChildSession!(
+                      request.params.parentSessionId,
+                      request.params.childSessionId,
+                      request.params.page?.throughSequence,
+                    )
+                  : undefined;
       if (result === undefined) {
+        if (isCancelled()) return true;
+        onResponseQueued();
         await this.#writeError(request.id, 'method_not_found');
         return true;
       }
+      if (isCancelled()) return true;
+      if (
+        (request.method === 'history/load_session' ||
+          request.method === 'history/load_child_session') &&
+        request.params.page?.afterSequence !== undefined &&
+        request.params.page.snapshotDigest !== undefined
+      ) {
+        const digest = (result as RuntimeHistorySessionTranscript).snapshotDigest;
+        if (digest && request.params.page.snapshotDigest !== digest) {
+          throw Object.assign(new Error('History snapshot changed during pagination.'), {
+            code: 'history_snapshot_changed',
+          });
+        }
+      }
       const response =
+        !pageRead &&
         (request.method === 'history/load_session' ||
           request.method === 'history/load_child_session') &&
         request.params.page
@@ -475,12 +956,15 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
               request.params.page.afterSequence,
             )
           : result;
+      onResponseQueued();
       await this.#writeProtocol({
         jsonrpc: '2.0',
         id: request.id,
         result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse(response),
       });
     } catch (error) {
+      if (isCancelled()) return true;
+      onResponseQueued();
       await this.#writeError(
         request.id,
         'internal_error',
@@ -490,7 +974,12 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     return true;
   }
 
-  async #handleAppControl(value: unknown): Promise<boolean> {
+  async #handleAppControl(
+    value: unknown,
+    isCancelled: () => boolean = () => false,
+    onResponseQueued: () => void = () => undefined,
+  ): Promise<boolean> {
+    if (isCancelled()) return true;
     const candidate = value as { readonly method?: unknown; readonly id?: unknown };
     if (typeof candidate.method !== 'string' || !candidate.method.startsWith('app/')) {
       return false;
@@ -500,6 +989,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       !decoded.success ||
       !RUNTIME_PROTOCOL_APP_METHOD_SCHEMA_.safeParse(decoded.data.method).success
     ) {
+      onResponseQueued();
       await this.#writeError(
         typeof candidate.id === 'string' ? candidate.id : null,
         'invalid_params',
@@ -511,6 +1001,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       { readonly method: RuntimeProtocolAppMethod }
     >;
     if (this.#connection?.state !== 'active') {
+      onResponseQueued();
       await this.#writeError(request.id, 'not_initialized');
       return true;
     }
@@ -521,6 +1012,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         request.method !== 'app/workspace/remove' &&
         !this.#options.appControl)
     ) {
+      onResponseQueued();
       await this.#writeError(request.id, 'method_not_found');
       return true;
     }
@@ -537,12 +1029,16 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
                 request.method,
                 request.params.request,
               );
+      if (isCancelled()) return true;
+      onResponseQueued();
       await this.#writeProtocol({
         jsonrpc: '2.0',
         id: request.id,
         result: RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({ method: request.method, response }),
       });
     } catch (error) {
+      if (isCancelled()) return true;
+      onResponseQueued();
       await this.#writeError(
         request.id,
         error instanceof AppControlProtocolRequestError ? 'invalid_params' : 'internal_error',
@@ -634,11 +1130,27 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
 
   #writeProtocol(message: RuntimeProtocolMessage): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    const operation = this.#outputTail.then(async () => {
-      const encoded = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
-      const accepted = await this.#options.stdout.write(encoded);
-      if (!accepted) await this.#waitForDrain();
-    });
+    const encoded = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
+    if (
+      this.#queuedOutputFrames >= MAX_QUEUED_OUTPUT_FRAMES ||
+      this.#queuedOutputBytes + encoded.byteLength > MAX_QUEUED_OUTPUT_BYTES ||
+      !this.#outputBudget.reserve(encoded.byteLength)
+    ) {
+      void this.#failClosed('stdout_overloaded');
+      return Promise.reject(new Error('runtime stdio output queue is full'));
+    }
+    this.#queuedOutputFrames++;
+    this.#queuedOutputBytes += encoded.byteLength;
+    const operation = this.#outputTail
+      .then(async () => {
+        const accepted = await this.#options.stdout.write(encoded);
+        if (!accepted) await this.#waitForDrain();
+      })
+      .finally(() => {
+        this.#queuedOutputFrames--;
+        this.#queuedOutputBytes -= encoded.byteLength;
+        this.#outputBudget.release(encoded.byteLength);
+      });
     this.#outputTail = operation.catch(() => undefined);
     return operation;
   }
@@ -863,7 +1375,9 @@ function readFailure(
       : code === 'session_not_found' ||
           code === 'session_unavailable' ||
           code === 'corrupt_event' ||
-          code === 'invalid_request'
+          code === 'invalid_request' ||
+          code === 'history_snapshot_changed' ||
+          code === 'history_too_large'
         ? code
         : fallback;
   return { detailCode, retryable: detailCode === 'temporarily_unavailable' };

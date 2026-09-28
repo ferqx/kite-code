@@ -144,6 +144,7 @@ export class DesktopHost {
     phase: ServiceStartupPhase | null;
     message: string | null;
     diagnosticAvailable: boolean;
+    canRetry: boolean;
   } {
     const waitingForSafeExit = this.#quitting && (this.#openingProcess || this.#process);
     return {
@@ -154,6 +155,9 @@ export class DesktopHost {
           ? describeServiceStartupProgress({ phase: this.#startupPhase })
           : null,
       diagnosticAvailable: this.#startupDiagnostic !== null,
+      canRetry:
+        this.#startupDiagnostic?.code !== 'store_history_reconciliation_required' &&
+        this.#startupDiagnostic?.code !== 'store_preparation_retry_blocked',
     };
   }
 

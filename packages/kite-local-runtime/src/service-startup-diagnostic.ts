@@ -13,6 +13,22 @@ export const SERVICE_STARTUP_PHASES = [
 ] as const;
 export type ServiceStartupPhase = (typeof SERVICE_STARTUP_PHASES)[number];
 export type ServiceStartupProgress = Readonly<{ phase: ServiceStartupPhase }>;
+export const SERVICE_STORE_ADMISSION_REASONS = [
+  'unsupported_platform',
+  'desktop_identity_mismatch',
+  'paired_manifest_mismatch',
+  'desktop_parent_unverified',
+  'source_identity_mismatch',
+  'source_build_mismatch',
+  'source_parent_unverified',
+  'installed_identity_mismatch',
+  'release_selection_busy_or_unsafe',
+  'installed_parent_unverified',
+  'installed_process_inspection_incomplete',
+  'legacy_process_inspection_incomplete',
+  'admission_unverified',
+] as const;
+export type ServiceStoreAdmissionReason = (typeof SERVICE_STORE_ADMISSION_REASONS)[number];
 export type ServiceStartupDiagnostic = Readonly<{
   code:
     | 'store_incompatible'
@@ -22,10 +38,13 @@ export type ServiceStartupDiagnostic = Readonly<{
     | 'store_corrupt'
     | 'store_preparation_cancelled'
     | 'store_busy'
+    | 'store_admission_failed'
+    | 'store_preparation_retry_blocked'
     | 'store_history_reconciliation_required';
   actualSchema: number | null;
   expectedSchema: number | null;
   stage?: ServiceStartupPhase;
+  admissionReason?: ServiceStoreAdmissionReason;
 }>;
 const CODES = new Set([
   'store_incompatible',
@@ -35,6 +54,8 @@ const CODES = new Set([
   'store_corrupt',
   'store_preparation_cancelled',
   'store_busy',
+  'store_admission_failed',
+  'store_preparation_retry_blocked',
   'store_history_reconciliation_required',
 ]);
 
@@ -47,11 +68,18 @@ export function serviceStartupDiagnostic(error: unknown): ServiceStartupDiagnost
   )
     return undefined;
   const compatibility = isRecord(error.compatibility) ? error.compatibility : undefined;
+  const admissionReason = error.admissionReason;
+  if (
+    (error.code === 'store_admission_failed' && !validAdmissionReason(admissionReason)) ||
+    (error.code !== 'store_admission_failed' && admissionReason !== undefined)
+  )
+    return undefined;
   return {
     code: error.code as ServiceStartupDiagnostic['code'],
     actualSchema: schema(compatibility?.actualSchema),
     expectedSchema: schema(compatibility?.expectedSchema),
     ...(validPhase(error.stage) ? { stage: error.stage } : {}),
+    ...(validAdmissionReason(admissionReason) ? { admissionReason } : {}),
   };
 }
 
@@ -67,15 +95,20 @@ export function parseServiceStartupDiagnostic(
 ): ServiceStartupDiagnostic | undefined {
   for (const line of stderr.split(/\r?\n/u)) {
     if (!line.startsWith(SERVICE_STARTUP_DIAGNOSTIC_PREFIX)) continue;
-    if (line.length > 256) return undefined;
+    if (line.length > 320) return undefined;
     const value = decode(line.slice(SERVICE_STARTUP_DIAGNOSTIC_PREFIX.length));
     if (!isRecord(value)) return undefined;
     const keys = Object.keys(value).sort().join(',');
-    if (
-      keys !== 'actualSchema,code,expectedSchema' &&
-      keys !== 'actualSchema,code,expectedSchema,stage'
-    )
-      return undefined;
+    const expectedKeys = [
+      'actualSchema',
+      'code',
+      'expectedSchema',
+      ...('stage' in value ? ['stage'] : []),
+      ...('admissionReason' in value ? ['admissionReason'] : []),
+    ]
+      .sort()
+      .join(',');
+    if (keys !== expectedKeys) return undefined;
     if (
       typeof value.code !== 'string' ||
       !CODES.has(value.code) ||
@@ -84,6 +117,11 @@ export function parseServiceStartupDiagnostic(
     )
       return undefined;
     if ('stage' in value && !validPhase(value.stage)) return undefined;
+    if (
+      (value.code === 'store_admission_failed' && !validAdmissionReason(value.admissionReason)) ||
+      (value.code !== 'store_admission_failed' && 'admissionReason' in value)
+    )
+      return undefined;
     return value as ServiceStartupDiagnostic;
   }
   return undefined;
@@ -122,34 +160,48 @@ export function describeServiceStartupProgress(progress: ServiceStartupProgress)
 }
 
 /** Export only public facts. Error messages, stderr, paths and database content are never copied. */
+function serviceStartupDiagnosticRetryable(diagnostic: ServiceStartupDiagnostic): boolean {
+  return diagnostic.code === 'store_busy' || diagnostic.code === 'store_preparation_cancelled';
+}
+
 export function formatServiceStartupReport(diagnostic: ServiceStartupDiagnostic): string {
   const checked = parseServiceStartupDiagnostic(
     SERVICE_STARTUP_DIAGNOSTIC_PREFIX + JSON.stringify(diagnostic),
   );
   if (!checked) throw new TypeError('Invalid Service startup diagnostic.');
   const action =
-    checked.code === 'store_preparation_cancelled'
-      ? 'retry_startup'
-      : checked.code === 'store_access_denied'
-        ? 'check_permissions'
-        : checked.code === 'store_insufficient_space'
-          ? 'free_space'
-          : checked.code === 'store_corrupt'
-            ? 'preserve_data_and_seek_recovery'
-            : checked.code === 'store_busy'
-              ? 'close_other_clients'
-              : checked.code === 'store_history_reconciliation_required'
-                ? 'check_preparation_conditions'
-                : 'use_compatible_version';
+    checked.code === 'store_admission_failed'
+      ? admissionAction(checked.admissionReason!)
+      : checked.code === 'store_preparation_retry_blocked'
+        ? 'use_updated_version_or_recovery'
+        : checked.code === 'store_preparation_cancelled'
+          ? 'retry_startup'
+          : checked.code === 'store_access_denied'
+            ? 'check_permissions'
+            : checked.code === 'store_insufficient_space'
+              ? 'free_space'
+              : checked.code === 'store_corrupt'
+                ? 'preserve_data_and_seek_recovery'
+                : checked.code === 'store_busy'
+                  ? 'close_other_clients'
+                  : checked.code === 'store_history_reconciliation_required'
+                    ? 'use_updated_version_or_recovery'
+                    : 'use_compatible_version';
   return `${JSON.stringify(
     {
       schema: 'kite.startup-diagnostic.v1',
       code: checked.code,
       stage: checked.stage ?? null,
+      ...(checked.admissionReason ? { admissionReason: checked.admissionReason } : {}),
       actualSchema: checked.actualSchema,
       expectedSchema: checked.expectedSchema,
-      retryable: checked.code === 'store_busy' || checked.code === 'store_preparation_cancelled',
-      actions: [action, 'retry_after_resolving_condition', 'save_diagnostic'],
+      retryable: serviceStartupDiagnosticRetryable(checked),
+      actions:
+        checked.code === 'store_admission_failed' ||
+        checked.code === 'store_preparation_retry_blocked' ||
+        checked.code === 'store_history_reconciliation_required'
+          ? [action, 'save_diagnostic']
+          : [action, 'retry_after_resolving_condition', 'save_diagnostic'],
     },
     null,
     2,
@@ -162,6 +214,10 @@ export function describeServiceStartupFailure(
 ): string {
   if (diagnostic) {
     const code = diagnostic.code.toUpperCase();
+    if (diagnostic.code === 'store_admission_failed')
+      return `${code}：${validAdmissionReason(diagnostic.admissionReason) ? describeAdmissionReason(diagnostic.admissionReason) : '无法完成会话数据维护准入核实。请保存诊断以便排查。'}会话数据及恢复资料保持不变。`;
+    if (diagnostic.code === 'store_preparation_retry_blocked')
+      return `${code}：同一版本对未变化的会话数据已尝试整理且未完成；为避免重复占用磁盘，本版本不会再次复制。请使用修复版本或保存诊断进行恢复处理；原数据及恢复资料保持不变。`;
     if (diagnostic.code === 'store_preparation_cancelled')
       return `${code}：已在提交前取消会话数据整理，原会话数据保持不变，可以重新启动。`;
     if (diagnostic.code === 'store_access_denied')
@@ -169,7 +225,7 @@ export function describeServiceStartupFailure(
     if (diagnostic.code === 'store_corrupt')
       return `${code}：会话数据库未通过完整性检查。请保留当前数据库及恢复资料，保存诊断后通过恢复流程处理；不会自动清空或覆盖数据。`;
     if (diagnostic.code === 'store_history_reconciliation_required')
-      return `${code}：会话数据自动整理尚未完成，原数据及恢复资料已保留。请关闭其他 Kite 客户端后重新尝试；若仍未完成，需要使用支持当前数据格式的版本继续整理。`;
+      return `${code}：会话数据自动整理未通过校验，原数据及恢复资料已保留。请保存诊断并使用修复版本继续整理；同一版本对未变化的数据不会重复建立备份。`;
     if (diagnostic.code === 'store_insufficient_space')
       return `${code}：磁盘可用空间不足，暂时无法完成会话数据整理。请释放磁盘空间后重新尝试；不要删除 Kite 会话数据或恢复资料。`;
     if (diagnostic.code === 'store_busy')
@@ -199,4 +255,54 @@ function validSchema(value: unknown): value is number | null {
 }
 function schema(value: unknown): number | null {
   return validSchema(value) ? value : null;
+}
+function validAdmissionReason(value: unknown): value is ServiceStoreAdmissionReason {
+  return (
+    typeof value === 'string' &&
+    (SERVICE_STORE_ADMISSION_REASONS as readonly string[]).includes(value)
+  );
+}
+function admissionAction(reason: ServiceStoreAdmissionReason): string {
+  switch (reason) {
+    case 'unsupported_platform':
+      return 'use_supported_platform';
+    case 'desktop_identity_mismatch':
+    case 'paired_manifest_mismatch':
+    case 'source_identity_mismatch':
+    case 'source_build_mismatch':
+    case 'installed_identity_mismatch':
+    case 'release_selection_busy_or_unsafe':
+      return 'verify_matching_installation';
+    case 'desktop_parent_unverified':
+    case 'source_parent_unverified':
+    case 'installed_parent_unverified':
+      return 'restart_verified_client';
+    case 'legacy_process_inspection_incomplete':
+    case 'installed_process_inspection_incomplete':
+      return 'inspect_other_clients';
+    case 'admission_unverified':
+      return 'save_diagnostic_for_recovery';
+  }
+}
+function describeAdmissionReason(reason: ServiceStoreAdmissionReason): string {
+  switch (reason) {
+    case 'unsupported_platform':
+      return '此平台不支持自动整理会话数据。请使用支持的运行环境。';
+    case 'desktop_identity_mismatch':
+    case 'paired_manifest_mismatch':
+    case 'source_identity_mismatch':
+    case 'source_build_mismatch':
+    case 'installed_identity_mismatch':
+    case 'release_selection_busy_or_unsafe':
+      return '无法核实客户端与配套服务或安装版本。请检查安装并从受支持的入口重新启动。';
+    case 'desktop_parent_unverified':
+    case 'source_parent_unverified':
+    case 'installed_parent_unverified':
+      return '无法核实启动配套服务的客户端。请退出 Kite 后从受支持的入口重新启动。';
+    case 'legacy_process_inspection_incomplete':
+    case 'installed_process_inspection_incomplete':
+      return '无法完整核实其他客户端是否仍在使用会话数据。请退出其他 Kite 客户端并保存诊断。';
+    case 'admission_unverified':
+      return '无法完成会话数据维护准入核实。请保存诊断以便排查。';
+  }
 }

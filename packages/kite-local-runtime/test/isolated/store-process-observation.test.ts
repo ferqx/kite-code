@@ -103,6 +103,40 @@ test('Darwin scopes live Services by Store and refuses an unknown candidate home
   });
 });
 
+test('Darwin scopes a different client by that process HOME', async () => {
+  if (process.platform !== 'darwin') return;
+  const root = mkdtempSync(join(tmpdir(), 'kite-process-home-scope-'));
+  directories.push(root);
+  const observerHome = join(root, 'observer');
+  const clientHome = join(root, 'client');
+  mkdirSync(observerHome);
+  mkdirSync(clientHome);
+  const client = fixture('cli', [], { HOME: clientHome });
+  await ready(client);
+
+  const script = join(root, 'observe.ts');
+  const source = new URL('../../src/service/legacy-store-processes.ts', import.meta.url).pathname;
+  writeFileSync(
+    script,
+    `import { observeLegacyKiteStoreProcesses } from ${JSON.stringify(source)};
+process.stdout.write(JSON.stringify(observeLegacyKiteStoreProcesses({ canonicalKiteHome: ${JSON.stringify(join(observerHome, '.kite-code'))} })));`,
+  );
+  const observer = Bun.spawn([process.execPath, script], {
+    env: { ...process.env, HOME: observerHome },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [output, exitCode] = await Promise.all([
+    new Response(observer.stdout).text(),
+    observer.exited,
+  ]);
+  expect(exitCode).toBe(0);
+  const result = JSON.parse(output) as ReturnType<typeof observeLegacyKiteStoreProcesses>;
+  if (result.status === 'busy')
+    expect(result.matches.some((match) => match.pid === client.pid)).toBe(false);
+  else expect(result.status).toBe('complete');
+});
+
 test('Darwin ignores a verified zombie even while its PID still exists', async () => {
   if (process.platform !== 'darwin') return;
   const python = Bun.which('python3');

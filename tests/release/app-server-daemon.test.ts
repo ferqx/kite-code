@@ -176,7 +176,7 @@ describe('explicit App Server daemon lifecycle', () => {
     }
   }, 30_000);
 
-  test('absent daemon delegates exact Store 11 preparation and surfaces an unqualified admission refusal', async () => {
+  test('absent daemon refuses Store 11 preparation without a verified source parent', async () => {
     if (process.platform === 'win32') return;
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-daemon-store11-')));
     cleanup.push(root);
@@ -201,7 +201,7 @@ describe('explicit App Server daemon lifecycle', () => {
       systemHome: root,
       sourceWebStaticRoot: createWebAssets(root),
     });
-    await expect(daemon.start(root)).rejects.toThrow('STORE_HISTORY_RECONCILIATION_REQUIRED');
+    await expect(daemon.start(root)).rejects.toThrow('STORE_ADMISSION_FAILED');
     expect(createHash('sha256').update(readFileSync(storePath)).digest('hex')).toBe(before);
     expect((await daemon.status()).state).toBe('absent');
   }, 20_000);

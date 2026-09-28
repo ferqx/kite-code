@@ -1,12 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   acquireKiteSessionStoreMaintenance,
   KITE_SESSION_STORE_FORMAT_EPOCH,
   type KiteSessionMaintenanceLock,
+  KiteSessionStoreOpenError,
 } from '@kite-ai/runtime-storage-sqlite';
 import { KITE_SESSION_STORE11_DDL } from '../../../../packages/runtime-storage-sqlite/src/kite-session-store11-conversion';
 import {
@@ -113,6 +114,52 @@ test('Service stops waiting on startup cancellation and leaves no maintenance ow
   }
 });
 
+test('unverified admission fails once with a bounded reason and retains the old Store', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-store-admission-failure-'));
+  const databasePath = join(root, 'kite-session.sqlite');
+  const oldStore = new Database(databasePath);
+  chmodSync(databasePath, 0o600);
+  for (const sql of KITE_SESSION_STORE11_DDL) oldStore.run(sql);
+  oldStore.run(
+    "INSERT INTO kite_meta VALUES ('schema_version', '11'), ('format_epoch', 'kite-session-accepted-runs-2026-09-15')",
+  );
+  oldStore.run('PRAGMA user_version=11');
+  oldStore.close(false);
+  const before = readFileSync(databasePath);
+  let reviews = 0;
+  const stages: StartupStage[] = [];
+  try {
+    await expect(
+      createKiteSessionAppServerStorageComposition({
+        databasePath,
+        hostInstanceId: 'unverified-parent',
+        onStoreStartupProgress: (stage) => {
+          stages.push(stage);
+        },
+        assertRetiredStoreWritersStopped: () => {
+          reviews++;
+          throw new KiteSessionStoreOpenError(
+            'store_admission_failed',
+            'Parent identity is unverified.',
+            { admissionReason: 'desktop_parent_unverified' },
+          );
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'store_admission_failed',
+      stage: 'acquiring_maintenance',
+      admissionReason: 'desktop_parent_unverified',
+    });
+    expect(reviews).toBe(1);
+    expect(stages).not.toContain('waiting_for_store');
+    expect(stages).not.toContain('preparing');
+    expect(readFileSync(databasePath)).toEqual(before);
+    expect(existsSync(join(root, 'session-store-recovery'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a qualified older Store publishes after a busy wait and remains open after post-publication cancellation', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-store-published-stop-'));
   const databasePath = join(root, 'kite-session.sqlite');
@@ -151,7 +198,7 @@ test('a qualified older Store publishes after a busy wait and remains open after
     try {
       expect(current.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual(
         {
-          value: '13',
+          value: '14',
         },
       );
       expect(current.query("SELECT value FROM kite_meta WHERE key='format_epoch'").get()).toEqual({

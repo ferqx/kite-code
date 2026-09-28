@@ -2,6 +2,8 @@
 
 Status: implemented
 
+本记录的无版本生产业务入口、单一 composition root 与禁止旧 alias／fallback façade 的取舍仍适用。对已验证旧 Store 的受控候选转换，以及迁移前旧写入者观测的全局禁令，已由[受控兼容 owner 的架构门禁](../process/2026-09-28-scope-pre-release-architecture-gate-to-compatibility-owners.md)部分取代；当前支持来源与失败边界以[本机 App Server 契约](../../../../docs/active/app-server-local-runtime.md#store-与版本)为准。下文旧格式不迁移的表述只描述当时 clean cutover 阶段，不再约束现行 Store 启动准备。
+
 ## Problem
 Kite Code 仍处于未发布阶段。迁移任务编号和格式版本曾进入生产文件名、实体名与跨包入口，导致模块身份、持久格式 metadata 与历史执行阶段混在一起。现有 Runtime 仍必须保持单一 Workspace authority、Host transaction owner、ack/receipt/terminal 顺序与 recovery 语义。
 

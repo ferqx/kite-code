@@ -1,6 +1,5 @@
 import { dlopen, ptr } from 'bun:ffi';
 import { realpathSync } from 'node:fs';
-import { userInfo } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 /** Observation only: this does not establish that an old distribution cannot launch later. */
@@ -266,10 +265,7 @@ export function observeLegacyKiteStoreProcesses(
     if (!Number.isInteger(count) || count <= 0 || count >= pids.length) {
       return { status: 'incomplete', reason: 'snapshot_capacity' };
     }
-    const prefixes = [
-      resolve(userInfo().homedir, '.local', 'share', 'kite-code'),
-      ...(input.managedInstallPrefixes ?? []),
-    ];
+    const prefixes = [...(input.managedInstallPrefixes ?? [])];
     if (prefixes.some((value) => !isAbsolute(value))) {
       return { status: 'incomplete', reason: 'process_identity' };
     }
@@ -461,6 +457,7 @@ function readDarwinExecutable(api: DarwinApi, pid: number): string | undefined {
 
 interface DarwinProcessInvocation {
   readonly argv: readonly string[];
+  readonly homeDirectory?: string;
   readonly configHome?: string;
   readonly runtimeHome?: string;
   readonly environmentComplete: boolean;
@@ -501,6 +498,7 @@ function readDarwinProcessInvocation(
       argv.push(decoder.decode(bytes.subarray(offset, end)));
       offset = end + 1;
     }
+    let homeDirectory: string | undefined;
     let configHome: string | undefined;
     let runtimeHome: string | undefined;
     let environmentComplete = false;
@@ -512,6 +510,10 @@ function readDarwinProcessInvocation(
         break;
       }
       const entry = decoder.decode(bytes.subarray(offset, end));
+      if (entry.startsWith('HOME=')) {
+        if (homeDirectory !== undefined) break;
+        homeDirectory = entry.slice('HOME='.length);
+      }
       if (entry.startsWith('KITE_CODE_CONFIG_HOME=')) {
         if (configHome !== undefined) break;
         configHome = entry.slice('KITE_CODE_CONFIG_HOME='.length);
@@ -522,7 +524,7 @@ function readDarwinProcessInvocation(
       }
       offset = end + 1;
     }
-    return { argv, configHome, runtimeHome, environmentComplete };
+    return { argv, homeDirectory, configHome, runtimeHome, environmentComplete };
   } catch {
     return undefined;
   }
@@ -550,21 +552,28 @@ function kiteProcessStoreHomes(
   const explicit = positions.length === 1 ? invocation.argv[positions[0]! + 1] : undefined;
   if (positions.length === 1 && !explicit) return undefined;
   if (!invocation.environmentComplete) return undefined;
-  const defaultHome = join(userInfo().homedir, '.kite-code');
+  // The observer's HOME may be an isolated test or Service home. A different
+  // process's default Store must be derived from that process's own environment.
+  const defaultHome = invocation.homeDirectory
+    ? join(invocation.homeDirectory, '.kite-code')
+    : undefined;
   if (kind === 'service') {
     // Older Services may keep their Store under the runtime root even when
     // their config root differs. Either root can therefore conflict.
     const paths = [invocation.configHome, invocation.runtimeHome].filter(
       (path): path is string => path !== undefined,
     );
-    const homes = (paths.length > 0 ? paths : [defaultHome]).map(canonicalStoreHome);
+    const candidates = paths.length > 0 ? paths : defaultHome ? [defaultHome] : [];
+    if (candidates.length === 0) return undefined;
+    const homes = candidates.map(canonicalStoreHome);
     return homes.every((home): home is string => home !== undefined) ? homes : undefined;
   }
-  // Current clients use --kite-home or the OS home. Include inherited Kite
+  // Current clients use --kite-home or their own HOME. Include inherited Kite
   // roots as candidates as well, since an older client may route through them.
   const paths = [explicit ?? defaultHome, invocation.configHome, invocation.runtimeHome].filter(
     (path): path is string => path !== undefined,
   );
+  if (paths.length === 0) return undefined;
   const homes = paths.map(canonicalStoreHome);
   return homes.every((home): home is string => home !== undefined) ? homes : undefined;
 }

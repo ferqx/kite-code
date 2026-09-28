@@ -84,6 +84,26 @@ describe('Runtime Protocol', () => {
       expect(safeDecodeRuntimeProtocolMessage(request(value)).success).toBeFalse();
     }
   });
+  test('History cancellation is an exact notification bound to one RPC id', () => {
+    const notification = {
+      jsonrpc: '2.0',
+      method: 'history/cancel',
+      params: { requestId: 'rpc-2-17' },
+    };
+    expect(safeDecodeRuntimeProtocolMessage(notification).success).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage({ ...notification, id: 'rpc-cancel' }).success,
+    ).toBeFalse();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        ...notification,
+        params: { requestId: 'rpc-2-17', sessionId: 'other-session' },
+      }).success,
+    ).toBeFalse();
+    expect(
+      safeDecodeRuntimeProtocolMessage({ ...notification, params: { requestId: '' } }).success,
+    ).toBeFalse();
+  });
   test('requires exact parent and child identities for a child live subscription', () => {
     const request = {
       jsonrpc: '2.0',
@@ -1325,7 +1345,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'ad5fb600:0ba630f3';
+    const expectedDigest = 'c74fa12b:94fb713b';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());
@@ -1334,6 +1354,7 @@ describe('Runtime Protocol', () => {
     expect(generated.typeScript).toContain("method: 'runtime/command'");
     expect(generated.typeScript).toContain("method: 'history/list_sessions'");
     expect(generated.typeScript).toContain("method: 'app/workspace/remove'");
+    expect(generated.typeScript).toContain('RuntimeProtocolHistoryCancelNotification');
     expect(generated.typeScript).toContain("method: 'app/workspace_trust/query'");
     expect(generated.typeScript).toContain("method: 'app/provider_credential/write'");
     expect(generated.typeScript).toContain("method: 'server/ping'");

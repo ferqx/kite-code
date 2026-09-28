@@ -51,6 +51,59 @@ describe('Node socket Runtime client transport', () => {
       fixture.cleanup();
     }
   });
+
+  test.each([
+    300, 1_000,
+  ])('drains %d responses from one socket write with a bounded queue', async (count) => {
+    const fixture = endpointFixture();
+    let resolvePeer!: (socket: import('node:net').Socket) => void;
+    const peer = new Promise<import('node:net').Socket>((resolve) => {
+      resolvePeer = resolve;
+    });
+    const server = createServer((socket) => resolvePeer(socket));
+    await listen(server, fixture.endpoint);
+    const diagnostics: string[] = [];
+    const connection = await createNodeSocketRuntimeClientTransport({
+      endpoint: fixture.endpoint,
+      maxQueuedMessages: 1,
+      onDiagnostic: (code) => diagnostics.push(code),
+    }).connect();
+    const socket = await peer;
+    try {
+      const messages = connection.messages()[Symbol.asyncIterator]();
+      const receiving = (async () => {
+        const ids: string[] = [];
+        let timerRan = false;
+        for (let index = 0; index < count; index++) {
+          const item = await messages.next();
+          expect(item.done).toBe(false);
+          ids.push((item.value as { id: string }).id);
+          if (count === 1_000 && index === 0)
+            setImmediate(() => {
+              timerRan = true;
+            });
+          if (count === 1_000 && index === 500) expect(timerRan).toBe(true);
+        }
+        return ids;
+      })();
+      socket.write(
+        Array.from(
+          { length: count },
+          (_, index) =>
+            `${JSON.stringify({ jsonrpc: '2.0', id: `bulk-${index}`, result: { status: 'ok' } })}\n`,
+        ).join(''),
+      );
+      socket.end();
+      expect(await receiving).toEqual(Array.from({ length: count }, (_, index) => `bulk-${index}`));
+      await expect(messages.next()).rejects.toThrow('App Server daemon connection failed.');
+      expect(diagnostics).toEqual(['socket_connection_closed']);
+    } finally {
+      await connection.close();
+      socket.destroy();
+      await close(server);
+      fixture.cleanup();
+    }
+  });
 });
 
 function endpointFixture(): {

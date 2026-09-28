@@ -65,6 +65,26 @@ describe('ordinary open-source release candidate workflow', () => {
     expect(workflow).toContain(`repository: \${{ env.KITE_CANDIDATE_REPOSITORY }}`);
   });
 
+  test('macOS candidate job qualifies a packaged Store upgrade before artifact upload', () => {
+    const steps = [
+      'bun run release:verify -- --require-clean-source',
+      'bun run scripts/release/prepare-desktop-service.ts dist/oss-candidate/kite-code-macos-arm64.tar.gz',
+      'bun run --cwd apps/kite-desktop build:desktop',
+      'codesign --force --deep --sign -',
+      'codesign --verify --strict',
+      'bun run --cwd apps/kite-desktop test:native:store-upgrade',
+      'actions/upload-artifact@',
+    ];
+    let previousIndex = -1;
+    for (const step of steps) {
+      const index = workflow.indexOf(step);
+      expect(index).toBeGreaterThan(previousIndex);
+      previousIndex = index;
+    }
+    expect(workflow.match(/- if: runner\.os == 'macOS'/gu)).toHaveLength(4);
+    expect(workflow).not.toContain('continue-on-error: true');
+  });
+
   test('builds and pins the Windows sandbox runner before packaging every required asset', () => {
     expect(cargoConfig).toContain('[target.x86_64-pc-windows-gnu]');
     expect(cargoConfig).toContain('link-arg=-Wl,--no-insert-timestamp');

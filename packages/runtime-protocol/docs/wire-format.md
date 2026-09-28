@@ -10,7 +10,9 @@
 
 验证：[Protocol tests](../test/)、[Server tests](../../runtime-server/test/runtime-server.test.ts)、[Client tests](../../runtime-client/test/runtime-client.test.ts)。
 
-`history/load_session` 的可选 `page` 参数携带 `afterSequence` 与 `throughSequence`。分页响应为闭集 `history_session_page`，只传 source-sequence records，不重复传 flattened events；客户端合并后还原完整 transcript。单帧仍受 1 MiB 限制，不分页的显式读取保留完整响应语义。
+`history/load_session` 的可选 `page` 参数携带 `afterSequence`、`throughSequence` 与后续页的 `snapshotDigest`。分页响应为闭集 `history_session_page`，只传 source-sequence records，不重复传 flattened events；服务端可附 64 位十六进制内容 digest，请求携带 digest 的后续页不符时返回 `history_snapshot_changed`，新客户端重新读取完整 transcript，不拼接不同版本。旧客户端省略 digest 的后续页仍可读取，但没有跨页内容改写检测。单帧仍受 1 MiB 限制，不分页的显式读取保留完整响应语义。
+
+服务端在 `initialize.capabilities.methods` 宣告 `history/cancel` 时，客户端可发送无 `id` 的 `{ "jsonrpc": "2.0", "method": "history/cancel", "params": { "requestId": "..." } }` 通知，取消同一连接上尚未完成的 History 请求。通知中的 `requestId` 是原请求的 RPC id，只能作用于该连接；未宣告此能力的旧服务端不会收到该通知。取消是资源释放信号，客户端仍须自行停止等待原响应。
 
 内部子 Session 只通过显式父树读取：`runtime/query` 的 `list_child_sessions` 和 `get_child_session_projection` 均以 `sessionId` 指明已授权的父 Session；`history/load_child_session` 同时传 `parentSessionId`、`childSessionId`，沿用同一分页响应。`runtime/subscribe` 的 `child_session` 选择器也同时携带父、子 ID，并支持源 revision 水位和 ephemeral 通知；Service 在订阅准入时核验准确父子血缘，Server 将已授权选择器映射到该子 Session 的现有事件流。普通根会话列表、直接 `get_session_projection(childId)`、`history/load_session(childId)` 和普通 `session` 订阅不因此开放。子 History 方法只在组合了受限读取端口时宣告，响应仍经过安全投影，不传原始 Store 事件。
 

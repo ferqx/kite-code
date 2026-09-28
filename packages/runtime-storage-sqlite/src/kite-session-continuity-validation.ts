@@ -7,7 +7,10 @@ import { createKiteHomeArtifactStore, type KiteHomeArtifactStore } from './kite-
 import { createKiteHomeRuntimeStorageForConnection } from './kite-home-runtime-storage';
 import { assertKiteSessionStoreSchema, assertKiteStoreIntegrity } from './kite-home-store';
 import { createKiteHomeWriteTransactionPort } from './kite-home-write';
-import { createKiteSessionExecutionAuthority } from './kite-session-execution-authority';
+import {
+  createKiteSessionExecutionAuthority,
+  isKiteSessionExecutionAuthorityQuiescent,
+} from './kite-session-execution-authority';
 import { KITE_SESSION_STORE_SCHEMA_VERSION } from './kite-session-store-format';
 import {
   SQLITE_RUNTIME_RUN_FORMAT_EPOCH,
@@ -102,13 +105,7 @@ export function validateKiteSessionStoreContinuity<Event, State>(input: {
         if (current.status === 'recovery_required') recoveryRequired++;
         if (current.status !== 'idle' && current.status !== 'recovery_required')
           throw new Error('Session continuity has live execution authority.');
-        if (
-          current.hostInstanceId !== null ||
-          current.clientId !== null ||
-          current.leaseUntilMs !== null ||
-          (current.status === 'idle' && !current.cleanupConfirmed) ||
-          (current.status === 'recovery_required' && current.cleanupConfirmed)
-        )
+        if (!isKiteSessionExecutionAuthorityQuiescent(current))
           throw new Error('Session continuity has an execution owner.');
       }
       const listed = new Set<string>();

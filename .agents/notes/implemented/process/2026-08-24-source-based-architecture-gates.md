@@ -2,6 +2,8 @@
 
 Status: implemented
 
+本记录反对生成快照与永久例外清单的取舍继续适用。现行架构门禁对受控 Store 候选转换和旧写入者迁移准入的判定，按[受控兼容 owner 的架构门禁](2026-09-28-scope-pre-release-architecture-gate-to-compatibility-owners.md)处理；旧版本身份不构成普通业务源码的全局豁免。
+
 ## Problem
 Runtime modularization 曾把 State/Event/Store、package graph 和 public export 的完整事实序列化为五份提交的 JSON 快照，并用生成器比对其可复现性。它们只复制当前源码事实，不是运行时输入；每次正常实现或 export 变化都会产生大范围 hash 与排序噪音。
 

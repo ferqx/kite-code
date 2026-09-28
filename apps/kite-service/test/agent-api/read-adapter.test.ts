@@ -652,6 +652,36 @@ describe('Agent API bounded read adapter', () => {
     expect(f.queries).toEqual([]);
   });
 
+  test('checks indexed root membership without loading the directory for Session pages', async () => {
+    const f = fixture();
+    const checked: string[] = [];
+    const context: AgentApiReadContext = {
+      ...f.context,
+      directory: {
+        list: () => {
+          throw new Error('Full directory scan is forbidden for Session reads.');
+        },
+        hasRootSession: (sessionId) => {
+          checked.push(sessionId);
+          return sessionId === 'session-1';
+        },
+      },
+    };
+    expect(await dispatch(context, '/v1/sessions/session-1')).toMatchObject({
+      matched: true,
+      result: { ok: true },
+    });
+    expect(await dispatch(context, '/v1/sessions/session-1/history?limit=1')).toMatchObject({
+      matched: true,
+      result: { ok: true },
+    });
+    expect(await dispatch(context, '/v1/sessions/session-hidden')).toMatchObject({
+      matched: true,
+      result: { ok: false, status: 404 },
+    });
+    expect(checked).toEqual(['session-1', 'session-1', 'session-hidden']);
+  });
+
   test('rejects cursor corruption and boundary replacement without disclosing event identity', async () => {
     const firstFixture = fixture();
     const first = await dispatch(firstFixture.context, '/v1/sessions/session-1/history?limit=1');

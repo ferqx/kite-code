@@ -21,6 +21,7 @@ const DEFAULT_SEND_DEADLINE_MS = 5_000;
 const DEFAULT_CLOSE_DEADLINE_MS = 5_000;
 const DEFAULT_MAX_QUEUED_MESSAGES = RUNTIME_PROTOCOL_LIMITS.maxOutboundMessages;
 const STARTUP_DIAGNOSTIC_WAIT_MS = 1_000;
+const MAX_STDOUT_FRAMES_PER_TURN = 32;
 
 export type BunStdioChildTransportDiagnosticCode =
   | 'stdio_child_exited'
@@ -268,6 +269,7 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
     const reader = this.#child.stdout.getReader();
     const line = new Uint8Array(this.#maxLineBytes + 1);
     let length = 0;
+    let framesSinceYield = 0;
     try {
       while (!this.#closed) {
         const item = await reader.read();
@@ -281,6 +283,14 @@ class BunStdioChildRuntimeClientConnection implements RuntimeClientConnection {
             const payloadLength = length > 0 && line[length - 1] === 0x0d ? length - 1 : length;
             if (!this.#acceptStdoutLine(line.subarray(0, payloadLength))) return;
             length = 0;
+            // The per-frame microtask lets an active iterator drain the bounded
+            // queue. Periodically yield to I/O and timers as well, including
+            // when one chunk contains thousands of complete responses.
+            if (++framesSinceYield === MAX_STDOUT_FRAMES_PER_TURN) {
+              framesSinceYield = 0;
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            } else await Promise.resolve();
+            if (this.#closed) return;
             continue;
           }
           // One CR byte is reserved for a max-sized CRLF line.

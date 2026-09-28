@@ -37,6 +37,7 @@ export interface DesktopStartupStatus {
     | null;
   message: string | null;
   diagnosticAvailable: boolean;
+  canRetry: boolean;
 }
 
 export type DesktopEditor = 'vscode' | 'zed' | 'textedit';

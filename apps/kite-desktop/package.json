@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test --parallel=1 --max-concurrency=1 --cwd ../.. apps/kite-desktop/test",
     "build:electron": "bun run scripts/build-electron.ts",
-    "test:native:window": "bun run scripts/native-smoke.ts"
+    "test:native:window": "bun run scripts/native-smoke.ts",
+    "test:native:store-upgrade": "bun test --parallel=1 --max-concurrency=1 scripts/session-store13-packaged-upgrade.test.ts"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",

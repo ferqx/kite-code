@@ -70,6 +70,8 @@ export interface RuntimeServerOpenOptions {
   readonly admission?: RuntimeServerAdmissionPort;
   /** App lifecycle binding; a connection close must not imply Runtime owner shutdown. */
   readonly onClose?: (connectionId: string) => void;
+  /** Only a carrier that consumes History cancellation may advertise it. */
+  readonly historyCancellation?: boolean;
 }
 
 export interface RuntimeServerBackend {
@@ -160,6 +162,7 @@ export class RuntimeServer {
       connection,
       this.#options.serverInfo,
       this.#options.historyMethods === true,
+      options?.historyCancellation === true,
       this.#options.childHistoryMethods === true,
       this.#options.appMethods === true,
       this.#options.serverControlMethods === true,
@@ -217,6 +220,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #serverInfo: Readonly<{ version: string; instanceId: string }>;
   readonly #historyMethods: boolean;
+  readonly #historyCancellation: boolean;
   readonly #childHistoryMethods: boolean;
   readonly #appMethods: boolean;
   readonly #serverControlMethods: boolean;
@@ -247,6 +251,7 @@ class ServerConnection implements RuntimeServerConnection {
     connection: RuntimeServerLogicalMessageConnection,
     serverInfo: Readonly<{ version: string; instanceId: string }>,
     historyMethods: boolean,
+    historyCancellation: boolean,
     childHistoryMethods: boolean,
     appMethods: boolean,
     serverControlMethods: boolean,
@@ -263,6 +268,7 @@ class ServerConnection implements RuntimeServerConnection {
     this.#connection = connection;
     this.#serverInfo = serverInfo;
     this.#historyMethods = historyMethods;
+    this.#historyCancellation = historyCancellation;
     this.#childHistoryMethods = childHistoryMethods;
     this.#appMethods = appMethods;
     this.#serverControlMethods = serverControlMethods;
@@ -446,7 +452,12 @@ class ServerConnection implements RuntimeServerConnection {
           'runtime/subscribe',
           'runtime/unsubscribe',
           ...(this.#historyMethods
-            ? (['history/list_sessions', 'history/list_events', 'history/load_session'] as const)
+            ? ([
+                'history/list_sessions',
+                'history/list_events',
+                'history/load_session',
+                ...(this.#historyCancellation ? (['history/cancel'] as const) : []),
+              ] as const)
             : []),
           ...(this.#childHistoryMethods ? (['history/load_child_session'] as const) : []),
           ...(this.#appMethods

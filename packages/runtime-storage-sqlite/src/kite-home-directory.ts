@@ -23,6 +23,8 @@ export interface KiteHomeDirectoryWorkspace {
 export interface KiteHomeDirectoryQueryPort {
   /** Path-free projection from the current Store 9 transaction authority. */
   list(): readonly KiteHomeDirectoryWorkspace[];
+  /** Indexed membership check for a public root Session; avoids materializing the directory. */
+  hasRootSession(sessionId: string): boolean;
   /** Keyset-paged metadata from the same Store, without restoring Runtime projections. */
   listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionPage;
 }
@@ -63,6 +65,11 @@ export function createKiteHomeDirectoryQuery(
       ORDER BY display_name ASC, workspace_id ASC
       LIMIT ?`,
   );
+  const rootSession = database.query<{ session_id: string }, [string]>(
+    `SELECT session_id FROM runtime_sessions WHERE session_id = ?${
+      hasSessionLineage(database) ? ' AND parent_session_id IS NULL' : ''
+    } LIMIT 1`,
+  );
   const listSessions = database.query<
     {
       session_id: string;
@@ -100,6 +107,9 @@ export function createKiteHomeDirectoryQuery(
   );
 
   return Object.freeze({
+    hasRootSession(sessionId: string): boolean {
+      return rootSession.get(sessionId) !== null;
+    },
     listSessions(request: ListRuntimeLogSessionsRequest): RuntimeLogSessionPage {
       assertListRuntimeLogSessionsRequest(request);
       const filters: string[] = hasSessionLineage(database) ? ['s.parent_session_id IS NULL'] : [];

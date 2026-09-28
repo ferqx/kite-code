@@ -11,6 +11,8 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
 - 路由 initialize、command、query、subscribe、unsubscribe 与 ping。
 - 可按App composition的精确布尔开关在initialize capability中声明三个History与十个App方法；Runtime Server不路由这些
   App-owned请求，声明与实际carrier handler必须由同一composition配对。普通Service/Worker不会从Store能力推断或误报它们。
+- `history/cancel` 另需当前 logical connection 的 carrier 在 `RuntimeServer.open()` 显式声明支持；generic InProcess endpoint
+  不宣告此能力。通知的解析和资源释放属于 carrier，Server core 不接受或路由该通知。
 - 显式daemon可用独立开关声明`server/status|server/shutdown`；parent-owned stdio、legacy Service和Worker不声明。方法正文仍由
   App carrier在logical message进入Server前处理，Server只拥有capability事实。
 - 管理 subscription pump、ack-before-notification、iterator cleanup、同 subscription FIFO 与 connection/global bounded outbound queue。

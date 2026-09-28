@@ -2,6 +2,8 @@
 
 Status: implemented
 
+此处旧写入者观测是迁移准入的安全 owner，不是 Runtime 的旧格式读取或旧 writer。架构门禁对该 owner 的窄边界见[受控兼容 owner 的架构门禁](../process/2026-09-28-scope-pre-release-architecture-gate-to-compatibility-owners.md)。
+
 ## Problem
 
 The macOS source, paired Desktop, and installed Service admission paths used machine-wide Kite process or distribution scans before migrating one Store. Another installation or a client on a separate canonical config home could block migration indefinitely. The Store maintenance lock cannot by itself protect against an older writer that does not participate in the lock protocol.

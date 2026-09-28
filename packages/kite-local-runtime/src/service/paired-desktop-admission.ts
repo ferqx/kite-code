@@ -111,17 +111,27 @@ export function reviewPairedDesktopStoreAdmission(input: {
   } catch {
     return { admitted: false, reason: 'paired_manifest_mismatch' };
   }
-  const parent = readKitePairedDesktopParentIdentity({
-    pid: process.ppid,
-    serviceExecutablePath: executablePath,
-    ...(input.sourceRepositoryRoot ? { sourceRepositoryRoot: input.sourceRepositoryRoot } : {}),
-  });
+  let parent: LegacyKiteProcessIdentity | undefined;
+  try {
+    parent = readKitePairedDesktopParentIdentity({
+      pid: process.ppid,
+      serviceExecutablePath: executablePath,
+      ...(input.sourceRepositoryRoot ? { sourceRepositoryRoot: input.sourceRepositoryRoot } : {}),
+    });
+  } catch {
+    return { admitted: false, reason: 'desktop_parent_unverified' };
+  }
   if (!parent) return { admitted: false, reason: 'desktop_parent_unverified' };
-  const observation = observeLegacyKiteStoreProcesses({
-    exclude: [parent],
-    canonicalKiteHome: home,
-    managedInstallPrefixes: input.knownManagedPrefixes,
-  });
+  let observation: ReturnType<typeof observeLegacyKiteStoreProcesses>;
+  try {
+    observation = observeLegacyKiteStoreProcesses({
+      exclude: [parent],
+      canonicalKiteHome: home,
+      managedInstallPrefixes: input.knownManagedPrefixes,
+    });
+  } catch {
+    return { admitted: false, reason: 'legacy_process_inspection_incomplete' };
+  }
   if (observation.status === 'busy') return { admitted: false, reason: 'legacy_process_busy' };
   if (observation.status !== 'complete')
     return { admitted: false, reason: 'legacy_process_inspection_incomplete' };

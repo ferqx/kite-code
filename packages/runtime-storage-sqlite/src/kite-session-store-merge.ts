@@ -1,12 +1,19 @@
 import type { Database } from 'bun:sqlite';
 import { inspectSqliteWorkspaceAuthorityMetadataKey } from './authority';
 import {
+  KITE_HISTORY_GENERATION_TRIGGER_NAMES,
+  KITE_HISTORY_GENERATION_TRIGGERS,
+} from './kite-history-generation';
+import {
   assertKiteSessionStoreSchema,
   assertKiteStoreIntegrity,
   KITE_SESSION_STORE_TABLE_COLUMNS,
 } from './kite-home-store';
 import { createKiteHomeWriteTransactionPort } from './kite-home-write';
-import { createKiteSessionExecutionAuthority } from './kite-session-execution-authority';
+import {
+  createKiteSessionExecutionAuthority,
+  isKiteSessionExecutionAuthorityQuiescent,
+} from './kite-session-execution-authority';
 import { isCanonicalRecoveryIdentity, recoveryIdentityMetaKey } from './preflight';
 
 /** Explicit parent-first copy order for the complete Store 13 table set. */
@@ -83,6 +90,10 @@ export function mergeKiteSessionStores10(input: {
       assertNoIdentityContradictions(source);
       assertNoIdentityContradictions(target);
 
+      // Bulk copy preserves the source's committed generation values. Suspend
+      // only the three verified built-in triggers inside this transaction.
+      for (const name of KITE_HISTORY_GENERATION_TRIGGER_NAMES) target.run(`DROP TRIGGER ${name}`);
+
       const insertedRows: Record<string, number> = {};
       let sharedWorkspaces = 0;
       for (const table of TABLE_ORDER) {
@@ -145,12 +156,24 @@ export function mergeKiteSessionStores10(input: {
               .query('UPDATE workspaces SET created_at = ?, updated_at = ? WHERE workspace_id = ?')
               .run(created, updated, row.workspace_id as string);
             sharedWorkspaces++;
+          } else if (table === 'runtime_sessions') {
+            // A content rewrite followed by a revert leaves the same durable
+            // rows with a higher cache invalidation generation. The generation
+            // is not itself a Session fact; preserve the higher watermark.
+            const facts = columns.filter((column) => column !== 'history_generation');
+            if (!sameRow(row, current, facts)) conflict();
+            const generation = maxInteger(row.history_generation, current.history_generation);
+            if (generation !== current.history_generation)
+              target
+                .query('UPDATE runtime_sessions SET history_generation = ? WHERE session_id = ?')
+                .run(generation, row.session_id as string);
           } else if (!sameRow(row, current, columns)) {
             conflict();
           }
         }
         insertedRows[table] = inserted;
       }
+      for (const sql of KITE_HISTORY_GENERATION_TRIGGERS) target.run(sql);
       assertKiteSessionStoreSchema(target);
       assertKiteStoreIntegrity(target);
       assertNoLiveAuthority(target);
@@ -235,23 +258,10 @@ function assertNoLiveAuthority(database: Database): void {
   for (const row of database
     .query<{ session_id: string }, []>('SELECT session_id FROM runtime_sessions')
     .iterate()) {
-    if (
-      !database
-        .query<{ key: string }, [string]>('SELECT key FROM kite_meta WHERE key = ?')
-        .get(`session_execution/${row.session_id}`)
-    )
-      conflict();
+    // Older Sessions can legitimately have no persisted authority record;
+    // the authority owner reads those as initial idle and clean.
     const state = authority.read(row.session_id);
-    if (
-      !(
-        (state.status === 'idle' && state.cleanupConfirmed) ||
-        (state.status === 'recovery_required' && !state.cleanupConfirmed)
-      ) ||
-      state.hostInstanceId !== null ||
-      state.clientId !== null ||
-      state.leaseUntilMs !== null
-    )
-      conflict();
+    if (!isKiteSessionExecutionAuthorityQuiescent(state)) conflict();
     for (const effect of database
       .query<{ state: string }, [string]>(
         'SELECT state FROM runtime_effect_leases WHERE session_id = ?',
@@ -267,16 +277,30 @@ function assertNoLiveAuthority(database: Database): void {
 }
 
 function rejectExtensions(database: Database): void {
-  for (const master of ['sqlite_master', 'sqlite_temp_master']) {
-    if (
-      database
-        .query<{ count: number }, []>(
-          `SELECT COUNT(*) AS count FROM ${master} WHERE type IN ('trigger', 'view')`,
-        )
-        .get()?.count !== 0
+  const persistent = database
+    .query<{ type: string; name: string }, []>(
+      "SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view')",
     )
-      conflict();
-  }
+    .all();
+  if (
+    persistent.length !== KITE_HISTORY_GENERATION_TRIGGER_NAMES.length ||
+    persistent.some(
+      (row) =>
+        row.type !== 'trigger' ||
+        !KITE_HISTORY_GENERATION_TRIGGER_NAMES.includes(
+          row.name as (typeof KITE_HISTORY_GENERATION_TRIGGER_NAMES)[number],
+        ),
+    )
+  )
+    conflict();
+  if (
+    database
+      .query<{ count: number }, []>(
+        "SELECT COUNT(*) AS count FROM sqlite_temp_master WHERE type IN ('trigger', 'view')",
+      )
+      .get()?.count !== 0
+  )
+    conflict();
 }
 
 function sameRow(left: Row, right: Row, columns: readonly string[]): boolean {

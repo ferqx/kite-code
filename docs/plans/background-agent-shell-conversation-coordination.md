@@ -109,9 +109,9 @@ D0 验收至少覆盖：三个子 Session 并发注册、handle、模型和终�
 
 #### 4.0.1 跨线程邮箱的实现边界
 
-阶段 D 的 Agent 目录以 `runtime_sessions.parent_session_id` 和各线程 Agent 身份为基础，一个 Agent 只拥有自己的 Session。当前 Store13 使用来源线程 outbox 与目标线程 inbox：发送方的准确 Tool 回执、私有正文引用、消息身份和待投递记录在来源 Session 事务中原子受理；接收方在自己的 Session 事务中按相同消息 ID 写一次 inbox 与接收事件。父子血缘、Workspace 身份、当前执行授权和目标状态在受理及投递时分别复验；知道 Agent ID 或子线程 ID 不形成权限。旧 Store11 的同 Session 邮箱表及工具路径仅为保留格式，不作为当前跨线程协议。
+阶段 D 的 Agent 目录以 `runtime_sessions.parent_session_id` 和各线程 Agent 身份为基础，一个 Agent 只拥有自己的 Session。当前 Store14 沿用 Store13 的来源线程 outbox 与目标线程 inbox：发送方的准确 Tool 回执、私有正文引用、消息身份和待投递记录在来源 Session 事务中原子受理；接收方在自己的 Session 事务中按相同消息 ID 写一次 inbox 与接收事件。父子血缘、Workspace 身份、当前执行授权和目标状态在受理及投递时分别复验；知道 Agent ID 或子线程 ID 不形成权限。旧 Store11 的同 Session 邮箱表及工具路径仅为保留格式，不作为当前跨线程协议。
 
-当前 Store13 继承 Store12 的来源 outbox／目标 inbox 的有界 `QueueOnly` 记录、来源 Tool 身份、跨 Session 血缘核对、私有正文和各自 fenced 事务。正式 App Server 的 `send_message` 从准确来源 Tool 受理，经目标 Event／inbox 投递，在目标后继模型输入中产生一次低权限 `<agent_message>`；空闲目标只排队。冷启动按未确认来源索引重放，重复扫描不产生第二条目标消息。`followup_task` 已由来源 Tool 受理并在子 Session 中准确路由；完成态终态 ACK 可生成确定性的 `reply` 邮件，待投递邮件按同一来源索引恢复。旧同 Session 表暂留，其工具开关保持关闭。
+当前 Store14 沿用 Store13 的来源 outbox／目标 inbox 的有界 `QueueOnly` 记录、来源 Tool 身份、跨 Session 血缘核对、私有正文和各自 fenced 事务。正式 App Server 的 `send_message` 从准确来源 Tool 受理，经目标 Event／inbox 投递，在目标后继模型输入中产生一次低权限 `<agent_message>`；空闲目标只排队。冷启动按未确认来源索引重放，重复扫描不产生第二条目标消息。`followup_task` 已由来源 Tool 受理并在子 Session 中准确路由；完成态终态 ACK 可生成确定性的 `reply` 邮件，待投递邮件按同一来源索引恢复。旧同 Session 表暂留，其工具开关保持关闭。
 
 正文只在来源私有 Artifact 保存一份。目标 inbox 以受限引用读取它：接收时若目标有准确活动 Run，保存该 Run 作为可投向模型的收件归属；若目标空闲，保留未绑定的排队消息，不能在后来任意人类 Run 中自动注入。目标只为归属当前 Run 的消息按自己的顺序推进 `mail_input_prepared` 水位；读列表、`wait_agent` 唤醒及 outbox 投递确认均不推进模型已读水位。来源 outbox 仍可枚举未有目标接收回执的消息；进程在任一步骤退出时按消息 ID 查询目标 inbox 后重试投递，不能重新执行发送 Tool 或生成第二条成功回执。跨线程步骤不要求父子 State 同时提交，但每一步都有明确 Session revision、幂等键和可查询的待恢复事实。QueueOnly 不申请目标模型预算，也不唤醒空闲目标；TriggerTurn 在来源资金 Run 锁定有界后备预算后，才允许目标按 §4.0 的新轮协议接纳。
 

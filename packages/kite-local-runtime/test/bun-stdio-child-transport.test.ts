@@ -72,6 +72,42 @@ describe('Bun stdio child RuntimeClient transport', () => {
     }
   });
 
+  test('real child preserves only a fixed maintenance admission reason', async () => {
+    const line = `${SERVICE_STARTUP_DIAGNOSTIC_PREFIX}${JSON.stringify({
+      code: 'store_admission_failed',
+      admissionReason: 'desktop_parent_unverified',
+      stage: 'acquiring_maintenance',
+      actualSchema: null,
+      expectedSchema: null,
+    })}\n`;
+    const runtime = new RuntimeClient({
+      clientInfo: { name: 'test', version: '1', instanceId: 'admission-test' },
+      transport: new BunStdioChildRuntimeClientTransport({
+        argv: [
+          process.execPath,
+          '-e',
+          `process.stderr.write(${JSON.stringify(line)}); process.stderr.write('secret-path\\n'); process.exit(1);`,
+        ],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      }),
+    });
+    try {
+      const error: unknown = await withTestDeadline(runtime.connect(), 3_000).catch(
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(RuntimeClientStartupError);
+      expect(error).toMatchObject({
+        diagnosticCode: 'store_admission_failed',
+        admissionReason: 'desktop_parent_unverified',
+        stage: 'acquiring_maintenance',
+      });
+      expect(String(error)).not.toContain('secret-path');
+    } finally {
+      await runtime.close();
+    }
+  });
+
   test('initialize write failure racing stderr and EOF retains the typed startup fact', async () => {
     const child = new FakeChild({ failWrite: true });
     const runtime = new RuntimeClient({
@@ -196,6 +232,42 @@ describe('Bun stdio child RuntimeClient transport', () => {
     expect(await messages.next()).toEqual({ done: false, value: pingResponse('one') });
     expect(await messages.next()).toEqual({ done: false, value: pingResponse('two') });
     await connection.close();
+  });
+
+  test.each([
+    300, 1_000,
+  ])('drains %d responses from one stdout chunk with a bounded queue', async (count) => {
+    const child = new FakeChild();
+    const diagnostics: string[] = [];
+    const connection = await transport(() => child, {
+      maxQueuedMessages: 1,
+      onDiagnostic: (code) => diagnostics.push(code),
+    }).connect();
+    try {
+      const messages = connection.messages()[Symbol.asyncIterator]();
+      const receiving = (async () => {
+        const ids: string[] = [];
+        let timerRan = false;
+        for (let index = 0; index < count; index++) {
+          const item = await messages.next();
+          expect(item.done).toBe(false);
+          ids.push((item.value as { id: string }).id);
+          if (count === 1_000 && index === 0)
+            setImmediate(() => {
+              timerRan = true;
+            });
+          if (count === 1_000 && index === 500) expect(timerRan).toBe(true);
+        }
+        return ids;
+      })();
+      child.stdoutText(
+        Array.from({ length: count }, (_, index) => line(pingResponse(`bulk-${index}`))).join(''),
+      );
+      expect(await receiving).toEqual(Array.from({ length: count }, (_, index) => `bulk-${index}`));
+      expect(diagnostics).toEqual([]);
+    } finally {
+      await connection.close();
+    }
   });
 
   test('strictly encodes writes as UTF-8 JSONL and awaits the pipe flush', async () => {

@@ -55,6 +55,19 @@ describe('Runtime Server', () => {
     });
   });
 
+  test('does not advertise carrier-owned History cancellation on a generic in-process connection', async () => {
+    const pair = createRuntimeServerInProcessHub(
+      { runtime: new FakeRuntime(), admission: allowAdmission },
+      { ...serverOptions(), historyMethods: true },
+    ).open();
+    const messages = pair.client.messages()[Symbol.asyncIterator]();
+    await pair.client.send(initialize);
+    const response = await next(messages);
+    expect(
+      (response as { result: { capabilities: { methods: string[] } } }).result.capabilities.methods,
+    ).not.toContain('history/cancel');
+  });
+
   test('releases global subscription capacity after admission throws', async () => {
     const runtime = new FakeRuntime();
     runtime.notifications = emptyIndex();

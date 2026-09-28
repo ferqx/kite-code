@@ -10,6 +10,7 @@ import type { KiteLocalRuntimeEndpoint } from '../service';
 const DEFAULT_CONNECT_DEADLINE_MS = 5_000;
 const DEFAULT_SEND_DEADLINE_MS = 5_000;
 const DEFAULT_MAX_QUEUED_MESSAGES = RUNTIME_PROTOCOL_LIMITS.maxOutboundMessages;
+const MAX_SOCKET_FRAMES_PER_TURN = 32;
 
 export type NodeSocketTransportDiagnosticCode =
   | 'socket_connect_failure'
@@ -139,7 +140,9 @@ class NodeSocketRuntimeClientConnection implements RuntimeClientConnection {
 
   #consume(): void {
     let buffered = Buffer.alloc(0);
-    this.#socket.on('data', (chunk: Buffer) => {
+    let processing: Promise<void> = Promise.resolve();
+    let framesSinceYield = 0;
+    const consumeChunk = async (chunk: Buffer): Promise<void> => {
       if (this.#closed || this.#failure) return;
       const firstNewline = chunk.indexOf(0x0a);
       if (firstNewline < 0 && buffered.byteLength + chunk.byteLength > this.#maxLineBytes) {
@@ -151,7 +154,7 @@ class NodeSocketRuntimeClientConnection implements RuntimeClientConnection {
         return;
       }
       buffered = Buffer.concat([buffered, chunk]);
-      while (true) {
+      while (!this.#closed && !this.#failure) {
         const newline = buffered.indexOf(0x0a);
         if (newline < 0) break;
         if (newline > this.#maxLineBytes) {
@@ -185,13 +188,32 @@ class NodeSocketRuntimeClientConnection implements RuntimeClientConnection {
           this.#fail('socket_queue_overflow');
           return;
         }
+        // Keep the socket paused while parsing this chunk. Give the active
+        // iterator a microtask per frame, and I/O and timers a turn per batch.
+        if (++framesSinceYield === MAX_SOCKET_FRAMES_PER_TURN) {
+          framesSinceYield = 0;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        } else await Promise.resolve();
       }
       if (buffered.byteLength > this.#maxLineBytes + 1) this.#fail('socket_overlong_line');
+    };
+    this.#socket.on('data', (chunk: Buffer) => {
+      if (this.#closed || this.#failure) return;
+      this.#socket.pause();
+      const next = processing.then(() => consumeChunk(chunk));
+      processing = next.catch(() => this.#fail('socket_connection_closed'));
+      const current = processing;
+      void current.then(() => {
+        if (processing === current && !this.#closed && !this.#failure) this.#socket.resume();
+      });
     });
     this.#socket.once('end', () => {
       if (this.#closed) return;
-      if (buffered.byteLength > 0) this.#fail('socket_truncated_line');
-      else this.#fail('socket_connection_closed');
+      void processing.then(() => {
+        if (this.#closed || this.#failure) return;
+        if (buffered.byteLength > 0) this.#fail('socket_truncated_line');
+        else this.#fail('socket_connection_closed');
+      });
     });
     this.#socket.once('error', () => this.#fail('socket_connection_closed'));
   }

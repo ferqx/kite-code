@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import {
   existsSync,
@@ -451,6 +452,9 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     expect(client.getSnapshot().ready).toBe(true);
     await client.send('continue in the original session while viewing another project');
     await waitFor(() => client.getSnapshot().projection?.currentRun?.status === 'completed');
+    // The completed projection can arrive before the Service releases its
+    // execution owner. The next command is valid only after cleanup is durable.
+    await waitForCleanExecutionAuthority(join(root, 'runtime/kite-session.sqlite'), first);
     expect(client.getSnapshot().projection?.workspaceDigest).toBe(
       client.getSnapshot().directory?.find((entry) => entry.sessionId === first)?.workspaceDigest,
     );
@@ -645,4 +649,20 @@ async function waitFor(predicate: () => boolean) {
   const deadline = Date.now() + 3000;
   while (!predicate() && Date.now() < deadline) await Bun.sleep(5);
   expect(predicate()).toBe(true);
+}
+
+async function waitForCleanExecutionAuthority(storePath: string, sessionId: string) {
+  const database = new Database(storePath, { readonly: true });
+  try {
+    await waitFor(() => {
+      const row = database
+        .query<{ value: string }, [string]>('SELECT value FROM kite_meta WHERE key = ?')
+        .get(`session_execution/${sessionId}`);
+      if (!row) return false;
+      const authority = JSON.parse(row.value) as { status?: string; cleanupConfirmed?: boolean };
+      return authority.status === 'idle' && authority.cleanupConfirmed === true;
+    });
+  } finally {
+    database.close();
+  }
 }

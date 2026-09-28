@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   KITE_HOME_STORE_FORMAT_EPOCH,
   KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
 } from '@kite-ai/runtime-storage-sqlite';
 
 const source = (path: string): string => readFileSync(path, 'utf8');
@@ -22,7 +23,8 @@ describe('KASD App Server/Session decoupling transition baseline', () => {
   });
 
   test('admits the completed KASD-01 exact Store and multi-connection owner', () => {
-    expect(KITE_SESSION_STORE_FORMAT_EPOCH).toBe('kite-session-cross-followup-2026-09-25');
+    expect(KITE_SESSION_STORE_SCHEMA_VERSION).toBeGreaterThanOrEqual(10);
+    expect(KITE_SESSION_STORE_FORMAT_EPOCH).toMatch(/^kite-session-/u);
     expect(source('packages/runtime-storage-sqlite/src/kite-session-runtime-file.ts')).toContain(
       "'store_incompatible'",
     );

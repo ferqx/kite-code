@@ -101,11 +101,11 @@ alive/uncertain/drift 全部保留。普通 disconnect 不改变 daemon；显式
 
 实现依据：[resolveManagedLocalAppServerTarget](../../scripts/release/app-server-client.ts)将 `runtimeRoot` 与 `configRoot` 指向同一 `home.root`；[Desktop host](../../apps/kite-desktop/electron/host.ts)从 canonical config root 构造进程参数；[createKiteAppServerRuntimeOwner](../../apps/kite-service/src/app-server.ts)将其交给 Store composition。[配对测试](../../tests/release/app-server-client.test.ts)断言源码入口使用该位置。
 
-Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 13、`kite-session-cross-followup-2026-09-25`；启动准备仅对已验证的 Store 9、Store 10、准确旧 epoch 11 和 Store 12 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
+Desktop、TUI、CLI 的 source/installed 入口统一打开 `<canonical-config-root>/kite-session.sqlite`。当前目标格式为 schema 14、`kite-session-history-generation-2026-09-28`；启动准备对已验证的 Store 9、Store 10、准确旧 epoch 11、Store 12 和 Store 13 执行受维护保护的备份、候选转换、连续性校验和发布。旧根会话 ID、State、事件及历史投影须保持；未知 epoch 或未经证明的语义明确拒绝，不能仅凭 schema 数字迁移。
 
-启动准备检查正式库、已知 `kite.sqlite` 与 `source-profiles/<digest>/kite-session.sqlite` 历史来源及待结算发布意图；合格来源在独占维护期归并为唯一正式库，并在旧会话可读取后才开放业务连接。转换失败或发布不确定时保留原件与恢复资产，不生成替代空库。普通历史查询保持只读，不能触发转换；见[实施方案](../plans/session-store-compatibility-and-continuity.md)。
+启动准备检查正式库、已知 `kite.sqlite` 与 `source-profiles/<digest>/kite-session.sqlite` 历史来源及待结算发布意图；合格来源在独占维护期归并为唯一正式库，并在旧会话可读取后才开放业务连接。Store 13→14 的私有候选将旧 `active`／`detached` execution owner 栅栏化为 cleanup 未确认的 `recovery_required`，不改变原库、不把租约失效当成清理完成。多来源归并与单源连续性共用无活动 owner 判定，也按 authority reader 的默认 idle 状态处理旧会话缺失的执行权行，保留已确认清理但仍标记 `recovery_required` 的记录。转换失败或发布不确定时保留原件与恢复资产，不生成替代空库。普通历史查询保持只读，不能触发转换；见[实施方案](../plans/session-store-compatibility-and-continuity.md)。
 
-Desktop 与 stdio TUI/CLI 首次初始化将白名单结构化启动诊断显示为错误码和实际/预期 schema；不展示任意 stderr。Service启动组合对明确的 `store_busy` 每250ms重试准备与开库，首个busy开始最多等待10秒，每轮重新识别真实状态；正常路径不延迟。等待通过封闭的 `waiting_for_store` 阶段展示，超时仍返回busy，未知/不安全准入不重试。启动退出请求可以停止等待；已完成发布的退出不冒充提交前取消。只有实际owner打开成功后报告ready。初始化后的普通断连保持原语义。
+Desktop 与 stdio TUI/CLI 首次初始化将白名单结构化启动诊断显示为错误码、阶段和实际/预期 schema；维护准入拒绝另带有限的 `admissionReason`，区分配套身份、清单、父进程、发行选择与旧进程观测失败。客户端只按固定 reason 给出处理动作，不展示任意 stderr、路径或原始 cause。同一已验证 Service build 对相同 source main/WAL 的未完成候选准备再次启动时，持久 marker 使其返回非重试的 `store_preparation_retry_blocked`，不再复制大备份；新 build 或源变化可重试，已提交发布仍先接续，既有恢复资产不自动删除。未分类的候选校验失败 `store_history_reconciliation_required` 也不提示同 build/source 重试，固定报告建议保存诊断并使用修复版本。Service 启动组合对明确的 `store_busy` 每 250ms 重试准备与开库，首个 busy 开始最多等待 10 秒，每轮重新识别真实状态；正常路径不延迟。等待通过封闭的 `waiting_for_store` 阶段展示，超时仍返回 busy。无法验证的身份或进程观测失败保持拒绝且不自动重试；只有已确认旧 writer 存活属于 busy。启动退出请求可以停止等待；已完成发布的退出不冒充提交前取消。只有实际 owner 打开成功后报告 ready。初始化后的普通断连保持原语义。
 
 Store owner 持有同目录固定维护文件的共享锁；迁移者必须取得独占锁，关闭或进程退出释放锁而不删除固定文件。POSIX 使用 flock，Windows 使用 LockFileEx 并由 Service 注入已有 DACL 安全校验。Windows 真实平台资格尚未完成，不能据此放行迁移。普通owner取得共享锁后重新检查发布意图及历史源，存在待结算状态时不打开或创建正式数据库。该锁不追溯约束不参与协议的历史二进制。
 
@@ -149,7 +149,7 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
-桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 只停止客户端后续分页，不中断已发出的服务读取、不新增协议方法。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
 
 Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。
 
@@ -158,9 +158,11 @@ Service 从持久 Store 读取未由当前进程持有执行权的会话时，�
 
 Service默认存储组合在初始化客户端协议前执行已知格式准备；正常连接持共享维护锁，转换及发布持canonical与所有来源的独占锁。source CLI/TUI采用当前构建和父进程准入；Desktop通过编入Electron Host的清单摘要与配对Service文件摘要核验发行身份。配对清单的纯Node helper仅供Electron主进程，renderer仍只能使用环境无关的协议入口，不能导入文件、进程观测或Service准入。
 
-source CLI/TUI、paired Desktop 和 installed CLI/TUI 的旧写入者观测按目标 canonical config home 限定：同目录活动 Kite 进程或无法核实目录的候选 Kite 进程仍拒绝维护，其他已核实目录的进程不阻断本 Store。发行入口是否存在不再单独作为迁移拒绝条件。进程观测只对可确认无法承载 Kite 入口的无关进程跳过读取失败；身份不明时仍拒绝。该准入只在迁移准备执行，当前格式正常打开不进入旧写入者准入。
+source CLI/TUI、paired Desktop 和 installed CLI/TUI 的旧写入者观测按目标 canonical config home 限定：没有显式目录的被观测进程按该进程自己的 `HOME` 推导默认 Store，绝不使用隔离 Service 的 `HOME` 代入。同目录活动 Kite 进程或无法核实目录的候选 Kite 进程仍拒绝维护，其他已核实目录的进程不阻断本 Store。发行入口是否存在不再单独作为迁移拒绝条件。进程观测只对可确认无法承载 Kite 入口的无关进程跳过读取失败；身份不明时仍拒绝。该准入只在迁移准备执行，当前格式正常打开不进入旧写入者准入。
 
 准备在私有副本完成严格9/11转换和10来源合并，维护期全量核验后才发布唯一canonical。固定短期意图优先于正常打开，发布后生产读取失败保留恢复阶段；未结清历史来源不能显示成空列表。实际支持矩阵与尚未完成的资格见[会话连续性计划](../plans/session-store-compatibility-and-continuity.md)。此机制不使任意旧安装或手动历史可执行文件自动获得跨版本并发兼容资格。
+
+[Store 13→14 打包升级回归](../../apps/kite-desktop/scripts/session-store13-packaged-upgrade.test.ts)以无活动写连接的隔离 WAL 旧库启动真实 macOS Desktop 与配套 Service，核对父子历史保留及二次启动不重做迁移；本机执行结果与制品边界见[桌面原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)。对受影响数据的只读候选检查已定位到转换后旧执行 owner 的连续性拒绝，而非这轮维护准入；隔离备份转换与发布验证见[存储 owner](../../packages/runtime-storage-sqlite/README.md)。
 
 已完成历史会话的遗留 `recovery_required` 不直接成为新一轮门禁：发送取得执行权前，在 Store writer 事务内核对无 owner、无 lease、无活跃或未知 Run、无未决 effect 和完整已完成 State。满足条件只确认旧 cleanup 并使用既有 acquire；不改历史或重发旧操作，真正未决执行保留恢复要求。
 

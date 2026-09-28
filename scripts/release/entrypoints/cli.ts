@@ -71,6 +71,7 @@ if (process.argv.includes('--version')) {
           actualSchema: error.actualSchema,
           expectedSchema: error.expectedSchema,
           ...(error.stage ? { stage: error.stage } : {}),
+          ...(error.admissionReason ? { admissionReason: error.admissionReason } : {}),
         }),
       );
     }

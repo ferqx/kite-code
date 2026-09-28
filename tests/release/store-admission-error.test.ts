@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  encodeServiceStartupDiagnostic,
+  parseServiceStartupDiagnostic,
+} from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { KiteSessionStoreOpenError } from '@kite-ai/runtime-storage-sqlite';
 import { storeAdmissionFailure } from '../../scripts/release/entrypoints/store-admission-error';
 
@@ -13,17 +17,29 @@ describe('Service Store admission errors', () => {
     }
   });
 
-  test('incomplete identity and release selection remain protected failures', () => {
+  test('incomplete identity and release selection retain finite, non-retryable reasons', () => {
     for (const reason of [
       'legacy_process_inspection_incomplete',
       'release_selection_busy_or_unsafe',
-      'installed_selection_or_process_unverified',
-      'other_distribution_unknown',
+      'installed_parent_unverified',
+      'installed_process_inspection_incomplete',
+      'desktop_identity_mismatch',
+      'paired_manifest_mismatch',
+      'desktop_parent_unverified',
       'source_identity_mismatch',
       'unsupported_platform',
-    ]) {
+    ] as const) {
       const error = storeAdmissionFailure('Store', reason);
-      expect(error).not.toBeInstanceOf(KiteSessionStoreOpenError);
+      expect(error).toBeInstanceOf(KiteSessionStoreOpenError);
+      expect(error.code).toBe('store_admission_failed');
+      expect(error.admissionReason).toBe(reason);
+      expect(parseServiceStartupDiagnostic(encodeServiceStartupDiagnostic(error)!)).toMatchObject({
+        code: 'store_admission_failed',
+        admissionReason: reason,
+      });
     }
+    const unknown = storeAdmissionFailure('Store', '/private/secret');
+    expect(unknown.admissionReason).toBe('admission_unverified');
+    expect(unknown.message).not.toContain('/private/secret');
   });
 });

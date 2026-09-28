@@ -57,4 +57,19 @@ describe('TUI startup diagnostics', () => {
     expect(report).toContain('"stage": "preparing"');
     expect(report).not.toContain('sqlite');
   });
+
+  test('reports the fixed admission reason without exposing private details', () => {
+    const report = formatTuiStartupError(
+      new RuntimeClientStartupError({
+        code: 'store_admission_failed',
+        actualSchema: null,
+        expectedSchema: null,
+        stage: 'acquiring_maintenance',
+        admissionReason: 'desktop_parent_unverified',
+      }),
+    );
+    expect(report).toContain('无法核实启动配套服务的客户端');
+    expect(report).toContain('"admissionReason": "desktop_parent_unverified"');
+    expect(report).not.toContain('/private/');
+  });
 });

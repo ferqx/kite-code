@@ -521,8 +521,8 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     : null;
   const admission = admissionRow ? parse(admissionRow.canonical_json) : {};
   const policy = record(admission.policy);
-  const independentV2 = grantPayload.schema === 'kite.child-followup-grant.v2';
-  const unsettledEarlierIndependent = independentV2
+  const isIndependentTurnProtocol = grantPayload.schema === 'kite.child-followup-grant.v2';
+  const unsettledEarlierIndependent = isIndependentTurnProtocol
     ? (database
         .query<{ count: number }, [string, string]>(
           `SELECT count(*) AS count FROM agent_mail_outbox prior
@@ -548,7 +548,7 @@ export function assertCrossSessionFollowupRunStartInTransaction(
         )
         .get(targetSessionId, mutation.submissionId)?.count ?? 0)
     : 0;
-  const validGrantBudget = independentV2
+  const validGrantBudget = isIndependentTurnProtocol
     ? validIndependentFollowupGrant(database, {
         sourceSessionId: mutation.sourceSessionId,
         targetSessionId,
@@ -6507,11 +6507,11 @@ export function acceptCrossSessionFollowupInTransaction(
   const counters = record(upper.counters);
   const gauges = record(upper.gauges);
   const deadlineAt = Date.parse(String(budget.deadlineAt));
-  const independentV2 = policy.executionMode === 'independent_turn_v2';
-  const minimumWindow = independentV2
+  const isIndependentTurnProtocol = policy.executionMode === 'independent_turn_v2';
+  const minimumWindow = isIndependentTurnProtocol
     ? 1
     : Math.max(60_000, Number(policy.firstAttemptTimeoutMs) + 5_000);
-  const originalGrant = independentV2
+  const originalGrant = isIndependentTurnProtocol
     ? readChildSealedGrant(database, input.sourceSessionId, input.targetSessionId)
     : null;
   const bodyDigest = `sha256:${createHash('sha256').update(input.bodyText).digest('hex')}`;
@@ -6521,10 +6521,10 @@ export function acceptCrossSessionFollowupInTransaction(
   const eventAdmissionRef = record(accepted.followupAdmissionRef);
   if (
     payload.schema !==
-      (independentV2
+      (isIndependentTurnProtocol
         ? 'kite.cross-session-followup-admission.v2'
         : 'kite.cross-session-followup-admission.v1') ||
-    (independentV2 &&
+    (isIndependentTurnProtocol &&
       (!originalGrant ||
         !['explore', 'plan', 'code', 'review'].includes(String(policy.targetRole)) ||
         policy.targetGrantDigest !== originalGrant.sealedGrantDigest ||
@@ -6537,7 +6537,7 @@ export function acceptCrossSessionFollowupInTransaction(
         gauges.activeToolInvocations !== 1 ||
         gauges.activeShellInvocations !== 1 ||
         gauges.activeWriters !== (policy.targetRole === 'code' ? 1 : 0))) ||
-    (!independentV2 &&
+    (!isIndependentTurnProtocol &&
       (upper.independentFollowupTurn === true || upper.unboundedToolInvocations === true)) ||
     payload.submissionId !== input.submissionId ||
     payload.messageId !== input.messageId ||
@@ -6606,17 +6606,19 @@ export function acceptCrossSessionFollowupInTransaction(
     !sameCanonicalValue(reservation, storedReservation) ||
     !sameCanonicalValue(payload.executableUpperBound, upper) ||
     counters.turns !== 1 ||
-    (independentV2 ? Number(counters.modelRequests) < 1 : counters.modelRequests !== 1) ||
+    (isIndependentTurnProtocol
+      ? Number(counters.modelRequests) < 1
+      : counters.modelRequests !== 1) ||
     !Number.isSafeInteger(counters.inputTokens) ||
     Number(counters.inputTokens) < 1 ||
-    (independentV2
+    (isIndependentTurnProtocol
       ? Number(counters.inputTokens) <
         2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))
       : Number(counters.inputTokens) >
         2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))) ||
     !Number.isSafeInteger(counters.outputTokens) ||
     Number(counters.outputTokens) < 1 ||
-    (independentV2
+    (isIndependentTurnProtocol
       ? Number(counters.outputTokens) < Number(policy.maxOutputTokens)
       : Number(counters.outputTokens) > Number(policy.maxOutputTokens)) ||
     gauges.activeSubagents !== 1 ||

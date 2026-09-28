@@ -131,6 +131,52 @@ test('host preserves the Service across renderer generations and fences stale cl
   }
 });
 
+test('host exposes whether a validated Store failure can retry in this build', async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-retry-')));
+  try {
+    const home = join(root, 'home');
+    const serviceDirectory = join(root, 'service');
+    mkdirSync(home);
+    mkdirSync(serviceDirectory);
+    const executable = join(serviceDirectory, 'kite-service');
+    writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o700 });
+    const buildId = 'retry-test';
+    let attempts = 0;
+    const host = new DesktopHost({
+      appDataDirectory: join(root, 'data'),
+      homeDirectory: home,
+      serviceDirectory,
+      platform: 'darwin',
+      serviceManifest: {
+        buildId,
+        environmentKeys: [],
+        executableSha256: digest(readFileSync(executable)),
+        expectedServerVersion: `kite-app-server-v1-${digest(buildId)}`,
+      },
+      createPeer: (options) => {
+        options.onStartupDiagnostic?.({
+          code: attempts++ === 0 ? 'store_history_reconciliation_required' : 'store_busy',
+          actualSchema: null,
+          expectedSchema: null,
+        });
+        throw new Error('fixture startup failed');
+      },
+    });
+    await expect(host.runtimeOpen()).rejects.toThrow('fixture startup failed');
+    expect(host.runtimeStartupStatus()).toMatchObject({
+      diagnosticAvailable: true,
+      canRetry: false,
+    });
+    await expect(host.runtimeOpen()).rejects.toThrow('fixture startup failed');
+    expect(host.runtimeStartupStatus()).toMatchObject({
+      diagnosticAvailable: true,
+      canRetry: true,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('quit retains a Service whose cleanup failed and retries the same owner', async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-electron-quit-owner-')));
   try {

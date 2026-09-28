@@ -92,6 +92,7 @@ import {
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundary,
+  createSqliteSessionHistoryReader,
   discoverSqliteRuntimeCompatibilitySource,
   type KiteHomeArtifactStore,
   type KiteHomeDirectoryQueryPort,
@@ -178,6 +179,15 @@ import { projectRuntimeClientText } from './runtime-client/safe-text';
 import { appSandboxBackendAvailable } from './sandbox/types';
 
 const STATE_STORAGE_BINDING_ = createRuntimeHostStateStorageBinding();
+
+/** Private read-only History worker opens its Store snapshot through the composition root. */
+export function openKiteHistoryPageReader(databasePath: string) {
+  return createSqliteSessionHistoryReader<RuntimeEvent, RuntimeState>({
+    databasePath,
+    codec: STATE_STORAGE_BINDING_.codec,
+    currentEventTypes: runtimeHostCurrentStateEventTypes(),
+  });
+}
 
 /**
  * Rebuild the Client-facing currentRun from Store 8 even when no Run is
@@ -927,6 +937,7 @@ export function suppressCompatibleKiteSession(checkpointPath: string, sessionId:
 }
 
 export interface KiteRuntimeStorageOwner {
+  readonly historyDatabasePath?: string;
   readonly directory?: import('@kite-ai/runtime-storage-sqlite').KiteHomeDirectoryQueryPort;
   readonly workspaceDeletion?: KiteSessionAppServerStorageOwner['workspaceDeletion'];
   readonly getAdmittedWorkspace?: KiteSessionAppServerStorageOwner['getAdmittedWorkspace'];
@@ -1007,6 +1018,8 @@ type KiteSessionStorageCompositionInput = {
   readonly shouldStopStartup?: () => boolean;
   readonly beforeStorePublication?: () => Promise<'commit' | 'cancel'>;
   readonly databasePath: string;
+  /** Launcher-verified Service build identity for durable Store preparation admission. */
+  readonly buildId?: string;
   readonly hostInstanceId: string;
   readonly clientId?: string;
   readonly connectionGeneration?: number;
@@ -1049,6 +1062,7 @@ export async function createKiteSessionAppServerStorageComposition(
     try {
       const preparation = await prepareKiteSessionStore({
         databasePath: input.databasePath,
+        ...(input.buildId ? { buildId: input.buildId } : {}),
         codec: STATE_STORAGE_BINDING_.codec,
         onProgress: (stage) => {
           if (stage !== 'ready') report(stage);

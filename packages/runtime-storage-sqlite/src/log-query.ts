@@ -14,6 +14,7 @@ import {
   RuntimeLogRequestValidationError,
 } from '@kite-ai/runtime-host/storage';
 import { openSqliteRuntimeLogConnection } from './connection';
+import { assertKiteSessionStoreSchema } from './kite-home-store';
 import {
   assertSqliteRuntimeRunStoreActive,
   assertSqliteWorkspaceStoreActive,
@@ -210,6 +211,44 @@ export function createSqliteRuntimeLogQueryPort<Event = unknown, State = unknown
   });
 }
 
+/** A current Session Store reader for one read-only worker transaction. */
+export function createSqliteSessionHistoryReader<Event = unknown, State = unknown>(input: {
+  readonly databasePath: string;
+  readonly codec: SqliteRuntimeSnapshotCodec<Event, State> | RuntimeSnapshotCodec<Event, State>;
+  readonly currentEventTypes: readonly string[];
+}): {
+  readonly database: Database;
+  readonly logs: RuntimeLogQueryPort<Event>;
+  childLogs(parentSessionId: string, childSessionId: string): RuntimeLogQueryPort<Event>;
+  close(): void;
+} {
+  assertNoFollowDatabasePath(input.databasePath);
+  const database = openSqliteRuntimeLogConnection(input.databasePath);
+  try {
+    assertKiteSessionStoreSchema(database);
+    const logs = createSqliteRuntimeLogQueryPortFromDatabase_({
+      database,
+      codec: input.codec,
+      currentEventTypes: input.currentEventTypes,
+    });
+    return {
+      database,
+      logs,
+      childLogs: (parentSessionId, childSessionId) =>
+        createSqliteRuntimeLogQueryPortFromDatabase_({
+          database,
+          codec: input.codec,
+          currentEventTypes: input.currentEventTypes,
+          childScope: { parentSessionId, childSessionId },
+        }),
+      close: () => database.close(),
+    };
+  } catch (error) {
+    database.close();
+    throw queryError(error);
+  }
+}
+
 /**
  * Bind the existing bounded log-query implementation to an already-open Store connection.
  * This is an internal adapter seam for the Store 7/8 owner: it opens no second SQLite connection
@@ -234,6 +273,10 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
   }
   const db = input.database;
   const rootOnly = hasSessionLineage(db) && !input.childScope;
+  const hasHistoryGeneration = db
+    .query<{ name: string }, []>('PRAGMA table_info(runtime_sessions)')
+    .all()
+    .some((column) => column.name === 'history_generation');
   if (
     input.childScope &&
     (!hasSessionLineage(db) ||
@@ -270,10 +313,11 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
               model_provider: string | null;
               model_name: string | null;
               last_sequence: number;
+              history_generation?: number;
             },
             string[]
           >(`SELECT s.session_id, s.name, s.updated_at, s.model_provider, s.model_name,
-          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence
+          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence${hasHistoryGeneration ? ', s.history_generation' : ''}
           FROM runtime_sessions s WHERE s.session_id = ?${rootOnly ? ' AND s.parent_session_id IS NULL' : ''}${input.childScope ? ' AND s.parent_session_id = ?' : ''}`)
           .get(sessionId, ...(input.childScope ? [input.childScope.parentSessionId] : []));
         return row
@@ -282,6 +326,9 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
               name: row.name,
               updatedAt: row.updated_at,
               lastSequence: row.last_sequence,
+              ...(row.history_generation === undefined
+                ? {}
+                : { historyGeneration: row.history_generation }),
               ...(row.model_provider && row.model_name
                 ? { model: { provider: row.model_provider, name: row.model_name } }
                 : {}),

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { RuntimeHistoryClient } from '@kite-ai/runtime-client';
 import type {
   InteractionMode,
@@ -103,6 +104,25 @@ function mapLogSession(entry: {
   };
 }
 
+function mapCurrentSession(
+  reader: RuntimeLogQueryPort<RuntimeEvent>,
+  entry: Parameters<typeof mapLogSession>[0],
+): RuntimeLogSessionEntry {
+  const projected = mapLogSession(entry);
+  if (!projected.needsSmartName) return projected;
+  const first = reader.listEvents({
+    sessionId: entry.sessionId,
+    direction: 'forward',
+    limit: 1,
+    eventTypes: ['user.message_appended'],
+  }).entries[0]?.event;
+  if (first?.type !== 'user.message_appended') return projected;
+  const displayName = projectRuntimeSessionTitle(first.content);
+  return displayName.length === 0
+    ? projected
+    : { ...projected, displayName, needsSmartName: false };
+}
+
 function allCurrentSessions(
   source: RuntimeLogQuerySource,
   query?: string,
@@ -112,30 +132,21 @@ function allCurrentSessions(
     let cursor: { readonly updatedAt: number; readonly sessionId: string } | undefined;
     for (;;) {
       const page = reader.listSessions({ cursor, limit: 100 });
-      entries.push(
-        ...page.entries.map((entry) => {
-          const projected = mapLogSession(entry);
-          if (!projected.needsSmartName) return projected;
-          const first = reader.listEvents({
-            sessionId: entry.sessionId,
-            direction: 'forward',
-            limit: 1,
-            eventTypes: ['user.message_appended'],
-          }).entries[0]?.event;
-          if (first?.type !== 'user.message_appended') return projected;
-          const displayName = projectRuntimeSessionTitle(first.content);
-          return displayName.length === 0
-            ? projected
-            : { ...projected, displayName, needsSmartName: false };
-        }),
-      );
+      entries.push(...page.entries.map((entry) => mapCurrentSession(reader, entry)));
       if (!page.hasMore) {
         const needle = query?.trim().toLocaleLowerCase();
         return needle
           ? entries.filter((entry) => currentSessionMatchesQuery(reader, entry, needle))
           : entries;
       }
-      if (!page.nextCursor) throw new Error('Runtime history session pagination did not advance.');
+      if (
+        !page.nextCursor ||
+        (cursor &&
+          (page.nextCursor.updatedAt > cursor.updatedAt ||
+            (page.nextCursor.updatedAt === cursor.updatedAt &&
+              page.nextCursor.sessionId >= cursor.sessionId)))
+      )
+        throw new Error('Runtime history session pagination did not advance.');
       cursor = page.nextCursor;
     }
   });
@@ -162,6 +173,48 @@ function currentSessionMatchesQuery(
   return (
     first?.type === 'user.message_appended' && first.content.toLocaleLowerCase().includes(needle)
   );
+}
+
+function searchCurrentSessionPage(
+  source: RuntimeLogQuerySource,
+  request: ListRuntimeLogSessionsRequest,
+): RuntimeLogSessionPage {
+  assertListRuntimeLogSessionsRequest(request);
+  const needle = request.query!.trim().toLocaleLowerCase();
+  return withLogs(source, (reader) => {
+    const matches: RuntimeLogSessionEntry[] = [];
+    let cursor = request.cursor;
+    for (;;) {
+      const page = reader.listSessions({
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+        ...(request.workspaceDigest ? { workspaceDigest: request.workspaceDigest } : {}),
+      });
+      for (const entry of page.entries) {
+        const projected = mapCurrentSession(reader, entry);
+        if (!currentSessionMatchesQuery(reader, projected, needle)) continue;
+        matches.push(projected);
+        if (matches.length > request.limit) {
+          const last = matches[request.limit - 1]!;
+          return {
+            entries: matches.slice(0, request.limit),
+            hasMore: true,
+            nextCursor: { updatedAt: last.updatedAt, sessionId: last.sessionId },
+          };
+        }
+      }
+      if (!page.hasMore) return { entries: matches, hasMore: false };
+      if (
+        !page.nextCursor ||
+        (cursor &&
+          (page.nextCursor.updatedAt > cursor.updatedAt ||
+            (page.nextCursor.updatedAt === cursor.updatedAt &&
+              page.nextCursor.sessionId >= cursor.sessionId)))
+      )
+        throw new Error('Runtime history session pagination did not advance.');
+      cursor = page.nextCursor;
+    }
+  });
 }
 
 function mergedSessionPage(
@@ -223,12 +276,21 @@ function mergedSessionPage(
 function findCurrentSession(
   source: RuntimeLogQuerySource,
   sessionId: string,
-): RuntimeLogSessionEntry | undefined {
+): { entry: RuntimeLogSessionEntry; historyGeneration?: number } | undefined {
   const indexed = withLogs(source, (reader) =>
     reader.getSession ? { entry: reader.getSession(sessionId) } : undefined,
   );
-  if (indexed) return indexed.entry ? mapLogSession(indexed.entry) : undefined;
-  return allCurrentSessions(source).find((entry) => entry.sessionId === sessionId);
+  if (indexed)
+    return indexed.entry
+      ? {
+          entry: mapLogSession(indexed.entry),
+          ...(indexed.entry.historyGeneration === undefined
+            ? {}
+            : { historyGeneration: indexed.entry.historyGeneration }),
+        }
+      : undefined;
+  const entry = allCurrentSessions(source).find((candidate) => candidate.sessionId === sessionId);
+  return entry ? { entry } : undefined;
 }
 
 function stableReasoningSegmentId(
@@ -249,6 +311,87 @@ type HistoricalRecord = {
   events: readonly RuntimeClientEvent[];
   identity?: RuntimeHistoryRecordIdentity;
 };
+
+// Desktop and Native History read a fixed sequence across multiple protocol pages.
+// Keep the projected transcript so a later page does not scan and project the
+// entire durable journal again. The key includes the authorized child scope;
+// callers still resolve the current Session through that scoped reader first.
+const HISTORY_CACHE_MAX_ENTRIES = 256;
+const HISTORY_CACHE_MAX_BYTES = 128 * 1024 * 1024;
+const HISTORY_CACHE_MAX_ENTRY_BYTES = 32 * 1024 * 1024;
+const HISTORY_CACHE_TTL_MS = 30_000;
+
+type CachedHistory = Readonly<{
+  transcript: RuntimeHistorySessionTranscript;
+  historyGeneration?: number;
+  bytes: number;
+  expiresAt: number;
+}>;
+
+class HistoryTranscriptCache {
+  readonly #entries = new Map<string, CachedHistory>();
+  readonly #maxBytes: number;
+  #bytes = 0;
+
+  constructor(maxBytes = HISTORY_CACHE_MAX_BYTES) {
+    this.#maxBytes = maxBytes;
+  }
+
+  get(key: string, historyGeneration?: number): RuntimeHistorySessionTranscript | undefined {
+    const entry = this.#entries.get(key);
+    if (!entry) return undefined;
+    if (
+      entry.expiresAt <= Date.now() ||
+      (historyGeneration !== undefined && entry.historyGeneration !== historyGeneration)
+    ) {
+      this.#delete(key);
+      return undefined;
+    }
+    this.#entries.delete(key);
+    this.#entries.set(key, entry);
+    return entry.transcript;
+  }
+
+  set(
+    key: string,
+    transcript: RuntimeHistorySessionTranscript,
+    retain: boolean,
+    historyGeneration?: number,
+  ): RuntimeHistorySessionTranscript {
+    // The JSON byte count bounds retained payload size, not actual JS heap use.
+    // Replace the old snapshot even when the new one is too large to retain.
+    this.#delete(key);
+    const content = JSON.stringify({
+      records: transcript.records,
+      interactionMode: transcript.interactionMode,
+      recovery: transcript.recovery,
+    });
+    const snapshotDigest = createHash('sha256').update(content).digest('hex');
+    const withDigest = { ...transcript, snapshotDigest };
+    // records and flattened events share objects in memory but occupy separate
+    // fields on the wire; double the encoded content to avoid under-accounting.
+    const bytes = Buffer.byteLength(content, 'utf8') * 2 + 4_096;
+    if (!retain || bytes > HISTORY_CACHE_MAX_ENTRY_BYTES) return withDigest;
+    this.#entries.set(key, {
+      transcript: withDigest,
+      historyGeneration,
+      bytes,
+      expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
+    });
+    this.#bytes += bytes;
+    while (this.#entries.size > HISTORY_CACHE_MAX_ENTRIES || this.#bytes > this.#maxBytes) {
+      this.#delete(this.#entries.keys().next().value!);
+    }
+    return withDigest;
+  }
+
+  #delete(key: string): void {
+    const entry = this.#entries.get(key);
+    if (!entry) return;
+    this.#bytes -= entry.bytes;
+    this.#entries.delete(key);
+  }
+}
 
 /** Rebuild only ownership proven by the bounded durable journal being loaded. */
 function repairLegacyHistoryOwnership(
@@ -423,10 +566,18 @@ export function projectRuntimeHistoryEvents(
 }
 
 /** App-owned bridge from the raw decoded log port to fixed client-safe history DTOs. */
-export function createKiteRuntimeHistoryClient(
+function createKiteRuntimeHistoryClientWithCache(
   logs: RuntimeLogQuerySource,
-  compatibility?: KiteRuntimeHistoryCompatibility,
-  openChildLogs?: KiteChildHistoryLogOpener,
+  compatibility: KiteRuntimeHistoryCompatibility | undefined,
+  openChildLogs: KiteChildHistoryLogOpener | undefined,
+  cache: HistoryTranscriptCache,
+  parentScope?: string,
+  limits?: Readonly<{
+    maxSourceBytes: number;
+    maxProjectedBytes: number;
+    maxRecords: number;
+    maxCacheBytes?: number;
+  }>,
 ): RuntimeHistoryClient {
   return Object.freeze({
     async listSessions(request: ListRuntimeLogSessionsRequest): Promise<RuntimeLogSessionPage> {
@@ -434,6 +585,19 @@ export function createKiteRuntimeHistoryClient(
         return withLogs(logs, (reader) =>
           createKiteRuntimePagedHistoryClient(reader).listSessions(request),
         );
+      if (!compatibility && request.query?.trim()) return searchCurrentSessionPage(logs, request);
+      if (!compatibility && !request.query?.trim()) {
+        assertListRuntimeLogSessionsRequest(request);
+        return withLogs(logs, (reader) => {
+          const { query: _query, ...pageRequest } = request;
+          const page = reader.listSessions(pageRequest);
+          return {
+            entries: page.entries.map((entry) => mapCurrentSession(reader, entry)),
+            ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+            hasMore: page.hasMore,
+          };
+        });
+      }
       return mergedSessionPage(logs, request, compatibility);
     },
     async listEvents(request: ListRuntimeLogEventsRequest) {
@@ -444,7 +608,8 @@ export function createKiteRuntimeHistoryClient(
       throughSequence?: number,
     ): Promise<RuntimeHistorySessionTranscript> {
       compatibility?.listSessions();
-      let session = findCurrentSession(logs, sessionId);
+      let current = findCurrentSession(logs, sessionId);
+      let session = current?.entry;
       if (!session && compatibility) {
         const imported = compatibility.importSession(sessionId);
         if (imported.status === 'failed' || imported.status === 'conflict') {
@@ -452,7 +617,8 @@ export function createKiteRuntimeHistoryClient(
             ? imported.error
             : new Error(`Runtime session import failed: ${sessionId}`);
         }
-        session = findCurrentSession(logs, sessionId);
+        current = findCurrentSession(logs, sessionId);
+        session = current?.entry;
       }
       if (!session)
         throw Object.assign(new Error(`Runtime session was not found: ${sessionId}`), {
@@ -468,10 +634,31 @@ export function createKiteRuntimeHistoryClient(
         }
         session = { ...session, lastSequence: throughSequence };
       }
+      // A continuation carries the first page's fixed watermark. Resolve the
+      // Session (and, for children, its exact parent) before consulting cache.
+      // A Store-owned event generation allows a fresh navigation to reuse the
+      // projection only when no event row has changed, including same-sequence
+      // repair. Readers without that generation still rescan the first page.
+      const cacheKey = JSON.stringify([parentScope ?? null, sessionId, session.lastSequence]);
+      if (throughSequence !== undefined && !compatibility) {
+        // A pinned load can also be a new request, not only a page continuation.
+        // Check the durable generation so same-sequence rewrites are visible.
+        const cached = cache.get(cacheKey, current?.historyGeneration);
+        if (cached) return { ...cached, session };
+      } else if (
+        throughSequence === undefined &&
+        !compatibility &&
+        current?.historyGeneration !== undefined
+      ) {
+        const cached = cache.get(cacheKey, current.historyGeneration);
+        if (cached) return { ...cached, session };
+      }
       const records = withLogs(logs, (reader) => {
         const all: HistoricalRecord[] = [];
         const sources: HistoricalSource[] = [];
         const pendingIdentityRecords: number[] = [];
+        let sourceBytes = 0;
+        let projectedBytes = 0;
         let afterSequence: number | undefined;
         let stableRunId: string | undefined;
         let activeTaskId: string | undefined;
@@ -482,11 +669,22 @@ export function createKiteRuntimeHistoryClient(
           const page = reader.listEvents({
             sessionId,
             ...(afterSequence === undefined ? {} : { afterSequence }),
-            ...(throughSequence === undefined ? {} : { beforeSequence: throughSequence + 1 }),
+            beforeSequence: session.lastSequence + 1,
             direction: 'forward',
             limit: 200,
           });
           for (const record of page.entries) {
+            if (limits) {
+              sourceBytes += Buffer.byteLength(JSON.stringify(record.event), 'utf8');
+              if (all.length >= limits.maxRecords || sourceBytes > limits.maxSourceBytes) {
+                throw Object.assign(
+                  new Error('Runtime History transcript exceeds the read budget.'),
+                  {
+                    code: 'history_too_large',
+                  },
+                );
+              }
+            }
             if (afterSequence !== undefined && record.sequence <= afterSequence) {
               throw new Error('Runtime history pagination did not advance.');
             }
@@ -545,6 +743,17 @@ export function createKiteRuntimeHistoryClient(
               events,
               ...(Object.keys(identity).length === 0 ? {} : { identity }),
             });
+            if (limits) {
+              projectedBytes += Buffer.byteLength(JSON.stringify(all.at(-1)), 'utf8');
+              if (projectedBytes > limits.maxProjectedBytes) {
+                throw Object.assign(
+                  new Error('Runtime History transcript exceeds the read budget.'),
+                  {
+                    code: 'history_too_large',
+                  },
+                );
+              }
+            }
             if (events.some((event) => !isRuntimeClientEventIdentitySatisfied(event, identity))) {
               pendingIdentityRecords.push(all.length - 1);
             }
@@ -590,7 +799,7 @@ export function createKiteRuntimeHistoryClient(
         }
       });
       const events = records.records.flatMap((record) => record.events);
-      return {
+      const transcript: RuntimeHistorySessionTranscript = {
         session,
         records: records.records,
         events,
@@ -601,6 +810,7 @@ export function createKiteRuntimeHistoryClient(
             ? 'pending_interaction'
             : 'normal',
       };
+      return cache.set(cacheKey, transcript, !compatibility, current?.historyGeneration);
     },
     ...(openChildLogs
       ? {
@@ -624,14 +834,31 @@ export function createKiteRuntimeHistoryClient(
                 },
               } as RuntimeLogQueryPort<RuntimeEvent>;
             };
-            return createKiteRuntimeHistoryClient(scopedLogs).loadSession(
-              childSessionId,
-              throughSequence,
-            );
+            return createKiteRuntimeHistoryClientWithCache(
+              scopedLogs,
+              undefined,
+              undefined,
+              cache,
+              parentSessionId,
+              limits,
+            ).loadSession(childSessionId, throughSequence);
           },
         }
       : {}),
   });
+}
+
+export function createKiteRuntimeHistoryClient(
+  logs: RuntimeLogQuerySource,
+  compatibility?: KiteRuntimeHistoryCompatibility,
+  openChildLogs?: KiteChildHistoryLogOpener,
+): RuntimeHistoryClient {
+  return createKiteRuntimeHistoryClientWithCache(
+    logs,
+    compatibility,
+    openChildLogs,
+    new HistoryTranscriptCache(),
+  );
 }
 
 /**
@@ -678,6 +905,19 @@ export function createKiteRuntimePagedHistoryFromWorkspaceStore(
 export function createKiteRuntimeObserverHistoryClient(
   logs: RuntimeLogQuerySource,
   openChildLogs?: KiteChildHistoryLogOpener,
+  limits?: Readonly<{
+    maxSourceBytes: number;
+    maxProjectedBytes: number;
+    maxRecords: number;
+    maxCacheBytes?: number;
+  }>,
 ): RuntimeHistoryClient {
-  return createKiteRuntimeHistoryClient(logs, undefined, openChildLogs);
+  return createKiteRuntimeHistoryClientWithCache(
+    logs,
+    undefined,
+    openChildLogs,
+    new HistoryTranscriptCache(limits?.maxCacheBytes),
+    undefined,
+    limits,
+  );
 }

@@ -14,6 +14,7 @@ export function formatTuiStartupError(error: unknown, pairing?: AppServerPairing
       actualSchema: error.actualSchema,
       expectedSchema: error.expectedSchema,
       ...(error.stage ? { stage: error.stage } : {}),
+      ...(error.admissionReason ? { admissionReason: error.admissionReason } : {}),
     })}`;
   }
   if (

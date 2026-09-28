@@ -29,7 +29,7 @@ Store 9对应`model_artifacts`、`plan_artifacts`、`capability_artifacts`、`fi
 `filesystem_preimage_artifacts`是mutation ready-before-commit evidence；它与Session checkpoint用的`runtime_file_preimages`不是同一领域，
 不得合表或相互 fallback；当前存储与恢复边界见[Runtime Authority](runtime-authority-boundary.md)及[SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
-Store11 引入私有 `subagent_checkpoint_artifacts`、`agent_followup_admission_artifacts` 与 `agent_mail_bodies`，分别保存子 Agent 续轮上下文、已受理续轮授权快照和有界消息正文；当前 Store13 沿用已验证的对应 Artifact 边界。旧格式只在受维护保护的私有候选中转换，不能在普通业务读取中静默改写。Agent 邮箱事件只保存 ref、digest 与来源，正文读取仍要求准确 Session 执行 handle、活动 task 和模型 invocation 准入证明；当前正式 App Server 已开放模型可见邮箱及受控续轮，实际事务与跨线程投递见 [SQLite 事务 owner](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
+Store11 引入私有 `subagent_checkpoint_artifacts`、`agent_followup_admission_artifacts` 与 `agent_mail_bodies`，分别保存子 Agent 续轮上下文、已受理续轮授权快照和有界消息正文；当前 Store14 沿用已验证的对应 Artifact 边界。旧格式只在受维护保护的私有候选中转换，不能在普通业务读取中静默改写。Agent 邮箱事件只保存 ref、digest 与来源，正文读取仍要求准确 Session 执行 handle、活动 task 和模型 invocation 准入证明；当前正式 App Server 已开放模型可见邮箱及受控续轮，实际事务与跨线程投递见 [SQLite 事务 owner](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)。
 
 旧同 Session 邮箱表保留但其生产能力开关关闭；当前独立子 Session 的结果和消息 Artifact 必须绑定准确子线程、父线程接收意图及投递 receipt。不可变 ref 与 digest 不能自证跨 Session 权限或父结果已接纳。子终态 Artifact 可以先于父接纳持久存在，待投递记录须可恢复；父确认丢失时只重放投递回执，不重新执行子任务或复制正文到 canonical Event。多 App Server owner 尚无完整跨 Session 可达性快照，Artifact GC 保持关闭。
 

@@ -21,7 +21,7 @@ export interface RuntimeServerInProcessPair {
 
 /** InProcess queue limits plus the optional App-owned connection admission. */
 export type RuntimeServerInProcessOpenOptions = Partial<RuntimeServerInProcessLimits> &
-  RuntimeServerOpenOptions;
+  Omit<RuntimeServerOpenOptions, 'historyCancellation'>;
 
 /** App composition creates one of these per Runtime instance, then opens any number of logical clients. */
 export interface RuntimeServerInProcessHub {

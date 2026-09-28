@@ -82,6 +82,226 @@ function dispatchIntent(invocationId: string, childInvocationId: string): Runtim
 }
 
 describe('Kite Runtime History Client adapter', () => {
+  test('reuses fresh root and child projections, including pinned first loads after a same-sequence rewrite', async () => {
+    const content = new Map([
+      ['root', 'root one'],
+      ['child', 'child one'],
+    ]);
+    const generations = new Map([
+      ['root', 1],
+      ['child', 1],
+    ]);
+    const reads = new Map<string, number>();
+    const reader = (visibleSession: string): RuntimeLogQueryPort<RuntimeEvent> => ({
+      getSession: (sessionId) =>
+        sessionId === visibleSession
+          ? {
+              sessionId,
+              name: sessionId,
+              updatedAt: 1,
+              lastSequence: 1,
+              historyGeneration: generations.get(sessionId)!,
+            }
+          : null,
+      listSessions: () => ({ entries: [], hasMore: false }),
+      listEvents: (request) => {
+        reads.set(visibleSession, (reads.get(visibleSession) ?? 0) + 1);
+        return {
+          entries: [
+            {
+              sessionId: visibleSession,
+              sequence: 1,
+              eventId: `${visibleSession}-event`,
+              createdAt: 1,
+              event: {
+                type: 'user.message_appended' as const,
+                messageId: `${visibleSession}-message`,
+                content: content.get(visibleSession)!,
+              },
+            },
+          ].filter(
+            (entry) => entry.sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY),
+          ),
+          hasMore: false,
+          observedLastSequence: 1,
+        };
+      },
+      close: () => undefined,
+    });
+    const history = createKiteRuntimeObserverHistoryClient(
+      () => reader('root'),
+      (parent, child) => reader(parent === 'root' ? child : 'denied'),
+    );
+    const firstRoot = await history.loadSession('root');
+    const firstChild = await history.loadChildSession!('root', 'child');
+    await history.loadSession('root');
+    await history.loadChildSession!('root', 'child');
+    await history.loadChildSession!('root', 'child', 1);
+    expect(reads).toEqual(
+      new Map([
+        ['root', 1],
+        ['child', 1],
+      ]),
+    );
+
+    content.set('child', 'child revised');
+    generations.set('child', 2);
+    const revisedChild = await history.loadChildSession!('root', 'child', 1);
+    expect(revisedChild.snapshotDigest).not.toBe(firstChild.snapshotDigest);
+    expect(revisedChild.events[0]).toMatchObject({ type: 'user.message', text: 'child revised' });
+    await history.loadSession('root');
+    expect(firstRoot.events[0]).toMatchObject({ type: 'user.message', text: 'root one' });
+    expect(reads).toEqual(
+      new Map([
+        ['root', 1],
+        ['child', 2],
+      ]),
+    );
+  });
+
+  test('bounds an unpinned read by the Session sequence observed before journal scanning', async () => {
+    const observedBeforeSequences: number[] = [];
+    const logs: RuntimeLogQueryPort<RuntimeEvent> = {
+      getSession: () => ({
+        sessionId: 'appending',
+        name: 'Appending',
+        updatedAt: 1,
+        lastSequence: 2,
+      }),
+      listSessions: () => ({ entries: [], hasMore: false }),
+      listEvents: (request) => {
+        observedBeforeSequences.push(request.beforeSequence ?? -1);
+        return {
+          entries: [1, 2, 3]
+            .filter((sequence) => sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY))
+            .map((sequence) => ({
+              sessionId: 'appending',
+              sequence,
+              eventId: `event-${sequence}`,
+              createdAt: 1,
+              event: {
+                type: 'user.message_appended' as const,
+                messageId: `message-${sequence}`,
+                content: `message ${sequence}`,
+              },
+            })),
+          hasMore: false,
+          observedLastSequence: 3,
+        };
+      },
+      close: () => undefined,
+    };
+    const history = createKiteRuntimeObserverHistoryClient(logs);
+    const transcript = await history.loadSession('appending');
+    expect(observedBeforeSequences).toEqual([3]);
+    expect(transcript.session.lastSequence).toBe(2);
+    expect(transcript.records.map((record) => record.sequence)).toEqual([1, 2]);
+  });
+
+  test('reuses fixed root and child transcripts across pages but checks child lineage on every read', async () => {
+    const events = Array.from(
+      { length: 401 },
+      (_, index): RuntimeEvent => ({
+        type: 'user.message_appended',
+        messageId: `message-${index}`,
+        content: `message ${index}`,
+      }),
+    );
+    let parent = 'parent';
+    let rootReads = 0;
+    let childReads = 0;
+    const reader = (sessionId: string, child: boolean): RuntimeLogQueryPort<RuntimeEvent> => ({
+      getSession: (requested) =>
+        requested === sessionId && (!child || parent === 'parent')
+          ? { sessionId, name: sessionId, updatedAt: 1, lastSequence: events.length }
+          : null,
+      listSessions: () => ({ entries: [], hasMore: false }),
+      listEvents: (request) => {
+        if (child) childReads++;
+        else rootReads++;
+        const entries = events
+          .map((event, index) => ({
+            sessionId,
+            sequence: index + 1,
+            eventId: `${sessionId}-${index + 1}`,
+            createdAt: 1,
+            event,
+          }))
+          .filter(
+            (entry) =>
+              entry.sequence > (request.afterSequence ?? 0) &&
+              entry.sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY),
+          );
+        return {
+          entries: entries.slice(0, request.limit),
+          hasMore: entries.length > request.limit,
+          ...(entries.length > request.limit
+            ? { nextCursor: entries[request.limit - 1]!.sequence }
+            : {}),
+          observedLastSequence: events.length,
+        };
+      },
+      close: () => undefined,
+    });
+    const history = createKiteRuntimeObserverHistoryClient(
+      () => reader('root', false),
+      (requestedParent, childId) => reader(requestedParent === parent ? childId : 'denied', true),
+    );
+    const root = await history.loadSession('root');
+    expect(root.records).toHaveLength(401);
+    expect(rootReads).toBe(3);
+    expect((await history.loadSession('root', root.session.lastSequence)).records).toHaveLength(
+      401,
+    );
+    expect(rootReads).toBe(3);
+    events[0] = { type: 'user.message_appended', messageId: 'replacement', content: 'revised' };
+    const revised = await history.loadSession('root');
+    expect(revised.snapshotDigest).not.toBe(root.snapshotDigest);
+    expect(revised.events[0]).toMatchObject({ type: 'user.message', text: 'revised' });
+    expect(
+      (await history.loadSession('root', revised.session.lastSequence)).events[0],
+    ).toMatchObject({
+      type: 'user.message',
+      text: 'revised',
+    });
+    expect(rootReads).toBe(6);
+
+    const child = await history.loadChildSession!('parent', 'child');
+    expect(child.records).toHaveLength(401);
+    expect(childReads).toBe(3);
+    expect(
+      (await history.loadChildSession!('parent', 'child', child.session.lastSequence)).records,
+    ).toHaveLength(401);
+    expect(childReads).toBe(3);
+    await expect(history.loadChildSession!('other-parent', 'child', 401)).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+    parent = 'moved-parent';
+    await expect(history.loadChildSession!('parent', 'child', 401)).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+
+    // A same-watermark rewrite that outgrows the bounded cache must discard
+    // the prior version before the next continuation is read.
+    const largeContent = 'x'.repeat(48_000);
+    for (let index = 0; index < events.length; index++) {
+      events[index] = {
+        type: 'user.message_appended',
+        messageId: `replacement-${index}`,
+        content: largeContent,
+      };
+    }
+    await history.loadSession('root');
+    const readsAfterOversizedFirstPage = rootReads;
+    const largeContinuation = await history.loadSession('root', 401);
+    expect(largeContinuation.events[0]).toMatchObject({
+      type: 'user.message',
+      messageId: 'replacement-0',
+      text: largeContent,
+    });
+    expect(rootReads).toBe(readsAfterOversizedFirstPage + 3);
+  });
+
   test('loads an immediate child only through the explicitly scoped History reader', async () => {
     const childEvent: RuntimeEvent = {
       type: 'user.message_appended',
@@ -367,7 +587,7 @@ describe('Kite Runtime History Client adapter', () => {
             eventId: 'event-1',
             createdAt: 42,
             event: {
-              type: 'user.message_appended',
+              type: 'user.message_appended' as const,
               messageId: 'message-1',
               content: 'hello',
             } as RuntimeEvent,
@@ -412,6 +632,54 @@ describe('Kite Runtime History Client adapter', () => {
       hasMore: false,
       observedLastSequence: 1,
     });
+  });
+
+  test('reads only the requested current session page for ordinary listing', async () => {
+    let listCalls = 0;
+    const logs: RuntimeLogQueryPort<RuntimeEvent> = {
+      listSessions: () => {
+        listCalls++;
+        if (listCalls > 1) throw new Error('History scanned beyond the requested page.');
+        return {
+          entries: [{ sessionId: 'recent', name: '', updatedAt: 42, lastSequence: 1 }],
+          hasMore: true,
+          nextCursor: { updatedAt: 42, sessionId: 'recent' },
+        };
+      },
+      listEvents: () => ({
+        entries: [
+          {
+            sessionId: 'recent',
+            sequence: 1,
+            eventId: 'event-1',
+            createdAt: 42,
+            event: {
+              type: 'user.message_appended',
+              messageId: 'message-1',
+              content: 'Recent title',
+            } as RuntimeEvent,
+          },
+        ],
+        hasMore: false,
+        observedLastSequence: 1,
+      }),
+      close: () => undefined,
+    };
+
+    await expect(createKiteRuntimeHistoryClient(logs).listSessions({ limit: 1 })).resolves.toEqual({
+      entries: [
+        {
+          sessionId: 'recent',
+          displayName: 'Recent title',
+          needsSmartName: false,
+          updatedAt: 42,
+          lastSequence: 1,
+        },
+      ],
+      hasMore: true,
+      nextCursor: { updatedAt: 42, sessionId: 'recent' },
+    });
+    expect(listCalls).toBe(1);
   });
 
   test('searches the first durable user message when the smart display name is truncated', async () => {
@@ -461,6 +729,38 @@ describe('Kite Runtime History Client adapter', () => {
       hasMore: false,
     });
     expect(eventQueries).toEqual([['user.message_appended']]);
+  });
+
+  test('stops current-format search after the requested result page', async () => {
+    let listCalls = 0;
+    const logs: RuntimeLogQueryPort<RuntimeEvent> = {
+      listSessions: () => {
+        listCalls++;
+        if (listCalls > 1) throw new Error('History searched beyond the result page.');
+        return {
+          entries: [3, 2, 1].map((index) => ({
+            sessionId: `matching-${index}`,
+            name: `matching ${index}`,
+            updatedAt: index,
+            lastSequence: 0,
+          })),
+          hasMore: true,
+          nextCursor: { updatedAt: 1, sessionId: 'matching-1' },
+        };
+      },
+      listEvents: () => {
+        throw new Error('Named results do not need message reads.');
+      },
+      close: () => undefined,
+    };
+    await expect(
+      createKiteRuntimeHistoryClient(logs).listSessions({ limit: 2, query: 'matching' }),
+    ).resolves.toMatchObject({
+      entries: [{ sessionId: 'matching-3' }, { sessionId: 'matching-2' }],
+      hasMore: true,
+      nextCursor: { updatedAt: 2, sessionId: 'matching-2' },
+    });
+    expect(listCalls).toBe(1);
   });
 
   test('reads every durable page and replays a model completion through the live event vocabulary', async () => {

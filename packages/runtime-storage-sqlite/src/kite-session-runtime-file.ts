@@ -21,8 +21,27 @@ export type KiteSessionStoreOpenErrorCode =
   | 'store_access_denied'
   | 'store_corrupt'
   | 'store_busy'
+  | 'store_admission_failed'
   | 'store_preparation_cancelled'
+  | 'store_preparation_retry_blocked'
   | 'store_history_reconciliation_required';
+
+/** Finite public reasons for a refused maintenance writer admission. */
+export type KiteSessionStoreAdmissionReason =
+  | 'unsupported_platform'
+  | 'desktop_identity_mismatch'
+  | 'paired_manifest_mismatch'
+  | 'desktop_parent_unverified'
+  | 'installed_identity_mismatch'
+  | 'release_selection_busy_or_unsafe'
+  | 'installed_parent_unverified'
+  | 'installed_process_inspection_incomplete'
+  | 'source_identity_mismatch'
+  | 'source_build_mismatch'
+  | 'source_parent_unverified'
+  | 'legacy_process_busy'
+  | 'legacy_process_inspection_incomplete'
+  | 'admission_unverified';
 
 export type KiteSessionStorePreparationStage =
   | 'inspecting'
@@ -97,6 +116,7 @@ export class KiteSessionStoreOpenError extends Error {
   readonly code: KiteSessionStoreOpenErrorCode;
   readonly compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
   readonly stage?: KiteSessionStorePreparationStage;
+  readonly admissionReason?: KiteSessionStoreAdmissionReason;
 
   constructor(
     code: KiteSessionStoreOpenErrorCode,
@@ -104,6 +124,7 @@ export class KiteSessionStoreOpenError extends Error {
     options?: ErrorOptions & {
       compatibility?: Exclude<KiteSessionStoreCompatibility, { status: 'compatible' }>;
       stage?: KiteSessionStorePreparationStage;
+      admissionReason?: KiteSessionStoreAdmissionReason;
     },
   ) {
     super(message, options);
@@ -111,6 +132,7 @@ export class KiteSessionStoreOpenError extends Error {
     this.code = code;
     this.compatibility = options?.compatibility;
     this.stage = options?.stage;
+    this.admissionReason = options?.admissionReason;
   }
 }
 

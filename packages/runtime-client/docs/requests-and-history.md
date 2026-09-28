@@ -19,12 +19,14 @@ generation天然不同而丢弃刷新。
 
 交接见[会话历史链路](../../../docs/development/flows/session-history.md)。验证：[client](../test/runtime-client.test.ts)、[store](../test/store.test.ts)。
 
-协议 History 的 `loadSession` 通过同一连接分页读取，首次返回的 source sequence 固定本次读取上界；校验 Session、序号顺序与游标前进后才合并为完整 transcript。分页只重组只读展示记录，不重放命令；断线或页身份错误会使本次加载失败。传入 `throughSequence` 可读取该已观察上界内的完整历史。
+协议 History 的 `loadSession` 通过同一连接分页读取，首次返回的 source sequence 固定本次读取上界；校验 Session、序号顺序与游标前进后才合并为完整 transcript。后续页携带首次响应的内容 digest；同一水位的历史在分页之间被改写或缓存淘汰后重建为不同内容时，客户端丢弃已收页面，从第一页最多重试一次。再次变化则返回错误，不展示混合历史。分页只重组只读展示记录，不重放命令；断线或页身份错误会使本次加载失败。传入 `throughSequence` 可读取该已观察上界内的完整历史。
 
 Store11 App Server 可选提供 `loadChildSession(parentSessionId, childSessionId, throughSequence?, { signal }?)`。客户端逐页核验子 Session ID 和固定 source sequence；父子血缘由服务端每页核对。普通 `loadSession(childSessionId)` 继续拒绝，知道子 ID 不取得子 History 的读取权。未组合该能力的 RuntimeHistoryClient 不提供此方法。
 
 `subscribeChildReadyWithGeneration` 使用父、子 ID 的专用 wire 选择器，等待初始 ready 后返回与普通会话相同的安全通知及连接代际。Desktop 先读子 History，再从该 source sequence 订阅并按消息 identity 投影后续事件；重连或离开详情时取消旧订阅并重读历史。子 Session 可能在订阅前已开始发送短暂流事件；经过父子准入及初始 reset 后，客户端允许首个观察到的子流帧以其真实 sequence 建立本地游标，后续仍必须连续，缺帧时照常重新同步。普通 Session 的首帧规则不变。此入口不把子 Session ID 转成普通顶层会话授权。
 
-`loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。已经发送到服务的单页读取仍可能完成，不新增远端取消方法、不改变协议 DTO 或命令重放语义。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
+`loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。服务端在初始化时宣告 `history/cancel` 能力且单页请求已经发出时，客户端在调用方取消或响应超时后向同一连接发送携带原 RPC id 的取消通知；旧服务端未宣告此能力时，已发出的读取仍可能完成。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
+
+同一 RuntimeClient 最多同时执行 4 个完整的协议 History 分页加载，另有最多 1024 个等待项。每次组装最多保留 50,000 条记录及约 40 MiB 的编码记录，超过任一界限返回 `history_too_large`；服务端返回同名 detailCode 时映射为同一客户端错误。超出等待容量立即返回 `request_overloaded`；等待超过配置的请求期限返回 `request_timeout`。等待中的取消会移除队列项，不向 transport 发送请求；断线、重连与关闭会取消旧队列及在途加载。这些限制按客户端连接分配，不限制 Store 中可保留的 Session 总数。
 
 `recoverSessionIfSafe` 仅供用户继续时处理明确的恢复拒绝：先读摘要，安全时提交独立恢复命令；不自动重跑任务或未知副作用。恢复丢回执和客户端命令结果未知时，`readCommandReceipt` 查询原命令身份，查不到则保留未知。原始发送重试只发生在服务明确拒绝且安全恢复成功之后，使用同一命令身份。

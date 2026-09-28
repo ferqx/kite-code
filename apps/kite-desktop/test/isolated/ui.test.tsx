@@ -92,6 +92,7 @@ class UiClient extends DesktopClient {
     | null = null;
   startupMessage: string | null = null;
   diagnosticAvailable = false;
+  startupRetryable = true;
   diagnosticSaves = 0;
   view: DesktopView;
   listeners = new Set<() => void>();
@@ -114,6 +115,7 @@ class UiClient extends DesktopClient {
       phase: this.startupPhase,
       message: this.startupMessage,
       diagnosticAvailable: this.diagnosticAvailable,
+      canRetry: this.startupRetryable,
     };
   }
   override async saveStartupDiagnostic() {
@@ -598,14 +600,34 @@ test('startup displays the validated preparation phase without offering unsafe c
 test('failed startup offers native diagnostic save only when a validated report exists', async () => {
   const client = new UiClient();
   client.diagnosticAvailable = true;
+  client.startupRetryable = false;
   client.restoreWorkspace = async () => {
     throw new Error('STORE_CORRUPT');
   };
   await render(<App client={client} />);
   await act(() => Bun.sleep(250));
   expect(document.body.textContent).toContain('保存诊断');
+  expect(document.body.textContent).not.toContain('重新尝试');
   await click(button('保存诊断'));
   expect(client.diagnosticSaves).toBe(1);
+});
+
+test('failed startup retains a validated diagnostic across a stale status reply', async () => {
+  const client = new UiClient();
+  client.restoreWorkspace = async () => {
+    client.diagnosticAvailable = true;
+    client.startupRetryable = false;
+    throw new Error('STORE_HISTORY_RECONCILIATION_REQUIRED');
+  };
+  await render(<App client={client} />);
+  await act(() => Bun.sleep(250));
+  expect(document.body.textContent).toContain('保存诊断');
+  expect(document.body.textContent).not.toContain('重新尝试');
+  client.diagnosticAvailable = false;
+  client.startupRetryable = true;
+  await act(() => Bun.sleep(250));
+  expect(document.body.textContent).toContain('保存诊断');
+  expect(document.body.textContent).not.toContain('重新尝试');
 });
 
 test('composer selects a configured model and changes the current session permission', async () => {

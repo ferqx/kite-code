@@ -129,6 +129,321 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('bounds a thousand concurrent History loads before transport send', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-bounded')));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    await client.connect();
+    const loads = Array.from({ length: 1041 }, (_, index) =>
+      client.history!.loadSession(`session-${index}`),
+    );
+    const settled = Promise.allSettled(loads);
+    try {
+      await until(() => connection.requests('history/load_session').length === 4);
+      expect(connection.requests('history/load_session')).toHaveLength(4);
+      expect(await loads[1040]!.catch((error: unknown) => error)).toMatchObject({
+        code: 'request_overloaded',
+      });
+
+      expect(connection.requests('history/load_child_session')).toHaveLength(0);
+    } finally {
+      await client.close();
+      await settled;
+    }
+  });
+
+  test('preserves a server overload as a typed client error', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-overload')));
+      else if (message.method === 'history/load_session')
+        target.push({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: { code: -32001, message: 'Overloaded', data: { code: 'overloaded' } },
+        });
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      await expect(client.history!.loadSession('session-overloaded')).rejects.toMatchObject({
+        code: 'request_overloaded',
+        protocol: { data: { code: 'overloaded' } },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('preserves the server History size detail as a typed client error', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-too-large')));
+      else if (message.method === 'history/load_session')
+        target.push({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32603,
+            message: 'History too large',
+            data: { code: 'internal_error', detailCode: 'history_too_large' },
+          },
+        });
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      await expect(client.history!.loadSession('session-too-large')).rejects.toMatchObject({
+        code: 'history_too_large',
+        protocol: { data: { detailCode: 'history_too_large' } },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('stops assembling a History transcript beyond 50,000 records', async () => {
+    const lastSequence = 50_001;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-record-limit')));
+      } else if (message.method === 'history/load_session') {
+        const after = message.params.page?.afterSequence ?? 0;
+        const end = Math.min(after + 10_000, lastSequence);
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'history-record-limit',
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence,
+            },
+            records: Array.from({ length: end - after }, (_, index) => ({
+              sequence: after + index + 1,
+              events: [],
+            })),
+            ...(end < lastSequence ? { nextCursor: end } : {}),
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      await expect(client.history!.loadSession('history-record-limit')).rejects.toMatchObject({
+        code: 'history_too_large',
+      });
+      expect(connection.requests('history/load_session')).toHaveLength(6);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('stops assembling a History transcript beyond 40 MiB of encoded records', async () => {
+    const lastSequence = 660;
+    const text = 'x'.repeat(64_000);
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-byte-limit')));
+      } else if (message.method === 'history/load_session') {
+        const after = message.params.page?.afterSequence ?? 0;
+        const end = Math.min(after + 10, lastSequence);
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'history-byte-limit',
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence,
+            },
+            records: Array.from({ length: end - after }, (_, index) => ({
+              sequence: after + index + 1,
+              events: [
+                {
+                  type: 'user.message',
+                  messageId: `message-${after + index + 1}`,
+                  kind: 'task',
+                  text,
+                },
+              ],
+            })),
+            ...(end < lastSequence ? { nextCursor: end } : {}),
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      await expect(client.history!.loadSession('history-byte-limit')).rejects.toMatchObject({
+        code: 'history_too_large',
+      });
+      expect(connection.requests('history/load_session').length).toBeGreaterThan(60);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('removes aborted and expired History waiters before transport send', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-waiters')));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+      requestTimeoutMs: 500,
+    });
+    await client.connect();
+    const active = Array.from({ length: 4 }, (_, index) =>
+      client.history!.loadSession(`active-${index}`),
+    );
+    const activeSettled = Promise.allSettled(active);
+    const controller = new AbortController();
+    const aborted = client.history!.loadChildSession!('parent', 'aborted', undefined, {
+      signal: controller.signal,
+    });
+    const expired = client.history!.loadChildSession!('parent', 'expired');
+    try {
+      await until(() => connection.requests('history/load_session').length === 4);
+      controller.abort(new Error('cancel waiting'));
+      await expect(aborted).rejects.toThrow('cancel waiting');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      for (const request of connection.requests('history/load_session')) {
+        connection.push(
+          result(request.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: (request.params as { sessionId: string }).sessionId,
+              displayName: 'Active',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 2,
+            },
+            records: [{ sequence: 1, events: [] }],
+            nextCursor: 1,
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+      }
+      await until(() => connection.requests('history/load_session').length === 8);
+      await expect(expired).rejects.toMatchObject({ code: 'request_timeout' });
+      expect(connection.requests('history/load_child_session')).toHaveLength(0);
+    } finally {
+      await client.close();
+      await activeSettled;
+    }
+  });
+
+  test('discards queued History loads on reconnect', async () => {
+    const first = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-first')));
+    });
+    const second = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-second')));
+      if (message.method === 'history/load_session')
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'fresh',
+              displayName: 'Fresh',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+    });
+    const client = new RuntimeClient({
+      transport: transport(first, second),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    await client.connect();
+    const old = Array.from({ length: 5 }, (_, index) =>
+      client.history!.loadSession(`old-${index}`),
+    );
+    const oldSettled = Promise.allSettled(old);
+    try {
+      await until(() => first.requests('history/load_session').length === 4);
+      await client.reconnect();
+      expect((await oldSettled).every((outcome) => outcome.status === 'rejected')).toBe(true);
+      expect(first.requests('history/load_session')).toHaveLength(4);
+      expect(second.requests('history/load_session')).toHaveLength(0);
+      await expect(client.history!.loadSession('fresh')).resolves.toMatchObject({
+        session: { sessionId: 'fresh' },
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('rejects queued History loads when the connection closes', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-disconnect')));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    await client.connect();
+    const loads = Array.from({ length: 5 }, (_, index) =>
+      client.history!.loadSession(`old-${index}`),
+    );
+    const settled = Promise.allSettled(loads);
+    try {
+      await until(() => connection.requests('history/load_session').length === 4);
+      connection.end();
+      const outcomes = await settled;
+      expect(outcomes).toHaveLength(5);
+      expect(
+        outcomes.every(
+          (outcome) =>
+            outcome.status === 'rejected' && outcome.reason?.code === 'connection_closed',
+        ),
+      ).toBe(true);
+      expect(connection.requests('history/load_session')).toHaveLength(4);
+    } finally {
+      await client.close();
+    }
+  });
+
   test('pins explicit child History pages to one source sequence and parent scope', async () => {
     let pages = 0;
     const connection = new FakeConnection((message, target) => {
@@ -168,6 +483,142 @@ describe('RuntimeClient protocol state machine', () => {
       const transcript = await client.history?.loadChildSession?.('parent', 'child');
       expect(transcript?.records.map((record) => record.sequence)).toEqual([1, 2]);
       expect(pages).toBe(2);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('restarts pagination after a same-sequence History rewrite without mixing records', async () => {
+    const firstDigest = 'a'.repeat(64);
+    const secondDigest = 'b'.repeat(64);
+    let pages = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-rewrite')));
+      } else if (message.method === 'history/load_session') {
+        pages++;
+        const expectedPage =
+          pages === 1 || pages === 3
+            ? {}
+            : {
+                afterSequence: 1,
+                throughSequence: 2,
+                snapshotDigest: pages === 2 ? firstDigest : secondDigest,
+              };
+        expect(message.params.page).toEqual(expectedPage);
+        const generation = pages === 1 ? 'old' : 'new';
+        const sequence = pages % 2 === 1 ? 1 : 2;
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'history-rewrite',
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 2,
+            },
+            records: [
+              {
+                sequence,
+                events: [
+                  {
+                    type: 'user.message',
+                    messageId: `${generation}-${sequence}`,
+                    kind: 'task',
+                    text: `${generation} ${sequence}`,
+                  },
+                ],
+              },
+            ],
+            interactionMode: 'auto',
+            recovery: 'normal',
+            snapshotDigest: pages === 1 ? firstDigest : secondDigest,
+            ...(sequence === 1 ? { nextCursor: 1 } : {}),
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      const transcript = await client.history!.loadSession('history-rewrite');
+      expect(
+        transcript.events.map((event) => (event.type === 'user.message' ? event.text : undefined)),
+      ).toEqual(['new 1', 'new 2']);
+      expect(pages).toBe(4);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('retries once when the carrier rejects a stale History continuation', async () => {
+    const digest = 'c'.repeat(64);
+    let pages = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-stale')));
+      } else if (message.method === 'history/load_session') {
+        pages++;
+        if (pages === 2) {
+          expect(message.params.page).toEqual({
+            afterSequence: 1,
+            throughSequence: 2,
+            snapshotDigest: digest,
+          });
+          target.push({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: {
+              code: -32603,
+              message: 'Internal error.',
+              data: { code: 'internal_error', detailCode: 'history_snapshot_changed' },
+            },
+          });
+          return;
+        }
+        expect(message.params.page).toEqual(
+          pages === 1
+            ? {}
+            : pages === 3
+              ? {}
+              : { afterSequence: 1, throughSequence: 2, snapshotDigest: digest },
+        );
+        const sequence = pages === 1 || pages === 3 ? 1 : 2;
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: 'history-stale',
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 2,
+            },
+            records: [{ sequence, events: [] }],
+            interactionMode: 'auto',
+            recovery: 'normal',
+            snapshotDigest: digest,
+            ...(sequence === 1 ? { nextCursor: 1 } : {}),
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      expect(
+        (await client.history!.loadSession('history-stale')).records.map(
+          (record) => record.sequence,
+        ),
+      ).toEqual([1, 2]);
+      expect(pages).toBe(4);
     } finally {
       await client.close();
     }
@@ -693,6 +1144,73 @@ describe('RuntimeClient protocol state machine', () => {
     });
     controller.abort(new Error('cancelled'));
     await expect(pending).rejects.toThrow('cancelled');
+    await client.close();
+  });
+
+  test.each([
+    true,
+    false,
+  ])('sends exact History cancellation only when the connected server advertises it: %s', async (advertised) => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        const initialize = initializeResult('history-cancel') as {
+          capabilities: { methods: string[] };
+        };
+        if (advertised) initialize.capabilities.methods.push('history/cancel');
+        target.push(result(message.id, initialize));
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    await client.connect();
+    const controller = new AbortController();
+    const pending = client.history!.loadSession('session-1', undefined, {
+      signal: controller.signal,
+    });
+    await until(() => connection.requests('history/load_session').length === 1);
+    const originalId = connection.requests('history/load_session')[0]!.id;
+    controller.abort(new Error('selection changed'));
+    await expect(pending).rejects.toThrow('selection changed');
+    const cancellations = connection.sent.filter(
+      (message) => 'method' in message && message.method === 'history/cancel',
+    );
+    expect(cancellations).toEqual(
+      advertised
+        ? [{ jsonrpc: '2.0', method: 'history/cancel', params: { requestId: originalId } }]
+        : [],
+    );
+    await client.close();
+  });
+
+  test('releases a sent History request after response timeout when cancellation is supported', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        const initialize = initializeResult('history-timeout') as {
+          capabilities: { methods: string[] };
+        };
+        initialize.capabilities.methods.push('history/cancel');
+        target.push(result(message.id, initialize));
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+      requestTimeoutMs: 20,
+    });
+    await client.connect();
+    await expect(client.history!.loadSession('session-1')).rejects.toMatchObject({
+      code: 'request_timeout',
+    });
+    const originalId = connection.requests('history/load_session')[0]!.id;
+    expect(
+      connection.sent.filter(
+        (message) => 'method' in message && message.method === 'history/cancel',
+      ),
+    ).toEqual([{ jsonrpc: '2.0', method: 'history/cancel', params: { requestId: originalId } }]);
     await client.close();
   });
 

@@ -193,6 +193,7 @@ export async function createKiteAppServerRuntimeOwner(
     ((input) =>
       createKiteSessionAppServerStorageComposition({
         ...input,
+        buildId: environment.buildId,
         onStoreStartupProgress: dependencies.onStoreStartupProgress,
         shouldStopStartup: dependencies.shouldStopStartup,
         beforeStorePublication: dependencies.beforeStorePublication,

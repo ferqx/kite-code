@@ -28,6 +28,10 @@ import {
   type RuntimeOperationGate,
 } from './runtime-application/operation-gate';
 import { createKiteRuntimeObserverHistoryClient } from './runtime-client/history-adapter';
+import {
+  createKiteHistoryPagePool,
+  type KiteHistoryPageClient,
+} from './runtime-client/history-page-pool';
 import { projectRuntimeClientText, projectRuntimeSessionTitle } from './runtime-client/safe-text';
 import type { SandboxBackend } from './sandbox/types';
 
@@ -89,7 +93,7 @@ export interface KiteServiceRuntimeComposition extends AsyncDisposable {
   readonly appControl: KiteInProcessAppControlComposition<RuntimeOperationGate>;
   readonly runtime: RuntimeAccess;
   readonly server: RuntimeServer;
-  readonly history: RuntimeHistoryClient;
+  readonly history: RuntimeHistoryClient & Partial<KiteHistoryPageClient>;
   readonly storage: KiteMultiWorkspaceRuntimeServerOwner['storage'];
   readonly removeWorkspace: KiteMultiWorkspaceRuntimeServerOwner['removeWorkspace'];
 }
@@ -258,39 +262,52 @@ function createKiteServiceRuntimeCompositionUnchecked(
     : input.storageOwner
       ? createKiteRuntimeObserverHistoryFromStorage(input.storageOwner.storage)
       : createKiteRuntimeHistory(input.checkpointPath);
-  const history: RuntimeHistoryClient = input.storageOwner?.readSnapshot
+  const historyPagePool =
+    input.appServerProtocol && input.storageOwner?.historyDatabasePath
+      ? createKiteHistoryPagePool({ databasePath: input.storageOwner.historyDatabasePath })
+      : undefined;
+  const history: RuntimeHistoryClient & Partial<KiteHistoryPageClient> = input.storageOwner
+    ?.readSnapshot
     ? Object.freeze({
         listSessions: (request: Parameters<RuntimeHistoryClient['listSessions']>[0]) =>
-          input.storageOwner!.readSnapshot!(async () => {
-            if (
-              input.appServerProtocol &&
-              input.storageOwner!.directory &&
-              !request.query?.trim()
-            ) {
-              const page = input.storageOwner!.directory!.listSessions(request);
-              return {
-                ...page,
-                entries: page.entries.map((entry) => ({
-                  ...entry,
-                  displayName: entry.needsSmartName
-                    ? projectRuntimeSessionTitle(entry.displayName)
-                    : projectRuntimeClientText(entry.displayName, 256),
-                  needsSmartName: entry.needsSmartName && entry.displayName === '新会话',
-                  ...(entry.workspace
-                    ? {
-                        workspace: {
-                          ...entry.workspace,
-                          displayName: projectRuntimeClientText(entry.workspace.displayName, 256),
-                        },
-                      }
-                    : {}),
-                })),
-              };
-            }
-            return rawHistory.listSessions(request);
-          }),
+          request.query?.trim() && historyPagePool
+            ? historyPagePool.searchSessions(request)
+            : input.storageOwner!.readSnapshot!(async () => {
+                if (
+                  input.appServerProtocol &&
+                  input.storageOwner!.directory &&
+                  !request.query?.trim()
+                ) {
+                  const page = input.storageOwner!.directory!.listSessions(request);
+                  return {
+                    ...page,
+                    entries: page.entries.map((entry) => ({
+                      ...entry,
+                      displayName: entry.needsSmartName
+                        ? projectRuntimeSessionTitle(entry.displayName)
+                        : projectRuntimeClientText(entry.displayName, 256),
+                      needsSmartName: entry.needsSmartName && entry.displayName === '新会话',
+                      ...(entry.workspace
+                        ? {
+                            workspace: {
+                              ...entry.workspace,
+                              displayName: projectRuntimeClientText(
+                                entry.workspace.displayName,
+                                256,
+                              ),
+                            },
+                          }
+                        : {}),
+                    })),
+                  };
+                }
+                return rawHistory.listSessions(request);
+              }),
         listEvents: (request: Parameters<RuntimeHistoryClient['listEvents']>[0]) =>
           input.storageOwner!.readSnapshot!(() => rawHistory.listEvents(request)),
+        // The adapter projects synchronously before its returned Promise settles.
+        // Keep metadata, every journal page, and the event generation in one
+        // SQLite read transaction; a future awaited scan needs an async snapshot owner.
         loadSession: (sessionId: string, throughSequence?: number) =>
           input.storageOwner!.readSnapshot!(() =>
             rawHistory.loadSession(sessionId, throughSequence),
@@ -305,6 +322,13 @@ function createKiteServiceRuntimeCompositionUnchecked(
                 input.storageOwner!.readSnapshot!(() =>
                   rawHistory.loadChildSession!(parentSessionId, childSessionId, throughSequence),
                 ),
+            }
+          : {}),
+        ...(historyPagePool
+          ? {
+              loadSessionPage: historyPagePool.loadSessionPage,
+              loadSessionFull: historyPagePool.loadSessionFull,
+              searchSessions: historyPagePool.searchSessions,
             }
           : {}),
       })
@@ -322,6 +346,7 @@ function createKiteServiceRuntimeCompositionUnchecked(
     cancelAll: owner.cancelAllSessions,
     dispose: async () => {
       try {
+        await historyPagePool?.close();
         await owner[Symbol.asyncDispose]();
       } finally {
         for (const release of runtimeControlReleases.values()) release();

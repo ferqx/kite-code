@@ -124,6 +124,10 @@ test('candidate child admission binds exact parent and hides children before eve
     assertStoreSchema: assertKiteSessionStoreSchema,
     maxSessionsPerWorkspace: 1,
   });
+  expect(directory.hasRootSession('root')).toBe(true);
+  expect(directory.hasRootSession('older')).toBe(true);
+  expect(directory.hasRootSession('child')).toBe(false);
+  expect(directory.hasRootSession('missing')).toBe(false);
   expect(
     directory
       .list()

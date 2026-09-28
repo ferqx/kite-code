@@ -249,7 +249,7 @@ Approval rejection的durable settlement同样只由当前turn的事实决定：i
 - Session execution generation、revision 和 lease 校验在写入事务内完成；同一 applied command 的 State/event/snapshot/Run 与 scoped receipt 按所属事务原子提交。
 - receipt 以 scope/commandId/digest 识别原决定；close/delete 保留，fork 不复制 source receipt，不以 TTL 或容量裁剪破坏重放语义。
 - 读取不取得执行权限；Directory/History/Checkpoint 的投影不能取代严格 Session 恢复检查。恢复点顺序使用 durable event position，不按显示时间猜测。
-- 默认 Session Store 不自动导入旧文件；非默认 migration/compatibility reader 只能在其明确 profile 和调用范围内使用，不建立 dual write 或执行 fallback。
+- 默认 Session Store 的普通业务读取只接受当前格式；启动准备在独占维护与连续性校验下，才可将已验证的旧 Store 来源转换为私有候选并发布。准确来源、版本和失败边界以[本机 App Server Store 契约](app-server-local-runtime.md#store-与版本)为准；不建立 dual write 或执行 fallback。
 
 事务、Artifact、Run coverage、fork/rewind 与版本内检查的完整实现约束分别见[事务](../../packages/runtime-storage-sqlite/docs/transactions-and-state.md)、[恢复](../../packages/runtime-storage-sqlite/docs/authority-and-recovery.md)、[查询](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。Ack、Receipt、terminal 与 cleanup 的顺序不得因 adapter 选择而改写。
 
@@ -263,9 +263,9 @@ Verification 只消费已提交 Receipt、Artifact 与注入的 Shell/MCP port�
 
 ## 完成与静态门禁
 
-生产命名使用领域职责；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。当前架构由以下 Gate 共同验证：
+生产业务模块使用领域职责命名；旧 alias、双路径、fallback dispatcher、版本 façade 与长期 allowlist 均禁止。已验证旧 Store 的转换只属于 SQLite Store 启动维护 owner，旧写入者观测只属于迁移准入 owner；两者可以使用准确旧版本身份，但不能向普通业务读写、Host 或客户端扩散，也不能据此放宽其他生产源码的命名约束。当前架构由以下 Gate 共同验证：
 
-- `check:pre-release-architecture`：命名、目录、封闭 compatibility owner、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；Service raw log projector等必需源码不得命中通用`logs` ignore规则，必须显式纳入版本控制；
+- `check:pre-release-architecture`：生产业务命名、受控 Store 转换与迁移准入边界、唯一 composition root、Runtime→TUI、current SQLite writer 与 required domain files；它不能用泛化版本名豁免或永久例外清单掩盖新的兼容分叉。Service raw log projector 等必需源码不得命中通用 `logs` ignore 规则，必须显式纳入版本控制；
 - `check:runtime-packages`：十八个workspace、依赖图、exports、deep import、cycle 与唯一 concrete composition authority；
 - `check:core-boundary`：Kernel/Host/Builtin/App、filesystem、sandbox、Tool Pipeline 与 Model authority；
 - `check:docs-impact` / `check:docs`：实现与当前文档共同收敛。

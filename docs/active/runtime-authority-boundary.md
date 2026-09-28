@@ -15,6 +15,7 @@
 client binding，不能单独renew或提交。read不落盘也不取得lease；acquire/renew/detach/release才写authority record。active/detached lease失效且
 cleanup无法证明时，下一次acquire会先持久化`recovery_required`并拒绝接管；只有显式cleanup reconciliation恢复idle后才能取得更大的
 `controllerGeneration`。旧Host晚到请求因generation或revision不匹配被拒绝。
+Store 13→14 的私有候选转换仅在独占维护和旧写入者准入后，将持久的 `active`／`detached` owner 提升 generation 与 revision、清除旧 host/client/lease，并标为 `recovery_required` 且 `cleanupConfirmed=false`；原 Store 和既有已确认清理的恢复标记不变。此步骤只解除旧进程身份对格式转换的阻断，不授予新执行权，也不推定外部效果已清理。候选须再通过完整连续性校验才发布。
 fresh Session的generation 1不经过第二个transaction：Session事实插入后只能调用already-held writer中的initial acquire seam，后续callback/fault会
 同时回滚Session与authority。checkpoint fork同样先以source generation进入唯一mutation transaction，再让target facts、recovery identity、
 Run/receipt与target generation 1共同提交；copy fault不会留下target Session或authority。

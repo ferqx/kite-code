@@ -161,6 +161,10 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   };
   const admissions = Object.freeze(admissionPort);
   const directory: KiteHomeDirectoryQueryPort = Object.freeze({
+    hasRootSession(sessionId: string) {
+      assertOpen();
+      return rawDirectory.hasRootSession(sessionId);
+    },
     listSessions(request: Parameters<KiteHomeDirectoryQueryPort['listSessions']>[0]) {
       assertOpen();
       return rawDirectory.listSessions(request);
