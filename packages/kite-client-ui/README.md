@@ -4,11 +4,11 @@
 
 `SessionPage.newConversation` 提供[新对话欢迎区与上下文栏](src/NewConversation.tsx)：四个带语义图标的紧凑建议卡片追加到草稿并聚焦；项目／分支菜单贴合输入区、左边缘对齐各自触发按钮，支持方向键、Enter、Escape 和焦点返回。只接收目录、分支展示数据及已授权回调，不创建会话或运行 Git。新对话的真实创建时机、草稿与原生能力由[桌面入口](../../apps/kite-desktop/docs/new-conversation.md)负责。
 
-Web 与 Tauri 桌面共用的 React 会话页面 owner。两个生产入口均调用 [SessionPage](src/SessionPage.tsx)，共用[侧栏](src/Sidebar.tsx)、[工作台](src/Workbench.tsx)、[会话阅读](src/Conversation.tsx)、[输入区](src/Composer.tsx)、[Markdown](src/MessageContent.tsx)和[样式](src/style.css)。不从某一 app 导入页面，不维护另一份 Web／Desktop 主界面。全局“新对话”与“工作台”复用同一组左对齐主导航行样式；工作台只按宿主给出的运行状态组织“正在推进”和“最近会话”，没有主题归属和时间条件数据时不显示伪筛选，也不从标题推断。
+Web 与 Electron 桌面共用的 React 会话页面 owner。两个生产入口均调用 [SessionPage](src/SessionPage.tsx)，共用[侧栏](src/Sidebar.tsx)、[会话阅读](src/Conversation.tsx)、[输入区](src/Composer.tsx)、[Markdown](src/MessageContent.tsx)和[样式](src/style.css)。不从某一 app 导入页面，不维护另一份 Web／Desktop 主界面。[工作台](src/Workbench.tsx)组件仍保留，按宿主给出的运行状态组织“正在推进”和“最近会话”；桌面入口暂时不传入工作台打开动作或视图标志，Web 入口也不提供工作台入口。
 
 界面图标统一由 `@hugeicons/core-free-icons` 与 `@hugeicons/react` 提供，不在共享客户端内维护页面专用 SVG asset；品牌图形、用户内容图片和纯 CSS 状态标记不属于该约束。
 
-桌面端可在“工作台”下提供[安排任务](src/ScheduledTasks.tsx)入口。共享页面负责空态和任务列表；点击“新建任务”或“创建第一个任务”后，名称、任务说明、项目、频率和本地／独立 worktree 运行环境表单在最右侧的[通用侧栏容器](src/RightSidebar.tsx)中打开，任务页仍保留在主区域。页面只消费宿主显式提供的任务事实与操作；没有持久化和后台执行 owner 时仍可填写表单，但保存保持禁用并说明限制，不在浏览器状态中伪造可运行任务。
+桌面端继续提供[安排任务](src/ScheduledTasks.tsx)入口。共享页面负责空态和任务列表；点击“新建任务”或“创建第一个任务”后，名称、任务说明、项目、频率和本地／独立 worktree 运行环境表单在最右侧的[通用侧栏容器](src/RightSidebar.tsx)中打开，任务页仍保留在主区域。页面只消费宿主显式提供的任务事实与操作；没有持久化和后台执行 owner 时仍可填写表单，但保存保持禁用并说明限制，不在浏览器状态中伪造可运行任务。
 
 页面外壳使用 shadcn Resizable 组合全高同级栏：左侧导航栏、中间页面栏，以及按需出现的最右辅助栏。左栏默认 236 px、范围 200–420 px；右栏默认 380 px、范围 300–640 px；中栏最小 360 px。相邻栏之间都可拖拽调整宽度。每栏自行包含 52 px 标题区和余下内容区，左栏收起后展开按钮进入中栏标题区；会话 header 只显示会话标题，不重复所属空间。标题最多展示 10 个 Unicode 字符，超长标题的第 10 位为省略号，完整值保留在提示和无障碍名称中。窄屏左栏继续作为覆盖抽屉，不改变中栏内容 owner。
 
@@ -36,7 +36,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 空间标题右侧的新对话按钮仅在端侧提供 `actions.newWorkspaceSession` 时显示；独立于展开按钮，调用已有项目选择流程，不自行创建会话。Composer 保持既有边界，聚焦不叠加描边；禁用原生 resize 手柄，输入使用 14 px Regular 与字体正常行高，避免空白新行的光标随固定行高放大。其他控件保留键盘焦点反馈。
 
-目录默认展示空间名称与会话标题；每个空间按会话 `updatedAt` 倒序排列后再分批展示；相同时间保持原有相对顺序，缺失或无效时间排在末尾，宿主提供新时间后重新排序。首次展开显示 5 条会话，末尾“展开更多”使用辅助文本色，每次追加展示 10 条，不足 10 条时展示剩余部分。收起该空间即重置为 5 条，其他空间的展开数量不受影响。展示数量由 Sidebar 的空间组件持有，复用宿主已有目录数据；端侧数据读取与后续页入口保持原有边界。会话行最右侧用 Spinner 表示 `running`，用 Badge 文案“待用户输入”表示 `waiting` 或已有 `pendingInteractions`，后者优先。`idle` 与 `completed` 不显示行内状态。会话数量、完整状态和更新时间移入详情浮层。工作台继续按自己的汇总语境展示状态，不在空间名称后追加空闲或完成状态。宿主的提交中状态只禁用会发生冲突的操作，不传染为会话目录的视觉禁用；会话切换由宿主按目标 sessionId 保持消息归属。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应回归见 [共享目录测试](test/reading.test.tsx)和 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
+目录默认展示空间名称与会话标题；每个空间按会话 `updatedAt` 倒序排列后再分批展示；相同时间保持原有相对顺序，缺失或无效时间排在末尾，宿主提供新时间后重新排序。首次展开显示 5 条会话，末尾“展开更多”使用辅助文本色，每次追加展示 10 条，不足 10 条时展示剩余部分。收起该空间即重置为 5 条，其他空间的展开数量不受影响。展示数量由 Sidebar 的空间组件持有，复用宿主已有目录数据；端侧数据读取与后续页入口保持原有边界。会话行最右侧用 Spinner 表示 `running`，用 Badge 文案“待用户输入”表示 `waiting` 或已有 `pendingInteractions`，后者优先。`idle` 与 `completed` 不显示行内状态。会话数量、完整状态和更新时间移入详情浮层。共享工作台组件按自己的汇总语境展示状态，不在空间名称后追加空闲或完成状态。宿主的提交中状态只禁用会发生冲突的操作，不传染为会话目录的视觉禁用；会话切换由宿主按目标 sessionId 保持消息归属。整个目录共用一个 TooltipProvider，首次悬停延迟 500 ms，浮层关闭后 300 ms 内移入其他项立即显示，超时后恢复首次延迟；首次等待中移开取消展示。键盘聚焦可直接查看，Escape 关闭，原生 title 已移除，避免重复提示。浮层使用 Portal 避免目录滚动裁剪。对应回归见 [共享目录测试](test/reading.test.tsx)和 [Web 目录详情测试](../../apps/kite-web/test/directory-details.test.tsx)。
 
 已加载但没有会话的空间显示辅助文案“暂无聊天”，文字左边缘与空间名称对齐，不使用句号或额外空态容器。“暂无聊天”和“展开更多”共用比其他次级信息更浅的目录三级文字色，不改变状态、时间或正文加载提示的颜色。
 

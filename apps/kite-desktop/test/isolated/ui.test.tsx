@@ -1085,7 +1085,8 @@ test('global new conversation preserves existing drafts, appends suggestions and
   expect(primaryNavigation).not.toBeNull();
   expect(
     [...(primaryNavigation?.querySelectorAll('button') ?? [])].map((item) => item.textContent),
-  ).toEqual(['新对话', '工作台', '安排任务']);
+  ).toEqual(['新对话', '安排任务']);
+  expect(document.querySelector('[aria-label="工作台"]')).toBeNull();
   await click(button('新对话'));
   expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
   expect(document.querySelector('.breadcrumb')?.textContent).toBe('新对话');
@@ -1154,7 +1155,7 @@ test('global new conversation preserves existing drafts, appends suggestions and
   expect(document.querySelector('[aria-label="用户消息"]')?.textContent).not.toContain('正在发送');
 });
 
-test('scheduled tasks opens below workbench and exposes an honest creation draft', async () => {
+test('scheduled tasks remains available while workbench is hidden', async () => {
   const client = new UiClient();
   await render(<App client={client} />);
   await click(button('安排任务'));
@@ -1172,8 +1173,8 @@ test('scheduled tasks opens below workbench and exposes an honest creation draft
   expect(document.body.textContent).toContain('频率');
   expect(button('保存任务').disabled).toBe(true);
   expect(document.body.textContent).toContain('尚未接入任务保存与后台运行');
-  await click(button('工作台'));
-  expect(document.querySelector('[aria-label="工作台"]')).not.toBeNull();
+  await click(button('新对话'));
+  expect(document.querySelector('[aria-label="新对话"]')).not.toBeNull();
 });
 
 test('first send keeps existing session navigation available and stays bound to the created session', async () => {
@@ -2154,7 +2155,7 @@ test('required child wait is limited to the loaded selected parent conversation'
   await act(() => client.update({ childDetail: undefined }));
   expect(status()?.textContent).toBe('正在等待子 Agent 结果');
 
-  await click(button('工作台'));
+  await click(button('安排任务'));
   expect(status()).toBeNull();
   await click(button('新对话'));
   expect(status()).toBeNull();
@@ -2624,7 +2625,7 @@ test.each([
   expect(document.querySelector('[aria-label="任务输入"]')).toBeNull();
   await click(button(kind === 'input' ? '提交回答' : '提交修改要求'));
   expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
-  await click(button('工作台'));
+  await click(button('安排任务'));
   await click(document.querySelectorAll<HTMLButtonElement>('.session-row')[0]!);
   expect(answer().value).toBe('先核对现有文档，再提供完整的复现步骤。');
   const next = { ...interaction, interactionId: 'next-interaction' };
