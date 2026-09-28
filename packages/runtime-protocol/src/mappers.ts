@@ -57,9 +57,7 @@ export function mapRuntimeCommandToProtocol(
   command: RuntimeCommand,
 ): RuntimeProtocolCommand | undefined {
   switch (command.type) {
-    case 'create_session': {
-      return RUNTIME_PROTOCOL_COMMAND_SCHEMA_.safeParse(command).data;
-    }
+    case 'create_session':
     case 'recover_session':
     case 'resume_session':
     case 'start_turn':

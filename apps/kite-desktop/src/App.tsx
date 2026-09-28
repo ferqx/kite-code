@@ -103,7 +103,6 @@ export function App({ client }: { client: DesktopClient }) {
     Record<string, { provider: string; name: string }>
   >({});
   const [firstSubmission, setFirstSubmission] = useState<FirstSubmission>();
-  const [workbenchView, setWorkbenchView] = useState(false);
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [navigation] = useState(readNavigation);
   const navigationRevision = useRef(0);
@@ -236,7 +235,6 @@ export function App({ client }: { client: DesktopClient }) {
     if (busyRef.current || !client.getSnapshot().connected) return;
     const revision = ++navigationRevision.current;
     client.leaveChildSession();
-    setWorkbenchView(false);
     setScheduledTasksView(false);
     setNewConversation(false);
     setSelectingSession(id);
@@ -271,7 +269,6 @@ export function App({ client }: { client: DesktopClient }) {
     if (!busyRef.current) {
       client.leaveChildSession();
       navigationRevision.current++;
-      setWorkbenchView(false);
       setScheduledTasksView(false);
       setNewConversation(true);
       setNewConversationWorkspace(undefined);
@@ -314,7 +311,6 @@ export function App({ client }: { client: DesktopClient }) {
       const branch = await client.queryProjectBranch(target);
       if (navigationRevision.current !== revision) return;
       navigationRevision.current++;
-      setWorkbenchView(false);
       setScheduledTasksView(false);
       setNewConversation(true);
       setNewConversationWorkspace(target);
@@ -352,7 +348,6 @@ export function App({ client }: { client: DesktopClient }) {
         setNewConversationWorkspace(undefined);
         setNewConversationBranch(undefined);
         setNewConversationTargetBranch(undefined);
-        setWorkbenchView(false);
         setScheduledTasksView(false);
         rememberNavigation(result.workspace);
       }
@@ -409,10 +404,9 @@ export function App({ client }: { client: DesktopClient }) {
     if (!connected) setStopRequest(undefined);
   }, [connected]);
   useEffect(() => {
-    if (!selected || !connected || !ready || preparing || workbenchView || scheduledTasksView)
-      return;
+    if (!selected || !connected || !ready || preparing || scheduledTasksView) return;
     void client.refreshChildSessions(selected).catch((error) => client.report(error));
-  }, [client, selected, connected, ready, preparing, workbenchView, scheduledTasksView]);
+  }, [client, selected, connected, ready, preparing, scheduledTasksView]);
   const active = !preparing && isActiveRun(projection);
   const model = preparing
     ? (newConversationModel ?? view.models?.selected)
@@ -476,13 +470,12 @@ export function App({ client }: { client: DesktopClient }) {
         : pendingAskMessages.map((message, index) =>
             index === optimisticRuntimeIndex ? optimisticMessage : message,
           )
-    : workbenchView || scheduledTasksView || preparing
+    : scheduledTasksView || preparing
       ? []
       : pendingAskMessages;
   const readingMessages = childDetail ? childDetail.messages : displayedMessages;
   const requiredSubagentWait =
     !preparing &&
-    !workbenchView &&
     !scheduledTasksView &&
     !childDetail &&
     connected &&
@@ -586,7 +579,7 @@ export function App({ client }: { client: DesktopClient }) {
       }))}
       defaultExpanded
       onExpand={() => void act(() => client.refreshSessions())}
-      selected={workbenchView || scheduledTasksView || preparing ? undefined : selected}
+      selected={scheduledTasksView || preparing ? undefined : selected}
       sessionLabel={
         childDetail
           ? childSessions?.entries.find((entry) => entry.sessionId === childDetail.childSessionId)
@@ -609,7 +602,6 @@ export function App({ client }: { client: DesktopClient }) {
         childDetail
           ? childDetail.loading
           : !optimisticMessage &&
-            !workbenchView &&
             !scheduledTasksView &&
             !preparing &&
             loadingSession &&
@@ -662,16 +654,9 @@ export function App({ client }: { client: DesktopClient }) {
           chooseProject(projects?.some((project) => project.path === id) ? id : undefined),
         addWorkspace: openProject,
         removeWorkspace: removeProject,
-        workbench: () => {
-          client.leaveChildSession();
-          navigationRevision.current++;
-          setScheduledTasksView(false);
-          setWorkbenchView(true);
-        },
         scheduledTasks: () => {
           client.leaveChildSession();
           navigationRevision.current++;
-          setWorkbenchView(false);
           setScheduledTasksView(true);
         },
         settings: () => setSettingsOpen(true),
@@ -681,12 +666,12 @@ export function App({ client }: { client: DesktopClient }) {
       }}
       writeClipboardText={(text) => client.copyText(text)}
       fileChanges={
-        !childDetail && !workbenchView && !scheduledTasksView && !preparing && selected
+        !childDetail && !scheduledTasksView && !preparing && selected
           ? view.messages.filter((message) => message.changeConfirmed)
           : undefined
       }
       environmentInformation={
-        !childDetail && !workbenchView && !scheduledTasksView && !preparing && selected ? (
+        !childDetail && !scheduledTasksView && !preparing && selected ? (
           <BackgroundExecutions
             id="session-environment-information"
             executions={environmentExecutions}
@@ -744,7 +729,7 @@ export function App({ client }: { client: DesktopClient }) {
         ) : undefined
       }
       newConversation={
-        !workbenchView && !scheduledTasksView && preparing
+        !scheduledTasksView && preparing
           ? {
               projects: [
                 ...(projects ?? []),
@@ -811,7 +796,6 @@ export function App({ client }: { client: DesktopClient }) {
       }
       interaction={
         !childDetail &&
-        !workbenchView &&
         !scheduledTasksView &&
         interaction &&
         interaction.kind === 'approval' &&
@@ -826,7 +810,6 @@ export function App({ client }: { client: DesktopClient }) {
             }
           />
         ) : !childDetail &&
-          !workbenchView &&
           !scheduledTasksView &&
           interaction &&
           (interaction.kind === 'input' || interaction.kind === 'plan_review') &&
@@ -874,7 +857,7 @@ export function App({ client }: { client: DesktopClient }) {
         ) : undefined
       }
       composer={
-        workbenchView || scheduledTasksView || childDetail
+        scheduledTasksView || childDetail
           ? undefined
           : {
               draft,
@@ -1158,7 +1141,6 @@ export function App({ client }: { client: DesktopClient }) {
                 }),
             }
       }
-      workbench={workbenchView || undefined}
       scheduledTasks={
         scheduledTasksView
           ? {

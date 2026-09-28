@@ -136,6 +136,26 @@ function childRunId(childThreadId: string): string {
   return `run_${createHash('sha256').update(`kite.child-run.v1\0${childThreadId}`).digest('hex')}`;
 }
 
+/** Metrics may replay, and the Host can normalize persisted event timestamps. */
+function sameDurableModelEvents(
+  applied: readonly RuntimeEvent[],
+  requested: readonly RuntimeEvent[],
+  options: { ignoreQueuedCreatedAt?: boolean } = {},
+): boolean {
+  const durable = (events: readonly RuntimeEvent[]) =>
+    events
+      .filter(
+        (event) => event.type !== 'model.cache_metrics' && event.type !== 'model.context_metrics',
+      )
+      .map((event) =>
+        event.type === 'model.responded' ||
+        (options.ignoreQueuedCreatedAt && event.type === 'tool.queued')
+          ? { ...event, createdAt: undefined }
+          : event,
+      );
+  return JSON.stringify(durable(applied)) === JSON.stringify(durable(requested));
+}
+
 function terminalStatus(state: RuntimeState): NonNullable<SubAgentResult['terminalStatus']> {
   const outcome = state.terminalOutcome;
   if (!outcome && state.turn.status === 'aborted' && state.turn.abortCause === 'user')
@@ -1517,19 +1537,7 @@ export function createChildSessionOrchestrator(input: {
               )
                 return false;
               const applied = child.session.processEventBatch(events);
-              const durable = (batch: readonly RuntimeEvent[]) =>
-                batch
-                  .filter(
-                    (event) =>
-                      event.type !== 'model.cache_metrics' &&
-                      event.type !== 'model.context_metrics',
-                  )
-                  .map((event) =>
-                    event.type === 'model.responded' || event.type === 'tool.queued'
-                      ? { ...event, createdAt: undefined }
-                      : event,
-                  );
-              if (JSON.stringify(durable(applied)) !== JSON.stringify(durable(events))) {
+              if (!sameDurableModelEvents(applied, events, { ignoreQueuedCreatedAt: true })) {
                 return false;
               }
               if (prepared.length === 1)
@@ -1650,17 +1658,7 @@ export function createChildSessionOrchestrator(input: {
                 return false;
             }
             const applied = child.session.processEventBatch(events);
-            const durable = (batch: readonly RuntimeEvent[]) =>
-              batch
-                .filter(
-                  (event) =>
-                    event.type !== 'model.cache_metrics' && event.type !== 'model.context_metrics',
-                )
-                .map((event) =>
-                  event.type === 'model.responded' ? { ...event, createdAt: undefined } : event,
-                );
-            // Metrics can be idempotent replays; the Host also normalizes responded.createdAt.
-            return JSON.stringify(durable(applied)) === JSON.stringify(durable(events));
+            return sameDurableModelEvents(applied, events);
           },
         });
         try {

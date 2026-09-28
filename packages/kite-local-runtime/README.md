@@ -33,7 +33,7 @@ Session generation、credential 或启动意图。
 
 ## Profile 与配置
 
-source/installed Runtime Store 均为 `<canonical-config-root>/kite-session.sqlite`。Service 打开前发现旧 `kite.sqlite` 或 source profile 数据时进入明确的未归并错误，不静默隐藏历史；实际转换尚未交付。
+source/installed Runtime Store 均为 `<canonical-config-root>/kite-session.sqlite`。已验证的 macOS source CLI/TUI、paired Desktop 与 installed CLI/TUI 入口在满足进程准入和 Store 独占维护条件后，可于 Service 打开前整理已知旧 `kite.sqlite` 和 source profile 数据；未知格式、无法证明旧 writer 已停止或未验证的平台保持原数据并拒绝切换空库。适用范围与验证见[会话存储兼容性计划](../../docs/plans/session-store-compatibility-and-continuity.md)。
 Provider/config/credential/Trust 继续共享 canonical config root，通过 file-local CAS 序列化；不存在 global writer lease。
 
 profile 与 private state directory 必须是 canonical、non-link、owner-only 路径。POSIX 收紧为 `0700`；Windows 使用 current-user

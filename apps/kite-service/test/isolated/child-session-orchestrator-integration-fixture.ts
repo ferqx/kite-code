@@ -512,8 +512,11 @@ export async function exerciseChildOrchestration(
         baseURL: model.baseURL,
         modelName: 'mock-model',
         modelKwargs: { maxOutputTokens: 64 },
-        modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
-        features: { resourceBudget: true },
+        modelCapabilities: {
+          contextWindowTokens: shellApprovalChild ? 8_192 : 4_096,
+          maxOutputTokens: 64,
+        },
+        features: { resourceBudget: true, boundedCancellation: shellApprovalChild },
         sandbox: { enabled: shellApprovalChild },
       },
       shellExecutor: async ({ command }: { command: string }) => ({

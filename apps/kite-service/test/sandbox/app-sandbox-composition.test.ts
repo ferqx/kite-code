@@ -112,10 +112,14 @@ function acknowledgedShellInput(workspace: string, command: string): ShellInput 
   };
 }
 
-async function waitForFile(path: string): Promise<void> {
+async function waitForPids(path: string): Promise<readonly [number, number]> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    if (existsSync(path)) return;
+    if (existsSync(path)) {
+      const pids = readFileSync(path, 'utf8').trim().split(/\s+/).map(Number);
+      if (pids.length === 2 && pids.every((pid) => Number.isSafeInteger(pid) && pid > 0))
+        return pids as [number, number];
+    }
     await Bun.sleep(10);
   }
   throw new Error(`Managed process tree did not publish its ready marker: ${path}`);
@@ -210,11 +214,7 @@ describe('App sandbox composition', () => {
             }),
           });
 
-          await waitForFile(readyPath);
-          [parentPid, descendantPid] = readFileSync(readyPath, 'utf8')
-            .trim()
-            .split(/\s+/)
-            .map(Number) as [number, number];
+          [parentPid, descendantPid] = await waitForPids(readyPath);
           expect(isPidAlive(parentPid)).toBe(true);
           expect(isPidAlive(descendantPid)).toBe(true);
           expect(

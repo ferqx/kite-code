@@ -17,7 +17,7 @@
 - [x] DeepSeek `deepseek-v4-flash` 一次低成本真实 smoke 通过。
 - [x] OpenCode Go OpenAI-compatible route 一次低成本真实 smoke 通过。
 - [x] `RELEASE_NOTES.md` 与 `KNOWN_LIMITATIONS.md` 和候选版本一致。
-- [x] `task-status-v2.json` 保持 83 completed、25 superseded、0 optional，没有未决路线图 Task。
+- [x] `task-status.json` 保持 83 completed、25 superseded、0 optional，没有未决路线图 Task。
 - [x] 候选包没有 credential、`.env`、日志正文或真实模型 response artifact。
 - [x] 回滚命令与安装 prefix 已记录并实测。
 

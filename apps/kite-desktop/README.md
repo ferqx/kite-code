@@ -7,7 +7,7 @@
 
 本 workspace 是 Electron 桌面 presentation 与本机宿主 owner：React/shadcn UI 在沙箱 renderer 中运行，Electron 主进程提供受限本机能力，业务执行继续由独立 Kite Runtime Host 承担。迁移实现与本机自动原生验收已完成，制品身份和验证边界见[原生验收](docs/native-validation.md#electron-本机迁移验收)。
 
-迁移前的 Tauri 版本曾完成[首版计划](../../docs/plans/desktop-client.md)中的本机 macOS 接入、日常开发闭环与稳定性验收；这些结果只保留为当时版本的历史证据，不能作为 Electron 制品、窗口或生命周期资格。当前仍以本机开发和内部测试为主，正式签名、公证及分发资格延后。
+迁移前的 Tauri 版本曾完成[原生验收记录](docs/native-validation.md)中的本机 macOS 接入、日常开发闭环与稳定性验收；这些结果只保留为当时版本的历史证据，不能作为 Electron 制品、窗口或生命周期资格。当前仍以本机开发和内部测试为主，正式签名、公证及分发资格延后。
 
 后续研发以 Codex 功能和日常交互体验为对标目标，需求基线与逐项核对入口见[日常体验方向](../../docs/plans/desktop-client.md#首轮验证后的日常体验方向)；当前实现职责与限制仍以下文为准。
 
@@ -64,7 +64,7 @@ Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配�
 
 当前 [Electron lifecycle](electron/main.ts)在关窗时隐藏主窗口；明确退出由主进程 `before-quit` 发起完整会话任务检查，只在存在运行或等待中的任务时显示原生异步确认框，空闲时直接清理退出；无法完整检查时保守显示确认。正常清理完成后再次退出；清理失败或等待超过 20 秒时仍有紧急退出路径，第二次明确退出也可触发该路径。空间切换不关闭 Service。标题栏非交互区由 CSS drag region 交给 Electron，双击才调用封闭的最大化切换。窗口、preload、重接、退出和崩溃清理需重复真实 Electron 场景，不能用单元测试或浏览器预览替代。
 
-会话切换/重连保持订阅代次边界；跨项目清除旧选中状态，加载会话显示提示并在 20 秒后有界失败。`tool.cancelled`/`tool.rejected` 在历史与实时投影中均为终态，迟到进度不能覆盖。其余范围见首版计划。
+会话切换/重连保持订阅代次边界；跨项目清除旧选中状态，加载会话显示提示并在 20 秒后有界失败。`tool.cancelled`/`tool.rejected` 在历史与实时投影中均为终态，迟到进度不能覆盖。其余范围见[日常体验与发布资格计划](../../docs/plans/desktop-client.md)。
 
 阶段 2 的[大历史回归](test/history.test.ts)通过真实 App Server 写入 20 轮、每轮约 32 KiB 回答，重启后完整分页恢复且每帧不超过 1 MiB；[丢失回执回归](test/resilience.test.ts)在文件已写入后丢弃 start_turn 回执，确认连接 ready 失效、结果未知提示和重连无重放。大会话渲染、与安装版 TUI 的同会话竞争、损坏制品拒绝及手动替换应用后的数据保留目前只有 Tauri 版本的历史原生证据；Electron 与 host 无关的 Service 回归分别记录，正式签名分发升级另行验收。
 

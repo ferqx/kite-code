@@ -104,9 +104,7 @@ admission revision，State codec只丢弃这条无法验证的background authori
 回归见[多工作区集成](../test/isolated/runtime-server-multi-workspace.test.ts)与
 [Kernel codec](../../../packages/agent-kernel/test/agent-kernel.test.ts)。
 
-单Workspace Worker的first-run也是该惰性边界：Store 8、Host、Server和App Control可以在Provider未配置时ready，credential/model
-mutation仍由同一Worker owner处理；`workspaceTemplateFor`直到配置ready后的首个Runtime context请求才调用`runtimeInputsFor`并等待
-MCP readiness。它不创建configuration-only第二Worker或placeholder execution backend，未完成配置的Runtime请求保持unavailable。
+当前默认 App Server 的首轮惰性准入由同一 Service composition 持有：Store、Host、Server 和 App Control 可在 Provider 未配置时就绪；`workspaceTemplateFor` 直到首个需要 Runtime context 的请求才调用 `runtimeInputsFor` 并等待 MCP readiness。它不创建第二个配置专用执行 owner 或占位 executor，未完成配置的 Runtime 请求保持 unavailable。旧单 Workspace Worker 只属于非默认保留布局。
 
 ## App Control、History 与 mutation
 
@@ -150,7 +148,7 @@ post-event State投影完整queue；无法取得exact State时返回unavailable/
 该规则同样覆盖manual compaction：command intent与effect terminal都通过Coordinator记录各自post-event State后才发布；
 不得直接写Session再让Bridge用batch最终State投影早期revision，否则activation必须fail closed且不能调度compaction。
 
-Store8 capability存在时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
+保留的 Store8 Run capability 被实际组合时，start planner把同一个canonical `turnId`交给Host transaction作为Run identity；queued Run、original
 resource receipt和State decision共同提交。bridge activation先调用Coordinator的queued→running transition，再发布notification或交给
 Host schedule。interaction request/settlement、terminal/cancel/recovery仍穿过State event transaction，并由Host派生同一Run transition。
 Start Turn整批presentation notification以及该accepted Run后续的model/tool/subagent/interaction/terminal通知都携带admission确认的`runId/taskId/turnId`；首条`user.message_appended`不从
@@ -158,14 +156,14 @@ Start Turn整批presentation notification以及该accepted Run后续的model/too
 `currentRun`与late-stream fence；该读取不写Store或触发recovery。
 
 若进程在 `start_turn` 的 Run 激活后、执行器调度前退出，取得上一代执行的 fencing 与清理证据后，Service 仅在当前 Turn 的完整日志证明没有模型、工具、交互或其他派发事实时补记中断终态，并将 Run 结算为失败。原命令回执保留可查，重放不再次派发；存在旧全局 Provider 准入等待时仍按其独立的可续跑证明处理。
-current Store8 composition提供private canonical Run port，但Public Agent API仍不发布该capability，不能用内存activeWork补写Run或降级为partial查询。
+保留的 Store8 composition 提供 private canonical Run port；当前默认 App Server 的 Run 查询以 Session Store owner 为准。Public Agent API 不因旧 capability 存在而发布该能力，不能用内存activeWork补写Run或降级为partial查询。
 
 History由Service-owned exhaustive raw-event projector与SQLite log query生成closed session/event/transcript DTO；Plan submit必须从
 active PlanDocument携带的exact Artifact ref读取正文，不得伪造空path或零byteLength ref。未持久化名称的Session在
 History与Agent API中复用同一safe-text规则，从首条用户消息派生最多80字符的只读展示标题，不写入第二份状态。carrier与
 CLI只能取得`RuntimeHistoryClient`，不能取得Store path、writer或raw event。App Control与Runtime mutation共享operation
 gate；`outcome_unknown`后只允许exact query与用户显式决定，不自动重放mutation。
-Workspace Worker另为每个Agent API context打开一条read-only in-process Runtime Client/Server logical connection；admission只允许
+保留的非默认 Workspace Worker 为每个旧 Agent API context 打开一条 read-only in-process Runtime Client/Server logical connection；该路径的 admission 只允许
 initialize/query，并继续把persisted Session identity与当前Workspace交叉校验。Session page先从同一Store 8 connection取得bounded keyset
 IDs，再以最多8并发query做page-local projection join；History只消费bounded safe `RuntimeHistoryClient` page，Checkpoint metadata消费
 same-connection keyset port且preview仍走Runtime query。Agent adapter不取得Host/Store/SQLite concrete，也不复用这条connection执行command、
@@ -220,17 +218,11 @@ opaque Controller binding reference）。App Server从每条command的已认证c
 generation 与 OS-user resource lease 共同完成 prepare/acquire/dispatch/terminal 或 `outcome_unknown`；context 不进入 Runtime
 Protocol wire frame，也不向Browser REST projection暴露。
 
-## Clean-cutover non-goals
+## 当前默认与非默认布局
 
-没有CLI backend副本、default embedded/stdio fallback、app-to-app import、dual Host/Store、generic RPC 或 OS Service。private Web是同一
-Service `/v1`的只读客户端，不拥有独立BFF、Runtime或Store，也不把Browser变成Controller；remote/LAN Web、Desktop/public SDK仍不属于V1。
-Service-owned stdio仅为parent-owned internal/test且必须显式使用isolated nondefault checkpoint path；它不是第二default root。
-Store 6/State 27仍是默认 Service authority，Store 6→Store 7 只能由显式 offline migration/admission 进入 Worker path，不能 silent
-schema fallback。
-Store 7→Store 8只存在于显式offline maintenance：调用方先关闭所有Coordinator/Worker/Gateway admission并证明
-Turn/Interaction/effect/external process已收敛，再由source-bound journal/fence、Coordinator-owned Catalog copy与Runtime Store
-whole-generation migrator共同切换。普通Runtime Application不调用该入口；fresh home直接初始化Store8，production Worker只接受
-committed Store8 evidence，Store7 profile不作为open failure fallback。
+默认 TUI/CLI 使用 parent-owned stdio App Server，显式 daemon 在同一 Service composition 上增加本机 endpoint 与只读 Browser `/v1`；二者使用 canonical Kite Home 的 Store13 Session 库。没有 CLI backend 副本、embedded fallback、双 Host/Store、通用 RPC 或独立 Browser Runtime。Browser 不取得 Controller 或 Runtime mutation 权限；remote/LAN 仍不支持。
+
+Store6/7/8 的 adapter、旧 Workspace Worker 与离线迁移 primitive 只供明确选择的非默认布局及维护调用者使用，不是默认打开路径。Store6→7、Store7→8 仍要求相应的 source-bound fence、完整 generation 收敛和可核对布局；普通 Runtime Application 不静默回退或自动切换到旧 Store。旧布局的安全准入不能从默认 Store13 的存在推断为可省略。
 
 ## 验证
 
@@ -304,7 +296,7 @@ Service 的会话投影查询、历史读取及订阅只读取持久事实并刷
 
 父 Run 已由用户取消、原 child allotment 已释放但仍有未结算的 required child 时，恢复扫描仅对无 dispatch ACK、无预算激活且 revision 0 无模型／工具尝试的准确子 Session 规划取消善后。Service 先隔离过期子执行代际并确认 idle 清理，再通过 Host 的两事件路径提交取消结果；不重复释放预算，也不恢复已取消的父 Run。Service 从原 Run 的持久取消状态与 `turn.aborted(cause=user)` 事件核对，不依赖当前 turn；Store 在同一事务重验原 Run 取消、原用户取消事件、原释放与无派发子证明，即使会话已开始新一轮也能结算，不足则保留 `recovery_required`。续轮审批代理的父 Tool 身份由 [Host storage codec](../../../packages/runtime-host/src/storage/followup-child-approval-identity.ts) 解析，Service 不从 SQLite Store 包读取运行时解析权威。对应验证为 [恢复规划](../test/child-session-recovery.test.ts)、[结算辅助](../test/isolated/child-creation-failure.test.ts)、[Store CAS](../../../packages/runtime-storage-sqlite/test/kite-child-session-intents.test.ts)及[真实 Store／Host 恢复](../test/isolated/child-session-orchestrator-integration.test.ts)。
 
-ACK 前的恢复仅在父资金 Run 的准确委派预留仍为 `reserved`、且 Store 可证明子线程尚未外部派发时，将已结束父 Run 或过期授权的子任务结算为具名启动失败；已有 ACK、预算 unknown 或证据变化继续保留需恢复诊断。D0 首发验收针对默认 Store12 App Server；旧 Store8 Workspace Worker 属于默认发布路径之外，仍使用现有子任务路径，不通过可选 owner 接口伪装为 Store11 子线程执行。
+ACK 前的恢复仅在父资金 Run 的准确委派预留仍为 `reserved`、且 Store 可证明子线程尚未外部派发时，将已结束父 Run 或过期授权的子任务结算为具名启动失败；已有 ACK、预算 unknown 或证据变化继续保留需恢复诊断。D0 首发验收针对默认 Store12 App Server；旧 Store8 Workspace Worker 位于默认发布路径之外，仍使用其保留的子任务路径，不通过可选 owner 接口伪装为 Store11 子线程执行。
 
 原 D0 验收门禁曾把 `agentMailboxAvailable` 设为 false，以隔离子 Session 派发与后续 Agent 邮箱接线。现行 Store13 App Server 已在正式入口接入独立子 Session、根邮箱命令／模型输入与子 Agent 注册；背景 watcher 继续经 A–C 的结果路径结算。`createKiteSessionAppServerStorageComposition` 的启动准备已恢复已验证旧格式的备份、候选转换和发布；合成 Store10 会话经正常启动后保留原 ID，Runtime History 的事件与记录顺序不变。
 

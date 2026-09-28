@@ -33,18 +33,18 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
 项目采用未发布clean cutover。默认terminal fresh profile直接创建exact `kite-session.sqlite`；正式CLI/candidate不导入旧
-`kite.sqlite`，不提供Store 7/8 migration或启动期source cleanup。旧Store原样保留但不是fallback。App Server reopen与本机candidate smoke
-已通过，但三平台filesystem/process evidence完成前仍不计入G1。
+`kite.sqlite`，不提供Store 7/8 migration或启动期source cleanup。旧Store原样保留但不是fallback。
 
 首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
 Host/Builtin/History/App Control composition，多个进程只通过durable Store共享Session facts。普通启动没有HTTP/Web listener；显式
 `kite server start/status/stop`提供fixed exact protocol本机daemon且不参与默认发现；旧Service/Web控制面已经删除。
 App Server internal stdio、development loopback WebSocket、
 browser与Desktop reference不等同于remote/public Web access。
-KLSV1-06的本地源码、candidate与smoke evidence不能计作G1三平台成功；KLSV1-07的macOS、Ubuntu、Windows installed
-App Server/process结果取得前保持pending qualification。当前macOS arm64本机candidate build/verify以及安装、CLI/TUI App Server、显式daemon、
-retired companion absence、Web payload、MCP wrapper、升级、回滚、卸载smoke已通过，但它只是单平台dirty-source开发证据；真实
-Windows ACL/locked-directory atomic publication与三平台 qualification 仍未取得。
+KLSV1-06 的本机源码与 dirty-source candidate smoke 只证明当时的单平台开发状态。后续 KASD implementation head
+`af7c7596c2e1b7b4aa6eccb12375aca017b45222` 已由
+[三平台候选 run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)完成 macOS、Ubuntu、Windows 的
+build/verify/install/process/PTY/smoke 资格；证据边界见[完成记录](../../release/app-server/evidence/2026-09-03-app-server-session-decoupling.md)。
+该批次不自动覆盖后续生命周期升级、Store 兼容性或桌面包的新增验收；这些变更按各自计划和证据判断。
 
 ## 制品与安装
 
