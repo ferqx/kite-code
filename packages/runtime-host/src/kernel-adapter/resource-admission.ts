@@ -437,7 +437,6 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
   if (call?.name === 'task') {
     // Task acceptance is a durable Tool receipt. A child allotment acquires
     // the Sub-agent slot when its independent execution can start.
-    usage.gauges.activeToolInvocations = 0;
     usage.gauges.activeWriters = 0;
   }
   usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
@@ -909,7 +908,7 @@ export function createDescendantResourceAdmission(input: {
         const attemptTime = now();
         const storedWaiter = budget.waiters[invocation.invocationId];
         const existingWaiter = storedWaiter?.state === 'waiting' ? storedWaiter : undefined;
-        if (existingWaiter?.state === 'waiting' && invocation.requiredPermits.length === 0) {
+        if (existingWaiter && invocation.requiredPermits.length === 0) {
           await persist({
             type: 'resource_budget.waiter_cancelled',
             invocationId: invocation.invocationId,
@@ -1216,7 +1215,7 @@ export function planRuntimeBudgetAdmission(
     }
     const storedWaiter = projected.waiters?.[invocation.invocationId];
     let existingWaiter = storedWaiter?.state === 'waiting' ? storedWaiter : undefined;
-    if (existingWaiter?.state === 'waiting' && invocation.requiredPermits.length === 0) {
+    if (existingWaiter && invocation.requiredPermits.length === 0) {
       const cancelled = {
         type: 'resource_budget.waiter_cancelled',
         invocationId: invocation.invocationId,

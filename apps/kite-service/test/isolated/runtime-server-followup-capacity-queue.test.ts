@@ -264,6 +264,7 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
         }),
       );
     });
+    await server.host.waitForSessionIdle(parentSessionId);
     const intendedTarget = parentEvents().find(
       (event) =>
         event.type === 'subagent.child_session_intended' &&

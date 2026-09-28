@@ -181,11 +181,7 @@ export function createAgentApiBrowserClient(
   async function request(path: string, input: RequestInput): Promise<Response> {
     const response = await fetchImpl(`${baseUrl}${path}`, {
       method: input.method,
-      headers: {
-        accept: 'application/json',
-        ...(input.body ? { 'content-type': 'application/json' } : {}),
-      },
-      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+      headers: { accept: 'application/json' },
       ...(input.signal ? { signal: input.signal } : {}),
       cache: 'no-store',
       credentials: 'include',
@@ -208,7 +204,6 @@ export function createAgentApiBrowserClient(
 
 interface RequestInput {
   readonly method: 'DELETE' | 'GET' | 'POST';
-  readonly body?: unknown;
   readonly signal?: AbortSignal;
 }
 

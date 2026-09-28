@@ -347,6 +347,7 @@ test('formal AppServer exposes followup_task and admits one completed-child new 
     inspection.close();
 
     await until(() => parentEvents().some((event) => event.type === 'run.completed'));
+    await server.host.waitForSessionIdle(parentSessionId);
 
     const laterRevision = storage.loadCurrentSnapshot(parentSessionId)?.revision;
     if (laterRevision === undefined) throw new Error('Parent Session revision is unavailable.');

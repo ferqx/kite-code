@@ -378,18 +378,47 @@ test('restart recovery marks an in-flight required child unknown without replayi
       }),
     ).resolves.toMatchObject({ status: 'idempotent_replay' });
     expect(model.getRequestCount()).toBe(requestCountBeforeCrash);
+
+    const serverToDispose = restarted;
+    restarted = undefined;
+    try {
+      await serverToDispose[Symbol.asyncDispose]();
+    } catch (error) {
+      expect(disposalMessage(error)).toContain('Independent child Session cleanup is unconfirmed.');
+    }
   } finally {
     childResponseGate.resolve();
     child.kill('SIGKILL');
     await child.exited;
-    await runtime?.close();
-    await restarted?.[Symbol.asyncDispose]();
-    storage?.disposeStorage();
-    model.assertComplete({ allowUnconsumedResponses: true });
-    model.stop();
-    rmSync(resolve(root), { recursive: true, force: true });
+    try {
+      await runtime?.close();
+      await disposeAllowingUnconfirmedChildCleanup(restarted);
+    } finally {
+      storage?.disposeStorage();
+      model.assertComplete({ allowUnconsumedResponses: true });
+      model.stop();
+      rmSync(resolve(root), { recursive: true, force: true });
+    }
   }
 }, 30_000);
+
+function disposalMessage(error: unknown): string {
+  return error instanceof AggregateError
+    ? `${error.message} ${error.errors.map(disposalMessage).join(' ')}`
+    : String(error);
+}
+
+async function disposeAllowingUnconfirmedChildCleanup(
+  server: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined,
+): Promise<void> {
+  if (!server) return;
+  try {
+    await server[Symbol.asyncDispose]();
+  } catch (error) {
+    if (!disposalMessage(error).includes('Independent child Session cleanup is unconfirmed.'))
+      throw error;
+  }
+}
 
 function createAccess(input: {
   readonly workspace: string;
