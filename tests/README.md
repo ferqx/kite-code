@@ -23,7 +23,8 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
   instance handshake；manager不再以App-private source留在Service workspace。
 - `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
 - `tests/qualification/`：fault、soak、native 与安全 qualification。
-- `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试。
+- `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试；每个文件使用独立进程，已审计为安全的文件可跨进程并行。
+- `tests/isolated/exclusive/` 和 owner-local `test/isolated/exclusive/`：使用固定临时路径、仓库内建目录、全局进程快照、进程组、SIGKILL 或编译等共享资源的独占测试；逐文件运行，且不与其他默认测试 job 重叠。
 - `tests/tui-system/`、`tests/e2e/`、`tests/release/`、`tests/golden/`：稳定专用套件。
 - `tests/fixtures/`、`tests/helpers/`、`tests/reliability-harness/`：非测试辅助资源。
 
@@ -39,19 +40,15 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 ## 默认执行
 
-`bun run test` 保持 deterministic 默认覆盖：
+`bun run test` 保持 deterministic 默认覆盖。runner 以同一计划发现并分类 workspace、App、root integration、Web Vitest 和 isolated 文件；普通套件达到 16 个文件时按文件大小分成最多 4 个 job。普通测试、Web Vitest 与安全的 isolated 文件共用最多 4 槽队列，较大的 job 优先启动。isolated 仍每文件单独启动 Bun，进程内 `maxConcurrency=1`；`isolated/exclusive/` 及目录外被识别出的进程级测试在并行队列结束后全局逐文件串行运行。Windows 的 isolated 文件暂全部串行执行，待平台并发验证通过后再调整。失败后不再派发新 job，已启动文件完成清理。
 
-1. 以独立进程并行运行 workspace/App parallel-safe tests；
-2. 并行运行 root integration；
-3. 逐文件、逐进程串行运行 owner-local 与 root isolated tests。
-
-并发上限是 `max(1, min(4, availableParallelism()))`。每个子进程使用独立临时`HOME`，Windows `USERPROFILE`
+并发上限是 `max(1, min(4, availableParallelism()))`。每个子进程使用独立临时 `HOME`，Windows `USERPROFILE`
 与其相同，`KITE_CODE_HOME`固定为该home下的exact `.kite-code` root；结束后连同root一起清理。
 
 默认测试排除真实 PTY、fault/soak、native sandbox、spike 和 live Provider；这些使用已有显式命令。
 默认source TUI使用parent-owned App Server与worktree持久profile；旧single-Service real-child/manager/build replacement矩阵已随production
 控制面删除，不再保留只为测试存在的兼容路径。
-`apps/kite-service/test/isolated/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、同连接
+`apps/kite-service/test/isolated/exclusive/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、同连接
 Runtime/History/App Control/credential client、EOF active model cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint。
 同文件还让真实approved host-shell child记录PID，SIGKILL App Server后验证Runtime Host watchdog清理command group、successor显式reconcile且
 resume不重新启动command；当前release未启用local stdio MCP，因此不以测试专用port伪造该能力。
@@ -151,7 +148,7 @@ Thinking 与工具聚合仍各自只有一个 block owner。TUI harness 还以�
 补充隐藏 Thought metadata；live 与重启 `/resume` 都不得泄漏后缀、恢复活动圆点或重复回答。会创建真实
 child、socket、SQLite file、cwd 或 global process environment 的backend tests必须留在
 `apps/kite-service/test/isolated/`；CLI isolated目录只保留terminal/client-owned process journey。默认runner逐文件、
-逐进程串行执行，不能为了提速改成共享进程。
+逐进程执行；可并行文件仍不能为了提速改成共享进程，独占文件必须放在 `isolated/exclusive/`。
 
 Runtime Server/Client owner tests 还必须固定 reconnect generation 立即失效 Session readiness、cursor 超过
 Host watermark 时以 current snapshot reset/ready 收敛，以及 blocked carrier 的 in-flight send 在 settle 前继续

@@ -146,7 +146,7 @@ describe('platform capability probe admission', () => {
     expect(macosRequiredStep).toContain('apps/kite-cli/test/isolated/sandbox.test.ts');
     expect(macosRequiredStep).not.toContain('tests/qualification/sandbox-executor.test.ts');
     expect(requiredSteps.slice(posixStepStart)).toContain(
-      'apps/kite-service/test/isolated/execution/posix-supervisor.test.ts',
+      'apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts',
     );
     expect(requiredSteps).not.toContain(
       'apps/kite-cli/test/isolated/execution/posix-supervisor.test.ts',

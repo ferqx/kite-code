@@ -277,7 +277,7 @@ capability surface 不得把文件工具读取误分类为原生进程 external-
 
 ```bash
 bun run typecheck
-bun test tests/isolated/tools.test.ts
+bun test tests/isolated/exclusive/tools.test.ts
 bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-policy.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts apps/kite-service/test/subagent-runner.test.ts tests/integration/builtin-runtime/context.test.ts
 ```
 

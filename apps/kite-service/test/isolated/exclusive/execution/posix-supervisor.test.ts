@@ -16,7 +16,7 @@ import {
 } from '@kite-ai/runtime-host';
 import type { PreparedSandboxExecution, SandboxPreparationLifecycle } from '@kite-ai/runtime-spi';
 import { sandboxBackendCapabilities } from '#kite-service/sandbox/runtime-execution';
-import { compileOssReleaseExecutable } from '../../../../../scripts/release/oss-candidate';
+import { compileOssReleaseExecutable } from '../../../../../../scripts/release/oss-candidate';
 
 const POSIX = process.platform === 'darwin' || process.platform === 'linux';
 
@@ -26,7 +26,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     const executable = join(root, 'kite');
     try {
       await compileOssReleaseExecutable(
-        resolve(import.meta.dir, '../../../src/executable.ts'),
+        resolve(import.meta.dir, '../../../../src/executable.ts'),
         executable,
       );
       // An installed Kite process has already faulted the standalone image in
@@ -489,7 +489,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
   test('Host supervision source has no Shell DTO or raw command authority', () => {
     const source = readFileSync(
       new URL(
-        '../../../../../packages/runtime-host/src/process/posix-supervisor.ts',
+        '../../../../../../packages/runtime-host/src/process/posix-supervisor.ts',
         import.meta.url,
       ),
       'utf8',
@@ -756,7 +756,7 @@ function writeForgedSupervisorScript(
 ): string {
   const target = join(root, 'forged-supervisor.ts');
   const identityModule = new URL(
-    '../../../../../packages/runtime-host/src/process/posix-supervisor-identity.ts',
+    '../../../../../../packages/runtime-host/src/process/posix-supervisor-identity.ts',
     import.meta.url,
   ).pathname;
   const source = `#!${process.execPath}

@@ -79,7 +79,7 @@ checkpoint list/preview是同一Runtime query surface上的只读操作，不等
 query权威投影独立hydrate。rewind mutation、Controller命令与普通turn仍必须等待Session readiness。TUI调用时以Reducer当前
 `activeSessionId`为准，mutable ref只作尚未建立Reducer identity时的fallback。
 
-验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts`。
+验证：`bun test apps/kite-cli/test/service-mode apps/kite-cli/test/cli.test.ts apps/kite-cli/test/tui-runtime-client-conformance.test.ts`。
 
 ## 当前 CLI 终态退出差异
 

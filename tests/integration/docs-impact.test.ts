@@ -257,7 +257,9 @@ describe('documentation impact gate V2', () => {
       ),
     ).toEqual(['runtime-transport-qualification']);
     expect(
-      triggeredRepositoryRules('apps/kite-service/test/isolated/runtime-stdio-child.test.ts'),
+      triggeredRepositoryRules(
+        'apps/kite-service/test/isolated/exclusive/runtime-stdio-child.test.ts',
+      ),
     ).toEqual(['runtime-transport-qualification']);
     expect(triggeredRepositoryRules('apps/kite-cli/src/service-mode/adapter.ts')).toEqual([
       'kite-service-mode-adapter',

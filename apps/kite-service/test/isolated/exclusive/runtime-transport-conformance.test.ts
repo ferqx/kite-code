@@ -26,7 +26,7 @@ import {
   type DevelopmentLoopbackCarrier,
 } from '#kite-service/carrier/development-loopback-carrier';
 
-const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../..');
+const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../../..');
 const SERVICE_STDIO_ENTRYPOINT = join(
   REPOSITORY_ROOT,
   'apps/kite-service/test/fixtures/runtime-transport-stdio-child.ts',

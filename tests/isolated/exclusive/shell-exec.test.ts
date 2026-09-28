@@ -8,8 +8,8 @@ import {
   isWslStubPath,
 } from '@kite-ai/builtin-runtime/sandbox';
 import { guardProcessTree } from '@kite-ai/runtime-host';
-import { createSandboxExecutor } from '../helpers/sandbox-executor';
-import { buildHostShellInvocations } from '../helpers/shell-executor';
+import { createSandboxExecutor } from '../../helpers/sandbox-executor';
+import { buildHostShellInvocations } from '../../helpers/shell-executor';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');

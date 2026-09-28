@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import {
   pairedDesktopManifestDigest,
   parsePairedDesktopServiceManifest,
-} from '../../src/paired-desktop-manifest';
-import { observeLegacyKiteStoreProcesses } from '../../src/service/legacy-store-processes';
-import { verifyPairedDesktopServiceArtifact } from '../../src/service/paired-desktop-admission';
+} from '../../../src/paired-desktop-manifest';
+import { observeLegacyKiteStoreProcesses } from '../../../src/service/legacy-store-processes';
+import { verifyPairedDesktopServiceArtifact } from '../../../src/service/paired-desktop-admission';
 
 const roots: string[] = [];
 afterEach(() => {

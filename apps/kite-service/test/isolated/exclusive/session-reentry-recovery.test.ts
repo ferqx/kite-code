@@ -15,12 +15,12 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
-import { createRuntimeOperationGate } from '../../src/runtime-application/operation-gate';
+} from '../../../src/bootstrap';
+import { createRuntimeOperationGate } from '../../../src/runtime-application/operation-gate';
 
 test('projection reads stay read-only during quiesce and command recovery publishes a failed cleanup revision', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-reentry-watermark-'));
@@ -386,7 +386,7 @@ test('reentering a killed active Session settles its old Run once and permits a 
   const child = Bun.spawn(
     [
       process.execPath,
-      join(import.meta.dir, '..', 'fixtures', 'runtime-pending-approval-child.ts'),
+      join(import.meta.dir, '../..', 'fixtures', 'runtime-pending-approval-child.ts'),
     ],
     {
       cwd: workspace,
@@ -595,7 +595,7 @@ test('a model attempt interrupted by process death is terminal on reentry withou
     { message: { content: 'stale response from killed process' }, delay: 3_000 },
     { message: { content: 'new turn after interrupted model' } },
   ]);
-  const bootstrapModule = join(import.meta.dir, '..', '..', 'src', 'bootstrap.ts');
+  const bootstrapModule = join(import.meta.dir, '../..', '..', 'src', 'bootstrap.ts');
   const childCode = `
     import { createKiteCliRuntimeAccess } from ${JSON.stringify(bootstrapModule)};
     import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
@@ -633,7 +633,7 @@ test('a model attempt interrupted by process death is terminal on reentry withou
     await new Promise(() => {});
   `;
   const child = Bun.spawn([process.execPath, '-e', childCode], {
-    cwd: join(import.meta.dir, '..', '..', '..', '..'),
+    cwd: join(import.meta.dir, '../..', '..', '..', '..'),
     env: { ...process.env, KITE_CODE_HOME: root },
     stdout: 'pipe',
     stderr: 'pipe',

@@ -96,7 +96,7 @@ development loopback/reference仅用于同一Protocol transport qualification，
 
 ## 验证
 
-`bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/agent-api/context.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts`。
+`bun test --no-orphans apps/kite-service/test/isolated/carrier/native-loopback-carrier.test.ts apps/kite-service/test/agent-api/context.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/exclusive/runtime-transport-conformance.test.ts`。
 这些local结果不构成KLSV1-07 Windows/三平台或全部PTY evidence。
 
 初始化后的 History 与明确只读辅助请求使用独立容量。每连接 History 至多接纳 256 个未完成读取、3 MiB 排队输入；App 辅助读取至多接纳 64 个、1 MiB。共享同一 History owner 的全部连接再受总计 8 个执行中、1024 个未完成读取、12 MiB 输入帧约束；同一 Runtime Server 的 App 辅助读取受总计 16 个执行中、256 个未完成读取、4 MiB 输入帧约束。两类读取分别按连接轮转，每次启动前让出一轮事件循环。达到任一上限返回 `overloaded`；排队及过载响应不阻塞后续帧解析，单个输入块每解析 64 帧还会让出事件循环。只有可处理取消通知且注入 History owner 的 stdio carrier 才声明 `history/cancel`；generic InProcess 连接不声明。客户端可按同连接原 RPC id 取消等待中或执行中的 History 读取；连接关闭也取消该连接的排队读取。执行中读取若 10 秒未结束，返回可重试的固定错误；若响应已进入有界输出队列，超时不再生成第二个响应。App Control owner 不接受取消信号，因此其执行名额直到实际调用结束才释放；16 个永久不返回的 owner 调用会使新的 App 辅助读取过载或超时，不能声称该 owner 自动恢复，Runtime 与 History 容量不受此影响。stdout 按序写入，每连接积压超过 2048 帧或 8 MiB、同一 Runtime Server 的全部连接积压超过 8192 帧或 64 MiB 时关闭触发超额的连接，避免多连接背压使输出队列无限增长。读取失败返回稳定 detailCode 与 retryable，不泄漏 SQLite 或路径错误；这些额度是负载保护，不是 Store 的 Session 数量上限。

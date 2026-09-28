@@ -55,11 +55,11 @@ import {
   sandboxPreparationDigest,
 } from '#kite-service/sandbox/runtime-execution';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import { ScriptableFakeSandboxExecutionProvider } from '../../../../../tests/helpers/sandbox-execution-provider';
+import { ScriptableFakeSandboxExecutionProvider } from '../../../../../../tests/helpers/sandbox-execution-provider';
 import {
   createBuiltinSandboxExecutionConsumerForTest,
   createCompletedPreparedProcessPortForTest,
-} from '../../../../../tests/helpers/sandbox-executor';
+} from '../../../../../../tests/helpers/sandbox-executor';
 
 function createTestRuntimeDir(workspace: string, label: string): string {
   const preparationDigest = `sandbox-provider-test:${label}:${randomUUID()}`;

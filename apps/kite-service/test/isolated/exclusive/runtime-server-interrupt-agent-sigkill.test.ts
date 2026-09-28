@@ -7,11 +7,11 @@ import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-cli
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
+} from '../../../src/bootstrap';
 
 async function until(check: () => boolean, stage: string, timeoutMs = 10000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -97,12 +97,12 @@ test('SIGKILL after queued interrupt receipt resumes one parent-owned stop witho
       'test',
       '--test-name-pattern',
       '^interrupt queued SIGKILL seed$',
-      join(import.meta.dir, 'interrupt-agent-pipeline.test.ts'),
+      join(import.meta.dir, '../interrupt-agent-pipeline.test.ts'),
       '--parallel=1',
       '--max-concurrency=1',
     ],
     {
-      cwd: join(import.meta.dir, '../../../..'),
+      cwd: join(import.meta.dir, '../../../../..'),
       stdout: 'pipe',
       stderr: 'pipe',
       env: {

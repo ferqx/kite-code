@@ -604,8 +604,8 @@
         "apps/kite-service/test/isolated/development-runtime-reference.test.ts",
         "apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts",
         "apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts",
-        "apps/kite-service/test/isolated/runtime-stdio-child.test.ts",
-        "apps/kite-service/test/isolated/runtime-transport-conformance.test.ts"
+        "apps/kite-service/test/isolated/exclusive/runtime-stdio-child.test.ts",
+        "apps/kite-service/test/isolated/exclusive/runtime-transport-conformance.test.ts"
       ],
       "authorities": [
         "apps/kite-service/docs/runtime-server-carrier.md",

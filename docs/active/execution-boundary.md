@@ -11,7 +11,7 @@ apps/kite-service/test/config/features.test.ts apps/kite-service/test/sandbox/st
 tests/isolated/workspace/worktree-controller.test.ts tests/integration/builtin-runtime/mcp-transport-boundary.test.ts
 packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts apps/kite-service/test/git-broker.test.ts
 apps/kite-service/test/runtime/git-tool-controller.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts
-apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
+apps/kite-service/test/isolated/exclusive/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -290,7 +290,7 @@ Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证
 Runtime schema v26 或 `kite-runtime-modularization-v1-2026-08-19` format epoch。
 
 Darwin 的 supervisor negative conformance 由
-`apps/kite-service/test/isolated/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
+`apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
 `cleanupConfirmed` 必须保持 `false`。恢复同样传递 `descendantContainmentProven=false`，所以只终止已绑定
 supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的 `AbandonProcessGroup=false`
 只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的

@@ -1,13 +1,6 @@
 import { resolve } from 'node:path';
-import {
-  collectTestFiles,
-  partitionTestFiles,
-  runTestJob,
-  runTestJobs,
-  shardTestFiles,
-  type TestJob,
-  testParallelism,
-} from './test-suite';
+import { planTestSuites, runTestPlan } from './test-plan';
+import { collectTestFiles, testParallelism } from './test-suite';
 
 const root = resolve(import.meta.dir, '..');
 const workspaces = [
@@ -29,83 +22,43 @@ const workspaces = [
   'packages/kite-client-ui',
   'apps/kite-desktop',
 ] as const;
-
-const concurrency = testParallelism();
-const workspaceJobs: TestJob[] = [];
-const isolatedFiles: string[] = [];
-for (const workspace of workspaces) {
-  const partition = partitionTestFiles(collectTestFiles(resolve(root, workspace, 'test')));
-  const shards = shardTestFiles(
-    partition.parallel,
-    workspace === 'apps/kite-cli' ? concurrency : 1,
-  );
-  for (const [index, files] of shards.entries()) {
-    workspaceJobs.push({
-      label: workspace + (shards.length > 1 ? `:shard-${index + 1}/${shards.length}` : ''),
-      files,
-    });
-  }
-  isolatedFiles.push(...partition.isolated);
-}
-
 const rootSuites = [
   'tests/integration',
   'tests/golden',
   'tests/release',
   'tests/e2e/local',
   'tests/tui-system/harness',
-];
-const integrationJobs: TestJob[] = [];
-let integrationFileCount = 0;
-for (const suite of rootSuites) {
-  const partition = partitionTestFiles(collectTestFiles(resolve(root, suite)));
-  isolatedFiles.push(...partition.isolated);
-  const shards = shardTestFiles(
-    partition.parallel,
-    suite === 'tests/integration' ? concurrency : 1,
-  );
-  for (const [index, files] of shards.entries()) {
-    integrationJobs.push({
-      label: suite + (shards.length > 1 ? `:shard-${index + 1}/${shards.length}` : ''),
-      files,
-    });
-    integrationFileCount += files.length;
-  }
-}
-isolatedFiles.push(...collectTestFiles(resolve(root, 'tests/isolated')));
+  'tests/isolated',
+] as const;
 
-console.log(`[test] workspace parallelism=${concurrency}`);
-const workspaceExit = await runTestJobs(root, workspaceJobs, concurrency);
-if (workspaceExit !== 0) process.exit(workspaceExit);
+const concurrency = testParallelism();
+const workspacePlan = planTestSuites(
+  root,
+  workspaces.map((workspace) => `${workspace}/test`),
+  concurrency,
+);
+const rootPlan = planTestSuites(root, rootSuites, concurrency);
+const plan = {
+  concurrent: [
+    ...workspacePlan.concurrent,
+    ...rootPlan.concurrent,
+    {
+      label: 'apps/kite-web',
+      files: collectTestFiles(resolve(root, 'apps/kite-web/test')),
+      command: [process.execPath, 'run', '--cwd', 'apps/kite-web', 'test'],
+    },
+  ],
+  exclusive: [...workspacePlan.exclusive, ...rootPlan.exclusive],
+  counts: {
+    parallel: workspacePlan.counts.parallel + rootPlan.counts.parallel,
+    isolated: workspacePlan.counts.isolated + rootPlan.counts.isolated,
+    exclusive: workspacePlan.counts.exclusive + rootPlan.counts.exclusive,
+  },
+};
 
-// React Testing Library requires Vitest's configured jsdom environment. Running these files
-// through Bun's generic test process would make the default gate report a false DOM failure.
-const webTest = Bun.spawn([process.execPath, 'run', '--cwd', 'apps/kite-web', 'test'], {
-  cwd: root,
-  stdin: 'inherit',
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
-const webExit = await webTest.exited;
-if (webExit !== 0) process.exit(webExit);
-
-const integrationExit = await runTestJobs(root, integrationJobs, concurrency);
-if (integrationExit !== 0) process.exit(integrationExit);
-
-for (const file of isolatedFiles.sort()) {
-  const exitCode = await runTestJob(
-    root,
-    { label: `isolated:${file.split(/[\\/]/u).at(-1)}`, files: [file] },
-    { maxConcurrency: 1 },
-  );
-  if (exitCode !== 0) process.exit(exitCode);
-}
-
+console.log(`[test] parallelism=${concurrency}`);
+const exitCode = await runTestPlan(root, plan, concurrency);
+if (exitCode !== 0) process.exit(exitCode);
 console.log(
-  '\n[test] passed workspaceFiles=' +
-    workspaceJobs.reduce((count, job) => count + job.files.length, 0) +
-    ' integrationFiles=' +
-    integrationFileCount +
-    ' isolatedFiles=' +
-    isolatedFiles.length,
+  `\n[test] passed parallelFiles=${plan.counts.parallel} isolatedFiles=${plan.counts.isolated} exclusiveFiles=${plan.counts.exclusive} web=vitest`,
 );

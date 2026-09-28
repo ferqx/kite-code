@@ -1,31 +1,14 @@
-import { resolve } from 'node:path';
-import { collectTestFiles, partitionTestFiles, runTestJob } from './test-suite';
+import { relative, resolve, sep } from 'node:path';
+import { planSuiteTests, runTestPlan } from './test-plan';
+import { testParallelism } from './test-suite';
 
 const repositoryRoot = resolve(import.meta.dir, '..');
 const workspaceRoot = resolve(process.cwd(), process.argv[2] ?? '.');
-const partition = partitionTestFiles(collectTestFiles(resolve(workspaceRoot, 'test')));
-const workspaceLabel = workspaceRoot.slice(repositoryRoot.length + 1).replaceAll('\\', '/');
-
-const parallelExit = await runTestJob(repositoryRoot, {
-  label: workspaceLabel + ':parallel',
-  files: partition.parallel,
-});
-if (parallelExit !== 0) process.exit(parallelExit);
-
-for (const file of partition.isolated) {
-  const exitCode = await runTestJob(
-    repositoryRoot,
-    { label: workspaceLabel + ':isolated:' + file.split(/[\\/]/u).at(-1), files: [file] },
-    { maxConcurrency: 1 },
-  );
-  if (exitCode !== 0) process.exit(exitCode);
-}
-
+const workspaceLabel = relative(repositoryRoot, workspaceRoot).split(sep).join('/');
+const concurrency = testParallelism();
+const plan = planSuiteTests(repositoryRoot, `${workspaceLabel}/test`, concurrency);
+const exitCode = await runTestPlan(repositoryRoot, plan, concurrency);
+if (exitCode !== 0) process.exit(exitCode);
 console.log(
-  '[test:' +
-    workspaceLabel +
-    '] passed parallel=' +
-    partition.parallel.length +
-    ' isolated=' +
-    partition.isolated.length,
+  `[test:${workspaceLabel}] passed parallel=${plan.counts.parallel} isolated=${plan.counts.isolated} exclusive=${plan.counts.exclusive}`,
 );

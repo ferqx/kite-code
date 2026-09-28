@@ -274,7 +274,7 @@ describe('secure session log writer', () => {
     const child = Bun.spawn({
       cmd: [
         process.execPath,
-        resolve(import.meta.dir, '../../../../../tests/fixtures/session-logger/lease-holder.ts'),
+        resolve(import.meta.dir, '../../../../../../tests/fixtures/session-logger/lease-holder.ts'),
       ],
       cwd: process.cwd(),
       env: { ...process.env },
@@ -308,7 +308,7 @@ describe('secure session log writer', () => {
     const child = Bun.spawn({
       cmd: [
         process.execPath,
-        resolve(import.meta.dir, '../../../../../tests/fixtures/session-logger/lease-holder.ts'),
+        resolve(import.meta.dir, '../../../../../../tests/fixtures/session-logger/lease-holder.ts'),
       ],
       cwd: process.cwd(),
       env: { ...process.env, KITE_TEST_BOUNDED_POLICY: '1' },

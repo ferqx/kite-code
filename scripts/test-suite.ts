@@ -8,11 +8,15 @@ export const TEST_FILE_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
 export interface TestJob {
   label: string;
   files: string[];
+  command?: string[];
+  maxConcurrency?: number;
+  drainOnFailure?: boolean;
 }
 
 export interface TestPartition {
   parallel: string[];
   isolated: string[];
+  exclusive: string[];
 }
 
 export function testParallelism(): number {
@@ -38,12 +42,11 @@ export function collectTestFiles(path: string): string[] {
   }
 }
 
-export function testRequiresProcessIsolation(path: string): boolean {
+export function testIsolationClass(path: string): 'parallel' | 'isolated' | 'exclusive' {
   const normalized = path.split(sep).join('/');
-  return (
-    normalized.includes('/isolated/') ||
-    testSourceRequiresProcessIsolation(readFileSync(path, 'utf8'))
-  );
+  if (normalized.includes('/isolated/exclusive/')) return 'exclusive';
+  if (normalized.includes('/isolated/')) return 'isolated';
+  return testSourceRequiresProcessIsolation(readFileSync(path, 'utf8')) ? 'exclusive' : 'parallel';
 }
 
 export function testSourceRequiresProcessIsolation(source: string): boolean {
@@ -57,7 +60,8 @@ export function testSourceRequiresProcessIsolation(source: string): boolean {
         target === 'process.chdir' ||
         target === 'Bun.spawn' ||
         target === 'Bun.spawnSync' ||
-        target === 'spawnSync'
+        target === 'spawnSync' ||
+        target === 'ServiceProcess.start'
       ) {
         required = true;
         return;
@@ -86,10 +90,14 @@ export function testSourceRequiresProcessIsolation(source: string): boolean {
 export function partitionTestFiles(files: readonly string[]): TestPartition {
   const parallel: string[] = [];
   const isolated: string[] = [];
+  const exclusive: string[] = [];
   for (const file of files) {
-    (testRequiresProcessIsolation(file) ? isolated : parallel).push(file);
+    const mode = testIsolationClass(file);
+    if (mode === 'parallel') parallel.push(file);
+    else if (mode === 'isolated') isolated.push(file);
+    else exclusive.push(file);
   }
-  return { parallel, isolated };
+  return { parallel, isolated, exclusive };
 }
 
 export function shardTestFiles(files: readonly string[], requestedShards: number): string[][] {
@@ -129,25 +137,26 @@ export async function runTestJob(
   job: TestJob,
   options: { maxConcurrency?: number; signal?: AbortSignal } = {},
 ): Promise<number> {
-  if (job.files.length === 0) return 0;
+  if (job.files.length === 0 && !job.command) return 0;
   if (options.signal?.aborted) return 130;
   const environment = testEnvironment('kite-test-v2-');
   const startedAt = performance.now();
   const displayFiles = job.files.map((file) => relative(repositoryRoot, file).split(sep).join('/'));
+  const maxConcurrency = options.maxConcurrency ?? job.maxConcurrency;
   console.log(
     '\n[test:' +
       job.label +
       '] files=' +
       displayFiles.length +
-      (options.maxConcurrency ? ` maxConcurrency=${options.maxConcurrency}` : ''),
+      (maxConcurrency ? ` maxConcurrency=${maxConcurrency}` : ''),
   );
-  const args = [
+  const args = job.command ?? [
     process.execPath,
     'test',
     '--no-orphans',
     '--only-failures',
     ...(process.platform === 'win32' ? ['--timeout=30000'] : []),
-    ...(options.maxConcurrency ? [`--max-concurrency=${options.maxConcurrency}`] : []),
+    ...(maxConcurrency ? [`--max-concurrency=${maxConcurrency}`] : []),
     ...displayFiles,
   ];
   try {
@@ -166,6 +175,7 @@ export async function runTestJob(
       }
     };
     options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
     const exitCode = await child.exited;
     options.signal?.removeEventListener('abort', abort);
     console.log(
@@ -195,7 +205,9 @@ export async function runTestJobs(
       const index = nextIndex++;
       const job = jobs[index];
       if (!job) return;
-      const exitCode = await runTestJob(repositoryRoot, job, { signal: controller.signal });
+      const exitCode = await runTestJob(repositoryRoot, job, {
+        signal: job.drainOnFailure ? undefined : controller.signal,
+      });
       if (exitCode !== 0 && failure === 0) {
         failure = exitCode;
         controller.abort();
