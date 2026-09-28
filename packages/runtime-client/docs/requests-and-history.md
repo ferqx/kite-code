@@ -6,11 +6,11 @@
 
 单次请求的默认期限为 30 秒，可通过 `requestTimeoutMs` 调整。期限覆盖建连、transport `send()` 和等待响应；到期后删除本地 correlation，迟到响应被忽略。`request_timeout` 只说明客户端未拿到结果，尤其对 mutation 应保留结果未知状态，并通过原 command ID 查询回执；不能据此生成新命令或自动重放。订阅恢复中的取消旧订阅请求也受同一期限约束，旧请求超时后继续尝试建立替代订阅。
 `subscribeReady` 和 `subscribeReadyWithGeneration` 在收到订阅回执后仍等待初始 ready 边界；该等待同样使用配置的期限。ready 一直不到时关闭对应 logical connection，让服务端释放远端订阅，并向调用方返回超时错误。
-订阅请求已经发出、远端 ID 尚未返回时若调用方取消，同样关闭该 logical connection；此时无法用 ID 发送 unsubscribe，连接关闭负责释放服务端可能已占用的名额。
+订阅请求已经发出、远端 ID 尚未返回时若调用方取消，本地立即结束该订阅的等待，并以原订阅请求 ID 调用 `runtime/unsubscribe`。服务端负责清理待建立或已建立的订阅，取消不依赖原订阅回执；已取得远端 ID 时仍按该 ID 取消。取消接口失败或超时才关闭 logical connection，作为无法核实远端资源时的异常清理边界。旧连接的迟到回执不能作用于替代连接。
 
 通知更新客户端投影与订阅。event-free snapshot 可以修正活动/交互状态，但不伪造批准、取消或完成事件。历史读取通过独立注入的 HistoryClient 获取完整 durable transcript；短期 replay window 不能代替它。
 
-客户端缓存只服务读取与展示，业务 State 仍由服务端决定。UI 本地 pending feedback 与 accepted receipt、durable event 的合并由相应客户端实现处理，不由本包猜测消息文本 identity。
+客户端缓存只服务读取与展示，业务 State 仍由服务端决定。最后一个会话／子会话订阅结束时，Store 回收该会话投影、临时流、后台执行快照与终止 Run 过滤记录；同会话多个订阅读取期间继续共享。后台列表与详情查询始终向调用方返回 Service DTO；只有发起与收到结果时同一读取订阅仍存在，才把结果写入展示快照，避免离开后迟到响应或重进同一会话的旧响应恢复过期状态。UI 本地 pending feedback 与 accepted receipt、durable event 的合并由相应客户端实现处理，不由本包猜测消息文本 identity。
 
 后台停止必须使用同一个list/detail投影中的`sessionRevision`作为Session CAS，并保留该item的
 `ownerGeneration + revision`作为原生执行fence；item `revision`同时表示执行状态水位。Store合并detail时保留完整列表及其

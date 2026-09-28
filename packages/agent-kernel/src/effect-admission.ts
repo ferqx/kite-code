@@ -48,6 +48,26 @@ function isToolTerminalEvent(
   );
 }
 
+function terminalToolCallIds(state: Readonly<AgentState>, event: RuntimeEvent): readonly string[] {
+  if (isToolTerminalEvent(event)) return [event.toolCallId];
+  if (event.type !== 'turn.aborted' || event.turnId !== state.turn.turnId) return [];
+  // Authorization closes approved, still-running Tools as part of turn.aborted.
+  // They have no explicit tool.cancelled event for the capability preprocessor.
+  return [
+    ...new Set(
+      [...state.pendingApprovals.values()]
+        .map((pending) => pending.toolCallId)
+        .filter((toolCallId) => {
+          const status = state.tools.calls[toolCallId]?.status;
+          return (
+            status != null &&
+            !['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(status)
+          );
+        }),
+    ),
+  ];
+}
+
 /**
  * Determine which suspended capability receipts require Host-supplied terminal timestamps.
  * The Kernel never reads a clock; callers must bind every returned invocation exactly once.
@@ -61,20 +81,21 @@ export function suspendedCapabilityTerminalRequirements(
   );
   const requirements: SuspendedCapabilityTerminalRequirement[] = [];
   for (const event of events) {
-    if (!isToolTerminalEvent(event)) continue;
-    for (const invocation of Object.values(state.capabilities.invocations)) {
-      if (
-        invocation.toolCallId !== event.toolCallId ||
-        (invocation.status !== 'recorded' && invocation.status !== 'running') ||
-        terminalInvocationIds.has(invocation.invocationId)
-      ) {
-        continue;
+    for (const toolCallId of terminalToolCallIds(state, event)) {
+      for (const invocation of Object.values(state.capabilities.invocations)) {
+        if (
+          invocation.toolCallId !== toolCallId ||
+          (invocation.status !== 'recorded' && invocation.status !== 'running') ||
+          terminalInvocationIds.has(invocation.invocationId)
+        ) {
+          continue;
+        }
+        terminalInvocationIds.add(invocation.invocationId);
+        requirements.push({
+          invocationId: invocation.invocationId,
+          toolCallId: invocation.toolCallId,
+        });
       }
-      terminalInvocationIds.add(invocation.invocationId);
-      requirements.push({
-        invocationId: invocation.invocationId,
-        toolCallId: invocation.toolCallId,
-      });
     }
   }
   return requirements;
@@ -99,13 +120,17 @@ export function attachSuspendedCapabilityTerminals(
       }
       continue;
     }
-    if (!isToolTerminalEvent(event)) {
+    const toolCallIds = terminalToolCallIds(state, event);
+    if (
+      toolCallIds.length === 0 ||
+      (!isToolTerminalEvent(event) && event.type !== 'turn.aborted')
+    ) {
       output.push(event);
       continue;
     }
     for (const invocation of Object.values(state.capabilities.invocations)) {
       if (
-        invocation.toolCallId !== event.toolCallId ||
+        !toolCallIds.includes(invocation.toolCallId) ||
         (invocation.status !== 'recorded' && invocation.status !== 'running') ||
         emittedTerminalIds.has(invocation.invocationId)
       ) {
@@ -123,7 +148,14 @@ export function attachSuspendedCapabilityTerminals(
           `Suspended capability terminal ${invocation.invocationId} requires a valid Host timestamp.`,
         );
       }
-      if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
+      if (event.type === 'turn.aborted') {
+        output.push({
+          type: 'capability.execution_unknown',
+          invocationId: invocation.invocationId,
+          reason: 'Turn aborted before the approved Tool result was committed.',
+          finishedAt,
+        });
+      } else if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
         output.push({
           type: 'capability.execution_unknown',
           invocationId: invocation.invocationId,

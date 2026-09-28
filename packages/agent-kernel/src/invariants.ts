@@ -343,9 +343,13 @@ function assertResourceBudget(state: AgentState): void {
     sequences.add(sequence!);
     assert(
       Array.isArray(waiter.requiredPermits) &&
-        (waiter.requiredPermits.length === 1 || waiter.requiredPermits.length === 2) &&
-        waiter.requiredPermits[0] === 'tool' &&
-        (waiter.requiredPermits.length === 1 || waiter.requiredPermits[1] === 'shell_invocation'),
+        ((waiter.requiredPermits.length === 1 &&
+          (waiter.requiredPermits[0] === 'tool' ||
+            waiter.requiredPermits[0] === 'writer' ||
+            waiter.requiredPermits[0] === 'artifact_capacity')) ||
+          (waiter.requiredPermits.length === 2 &&
+            waiter.requiredPermits[0] === 'tool' &&
+            waiter.requiredPermits[1] === 'shell_invocation')),
       'resource waiter permits are invalid.',
     );
     assert(

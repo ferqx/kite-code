@@ -136,8 +136,8 @@ describe('Runtime Server', () => {
     await server.beginDraining();
   });
 
-  test('releases pending subscription capacity when its connection closes', async () => {
-    const gate = deferred<void>();
+  test('releases pending subscription capacity when its connection closes and admission never settles', async () => {
+    const neverSettles = new Promise<void>(() => undefined);
     const runtime = new FakeRuntime();
     runtime.notifications = emptyIndex();
     const server = new RuntimeServer(
@@ -146,7 +146,7 @@ describe('Runtime Server', () => {
         admission: {
           authorize: async (input) => {
             if (input.operation === 'runtime/subscribe' && input.connectionId === 'connection-1') {
-              await gate.promise;
+              await neverSettles;
             }
             return { allowed: true, workspace: '/trusted/workspace' };
           },
@@ -170,7 +170,121 @@ describe('Runtime Server', () => {
     expect(
       second.sent.find((message) => 'id' in message && message.id === 'accepted'),
     ).toMatchObject({ result: { subscriptionId: 'subscription-1' } });
-    gate.resolve();
+    await server.beginDraining();
+  });
+
+  test('releases request accounting when a cancelled subscription admission never settles', async () => {
+    const entered = deferred<void>();
+    const neverSettles = new Promise<void>(() => undefined);
+    let pendingAttempts = 0;
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    const transport = new TestConnection();
+    const server = new RuntimeServer(
+      {
+        runtime,
+        admission: {
+          authorize: async (input) => {
+            if (
+              input.operation === 'runtime/subscribe' &&
+              input.requestId === 'pending' &&
+              ++pendingAttempts === 1
+            ) {
+              entered.resolve();
+              await neverSettles;
+            }
+            return { allowed: true, workspace: '/trusted/workspace' };
+          },
+        },
+      },
+      { ...serverOptions(), limits: { maxSubscriptions: 1 } },
+    );
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    transport.push(subscribeRequest('pending'));
+    await entered.promise;
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'detach-pending',
+      method: 'runtime/unsubscribe',
+      params: { subscribeRequestId: 'pending' },
+    });
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'detach-pending'),
+    );
+    expect(transport.sent).toContainEqual(
+      expect.objectContaining({ id: 'detach-pending', result: { unsubscribed: true } }),
+    );
+    expect(
+      transport.sent.find((message) => 'id' in message && message.id === 'pending'),
+    ).toMatchObject({
+      error: { data: { code: 'subscription_unavailable' } },
+    });
+    transport.push(subscribeRequest('pending'));
+    await eventually(() =>
+      transport.sent.some(
+        (message) => 'id' in message && message.id === 'pending' && 'result' in message,
+      ),
+    );
+    expect(
+      transport.sent.find(
+        (message) => 'id' in message && message.id === 'pending' && 'result' in message,
+      ),
+    ).toMatchObject({ result: { subscriptionId: 'subscription-1' } });
+    expect(runtime.subscriptions).toHaveLength(1);
+    expect(connection.state).toBe('active');
+    expect(runtime.commands).toHaveLength(0);
+    await server.beginDraining();
+  });
+
+  test('releases request accounting when a cancelled initial boundary never settles', async () => {
+    const neverSettles = new Promise<void>(() => undefined);
+    const runtime = new FakeRuntime();
+    runtime.sessionProjectionRevision = 1;
+    runtime.queryGate = neverSettles;
+    const transport = new TestConnection();
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'pending-boundary',
+      method: 'runtime/subscribe',
+      params: { subscription: { scope: 'session', sessionId: 'session-1' } },
+    });
+    await eventually(() => runtime.queries.length === 1);
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'detach-boundary',
+      method: 'runtime/unsubscribe',
+      params: { subscribeRequestId: 'pending-boundary' },
+    });
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'detach-boundary'),
+    );
+    expect(runtime.iteratorReturns).toBe(1);
+    expect(transport.sent).toContainEqual(
+      expect.objectContaining({ id: 'detach-boundary', result: { unsubscribed: true } }),
+    );
+    expect(
+      transport.sent.some(
+        (message) => 'id' in message && message.id === 'pending-boundary' && 'result' in message,
+      ),
+    ).toBeFalse();
+    runtime.queryGate = undefined;
+    transport.push(subscribeRequest('pending-boundary'));
+    await eventually(() =>
+      transport.sent.some(
+        (message) => 'id' in message && message.id === 'pending-boundary' && 'result' in message,
+      ),
+    );
+    expect(
+      transport.sent.filter(
+        (message) => 'id' in message && message.id === 'pending-boundary' && 'result' in message,
+      ),
+    ).toHaveLength(1);
+    expect(connection.state).toBe('active');
+    expect(runtime.commands).toHaveLength(0);
     await server.beginDraining();
   });
 
@@ -604,6 +718,42 @@ describe('Runtime Server', () => {
       result: { unsubscribed: true },
     });
     expect(runtime.iteratorReturns).toBe(1);
+  });
+
+  test('detaches an acknowledged subscription by its subscribe request ID', async () => {
+    const runtime = new FakeRuntime();
+    runtime.notifications = emptyIndex();
+    const transport = new TestConnection();
+    const server = new RuntimeServer({ runtime, admission: allowAdmission }, serverOptions());
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    transport.push(subscribeRequest('subscribe-by-request'));
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'subscribe-by-request'),
+    );
+    transport.push({
+      jsonrpc: '2.0',
+      id: 'detach-by-request',
+      method: 'runtime/unsubscribe',
+      params: { subscribeRequestId: 'subscribe-by-request' },
+    });
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'detach-by-request'),
+    );
+    expect(transport.sent).toContainEqual(
+      expect.objectContaining({ id: 'detach-by-request', result: { unsubscribed: true } }),
+    );
+    expect(runtime.iteratorReturns).toBe(1);
+    transport.push(commandRequest('command-after-detach'));
+    await eventually(() =>
+      transport.sent.some((message) => 'id' in message && message.id === 'command-after-detach'),
+    );
+    expect(
+      transport.sent.find((message) => 'id' in message && message.id === 'command-after-detach'),
+    ).toMatchObject({ result: { status: 'applied' } });
+    expect(runtime.commands.map((command) => command.type)).toEqual(['create_session']);
+    expect(connection.state).toBe('active');
+    await server.beginDraining();
   });
 
   test('enforces in-flight overload without dispatching the excess request', async () => {
@@ -1481,6 +1631,7 @@ class FakeRuntime implements RuntimeAccess {
   notifications: RuntimeAccessNotification[] = [];
   iteratorReturns = 0;
   commandGate: Promise<void> | undefined;
+  queryGate: Promise<void> | undefined;
   querySessions: Array<{
     schema: 'kite.runtime-projection.v2';
     sessionId: string;
@@ -1508,6 +1659,8 @@ class FakeRuntime implements RuntimeAccess {
 
   async query(query: RuntimeQuery) {
     this.queries.push(query);
+    if (query.type === 'get_session_projection' || query.type === 'get_child_session_projection')
+      await this.queryGate;
     if (query.type === 'get_child_session_projection') {
       return this.sessionProjectionRevision === undefined
         ? {

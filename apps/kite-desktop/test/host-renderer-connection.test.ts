@@ -157,10 +157,192 @@ test('renderer reload cancels old receive and unsubscribes the old page', async 
   expect((abandonedResult as Error).message).toBe('页面连接已被替换。');
   expect(service.sent.map((frame) => JSON.parse(frame))).toContainEqual({
     jsonrpc: '2.0',
-    id: 'desktop-native-unsubscribe',
+    id: 'desktop-native-unsubscribe-1',
     method: 'runtime/unsubscribe',
     params: { subscriptionId: 'subscription-1' },
   });
+});
+
+test('request-id cancellation is translated and its late subscribe ack cannot restore a stream', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  await connection.send(
+    1,
+    JSON.stringify({ jsonrpc: '2.0', id: 'child', method: 'runtime/subscribe', params: {} }),
+  );
+  const wireRequestId = JSON.parse(service.sent.at(-1)!).id;
+  await connection.send(
+    1,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'cancel-child',
+      method: 'runtime/unsubscribe',
+      params: { subscribeRequestId: 'child' },
+    }),
+  );
+  expect(JSON.parse(service.sent.at(-1)!)).toEqual({
+    jsonrpc: '2.0',
+    id: JSON.stringify([1, 'cancel-child']),
+    method: 'runtime/unsubscribe',
+    params: { subscribeRequestId: wireRequestId },
+  });
+
+  service.feed({
+    jsonrpc: '2.0',
+    id: wireRequestId,
+    result: { subscriptionId: 'late-child' },
+  });
+  service.feed({
+    jsonrpc: '2.0',
+    id: JSON.stringify([1, 'cancel-child']),
+    result: { unsubscribed: true },
+  });
+  expect(JSON.parse(await connection.receive(1))).toMatchObject({
+    id: 'child',
+    result: { subscriptionId: 'late-child' },
+  });
+  expect(JSON.parse(await connection.receive(1))).toMatchObject({
+    id: 'cancel-child',
+    result: { unsubscribed: true },
+  });
+  expect(service.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+    jsonrpc: '2.0',
+    id: 'desktop-native-unsubscribe-1',
+    method: 'runtime/unsubscribe',
+    params: { subscriptionId: 'late-child' },
+  });
+  service.feed({
+    jsonrpc: '2.0',
+    method: 'runtime/subscription',
+    params: { subscriptionId: 'late-child', message: {} },
+  });
+  await connection.send(
+    1,
+    JSON.stringify({ jsonrpc: '2.0', id: 'next-query', method: 'runtime/query', params: {} }),
+  );
+  service.feed({
+    jsonrpc: '2.0',
+    id: JSON.stringify([1, 'next-query']),
+    result: { status: 'ok' },
+  });
+  expect(JSON.parse(await connection.receive(1))).toMatchObject({ id: 'next-query' });
+  await connection.attach(2);
+  expect(
+    service.sent.filter((frame) => JSON.parse(frame).method === 'runtime/unsubscribe'),
+  ).toHaveLength(2);
+});
+
+test('renderer reattach cancels pending subscribe by its host-scoped request id', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  await connection.send(
+    1,
+    JSON.stringify({ jsonrpc: '2.0', id: 'same', method: 'runtime/subscribe', params: {} }),
+  );
+  const oldWireId = JSON.parse(service.sent.at(-1)!).id;
+  await connection.attach(2);
+  expect(JSON.parse(service.sent.at(-1)!)).toEqual({
+    jsonrpc: '2.0',
+    id: 'desktop-native-unsubscribe-1',
+    method: 'runtime/unsubscribe',
+    params: { subscribeRequestId: oldWireId },
+  });
+  await connection.send(
+    2,
+    JSON.stringify({ jsonrpc: '2.0', id: 'same', method: 'runtime/subscribe', params: {} }),
+  );
+  const newWireId = JSON.parse(service.sent.at(-1)!).id;
+  expect(newWireId).not.toBe(oldWireId);
+  service.feed({ jsonrpc: '2.0', id: oldWireId, result: { subscriptionId: 'stale' } });
+  service.feed({ jsonrpc: '2.0', id: newWireId, result: { subscriptionId: 'live' } });
+  expect(JSON.parse(await connection.receive(2))).toMatchObject({
+    id: 'same',
+    result: { subscriptionId: 'live' },
+  });
+  expect(service.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+    jsonrpc: '2.0',
+    id: 'desktop-native-unsubscribe-2',
+    method: 'runtime/unsubscribe',
+    params: { subscriptionId: 'stale' },
+  });
+  await connection.attach(3);
+  expect(service.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+    jsonrpc: '2.0',
+    id: 'desktop-native-unsubscribe-3',
+    method: 'runtime/unsubscribe',
+    params: { subscriptionId: 'live' },
+  });
+});
+
+test('request-id cancellation detaches an already acknowledged subscription', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  await connection.send(
+    1,
+    JSON.stringify({ jsonrpc: '2.0', id: 'child', method: 'runtime/subscribe', params: {} }),
+  );
+  const wireRequestId = JSON.parse(service.sent.at(-1)!).id;
+  service.feed({ jsonrpc: '2.0', id: wireRequestId, result: { subscriptionId: 'child-stream' } });
+  expect(JSON.parse(await connection.receive(1))).toMatchObject({ id: 'child' });
+  await connection.send(
+    1,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'cancel-child',
+      method: 'runtime/unsubscribe',
+      params: { subscribeRequestId: 'child' },
+    }),
+  );
+  await connection.attach(2);
+  expect(service.sent.map((frame) => JSON.parse(frame))).toContainEqual({
+    jsonrpc: '2.0',
+    id: JSON.stringify([1, 'cancel-child']),
+    method: 'runtime/unsubscribe',
+    params: { subscribeRequestId: wireRequestId },
+  });
+  expect(
+    service.sent.filter((frame) => JSON.parse(frame).id === 'desktop-native-unsubscribe-1'),
+  ).toHaveLength(0);
+});
+
+test('successful cancellation retires a pending subscribe even without its reply', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  for (let index = 0; index < 100; index++) {
+    await connection.send(
+      1,
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: `child-${index}`,
+        method: 'runtime/subscribe',
+        params: {},
+      }),
+    );
+    await connection.send(
+      1,
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: `cancel-${index}`,
+        method: 'runtime/unsubscribe',
+        params: { subscribeRequestId: `child-${index}` },
+      }),
+    );
+    service.feed({
+      jsonrpc: '2.0',
+      id: JSON.stringify([1, `cancel-${index}`]),
+      result: { unsubscribed: true },
+    });
+    expect(JSON.parse(await connection.receive(1))).toMatchObject({
+      id: `cancel-${index}`,
+      result: { unsubscribed: true },
+    });
+  }
+  await connection.attach(2);
+  expect(service.sent).toHaveLength(200);
 });
 
 test('reattach preserves initialize received while the old receiver is being cancelled', async () => {

@@ -244,9 +244,8 @@ export function App({ client }: { client: DesktopClient }) {
     [act, client, editor],
   );
   const openSession = (id: string) => {
-    if (busyRef.current || !client.getSnapshot().connected) return;
     const revision = ++navigationRevision.current;
-    client.leaveChildSession();
+    client.leaveChildSession({ restoreParent: false });
     setScheduledTasksView(false);
     setNewConversation(false);
     setSelectingSession(id);
@@ -279,7 +278,7 @@ export function App({ client }: { client: DesktopClient }) {
   };
   const newSession = () => {
     if (!busyRef.current) {
-      client.leaveChildSession();
+      client.leaveSessionPage();
       navigationRevision.current++;
       setScheduledTasksView(false);
       setNewConversation(true);
@@ -323,6 +322,7 @@ export function App({ client }: { client: DesktopClient }) {
       const branch = await client.queryProjectBranch(target);
       if (navigationRevision.current !== revision) return;
       navigationRevision.current++;
+      client.leaveSessionPage();
       setScheduledTasksView(false);
       setNewConversation(true);
       setNewConversationWorkspace(target);
@@ -355,7 +355,7 @@ export function App({ client }: { client: DesktopClient }) {
       const result = await client.removeProject(id);
       navigationRevision.current++;
       if (result.selectedRemoved || newConversationWorkspace === id || workspace === id) {
-        client.leaveChildSession();
+        client.leaveSessionPage();
         setNewConversation(true);
         setNewConversationWorkspace(undefined);
         setNewConversationBranch(undefined);
@@ -615,7 +615,7 @@ export function App({ client }: { client: DesktopClient }) {
       requiredSubagentWait={requiredSubagentWait}
       childSessionIdsByTaskId={childDetail ? undefined : childSessionIdsByExecutionId}
       onOpenChildSession={
-        !childDetail && selected && connected && ready
+        !childDetail && selected && connected && (ready || childSessions)
           ? (childSessionId) =>
               void client
                 .openChildSession(selected, childSessionId)
@@ -638,7 +638,7 @@ export function App({ client }: { client: DesktopClient }) {
       onHeaderMouseDown={(clickCount) =>
         void client.handleHeaderMouseDown(clickCount).catch((error) => client.report(error))
       }
-      onOpen={connected || busyRef.current ? openSession : undefined}
+      onOpen={openSession}
       headerActions={
         childDetail ? (
           <>
@@ -679,7 +679,7 @@ export function App({ client }: { client: DesktopClient }) {
         addWorkspace: openProject,
         removeWorkspace: removeProject,
         scheduledTasks: () => {
-          client.leaveChildSession();
+          client.leaveSessionPage();
           navigationRevision.current++;
           setScheduledTasksView(true);
         },
@@ -702,7 +702,7 @@ export function App({ client }: { client: DesktopClient }) {
             currentOnly
             stoppingExecutionId={stoppingBackground}
             subagentDetails={
-              connected && ready
+              connected && (ready || childSessions)
                 ? {
                     sessionIdsByExecutionId: childSessionIdsByExecutionId,
                     loading: childSessions?.loading,

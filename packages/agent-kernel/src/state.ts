@@ -243,7 +243,11 @@ export interface ResourceWaiter {
   readonly version: 1;
   readonly runId: string;
   readonly invocationId: string;
-  readonly requiredPermits: readonly ['tool'] | readonly ['tool', 'shell_invocation'];
+  readonly requiredPermits:
+    | readonly ['tool']
+    | readonly ['tool', 'shell_invocation']
+    | readonly ['writer']
+    | readonly ['artifact_capacity'];
   readonly sequence: number;
   readonly enqueuedAt: string;
   readonly deadlineAt: string;

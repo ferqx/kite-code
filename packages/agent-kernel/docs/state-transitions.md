@@ -22,6 +22,10 @@ Kernel 负责从当前 State 和已确认 facts 决定下一状态，不执行 I
 
 Host 分配时间和 ID，Kernel 只校验与使用。重放同一已提交事件必须得到同一状态；不能在 reducer 中读取 clock、random、文件、Provider 或编译动态配置。
 
+`turn.aborted` 会由授权归约同时取消尚未结算的审批 Tool。若该 Tool 已开始执行，Host 在提交同一批次前为仍活动的 Capability 补入带 Host 时间的 `capability.execution_unknown`；外部执行结果未获确认时保持 unknown，避免 Tool 已终态而 Capability 仍在运行，也不把异常结束误记为用户主动取消。
+
+资源等待记录现在接受 `['artifact_capacity']`，并继续读取旧 `['writer']`、`['tool']`、`['tool', 'shell_invocation']` 记录。Kernel 只验证持久事实、顺序和状态转移；等待准入、超时后的局部 Tool 失败以及 Run 级失败选择由 Service 和 Host 决定。
+
 ## 与持久化的交接
 
 Kernel 返回的 nextState 尚不等于持久提交。Host/Storage 将事件、快照和相应运行事实在指定事务边界落盘，再执行 pending effect。页面不能跳过这一步直接从模型结果修改 Kernel 状态。

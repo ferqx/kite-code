@@ -199,7 +199,12 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
       independentFollowupTurn: true,
       unboundedToolInvocations: true,
       counters: { turns: 1, modelRequests: 24, toolInvocations: 0 },
-      gauges: { elapsedRunMs: 1_800_000, activeSubagents: 1 },
+      gauges: {
+        elapsedRunMs: 1_800_000,
+        activeSubagents: 1,
+        activeToolInvocations: 0,
+        activeShellInvocations: 0,
+      },
     });
     const funded = {
       ...sourceState,
@@ -321,6 +326,45 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
       }),
     ).toThrow('source envelope');
   });
+  test('v2 followups share subagent capacity without holding Tool or Shell slots', () => {
+    const base = source();
+    let fundingState = {
+      ...base,
+      resourceBudget: {
+        ...base.resourceBudget,
+        budget: {
+          ...LIMITED_RESOURCE_BUDGET_,
+          maxConcurrentToolInvocations: 1,
+          maxConcurrentShellInvocations: 0,
+        },
+      },
+    } as AgentState;
+    for (let index = 1; index <= 2; index += 1) {
+      const planned = planCrossSessionTriggerTurnBackup({
+        ...backupInput(),
+        sourceState: fundingState,
+        targetSessionId: `target-${index}`,
+        submissionId: `submission-${index}`,
+        policy: {
+          ...policy(fundingState),
+          executionMode: 'independent_turn_v2',
+          targetRole: 'explore',
+          targetGrantDigest: `sha256:${'e'.repeat(64)}`,
+        },
+      });
+      if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
+      expect(planned.admission.executableUpperBound.gauges.activeToolInvocations).toBe(0);
+      expect(planned.admission.executableUpperBound.gauges.activeShellInvocations).toBe(0);
+      fundingState = {
+        ...fundingState,
+        resourceBudget: acquireBackup(fundingState.resourceBudget, planned.reservationEvent),
+      };
+    }
+    if (fundingState.resourceBudget.status !== 'active')
+      throw new Error('Funding budget was not configured.');
+    expect(committedResourceUsage(fundingState.resourceBudget).gauges.activeSubagents).toBe(2);
+  });
+
   test('v2 code followup reserves one writer under the original role', () => {
     const sourceState = source();
     const planned = planCrossSessionTriggerTurnBackup({

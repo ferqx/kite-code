@@ -645,6 +645,56 @@ describe('Runtime Snapshot Store', () => {
     ).toBe('applied');
   });
 
+  test('discarding an inactive session releases its streams, terminal fences, and background snapshot', () => {
+    const store = new RuntimeSnapshotStore();
+    store.setConnection({ generation: 1, status: 'active' });
+    store.applyBackgroundSnapshot({
+      connectionGeneration: 1,
+      snapshot: background('session-1', 'owner-1', 1, 'running'),
+    });
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(projection('session-1', 1)),
+      reset: true,
+    });
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 1,
+        notification: { ...ephemeral(1), runId: 'run-1' },
+      }),
+    ).toBe('applied');
+    expect(Object.keys(store.getSnapshot().streams)).toHaveLength(1);
+
+    const terminalSession: RuntimeSessionProjection = {
+      ...projection('session-1', 2),
+      currentRun: {
+        runId: 'run-1',
+        initialTurnId: 'turn-1',
+        activeTurnId: 'turn-1',
+        status: 'completed',
+        revision: 2,
+      },
+    };
+    store.applySessionNotification({
+      connectionGeneration: 1,
+      subscriptionGeneration: 1,
+      notification: durable(terminalSession),
+    });
+    store.discardSession('session-1');
+    expect(store.getSnapshot().sessions['session-1']).toBeUndefined();
+    expect(store.getSnapshot().streams).toEqual({});
+    expect(store.getSnapshot().background['session-1']).toBeUndefined();
+    expect(
+      store.applySessionNotification({
+        connectionGeneration: 1,
+        subscriptionGeneration: 2,
+        notification: { ...ephemeral(1), runId: 'run-1' },
+      }),
+    ).toBe('applied');
+  });
+
   test('batches notifications and isolates throwing observers', async () => {
     const store = new RuntimeSnapshotStore();
     let observed = 0;

@@ -2037,11 +2037,17 @@ export async function executeAppTaskToolPipeline(input: {
   if (result.kind === 'committed') {
     const resourceFailure = capturedSubagentResult?.resourceAdmissionFailure;
     if (resourceFailure) {
-      // The exact child result has already crossed the Builtin projection and
-      // the Host has durably committed the parent capability/tool receipt.
-      // Only now may the App lift the known descendant admission denial into
-      // the existing run-level terminal policy; throwing inside dispatch would
-      // incorrectly turn this known outcome into post-ack unknown recovery.
+      // A child permit timeout has already been committed as this Task's Tool
+      // failure. Let the parent Agent consume that result and continue its Run.
+      // Other admission failures may invalidate the shared funding authority,
+      // so preserve their run-level recovery boundary.
+      if (
+        (resourceFailure.reason === 'tool_concurrency_saturated' ||
+          resourceFailure.reason === 'shell_concurrency_saturated') &&
+        makeState().tools.calls[toolCallId]?.status === 'failed'
+      ) {
+        return [];
+      }
       throw new DescendantResourceAdmissionError(resourceFailure.reason, resourceFailure.message);
     }
     return [];

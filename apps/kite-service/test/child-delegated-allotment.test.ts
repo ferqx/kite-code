@@ -145,6 +145,31 @@ test('three read-only child allotments reconcile transient Tools and coexist und
   expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(3);
 });
 
+test('child allotments use subagent slots without reserving Tool or Shell slots', () => {
+  let state = initialState({
+    ...INTERNAL_RESOURCE_BUDGET_,
+    maxConcurrentToolInvocations: 1,
+    maxConcurrentShellInvocations: 0,
+  });
+  for (let index = 1; index <= 3; index += 1) {
+    state = withTransient(state, index);
+    const plan = planChildDelegatedAllotment({
+      state,
+      transientReservationId: transientId(index),
+      toolFinished: finished(index),
+      childThreadId: childId(index),
+      role: 'review',
+      taskArtifactBytes: 1,
+      now: NOW,
+    });
+    expect(plan.reservation.executableUpperBound.gauges.activeToolInvocations).toBe(0);
+    expect(plan.reservation.executableUpperBound.gauges.activeShellInvocations).toBe(0);
+    state = applyPlanned(state, plan.events);
+  }
+  if (state.resourceBudget.status !== 'active') throw new Error('Projected budget closed.');
+  expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
+});
+
 test('LIMITED budget admits three child allotments and rejects a fourth without queuing', () => {
   let state = initialState(LIMITED_RESOURCE_BUDGET_);
   const reservations: BudgetReservation[] = [];

@@ -69,6 +69,22 @@ describe('independent child funding', () => {
     expect(() =>
       assertChildBudgetWithinDelegation({
         ...input,
+        reservation: {
+          ...reservation,
+          executableUpperBound: {
+            ...reservation.executableUpperBound,
+            gauges: {
+              ...reservation.executableUpperBound.gauges,
+              activeToolInvocations: 0,
+              activeShellInvocations: 0,
+            },
+          },
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
         reservation: { ...reservation, executableUpperBound: upper },
       }),
     ).toThrow('exceeds its parent delegation');

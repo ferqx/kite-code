@@ -185,7 +185,6 @@ export function planChildDelegatedAllotment(input: {
   upper.gauges.elapsedRunMs = duration;
   upper.gauges.activeSubagents = 1;
   upper.gauges.activeWriters = role === 'code' ? 1 : 0;
-  upper.gauges.activeToolInvocations = 1;
   const reservation: BudgetReservation = {
     version: 1,
     reservationId,

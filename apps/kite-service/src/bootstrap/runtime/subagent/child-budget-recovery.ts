@@ -97,10 +97,11 @@ export function recoverChildDelegatedBudget(input: {
       intent.role === 'code'
         ? Math.min(upper.gauges.activeWriters, ledger.budget.maxConcurrentWriters)
         : 1,
-    maxConcurrentToolInvocations: Math.min(
-      upper.gauges.activeToolInvocations,
-      ledger.budget.maxConcurrentToolInvocations,
-    ),
+    // Independent child Tools do not consume a count gauge. Keep the schema's
+    // positive Tool field for its writer relationship, including on recovery.
+    maxConcurrentToolInvocations: independentTurnDeadline
+      ? 1
+      : Math.min(upper.gauges.activeToolInvocations, ledger.budget.maxConcurrentToolInvocations),
     maxConcurrentShellInvocations: 0,
     maxConcurrencyWaitMs: Math.min(ledger.budget.maxConcurrencyWaitMs, duration),
   };

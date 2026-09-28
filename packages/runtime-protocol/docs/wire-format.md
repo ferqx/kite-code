@@ -14,6 +14,8 @@
 
 服务端在 `initialize.capabilities.methods` 宣告 `history/cancel` 时，客户端可发送无 `id` 的 `{ "jsonrpc": "2.0", "method": "history/cancel", "params": { "requestId": "..." } }` 通知，取消同一连接上尚未完成的 History 请求。通知中的 `requestId` 是原请求的 RPC id，只能作用于该连接；未宣告此能力的旧服务端不会收到该通知。取消是资源释放信号，客户端仍须自行停止等待原响应。
 
+`runtime/unsubscribe` 严格接受 `{ subscriptionId }` 或 `{ subscribeRequestId }` 其中一种参数。前者清理已确认的远端订阅，后者以同一 logical connection 上原 `runtime/subscribe` 的 RPC id 清理尚在准入或初始边界阶段的订阅；订阅脱离只释放通知资源，不表示取消 Session Run。跨 renderer 代际的宿主必须将请求 ID 转换为 Service 实际收到的连接内身份。
+
 内部子 Session 只通过显式父树读取：`runtime/query` 的 `list_child_sessions` 和 `get_child_session_projection` 均以 `sessionId` 指明已授权的父 Session；`history/load_child_session` 同时传 `parentSessionId`、`childSessionId`，沿用同一分页响应。`runtime/subscribe` 的 `child_session` 选择器也同时携带父、子 ID，并支持源 revision 水位和 ephemeral 通知；Service 在订阅准入时核验准确父子血缘，Server 将已授权选择器映射到该子 Session 的现有事件流。普通根会话列表、直接 `get_session_projection(childId)`、`history/load_session(childId)` 和普通 `session` 订阅不因此开放。子 History 方法只在组合了受限读取端口时宣告，响应仍经过安全投影，不传原始 Store 事件。
 
 按需恢复的 command/query、codec、双向 mapper 和生成类型在同一配套版本更新：`recover_session` 绑定 expectedRevision/expectedAuthorityRevision，`get_session_recovery` 只读既有事实，`get_command_receipt` 查询原命令回执。原命令作为查询数据绝不进入 dispatch；Host 仍校验 scope 和 digest。create_session 允许显式请求目标 workspace，但准入规范化与信任校验后的上下文才是最终执行身份。无未发布格式的兼容分支。

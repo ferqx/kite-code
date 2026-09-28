@@ -58,8 +58,11 @@ async function fixture(
   let droppedEvent: string | undefined;
   let nextLiveFailure: 'projection' | 'subscription' | undefined;
   let nextSubscriptionGate: ReturnType<typeof gate> | undefined;
+  let nextSubscriptionScope: 'child_session' | undefined;
+  let nextChildProjectionGate: ReturnType<typeof gate> | undefined;
   let nextFailure: 'temporary' | 'unauthorized' | 'missing' | undefined;
   let nextGate: ReturnType<typeof gate> | undefined;
+  let nextDirectoryGate: ReturnType<typeof gate> | undefined;
   let nextCreationGate: ReturnType<typeof gate> | undefined;
   const lostCreations = new Set<unknown>();
   const lostSteers = new Set<unknown>();
@@ -68,6 +71,11 @@ async function fixture(
   let refreshProjectionAfterConflict: 'active' | 'stale' | undefined;
   const sendCommands: Array<{ type: string; commandId: string }> = [];
   const backgroundQueries: Array<{ sessionId: string; parentRunStatus: string | undefined }> = [];
+  let childSubscriptionRequests = 0;
+  let parentSubscriptionRequests = 0;
+  let unsubscribeRequests = 0;
+  let cancelCommands = 0;
+  let indexResetEnds = 0;
   const rewrittenProjections = new Map<unknown, 'stale' | 'active'>();
   const bufferedMessages: unknown[] = [];
   let injectedMode: 'auto' | 'full' = 'auto';
@@ -140,6 +148,24 @@ async function fixture(
         });
       if (
         message.method === 'runtime/query' &&
+        message.params.query.type === 'get_child_session_projection' &&
+        nextChildProjectionGate
+      ) {
+        gated.set(message.id, nextChildProjectionGate);
+        nextChildProjectionGate = undefined;
+      }
+      if (
+        message.method === 'runtime/subscribe' &&
+        message.params.subscription.scope === 'child_session'
+      )
+        childSubscriptionRequests++;
+      if (message.method === 'runtime/subscribe' && message.params.subscription.scope === 'session')
+        parentSubscriptionRequests++;
+      if (message.method === 'runtime/unsubscribe') unsubscribeRequests++;
+      if (message.method === 'runtime/command' && message.params?.command?.type === 'cancel_turn')
+        cancelCommands++;
+      if (
+        message.method === 'runtime/query' &&
         message.params.query.type === 'get_session_projection' &&
         staleNextSendProjection
       ) {
@@ -197,9 +223,14 @@ async function fixture(
         failures.set(message.id, 'temporary');
         nextLiveFailure = undefined;
       }
-      if (message.method === 'runtime/subscribe' && nextSubscriptionGate) {
+      if (
+        message.method === 'runtime/subscribe' &&
+        nextSubscriptionGate &&
+        (!nextSubscriptionScope || message.params.subscription.scope === nextSubscriptionScope)
+      ) {
         gated.set(message.id, nextSubscriptionGate);
         nextSubscriptionGate = undefined;
+        nextSubscriptionScope = undefined;
       }
       if (message.method === 'history/load_session') {
         historyRequests++;
@@ -211,6 +242,12 @@ async function fixture(
           failures.set(message.id, nextFailure);
           nextFailure = undefined;
         }
+      }
+      if (message.method === 'history/list_sessions' && nextDirectoryGate) {
+        const directoryGate = nextDirectoryGate;
+        nextDirectoryGate = undefined;
+        directoryGate.arrive();
+        await directoryGate.released;
       }
       await carrier.connection.send(message);
     } else if (command === 'runtime_receive') {
@@ -233,6 +270,11 @@ async function fixture(
       }
       if (item.done) throw new Error('closed');
       const message = item.value as { id?: unknown };
+      if (
+        (message as { params?: { message?: { type?: string } } }).params?.message?.type ===
+        'index_reset_end'
+      )
+        indexResetEnds++;
       const waiting = gated.get(message.id);
       if (waiting) {
         gated.delete(message.id);
@@ -352,10 +394,31 @@ async function fixture(
     dropLiveEvent(type: string) {
       droppedEvent = type;
     },
-    holdSubscription() {
+    holdSubscription(scope?: 'child_session') {
       nextSubscriptionGate = gate();
+      nextSubscriptionScope = scope;
       allGates.push(nextSubscriptionGate);
       return nextSubscriptionGate;
+    },
+    holdChildProjection() {
+      nextChildProjectionGate = gate();
+      allGates.push(nextChildProjectionGate);
+      return nextChildProjectionGate;
+    },
+    get childSubscriptionRequests() {
+      return childSubscriptionRequests;
+    },
+    get parentSubscriptionRequests() {
+      return parentSubscriptionRequests;
+    },
+    get unsubscribeRequests() {
+      return unsubscribeRequests;
+    },
+    get cancelCommands() {
+      return cancelCommands;
+    },
+    get indexResetEnds() {
+      return indexResetEnds;
     },
     failLiveRead(kind: 'projection' | 'subscription') {
       nextLiveFailure = kind;
@@ -370,6 +433,11 @@ async function fixture(
       nextGate = gate();
       allGates.push(nextGate);
       return nextGate;
+    },
+    holdDirectory() {
+      nextDirectoryGate = gate();
+      allGates.push(nextDirectoryGate);
+      return nextDirectoryGate;
     },
     holdUnknownCreation() {
       nextCreationGate = gate();
@@ -446,6 +514,118 @@ test('desktop makes one final background read when the selected Run finishes', a
   }
 }, 20_000);
 
+test('leaving the reading page releases its stream while the Service Run continues', async () => {
+  const f = await fixture([
+    { message: { content_chunks: ['started ', 'finished'] }, chunk_delay: 350 },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Continue while I leave this page.');
+    await waitFor(() =>
+      f.client.getSnapshot().messages.some((message) => message.role === 'assistant'),
+    );
+    const previousUnsubscribes = f.unsubscribeRequests;
+    f.client.leaveSessionPage();
+    await waitFor(() => f.unsubscribeRequests > previousUnsubscribes);
+    expect(f.client.getSnapshot().ready).toBe(false);
+    expect(f.cancelCommands).toBe(0);
+    await Bun.sleep(900);
+    await f.client.selectSession(f.a);
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(
+      f.client.getSnapshot().messages.find((message) => message.role === 'assistant')?.text,
+    ).toBe('started finished');
+    expect(f.cancelCommands).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('the directory follows two concurrent Runs after leaving the reading page', async () => {
+  const f = await fixture([
+    { message: { content_chunks: ['A started ', 'A finished'] }, chunk_delay: 1_000 },
+    { message: { content_chunks: ['B started ', 'B finished'] }, chunk_delay: 1_000 },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Run A');
+    await waitFor(
+      () =>
+        f.client.getSnapshot().directory?.find((entry) => entry.sessionId === f.a)?.currentRun
+          ?.status === 'running',
+    );
+    await f.client.selectSession(f.b);
+    await f.client.send('Run B');
+    await waitFor(() =>
+      [f.a, f.b].every(
+        (id) =>
+          f.client.getSnapshot().directory?.find((entry) => entry.sessionId === id)?.currentRun
+            ?.status === 'running',
+      ),
+    );
+    const generation = f.connectionGeneration;
+    const subscriptions = f.parentSubscriptionRequests;
+    const historyRequests = f.historyRequests;
+    const unsubscribes = f.unsubscribeRequests;
+    f.client.leaveSessionPage();
+    await waitFor(() => f.unsubscribeRequests > unsubscribes);
+    await waitFor(() =>
+      [f.a, f.b].every(
+        (id) =>
+          f.client.getSnapshot().directory?.find((entry) => entry.sessionId === id)?.currentRun
+            ?.status === 'completed',
+      ),
+    );
+    expect(f.client.getSnapshot().ready).toBe(false);
+    expect(f.connectionGeneration).toBe(generation);
+    expect(f.parentSubscriptionRequests).toBe(subscriptions);
+    expect(f.historyRequests).toBe(historyRequests);
+    expect(f.cancelCommands).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('an index reset arriving before the directory read still supplies the Run status', async () => {
+  const f = await fixture([{ message: { content: 'Persisted completion.' } }]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Complete before reconnect');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    await f.client.disconnect();
+    const resetEnds = f.indexResetEnds;
+    const directoryGate = f.holdDirectory();
+    const connecting = f.client.connect();
+    await directoryGate.arrived;
+    await waitFor(() => f.indexResetEnds > resetEnds);
+    directoryGate.release();
+    await connecting;
+    expect(
+      f.client.getSnapshot().directory?.find((entry) => entry.sessionId === f.a)?.currentRun,
+    ).toMatchObject({ status: 'completed' });
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('a cached session can be selected while the connection is recovering', async () => {
+  const f = await fixture();
+  try {
+    await f.client.selectSession(f.a);
+    await f.dropCurrentTransport();
+    await waitFor(() => !f.client.getSnapshot().connected);
+    await f.client.selectSession(f.b);
+    expect(f.client.getSnapshot()).toMatchObject({
+      connected: true,
+      selected: f.b,
+      ready: true,
+    });
+    expect(f.cancelCommands).toBe(0);
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
 for (const openAfterFirstFrame of [false, true])
   test(`child detail renders live text when opened ${openAfterFirstFrame ? 'after' : 'before'} the first frame`, async () => {
     let releaseChild!: () => void;
@@ -510,7 +690,10 @@ for (const openAfterFirstFrame of [false, true])
         releaseChild();
         await Bun.sleep(300);
       }
+      const parentUnsubscribes = f.unsubscribeRequests;
       await f.client.openChildSession(f.a, childSessionId);
+      await waitFor(() => f.unsubscribeRequests > parentUnsubscribes);
+      expect(f.client.getSnapshot().ready).toBe(false);
       expect(f.client.getSnapshot().childDetail?.loading).toBe(false);
       if (!openAfterFirstFrame) releaseChild();
       if (!openAfterFirstFrame)
@@ -537,6 +720,8 @@ for (const openAfterFirstFrame of [false, true])
       expect(document.body.textContent).toContain('CHILD_STREAM_OMEGA');
       if (openAfterFirstFrame) {
         expect(document.body.textContent).toContain('CHILD_STREAM_ALPHA');
+        f.client.leaveChildSession();
+        await waitFor(() => f.client.getSnapshot().ready);
         await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
         await f.client.selectSession(f.b);
         expect(f.client.getSnapshot().childSessions?.parentSessionId).not.toBe(f.a);
@@ -550,6 +735,46 @@ for (const openAfterFirstFrame of [false, true])
         expect(
           f.client.getSnapshot().childDetail?.messages.some((message) => message.settled),
         ).toBe(true);
+        const stableConnection = f.connectionGeneration;
+        f.client.leaveChildSession();
+        await waitFor(() => f.client.getSnapshot().ready);
+        const staleProjection = f.holdChildProjection();
+        const staleOpen = f.client.openChildSession(f.a, childSessionId);
+        await staleProjection.arrived;
+        const subscriptionsBeforeLeaving = f.childSubscriptionRequests;
+        f.client.leaveChildSession();
+        staleProjection.release();
+        await staleOpen;
+        await waitFor(() => f.client.getSnapshot().ready);
+        expect(f.childSubscriptionRequests).toBe(subscriptionsBeforeLeaving);
+        expect(f.client.getSnapshot().childDetail).toBeUndefined();
+
+        const subscriptionsBeforeSwitching = f.childSubscriptionRequests;
+        let previousUnsubscribes = f.unsubscribeRequests;
+        for (let index = 0; index < 100; index++) {
+          const pendingAck = f.holdSubscription('child_session');
+          const opening = f.client.openChildSession(f.a, childSessionId);
+          await pendingAck.arrived;
+          f.client.leaveChildSession();
+          pendingAck.release();
+          await opening;
+          await waitFor(() => f.unsubscribeRequests > previousUnsubscribes);
+          previousUnsubscribes = f.unsubscribeRequests;
+          expect(f.connectionGeneration).toBe(stableConnection);
+          expect(f.client.getSnapshot()).toMatchObject({
+            connected: true,
+            selected: f.a,
+          });
+          expect(f.client.getSnapshot().childDetail).toBeUndefined();
+        }
+        expect(f.childSubscriptionRequests).toBe(subscriptionsBeforeSwitching + 100);
+        expect(f.cancelCommands).toBe(0);
+        await waitFor(() => f.client.getSnapshot().ready);
+        await f.client.openChildSession(f.a, childSessionId);
+        expect(f.client.getSnapshot().childDetail?.loading).toBe(false);
+        const parentSubscriptionsWhileReadingChild = f.parentSubscriptionRequests;
+        await f.client.connect();
+        expect(f.parentSubscriptionRequests).toBe(parentSubscriptionsWhileReadingChild);
         const previousConnection = f.connectionGeneration;
         f.failOneReconnect();
         await f.dropCurrentTransport();

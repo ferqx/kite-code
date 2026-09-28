@@ -94,8 +94,12 @@ export function assertChildBudgetWithinDelegation(input: {
     upper.gauges.activeSubagents < 1 ||
     (childMaySpawn && childBudget.maxConcurrentSubagents > upper.gauges.activeSubagents - 1) ||
     (childMayWrite && childBudget.maxConcurrentWriters > upper.gauges.activeWriters) ||
-    childBudget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
-    childBudget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations
+    ((!independentTurn ||
+      upper.unboundedToolInvocations !== true ||
+      upper.gauges.activeToolInvocations !== 0 ||
+      upper.gauges.activeShellInvocations !== 0) &&
+      (childBudget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
+        childBudget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations))
   )
     throw new Error('Child Session budget exceeds its parent delegation.');
 }

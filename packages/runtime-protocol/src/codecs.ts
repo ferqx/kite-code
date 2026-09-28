@@ -767,7 +767,10 @@ export const RUNTIME_PROTOCOL_REQUEST_SCHEMA_ = z.discriminatedUnion('method', [
     .object({
       ...requestBase,
       method: z.literal('runtime/unsubscribe'),
-      params: z.object({ subscriptionId: identifier }).strict(),
+      params: z.union([
+        z.object({ subscriptionId: identifier }).strict(),
+        z.object({ subscribeRequestId: identifier }).strict(),
+      ]),
     })
     .strict(),
   z

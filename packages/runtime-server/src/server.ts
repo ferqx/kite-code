@@ -214,6 +214,16 @@ export class RuntimeServer {
   }
 }
 
+interface SubscriptionRequestState {
+  cancelled: boolean;
+  responseStarted: boolean;
+  subscription?: Subscription;
+  readonly cancellation: Promise<void>;
+  readonly cancel: () => void;
+  readonly releaseReservation: () => void;
+  readonly releasePermit: () => void;
+}
+
 class ServerConnection implements RuntimeServerConnection {
   readonly connectionId: string;
   readonly #backend: RuntimeServerBackend;
@@ -234,6 +244,7 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #inFlight = new Set<Promise<void>>();
   readonly #subscriptions = new Map<string, Subscription>();
   readonly #pendingSubscriptions = new Set<() => void>();
+  readonly #subscriptionRequests = new Map<string, SubscriptionRequestState>();
   readonly #rpcIds = new Set<string>();
   #activeRequestTasks = 0;
   #clientInfo: RuntimeServerAdmissionInput['clientInfo'];
@@ -577,15 +588,37 @@ class ServerConnection implements RuntimeServerConnection {
       this.#releaseSubscription();
     };
     this.#pendingSubscriptions.add(releaseReservation);
-    let decision: RuntimeServerAdmissionDecision;
+    let resolveCancellation!: () => void;
+    const cancellation = new Promise<void>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    const pending: SubscriptionRequestState = {
+      cancelled: false,
+      responseStarted: false,
+      cancellation,
+      cancel: () => {
+        if (pending.cancelled) return;
+        pending.cancelled = true;
+        releasePermit();
+        resolveCancellation();
+      },
+      releaseReservation,
+      releasePermit,
+    };
+    this.#subscriptionRequests.set(request.id, pending);
+    let decision: RuntimeServerAdmissionDecision | undefined;
     try {
-      decision = await this.#authorize(request);
+      decision = await Promise.race([this.#authorize(request), cancellation.then(() => undefined)]);
     } catch (error) {
       releaseReservation();
+      this.#subscriptionRequests.delete(request.id);
+      if (pending.cancelled) return;
       throw error;
     }
+    if (pending.cancelled || !decision) return;
     if (!decision.allowed || this.#state !== 'active') {
       releaseReservation();
+      this.#subscriptionRequests.delete(request.id);
       if (this.#state !== 'closed') {
         await this.#sendError(
           request.id,
@@ -609,14 +642,26 @@ class ServerConnection implements RuntimeServerConnection {
       () => void this.close('subscription_unavailable'),
       () => {
         this.#subscriptions.delete(subscriptionId);
+        if (this.#subscriptionRequests.get(request.id) === pending)
+          this.#subscriptionRequests.delete(request.id);
         releaseReservation();
       },
     );
+    pending.subscription = subscription;
     this.#subscriptions.set(subscriptionId, subscription);
     this.#pendingSubscriptions.delete(releaseReservation);
     try {
       subscription.acquire();
-      await subscription.prepareInitialBoundary();
+      const prepared = await Promise.race([
+        subscription.prepareInitialBoundary().then(() => true),
+        cancellation.then(() => false),
+      ]);
+      if (!prepared) return;
+      if (pending.cancelled || this.#state !== 'active') {
+        await subscription.close();
+        return;
+      }
+      pending.responseStarted = true;
       const acknowledged = await this.#sendResult(
         request.id,
         RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({
@@ -625,7 +670,7 @@ class ServerConnection implements RuntimeServerConnection {
         }),
         releasePermit,
       );
-      if (!acknowledged) {
+      if (!acknowledged || pending.cancelled || this.#state !== 'active') {
         await subscription.close();
         return;
       }
@@ -633,7 +678,8 @@ class ServerConnection implements RuntimeServerConnection {
     } catch (_error) {
       this.#subscriptions.delete(subscriptionId);
       await subscription.close();
-      await this.#sendError(request.id, 'subscription_unavailable', releasePermit);
+      if (!pending.cancelled && !pending.responseStarted)
+        await this.#sendError(request.id, 'subscription_unavailable', releasePermit);
     }
   }
 
@@ -641,11 +687,28 @@ class ServerConnection implements RuntimeServerConnection {
     request: Extract<RuntimeProtocolRequest, { method: 'runtime/unsubscribe' }>,
     releasePermit: () => void,
   ): Promise<void> {
-    const subscription = this.#subscriptions.get(request.params.subscriptionId);
-    if (subscription) await subscription.close();
+    let unsubscribed = false;
+    if ('subscribeRequestId' in request.params) {
+      const pending = this.#subscriptionRequests.get(request.params.subscribeRequestId);
+      if (pending) {
+        unsubscribed = true;
+        pending.cancel();
+        if (pending.subscription) await pending.subscription.close();
+        else {
+          pending.releaseReservation();
+          this.#subscriptionRequests.delete(request.params.subscribeRequestId);
+        }
+        if (!pending.responseStarted)
+          await this.#sendError(request.params.subscribeRequestId, 'subscription_unavailable');
+      }
+    } else {
+      const subscription = this.#subscriptions.get(request.params.subscriptionId);
+      unsubscribed = Boolean(subscription);
+      if (subscription) await subscription.close();
+    }
     await this.#sendResult(
       request.id,
-      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({ unsubscribed: Boolean(subscription) }),
+      RUNTIME_PROTOCOL_RESULT_SCHEMA_.parse({ unsubscribed }),
       releasePermit,
     );
   }
@@ -739,6 +802,8 @@ class ServerConnection implements RuntimeServerConnection {
     let failed = false;
     let stopSubscriptions: Promise<void>;
     try {
+      for (const pending of this.#subscriptionRequests.values()) pending.cancel();
+      this.#subscriptionRequests.clear();
       for (const release of this.#pendingSubscriptions) release();
       stopSubscriptions = this.#stopSubscriptions();
     } catch (error) {
@@ -857,6 +922,7 @@ export class Subscription {
             sessionId: this.#spec.sessionId,
           },
     );
+    if (this.#closed) return;
     if (result.status === 'not_found') return;
     if (result.status !== 'ok') throw new Error('Session projection watermark is unavailable.');
     const revision = result.revision ?? result.session?.revision;

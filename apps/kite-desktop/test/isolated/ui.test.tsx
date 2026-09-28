@@ -2007,6 +2007,17 @@ test('clicking switches sessions immediately and restores each draft', async () 
   expect(client.sent).toEqual([]);
 });
 
+test('cached session rows remain clickable while the connection is recovering', async () => {
+  const client = new UiClient();
+  await render(<App client={client} />);
+  await act(() => client.update({ connected: false, ready: false }));
+  const second = document.querySelectorAll<HTMLButtonElement>('.session-row')[1]!;
+  expect(second.disabled).toBe(false);
+  await click(second);
+  expect(client.selectedIds).toContain('s1');
+  expect(client.cancelled).toBe(0);
+});
+
 test('a failed session switch and stale steer rejection keep the draft on its original target', async () => {
   const client = new UiClient();
   client.view.projection = {
@@ -2156,7 +2167,7 @@ test('waiting approval hides the prompt input and stop control while preserving 
   expect(client.cancelled).toBe(0);
   await act(() => client.update({ connected: false, ready: false }));
   expect(document.querySelector('[aria-label="停止任务"]')).toBeNull();
-  expect(document.querySelector<HTMLButtonElement>('.session-row')?.disabled).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>('.session-row')?.disabled).toBe(false);
   expect(button('仅批准这一次').disabled).toBe(true);
   await act(() =>
     client.update({

@@ -56,6 +56,7 @@ App 可同时提供 `onClose(connectionId)` 清理自身 connection-to-interacti
   binding reference 组成 `RuntimeCommandContext`；Server 不解释或缓存 Worker capability，旧 caller 未提供 binding 时只传 null。
 - 输入和 InProcess message 一律通过同一 Protocol codec/limits；未知、超限或未初始化请求 fail closed。
 - subscribe 先取得 Host iterator 并缓冲，再写 ack；顺序是 ack、replay/reset、initial item、ready/end、live。
+  unsubscribe 可用已返回的 subscription ID，或用原始 subscribe request ID 脱离仍在准入/初始边界阶段的订阅；两者只释放通知 iterator，不取消 Runtime 执行。
   `afterRevision` 超过 Host watermark 时，ack 后立即发送 authoritative current snapshot/reset 与 ready，不能等待
   一个无法到达的旧边界。慢 consumer 只关闭所属 connection，并 return 所有 iterator；不会取消 Runtime work。
 - outbound 同时受 count 和 encoded-byte 上限；已经从队列取出但尚未 settle 的 send 仍占 connection/global

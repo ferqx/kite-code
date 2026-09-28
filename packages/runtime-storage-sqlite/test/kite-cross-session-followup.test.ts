@@ -332,7 +332,9 @@ function fixture(path = ':memory:') {
 }
 
 describe('Store13 cross-Session TriggerTurn source', () => {
-  test('accepts a versioned independent-turn backup and reconstructs the sealed source policy', () => {
+  test.each([
+    0, 1,
+  ])('accepts a versioned independent-turn backup with Tool/Shell gauge %p', (heldGauge) => {
     const { db, input } = fixture();
     try {
       const sealed = sealChildGrantPayload({
@@ -379,8 +381,8 @@ describe('Store13 cross-Session TriggerTurn source', () => {
           elapsedRunMs: 30 * 60_000,
           activeSubagents: 1,
           activeWriters: 0,
-          activeToolInvocations: 1,
-          activeShellInvocations: 1,
+          activeToolInvocations: heldGauge,
+          activeShellInvocations: heldGauge,
         },
       };
       Object.assign(v2.reservationEvent.reservation, {
@@ -1335,7 +1337,7 @@ describe('Store13 cross-Session TriggerTurn source', () => {
           elapsedRunMs: 12_000,
           activeSubagents: 1,
           activeWriters: 0,
-          activeToolInvocations: 1,
+          activeToolInvocations: heldGauge,
           activeShellInvocations: 0,
         },
       };

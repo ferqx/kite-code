@@ -51,6 +51,7 @@ Session 的可选 `workspaceDigest` 在 wire 中保留，供客户端目录归�
 - The only request methods are initialize, Runtime command/query/subscribe/unsubscribe, the three exact History reads,
   ten App methods, the two daemon lifecycle methods and ping. Server notifications are subscription and draining facts;
   the Server never makes Client requests.
+- `runtime/unsubscribe` accepts either the acknowledged server `subscriptionId` or the original `runtime/subscribe` request ID as `subscribeRequestId`, scoped to the same logical connection. The latter lets a client detach a subscription while admission or initial projection is still pending; it never means canceling Session execution.
 - New Contract discriminants do not become wire capabilities until an explicit exhaustive mapper and codec change admits them. Raw Runtime events, credentials, headers, provider bodies, authority identities and Store locators do not cross this boundary. User-local presentation may carry bounded reasoning, ordinary tool paths/commands/arguments and terminal output through their exact closed DTOs; obvious credential-shaped values remain redacted.
 - `model.text_delta` and `reasoning.activity` carry a required `requestId`; codecs and mappers preserve it exactly and reject missing or additional fields.
 - `tool.queued.presentationGroupId`, when present, is a bounded opaque identifier copied from the App projection. It pairs the tool with `model.responded.messageId` for presentation only; it grants no Runtime authority and unknown/additional grouping fields fail closed.

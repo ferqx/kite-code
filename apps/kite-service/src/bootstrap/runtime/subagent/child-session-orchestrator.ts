@@ -4332,10 +4332,11 @@ export function createChildSessionOrchestrator(input: {
             funding.budget.maxConcurrentSubagents &&
           committed.gauges.activeWriters + upper.activeWriters <=
             funding.budget.maxConcurrentWriters &&
-          committed.gauges.activeToolInvocations + upper.activeToolInvocations <=
-            funding.budget.maxConcurrentToolInvocations &&
-          committed.gauges.activeShellInvocations + upper.activeShellInvocations <=
-            funding.budget.maxConcurrentShellInvocations
+          (independentTurn ||
+            (committed.gauges.activeToolInvocations + upper.activeToolInvocations <=
+              funding.budget.maxConcurrentToolInvocations &&
+              committed.gauges.activeShellInvocations + upper.activeShellInvocations <=
+                funding.budget.maxConcurrentShellInvocations))
         ) {
           input.owner.runWithSessionExecution(input.parentSessionId, () =>
             parent.commitChildSlotAcquisition(intent.delegatedReservationId),

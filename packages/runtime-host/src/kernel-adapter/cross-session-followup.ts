@@ -347,8 +347,6 @@ export function planCrossSessionTriggerTurnBackup<Receipt>(input: {
     );
     upper.gauges.elapsedRunMs = 30 * 60 * 1000;
     upper.gauges.activeWriters = input.policy.targetRole === 'code' ? 1 : 0;
-    upper.gauges.activeToolInvocations = 1;
-    upper.gauges.activeShellInvocations = 1;
     upper.unboundedToolInvocations = true;
     upper.independentFollowupTurn = true;
     if (
@@ -507,8 +505,9 @@ export function planCrossSessionIndependentTurnActivation(input: {
     budget.maxArtifactBytes > upper.counters.artifactBytes ||
     budget.maxConcurrentSubagents !== 0 ||
     budget.maxConcurrentWriters > upper.gauges.activeWriters ||
-    budget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
-    budget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations
+    ((upper.gauges.activeToolInvocations !== 0 || upper.gauges.activeShellInvocations !== 0) &&
+      (budget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
+        budget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations))
   )
     fail('budget_exhausted', 'Independent followup target turn exceeds its source envelope.');
   if (backup.state === 'dispatch_started') return { status: 'already_activated' };

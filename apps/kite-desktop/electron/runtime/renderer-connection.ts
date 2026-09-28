@@ -15,6 +15,10 @@ interface Attachment {
   initializeWaiter?: RequestIdentity;
   reply?: string;
   subscriptions: Set<string>;
+  pendingSubscriptions: Set<string>;
+  cancelledSubscriptions: Set<string>;
+  subscriptionRequests: Map<string, string>;
+  cancellationRequests: Map<string, string>;
 }
 
 export interface ServiceProcessCarrier {
@@ -36,7 +40,12 @@ export class RendererConnection {
     generation: 0,
     initializing: false,
     subscriptions: new Set(),
+    pendingSubscriptions: new Set(),
+    cancelledSubscriptions: new Set(),
+    subscriptionRequests: new Map(),
+    cancellationRequests: new Map(),
   };
+  #nextNativeRequest = 0;
   #version = 0;
   readonly #changes = new Set<() => void>();
 
@@ -50,17 +59,23 @@ export class RendererConnection {
   }
 
   async attach(generation: number): Promise<void> {
-    const subscriptions = await this.#lock.run(() => {
+    const { subscriptions, pendingSubscriptions } = await this.#lock.run(() => {
       this.#state.generation = generation;
       this.#state.reply = undefined;
       this.#state.initializeWaiter = undefined;
       const current = [...this.#state.subscriptions];
+      const pending = [...this.#state.pendingSubscriptions];
       this.#state.subscriptions.clear();
+      this.#state.pendingSubscriptions.clear();
+      this.#state.cancelledSubscriptions.clear();
+      this.#state.subscriptionRequests.clear();
+      this.#state.cancellationRequests.clear();
       this.#notify();
-      return current;
+      return { subscriptions: current, pendingSubscriptions: pending };
     });
     await this.#service.waitForReceiver();
     for (const subscription of subscriptions) await this.#unsubscribe(subscription);
+    for (const requestId of pendingSubscriptions) await this.#cancelSubscriptionRequest(requestId);
   }
 
   async send(generation: number, frame: string): Promise<void> {
@@ -97,9 +112,31 @@ export class RendererConnection {
       } else {
         if (message.method === 'runtime/unsubscribe' && isJsonRecord(message.params)) {
           const subscription = message.params.subscriptionId;
-          if (typeof subscription === 'string') this.#state.subscriptions.delete(subscription);
+          if (typeof subscription === 'string') {
+            this.#state.subscriptions.delete(subscription);
+            this.#state.subscriptionRequests.delete(subscription);
+          }
+          const subscribeRequestId = message.params.subscribeRequestId;
+          if (typeof subscribeRequestId === 'string') {
+            const wireRequestId = JSON.stringify([generation, subscribeRequestId]);
+            message.params.subscribeRequestId = wireRequestId;
+            this.#state.cancellationRequests.set(JSON.stringify([generation, id]), wireRequestId);
+            if (
+              this.#state.pendingSubscriptions.has(wireRequestId) ||
+              [...this.#state.subscriptionRequests.values()].includes(wireRequestId)
+            ) {
+              this.#state.cancelledSubscriptions.add(wireRequestId);
+              for (const [remoteId, requestId] of this.#state.subscriptionRequests) {
+                if (requestId !== wireRequestId) continue;
+                this.#state.subscriptionRequests.delete(remoteId);
+                this.#state.subscriptions.delete(remoteId);
+              }
+            }
+          }
         }
         message.id = JSON.stringify([generation, id]);
+        if (message.method === 'runtime/subscribe')
+          this.#state.pendingSubscriptions.add(message.id);
       }
       return JSON.stringify(message);
     });
@@ -173,7 +210,6 @@ export class RendererConnection {
       const action = await this.#lock.run(() => this.#accept(generation, message));
       if (action.unsubscribe !== undefined) {
         await this.#unsubscribe(action.unsubscribe);
-        continue;
       }
       if (action.retry) continue;
       if (action.error) throw new Error(action.error);
@@ -210,16 +246,33 @@ export class RendererConnection {
     }
 
     if (typeof message.id === 'string') {
+      const cancelledRequestId = this.#state.cancellationRequests.get(message.id);
+      if (cancelledRequestId !== undefined) {
+        this.#state.cancellationRequests.delete(message.id);
+        if (isJsonRecord(message.result) && message.result.unsubscribed === true) {
+          // Server responses share one FIFO outbound queue. A successful
+          // cancellation response follows any ACK already queued for the
+          // original subscribe, so no late ACK can restore this identity.
+          this.#state.pendingSubscriptions.delete(cancelledRequestId);
+          this.#state.cancelledSubscriptions.delete(cancelledRequestId);
+        }
+      }
       const identity = parseIdentity(message.id);
       const subscription = isJsonRecord(message.result) ? message.result.subscriptionId : undefined;
+      const wasPending = this.#state.pendingSubscriptions.delete(message.id);
+      const wasCancelled = this.#state.cancelledSubscriptions.delete(message.id);
+      let unsubscribe: string | undefined;
       if (typeof subscription === 'string') {
-        if (identity?.generation === this.#state.generation)
+        if (identity?.generation === this.#state.generation && !wasCancelled) {
           this.#state.subscriptions.add(subscription);
-        else return { unsubscribe: subscription };
+          if (wasPending) this.#state.subscriptionRequests.set(subscription, message.id);
+        } else unsubscribe = subscription;
       }
       if (!identity) return { retry: true };
-      if (identity.generation !== this.#state.generation) return { retry: true };
+      if (identity.generation !== this.#state.generation)
+        return unsubscribe ? { unsubscribe } : { retry: true };
       message.id = identity.id;
+      if (unsubscribe) return { frame: JSON.stringify(message), unsubscribe };
     } else if (message.method === 'runtime/subscription') {
       const subscription = isJsonRecord(message.params) ? message.params.subscriptionId : undefined;
       if (typeof subscription !== 'string' || !this.#state.subscriptions.has(subscription))
@@ -239,9 +292,20 @@ export class RendererConnection {
     await this.#service.send(
       JSON.stringify({
         jsonrpc: '2.0',
-        id: UNSUBSCRIBE_ID,
+        id: `${UNSUBSCRIBE_ID}-${++this.#nextNativeRequest}`,
         method: 'runtime/unsubscribe',
         params: { subscriptionId },
+      }),
+    );
+  }
+
+  async #cancelSubscriptionRequest(subscribeRequestId: string): Promise<void> {
+    await this.#service.send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: `${UNSUBSCRIBE_ID}-${++this.#nextNativeRequest}`,
+        method: 'runtime/unsubscribe',
+        params: { subscribeRequestId },
       }),
     );
   }

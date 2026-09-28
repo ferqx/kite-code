@@ -424,6 +424,30 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     return 'applied';
   }
 
+  /** Release presentation state after its last session stream is detached. */
+  discardSession(sessionId: string): void {
+    if (this.#closed) return;
+    const hasSession = Object.hasOwn(this.#snapshot.sessions, sessionId);
+    const hasStreams = Object.values(this.#snapshot.streams).some(
+      (stream) => stream.sessionId === sessionId,
+    );
+    const hasBackground = Object.hasOwn(this.#snapshot.background, sessionId);
+    this.#deleteClosedRuns(sessionId);
+    if (!hasSession && !hasStreams && !hasBackground) return;
+    const sessions = { ...this.#snapshot.sessions };
+    delete sessions[sessionId];
+    const background = { ...this.#snapshot.background };
+    delete background[sessionId];
+    this.#replace({
+      ...this.#snapshot,
+      sessions,
+      background,
+      streams: hasStreams
+        ? removeSessionStreams(this.#snapshot.streams, sessionId)
+        : this.#snapshot.streams,
+    });
+  }
+
   dispose(): void {
     this.#closed = true;
     this.#pendingIndex = undefined;

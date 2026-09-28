@@ -655,6 +655,406 @@ describe('runtime resource budget admission', () => {
     });
   });
 
+  test('replaces a legacy writer waiter before admitting a writing Tool', () => {
+    let state = configuredState({ maxConcurrentWriters: 1 });
+    state.tools.calls['legacy-writer'] = {
+      toolCallId: 'legacy-writer',
+      modelMessageId: 'legacy-model',
+      name: 'write_file',
+      args: { path: 'fixture.txt', content: 'hello' },
+      status: 'approved',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'legacy-writer'];
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.waiter_enqueued',
+      waiter: {
+        version: 1,
+        runId: 'run-1',
+        invocationId: 'tool:legacy-writer',
+        requiredPermits: ['writer'],
+        sequence: 0,
+        enqueuedAt: '2026-07-30T00:00:01Z',
+        deadlineAt: '2026-07-30T00:00:02Z',
+        state: 'waiting',
+      },
+    });
+    const plan = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['legacy-writer'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(plan.status).toBe('admitted');
+    expect(plan.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.waiter_cancelled',
+      'resource_budget.reserved',
+    ]);
+  });
+
+  test('reuses an undispatched reservation but never locally fails an already dispatched Tool', () => {
+    let state = configuredState({ maxToolInvocations: 1 });
+    state.tools.calls['durable-tool'] = {
+      toolCallId: 'durable-tool',
+      modelMessageId: 'durable-model',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'approved',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'durable-tool'];
+    const effect = { type: 'run_tools' as const, toolCallIds: ['durable-tool'] };
+    const first = planRuntimeBudgetAdmission(state, effect, new Date('2026-07-30T00:00:01Z'));
+    expect(first.status).toBe('admitted');
+    state = apply(state, first.preparationEvents);
+    const expired = planRuntimeBudgetAdmission(state, effect, new Date('2026-07-30T00:30:01Z'));
+    expect(expired).toMatchObject({ status: 'denied', reason: 'budget_exhausted' });
+    expect(expired.budgetDeniedToolCallId).toBeUndefined();
+    const resumed = planRuntimeBudgetAdmission(state, effect, new Date('2026-07-30T00:00:02Z'));
+    expect(resumed.status).toBe('admitted');
+    expect(resumed.preparationEvents).toEqual([]);
+    expect(resumed.reservationIds).toEqual(first.reservationIds);
+    expect(resumed.dispatchEvents).toEqual(first.dispatchEvents);
+    state = apply(state, resumed.dispatchEvents);
+    const alreadyDispatched = planRuntimeBudgetAdmission(
+      state,
+      effect,
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(alreadyDispatched).toMatchObject({
+      status: 'denied',
+      reason: 'reconciliation_required',
+    });
+    expect(alreadyDispatched.budgetDeniedToolCallId).toBeUndefined();
+  });
+
+  test('admits independent writing Tools concurrently without a writer-count slot', () => {
+    let state = configuredState({ maxConcurrentWriters: 1 });
+    for (const toolCallId of ['write-first', 'write-second']) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-independent-writes',
+        name: 'write_file',
+        args: { path: `${toolCallId}.txt`, content: 'hello' },
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const first = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-first'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(first.status).toBe('admitted');
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const second = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-second'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(second.status).toBe('admitted');
+    expect(second.preparationEvents).toContainEqual(
+      expect.objectContaining({ type: 'resource_budget.reserved' }),
+    );
+    expect(
+      second.preparationEvents.some((event) => event.type === 'resource_budget.waiter_enqueued'),
+    ).toBe(false);
+    expect(
+      [...first.preparationEvents, ...second.preparationEvents]
+        .filter((event) => event.type === 'resource_budget.reserved')
+        .every((event) => event.reservation.executableUpperBound.gauges.activeWriters === 0),
+    ).toBe(true);
+  });
+
+  test('releases proven undispatched Tool budget instead of reconciling its Artifact ceiling', () => {
+    let state = configuredState();
+    state.tools.calls['undispatched-shell'] = {
+      toolCallId: 'undispatched-shell',
+      modelMessageId: 'model-undispatched',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'approved',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'undispatched-shell'];
+    const admission = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['undispatched-shell'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...admission.preparationEvents, ...admission.dispatchEvents]);
+    const release: RuntimeEvent = {
+      type: 'resource_budget.released',
+      reservationId: admission.reservationIds[0]!,
+      proof: 'local_pre_dispatch_failure',
+    };
+    expect(reconciliationEventsForReservations(state, admission.reservationIds, [release])).toEqual(
+      [],
+    );
+    state = apply(state, [release]);
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      reconciledUsage: { counters: { toolInvocations: 0, artifactBytes: 0 } },
+    });
+  });
+
+  test('waits for a sibling Shell artifact reservation, admits reads, then promotes after reconciliation', () => {
+    let state = configuredState({ maxConcurrentWriters: 1, maxConcurrencyWaitMs: 5_000 });
+    for (const toolCallId of ['shell-first', 'shell-second']) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-shell-writers',
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    state.tools.calls['read-sibling'] = {
+      toolCallId: 'read-sibling',
+      modelMessageId: 'model-shell-writers',
+      name: 'read_file',
+      args: { path: 'fixture.txt' },
+      status: 'approved',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'read-sibling'];
+
+    const first = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell-first'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(first.status).toBe('admitted');
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const second = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell-second', 'read-sibling'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(second.status).toBe('waiting');
+    expect(second.preparationEvents).toContainEqual({
+      type: 'resource_budget.waiter_enqueued',
+      waiter: expect.objectContaining({
+        invocationId: 'tool:shell-second',
+        requiredPermits: ['artifact_capacity'],
+        state: 'waiting',
+      }),
+    });
+    expect(
+      second.preparationEvents.some(
+        (event) =>
+          event.type === 'resource_budget.waiter_enqueued' &&
+          event.waiter.invocationId === 'tool:read-sibling',
+      ),
+    ).toBe(false);
+    state = apply(state, second.preparationEvents);
+
+    const read = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['read-sibling'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(read.status).toBe('admitted');
+    expect(
+      read.preparationEvents.some((event) => event.type === 'resource_budget.waiter_enqueued'),
+    ).toBe(false);
+    state = apply(state, [...read.preparationEvents, ...read.dispatchEvents]);
+
+    const firstActual = createZeroResourceUsage('actual');
+    firstActual.counters.toolInvocations = 1;
+    state = apply(state, [
+      {
+        type: 'resource_budget.reconciled',
+        reservationId: first.reservationIds[0]!,
+        actual: firstActual,
+      },
+    ]);
+    const promoted = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell-second'] },
+      new Date('2026-07-30T00:00:04Z'),
+    );
+    expect(promoted.status).toBe('admitted');
+    expect(promoted.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.waiter_promoted',
+      'resource_budget.reserved',
+    ]);
+    state = apply(state, [...promoted.preparationEvents, ...promoted.dispatchEvents]);
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      waiters: { 'tool:shell-second': { state: 'promoted' } },
+      reservations: { [promoted.reservationIds[0]!]: { state: 'dispatch_started' } },
+    });
+  });
+
+  test('waits for transient Shell artifact reservation while preserving unknown Shell writes', () => {
+    let state = configuredState({ maxConcurrentWriters: 1, maxConcurrencyWaitMs: 5_000 });
+    state.tools.calls['shell-artifact'] = {
+      toolCallId: 'shell-artifact',
+      modelMessageId: 'model-artifact-writers',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'approved',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['write-after-shell'] = {
+      toolCallId: 'write-after-shell',
+      modelMessageId: 'model-artifact-writers',
+      name: 'write_file',
+      args: { path: 'fixture.txt', content: 'hello' },
+      status: 'approved',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'shell-artifact', 'write-after-shell'];
+    const first = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell-artifact'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(first.preparationEvents).toContainEqual({
+      type: 'resource_budget.reserved',
+      reservation: expect.objectContaining({
+        executableUpperBound: expect.objectContaining({
+          counters: expect.objectContaining({
+            artifactBytes: LIMITED_RESOURCE_BUDGET_.maxArtifactBytes,
+          }),
+        }),
+      }),
+    });
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const blocked = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-after-shell'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(blocked.status).toBe('waiting');
+    expect(blocked.preparationEvents).toContainEqual({
+      type: 'resource_budget.waiter_enqueued',
+      waiter: expect.objectContaining({ requiredPermits: ['artifact_capacity'] }),
+    });
+    state = apply(state, blocked.preparationEvents);
+    const conservativelyReconciled = apply(
+      state,
+      reconciliationEventsForReservations(state, first.reservationIds),
+    );
+    expect(conservativelyReconciled.resourceBudget).toMatchObject({
+      status: 'active',
+      reconciledUsage: {
+        counters: { artifactBytes: LIMITED_RESOURCE_BUDGET_.maxArtifactBytes },
+      },
+    });
+    const noObservedChanges = planRuntimeBudgetAdmission(
+      conservativelyReconciled,
+      { type: 'run_tools', toolCallIds: ['write-after-shell'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(noObservedChanges.status).toBe('denied');
+    expect(noObservedChanges.reason).toBe('budget_exhausted');
+    expect(noObservedChanges.budgetDeniedToolCallId).toBe('write-after-shell');
+    expect(noObservedChanges.preparationEvents).toEqual([
+      { type: 'resource_budget.waiter_cancelled', invocationId: 'tool:write-after-shell' },
+    ]);
+    const afterDeniedWaiter = apply(conservativelyReconciled, noObservedChanges.preparationEvents);
+    expect(afterDeniedWaiter.resourceBudget).toMatchObject({
+      status: 'active',
+      waiters: { 'tool:write-after-shell': { state: 'cancelled' } },
+    });
+    const opaqueState = {
+      ...afterDeniedWaiter,
+      tools: {
+        ...afterDeniedWaiter.tools,
+        calls: {
+          ...afterDeniedWaiter.tools.calls,
+          'opaque-shell-after-shell': {
+            toolCallId: 'opaque-shell-after-shell',
+            modelMessageId: 'model-artifact-writers',
+            name: 'shell_execute',
+            args: { command: 'pwd' },
+            status: 'approved' as const,
+            sideEffect: true,
+            createdAtTurnId: afterDeniedWaiter.turn.turnId,
+          },
+        },
+        queue: [...afterDeniedWaiter.tools.queue, 'opaque-shell-after-shell'],
+      },
+    };
+    const opaqueDenied = planRuntimeBudgetAdmission(
+      opaqueState,
+      { type: 'run_tools', toolCallIds: ['opaque-shell-after-shell'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(opaqueDenied.status).toBe('denied');
+    expect(opaqueDenied.budgetDeniedToolCallId).toBe('opaque-shell-after-shell');
+
+    // A trusted receipt proving zero artifact bytes releases only the transient upper bound.
+    const actual = createZeroResourceUsage('actual');
+    actual.counters.toolInvocations = 1;
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: first.reservationIds[0]!,
+      actual,
+    });
+    const promoted = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-after-shell'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(promoted.status).toBe('admitted');
+    expect(promoted.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.waiter_promoted',
+      'resource_budget.reserved',
+    ]);
+  });
+
+  test('denies a second writer when the durable Tool invocation budget is exhausted', () => {
+    let state = configuredState({ maxToolInvocations: 1, maxConcurrentWriters: 1 });
+    for (const toolCallId of ['writer-one', 'writer-two']) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-budget-writers',
+        name: 'write_file',
+        args: { path: `${toolCallId}.txt`, content: 'x' },
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const first = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['writer-one'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(first.status).toBe('admitted');
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const actual = createZeroResourceUsage('actual');
+    actual.counters.toolInvocations = 1;
+    actual.counters.artifactBytes = 1;
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: first.reservationIds[0]!,
+      actual,
+    });
+    const second = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['writer-two'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(second.status).toBe('denied');
+    expect(second.reason).toBe('budget_exhausted');
+    expect(second.preparationEvents).toEqual([]);
+  });
+
   test('does not queue a second descendant tool while the first is active', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,

@@ -165,8 +165,10 @@ export function planChildFollowupTurn(input: {
     maxArtifactBytes: independent ? upper.counters.artifactBytes : 0,
     maxConcurrentSubagents: 0,
     maxConcurrentWriters: independent ? upper.gauges.activeWriters : 0,
-    maxConcurrentToolInvocations: independent ? upper.gauges.activeToolInvocations : 0,
-    maxConcurrentShellInvocations: independent ? upper.gauges.activeShellInvocations : 0,
+    // The v2 grant's Tool/Shell fields retain their schema shape, but tool
+    // dispatch does not consume a numeric concurrency slot.
+    maxConcurrentToolInvocations: independent ? 1 : 0,
+    maxConcurrentShellInvocations: independent ? 1 : 0,
     maxConcurrencyWaitMs: independent ? 15_000 : 1,
   };
   const targetRunId = derived('run', admission.submissionId);

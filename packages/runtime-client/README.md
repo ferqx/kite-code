@@ -7,11 +7,13 @@
 ## 拥有职责
 
 - 管理 Protocol request correlation、connection generation、显式 reconnect 与 subscription resubscribe。
+- 在订阅回执到达前取消读取时，按原订阅请求 ID 调用服务端 `runtime/unsubscribe`；服务端负责清理待建立或已建立的订阅，客户端无需等待迟到回执，也不因正常页面切换关闭共用连接。仅取消接口自身失败时才关闭该 logical connection。
 - 单次 Protocol request 默认 30 秒内必须收到响应（可用 `requestTimeoutMs` 配置）；超时清理本地等待并返回 `request_timeout`。命令结果仍可能已在服务端生效，客户端不自动重发。
 - 需要同时消费 event-free snapshot 与事件 envelope 的 Native presentation adapter 使用
   `subscribeReadyWithGeneration()`；每个排队 notification 保留接收时的 connection generation，重连后不得用当前 generation 重新盖章。
 - 维护 Session/index/ephemeral 的 observable snapshot，使用 connection generation 隔离旧连接消息，并在 index reset end 原子替换 session 列表。
 - 同一连接上的多个 Session 订阅可并行接收各自的 durable 增量；共享 Store 仍按投影 revision 校验，较旧订阅的 reset 不能覆盖较新水位，旧连接消息继续被 connection generation 拒绝。
+- 最后一个会话／子会话订阅离开后，释放该会话的投影、临时流、后台执行展示缓存与终止 Run 过滤记录；其他同会话订阅仍在时保留共享快照。后台查询仍返回原 DTO，只有查询开始和返回时都存在同一会话读取订阅，结果才写入展示缓存；旧页面的迟到结果不能重新填回已释放的状态。
 - Store mutation返回`applied`后notification才进入consumer queue；ignored、same-revision divergence、durable gap或ephemeral sequence
   gap均不dispatch原event。`resync_required`把Session置为not-ready并在同connection复用既有subscription重新订阅，不重放mutation。
 - 自动重订阅失败时关闭该订阅的本地 iterator，让客户端结束等待并显示恢复入口；旧 connection generation 的恢复任务

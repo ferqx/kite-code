@@ -292,6 +292,9 @@ interface SubscriptionState {
   remoteGeneration?: number;
   /** Local connection generation that owns the remote subscription identity. */
   connectionGeneration?: number;
+  /** Sent subscribe request, usable to detach before the remote ID is acknowledged. */
+  subscribeRequestId?: string;
+  subscribeRequestGeneration?: number;
   resyncing?: boolean;
   onAbort?: () => void;
 }
@@ -634,6 +637,17 @@ export class RuntimeClient implements AsyncDisposable {
       );
     }
     const connectionGeneration = this.#connectionGeneration;
+    const backgroundSubscribers =
+      query.type === 'list_background_executions' || query.type === 'get_background_execution'
+        ? [...this.#subscriptions.values()]
+            .filter(
+              (state) =>
+                (state.spec.scope === 'session' && state.spec.sessionId === query.sessionId) ||
+                (state.spec.scope === 'child_session' &&
+                  state.spec.childSessionId === query.sessionId),
+            )
+            .map((state) => state.id)
+        : [];
     const result = await this.#request('runtime/query', { query: wire });
     if (!isQueryResult(result)) {
       throw new RuntimeClientError('protocol_error', 'Protocol returned a non-query result.');
@@ -641,7 +655,8 @@ export class RuntimeClient implements AsyncDisposable {
     if (
       result.status === 'ok' &&
       result.queryType === 'list_background_executions' &&
-      result.backgroundSnapshot !== undefined
+      result.backgroundSnapshot !== undefined &&
+      backgroundSubscribers.some((id) => this.#subscriptions.has(id))
     ) {
       this.#store.applyBackgroundSnapshot({
         connectionGeneration,
@@ -651,7 +666,8 @@ export class RuntimeClient implements AsyncDisposable {
     if (
       result.status === 'ok' &&
       result.queryType === 'get_background_execution' &&
-      result.backgroundExecution !== undefined
+      result.backgroundExecution !== undefined &&
+      backgroundSubscribers.some((id) => this.#subscriptions.has(id))
     ) {
       this.#store.applyBackgroundExecution({
         connectionGeneration,
@@ -839,20 +855,53 @@ export class RuntimeClient implements AsyncDisposable {
     state.ready?.reject(closedError());
     state.queue.close();
     if (state.signal && state.onAbort) state.signal.removeEventListener('abort', state.onAbort);
+    const releasedSessionId =
+      state.spec.scope === 'session'
+        ? state.spec.sessionId
+        : state.spec.scope === 'child_session'
+          ? state.spec.childSessionId
+          : undefined;
+    if (
+      releasedSessionId &&
+      ![...this.#subscriptions.values()].some(
+        (remaining) =>
+          (remaining.spec.scope === 'sessions' && !remaining.indexObserverOnly) ||
+          (remaining.spec.scope === 'session' && remaining.spec.sessionId === releasedSessionId) ||
+          (remaining.spec.scope === 'child_session' &&
+            remaining.spec.childSessionId === releasedSessionId),
+      )
+    )
+      this.#store.discardSession(releasedSessionId);
     const remoteId = state.remoteId;
     const remoteConnectionGeneration = state.connectionGeneration;
+    const subscribeRequestId = state.subscribeRequestId;
+    const subscribeRequestGeneration = state.subscribeRequestGeneration;
     state.remoteId = undefined;
     state.remoteGeneration = undefined;
     state.connectionGeneration = undefined;
+    state.subscribeRequestId = undefined;
+    state.subscribeRequestGeneration = undefined;
     if (
       !sendUnsubscribe ||
-      !remoteId ||
       !this.#connection ||
-      remoteConnectionGeneration !== this.#connectionGeneration
+      (remoteId
+        ? remoteConnectionGeneration !== this.#connectionGeneration
+        : !subscribeRequestId || subscribeRequestGeneration !== this.#connectionGeneration)
     )
       return true;
-    const result = await this.#request('runtime/unsubscribe', { subscriptionId: remoteId });
-    return isUnsubscribeResult(result) ? result.unsubscribed : false;
+    const connection = this.#connection;
+    try {
+      const result = await this.#request(
+        'runtime/unsubscribe',
+        remoteId ? { subscriptionId: remoteId } : { subscribeRequestId },
+      );
+      if (!isUnsubscribeResult(result)) throw new Error('Invalid unsubscribe result.');
+      return result.unsubscribed;
+    } catch (error) {
+      if (this.#connection === connection)
+        void connection.close('runtime_subscription_cleanup_failed').catch(() => undefined);
+      throw error;
+    }
   }
 
   async close(reason = 'runtime_client_closed'): Promise<void> {
@@ -867,6 +916,8 @@ export class RuntimeClient implements AsyncDisposable {
       state.ready?.reject(closedError());
       state.remoteId = undefined;
       state.remoteGeneration = undefined;
+      state.subscribeRequestId = undefined;
+      state.subscribeRequestGeneration = undefined;
       state.queue.close();
     }
     try {
@@ -902,6 +953,8 @@ export class RuntimeClient implements AsyncDisposable {
       state.remoteId = undefined;
       state.remoteGeneration = undefined;
       state.connectionGeneration = undefined;
+      state.subscribeRequestId = undefined;
+      state.subscribeRequestGeneration = undefined;
     }
     this.#store.setConnection({ generation, status });
     this.#rejectPending(
@@ -1143,12 +1196,6 @@ export class RuntimeClient implements AsyncDisposable {
         finish();
         reject(signal?.reason ?? new Error('Runtime request cancelled.'));
         cancelRemoteHistoryRead();
-        // The Server may have created a subscription before its ack arrives.
-        // Without a remote id, closing this logical connection is the only
-        // way to release that subscription after cancellation.
-        if (sendStarted && method === 'runtime/subscribe') {
-          void connection.close('runtime_subscribe_cancelled').catch(() => undefined);
-        }
       };
       const timer = setTimeout(
         () => {
@@ -1190,6 +1237,10 @@ export class RuntimeClient implements AsyncDisposable {
     };
     if (!signal?.aborted) {
       sendStarted = true;
+      if (method === 'runtime/subscribe' && subscriptionState) {
+        subscriptionState.subscribeRequestId = id;
+        subscriptionState.subscribeRequestGeneration = generation;
+      }
       try {
         void connection
           .send({ jsonrpc: '2.0', id, method, params } as RuntimeProtocolMessage)

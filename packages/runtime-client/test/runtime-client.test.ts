@@ -1248,30 +1248,162 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
-  test('closes the connection when an in-flight subscribe is cancelled before its ack', async () => {
+  test('cancelling an in-flight subscribe detaches by request id without waiting for its ack', async () => {
     const controller = new AbortController();
+    let subscribeRequestId: string | undefined;
+    let subscriptions = 0;
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize')
         target.push(result(message.id, initializeResult('server-1')));
-      // The subscribe ack is withheld while the Server may already own a slot.
+      if (message.method === 'runtime/subscribe') {
+        if (++subscriptions === 1)
+          target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+        else subscribeRequestId = message.id;
+      }
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
     });
     const client = new RuntimeClient({
       transport: transport(connection),
       clientInfo: clientInfo(),
     });
     await client.connect();
+    const root = client
+      .subscribe({ spec: { scope: 'session', sessionId: 'parent' } })
+      [Symbol.asyncIterator]();
+    await until(() => connection.requests('runtime/subscribe').length === 1);
+    const pending = client.subscribeChildReadyWithGeneration({
+      spec: { scope: 'child_session', parentSessionId: 'parent', childSessionId: 'child' },
+      signal: controller.signal,
+    });
+    await tick();
+    expect(connection.requests('runtime/subscribe')).toHaveLength(2);
+    controller.abort(new Error('subscribe cancelled'));
+    await expect(pending).rejects.toThrow('subscribe cancelled');
+    await until(() => connection.requests('runtime/unsubscribe').length === 1);
+    expect(connection.requests('runtime/unsubscribe')[0]).toMatchObject({
+      params: { subscribeRequestId },
+    });
+    connection.push(
+      result(subscribeRequestId!, { subscriptionId: 'abandoned-child', generation: 1 }),
+    );
+    expect(client.snapshotStore.getSnapshot().status).toBe('active');
+    connection.push(
+      subscriptionUpdate(1, {
+        type: 'notification',
+        durability: 'durable',
+        sessionId: 'parent',
+        revision: 1,
+        session: session('parent', 1),
+      }),
+    );
+    await expect(root.next()).resolves.toMatchObject({ value: { sessionId: 'parent' } });
+    await root.return?.();
+    await client.close();
+  });
+
+  test('closes the connection when cancellation itself is never acknowledged', async () => {
+    const controller = new AbortController();
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 20,
+    });
+    await client.connect();
     const pending = client.subscribeReady({
       spec: { scope: 'sessions' },
       signal: controller.signal,
     });
-    await tick();
-    expect(connection.requests('runtime/subscribe')).toHaveLength(1);
+    await until(() => connection.requests('runtime/subscribe').length === 1);
     controller.abort(new Error('subscribe cancelled'));
     await expect(pending).rejects.toThrow('subscribe cancelled');
+    await until(() => connection.requests('runtime/unsubscribe').length === 1);
+    expect(connection.requests('runtime/unsubscribe')[0]).toMatchObject({
+      params: { subscribeRequestId: connection.requests('runtime/subscribe')[0]?.id },
+    });
+    await Bun.sleep(40);
+    await until(() => client.snapshotStore.getSnapshot().status === 'disconnected');
     await expect(
-      connection.send({ jsonrpc: '2.0', id: 'after-cancel', method: 'server/ping', params: {} }),
+      connection.send({ jsonrpc: '2.0', id: 'after-timeout', method: 'server/ping', params: {} }),
     ).rejects.toThrow('closed');
     await client.close();
+  });
+
+  test('a confirmed request-id cancellation stays connected without the original subscribe ack', async () => {
+    const controller = new AbortController();
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 40,
+    });
+    await client.connect();
+    const pending = client.subscribeChildReadyWithGeneration({
+      spec: { scope: 'child_session', parentSessionId: 'parent', childSessionId: 'child' },
+      signal: controller.signal,
+    });
+    await until(() => connection.requests('runtime/subscribe').length === 1);
+    controller.abort(new Error('left detail'));
+    await expect(pending).rejects.toThrow('left detail');
+    await until(() => connection.requests('runtime/unsubscribe').length === 1);
+    await Bun.sleep(80);
+    expect(client.snapshotStore.getSnapshot().status).toBe('active');
+    await client.close();
+  });
+
+  test('cancels two pending child subscriptions by their exact request ids', async () => {
+    const controllers = [new AbortController(), new AbortController()];
+    const requests: string[] = [];
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-1')));
+      if (message.method === 'runtime/subscribe') requests.push(message.id);
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    await client.connect();
+    const pending = controllers.map((controller, index) =>
+      client.subscribeChildReadyWithGeneration({
+        spec: {
+          scope: 'child_session',
+          parentSessionId: 'parent',
+          childSessionId: `child-${index}`,
+        },
+        signal: controller.signal,
+      }),
+    );
+    await until(() => requests.length === 2);
+    const cancelled = pending.map((subscription) => subscription.catch((error: unknown) => error));
+    for (const controller of controllers) controller.abort(new Error('left child detail'));
+    const cancellation = await Promise.all(cancelled);
+    for (const error of cancellation) expect(error).toBeInstanceOf(Error);
+    await until(() => connection.requests('runtime/unsubscribe').length === 2);
+    connection.push(result(requests[1]!, { subscriptionId: 'remote-child-1', generation: 1 }));
+    connection.push(result(requests[0]!, { subscriptionId: 'remote-child-0', generation: 1 }));
+    await tick();
+    const cleanupRequests = connection.requests('runtime/unsubscribe');
+    const status = client.snapshotStore.getSnapshot().status;
+    await client.close();
+    expect(cleanupRequests).toHaveLength(2);
+    expect(
+      cleanupRequests.map((request) =>
+        'subscribeRequestId' in request.params ? request.params.subscribeRequestId : undefined,
+      ),
+    ).toEqual(requests);
+    expect(status).toBe('active');
   });
 
   test('a failed automatic resubscribe closes its iterator instead of leaving a live waiter', async () => {
@@ -1635,6 +1767,219 @@ describe('RuntimeClient protocol state machine', () => {
     await until(() => client.snapshotStore.getSnapshot().sessions['session-1']?.ready === true);
     await iterator.return?.();
     await client.close();
+  });
+
+  test('releases snapshot state while switching among 120 distinct sessions', async () => {
+    let nextSubscription = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('snapshot-retention', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (message.method === 'runtime/subscribe')
+        target.push(
+          result(message.id, {
+            subscriptionId: `subscription-${++nextSubscription}`,
+            generation: nextSubscription,
+          }),
+        );
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'list_background_executions'
+      ) {
+        const sessionId = message.params.query.sessionId;
+        target.push(
+          result(message.id, {
+            status: 'ok',
+            queryType: 'list_background_executions',
+            backgroundSnapshot: {
+              sessionId,
+              sessionRevision: 1,
+              aggregateGeneration: `aggregate-${sessionId}`,
+              watermark: 1,
+              executions: [],
+            },
+          }),
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      for (let index = 0; index < 120; index += 1) {
+        const sessionId = `session-${index}`;
+        const handle = await client.subscribeHandle({ scope: 'session', sessionId });
+        connection.push({
+          jsonrpc: '2.0',
+          method: 'runtime/subscription',
+          params: {
+            subscriptionId: `subscription-${index + 1}`,
+            generation: index + 1,
+            message: {
+              type: 'notification',
+              durability: 'durable',
+              sessionId,
+              revision: 1,
+              session: session(sessionId, 1),
+            },
+          },
+        });
+        await until(() => client.snapshotStore.getSnapshot().sessions[sessionId] !== undefined);
+        await client.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'list_background_executions',
+          sessionId,
+        });
+        expect(Object.keys(client.snapshotStore.getSnapshot().sessions)).toHaveLength(1);
+        expect(Object.keys(client.snapshotStore.getSnapshot().background)).toHaveLength(1);
+        await handle.unsubscribe();
+        expect(Object.keys(client.snapshotStore.getSnapshot().sessions)).toHaveLength(0);
+        expect(Object.keys(client.snapshotStore.getSnapshot().streams)).toHaveLength(0);
+        expect(Object.keys(client.snapshotStore.getSnapshot().background)).toHaveLength(0);
+      }
+      expect(connection.requests('runtime/subscribe')).toHaveLength(120);
+      expect(connection.requests('runtime/unsubscribe')).toHaveLength(120);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('keeps shared session state until its last subscriber detaches', async () => {
+    let nextSubscription = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('shared-snapshot')));
+      if (message.method === 'runtime/subscribe')
+        target.push(
+          result(message.id, {
+            subscriptionId: `subscription-${++nextSubscription}`,
+            generation: nextSubscription,
+          }),
+        );
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      const first = await client.subscribeHandle({ scope: 'session', sessionId: 'session-1' });
+      const second = await client.subscribeHandle({ scope: 'session', sessionId: 'session-1' });
+      connection.push({
+        jsonrpc: '2.0',
+        method: 'runtime/subscription',
+        params: {
+          subscriptionId: 'subscription-1',
+          generation: 1,
+          message: {
+            type: 'notification',
+            durability: 'durable',
+            sessionId: 'session-1',
+            revision: 1,
+            session: session('session-1', 1),
+          },
+        },
+      });
+      await until(() => client.snapshotStore.getSnapshot().sessions['session-1'] !== undefined);
+      await first.unsubscribe();
+      expect(client.snapshotStore.getSnapshot().sessions['session-1']).toBeDefined();
+      await second.unsubscribe();
+      expect(client.snapshotStore.getSnapshot().sessions['session-1']).toBeUndefined();
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('an old background query cannot refill a detached or newly reopened session', async () => {
+    let nextSubscription = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('background-read-owner', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (message.method === 'runtime/subscribe')
+        target.push(
+          result(message.id, {
+            subscriptionId: `subscription-${++nextSubscription}`,
+            generation: nextSubscription,
+          }),
+        );
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    const query = () =>
+      client.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId: 'session-1',
+      });
+    const reply = (index: number, watermark: number) => {
+      const request = connection.requests('runtime/query')[index]!;
+      connection.push(
+        result(request.id, {
+          status: 'ok',
+          queryType: 'list_background_executions',
+          backgroundSnapshot: {
+            sessionId: 'session-1',
+            sessionRevision: watermark,
+            aggregateGeneration: 'aggregate-1',
+            watermark,
+            executions: [],
+          },
+        }),
+      );
+    };
+    try {
+      const first = await client.subscribeHandle({ scope: 'session', sessionId: 'session-1' });
+      const detachedQuery = query();
+      await until(() => connection.requests('runtime/query').length === 1);
+      await first.unsubscribe();
+      reply(0, 1);
+      await detachedQuery;
+      expect(client.snapshotStore.getSnapshot().background['session-1']).toBeUndefined();
+
+      const second = await client.subscribeHandle({ scope: 'session', sessionId: 'session-1' });
+      const oldQuery = query();
+      await until(() => connection.requests('runtime/query').length === 2);
+      await second.unsubscribe();
+      const third = await client.subscribeHandle({ scope: 'session', sessionId: 'session-1' });
+      const currentQuery = query();
+      await until(() => connection.requests('runtime/query').length === 3);
+      reply(2, 2);
+      await currentQuery;
+      reply(1, 3);
+      await oldQuery;
+      expect(client.snapshotStore.getSnapshot().background['session-1']?.snapshot.watermark).toBe(
+        2,
+      );
+      await third.unsubscribe();
+      expect(client.snapshotStore.getSnapshot().background['session-1']).toBeUndefined();
+    } finally {
+      await client.close();
+    }
   });
 
   test('reconstructs a complete ephemeral RuntimeAccess notification from the closed Protocol event', async () => {

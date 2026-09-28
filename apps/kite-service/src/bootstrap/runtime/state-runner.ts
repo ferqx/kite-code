@@ -1358,6 +1358,40 @@ export async function* runStateRuntimeLoop(
       let reservationIds: string[] = [];
       if (kernel.getState().resourceBudget.status === 'active') {
         const admission = planRuntimeBudgetAdmission(kernel.getState(), effect);
+        if (admission.timedOutToolCallId || admission.budgetDeniedToolCallId) {
+          const toolCallId = admission.timedOutToolCallId ?? admission.budgetDeniedToolCallId!;
+          const timedOut = admission.preparationEvents.some(
+            (event) =>
+              event.type === 'resource_budget.waiter_timed_out' &&
+              (event.invocationId === `tool:${toolCallId}` ||
+                event.invocationId.startsWith(`tool:${toolCallId}:`)),
+          );
+          const call = kernel.getState().tools.calls[toolCallId];
+          if (
+            (admission.timedOutToolCallId !== undefined && !timedOut) ||
+            !call ||
+            !['queued', 'approved', 'authorized_queued'].includes(call.status)
+          ) {
+            continue;
+          }
+          const budgetDenied =
+            admission.budgetDeniedToolCallId !== undefined ||
+            admission.reason === 'budget_exhausted';
+          const localFailure: RuntimeEvent = {
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              budgetDenied ? 'budget_exceeded' : 'resource_saturated',
+              budgetDenied
+                ? 'The tool cannot fit the remaining Run budget.'
+                : 'The tool could not acquire a resource slot before its wait deadline.',
+            ),
+          };
+          const settlement = [...admission.preparationEvents, localFailure];
+          kernel.processEventBatch(settlement);
+          yield* settlement;
+          continue;
+        }
         if (admission.preparationEvents.length > 0) {
           kernel.processEventBatch(admission.preparationEvents);
           yield* admission.preparationEvents;
@@ -1388,13 +1422,10 @@ export async function* runStateRuntimeLoop(
             if (signal?.aborted) return;
             continue;
           }
-          const terminalEvents = resourceAdmissionTerminalEvents(
-            kernel.getState(),
-            admission.reason,
-          );
-          kernel.processEventBatch(terminalEvents);
-          yield* terminalEvents;
-          return;
+          // The deadline may have passed after planning. Recheck the durable
+          // waiter and settle only the exact Tool once the planner records a
+          // timeout; a clock tick alone cannot terminate the whole Run.
+          continue;
         }
         if (admission.status === 'denied') {
           const terminalEvents = resourceAdmissionTerminalEvents(

@@ -56,7 +56,9 @@
 - 子 Session 已激活但父 dispatch ACK 尚未落盘时，Host 只接受 cleanup confirmed 的 idle 执行权和精确 revision 5 作为失败结算预检；Store 在父 receipt transaction 内复核完整激活足迹。激活批次第五条必须是绑定子 invocation/Run 的 `task.started`，其 `userGoal` 为固定通用标签；预检不能替代 Store CAS。
 - Effect lease的global revision fence在dispatch前保持严格：stale Model preparation/attempt-start不得执行。精确Model invocation已经dispatch后，同一active Turn内无关的user control revision可以与其stream/retry/terminal evidence并发；Host只接受匹配live invocation的封闭Model/Tool/resource批次，Turn终止、invocation替换或identity漂移后仍拒绝迟到结果。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。
-- Tool/Shell活动数量不再形成Resource Budget permit；`maxToolInvocations`仍限制整轮累计调用，Subagent、writer、deadline与取消继续走原有账本。
+- Tool/Shell 活动数量和单个写 Tool 均不占用 Resource Budget 的数量 permit；`maxToolInvocations`仍限制整轮累计调用，Subagent、deadline 与取消继续走原有账本。`activeWriters` 只用于独立 code Subagent 的额度。
+- 未结算的 Artifact 上界可暂时占额度，Host 使用持久 `artifact_capacity` waiter 待结算后重新准入；已知上界可放入预算的写 Tool 不受写者数量限制。旧的 Tool/Shell/writer waiter 可读取，重入时按现行准入类型取消或替换。自动审批未派发时的 Tool 调用次数与 Artifact 实际用量为零；已派发 Shell 缺少可靠文件变更事实时仍按预留上界保守结算。
+- 同一 Tool invocation 已有 `reserved` 账目且 Run 未到期时，恢复使用原 reservation 完成派发；已有 `dispatch_started`、`unknown` 或已结算账目时，新的准入计划要求结果核对，不能把重复 reservation 错误当作本地预算拒绝或重派工具。
 - Session lifecycle、mailbox、effect lease、cleanup、recovery 与 persistent scoped receipt decision 只有一个 Host owner；Server 仅通过 `RuntimeAccess` 调用它。
 - Host从同一`SessionLifecycleSupervisor`投影`hasActiveSessionOperations()`聚合只读事实，供Service在关闭mutation admission后判断普通stop是否
   必须返回busy；该方法不创建第二份Run registry、不取消Session，也不把terminal projection误报为active。

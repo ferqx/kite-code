@@ -38,6 +38,28 @@ const initializeRequest = {
 };
 
 describe('Runtime Protocol', () => {
+  test('accepts exact unsubscribe identity by remote ID or subscribe request ID', () => {
+    const request = (params: unknown) => ({
+      jsonrpc: '2.0',
+      id: 'detach-1',
+      method: 'runtime/unsubscribe',
+      params,
+    });
+    expect(
+      safeDecodeRuntimeProtocolMessage(request({ subscriptionId: 'remote-1' })).success,
+    ).toBeTrue();
+    expect(
+      safeDecodeRuntimeProtocolMessage(request({ subscribeRequestId: 'subscribe-1' })).success,
+    ).toBeTrue();
+    for (const params of [
+      {},
+      { subscriptionId: 'remote-1', subscribeRequestId: 'subscribe-1' },
+      { subscribeRequestId: '' },
+      { subscribeRequestId: 'subscribe-1', cancelTurn: true },
+    ]) {
+      expect(safeDecodeRuntimeProtocolMessage(request(params)).success).toBeFalse();
+    }
+  });
   test('requires exact Workspace removal phase and identity', () => {
     const identity = {
       workspace: '/trusted/workspace',
@@ -1345,7 +1367,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'c74fa12b:94fb713b';
+    const expectedDigest = '930106a5:175b957e';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

@@ -7,15 +7,24 @@ import {
 } from '@kite-ai/builtin-runtime/skills';
 import { isBuiltinSubagentTaskToolName } from '@kite-ai/builtin-runtime/subagent';
 import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
-import { createRuntimeHostInteractionId } from '@kite-ai/runtime-host';
+import {
+  createRuntimeHostInteractionId,
+  RuntimeHostToolPipelineAttemptCoordinatorError,
+} from '@kite-ai/runtime-host';
 import {
   createDescendantResourceAdmission,
   DescendantResourceAdmissionError,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#kite-service/config/features';
 import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
-import { isConcurrentExploreSubagentBatch } from '../../runtime/tool-execution/subagent-executor';
-import { createAppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
+import {
+  AppToolPipelinePersistenceError,
+  isConcurrentExploreSubagentBatch,
+} from '../../runtime/tool-execution/subagent-executor';
+import {
+  AppStateToolPipelinePersistenceError,
+  createAppStateToolPipelinePersistence,
+} from '../../runtime/tool-persistence';
 import {
   type CrossSessionQueueMailPort,
   createCrossSessionChildMailboxPort,
@@ -23,7 +32,11 @@ import {
 } from './agent-mailbox-port';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
-import { ProviderReadinessCoordinator } from './provider-readiness';
+import {
+  ProviderReadinessCoordinator,
+  ProviderReadinessPersistenceError,
+  ProviderReadinessUnknownError,
+} from './provider-readiness';
 import { resourceAdmissionTerminalEvents } from './resource-admission-terminal';
 import type { RuntimeExecutorDependencies } from './runtime-effect-dependencies';
 import type {
@@ -84,8 +97,115 @@ function currentSkillCatalog(
     : undefined;
 }
 
+function undispatchedToolFailure(
+  toolCallId: string,
+  state: Readonly<RuntimeState>,
+  dependencies: RuntimeExecutorDependencies,
+  executionContext: Parameters<RuntimeEffectExecutor>[3],
+  error: unknown,
+): RuntimeEvent[] | undefined {
+  if (
+    error instanceof DescendantResourceAdmissionError ||
+    error instanceof SiblingTerminalPersistenceError ||
+    error instanceof AppStateToolPipelinePersistenceError ||
+    error instanceof AppToolPipelinePersistenceError ||
+    error instanceof RuntimeHostToolPipelineAttemptCoordinatorError ||
+    error instanceof ProviderReadinessPersistenceError ||
+    error instanceof ProviderReadinessUnknownError
+  )
+    return undefined;
+  const initialCall = state.tools.calls[toolCallId];
+  if (
+    !initialCall ||
+    isBuiltinSubagentTaskToolName(initialCall.name) ||
+    initialCall.name.startsWith('mcp__') ||
+    dependencies.signal?.aborted === true
+  )
+    return undefined;
+  let currentState: Readonly<RuntimeState>;
+  try {
+    // A missing or failing durable projection is not evidence of no dispatch.
+    const current = executionContext?.getState?.();
+    if (!current) return undefined;
+    currentState = current;
+  } catch {
+    return undefined;
+  }
+  const call = currentState.tools.calls[toolCallId];
+  if (
+    !call ||
+    !['queued', 'approved', 'authorized_queued'].includes(call.status) ||
+    Object.values(currentState.capabilities.invocations).some(
+      (invocation) => invocation.toolCallId === toolCallId,
+    )
+  )
+    return undefined;
+  if (currentState.resourceBudget.status !== 'active') return undefined;
+  const invocationPrefix = `tool:${toolCallId}`;
+  const matching =
+    executionContext?.reservationIds.flatMap((reservationId) => {
+      const reservation =
+        currentState.resourceBudget.status === 'active'
+          ? currentState.resourceBudget.reservations[reservationId]
+          : undefined;
+      return reservation &&
+        (reservation.invocationId === invocationPrefix ||
+          reservation.invocationId.startsWith(`${invocationPrefix}:`))
+        ? [reservation]
+        : [];
+    }) ?? [];
+  const reservation = matching.length === 1 ? matching[0] : undefined;
+  if (reservation?.state !== 'dispatch_started') return undefined;
+  return [
+    {
+      type: 'resource_budget.released',
+      reservationId: reservation.reservationId,
+      proof: 'local_pre_dispatch_failure',
+    },
+    {
+      type: 'tool.failed',
+      toolCallId,
+      failure: classifyFailure(
+        'tool_runtime_error',
+        'The tool failed before its execution attempt was dispatched.',
+      ),
+    },
+  ];
+}
+
 /** App-owned State projection for the one run_tools effect. */
 export async function executeAppRuntimeToolsEffect(
+  effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
+  state: Readonly<RuntimeState>,
+  dependencies: RuntimeExecutorDependencies,
+  emit: Parameters<RuntimeEffectExecutor>[2],
+  executionContext: Parameters<RuntimeEffectExecutor>[3],
+  subagentEventSink: SubAgentEventSink,
+): Promise<RuntimeEvent[]> {
+  try {
+    return await executeAppRuntimeToolsEffectUnchecked(
+      effect,
+      state,
+      dependencies,
+      emit,
+      executionContext,
+      subagentEventSink,
+    );
+  } catch (error) {
+    const toolCallId = effect.toolCallIds.length === 1 ? effect.toolCallIds[0] : undefined;
+    // The budget's dispatch_started fact authorizes entry into the effect; it
+    // does not prove that a Tool Pipeline attempt was dispatched. Its durable
+    // capability.execution_started/tool.started facts are the conservative
+    // boundary. Never infer this from the stale effect-entry snapshot.
+    const localFailure = toolCallId
+      ? undispatchedToolFailure(toolCallId, state, dependencies, executionContext, error)
+      : undefined;
+    if (localFailure) return localFailure;
+    throw error;
+  }
+}
+
+async function executeAppRuntimeToolsEffectUnchecked(
   effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
   state: Readonly<RuntimeState>,
   dependencies: RuntimeExecutorDependencies,
@@ -268,13 +388,16 @@ export async function executeAppRuntimeToolsEffect(
       };
       try {
         const toolPipelineComposition = resolveToolPipelineAdapterComposition(dependencies);
+        const builtinToolCatalog = requireBuiltinToolCatalog(dependencies);
+        const modelEffectCoordinator = requireModelEffectCoordinator(dependencies);
+        const skillCatalog = currentSkillCatalog(dependencies);
         const returnedEvents = await executeAppRuntimeTools({
           state,
           toolCallIds,
           shellExecutor: dependencies.shellExecutor,
           mcpManager: dependencies.mcpManager,
           capabilityExecution: dependencies.capabilityExecution,
-          builtinToolCatalog: requireBuiltinToolCatalog(dependencies),
+          builtinToolCatalog,
           toolPipelineComposition,
           ordinaryToolPipelineAttemptRuntime,
           taskToolPipelineAttemptRuntime,
@@ -283,12 +406,12 @@ export async function executeAppRuntimeToolsEffect(
           providerReadinessCoordinator,
           skillManifests: dependencies.skills,
           skillOptions: dependencies.skillOptions,
-          skillCatalog: currentSkillCatalog(dependencies),
+          skillCatalog,
           signal: dependencies.signal,
           taskConfig: dependencies.config,
           taskModel: dependencies.model,
           descendantResourceAdmission,
-          modelEffectCoordinator: requireModelEffectCoordinator(dependencies),
+          modelEffectCoordinator,
           capabilityArtifactStore: dependencies.capabilityArtifactStore,
           workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
           sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
@@ -499,6 +622,23 @@ export async function executeAppRuntimeToolsEffect(
           resourceAdmissionTerminalEvents(currentState, batch.reason.reason),
         );
       } else {
+        const localFailure = undispatchedToolFailure(
+          toolCallId,
+          state,
+          dependencies,
+          executionContext,
+          batch.reason,
+        );
+        if (localFailure) {
+          terminalEventBatches.push(localFailure);
+          continue;
+        }
+        if (
+          !isBuiltinSubagentTaskToolName(state.tools.calls[toolCallId]?.name) &&
+          !state.tools.calls[toolCallId]?.name.startsWith('mcp__') &&
+          !dependencies.signal?.aborted
+        )
+          throw batch.reason;
         terminalEventBatches.push([
           {
             type: dependencies.signal?.aborted ? 'tool.cancelled' : 'tool.failed',

@@ -373,8 +373,14 @@ function validIndependentFollowupGrant(
     ['maxRunOutputTokens', upperCounters.outputTokens],
     ['maxArtifactBytes', upperCounters.artifactBytes],
     ['maxConcurrentWriters', upperGauges.activeWriters],
-    ['maxConcurrentToolInvocations', upperGauges.activeToolInvocations],
-    ['maxConcurrentShellInvocations', upperGauges.activeShellInvocations],
+    // A zero v2 gauge means Tool/Shell concurrency is not source funded.
+    // Retain the bounded check for previously admitted v2 envelopes.
+    ...(upperGauges.activeToolInvocations === 0 && upperGauges.activeShellInvocations === 0
+      ? []
+      : ([
+          ['maxConcurrentToolInvocations', upperGauges.activeToolInvocations],
+          ['maxConcurrentShellInvocations', upperGauges.activeShellInvocations],
+        ] as [string, unknown][])),
   ];
   return (
     admission.schema === 'kite.cross-session-followup-admission.v2' &&
@@ -6534,8 +6540,10 @@ export function acceptCrossSessionFollowupInTransaction(
         counters.toolInvocations !== 0 ||
         Number(counters.artifactBytes) < 1 ||
         gauges.elapsedRunMs !== FOLLOWUP_TURN_DURATION_MS ||
-        gauges.activeToolInvocations !== 1 ||
-        gauges.activeShellInvocations !== 1 ||
+        !(
+          (gauges.activeToolInvocations === 0 && gauges.activeShellInvocations === 0) ||
+          (gauges.activeToolInvocations === 1 && gauges.activeShellInvocations === 1)
+        ) ||
         gauges.activeWriters !== (policy.targetRole === 'code' ? 1 : 0))) ||
     (!isIndependentTurnProtocol &&
       (upper.independentFollowupTurn === true || upper.unboundedToolInvocations === true)) ||

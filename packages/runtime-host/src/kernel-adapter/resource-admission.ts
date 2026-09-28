@@ -39,6 +39,10 @@ export interface RuntimeBudgetAdmissionPlan {
   dispatchEvents: RuntimeEvent[];
   reservationIds: string[];
   waitDeadlineAt?: string;
+  /** Exact undispatched Tool whose durable concurrency waiter expired. */
+  timedOutToolCallId?: string;
+  /** Exact undispatched Tool that cannot fit the remaining cumulative budget. */
+  budgetDeniedToolCallId?: string;
 }
 
 export interface ModelResourcePreparationPlan {
@@ -378,7 +382,7 @@ interface PlannedInvocation {
   invocationId: string;
   toolCallId?: string;
   resourceKind: BudgetReservation['resourceKind'];
-  requiredPermits: readonly ('tool' | 'shell_invocation')[];
+  requiredPermits: ConcurrencyWaiter['requiredPermits'] | readonly [];
   upperBound: ResourceUsage;
 }
 
@@ -426,19 +430,16 @@ function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
       return remaining;
     }
   }
-  return remaining;
+  // An opaque side effect may write an Artifact even when no capacity is
+  // left. A zero upper bound would incorrectly authorize that Tool.
+  return Math.max(1, remaining);
 }
 
 function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsage {
   const usage = createZeroResourceUsage('versioned_upper_bound', 'runtime-effect-v1');
   usage.counters.toolInvocations = 1;
-  const call = state.tools.calls[toolCallId];
-  if (call?.sideEffect && call.name !== 'followup_task') usage.gauges.activeWriters = 1;
-  if (call?.name === 'task') {
-    // Task acceptance is a durable Tool receipt. A child allotment acquires
-    // the Sub-agent slot when its independent execution can start.
-    usage.gauges.activeWriters = 0;
-  }
+  // A Tool does not acquire a writer-count slot. A code Sub-agent acquires
+  // its own allotment when its independent execution starts.
   usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
   return usage;
 }
@@ -539,7 +540,10 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
               : taskInvocationPrefix,
         toolCallId,
         resourceKind,
-        requiredPermits: [],
+        requiredPermits:
+          call?.sideEffect && call.name !== 'task' && call.name !== 'followup_task'
+            ? ['artifact_capacity']
+            : [],
         upperBound: upperBoundForTool(state, toolCallId),
       },
     ];
@@ -1073,11 +1077,25 @@ function isQueueHead(
   if (invocation.requiredPermits.length === 0) return true;
   const waiting = waitingInFifoOrder(budget);
   const own = budget.waiters?.[invocation.invocationId];
-  if (!own) return waiting.length === 0;
-  const toolHead = waiting[0]?.invocationId === own.invocationId;
+  // A restored legacy waiter keeps its FIFO position until the planner
+  // replaces its permit type before admission.
+  const permits = own?.state === 'waiting' ? own.requiredPermits : invocation.requiredPermits;
+  if (permits[0] === 'artifact_capacity') {
+    const artifactHead = waiting.find(
+      (waiter) => waiter.requiredPermits[0] === 'artifact_capacity',
+    );
+    return artifactHead === undefined || artifactHead.invocationId === invocation.invocationId;
+  }
+  if (permits[0] === 'writer') {
+    const writerHead = waiting.find((waiter) => waiter.requiredPermits[0] === 'writer');
+    return writerHead === undefined || writerHead.invocationId === invocation.invocationId;
+  }
+  const legacyWaiting = waiting.filter((waiter) => waiter.requiredPermits[0] === 'tool');
+  if (!own) return legacyWaiting.length === 0;
+  const toolHead = legacyWaiting[0]?.invocationId === own.invocationId;
   const shellHead =
-    invocation.requiredPermits.length < 2 ||
-    waiting.find((waiter) => waiter.requiredPermits.length === 2)?.invocationId ===
+    permits.length < 2 ||
+    legacyWaiting.find((waiter) => waiter.requiredPermits.length === 2)?.invocationId ===
       own.invocationId;
   return toolHead && shellHead;
 }
@@ -1127,12 +1145,41 @@ function canFitWithoutConcurrency(
   }
 }
 
+function canFitAfterInFlightArtifacts(
+  budget: ActiveResourceBudgetRuntimeState,
+  reservation: BudgetReservation,
+): boolean {
+  const reservations = Object.fromEntries(
+    Object.entries(budget.reservations).map(([id, pending]) => {
+      if (
+        (pending.state !== 'reserved' && pending.state !== 'dispatch_started') ||
+        pending.executableUpperBound.counters.artifactBytes === 0
+      )
+        return [id, pending];
+      return [
+        id,
+        {
+          ...pending,
+          executableUpperBound: {
+            ...pending.executableUpperBound,
+            counters: { ...pending.executableUpperBound.counters, artifactBytes: 0 },
+          },
+        },
+      ];
+    }),
+  ) as ActiveResourceBudgetRuntimeState['reservations'];
+  // This is only a feasibility projection. The durable upper bounds stay in
+  // place until their actual use is known; a waiting Tool is rechecked then.
+  return canFitWithoutConcurrency({ ...budget, reservations }, reservation);
+}
+
 function saturationReason(
   invocation: PlannedInvocation,
 ): Extract<
   RuntimeBudgetAdmissionReason,
-  'tool_concurrency_saturated' | 'shell_concurrency_saturated'
+  'budget_exhausted' | 'tool_concurrency_saturated' | 'shell_concurrency_saturated'
 > {
+  if (invocation.requiredPermits[0] === 'artifact_capacity') return 'budget_exhausted';
   return invocation.requiredPermits.length === 2
     ? 'shell_concurrency_saturated'
     : 'tool_concurrency_saturated';
@@ -1200,22 +1247,46 @@ export function planRuntimeBudgetAdmission(
     | {
         reason: RuntimeBudgetAdmissionPlan['reason'];
         deadlineAt?: string;
+        toolCallId?: string;
+        waiterInvocationId?: string;
       }
     | undefined;
 
   for (const invocation of invocations) {
     if (projected.status !== 'active') throw new Error('Budget projection became inactive.');
-    const unresolved = Object.values(projected.reservations).find(
+    const previous = Object.values(projected.reservations).find(
       (reservation) =>
-        reservation.invocationId === invocation.invocationId && reservation.state === 'unknown',
+        reservation.invocationId === invocation.invocationId && reservation.state !== 'released',
     );
-    if (unresolved) {
+    if (previous?.state === 'reserved' && previous.resourceKind === invocation.resourceKind) {
+      if (Date.parse(projected.deadlineAt) <= now.getTime()) {
+        blocked = { reason: 'budget_exhausted' };
+        break;
+      }
+      // Reservation preparation was durable, but dispatch was not. Resume
+      // with the same upper bound and identity instead of creating another.
+      dispatchEvents.push({
+        type: 'resource_budget.dispatch_started',
+        reservationId: previous.reservationId,
+      });
+      reservationIds.push(previous.reservationId);
+      if (effect.type === 'run_tools' && invocation.toolCallId)
+        admittedToolCallIds.push(invocation.toolCallId);
+      continue;
+    }
+    if (previous) {
+      // dispatch_started may already have caused an external effect. Neither
+      // replay nor a local Tool failure is safe until recovery confirms it.
       blocked = { reason: 'reconciliation_required' };
       break;
     }
     const storedWaiter = projected.waiters?.[invocation.invocationId];
     let existingWaiter = storedWaiter?.state === 'waiting' ? storedWaiter : undefined;
-    if (existingWaiter && invocation.requiredPermits.length === 0) {
+    if (
+      existingWaiter &&
+      (invocation.requiredPermits.length === 0 ||
+        existingWaiter.requiredPermits[0] !== invocation.requiredPermits[0])
+    ) {
       const cancelled = {
         type: 'resource_budget.waiter_cancelled',
         invocationId: invocation.invocationId,
@@ -1232,10 +1303,18 @@ export function planRuntimeBudgetAdmission(
         type: 'resource_budget.waiter_timed_out',
         invocationId: invocation.invocationId,
       } as const;
-      preparationEvents.push(timedOutEvent);
-      projected = reduceResourceBudgetState(projected, timedOutEvent);
-      blocked = { reason: saturationReason(invocation) };
-      break;
+      // Discard any earlier speculative reservations in this plan. The
+      // Service first settles this exact undispatched Tool, then replans the
+      // remaining queue against the fresh ledger.
+      return {
+        status: 'waiting',
+        reason: saturationReason(invocation),
+        effect,
+        preparationEvents: [timedOutEvent],
+        dispatchEvents: [],
+        reservationIds: [],
+        ...(invocation.toolCallId ? { timedOutToolCallId: invocation.toolCallId } : {}),
+      };
     }
     if (!isQueueHead(projected, invocation)) {
       const waiter = existingWaiter ?? waiterFor(projected, invocation, now);
@@ -1283,12 +1362,26 @@ export function planRuntimeBudgetAdmission(
       }
     } catch {
       const activeProjected = projected;
-      if (!canFitWithoutConcurrency(activeProjected, reservation)) {
-        blocked = { reason: 'budget_exhausted' };
+      if (
+        !canFitWithoutConcurrency(activeProjected, reservation) &&
+        !(
+          invocation.requiredPermits[0] === 'artifact_capacity' &&
+          canFitAfterInFlightArtifacts(activeProjected, reservation)
+        )
+      ) {
+        blocked = {
+          reason: 'budget_exhausted',
+          toolCallId: invocation.toolCallId,
+          ...(existingWaiter ? { waiterInvocationId: invocation.invocationId } : {}),
+        };
         break;
       }
       if (invocation.requiredPermits.length === 0) {
-        blocked = { reason: 'budget_exhausted' };
+        blocked = {
+          reason: 'budget_exhausted',
+          toolCallId: invocation.toolCallId,
+          ...(existingWaiter ? { waiterInvocationId: invocation.invocationId } : {}),
+        };
         break;
       }
       const waiter = existingWaiter ?? waiterFor(activeProjected, invocation, now);
@@ -1302,11 +1395,29 @@ export function planRuntimeBudgetAdmission(
     }
   }
 
+  if (blocked?.reason === 'budget_exhausted' && effect.type === 'run_tools' && blocked.toolCallId) {
+    // The requested Tool never dispatched. Keep the hard budget gate, but
+    // return its denial to the model as that Tool's result instead of ending
+    // an otherwise funded Agent Run. Replan other Tools afterward.
+    return {
+      status: 'denied',
+      reason: 'budget_exhausted',
+      effect,
+      preparationEvents: blocked.waiterInvocationId
+        ? [{ type: 'resource_budget.waiter_cancelled', invocationId: blocked.waiterInvocationId }]
+        : [],
+      dispatchEvents: [],
+      reservationIds: [],
+      budgetDeniedToolCallId: blocked.toolCallId,
+    };
+  }
+
   if (blocked?.deadlineAt && effect.type === 'run_tools' && projected.status === 'active') {
     let queueState: ActiveResourceBudgetRuntimeState = projected;
     for (const invocation of invocations) {
       if (
         (invocation.toolCallId && admittedToolCallIds.includes(invocation.toolCallId)) ||
+        invocation.requiredPermits.length === 0 ||
         queueState.waiters?.[invocation.invocationId]
       ) {
         continue;
@@ -1336,7 +1447,8 @@ export function planRuntimeBudgetAdmission(
   }
   return {
     status:
-      blocked?.reason === 'budget_exhausted' || blocked?.reason === 'reconciliation_required'
+      !blocked?.deadlineAt &&
+      (blocked?.reason === 'budget_exhausted' || blocked?.reason === 'reconciliation_required')
         ? 'denied'
         : 'waiting',
     reason: blocked?.reason ?? 'budget_exhausted',
@@ -1385,15 +1497,18 @@ export function actualUsageForReservation(
       : undefined;
   const awaitingPreDispatchApproval =
     toolCallId !== undefined &&
-    state.tools.calls[toolCallId]?.status === 'awaiting_approval' &&
+    (state.tools.calls[toolCallId]?.status === 'awaiting_approval' ||
+      state.tools.calls[toolCallId]?.status === 'awaiting_auto_review') &&
     [...state.pendingApprovals.values()].some(
       (pending) =>
         pending.toolCallId === toolCallId &&
-        pending.route === 'user' &&
-        pending.status === 'awaiting_user' &&
+        ((pending.route === 'user' && pending.status === 'awaiting_user') ||
+          (pending.route === 'auto' &&
+            (pending.status === 'queued_auto' || pending.status === 'auto_reviewing'))) &&
         pending.receiptId === undefined &&
         (pending.dispatchState === undefined || pending.dispatchState === 'before_dispatch'),
     );
+  if (awaitingPreDispatchApproval) usage.counters.toolInvocations = 0;
   const fileChanges = terminalEvents.filter(
     (event): event is Extract<RuntimeEvent, { type: 'tool.file_change' }> =>
       event.type === 'tool.file_change' && event.toolCallId === toolCallId,
@@ -1423,6 +1538,15 @@ export function reconciliationEventsForReservations(
   terminalEvents: RuntimeEvent[] = [],
 ): Array<Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>> {
   return reservationIds
+    .filter(
+      (reservationId) =>
+        !terminalEvents.some(
+          (event) =>
+            event.type === 'resource_budget.released' &&
+            event.reservationId === reservationId &&
+            event.proof === 'local_pre_dispatch_failure',
+        ),
+    )
     .map((reservationId) => {
       const reservation = fundingBudgetForReservation(state, reservationId)?.reservations[
         reservationId

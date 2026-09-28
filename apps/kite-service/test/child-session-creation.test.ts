@@ -204,7 +204,12 @@ test('recovery grants a new 30-minute child turn after the parent deadline only 
     unboundedToolInvocations: true as const,
     independentChildTurnDeadline: true as const,
     counters: { ...base.upper.counters, toolInvocations: 0 },
-    gauges: { ...base.upper.gauges, elapsedRunMs: 30 * 60_000 },
+    gauges: {
+      ...base.upper.gauges,
+      elapsedRunMs: 30 * 60_000,
+      activeToolInvocations: 0,
+      activeShellInvocations: 0,
+    },
   };
   const reservationId = `child-allotment:${base.intent.childThreadId}`;
   const parentState: RuntimeState = {
@@ -238,6 +243,7 @@ test('recovery grants a new 30-minute child turn after the parent deadline only 
   expect(result.childDeadlineAt).toBe(new Date(nowMs + 30 * 60_000).toISOString());
   expect(result.childBudget.maxRunDurationMs).toBe(30 * 60_000);
   expect(result.childBudget.maxToolInvocations).toBe(0);
+  expect(result.childBudget.maxConcurrentToolInvocations).toBe(1);
   expect(result.childBudget.unboundedToolInvocations).toBe(true);
   expect(() =>
     recoverChildDelegatedBudget({

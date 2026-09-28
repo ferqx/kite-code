@@ -152,7 +152,7 @@ Kernel 拥有 authorization、approval binding、resource admission 与 ToolOutc
 Host 的通用 event-batch admission 是 capability/Tool 终态屏障：任何直接 `tool.*` terminal 都会先闭合同一 Tool 下全部
 `recorded|running` capability invocation；App 中会间接终结 Tool 的 reviewer/approval producer 也必须在同一 batch 提供
 等价 terminal fact。该屏障按 Tool identity 匹配全部 invocation，不依赖可选 receipt 字段，也不能在 invariant 失败后用
-取消外层 turn 掩盖半终态。
+取消外层 turn 掩盖半终态。`turn.aborted` 使未结算的审批 Tool 隐式取消时，Host 在同一批次先补齐其活动 Capability 的 unknown 终态，保留未确认的外部结果。
 
 Filesystem mutation 必须在同一 acknowledged attempt 下提交 intent、mutation-ready、preimage Artifact 与 terminal observation；Subagent suspension 必须提交 parent attempt、private continuation Artifact、blocked Tool identity 与 exact review event。任何 clone、cross-parent、stale revision 或持久失败都在 dispatch/terminal 发布前 fail closed。
 

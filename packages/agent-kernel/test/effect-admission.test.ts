@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  type AgentPendingApproval,
   type AgentState,
   assertAgentStateInvariants,
   assertCapabilityToolTerminalBatch,
@@ -198,6 +199,65 @@ describe('State effect admission policy', () => {
     expect(() => assertCapabilityToolTerminalBatch(state, lease, [batch[0]!])).toThrow(
       /atomic batch/u,
     );
+  });
+
+  test('closes a running approved capability before turn abortion implicitly cancels its Tool', () => {
+    const running = runningShellState();
+    const state: AgentState = {
+      ...running,
+      capabilities: {
+        ...running.capabilities,
+        invocations: {
+          invocation: {
+            ...running.capabilities.invocations.invocation!,
+            attemptsStarted: 1,
+            admissionDigest: 'admission-1',
+          },
+        },
+      },
+      pendingApprovals: new Map([
+        [
+          'review-shell',
+          {
+            interactionId: 'review-shell',
+            toolCallId: 'shell',
+            route: 'auto',
+            fullModeBypassEligible: false,
+            fullModePolicyBypassAllowed: false,
+            bindingDigest: 'binding',
+            approval: {} as AgentPendingApproval['approval'],
+            invocation: {},
+            sequence: 1,
+            generation: 1,
+            createdAt: '2026-08-20T00:00:00.000Z',
+            status: 'running',
+          },
+        ],
+      ]),
+    };
+    const aborted: KernelEvent = {
+      type: 'turn.aborted',
+      turnId: 'turn-1',
+      reason: 'Runtime execution failed.',
+      cause: 'error',
+    };
+    expect(suspendedCapabilityTerminalRequirements(state, [aborted])).toEqual([
+      { invocationId: 'invocation', toolCallId: 'shell' },
+    ]);
+    const batch = attachSuspendedCapabilityTerminals(state, [aborted], {
+      invocation: '2026-08-20T00:00:02.000Z',
+    });
+    expect(batch.map((event) => event.type)).toEqual([
+      'capability.execution_unknown',
+      'turn.aborted',
+    ]);
+    let settled = state;
+    for (const event of batch) {
+      settled = reduce(settled, [normalizeAgentEvent(event, settled, '2026-08-20T00:00:02.000Z')]);
+    }
+    expect(settled.tools.calls.shell?.status).toBe('cancelled');
+    expect(settled.capabilities.invocations.invocation?.status).toBe('unknown');
+    expect(() => assertAgentStateInvariants(settled)).not.toThrow();
   });
 
   test('closes every live capability before a Tool terminal, including recorded invocations', () => {

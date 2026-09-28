@@ -149,7 +149,7 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
-桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。子会话详情在订阅回执前被关闭时，Client 以原订阅请求 ID 调用 `runtime/unsubscribe`，由 Service 清理待建立或已建立的子订阅；只有该取消接口失败才关闭 logical connection，不因正常快速切换切断其他会话的连接。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
 
 Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。
 
