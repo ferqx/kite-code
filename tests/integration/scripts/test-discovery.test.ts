@@ -57,6 +57,7 @@ describe('test discovery boundaries V2', () => {
     expect(partition.exclusive).toEqual([files[2]!]);
     expect(testParallelism()).toBeGreaterThanOrEqual(1);
     expect(testParallelism()).toBeLessThanOrEqual(4);
+    if (process.platform === 'linux') expect(testParallelism()).toBeLessThanOrEqual(2);
   });
 
   test('plans each file once and only shards suites with at least 16 ordinary files', () => {

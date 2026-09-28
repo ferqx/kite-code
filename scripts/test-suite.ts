@@ -20,7 +20,8 @@ export interface TestPartition {
 }
 
 export function testParallelism(): number {
-  return Math.max(1, Math.min(4, availableParallelism()));
+  const platformLimit = process.platform === 'linux' ? 2 : 4;
+  return Math.max(1, Math.min(platformLimit, availableParallelism()));
 }
 
 export function collectTestFiles(path: string): string[] {

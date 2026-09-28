@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-默认 runner 统一发现和分类，保留默认文件集合及命令。普通测试、Web Vitest 与经审计可并行的 `isolated/` 文件使用最多 4 槽的队列；普通套件文件数达到 16 时按文件大小分成最多 4 个 job。隔离测试仍逐文件启动独立 Bun 进程，进程内 `maxConcurrency=1`，每个子进程拥有独立 HOME 并在结束后清理。失败后停止派发新 job，让已启动的隔离文件完成清理。
+默认 runner 统一发现和分类，保留默认文件集合及命令。普通测试、Web Vitest 与经审计可并行的 `isolated/` 文件使用最多 4 槽的队列；普通套件文件数达到 16 时按文件大小分成最多 4 个 job。Linux 队列限为 2 槽，以免 Required runner 同时执行四个大型 Service 分片时让原有短超时测试失效。隔离测试仍逐文件启动独立 Bun 进程，进程内 `maxConcurrency=1`，每个子进程拥有独立 HOME 并在结束后清理。失败后停止派发新 job，让已启动的隔离文件完成清理。
 
 `isolated/exclusive/` 表达必须与其他默认 job 全局错开的资源风险，逐文件串行执行。已审计的 Service 子进程、SIGKILL、进程组与编译场景，以及根测试中使用固定临时路径或仓库内建目录的场景归入该目录。`kite-local-runtime` 的真实 macOS 进程快照测试也必须独占：并发子进程恰好退出时，保守观察器会正确返回 `incomplete`，使原有稳定性断言出现时序失败。目录外由 AST 识别的进程级测试默认独占。Windows 暂继续串行运行隔离文件，直到其并发行为完成平台验证。具体执行模型与验证入口由[测试体系](../../../../tests/README.md#默认执行)维护。
 
