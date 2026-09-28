@@ -1108,6 +1108,7 @@ describe('Runtime stdio carrier', () => {
             frame.id === 'bounded-255',
         ),
       );
+      await eventually(() => calls === 16);
       expect(calls).toBe(16);
       expect(protocolFrames(output)).toContainEqual(
         expect.objectContaining({

@@ -11,7 +11,7 @@
 | 桌面开发 | `bun run desktop` | 先绑定 Vite 端口 1420，占用时立即提示并退出；随后构建并校验 verified 配套服务，编译 Electron host，再启动 Electron；不需要手动执行 `prepare:service`，也不需要 Rust/Tauri |
 | 桌面配套服务 smoke | `bun run test:desktop:native` | Electron host 在隔离 home/workspace 下调用真实配套服务与本地模型 fixture，验证重接、历史和 EOF 清理，不调用外部 Provider |
 | Electron 制品窗口 smoke | `bun run test:desktop:window` | 先完成 `build:desktop`；在源码目录外驱动 packaged macOS `.app`，当前本机结果和剩余范围见[原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收) |
-| 默认测试 | `bun run test` | 使用仓库测试 runner |
+| 默认测试 | `bun run test` | 普通测试、Web Vitest 和安全的逐文件进程测试共用最多 4 槽；独占测试随后串行执行。详见[测试体系](../../tests/README.md#默认执行) |
 | TUI 系统测试 | `bun run test:tui:system` | PTY 场景，按修改选择定向场景 |
 | 类型检查 | `bun run typecheck` | 根与 workspace |
 | 文档 | `bun run check:docs`、`bun run check:docs-impact` | 结构阻断，影响提示需语义核对 |

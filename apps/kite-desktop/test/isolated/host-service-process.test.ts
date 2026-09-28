@@ -9,8 +9,8 @@ import {
   SERVICE_STARTUP_DIAGNOSTIC_PREFIX,
 } from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { RuntimeClient } from '@kite-ai/runtime-client';
-import { RendererConnection } from '../electron/runtime/renderer-connection';
-import { ServiceProcess, type ServiceProcessOptions } from '../electron/runtime/service-process';
+import { RendererConnection } from '../../electron/runtime/renderer-connection';
+import { ServiceProcess, type ServiceProcessOptions } from '../../electron/runtime/service-process';
 
 test('stdio carrier retains frame order and closes cleanly by EOF', async () => {
   await withFixture(

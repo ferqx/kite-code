@@ -13,12 +13,12 @@ import type {
 import {
   listPendingCrossSessionFollowupFunding,
   readPreparedCrossSessionFollowupRecoveryProof,
-} from '../../../../packages/runtime-storage-sqlite/src/kite-cross-session-followup';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+} from '../../../../../packages/runtime-storage-sqlite/src/kite-cross-session-followup';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
+} from '../../../src/bootstrap';
 
 const parentSessionId = 'orchestrator-parent';
 
@@ -114,12 +114,12 @@ for (const stage of ['prepared', 'activated', 'attempt_started'] as const)
         'test',
         '--test-name-pattern',
         '^completed child permits a real parent Model Surface for a followup Tool attempt$',
-        join(import.meta.dir, 'cross-session-followup-new-turn.test.ts'),
+        join(import.meta.dir, '../cross-session-followup-new-turn.test.ts'),
         '--parallel=1',
         '--max-concurrency=1',
       ],
       {
-        cwd: join(import.meta.dir, '../../../..'),
+        cwd: join(import.meta.dir, '../../../../..'),
         stdout: 'pipe',
         stderr: 'pipe',
         env: {

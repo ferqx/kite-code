@@ -9,7 +9,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
 apps/kite-service/test/sandbox/network-boundary.test.ts apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts
 apps/kite-service/test/runtime/git-tool-controller.test.ts
-apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts`、
+apps/kite-service/test/isolated/exclusive/execution/sandbox-execution-provider.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -322,7 +322,7 @@ descendant exit 与入口组合证据，不能由本机静态/单元测试升级
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
 
 Darwin 的 native negative conformance 还会在
-`apps/kite-service/test/isolated/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
+`apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
 session descendant；即使 supervisor 的 PGID 被终止，测试也必须得到
 `cleanupConfirmed=false`，并回收该 fixture。系统 `launchd.plist(5)` 的
 `AbandonProcessGroup=false` 只承诺终止与 job 相同的 process group，`sandbox(7)` 只描述新进程继承

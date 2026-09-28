@@ -12,9 +12,9 @@ test('TUI preferences and App Server config preserve each other across processes
   const configPath = join(root, 'kite-code.jsonc');
   const preferenceChild = resolve(
     import.meta.dir,
-    '../../../kite-cli/test/fixtures/write-preference-child.ts',
+    '../../../../kite-cli/test/fixtures/write-preference-child.ts',
   );
-  const providerChild = resolve(import.meta.dir, '../fixtures/write-provider-config-child.ts');
+  const providerChild = resolve(import.meta.dir, '../../fixtures/write-provider-config-child.ts');
   try {
     const startAt = Date.now() + 250;
     const children = [

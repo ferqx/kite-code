@@ -24,4 +24,4 @@ absolute path或raw exception。
 
 旧access/control token、Native describe/service_stop、descriptor handshake与跨build Service replacement已从production入口删除。
 
-验证：`bun test tests/release/app-server-client.test.ts tests/release/app-server-daemon.test.ts apps/kite-service/test/isolated/carrier/runtime-stdio-child.test.ts`。
+验证：`bun test tests/release/app-server-client.test.ts tests/release/app-server-daemon.test.ts apps/kite-service/test/isolated/exclusive/runtime-stdio-child.test.ts`。

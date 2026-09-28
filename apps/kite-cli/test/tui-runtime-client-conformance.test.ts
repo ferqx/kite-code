@@ -8,7 +8,7 @@ import type {
   RuntimeHistoryClient,
 } from '@kite-ai/runtime-client';
 import { RuntimeClient } from '@kite-ai/runtime-client';
-import { createNativeTuiRuntimeClient } from '../../src/service-mode';
+import { createNativeTuiRuntimeClient } from '../src/service-mode';
 
 const workspace = '/tmp/tui-runtime-client-contract';
 
@@ -63,7 +63,7 @@ test('TUI runtime facade consumes only an injected Native connection and exposes
   expect(facade.getRuntime('missing-session')).toBeUndefined();
 
   const source = readFileSync(
-    new URL('../../src/service-mode/tui-client.ts', import.meta.url),
+    new URL('../src/service-mode/tui-client.ts', import.meta.url),
     'utf8',
   );
   expect(source).not.toContain("from '#kite-service/");

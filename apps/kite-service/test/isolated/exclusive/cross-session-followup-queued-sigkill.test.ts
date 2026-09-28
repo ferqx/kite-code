@@ -7,11 +7,11 @@ import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-cli
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
+} from '../../../src/bootstrap';
 
 const parentSessionId = 'capacity-parent';
 
@@ -95,12 +95,12 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
       'test',
       '--test-name-pattern',
       '^two occupied child slots expire a queued followup without target dispatch$',
-      join(import.meta.dir, 'runtime-server-followup-capacity-queue.test.ts'),
+      join(import.meta.dir, '../runtime-server-followup-capacity-queue.test.ts'),
       '--parallel=1',
       '--max-concurrency=1',
     ],
     {
-      cwd: join(import.meta.dir, '../../../..'),
+      cwd: join(import.meta.dir, '../../../../..'),
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...process.env, TMPDIR: root },

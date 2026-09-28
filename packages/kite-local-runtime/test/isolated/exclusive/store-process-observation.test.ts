@@ -7,7 +7,7 @@ import {
   observeLegacyKiteStoreProcesses,
   readKiteSourceClientParentIdentity,
   readLegacyKiteProcessIdentity,
-} from '../../src/service/legacy-store-processes';
+} from '../../../src/service/legacy-store-processes';
 
 test('Desktop observation recognizes main processes without treating launchers or renderers as writers', () => {
   const electron = '/checkout/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron';
@@ -115,7 +115,8 @@ test('Darwin scopes a different client by that process HOME', async () => {
   await ready(client);
 
   const script = join(root, 'observe.ts');
-  const source = new URL('../../src/service/legacy-store-processes.ts', import.meta.url).pathname;
+  const source = new URL('../../../src/service/legacy-store-processes.ts', import.meta.url)
+    .pathname;
   writeFileSync(
     script,
     `import { observeLegacyKiteStoreProcesses } from ${JSON.stringify(source)};

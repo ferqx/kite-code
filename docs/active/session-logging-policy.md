@@ -4,7 +4,7 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicy` 时。
 
-验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts apps/kite-service/test/session-logger/metadata.test.ts apps/kite-service/test/session-logger/recorder.test.ts apps/kite-service/test/isolated/session-logger/writer.test.ts apps/kite-service/test/session-logger/active-session-lease.test.ts apps/kite-service/test/session-logger/retention.test.ts apps/kite-service/test/isolated/exclusive/session-logger/writer-security.test.ts apps/kite-service/test/model-invocation-gateway.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`release/oss-first-release/evidence/2026-07-29-agent-production-local-data-privacy.md`、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)。

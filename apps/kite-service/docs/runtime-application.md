@@ -8,7 +8,7 @@
 
 ## 唯一 Host/Store composition
 
-`app/workspace/remove` 由当前 Service/Store owner 执行。请求的规范路径与持久 digest、projectId、workspaceId 重新交叉核对；删除门禁在 Store writer 中与新 Session 插入互斥，同空间活跃删除不能重入。Service 用准确 Run 身份提交取消，等待本地执行收尾，再通过 Host 的 `delete_session` 删除顶层及其内部子会话树。被删 Session 的订阅关闭，迟到通知被丢弃；HTTP 服务商请求若已发出，不把远端停止确认作为本地删除条件。顶层历史归零后，Service 将持久门禁标记为已完成；客户端再用 token 调用 `finalize` 释放门禁，然后移除本机项目登记。`finalize` 不接受仍在运行或 token 不符的删除，失败时项目登记保留供重试。旧 Service 退出后，新 owner 可接管未完成删除；已完成的门禁可由新 token 接续收尾。回归见 [App Server process](../test/isolated/app-server-process.test.ts)、[Store 原子边界](../../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)与[Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+`app/workspace/remove` 由当前 Service/Store owner 执行。请求的规范路径与持久 digest、projectId、workspaceId 重新交叉核对；删除门禁在 Store writer 中与新 Session 插入互斥，同空间活跃删除不能重入。Service 用准确 Run 身份提交取消，等待本地执行收尾，再通过 Host 的 `delete_session` 删除顶层及其内部子会话树。被删 Session 的订阅关闭，迟到通知被丢弃；HTTP 服务商请求若已发出，不把远端停止确认作为本地删除条件。顶层历史归零后，Service 将持久门禁标记为已完成；客户端再用 token 调用 `finalize` 释放门禁，然后移除本机项目登记。`finalize` 不接受仍在运行或 token 不符的删除，失败时项目登记保留供重试。旧 Service 退出后，新 owner 可接管未完成删除；已完成的门禁可由新 token 接续收尾。回归见 [App Server process](../test/isolated/exclusive/app-server-process.test.ts)、[Store 原子边界](../../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)与[Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
 Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable的default App Server
@@ -112,7 +112,7 @@ admission revision，State codec只丢弃这条无法验证的background authori
 
 ## App Control、History 与 mutation
 
-本机 App Server 的 `set_interaction_mode` 从同一 Storage owner 读取目标 Session 的持久 workspace、projectId 与 canonicalWorkspaceDigest，重新查询该工作区 Trust 并比对完整身份；不从客户端目录、当前执行项目或显示路径推导授权。通过后进入同一 Host 的权限命令事务，不重启服务或停止其他 Session。未知会话、未信任或身份漂移仍拒绝；目标目录在信任查询时消失、Trust 损坏或不可用使用协议已有的 `internal_error + temporarily_unavailable` 详情。该命令不授予跨项目创建或启动 Turn 的权限。回归见 [App Server process](../test/isolated/app-server-process.test.ts) 与 [Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+本机 App Server 的 `set_interaction_mode` 从同一 Storage owner 读取目标 Session 的持久 workspace、projectId 与 canonicalWorkspaceDigest，重新查询该工作区 Trust 并比对完整身份；不从客户端目录、当前执行项目或显示路径推导授权。通过后进入同一 Host 的权限命令事务，不重启服务或停止其他 Session。未知会话、未信任或身份漂移仍拒绝；目标目录在信任查询时消失、Trust 损坏或不可用使用协议已有的 `internal_error + temporarily_unavailable` 详情。该命令不授予跨项目创建或启动 Turn 的权限。回归见 [App Server process](../test/isolated/exclusive/app-server-process.test.ts) 与 [Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
 
 权限设置与执行准备分离。本进程已有 coordinator 时，仍由其持有的 State、execution fence 和提交后事件队列更新，运行中的工具继续观察同一份策略。没有本地 coordinator 时，直接用持久 State 构造一次性的 `StateRuntimeSession`，复用 `commitInteractionModeCommand`，不加载 Workspace 配置、模型、MCP 或完整 Runtime，也不调用 recovery。该实例不进入 registry，不取得 Run 写入能力；SQLite 的 `commitUnownedDecision` 在 BEGIN IMMEDIATE 内检查 authority 为 idle 或 recovery_required、Session revision 未变化，再提交同一事件／State／回执事务。active、detached（含尚未显式 fencing 的过期租约）返回 runtime_busy，避免覆盖其他执行者的内存 State。
 
@@ -253,7 +253,7 @@ History 可按已观察的 `throughSequence` 重建历史前缀，模式、恢�
 
 同一本机 App Server 对已有会话按持久 canonical workspace identity 核对信任并路由；新会话请求显式 workspace，由服务规范化和验证授权。App Control 按请求所属的已验证 workspace 选择配置引用，不以进程启动目录代表全部空间。Electron 重接仅替换连接代次；一个 Service、Store、Host 持续管理所有空间，不增加进程池。
 
-Service 提供只读 get_session_recovery，摘要来自 authority/effect facts，最多返回 20 个待核对 effect identity。recover_session 绑定业务与 authority revision；有效执行者、未确认清理或未决/未知 effect 不能被接管。仅确认安全时原子保存恢复回执并回到 idle。get_command_receipt 查询原命令结果，不重放操作。失权而仍有本地 coordinator 时，权限设置返回 session_cleanup_pending，不能调用正在关闭的 Runtime。验证见[多空间与恢复](../test/isolated/runtime-server-multi-workspace.test.ts)、[原生 Service 进程](../test/isolated/app-server-process.test.ts)。
+Service 提供只读 get_session_recovery，摘要来自 authority/effect facts，最多返回 20 个待核对 effect identity。recover_session 绑定业务与 authority revision；有效执行者、未确认清理或未决/未知 effect 不能被接管。仅确认安全时原子保存恢复回执并回到 idle。get_command_receipt 查询原命令结果，不重放操作。失权而仍有本地 coordinator 时，权限设置返回 session_cleanup_pending，不能调用正在关闭的 Runtime。验证见[多空间与恢复](../test/isolated/runtime-server-multi-workspace.test.ts)、[原生 Service 进程](../test/isolated/exclusive/app-server-process.test.ts)。
 
 Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 answers 映射为有界脱敏文本。客户端据问题选项恢复文案，不把执行结果包装 JSON 作为问答历史。
 
@@ -274,7 +274,7 @@ Ask 的实时交互与请求历史都投影 toolCallId；回答事件将现有 a
 
 Service 的会话投影查询、历史读取及订阅只读取持久事实并刷新 Host 观察水位，不调用 `reconcileInterruptedSession`。执行命令在 mutation admission 内对目标会话触发该恢复：先保留有效租约的执行；失效执行经 Store CAS 隔离后取得受控恢复 scope，调用 `reconcileRuntimeSessionAfterRestart` 核对 Provider／沙箱资源，在持有当前代际时追加工具、子 Agent、Turn 的收尾事实，由同一 State 事务更新 Run。未知外部结果保留，调度与完成门禁按当前轮归属判断，不能因 Task 跨轮复用而阻塞新消息。
 
-恢复事件在创建后继 Run 前按旧 Run 身份完成投影；不能延迟到新轮激活时给旧 revision 配上新 runId。同一会话的恢复请求共享进行中的 Promise，重复执行命令访问已收尾会话不追加相同事件。清理失败后仍返回可读历史及持久恢复状态；执行请求保留明确失败，不能把检查失败当作清理成功。回归见[重新进入故障测试](../test/isolated/session-reentry-recovery.test.ts)。
+恢复事件在创建后继 Run 前按旧 Run 身份完成投影；不能延迟到新轮激活时给旧 revision 配上新 runId。同一会话的恢复请求共享进行中的 Promise，重复执行命令访问已收尾会话不追加相同事件。清理失败后仍返回可读历史及持久恢复状态；执行请求保留明确失败，不能把检查失败当作清理成功。回归见[重新进入故障测试](../test/isolated/exclusive/session-reentry-recovery.test.ts)。
 
 终态会话同样核对有持久证据的历史子 Agent 悬挂卡片：先从 State 筛选失败终态父工具与已确认清理的 Provider lifecycle，再读取事件验证唯一 childInvocationId 的 started 尚无 terminal。存在候选时不走 idle／settled authority 的提前返回，而进入相同恢复 writer 追加终态；已失败的旧 Task 不受当前 Task 过滤。成功父工具还必须同时匹配同一 invocation 的 completed observation、attempt／dispatch digest 一致的 cleanup、execution_succeeded 和成功 tool.finished，才补记 subagent.completed；子执行已有 completed observation 但父工具随后失败／取消、完整成功证据不足时保持待核验，不补写失败；身份歧义、未确认子执行清理及有效 owner 不被此规则改写。子 Agent 已有确证的终态在 Provider 核对后即提交，不因其他沙箱清理失败而延后；最终恢复仍保留清理失败，并使用已追加事实避免重复终态。
 

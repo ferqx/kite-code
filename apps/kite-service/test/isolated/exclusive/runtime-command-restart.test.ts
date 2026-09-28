@@ -17,19 +17,19 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteCliRuntimeAccess,
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
-import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
+} from '../../../src/bootstrap';
+import { APP_PREPARED_SHELL_EXECUTION_ } from '../../../src/sandbox/prepared-tool-pipeline';
 
 type RestartCommand =
   | Extract<RuntimeCommand, { type: 'create_session' }>
   | Extract<RuntimeCommand, { type: 'start_turn' }>;
 
-const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../..');
+const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../../..');
 
 test('Store 6 reopens committed create/start receipts after a provider connection loss without redispatching', async () => {
   const workspace = mkdtempSync(join(realpathSync(tmpdir()), 'kite-runtime-command-restart-'));
@@ -181,7 +181,7 @@ test('a pending approval stays durable while a crashed execution owner remains f
   const child = Bun.spawn(
     [
       process.execPath,
-      join(import.meta.dir, '..', 'fixtures', 'runtime-pending-approval-child.ts'),
+      join(import.meta.dir, '../..', 'fixtures', 'runtime-pending-approval-child.ts'),
     ],
     {
       cwd: workspace,
@@ -286,7 +286,7 @@ test('restart recovery marks an in-flight required child unknown without replayi
   const child = Bun.spawn(
     [
       process.execPath,
-      join(import.meta.dir, '..', 'fixtures', 'runtime-required-background-wait-child.ts'),
+      join(import.meta.dir, '../..', 'fixtures', 'runtime-required-background-wait-child.ts'),
     ],
     {
       cwd: REPOSITORY_ROOT,

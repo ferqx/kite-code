@@ -18,8 +18,8 @@ import {
   sqliteRuntimeStoreFingerprint,
   writeSqliteRuntimeMigrationFence,
 } from '@kite-ai/runtime-storage-sqlite';
-import { createSqliteRuntimeMigrationCatalogBuilder } from '../../apps/kite-service/src/coordinator/catalog-builder';
-import { openCoordinatorCatalog } from '../../packages/kite-local-runtime/src/coordinator';
+import { createSqliteRuntimeMigrationCatalogBuilder } from '../../../apps/kite-service/src/coordinator/catalog-builder';
+import { openCoordinatorCatalog } from '../../../packages/kite-local-runtime/src/coordinator';
 
 type Event = { readonly type: string; readonly content?: string };
 type State = {

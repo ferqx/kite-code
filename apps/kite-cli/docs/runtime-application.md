@@ -31,5 +31,5 @@ client `close`/TUI facade `dispose`关闭自身stdio connection、subscription�
 
 ## 验证
 
-`bun test apps/kite-cli/test/cli.test.ts apps/kite-cli/test/service-mode apps/kite-cli/test/isolated/tui-runtime-client-conformance.test.ts apps/kite-cli/test/tui-exit-coordinator.test.ts`、
+`bun test apps/kite-cli/test/cli.test.ts apps/kite-cli/test/service-mode apps/kite-cli/test/tui-runtime-client-conformance.test.ts apps/kite-cli/test/tui-exit-coordinator.test.ts`、
 `bun run --cwd apps/kite-cli typecheck`。

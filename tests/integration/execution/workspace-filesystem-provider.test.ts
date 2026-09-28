@@ -110,14 +110,16 @@ describe('WorkspaceFilesystemProvider contract', () => {
     if (!content.ok || content.observation.kind !== 'search_content') {
       throw new Error('protected content pruning failed');
     }
-    expect(content.observation.matches).toEqual([
-      { path: 'visible.txt', line: 1, text: 'needle-visible' },
+    expect(
+      content.observation.matches.slice().sort((a, b) => a.path.localeCompare(b.path)),
+    ).toEqual([
+      { path: '.env', line: 1, text: 'needle-protected-file' },
       {
         path: '.kite-code/secret.txt',
         line: 1,
         text: 'needle-protected-directory',
       },
-      { path: '.env', line: 1, text: 'needle-protected-file' },
+      { path: 'visible.txt', line: 1, text: 'needle-visible' },
     ]);
 
     const files = await harness.local.observe({

@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、persistent command receipt、Protocol/Server/Client carrier/reconnect、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test packages/runtime-host/test/persistent-command-crash-windows.test.ts packages/runtime-storage-sqlite/test/store-conformance.test.ts apps/kite-service/test/isolated/exclusive/runtime-command-restart.test.ts apps/kite-service/test/isolated/runtime-server-multi-client.test.ts apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/exclusive/runtime-transport-conformance.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts`、`bun test apps/kite-service/test/model-invocation-gateway.test.ts apps/kite-service/test/model-invocation-recovery.test.ts tests/integration/execution/workspace-filesystem-provider.test.ts apps/kite-service/test/isolated/exclusive/execution/sandbox-execution-provider.test.ts apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts apps/kite-service/test/runtime/store.test.ts tests/integration/mcp-manager.test.ts`、`bun test apps/kite-service/test/subagent-artifacts.test.ts apps/kite-service/test/subagent-provider.test.ts apps/kite-service/test/isolated/runtime/agent.integration.test.ts tests/integration/runtime/event-codec.test.ts apps/kite-service/test/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`../../apps/kite-cli/docs/tui-system-testing.md`、[Agent Note 0115](../../.agents/notes/implemented/process/2026-08-18-ps03-deterministic-synthetic-replay-qualification.md)、[Agent Note 0116](../../.agents/notes/implemented/process/2026-08-18-ps02-github-actions-native-evidence-authority.md)、[Agent Note 0166](../../.agents/notes/implemented/simplification/2026-09-02-decouple-app-server-process-from-durable-session-authority.md)。
 
@@ -22,7 +22,7 @@ Host恢复或TUI lifecycle，因此不是release qualification。验证：`bun t
 
 global config局部资格以真实process证明同一文件互斥、不同文件无global lock、两个TUI并发保留不同preference字段，以及TUI与模拟App Server并发
 保留preference/provider字段。Workspace Trust不再按5秒mtime抢锁；MCP与provider/model在锁内重读revision。该证据不替代Windows owner ACL或完整
-App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/isolated/config-file-mutation-lock.test.ts apps/kite-cli/test/isolated/preferences-concurrency.test.ts apps/kite-service/test/isolated/config-multi-process.test.ts`。
+App Server lifecycle qualification。验证：`bun test packages/kite-local-runtime/test/isolated/config-file-mutation-lock.test.ts apps/kite-cli/test/isolated/preferences-concurrency.test.ts apps/kite-service/test/isolated/exclusive/config-multi-process.test.ts`。
 
 KASD-02真实process局部资格覆盖：stdio initialize/list/History/App Control只写protocol stdout且不创建global endpoint；History/App Control在
 initialize前拒绝，未组合owner时fail closed，组合owner后可从同一SQLite read snapshot加载已创建Session的完整closed transcript；active model收到parent EOF后cancel并在
@@ -33,7 +33,7 @@ response不回显secret。source resolver真实启动checked-in App Server，ins
 App Server SIGKILL会经POSIX watchdog杀死已批准且已dispatch的host-shell child，lease到期后successor必须显式reconcile，resume不会再次启动
 该command。local stdio MCP当前没有release-approved process port，因此本阶段不注入测试旁路；首次真实启用必须在对应execution qualification
 中补parent-crash child证据。该证据尚不替代三平台qualification。验证：
-`bun test apps/kite-service/test/isolated/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
+`bun test apps/kite-service/test/isolated/exclusive/app-server-process.test.ts apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts`。
 
 KASD-03本机client资格覆盖default source TUI startup、退出后重启/History恢复、两个并存TUI通过各自App Server读取同一profile，以及普通
 历史打开的observer-only边界；首次mutation惰性resume，rewind continuation在交给UI前完成写准入与subscription readiness，连续两次
@@ -274,7 +274,7 @@ control base，Linux Full 也用只读空 tmpfs 覆盖整个 control base，因�
 identity 都不可见。首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
 `cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
-`apps/kite-service/test/isolated/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
+`apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
 `descendantContainmentProven=false` 传给 reconciliation，保留 pending cleanup authority。Apple
 `launchd.plist(5)` 仅定义同 process group 的 kill 行为，不能替代 detached/session descendant 的
 kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative

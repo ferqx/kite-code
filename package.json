@@ -25,7 +25,7 @@
     "test:runtime:soak": "bun run scripts/runtime/run-fault-soak.ts --profile=ci",
     "test:runtime:stdio": "bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/runtime-stdio-carrier.test.ts apps/kite-service/test/isolated/runtime-server-composition.test.ts packages/kite-local-runtime/test/bun-stdio-child-transport.test.ts",
     "test:runtime:websocket": "bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/local-bootstrap-auth.test.ts apps/kite-service/test/isolated/development-loopback-carrier.test.ts packages/kite-local-runtime/test/bun-websocket-transport.test.ts apps/kite-service/test/isolated/development-websocket-runtime-client.test.ts apps/kite-service/test/isolated/development-runtime-reference.test.ts",
-    "test:runtime:transport": "bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/runtime-transport-conformance.test.ts",
+    "test:runtime:transport": "bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/exclusive/runtime-transport-conformance.test.ts",
     "test:sandbox:smoke:native": "bun test --parallel=1 --max-concurrency=1 tests/qualification/sandbox-executor.test.ts tests/qualification/sandbox-bwrap-executor.test.ts",
     "test:tui:harness": "bun test --parallel=1 --max-concurrency=1 tests/tui-system/harness/",
     "test:tui:integration": "bun run scripts/run-tui-system-tests.ts",

@@ -8,7 +8,7 @@
 
 load token 只允许当前请求提交。切换到已注册会话会使旧 load 失效，同目标第二次 load 也取代第一次；迟到成功、错误和 rollback 都不能覆盖新选择。模型、模式、context 和 Runtime projection 按 Session 恢复，不继承上一 Session transient state。
 
-独立子 Session 使用[只读面板](../src/tui/components/ChildSessionPanel.tsx)与父作用域 `childSessionReader`，不进入 `SWITCH_SESSION`、注册表或主 Composer。服务端先核对准确父子血缘，再以 `history/load_child_session` 分页读取安全历史；面板将 transcript 转为普通历史 UI block，仅供阅读。父 Session 变化使在途子请求失效，面板期间输入与全局变更快捷键禁用。验证见[面板测试](../test/child-session-panel.test.tsx)及[Runtime Client 契约](../test/isolated/tui-runtime-client-conformance.test.ts)。
+独立子 Session 使用[只读面板](../src/tui/components/ChildSessionPanel.tsx)与父作用域 `childSessionReader`，不进入 `SWITCH_SESSION`、注册表或主 Composer。服务端先核对准确父子血缘，再以 `history/load_child_session` 分页读取安全历史；面板将 transcript 转为普通历史 UI block，仅供阅读。父 Session 变化使在途子请求失效，面板期间输入与全局变更快捷键禁用。验证见[面板测试](../test/child-session-panel.test.tsx)及[Runtime Client 契约](../test/tui-runtime-client-conformance.test.ts)。
 
 Agent 邮箱状态由当前 Session 的持久事件投影为内容为空的提示。`agent.mail_accepted` 显示“已受理，等待目标读取”，`agent.mail_input_prepared` 才显示“已准备进入目标模型输入”，`agent.followup_turn_settled` 显示准确续轮结果；重复历史事件按消息或提交身份合并。父 Session 的受理提示不推断子 Session 已读取，子线程的输入和结果事实须读取其授权历史。私有正文及 Artifact 引用不进入提示。
 

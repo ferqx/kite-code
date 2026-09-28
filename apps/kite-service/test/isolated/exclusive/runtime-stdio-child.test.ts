@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { RUNTIME_PROTOCOL_SCHEMA, RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 
-const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../..');
+const REPOSITORY_ROOT = resolve(import.meta.dir, '../../../../..');
 const SERVICE_STDIO_ENTRYPOINT = join(
   REPOSITORY_ROOT,
   'apps/kite-service/test/fixtures/runtime-transport-stdio-child.ts',

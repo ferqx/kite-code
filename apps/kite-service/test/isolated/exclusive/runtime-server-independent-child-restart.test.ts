@@ -10,11 +10,11 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
+} from '../../../src/bootstrap';
 
 test('default Store11 App Server resumes one accepted independent child after process restart', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-child-restart-'));
@@ -70,13 +70,13 @@ test('default Store11 App Server resumes one accepted independent child after pr
   const crashed = Bun.spawn(
     [
       process.execPath,
-      join(import.meta.dir, 'runtime-server-independent-child-restart-fixture.ts'),
+      join(import.meta.dir, '../runtime-server-independent-child-restart-fixture.ts'),
       home,
       workspace,
       model.baseURL,
       marker,
     ],
-    { cwd: join(import.meta.dir, '../../../..'), stdout: 'pipe', stderr: 'pipe' },
+    { cwd: join(import.meta.dir, '../../../../..'), stdout: 'pipe', stderr: 'pipe' },
   );
   let storage: Awaited<ReturnType<typeof createKiteSessionAppServerStorageComposition>> | undefined;
   let server: ReturnType<typeof createKiteMultiWorkspaceRuntimeServer> | undefined;

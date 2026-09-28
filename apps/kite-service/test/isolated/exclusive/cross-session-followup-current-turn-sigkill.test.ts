@@ -7,11 +7,11 @@ import { RuntimeClient, type RuntimeClientTransport } from '@kite-ai/runtime-cli
 import { RUNTIME_COMMAND_SCHEMA_ } from '@kite-ai/runtime-contract';
 import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
+} from '../../../src/bootstrap';
 
 const parentSessionId = 'orchestrator-parent';
 
@@ -85,12 +85,12 @@ for (const stage of ['current_turn_routed', 'current_turn_prepared'] as const)
         'test',
         '--test-name-pattern',
         '^same mode revision routes an active zero Tool child mail into its first Model$',
-        join(import.meta.dir, 'cross-session-followup-current-turn.test.ts'),
+        join(import.meta.dir, '../cross-session-followup-current-turn.test.ts'),
         '--parallel=1',
         '--max-concurrency=1',
       ],
       {
-        cwd: join(import.meta.dir, '../../../..'),
+        cwd: join(import.meta.dir, '../../../../..'),
         stdout: 'pipe',
         stderr: 'pipe',
         env: {

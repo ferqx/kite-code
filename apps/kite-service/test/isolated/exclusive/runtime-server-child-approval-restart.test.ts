@@ -10,12 +10,12 @@ import type {
   RuntimeServerAdmissionInput,
   RuntimeServerAdmissionPort,
 } from '@kite-ai/runtime-server';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
 import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
-} from '../../src/bootstrap';
-import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
+} from '../../../src/bootstrap';
+import { APP_PREPARED_SHELL_EXECUTION_ } from '../../../src/sandbox/prepared-tool-pipeline';
 
 for (const decisionWindow of ['pending', 'decided'] as const)
   test(`SIGKILL child approval recovery from durable ${decisionWindow} proxy`, async () => {
@@ -94,14 +94,14 @@ for (const decisionWindow of ['pending', 'decided'] as const)
     const crashed = Bun.spawn(
       [
         process.execPath,
-        join(import.meta.dir, 'runtime-server-child-approval-restart-fixture.ts'),
+        join(import.meta.dir, '../runtime-server-child-approval-restart-fixture.ts'),
         home,
         workspace,
         model.baseURL,
         marker,
         decisionWindow,
       ],
-      { cwd: join(import.meta.dir, '../../../..'), stdout: 'pipe', stderr: 'pipe' },
+      { cwd: join(import.meta.dir, '../../../../..'), stdout: 'pipe', stderr: 'pipe' },
     );
     let storage:
       | Awaited<ReturnType<typeof createKiteSessionAppServerStorageComposition>>

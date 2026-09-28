@@ -35,6 +35,10 @@ async function exerciseIndependentFollowupBoundary(
   const firstChildModelReleased = new Promise<void>((resolve) => {
     releaseFirstChildModel = resolve;
   });
+  let releaseCodeFollowup: (() => void) | undefined;
+  const codeFollowupReleased = new Promise<void>((resolve) => {
+    releaseCodeFollowup = resolve;
+  });
   let parentCalls = 0;
   let childCalls = 0;
   let childCallsAtFollowupResponse = -1;
@@ -146,6 +150,7 @@ async function exerciseIndependentFollowupBoundary(
             };
           if (parentCalls === 2) {
             if (!eagerFollowup) await until(() => childCalls === 1);
+            if (role === 'code') await codeFollowupReleased;
             childCallsAtFollowupResponse = childCalls;
             const childSessionId = parentEvents().find(
               (event) => event.type === 'subagent.child_session_intended',
@@ -311,6 +316,7 @@ async function exerciseIndependentFollowupBoundary(
           (event) => event.type === 'agent.mail_accepted' && event.mode === 'trigger_turn',
         ),
       ).toHaveLength(0);
+      releaseCodeFollowup?.();
     }
     await until(() =>
       parentEvents().some(
@@ -492,6 +498,7 @@ async function exerciseIndependentFollowupBoundary(
     failed = true;
     throw error;
   } finally {
+    releaseCodeFollowup?.();
     releaseFirstChildModel?.();
     try {
       await client?.close();

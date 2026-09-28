@@ -41,7 +41,7 @@ import {
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   shellTool,
-} from '../helpers/shell-executor';
+} from '../../helpers/shell-executor';
 
 const DEFAULT_READ_FILE_LINE_LIMIT = 2_000;
 

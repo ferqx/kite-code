@@ -25,9 +25,9 @@ import {
 } from '@kite-ai/kite-local-runtime/client/protocol';
 import { parseServiceStartupProgress } from '@kite-ai/kite-local-runtime/startup-diagnostic';
 import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
-import { createMockModelServer } from '../../../../tests/tui-system/harness/fixtures';
-import { createKiteSessionAppServerStorageComposition } from '../../src/bootstrap';
-import { trustWorkspace } from '../../src/config/workspace-trust';
+import { createMockModelServer } from '../../../../../tests/tui-system/harness/fixtures';
+import { createKiteSessionAppServerStorageComposition } from '../../../src/bootstrap';
+import { trustWorkspace } from '../../../src/config/workspace-trust';
 
 describe('KASD parent-owned App Server process', () => {
   test('removes an active Workspace Session and keeps the App connection usable', async () => {
@@ -49,7 +49,7 @@ describe('KASD parent-owned App Server process', () => {
       createBunStdioChildRuntimeClientTransport({
         argv: [
           process.execPath,
-          join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+          join(import.meta.dir, '../../../../../scripts/release/entrypoints/service.ts'),
           'app-server',
           'run-stdio',
         ],
@@ -165,7 +165,7 @@ describe('KASD parent-owned App Server process', () => {
         createBunStdioChildRuntimeClientTransport({
           argv: [
             process.execPath,
-            join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+            join(import.meta.dir, '../../../../../scripts/release/entrypoints/service.ts'),
             'app-server',
             'run-stdio',
           ],
@@ -394,7 +394,7 @@ describe('KASD parent-owned App Server process', () => {
       createBunStdioChildRuntimeClientTransport({
         argv: [
           process.execPath,
-          join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+          join(import.meta.dir, '../../../../../scripts/release/entrypoints/service.ts'),
           'app-server',
           'run-stdio',
         ],
@@ -448,7 +448,7 @@ describe('KASD parent-owned App Server process', () => {
     const client = createKiteAppServerClient({
       executable: process.execPath,
       argumentsPrefix: [
-        join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+        join(import.meta.dir, '../../../../../scripts/release/entrypoints/service.ts'),
       ],
       buildId: 'history-source',
       workspace: root,
@@ -486,7 +486,7 @@ describe('KASD parent-owned App Server process', () => {
     const client = createKiteAppServerClient({
       executable: process.execPath,
       argumentsPrefix: [
-        join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts'),
+        join(import.meta.dir, '../../../../../scripts/release/entrypoints/service.ts'),
       ],
       buildId: 'source-client-build',
       runtimeRoot,
@@ -539,7 +539,10 @@ describe('KASD parent-owned App Server process', () => {
     for (const path of [runtimeRoot, configRoot, osHome, workspace])
       mkdirSync(path, { mode: 0o700 });
     const buildId = 'test-app-server-build';
-    const entrypoint = join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts');
+    const entrypoint = join(
+      import.meta.dir,
+      '../../../../../scripts/release/entrypoints/service.ts',
+    );
     const child = Bun.spawn([process.execPath, entrypoint, 'app-server', 'run-stdio'], {
       cwd: '/',
       env: {
@@ -661,7 +664,10 @@ describe('KASD parent-owned App Server process', () => {
       }).status,
     ).toBe('recorded');
 
-    const entrypoint = join(import.meta.dir, '../../../../scripts/release/entrypoints/service.ts');
+    const entrypoint = join(
+      import.meta.dir,
+      '../../../../../scripts/release/entrypoints/service.ts',
+    );
     const child = Bun.spawn([process.execPath, entrypoint, 'app-server', 'run-stdio'], {
       cwd: '/',
       env: {
@@ -822,7 +828,7 @@ describe('KASD parent-owned App Server process', () => {
       }).status,
     ).toBe('recorded');
 
-    const childPath = join(import.meta.dir, '../fixtures/app-server-short-lease-child.ts');
+    const childPath = join(import.meta.dir, '../../fixtures/app-server-short-lease-child.ts');
     const child = Bun.spawn([process.execPath, childPath], {
       cwd: '/',
       env: {
@@ -966,7 +972,7 @@ describe('KASD parent-owned App Server process', () => {
       for (const path of [runtimeRoot, configRoot, osHome, workspace])
         mkdirSync(path, { mode: 0o700 });
       const shellPidPath = join(root, 'shell.pid');
-      const longChild = join(import.meta.dir, '../fixtures/long-running-child.ts');
+      const longChild = join(import.meta.dir, '../../fixtures/long-running-child.ts');
       const model = createMockModelServer();
       model.setResponses([
         {
@@ -993,7 +999,7 @@ describe('KASD parent-owned App Server process', () => {
         }).status,
       ).toBe('recorded');
 
-      const childPath = join(import.meta.dir, '../fixtures/app-server-short-lease-child.ts');
+      const childPath = join(import.meta.dir, '../../fixtures/app-server-short-lease-child.ts');
       const child = Bun.spawn([process.execPath, childPath], {
         cwd: '/',
         env: {
