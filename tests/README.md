@@ -42,7 +42,7 @@ Required CI、release/platform smoke 与正式 Runtime qualification 统一使�
 
 `bun run test` 保持 deterministic 默认覆盖。runner 以同一计划发现并分类 workspace、App、root integration、Web Vitest 和 isolated 文件；普通套件达到 16 个文件时按文件大小分成最多 4 个 job。普通测试、Web Vitest 与安全的 isolated 文件共用最多 4 槽队列，较大的 job 优先启动。isolated 仍每文件单独启动 Bun，进程内 `maxConcurrency=1`；`isolated/exclusive/` 及目录外被识别出的进程级测试在并行队列结束后全局逐文件串行运行。Windows 的 isolated 文件暂全部串行执行，待平台并发验证通过后再调整。失败后不再派发新 job，已启动文件完成清理。
 
-macOS/Windows 并发上限是 `max(1, min(4, availableParallelism()))`；Linux 上限为 2，避免 Required runner 在多个大型 Service 分片同时执行时触发原有短超时测试。每个子进程使用独立临时 `HOME`，Windows `USERPROFILE`
+macOS/Windows 并发上限是 `max(1, min(4, availableParallelism()))`；Linux 上限为 2，避免 Required runner 在多个大型 Service 分片同时执行时争用资源。Linux 与 Windows 的 Bun 文件测试限时为 30 秒，覆盖仓库扫描等在 CI 上超过 Bun 默认 5 秒限时的场景，不减少断言。每个子进程使用独立临时 `HOME`，Windows `USERPROFILE`
 与其相同，`KITE_CODE_HOME`固定为该home下的exact `.kite-code` root；结束后连同root一起清理。
 
 默认测试排除真实 PTY、fault/soak、native sandbox、spike 和 live Provider；这些使用已有显式命令。

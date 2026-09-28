@@ -156,7 +156,7 @@ export async function runTestJob(
     'test',
     '--no-orphans',
     '--only-failures',
-    ...(process.platform === 'win32' ? ['--timeout=30000'] : []),
+    ...(process.platform === 'darwin' ? [] : ['--timeout=30000']),
     ...(maxConcurrency ? [`--max-concurrency=${maxConcurrency}`] : []),
     ...displayFiles,
   ];
