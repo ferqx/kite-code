@@ -1033,7 +1033,8 @@ export async function* executeRuntimeTurn(
             ? state.completionGuard.waitingReason.taskIds
             : requiredBackground,
         );
-        const inspectRequiredBackground = () => {
+        let pendingIndependentTaskIds: string[] = [];
+        const inspectRequiredBackground = async () => {
           if (awaitedBackground.size === 0) return undefined;
           const currentState = kernel.getState();
           if (currentState.revision !== revision) return 'state_changed' as const;
@@ -1046,7 +1047,6 @@ export async function* executeRuntimeTurn(
           );
           if (recoveryBlocked)
             throw new Error('Required child Session needs explicit execution recovery.');
-          if (!children) return undefined;
           const independentChildren = new Set(
             Object.values(currentState.capabilities.invocations)
               .filter(
@@ -1054,6 +1054,25 @@ export async function* executeRuntimeTurn(
               )
               .map((invocation) => invocation.subagentProviderLifecycle!.childInvocationId),
           );
+          const independentAwaited = [...awaitedBackground].filter((taskId) =>
+            independentChildren.has(taskId),
+          );
+          pendingIndependentTaskIds = [];
+          if (independentAwaited.length > 0) {
+            const taskControl = input.childSessionAcceptance?.taskControl;
+            if (!taskControl)
+              throw new Error('Required child Session Task control is unavailable.');
+            for (const taskId of independentAwaited) {
+              const task = await taskControl.readTask(taskId);
+              if (waitSignal?.aborted || kernel.getState().revision !== revision)
+                return 'state_changed' as const;
+              if (task.status === 'unknown' || task.status === 'not_found')
+                throw new Error('Required child Session needs explicit execution recovery.');
+              if (task.status === 'running' || task.status === 'cancelling')
+                pendingIndependentTaskIds.push(taskId);
+            }
+          }
+          if (!children) return undefined;
           const legacyAwaited = new Set(
             [...awaitedBackground].filter((taskId) => !independentChildren.has(taskId)),
           );
@@ -1071,26 +1090,50 @@ export async function* executeRuntimeTurn(
         if (requiredBackground.size === 0 && inspectRequiredShells(state)) {
           return 'managed_shell_terminal' as const;
         }
-        const existingBackground = inspectRequiredBackground();
+        const existingBackground = await inspectRequiredBackground();
         if (existingBackground) return existingBackground;
-        const wake = await Promise.race([
-          (
-            kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
-          ).then(() => 'state_changed' as const),
-          managedShellRuntime
-            .waitForOwnerChange(ownerKey, shellWatermark, waitSignal)
-            .then(() => 'managed_shell_changed' as const),
-          ...(children && childWatermark !== undefined
-            ? [
-                children
-                  .waitForOwnerChange(childOwnerKey, childWatermark, waitSignal)
-                  .then(() => 'background_changed' as const),
-              ]
-            : []),
-        ]);
+        const taskWaitController = new AbortController();
+        const abortTaskWait = () => taskWaitController.abort();
+        waitSignal?.addEventListener('abort', abortTaskWait, { once: true });
+        if (waitSignal?.aborted) abortTaskWait();
+        let wake: 'state_changed' | 'managed_shell_changed' | 'background_changed';
+        try {
+          const taskControl = input.childSessionAcceptance?.taskControl;
+          const taskWaits = [];
+          for (let offset = 0; offset < pendingIndependentTaskIds.length; offset += 8) {
+            taskWaits.push(
+              taskControl!
+                .waitTasks(
+                  pendingIndependentTaskIds.slice(offset, offset + 8),
+                  60_000,
+                  taskWaitController.signal,
+                )
+                .then(() => 'background_changed' as const),
+            );
+          }
+          wake = await Promise.race([
+            (
+              kernel.waitForRevisionChange?.(revision, waitSignal) ?? new Promise<void>(() => {})
+            ).then(() => 'state_changed' as const),
+            managedShellRuntime
+              .waitForOwnerChange(ownerKey, shellWatermark, waitSignal)
+              .then(() => 'managed_shell_changed' as const),
+            ...(children && childWatermark !== undefined
+              ? [
+                  children
+                    .waitForOwnerChange(childOwnerKey, childWatermark, waitSignal)
+                    .then(() => 'background_changed' as const),
+                ]
+              : []),
+            ...taskWaits,
+          ]);
+        } finally {
+          taskWaitController.abort();
+          waitSignal?.removeEventListener('abort', abortTaskWait);
+        }
         if (wake === 'state_changed') return wake;
-        if (wake === 'background_changed' && children) {
-          const settledBackground = inspectRequiredBackground();
+        if (wake === 'background_changed') {
+          const settledBackground = await inspectRequiredBackground();
           if (settledBackground) return settledBackground;
           return wake;
         }

@@ -173,8 +173,11 @@ export function planModelInvocationResource(
     remainingOutput,
   );
   if (maxOutputTokens <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
-  const inputTokenUpperBound = Math.min(input.inputTokens * 2, remainingInput);
-  if (inputTokenUpperBound < input.inputTokens) {
+  // The Provider may count more prompt tokens than the local tokenizer. If the
+  // remaining Run budget cannot fund the full 2x envelope, stop before dispatch
+  // instead of persisting a response that cannot be reconciled afterwards.
+  const inputTokenUpperBound = input.inputTokens * 2;
+  if (!Number.isSafeInteger(inputTokenUpperBound) || inputTokenUpperBound > remainingInput) {
     throw new DescendantResourceAdmissionError('budget_exhausted');
   }
   const usage = createZeroResourceUsage('versioned_upper_bound', 'model-surface-v2');

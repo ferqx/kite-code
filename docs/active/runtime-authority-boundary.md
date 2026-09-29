@@ -308,3 +308,5 @@ Private Artifact 以 canonical bytes 的 SHA-256 内容寻址并返回 path-free
 ## 执行权丢失后的本地停止
 
 写入仍受当前generation与未过期lease约束；活跃写入可在原续租间隔内续租有效执行权，不能复活过期lease。失去执行权后，Host仍负责停止自己已启动的Provider工作并等待本地清理，但不能替现owner写取消、完成或清理确认。只读Run查询以当前执行权检查补充进程恢复记录，将不再可信的非终态执行投影为unknown/recovery_required；不因查询自动恢复或重放。
+
+定时续租遇到一次 Store 写失败时，仅在原租约未过期且重读确认相同 owner／generation 后保留本地执行到下一次续租；重读失败、失权或过期仍停止本地执行。父 Run 等待 required 独立子 Session 时同时观察子任务与执行权租约，`unknown` 或任务不存在使等待以需显式恢复的错误结束；不能将失权子任务当作完成，也不能仅因父 revision 未变化而无限等待。

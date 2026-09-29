@@ -10,7 +10,7 @@ Status: implemented
 ## Decision
 1. `ResourceBudgetV1` 对整个 run 及全部 Sub-agent 累计 time、turn、model/tool request、token、
    sub-agent、artifact 与 tool/shell concurrency；配置只能收紧。
-2. dispatch 前按可执行上界建立持久 reservation，完成后 reconcile；无法预留时零副作用拒绝。
+2. dispatch 前按可执行上界建立持久 reservation，完成后 reconcile；无法预留时零副作用拒绝。Model 输入 token 的本地估算使用完整 2 倍上界；剩余额度不足以覆盖该上界时，在 Provider 派发前结束为预算耗尽，不把 reservation 截成剩余额度后继续发送。
 3. 当前普通 Tool/Shell 不按活动数量或写者数量占 permit；累计 Tool 次数仍按 Run 的有效预算限制。
    独立 code Sub-agent 的写者额度仍按其子任务 allotment 计。写 Tool 的 Artifact 上界若
    暂被未结算 reservation 占用，使用持久 `artifact_capacity` waiter 等待；截止时间取
@@ -26,7 +26,7 @@ Status: implemented
    budget_exhausted/resource_saturated/verification_failed/verification_inconclusive。
    final text、Plan completed 或进程零退出码不能单独转为 completed。
 7. terminal 后停止新 sibling，运行中 child 有界清理；stale lease/late event 不能覆盖 durable
-   terminal。
+   terminal。父 Run 受管等待 required 独立 child 时，除了父事件还需观察子任务及执行权租约；未知或失权应终止等待并进入显式恢复，不得无限等待或伪造成功。
 8. 未派发 Tool 的 Artifact 等待超时或累计预算拒绝只结算该 Tool；旧式同步 Task 的子并发
    许可超时若已提交为 Task Tool 失败，也不再次升级。模型可在同一 Run 中处理这些失败；
    模型预算、未知外部结果和持久化等 Run 级边界仍可终止 Run。审批尚未派发的 Tool 不按

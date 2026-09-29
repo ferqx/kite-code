@@ -213,6 +213,7 @@ content-free `diagnostic.code/stage`，但必须删除`modelInvocationId`和raw 
 Service的Subagent adapter必须显式向Builtin模型循环传入12轮工具响应上限。达到上限后下一次Provider请求使用空工具面并要求基于
 已收集证据总结；返回正文则按正常child terminal继续父Run，若Provider仍伪造工具调用则按现有失败分类闭合child且不再调用模型。
 该边界不依赖可选共享`resourceBudget`，并以continuation保存的`modelInvocationOrdinal`延续，审批暂停/恢复不得重新获得12轮。
+父 Run 的 required 独立子会话等待除父 revision 外还监听子任务状态与执行权租约；等待入口和唤醒后重读准确 task ID，`unknown`／`not_found` 触发需显式恢复的失败，不能因没有父 revision 变化而无限等待。已结算结果仍由父事务导入，局部等待退出时取消订阅；不自动重派未知子任务。
 并发Subagent的用户取消可以先发布可见`turn.aborted`，但执行generator仍拥有Session，直到每个durable Provider lifecycle都进入
 `cleanup_completed(cleanupConfirmed=true)`。该窗口内Bridge拒绝后继`start_turn`为`runtime_busy`；同进程cleanup只补Provider
 cleanup事实并保留取消事务的`capability.reconciliation_resolved(decision=waived)`，不得复用crash语义追加`capability.execution_unknown`。
@@ -238,7 +239,7 @@ Store6/7/8 的 adapter、旧 Workspace Worker 与离线迁移 primitive 只供�
 
 Session 写入口在核对当前执行权与有效期后，可使用同一 authority 的 CAS 续租；达到正常续租间隔时随实际写入进度续租，避免连续同步工具提交延后定时器而使活跃执行过期。模型等待等无写入阶段仍由原定时器续租。已过期、失去 generation 或属于其他 owner 的执行权不能借写入重新激活，仍需恢复处理；不延长默认租约或新增后台协调进程。
 
-续租失败时在 Server stderr 记录 Session、失败原因或租约失效时间，便于区分定时器延后与存储/执行权错误；不污染 stdio protocol 的 stdout。
+续租写入暂时失败时，只有原租约尚有效、重读仍确认相同 owner／generation 且仍有有效租约，才保留本地执行并在下一轮重试。无法确认、失权或过期仍立即停止本地执行。Server stderr 只记录结构化错误码、Session 与租约时间，便于区分定时器延后与存储/执行权错误；不污染 stdio protocol 的 stdout。
 
 执行权失效由原Storage owner通知同一Host停止本地执行，不另设执行登记或后台协调器。取消监听器即使无法持久化也必须继续传播Provider停止信号；只发布成功提交的终态事件，持久恢复记录不会因本地I/O关闭而被伪装成已完成。
 

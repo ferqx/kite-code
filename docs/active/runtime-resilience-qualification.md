@@ -55,6 +55,8 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 Model lease并发资格还必须覆盖运行中user control revision：durable attempt-start之后切换interaction mode，原exact invocation的stream继续投影，response/retry/terminal evidence仍原子提交且Run继续；同一变化发生在attempt-start之前必须拒绝旧Surface dispatch。Turn abort、不同invocation ID、已terminal invocation或夹带非Model批次事件必须拒绝迟到结果。该测试证明无关revision不会产生`Model invocation evidence acknowledgement was rejected`，不放宽跨Turn、跨identity或pre-dispatch revision fence。
 
+执行权韧性回归覆盖一次 Store 续租写失败后，在原租约有效且 owner／generation 未变时重试，以及写失败持续至到期或 generation 变化时停止；[续租测试](../../apps/kite-service/test/session-execution-renewal.test.ts)验证这些边界。[三子屏障测试](../../apps/kite-service/test/isolated/runtime-server-required-background-three-child-barrier.test.ts)另验证 required 独立子租约过期会让父 Run 及时记录恢复错误而不伪完成。这些是本机定向证据，不代替故障注入 soak 或发布资格。
+
 Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
 untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
 初始化失败也不恢复或重放该secret，Client必须重新mint。context TTL、logout、generation supersede、Native connection close或Worker restart只释放

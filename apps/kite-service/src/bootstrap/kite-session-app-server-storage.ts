@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
 import { isRuntimeHostStateSettledForMigration } from '@kite-ai/runtime-host';
 import type { RuntimeStorage, RuntimeTransactionInput } from '@kite-ai/runtime-host/storage';
-import type {
-  KiteSessionExecutionAuthorityRecord,
-  KiteSessionExecutionHandle,
-  KiteSessionRuntimeStorageOwner,
+import {
+  KiteHomeWriteError,
+  type KiteSessionExecutionAuthorityRecord,
+  type KiteSessionExecutionHandle,
+  type KiteSessionRuntimeStorageOwner,
 } from '@kite-ai/runtime-storage-sqlite';
 import type { AdmittedWorkspace } from '../runtime-application';
 import {
@@ -17,6 +18,12 @@ import { hasPendingSubagentProviderRecovery } from './runtime/subagent-provider-
 
 const DEFAULT_EXECUTION_LEASE_MS = 30_000;
 const DEFAULT_RENEW_INTERVAL_MS = 10_000;
+
+function renewalDiagnosticCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const code = error.code;
+  return typeof code === 'string' && /^[a-zA-Z][a-zA-Z0-9_]{0,63}$/u.test(code) ? code : undefined;
+}
 
 export type KiteAppServerSessionErrorCode =
   | 'session_busy'
@@ -514,17 +521,20 @@ export function createKiteSessionAppServerStorage(input: {
   const renewTimer = setInterval(() => {
     if (closed || hostClosed) return;
     for (const [sessionId, execution] of owned) {
+      let renewing = false;
       try {
         const current = target.authority.read(sessionId);
         if (
           current.status !== 'active' ||
           current.hostInstanceId !== input.hostInstanceId ||
           current.clientId !== clientId ||
-          current.connectionGeneration !== connectionGeneration
+          current.connectionGeneration !== connectionGeneration ||
+          current.controllerGeneration !== execution.record.controllerGeneration
         ) {
           loseExecution(sessionId);
           continue;
         }
+        renewing = true;
         const renewed = target.authority.renew({
           sessionId,
           expectedRevision: current.revision,
@@ -545,13 +555,47 @@ export function createKiteSessionAppServerStorage(input: {
         execution.record = renewed.authority;
         target.refreshExecution(execution.handle, renewed.authority);
       } catch (error) {
+        if (
+          renewing &&
+          error instanceof KiteHomeWriteError &&
+          error.code === 'write_failed' &&
+          execution.record.leaseUntilMs !== null &&
+          execution.record.leaseUntilMs > now()
+        ) {
+          try {
+            // A failed writer transaction can leave the prior lease valid. Re-read
+            // authority before retaining the execution; an owner change still fences it.
+            const current = target.authority.read(sessionId);
+            if (
+              current.status === 'active' &&
+              current.hostInstanceId === input.hostInstanceId &&
+              current.clientId === clientId &&
+              current.connectionGeneration === connectionGeneration &&
+              current.controllerGeneration === execution.record.controllerGeneration &&
+              current.leaseUntilMs !== null &&
+              current.leaseUntilMs > now()
+            ) {
+              target.refreshExecution(execution.handle, current);
+              execution.record = current;
+              console.error('Session execution renewal deferred after Store write failure.', {
+                sessionId,
+                errorCode: error.code,
+                causeCode: renewalDiagnosticCode(error.cause),
+                leaseUntilMs: current.leaseUntilMs,
+                observedAtMs: now(),
+              });
+              continue;
+            }
+          } catch {
+            // Ownership cannot be confirmed; follow the normal loss path.
+          }
+        }
         console.error('Session execution renewal failed.', {
           sessionId,
-          error: error instanceof Error ? error.message : String(error),
-          cause:
-            error instanceof Error && error.cause instanceof Error
-              ? error.cause.message
-              : undefined,
+          errorCode: renewalDiagnosticCode(error),
+          causeCode: error instanceof Error ? renewalDiagnosticCode(error.cause) : undefined,
+          leaseUntilMs: execution.record.leaseUntilMs,
+          observedAtMs: now(),
         });
         loseExecution(sessionId);
       }

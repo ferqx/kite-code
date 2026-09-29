@@ -984,13 +984,16 @@ export class DesktopClient {
     this.#childListRefreshInFlight = undefined;
     this.#selectionLoad = undefined;
     this.#calibratedSelection = undefined;
-    this.#historyCache.clear();
+    if (options.preserveReadingPage)
+      this.#historyCache.evictWhere((key) => key.startsWith('child:'));
+    else this.#historyCache.clear();
     this.#childSessionCache.clear();
     this.#backgroundDisplayCache.clear();
     if (backgroundDisplay)
       this.#backgroundDisplayCache.set(backgroundDisplay.sessionId, backgroundDisplay.snapshot);
     this.#invalidatedPresentationSessions.clear();
     this.#historyConnection = undefined;
+    if (!options.preserveReadingPage) this.#historyWorkspaceDigest = undefined;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     const connection = this.#connection;
@@ -1624,11 +1627,35 @@ export class DesktopClient {
       this.#selectionLoad = undefined;
       this.#calibratedSelection = undefined;
       const sameSelection = this.#view.selected === sessionId;
+      const listedDigest = this.#view.directory?.find(
+        (item) => item.sessionId === sessionId,
+      )?.workspaceDigest;
+      const cached = sameSelection ? undefined : this.#historyCache.take(sessionId);
+      const usableCache = cached && listedDigest === cached.workspaceDigest ? cached : undefined;
+      if (
+        !sameSelection &&
+        this.#view.selected &&
+        this.#view.hasLoadedHistory &&
+        this.#historyWorkspaceDigest &&
+        this.#view.directory?.some(
+          (item) =>
+            item.sessionId === this.#view.selected &&
+            item.workspaceDigest === this.#historyWorkspaceDigest,
+        )
+      )
+        this.#historyCache.save(
+          this.#view.selected,
+          this.#historyWorkspaceDigest,
+          this.#view.messages,
+        );
+      if (!sameSelection) this.#historyWorkspaceDigest = usableCache?.workspaceDigest;
       this.#publish({
         selected: sessionId,
-        messages: sameSelection ? this.#view.messages : [],
+        messages: sameSelection ? this.#view.messages : (usableCache?.messages ?? []),
         cacheMetrics: sameSelection ? this.#view.cacheMetrics : undefined,
-        hasLoadedHistory: sameSelection ? this.#view.hasLoadedHistory : false,
+        hasLoadedHistory: sameSelection
+          ? this.#view.hasLoadedHistory
+          : (usableCache?.hasLoadedHistory ?? false),
         projection: sameSelection ? this.#view.projection : undefined,
         backgroundDisplay: sameSelection ? this.#view.backgroundDisplay : undefined,
         ready: false,
@@ -2094,8 +2121,7 @@ export class DesktopClient {
     const listedDigest = this.#view.directory?.find(
       (item) => item.sessionId === sessionId,
     )?.workspaceDigest;
-    const usableCache =
-      cached && (!listedDigest || listedDigest === cached.workspaceDigest) ? cached : undefined;
+    const usableCache = cached && listedDigest === cached.workspaceDigest ? cached : undefined;
     this.#historyWorkspaceDigest = sameSelection
       ? this.#historyWorkspaceDigest
       : usableCache?.workspaceDigest;

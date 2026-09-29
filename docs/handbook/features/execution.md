@@ -39,6 +39,8 @@ macOS 与 Linux 上的受管 Shell 不作为 login shell 启动，并移除 `BAS
 
 Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，并只允许对新鲜、仍运行的准确执行发起停止。所选会话的父 Run 正在等待多个子 Agent 时，已结算子 Agent 的卡片会更新为终态，其余卡片继续显示运行；父 Run 保持原身份与等待状态。重新进入会话时，历史中已持久化的后台子 Agent 结果会结束对应运行卡片；读取历史不会为了修正展示而写入新事件。TUI 支持运行中引导和准确停止；Web 只读展示后台摘要，不获得 mutation 权限。宿主退出、崩溃或升级后不承诺本地进程续跑；历史结果保留，无法确认的清理保持 unknown。当前进程树清理已在 macOS 验证，Linux 与 Windows 的本次平台资格尚未实跑。
 
+父 Run 受管等待 required 子 Agent 时，独立子会话的执行权过期或其任务结果变为 `unknown`／不存在，会结束当前等待并提示需要恢复，不持续显示为运行中，也不把未知结果记为成功。模型输入预算不足以覆盖预留上界时，子 Agent 在 Provider 派发前以预算耗尽结算。
+
 [后台 Agent 与 Shell 会话协调方案](../../plans/background-agent-shell-conversation-coordination.md)中的多结果等待与工具调用指引已接入独立父子 Session。`send_message` 只把直接父子之间的消息受理进持久邮箱，不启动空闲目标 Run；绑定目标当前 Run 的消息在下一次模型请求作为低信任 Agent 消息输入。`followup_task` 显式请求直接子 Agent 继续：成功的空工具回执表示来源请求已持久受理，新受理请求在子 Agent 原 Run 完成后从 checkpoint 开始独立新 Run；历史 v1 请求仍按已持久授权可能沿原 Run 继续；回执不表示目标已读取或完成。`interrupt_agent` 针对直接子 Agent 的当前准确任务提交停止请求，清理确认或 unknown 以服务端持久结果为准，不影响其他子任务。`list_agents` 可读取直接子 Agent、当前 Run 未读计数、已有续轮的最近一次持久终态，以及预派发失败时已结算的具名原因；`wait_agent` 可等待调用者邮箱或该 Run 的 Agent 终态更新，返回 `agent_update` 也不消费邮件。两者不会推进模型已读水位，也不会启动或取消子 Run。`task_id` 仍只代表一次 child 执行，续轮使用新的 task ID。
 
 历史 v1 当前轮续行要求子 Agent 原 Run 仍有准确的未派发模型预算和输入边界；消息在下一次模型请求进入原 Run，已派发的模型请求与工具不会被改写。受限的 `explore`／`plan`／`review` 子 Agent 即使旧 grant 包含工具，也只在可证明的静态只读 `read_file`、`search_content`、`search_files` 模型 Surface 上接纳当前轮消息，之后原 Run 的工具调用继续受这组上界约束；新受理的 v2 请求等待原 Run 终态后尝试新轮。新委派的后续新 turn 在目标 Run 启动时独立开始最长 30 分钟期限，可使用原角色和现行策略共同允许的工具，没有累计工具调用次数上限；每次模型请求、token、产物量和并发仍由发送方 Run 在受理时预留的有限资金约束。父 Run 随后结束不取消已受理的后续新 turn，结果以持久回执和邮箱回复查看。旧 v1 会话继续按原期限、单次模型请求和零工具的持久 grant 回放。新轮等待并发位时保持已受理状态；在有界等待内取得执行位才启动目标 Run，等待超期则以 `capacity_timeout` 结算且不派发目标模型。发送方可通过 `list_agents` 或 `wait_agent` 查看具名失败；成功受理本身不承诺目标已经开始执行。

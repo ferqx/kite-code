@@ -104,7 +104,7 @@ describe('runtime resource budget admission', () => {
   });
 
   test('atomically replaces one reserved after-turn report with the exact model reservation', () => {
-    const initial = configuredState({ maxRunInputTokens: 100, maxRunOutputTokens: 100 });
+    const initial = configuredState({ maxRunInputTokens: 200, maxRunOutputTokens: 100 });
     const placeholder = planModelInvocationResource(initial, {
       invocationId: 'after-turn-placeholder',
       inputTokens: 80,
@@ -266,6 +266,36 @@ describe('runtime resource budget admission', () => {
         now: new Date('2026-07-30T00:00:03Z'),
       }),
     ).toThrow('Resource budget exhausted before dispatch.');
+  });
+
+  test('denies a model call before dispatch when only its estimate fits the remaining input budget', () => {
+    const state = configuredState({ maxRunInputTokens: 30, maxRunOutputTokens: 100 });
+    const first = planModelInvocationResource(state, {
+      invocationId: 'first-model',
+      inputTokens: 5,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+    });
+    if (first.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const dispatched = apply(state, [
+      ...first.preparationEvents,
+      { type: 'resource_budget.dispatch_started', reservationId: first.budget.reservationId },
+    ]);
+    const actual = createZeroResourceUsage();
+    actual.counters.modelRequests = 1;
+    actual.counters.inputTokens = 10;
+    const consumed = apply(dispatched, [
+      { type: 'resource_budget.reconciled', reservationId: first.budget.reservationId, actual },
+    ]);
+    expect(() =>
+      planModelInvocationResource(consumed, {
+        invocationId: 'near-ceiling-model',
+        inputTokens: 11,
+        requestedMaxOutputTokens: 1,
+        resourceKind: 'model',
+      }),
+    ).toThrow('Sub-agent resource admission denied: budget_exhausted.');
+    expect(consumed.resourceBudget.status).toBe('active');
   });
 
   test('preserves unknown external outcome instead of misclassifying it as budget exhaustion', () => {

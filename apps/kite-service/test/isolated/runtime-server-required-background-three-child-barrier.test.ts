@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -926,7 +927,7 @@ for (const order of ['shells-first', 'children-first', 'same-batch'] as const) {
   }, 30_000);
 }
 
-test('three admitted children keep the parent waiting until each result is terminal', async () => {
+async function runThreeAdmittedChildren(lastChildOutcome: 'completed' | 'lease-expired') {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-cancel-first-child-barrier-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -1096,6 +1097,27 @@ test('three admitted children keep the parent waiting until each result is termi
       },
     });
     for (let index = 0; index < 2; index += 1) {
+      if (index === 1 && lastChildOutcome === 'lease-expired') {
+        // Shorten the still-active third child's lease before the second
+        // terminal changes parent revision and starts the next wait.
+        const database = new Database(databasePath);
+        try {
+          const child = database
+            .query<{ child_thread_id: string }, [string, string]>(
+              'SELECT child_thread_id FROM child_session_intents WHERE parent_session_id = ? AND origin_tool_call_id = ?',
+            )
+            .get(sessionId, 'cancel-start-2');
+          if (!child) throw new Error('Expected the third independent child intent.');
+          const updated = database
+            .query(
+              "UPDATE kite_meta SET value = json_set(value, '$.leaseUntilMs', ?, '$.revision', json_extract(value, '$.revision') + 1) WHERE key = ? AND json_extract(value, '$.status') = 'active'",
+            )
+            .run(Date.now() + 1_500, `session_execution/${child.child_thread_id}`);
+          expect(updated.changes).toBe(1);
+        } finally {
+          database.close();
+        }
+      }
       gates[index]!.resolve();
       await until(
         () =>
@@ -1108,25 +1130,41 @@ test('three admitted children keep the parent waiting until each result is termi
         events().some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
       ).toBe(false);
     }
-    gates[2]!.resolve();
-    await until(() => events().some((event) => event.type === 'run.completed'));
-    const terminal = events();
-    expect(parentCalls).toBe(3);
-    const terminalResults = terminal.filter(
-      (event) => event.type === 'subagent.background_result_persisted',
-    );
-    expect(terminalResults).toHaveLength(3);
-    expect(new Set(terminalResults.map((event) => event.taskId)).size).toBe(3);
-    expect(thirdChildRequests).toBe(1);
-    expect(terminal.filter((event) => event.type === 'run.completed')).toHaveLength(1);
-    expect(terminal.filter((event) => event.type === 'turn.completed')).toHaveLength(1);
-    expect(
-      terminal.some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
-    ).toBe(false);
+    if (lastChildOutcome === 'lease-expired') {
+      await until(() => events().some((event) => event.type === 'run.error'));
+      const terminal = events();
+      expect(terminal.find((event) => event.type === 'run.error')).toMatchObject({
+        message: 'Required child Session needs explicit execution recovery.',
+      });
+      expect(parentCalls).toBe(2);
+      expect(terminal.some((event) => event.type === 'run.completed')).toBe(false);
+      expect(terminal.some((event) => event.type === 'turn.aborted')).toBe(true);
+      expect(thirdChildRequests).toBe(1);
+    } else {
+      gates[2]!.resolve();
+      await until(() => events().some((event) => event.type === 'run.completed'));
+      const terminal = events();
+      expect(parentCalls).toBe(3);
+      const terminalResults = terminal.filter(
+        (event) => event.type === 'subagent.background_result_persisted',
+      );
+      expect(terminalResults).toHaveLength(3);
+      expect(new Set(terminalResults.map((event) => event.taskId)).size).toBe(3);
+      expect(thirdChildRequests).toBe(1);
+      expect(terminal.filter((event) => event.type === 'run.completed')).toHaveLength(1);
+      expect(terminal.filter((event) => event.type === 'turn.completed')).toHaveLength(1);
+      expect(
+        terminal.some((event) => event.type === 'run.error' || event.type === 'turn.aborted'),
+      ).toBe(false);
+    }
   } finally {
     for (const gate of gates) gate.resolve();
     await client.close();
-    await server[Symbol.asyncDispose]();
+    if (lastChildOutcome === 'lease-expired')
+      await expect(server[Symbol.asyncDispose]()).rejects.toThrow(
+        'Runtime Server owner disposal failed.',
+      );
+    else await server[Symbol.asyncDispose]();
     storage.disposeStorage();
     model.assertComplete({ allowUnconsumedResponses: true });
     model.stop();
@@ -1134,7 +1172,18 @@ test('three admitted children keep the parent waiting until each result is termi
     else process.env.KITE_CODE_HOME = previousHome;
     rmSync(root, { recursive: true, force: true });
   }
-}, 30_000);
+}
+
+test(
+  'three admitted children keep the parent waiting until the last is completed',
+  () => runThreeAdmittedChildren('completed'),
+  30_000,
+);
+test(
+  'three admitted children stop waiting when the last lease expires',
+  () => runThreeAdmittedChildren('lease-expired'),
+  30_000,
+);
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

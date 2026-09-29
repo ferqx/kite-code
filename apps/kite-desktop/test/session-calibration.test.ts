@@ -1848,6 +1848,67 @@ test('session clicks during reconnect show the latest selection and load it once
   }
 }, 30_000);
 
+test('repeated A/B clicks during reconnect retain read main histories and honor the last choice', async () => {
+  const f = await fixture([
+    { message: { content: 'A durable answer' } },
+    { message: { content: 'B durable answer' } },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('A question');
+    await waitFor(() =>
+      f.client.getSnapshot().messages.some((m) => m.text === 'A durable answer' && m.settled),
+    );
+    const aMessages = f.client.getSnapshot().messages;
+    await f.client.selectSession(f.b);
+    await f.client.send('B question');
+    await waitFor(() =>
+      f.client.getSnapshot().messages.some((m) => m.text === 'B durable answer' && m.settled),
+    );
+    const bMessages = f.client.getSnapshot().messages;
+    const opening = f.holdRuntimeOpen();
+    await f.dropCurrentTransport();
+    await opening.arrived;
+    const first = f.client.selectSession(f.a);
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected: f.a,
+      hasLoadedHistory: true,
+      loadingSession: true,
+      ready: false,
+    });
+    expect(f.client.getSnapshot().messages).toBe(aMessages);
+    const second = f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().messages).toBe(bMessages);
+    const last = f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().messages).toBe(aMessages);
+    const historyBefore = f.historyRequests;
+    const held = f.holdHistory();
+    opening.release();
+    await held.arrived;
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected: f.a,
+      hasLoadedHistory: true,
+      loadingSession: true,
+      ready: false,
+    });
+    expect(f.client.getSnapshot().messages).toBe(aMessages);
+    expect(f.historyRequests).toBe(historyBefore + 1);
+    held.release();
+    await Promise.all([first, second, last]);
+    await waitFor(() => f.client.getSnapshot().ready);
+    expect(f.client.getSnapshot().projection?.sessionId).toBe(f.a);
+    const heldB = f.holdHistory();
+    const toB = f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().messages).toBe(bMessages);
+    await heldB.arrived;
+    expect(f.client.getSnapshot().ready).toBe(false);
+    heldB.release();
+    await toB;
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
 test('a child projection confirmed missing removes its parent detail entry', async () => {
   const f = await completedChildFixture();
   try {
@@ -1867,7 +1928,7 @@ test('a child projection confirmed missing removes its parent detail entry', asy
   }
 }, 30_000);
 
-test('late failed selection cannot clear the next view and reconnect discards inactive cache', async () => {
+test('late failed selection cannot clear the next view or restore unauthorized history', async () => {
   const f = await fixture();
   try {
     const held = f.holdHistory();
