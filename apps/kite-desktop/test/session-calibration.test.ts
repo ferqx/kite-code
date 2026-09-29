@@ -54,6 +54,7 @@ async function fixture(
   );
   let generation = 0;
   let failNextRuntimeOpen = false;
+  let nextRuntimeOpenGate: ReturnType<typeof gate> | undefined;
   let historyRequests = 0;
   let droppedEvent: string | undefined;
   let nextLiveFailure: 'projection' | 'subscription' | undefined;
@@ -61,6 +62,7 @@ async function fixture(
   let nextSubscriptionScope: 'child_session' | undefined;
   let nextChildProjectionGate: ReturnType<typeof gate> | undefined;
   let nextChildHistoryGate: ReturnType<typeof gate> | undefined;
+  let nextChildListGate: ReturnType<typeof gate> | undefined;
   let nextBackgroundGate: { sessionId: string; gate: ReturnType<typeof gate> } | undefined;
   let nextBackgroundOverride: { sessionId: string; status: 'running' | 'completed' } | undefined;
   const backgroundOverrides = new Map<
@@ -122,6 +124,12 @@ async function fixture(
         canSwitch: false,
       } as T;
     if (command === 'runtime_open') {
+      if (nextRuntimeOpenGate) {
+        const opening = nextRuntimeOpenGate;
+        nextRuntimeOpenGate = undefined;
+        opening.arrive();
+        await opening.released;
+      }
       if (failNextRuntimeOpen) {
         failNextRuntimeOpen = false;
         throw new Error('fixture first reconnect failed');
@@ -204,6 +212,10 @@ async function fixture(
         message.params.query.type === 'list_child_sessions'
       ) {
         childListRequests++;
+        if (nextChildListGate) {
+          gated.set(message.id, nextChildListGate);
+          nextChildListGate = undefined;
+        }
         if (omitNextChildList) {
           omittedChildLists.add(message.id);
           omitNextChildList = false;
@@ -526,6 +538,16 @@ async function fixture(
       allGates.push(nextChildHistoryGate);
       return nextChildHistoryGate;
     },
+    holdChildList() {
+      nextChildListGate = gate();
+      allGates.push(nextChildListGate);
+      return nextChildListGate;
+    },
+    holdRuntimeOpen() {
+      nextRuntimeOpenGate = gate();
+      allGates.push(nextRuntimeOpenGate);
+      return nextRuntimeOpenGate;
+    },
     holdBackground(sessionId: string) {
       const held = gate();
       nextBackgroundGate = { sessionId, gate: held };
@@ -690,7 +712,13 @@ async function completedChildFixture() {
     await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 1);
     const childSessionId = f.client.getSnapshot().childSessions!.entries[0]!.sessionId;
     await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
-    return { ...f, childSessionId };
+    return {
+      ...f,
+      childSessionId,
+      get childHistoryRequests() {
+        return f.childHistoryRequests;
+      },
+    };
   } catch (error) {
     await f.close();
     throw error;
@@ -1703,6 +1731,118 @@ test('same-workspace reconnect requires a fresh child list and reports its failu
       entries: [],
       loading: false,
     });
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('reconnecting a child keeps its page and list until the user returns to its parent', async () => {
+  const f = await completedChildFixture();
+  try {
+    await f.client.openChildSession(f.a, f.childSessionId);
+    const childMessages = f.client.getSnapshot().childDetail!.messages;
+    const pendingList = f.holdChildList();
+    await f.dropCurrentTransport();
+    await pendingList.arrived;
+    expect(f.client.getSnapshot().childDetail).toMatchObject({
+      childSessionId: f.childSessionId,
+      messages: childMessages,
+    });
+    expect(f.client.getSnapshot().childSessions?.entries).toHaveLength(1);
+
+    const childReadsBeforeReturn = f.childHistoryRequests;
+    f.client.leaveChildSession();
+    expect(f.client.getSnapshot().childDetail).toBeUndefined();
+    expect(f.client.getSnapshot().childSessions?.entries).toHaveLength(1);
+    pendingList.release();
+    await f.client.refreshChildSessions(f.a);
+    await waitFor(() => f.client.getSnapshot().ready);
+    expect(f.client.getSnapshot().childDetail).toBeUndefined();
+    expect(f.childHistoryRequests).toBe(childReadsBeforeReturn);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('reconnecting the current page keeps confirmed environment rows as stale display', async () => {
+  const f = await completedChildFixture();
+  try {
+    await waitFor(() =>
+      Boolean(
+        f.client
+          .getSnapshot()
+          .backgroundDisplay?.snapshot.executions.some(
+            (execution) => execution.kind === 'subagent',
+          ),
+      ),
+    );
+    const display = f.client.getSnapshot().backgroundDisplay!;
+    const opening = f.holdRuntimeOpen();
+    await f.dropCurrentTransport();
+    await opening.arrived;
+    expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+      sessionId: f.a,
+      snapshot: display.snapshot,
+      stale: true,
+    });
+    expect(f.client.getSnapshot().childSessions?.entries).toHaveLength(1);
+    opening.release();
+    await waitFor(() => f.client.getSnapshot().ready);
+    expect(f.client.getSnapshot().backgroundDisplay?.sessionId).toBe(f.a);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('a child restored after reconnect never exposes a temporary empty parent page', async () => {
+  const f = await completedChildFixture();
+  try {
+    await f.client.openChildSession(f.a, f.childSessionId);
+    const detailIds: Array<string | undefined> = [];
+    const unsubscribe = f.client.subscribe(() => {
+      detailIds.push(f.client.getSnapshot().childDetail?.childSessionId);
+    });
+    const pendingList = f.holdChildList();
+    const childReadsBefore = f.childHistoryRequests;
+    await f.dropCurrentTransport();
+    await pendingList.arrived;
+    expect(f.client.getSnapshot().childSessions?.entries).toHaveLength(1);
+    pendingList.release();
+    await waitFor(
+      () =>
+        f.childHistoryRequests > childReadsBefore &&
+        f.client.getSnapshot().childDetail?.loading === false,
+    );
+    unsubscribe();
+    expect(detailIds.length).toBeGreaterThan(0);
+    expect(detailIds.every((id) => id === f.childSessionId)).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('session clicks during reconnect show the latest selection and load it once', async () => {
+  const f = await fixture();
+  try {
+    await f.client.selectSession(f.a);
+    const opening = f.holdRuntimeOpen();
+    await f.dropCurrentTransport();
+    await opening.arrived;
+    const first = f.client.selectSession(f.b);
+    expect(f.client.getSnapshot()).toMatchObject({ selected: f.b, loadingSession: true });
+    const second = f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().selected).toBe(f.a);
+    const last = f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().selected).toBe(f.b);
+    const historyBeforeReconnect = f.historyRequests;
+    opening.release();
+    await Promise.all([first, second, last]);
+    await waitFor(() => f.client.getSnapshot().ready);
+    expect(f.client.getSnapshot().selected).toBe(f.b);
+    expect(f.client.getSnapshot().projection?.sessionId).toBe(f.b);
+    expect(f.historyRequests).toBe(historyBeforeReconnect + 1);
+    await f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().selected).toBe(f.a);
   } finally {
     await f.close();
   }

@@ -4,7 +4,7 @@
 `src/app-control/**` 的 owner-local current authority。它们同时组合default parent-owned App Server与显式daemon；CLI/TUI
 只通过typed Runtime/App client seam消费结果。
 
-独立子 Session 的 `task_read`／`task_wait` 先核父任务意图、父子血缘与结果封存证明，再从子 Session 已提交事件投影有限的模型重试信息。显式 `task_wait` 同时监听父与当前本机子 Session 的 revision；重试可唤醒这一次等待，但不成为子终态或 required 结算事实。父侧终态结果携带 Kernel 的稳定原因码，已接纳终态快照另给出 `safeRetry`、`recoveryEntry` 和外部效果确定性。原始 Provider 错误和子任务正文不作为诊断字段。子任务失败是读取到的结果，`task_read`／`task_wait` 的 Tool 仍可成功返回结构化 JSON；外部效果未知时保留原恢复限制。
+独立子 Session 的 `task_read`／`task_wait` 先核父任务意图、父子血缘与结果封存证明，再从子 Session 已提交事件投影有限的模型重试信息。未导入终态的子任务还需读取其 Store 执行权；`recovery_required` 或已过期租约返回 `unknown`，已验证的父侧终态导入则仍按封存结果读取。显式 `task_wait` 同时监听父与当前本机子 Session 的 revision，并在最近的子执行租约到期时重新判定；重试和执行权失效可唤醒这一次等待，但不成为子终态或 required 结算事实。父侧终态结果携带 Kernel 的稳定原因码，已接纳终态快照另给出 `safeRetry`、`recoveryEntry` 和外部效果确定性。原始 Provider 错误和子任务正文不作为诊断字段。子任务失败是读取到的结果，`task_read`／`task_wait` 的 Tool 仍可成功返回结构化 JSON；外部效果未知时保留原恢复限制。
 
 ## 唯一 Host/Store composition
 
@@ -35,7 +35,7 @@ CLI in-process组合在已完成执行释放coordinator后，也从同一Store�
 
 [后台 Agent 与 Shell 会话协调方案](../../../docs/plans/background-agent-shell-conversation-coordination.md)的 A–C 等待修复已有受控 Service/Host 回归：三个 required child 错峰结算、双有限 Shell、Shell 与 child 两种先后顺序、显式 `task_wait` 均核对同一 Run 的零纠错等待与单次恢复。[三 child／Shell 回归](../test/isolated/runtime-server-required-background-three-child-barrier.test.ts)和[结果提交间隙回归](../test/background-subagent-runtime.test.ts)分别验证部分完成和 Artifact 已写但未接纳的窗口。Builtin 与 Service 已具备私有 checkpoint 生成、结果绑定和崩溃后 proof 修复的内部路径；Store11 首次提供生产 checkpoint backend，现行 Store14 延续该路径。独立父子 Session 的 `send_message` QueueOnly 邮箱、`list_agents`、`wait_agent`、`followup_task` 和 `interrupt_agent` 已开放；`current_turn` 仍受下述精确授权条件限制，旧结果事件不会因此重发。真实 DeepSeek `deepseek-flash` 的隔离多 Session 测试另验证了 required child、单次 `task_wait`、会话隔离和 after-turn 恰好一个续行 Run。
 
-显式 `task_wait` 复用 Background subagent Runtime 已有的 owner watermark 与 waiter，对 1–8 个目标执行单次有界 wait-any；目标终态、超时、Run abort 或当前 Turn 的新用户输入结束该工具调用。无关 State revision 和非目标 owner 变化只触发重新判定，不直接驱动模型；超时与 steer 不取消 child。它不建立持久 deadline、第二个 scheduler 或新的终态存储，宿主重启后的单次等待由普通 safe-read 重入重新开始。
+显式 `task_wait` 复用 Background subagent Runtime 已有的 owner watermark 与 waiter，对 1–8 个目标执行单次有界 wait-any（默认 30 秒、最大 60 秒）；目标终态、需恢复的子执行权、超时、Run abort 或当前 Turn 的新用户输入结束该工具调用。无关 State revision 和非目标 owner 变化只触发重新判定，不直接驱动模型；超时与 steer 不取消 child。它不建立持久 deadline、第二个 scheduler 或新的终态存储，宿主重启后的单次等待由普通 safe-read 重入重新开始。父 Run 自身失权时，已提交的 `tool.started` 不能据此推断工具仍在执行；Run 恢复投影负责报告需恢复，未持久结算的工具结果保持未知。
 
 普通写 Tool 不占 `activeWriters` 数量额度。Host 只在未结算的 Artifact 上界暂时占满预算时创建持久 `artifact_capacity` waiter，Service 等现有工具结算后再核对预算与执行权；已知上界能同时放进预算的写 Tool 可并行准入。未派发 Tool 的 waiter 超时或累计预算拒绝只生成该 Tool 的失败结果，Service 继续同一 Run；旧式同步 Task 的子并发许可等待超时已在 Task Pipeline 提交为 `tool.failed` 后不再次抛给父 Run。普通工具在持久 State 确认尚无执行尝试时发生适配异常，也在同批提交预算释放与该工具的 `tool.failed`，同一 Run 可继续；已派发结果不明、模型准入及持久化失败仍按 Run 级安全出口处理。自动审批尚未派发的 Tool 不消耗 Tool 调用次数及 Artifact 实际额度；已派发 Shell 缺少可靠文件变更事实时仍保守结算其预留上界。
 

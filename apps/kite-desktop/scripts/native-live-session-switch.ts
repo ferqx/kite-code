@@ -42,7 +42,7 @@ const home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-live-switch-')
 const appData = join(home, 'app-data');
 const application = join(home, 'kite.app');
 const workspace = join(home, 'workspace');
-const gatePaths = [join(workspace, 'native-gate-a'), join(workspace, 'native-gate-b')];
+const gatePaths = ['a', 'b', 'c'].map((name) => join(workspace, `native-gate-${name}`));
 const releaseProcesses: ReturnType<typeof Bun.spawn>[] = [];
 let releasedGates = 0;
 try {
@@ -182,7 +182,7 @@ function readFacts() {
          WHERE json_extract(queued.event_json, '$.type') = 'tool.queued'
            AND json_extract(queued.event_json, '$.name') = 'shell_execute'
            AND json_extract(queued.event_json, '$.args.command') IN
-             ('head -n 1 native-gate-a', 'head -n 1 native-gate-b')
+             ('head -n 1 native-gate-a', 'head -n 1 native-gate-b', 'head -n 1 native-gate-c')
            AND json_extract(terminal.event_json, '$.type') IN
              ('tool.finished', 'tool.failed', 'tool.rejected', 'tool.cancelled')`,
       )
@@ -293,34 +293,35 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
   await input.fill(
     [
       'NATIVE_LIVE_SWITCH_A: test required background delegation.',
-      'In one response, dispatch exactly two independent explore task calls with background=true and result_disposition="required".',
+      'In one response, dispatch exactly three independent explore task calls with background=true and result_disposition="required".',
       'Child A must make exactly one shell_execute call with command `head -n 1 native-gate-a` and timeout_ms=180000, then report the line returned by that command. The path is a FIFO; do not substitute read_file.',
       'Child B must make exactly one shell_execute call with command `head -n 1 native-gate-b` and timeout_ms=180000, then report the line returned by that command. The path is a FIFO; do not substitute read_file.',
-      'After both task calls are accepted, call task_wait once with both returned task_id values and timeout_ms=60000. Do not call other parent tools.',
-      'Once both children finish, reply exactly NATIVE_LIVE_SWITCH_A_DONE.',
+      'Child C must make exactly one shell_execute call with command `head -n 1 native-gate-c` and timeout_ms=180000, then report the line returned by that command. The path is a FIFO; do not substitute read_file.',
+      'After all three task calls are accepted, call task_wait once with all three returned task_id values and timeout_ms=60000. Do not call other parent tools.',
+      'Once all three children finish, reply exactly NATIVE_LIVE_SWITCH_A_DONE.',
     ].join('\n'),
   );
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
 
   try {
     await waitFor(
-      'two active real child shell calls',
+      'three active real child shell calls',
       async () => {
         const facts = readFacts();
         if (!facts) return false;
         if (['failed', 'cancelled', 'recovery_required', 'completed'].includes(facts.runStatus))
-          throw new Error(`A ended before both child calls were active: ${facts.runStatus}.`);
+          throw new Error(`A ended before all child calls were active: ${facts.runStatus}.`);
         const commands = facts.childCommands.filter((child) =>
-          /^head -n 1 native-gate-[ab]$/u.test(child.command ?? ''),
+          /^head -n 1 native-gate-[abc]$/u.test(child.command ?? ''),
         );
         return (
-          facts.eventTypes.filter((type) => type === 'subagent.started').length === 2 &&
-          facts.taskCalls.length === 2 &&
+          facts.eventTypes.filter((type) => type === 'subagent.started').length === 3 &&
+          facts.taskCalls.length === 3 &&
           facts.taskCalls.every(
             (call) => call.background === 1 && call.disposition === 'required',
           ) &&
-          commands.length === 2 &&
-          new Set(commands.map((child) => child.session_id)).size === 2 &&
+          commands.length === 3 &&
+          new Set(commands.map((child) => child.session_id)).size === 3 &&
           commands.every((child) => child.timeout_ms === 180_000) &&
           commands.every((child) => !facts.childTerminals.has(child.session_id))
         );
@@ -363,21 +364,21 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
     if ((await childCards.count()) === 0)
       await page.getByRole('button', { name: '显示环境信息' }).click();
     await waitFor(
-      'both child detail entries',
-      async () => (await childButtons.count()) === 2,
+      'three child detail entries',
+      async () => (await childButtons.count()) === 3,
       15_000,
     );
   };
   const assertParentDisplayStable = async (
-    expectedStatuses: readonly string[] = ['运行中', '运行中'],
+    expectedStatuses: readonly string[] = ['运行中', '运行中', '运行中'],
   ) => {
     await ensureChildCards();
     await waitFor(
-      'both child agents to recover their authoritative status',
+      'all child agents to recover their authoritative status',
       async () => {
         const statuses = await childCards.locator('.background-execution-status').allTextContents();
         return (
-          statuses.length === 2 &&
+          statuses.length === 3 &&
           statuses.toSorted().join('|') === expectedStatuses.toSorted().join('|')
         );
       },
@@ -446,7 +447,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
   const childLabels = await childButtons.evaluateAll((buttons) =>
     buttons.map((button) => button.getAttribute('aria-label')),
   );
-  assert.equal(new Set(childLabels).size, 2);
+  assert.equal(new Set(childLabels).size, 3);
   await page.evaluate(() => {
     const monitor = window as Window & {
       __kiteChildStatusTrace?: {
@@ -469,6 +470,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
         ready: boolean;
         loading: boolean;
         childCount: number;
+        childSessionId?: string;
         backgroundStale?: boolean;
         backgroundIds: string[];
       }[];
@@ -552,6 +554,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
               ready: boolean;
               loadingSession: boolean;
               childSessions?: { entries: unknown[] };
+              childDetail?: { childSessionId: string };
               background?: Record<
                 string,
                 { stale: boolean; snapshot: { executions: { executionId: string }[] } }
@@ -574,6 +577,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
             ready: state.ready,
             loading: state.loadingSession,
             childCount: state.childSessions?.entries.length ?? 0,
+            childSessionId: state.childDetail?.childSessionId,
             backgroundStale: background?.stale,
             backgroundIds: background?.snapshot.executions.map((entry) => entry.executionId) ?? [],
           });
@@ -651,7 +655,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
   };
   const switchToBAndBack = async (
     childTerminalCount = 0,
-    statuses: readonly string[] = ['运行中', '运行中'],
+    statuses: readonly string[] = ['运行中', '运行中', '运行中'],
   ) => {
     await bRow.click();
     await page
@@ -666,7 +670,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
     index: number,
     destination: 'parent' | 'b',
     childTerminalCount = 0,
-    statuses: readonly string[] = ['运行中', '运行中'],
+    statuses: readonly string[] = ['运行中', '运行中', '运行中'],
   ) => {
     await openChild(index);
     if (destination === 'b') {
@@ -678,21 +682,71 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
       await assertParentDisplayStable(statuses);
     }
   };
-  // Parent → child 1 → parent → child 2 → parent → B → parent.
+  // Parent → each child → parent → B → parent.
   await visitChild(0, 'parent');
   await visitChild(1, 'parent');
+  await visitChild(2, 'parent');
   await switchToBAndBack();
   // Direct child-detail → B, reverse child order, and another B/A interleave.
   await visitChild(1, 'b');
   await visitChild(0, 'parent');
+  await visitChild(2, 'b');
   await switchToBAndBack();
   await visitChild(0, 'parent');
   await visitChild(1, 'parent');
+  await visitChild(2, 'parent');
   await switchToBAndBack();
   await visitChild(0, 'b');
   await visitChild(1, 'parent');
+  await visitChild(2, 'parent');
   await switchToBAndBack();
-  let childDetailVisits = 8;
+  let childDetailVisits = 12;
+  await openChild(0);
+  childDetailVisits++;
+  const reconnectBefore = await page.evaluate(() => {
+    const monitor = window as Window & {
+      __kiteClientTrace?: { childSessionId?: string }[];
+    };
+    return {
+      start: monitor.__kiteClientTrace?.length ?? 0,
+      childSessionId: monitor.__kiteClientTrace?.at(-1)?.childSessionId,
+    };
+  });
+  assert.ok(reconnectBefore.childSessionId, 'Expected to read a child before native reconnect.');
+  await page.evaluate(async () => {
+    const status = await window.kiteDesktop!.runtimeStatus();
+    if (status.connectionId === null) throw new Error('Native Service connection is missing.');
+    await window.kiteDesktop!.runtimeDetach(status.connectionId);
+  });
+  await waitFor(
+    'the same child detail to reconnect in the native window',
+    async () => {
+      const refresh = page.getByRole('button', { name: '刷新详情' });
+      return (await refresh.count()) === 1 && (await refresh.isEnabled());
+    },
+    20_000,
+  );
+  const reconnectTrace = await page.evaluate((start) => {
+    const monitor = window as Window & {
+      __kiteClientTrace?: { childCount: number; childSessionId?: string }[];
+    };
+    return monitor.__kiteClientTrace?.slice(start) ?? [];
+  }, reconnectBefore.start);
+  assert.ok(reconnectTrace.length > 0, 'Native reconnect produced no client snapshots.');
+  assert.ok(
+    reconnectTrace.every(
+      (entry) => entry.childCount === 3 && entry.childSessionId === reconnectBefore.childSessionId,
+    ),
+    'Native reconnect briefly exposed an empty parent or lost its child detail.',
+  );
+  assert.ok(cachedChildRevisitsVerified > 0, 'Expected cached child revisits before reconnect.');
+  // The active detail stays mounted, but inactive child history is scoped to
+  // the old connection. Re-establish the baseline on each sibling's first read.
+  visitedChildMessages.clear();
+  await page.getByRole('button', { name: '返回父会话' }).click();
+  await assertParentActive();
+  await assertParentDisplayStable();
+  await switchToBAndBack();
   const switchCycles = 30;
   for (let cycle = 0; cycle < switchCycles; cycle++) {
     await bRow.click();
@@ -700,7 +754,7 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
     await assertParentActive();
     await ensureChildCards();
     const statuses = await childCards.locator('.background-execution-status').allTextContents();
-    assert.equal(statuses.length, 2);
+    assert.equal(statuses.length, 3);
     assert.ok(!statuses.includes('不可用'), `Unexpected unavailable child at cycle ${cycle}.`);
   }
   await assertParentActive();
@@ -732,12 +786,14 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
   );
   await page.getByRole('button', { name: '返回父会话' }).click();
   await assertParentActive(1);
-  const mixedStatuses = ['已完成', '运行中'];
+  const mixedStatuses = ['已完成', '运行中', '运行中'];
   await assertParentDisplayStable(mixedStatuses);
   await switchToBAndBack(1, mixedStatuses);
   await visitChild(0, 'parent', 1, mixedStatuses);
   childDetailVisits++;
   await visitChild(1, 'parent', 1, mixedStatuses);
+  childDetailVisits++;
+  await visitChild(2, 'parent', 1, mixedStatuses);
   childDetailVisits++;
   const trace = await page.evaluate(() => {
     const monitor = window as Window & {
@@ -768,13 +824,16 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
       !entry.cardVisible ||
       entry.loading ||
       entry.animated ||
-      entry.statuses.length !== 2 ||
+      entry.statuses.length !== 3 ||
       entry.statuses.includes('不可用') ||
       entry.statuses.includes('状态待确认'),
   );
   assert.deepEqual(invalidTrace.slice(0, 10), [], 'A lost its message or child rows.');
 
-  const releases = [releaseGate(gatePaths[1]!, 'NATIVE_GATE_1_RELEASED')];
+  const releases = [
+    releaseGate(gatePaths[1]!, 'NATIVE_GATE_1_RELEASED'),
+    releaseGate(gatePaths[2]!, 'NATIVE_GATE_2_RELEASED'),
+  ];
   await Promise.race([
     Promise.all(releases.map((release) => release.exited)),
     Bun.sleep(15_000).then(() => {
@@ -783,14 +842,14 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
   ]);
   releasedGates = gatePaths.length;
   await waitFor(
-    'A and both children to complete',
+    'A and all children to complete',
     async () => {
       const facts = readFacts();
       return (
         facts?.runId === initial.runId &&
         facts.runStatus === 'completed' &&
         facts.eventTypes.filter((type) => type === 'subagent.background_result_persisted')
-          .length === 2
+          .length === 3
       );
     },
     90_000,
@@ -818,11 +877,11 @@ __kiteLiveWindow.dialog.showMessageBox = async () => ({ response: 0, checkboxChe
       provider: 'deepseek',
       model,
       packagedNativeWindow: true,
-      requiredChildren: 2,
+      requiredChildren: 3,
       switchCycles,
       childDetailVisits,
       cachedChildRevisitsVerified,
-      directChildToBTransitions: 2,
+      directChildToBTransitions: 3,
       partialChildSettlementVerified: true,
       childStatusTransitions: trace.length,
       runIdentityPreserved: true,

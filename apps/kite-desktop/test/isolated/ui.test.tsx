@@ -532,6 +532,48 @@ test('parent task tool gains a child detail entry when its exact session is list
   expect(client.selectedIds).toEqual([]);
 });
 
+test('a Run requiring recovery does not leave its pending task_wait visibly running', async () => {
+  const client = new UiClient();
+  const pendingWait = {
+    id: 'tool:wait',
+    turnId: 'turn-current',
+    role: 'tool' as const,
+    toolName: 'task_wait',
+    title: 'task_wait',
+    text: '',
+    settled: false,
+    status: 'running' as const,
+    presentation: 'standalone' as const,
+  };
+  const running = {
+    ...session('s0'),
+    currentRun: {
+      runId: 'run-current',
+      initialTurnId: 'turn-current',
+      activeTurnId: 'turn-current',
+      status: 'running' as const,
+      revision: 2,
+    },
+  };
+  client.view = { ...client.view, projection: running, messages: [pendingWait] };
+  await render(<App client={client} />);
+  expect(document.querySelector('.tool-activity-state')?.textContent).toContain('正在工作');
+
+  await act(() =>
+    client.update({
+      projection: {
+        ...running,
+        currentRun: { ...running.currentRun, status: 'recovery_required', revision: 3 },
+      },
+    }),
+  );
+  expect(document.querySelector('.tool-activity-state')?.textContent).toContain('需要恢复');
+  expect(client.getSnapshot().messages[0]).toEqual(pendingWait);
+
+  await act(() => client.update({ projection: running }));
+  expect(document.querySelector('.tool-activity-state')?.textContent).toContain('正在工作');
+});
+
 test('private child read error stays in parent tree and switching roots removes its detail', async () => {
   const client = new UiClient();
   client.update({
@@ -905,6 +947,43 @@ test('session switch keeps selectors steady until the target projection loads', 
   expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model');
   expect(document.querySelector('.composer')?.getAttribute('data-session-loading')).toBeNull();
   expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
+});
+
+test('a restored selected session never remains on the new-conversation welcome page', async () => {
+  const client = new UiClient();
+  const selected = client.view.sessions[0]!;
+  const selectedProjection = session(selected.sessionId, selected.displayName);
+  client.view = { ...client.view, selected: undefined, projection: undefined, ready: false };
+  await render(<App client={client} />);
+  await act(() => {
+    client.update({
+      selected: selected.sessionId,
+      projection: selectedProjection,
+      messages: [{ id: 'restored', role: 'user', text: '恢复的会话正文', settled: true }],
+      hasLoadedHistory: true,
+      ready: false,
+      loadingSession: true,
+    });
+  });
+  expect(document.querySelector('.conversation')?.textContent ?? '').toContain('恢复的会话正文');
+  expect(document.querySelector('.conversation')?.textContent ?? '').not.toContain(
+    '从一个想法开始',
+  );
+
+  await act(() => client.update({ selected: undefined, sessions: [], projection: undefined }));
+  await act(() =>
+    client.update({
+      selected: selected.sessionId,
+      sessions: [selected],
+      projection: selectedProjection,
+      ready: true,
+      loadingSession: false,
+    }),
+  );
+  expect(document.querySelector('.conversation')?.textContent ?? '').toContain('恢复的会话正文');
+  expect(document.querySelector('.conversation')?.textContent ?? '').not.toContain(
+    '从一个想法开始',
+  );
 });
 
 test('the desktop sidebar can be reopened after it is collapsed', async () => {

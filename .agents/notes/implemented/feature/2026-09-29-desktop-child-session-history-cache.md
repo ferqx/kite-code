@@ -12,6 +12,8 @@ The Desktop client stores a previously loaded child transcript in the existing b
 
 The cache owns message data rather than mounted React trees. The chosen boundary and invalidation rules are implemented in [DesktopClient](../../../../apps/kite-desktop/src/client.ts) and described in the [history owner document](../../../../apps/kite-desktop/docs/history-and-recovery.md).
 
+An interrupted connection is different from leaving the current reading page. The inactive cache is discarded, but the currently visible child transcript and parent child list remain on that page with reading authority revoked until the new connection verifies them. The restore intent belongs to that page, so an explicit return to the parent, a different child, or another main session cancels it before any late list response can reopen the old child. A reconnecting list is visible but cannot authorize a child read.
+
 ## Alternatives considered
 
 - Keep every visited parent and child page mounted: that would preserve DOM state but retain large message trees and live component effects outside the existing memory budget.
@@ -20,4 +22,4 @@ The cache owns message data rather than mounted React trees. The chosen boundary
 
 ## Consequences
 
-Reentering a cached child no longer replaces its transcript with a blank loading view. A remount still incurs React rendering cost, and the Service still transfers and verifies History. The cache can miss after eviction, deletion, or reconnect; those paths use the normal loading view. Existing scroll and disclosure state remain with the UI reading-state owner. Integration, UI, and native-window checks cover cached revisits and navigation during a real model run.
+Reentering a cached child no longer replaces its transcript with a blank loading view. A remount still incurs React rendering cost, and the Service still transfers and verifies History. The cache can miss after eviction or deletion; reconnect discards the inactive cache but keeps the current child page visible during fresh verification. Existing scroll and disclosure state remain with the UI reading-state owner. Integration, UI, and native-window checks cover cached revisits and navigation during a real model run.

@@ -117,6 +117,7 @@ export interface DesktopView {
     readonly parentSessionId: string;
     readonly entries: readonly RuntimeChildSessionSummary[];
     readonly loading: boolean;
+    readonly reconnecting?: boolean;
     readonly error?: string;
   };
   childDetail?: {
@@ -624,7 +625,7 @@ export class DesktopClient {
         parentSessionId: selected,
         childSessionId: this.#view.childDetail.childSessionId,
       };
-    await this.#detach();
+    await this.#detach({ preserveReadingPage: true });
     const info: DesktopConnectionInfo = await this.#native().runtimeOpen();
     const connection = createAppServerProtocolConnection(
       desktopTransport(info, this.#native()),
@@ -653,6 +654,8 @@ export class DesktopClient {
             loadingSession: false,
             hasLoadedHistory: false,
             backgroundDisplay: undefined,
+            childSessions: undefined,
+            childDetail: undefined,
           }
         : {}),
     });
@@ -767,7 +770,7 @@ export class DesktopClient {
     try {
       await connection.prepareAppControl();
     } catch (error) {
-      await this.#detach().catch(() => undefined);
+      await this.#detach({ preserveReadingPage: true }).catch(() => undefined);
       throw error;
     }
     const indexSubscription = new AbortController();
@@ -889,9 +892,8 @@ export class DesktopClient {
     if (
       selected &&
       !this.#readingPageSuspended &&
-      !this.#view.childDetail &&
-      this.#view.selected === selected &&
-      !this.#view.loadingSession
+      (!this.#view.childDetail || this.#childRestore?.parentSessionId === selected) &&
+      this.#view.selected === selected
     )
       await this.selectSession(selected).catch((error) => {
         if (connection.status === 'active') this.report(error);
@@ -962,7 +964,14 @@ export class DesktopClient {
       this.#recovering = undefined;
     });
   }
-  async #detach() {
+  async #detach(options: { readonly preserveReadingPage?: boolean } = {}) {
+    const currentDisplay = this.#view.backgroundDisplay;
+    const backgroundDisplay =
+      options.preserveReadingPage &&
+      currentDisplay &&
+      currentDisplay.sessionId === this.#view.selected
+        ? { ...currentDisplay, stale: true }
+        : undefined;
     this.#stopBackgroundRefresh();
     this.#indexSubscription?.abort();
     this.#indexSubscription = undefined;
@@ -978,6 +987,8 @@ export class DesktopClient {
     this.#historyCache.clear();
     this.#childSessionCache.clear();
     this.#backgroundDisplayCache.clear();
+    if (backgroundDisplay)
+      this.#backgroundDisplayCache.set(backgroundDisplay.sessionId, backgroundDisplay.snapshot);
     this.#invalidatedPresentationSessions.clear();
     this.#historyConnection = undefined;
     this.#unsubscribe?.();
@@ -985,13 +996,19 @@ export class DesktopClient {
     const connection = this.#connection;
     this.#connection = undefined;
     this.#admitted.clear();
+    const childSessions = options.preserveReadingPage ? this.#view.childSessions : undefined;
+    const childDetail = options.preserveReadingPage ? this.#view.childDetail : undefined;
     this.#publish({
       connected: false,
       ready: false,
-      loadingSession: false,
-      childSessions: undefined,
-      childDetail: undefined,
-      backgroundDisplay: undefined,
+      loadingSession: !!options.preserveReadingPage && !!this.#view.selected && !childDetail,
+      childSessions: childSessions
+        ? { ...childSessions, loading: true, reconnecting: true, error: undefined }
+        : undefined,
+      childDetail: childDetail
+        ? { ...childDetail, loading: true, projection: undefined, error: undefined }
+        : undefined,
+      backgroundDisplay,
     });
     if (connection) await connection.close();
   }
@@ -1601,7 +1618,25 @@ export class DesktopClient {
     }
     const connection = this.#connection;
     if (connection?.status !== 'active') {
-      return this.connect().then(() => this.selectSession(sessionId));
+      // Record the user's latest choice before waiting for a reconnect. Older
+      // clicks must not replay after the peer becomes active and replace it.
+      this.#selection?.abort();
+      this.#selectionLoad = undefined;
+      this.#calibratedSelection = undefined;
+      const sameSelection = this.#view.selected === sessionId;
+      this.#publish({
+        selected: sessionId,
+        messages: sameSelection ? this.#view.messages : [],
+        cacheMetrics: sameSelection ? this.#view.cacheMetrics : undefined,
+        hasLoadedHistory: sameSelection ? this.#view.hasLoadedHistory : false,
+        projection: sameSelection ? this.#view.projection : undefined,
+        backgroundDisplay: sameSelection ? this.#view.backgroundDisplay : undefined,
+        ready: false,
+        loadingSession: true,
+      });
+      return this.connect().then(() =>
+        this.#view.selected === sessionId ? this.selectSession(sessionId) : undefined,
+      );
     }
     if (
       this.#selectionLoad?.sessionId === sessionId &&
@@ -1646,8 +1681,13 @@ export class DesktopClient {
       this.#view.childSessions?.parentSessionId === parentSessionId
         ? this.#view.childSessions.entries
         : [];
+    const reconnecting =
+      this.#view.childSessions?.parentSessionId === parentSessionId &&
+      this.#view.childSessions.reconnecting;
     if (!options?.silent)
-      this.#publish({ childSessions: { parentSessionId, entries: previous, loading: true } });
+      this.#publish({
+        childSessions: { parentSessionId, entries: previous, loading: true, reconnecting },
+      });
     try {
       const entries: RuntimeChildSessionSummary[] = [];
       let cursor: { updatedAtMs: number; sessionId: string } | undefined;
@@ -1702,6 +1742,7 @@ export class DesktopClient {
           !this.#view.childSessions ||
           this.#view.childSessions.parentSessionId !== parentSessionId ||
           this.#view.childSessions.loading ||
+          this.#view.childSessions.reconnecting ||
           this.#view.childSessions.error ||
           entries.length !== previous.length ||
           entries.some(
@@ -1713,20 +1754,18 @@ export class DesktopClient {
         )
           this.#publish({ childSessions: { parentSessionId, entries, loading: false } });
         const restore = this.#childRestore;
-        if (restore?.parentSessionId === parentSessionId && !this.#view.childDetail) {
+        if (restore?.parentSessionId === parentSessionId) {
           if (!entries.some((entry) => entry.sessionId === restore.childSessionId))
             this.#childRestore = undefined;
-          else
-            void this.openChildSession(parentSessionId, restore.childSessionId)
-              .then(() => {
-                if (
-                  this.#childRestore === restore &&
-                  this.#view.childDetail?.childSessionId === restore.childSessionId &&
-                  !this.#view.childDetail.error
-                )
-                  this.#childRestore = undefined;
-              })
-              .catch((error) => this.report(error));
+          else if (
+            !this.#view.childDetail ||
+            this.#view.childDetail.childSessionId === restore.childSessionId
+          ) {
+            this.#childRestore = undefined;
+            void this.openChildSession(parentSessionId, restore.childSessionId).catch((error) =>
+              this.report(error),
+            );
+          } else this.#childRestore = undefined;
         }
       }
     } catch (error) {
@@ -1741,6 +1780,7 @@ export class DesktopClient {
             parentSessionId,
             entries: previous,
             loading: false,
+            reconnecting,
             error: messageOf(error),
           },
         });
@@ -1824,6 +1864,7 @@ export class DesktopClient {
       throw new Error('请先从父会话的环境信息或工具消息选择子会话。');
     const loadChildSession = connection.history.loadChildSession;
     if (!loadChildSession) throw new Error('当前服务不支持子会话历史读取。');
+    if (this.#childRestore?.childSessionId !== childSessionId) this.#childRestore = undefined;
     const sameChild =
       this.#view.childDetail?.parentSessionId === parentSessionId &&
       this.#view.childDetail.childSessionId === childSessionId;
@@ -1837,15 +1878,14 @@ export class DesktopClient {
         ? cached
         : undefined;
     if (!sameChild) this.#cacheCurrentChildDetail();
-    if (!this.#view.childDetail) {
-      // The parent remains an executing Service Session, but its reading stream
-      // belongs to the departing page and must not follow the child page.
-      this.#selection?.abort();
-      this.#selectionLoad = undefined;
-      this.#calibratedSelection = undefined;
-      this.#stopBackgroundRefresh();
-      this.#publish({ ready: false, loadingSession: false });
-    }
+    // The parent remains an executing Service Session, but its reading stream
+    // belongs to the departing page and must not follow the child page. This
+    // also applies when reconnect kept the old child page mounted.
+    this.#selection?.abort();
+    this.#selectionLoad = undefined;
+    this.#calibratedSelection = undefined;
+    this.#stopBackgroundRefresh();
+    this.#publish({ ready: false, loadingSession: false });
     this.#childRead?.abort();
     this.#calibratedChild = undefined;
     const controller = new AbortController();

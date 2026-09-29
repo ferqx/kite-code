@@ -11,6 +11,8 @@ export interface ChildSessionTaskControlPort {
   readonly getParentState: () => Readonly<RuntimeState>;
   readonly readIntent: (childThreadId: string) => Intent | null;
   readonly readChildState: (childThreadId: string) => Readonly<RuntimeState> | null;
+  readonly readAuthority: KiteSessionAppServerStorageOwner['readChildExecutionAuthority'];
+  readonly nowMs?: () => number;
   /** Committed child events; the control projects only bounded model retry facts. */
   readonly readChildEvents: (childThreadId: string) => readonly Readonly<{ event: RuntimeEvent }>[];
   readonly artifacts: Pick<SubagentResultArtifactAccess, 'lookup' | 'read'>;
@@ -31,6 +33,7 @@ type TaskRead = Readonly<{
   snapshot: Snapshot;
   childThreadId?: string;
   childRevision?: number;
+  leaseUntilMs?: number;
 }>;
 
 function activeRetry(
@@ -205,6 +208,19 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
     )
       return { snapshot: unknown(taskId, 'Background sub-agent child identity conflicts.') };
     if (!link.terminalImport) {
+      const authority = child
+        ? input.readAuthority(input.parentSessionId, link.childThreadId)
+        : null;
+      const nowMs = input.nowMs?.() ?? Date.now();
+      if (
+        authority?.status === 'recovery_required' ||
+        (authority?.leaseUntilMs !== null &&
+          authority?.leaseUntilMs !== undefined &&
+          authority.leaseUntilMs <= nowMs)
+      )
+        return {
+          snapshot: unknown(taskId, 'Background sub-agent execution requires recovery.'),
+        };
       const retry = child
         ? activeRetry(child, input.readChildEvents(link.childThreadId))
         : undefined;
@@ -218,6 +234,9 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
           ...(retry ? { retry } : {}),
         }),
         ...(child ? { childThreadId: link.childThreadId, childRevision: child.revision } : {}),
+        ...(authority?.leaseUntilMs !== null && authority?.leaseUntilMs !== undefined
+          ? { leaseUntilMs: authority.leaseUntilMs }
+          : {}),
       };
     }
     if (
@@ -293,7 +312,8 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
       timeoutMs > MAX_WAIT_MS
     )
       throw new Error('task_wait requires 1–8 distinct task IDs and a timeout within 0–60000 ms.');
-    const deadline = Date.now() + timeoutMs;
+    const nowMs = input.nowMs ?? Date.now;
+    const deadline = nowMs() + timeoutMs;
     const initialParent = input.getParentState();
     const turnId = initialParent.turn?.turnId;
     const initialUserMessages = new Set(
@@ -322,12 +342,15 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
         return waitResult(tasks, 'running', true, 'user_input');
       if (tasks.some((task) => task.retry))
         return waitResult(tasks, 'running', true, 'model_retry');
-      const remaining = deadline - Date.now();
+      const now = nowMs();
+      const remaining = deadline - now;
       if (remaining <= 0) return waitResult(tasks, 'timeout', true);
+      const nextLeaseExpiry = Math.min(...reads.map((read) => read.leaseUntilMs ?? Infinity));
+      const waitMs = Math.max(1, Math.min(remaining, nextLeaseExpiry - now));
       const waitController = new AbortController();
       const onAbort = () => waitController.abort();
       signal?.addEventListener('abort', onAbort, { once: true });
-      const timer = setTimeout(() => waitController.abort(), remaining);
+      const timer = setTimeout(() => waitController.abort(), waitMs);
       try {
         const waits = [input.waitForParentRevisionChange(parent.revision, waitController.signal)];
         for (const read of reads) {

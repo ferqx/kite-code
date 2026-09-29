@@ -60,12 +60,18 @@ function fixture() {
     },
   };
   const childEvents: { event: Record<string, unknown> }[] = [];
+  const authority = {
+    status: 'active',
+    leaseUntilMs: Date.now() + 60_000,
+  };
   const readers: Parameters<typeof createChildSessionTaskControl>[0] = {
     parentSessionId: 'parent-1',
     getParentState: () => parent as never,
     readIntent: (id) => (id === 'child-1' ? (intent as never) : null),
     readChildState: (id) => (id === 'child-1' ? (child as never) : null),
     readChildEvents: (id) => (id === 'child-1' ? (childEvents as never) : []),
+    readAuthority: (parentSessionId, childThreadId) =>
+      parentSessionId === 'parent-1' && childThreadId === 'child-1' ? (authority as never) : null,
     artifacts: {
       lookup: (owner, taskId) =>
         owner === 'owner-1' && taskId === 'task-1' ? { ref, result } : undefined,
@@ -75,7 +81,7 @@ function fixture() {
     waitForParentRevisionChange: async () => {},
     waitForChildRevisionChange: () => null,
   };
-  return { parent, link, intent, child, childEvents, readers };
+  return { parent, link, intent, child, childEvents, authority, readers };
 }
 
 test('readTask binds parent intent, child terminal and result Artifact before publishing', async () => {
@@ -319,6 +325,73 @@ test('a durable recovery diagnostic wakes task_wait without forging a child term
   });
   expect(f.link).not.toHaveProperty('terminalImport');
   expect(f.intent.parentClaimSettledEventId).toBeNull();
+});
+
+test('an expired active child lease is readable as unknown and wakes task_wait', async () => {
+  const f = fixture();
+  const control = createChildSessionTaskControl(f.readers);
+  f.authority.leaseUntilMs = Date.now() - 1;
+  expect(await control.readTask('task-1')).toMatchObject({
+    status: 'unknown',
+    ok: false,
+    cleanup_confirmed: false,
+  });
+  expect(await control.waitTasks(['task-1'], 60_000)).toMatchObject({
+    status: 'unknown',
+    ok: true,
+    tasks: [{ status: 'unknown', ok: false }],
+  });
+});
+
+test('task_wait observes child lease expiry during a bounded wait', async () => {
+  const f = fixture();
+  f.authority.leaseUntilMs = Date.now() + 25;
+  const control = createChildSessionTaskControl({
+    ...f.readers,
+    waitForParentRevisionChange: (_revision, signal) =>
+      new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('wait aborted')), { once: true });
+      }),
+  });
+  const startedAt = Date.now();
+  expect(await control.waitTasks(['task-1'], 60_000)).toMatchObject({
+    status: 'unknown',
+    ok: true,
+    tasks: [{ status: 'unknown', ok: false }],
+  });
+  expect(Date.now() - startedAt).toBeLessThan(1_000);
+});
+
+test('recovery-required authority is actionable even before a parent diagnostic', async () => {
+  const f = fixture();
+  f.authority.status = 'recovery_required';
+  const control = createChildSessionTaskControl(f.readers);
+  expect(await control.readTask('task-1')).toMatchObject({ status: 'unknown', ok: false });
+  expect(await control.waitTasks(['task-1'], 60_000)).toMatchObject({
+    status: 'unknown',
+    ok: true,
+    tasks: [{ status: 'unknown', ok: false }],
+  });
+});
+
+test('a verified terminal import wins over stale child execution authority', async () => {
+  const f = fixture();
+  f.authority.leaseUntilMs = Date.now() - 1;
+  Object.assign(f.link, {
+    terminalImport: { terminalRevision: 12, status: 'completed', resultRef: ref },
+  });
+  Object.assign(f.intent, {
+    parentClaimSettledEventId: 'settled-1',
+    parentClaimSettledRevision: 5,
+  });
+  f.parent.revision = 5;
+  const control = createChildSessionTaskControl(f.readers);
+  expect(await control.readTask('task-1')).toMatchObject({ status: 'completed', ok: true });
+  expect(await control.waitTasks(['task-1'], 60_000)).toMatchObject({
+    status: 'completed',
+    ok: true,
+    tasks: [{ status: 'completed', ok: true }],
+  });
 });
 
 test('waitTasks wakes from a parent revision and rereads the imported result', async () => {

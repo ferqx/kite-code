@@ -17,7 +17,7 @@ import appIcon from '../app-icon.svg';
 import { CommandResultUnknown, type DesktopClient } from './client';
 import { Interaction } from './Interaction';
 import { OperationToast } from './OperationToast';
-import { isActiveRun, projectEvent } from './presentation';
+import { isActiveRun, projectEvent, showRunRecovery } from './presentation';
 import { Settings } from './Settings';
 import { useDesktopTheme } from './theme';
 import './startup.css';
@@ -92,7 +92,10 @@ export function App({ client }: { client: DesktopClient }) {
   const busyRef = useRef(false);
   const submittingRef = useRef(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [newConversation, setNewConversation] = useState(!selected);
+  // A missing selection already renders the new-conversation page. Keep this
+  // flag for an explicit user choice, so a delayed session restore cannot
+  // leave a selected conversation hidden behind the welcome page.
+  const [newConversation, setNewConversation] = useState(false);
   const [newConversationWorkspace, setNewConversationWorkspace] = useState<string>();
   const [newConversationBranch, setNewConversationBranch] = useState(view.branch);
   const [newConversationTargetBranch, setNewConversationTargetBranch] = useState<string>();
@@ -114,7 +117,9 @@ export function App({ client }: { client: DesktopClient }) {
   const childDetail =
     !preparing && view.childDetail?.parentSessionId === selected ? view.childDetail : undefined;
   const childSessionIdsByExecutionId = new Map(
-    childSessions?.entries.map((entry) => [entry.taskId, entry.sessionId] as const) ?? [],
+    !childSessions?.reconnecting
+      ? (childSessions?.entries.map((entry) => [entry.taskId, entry.sessionId] as const) ?? [])
+      : [],
   );
   const currentBackground = selected ? view.background?.[selected] : undefined;
   const freshBackground =
@@ -158,7 +163,6 @@ export function App({ client }: { client: DesktopClient }) {
         (session) => session.sessionId === previousSelected.current,
       )
     ) {
-      setNewConversation(true);
       setNewConversationWorkspace(undefined);
       setNewConversationBranch(undefined);
       setNewConversationTargetBranch(undefined);
@@ -500,7 +504,12 @@ export function App({ client }: { client: DesktopClient }) {
     : scheduledTasksView || preparing
       ? []
       : pendingAskMessages;
-  const readingMessages = childDetail ? childDetail.messages : displayedMessages;
+  const readingMessages = childDetail
+    ? childDetail.messages
+    : showRunRecovery(
+        displayedMessages,
+        projection?.sessionId === selected ? projection : undefined,
+      );
   const requiredSubagentWait =
     !preparing &&
     !scheduledTasksView &&
@@ -621,7 +630,11 @@ export function App({ client }: { client: DesktopClient }) {
       requiredSubagentWait={requiredSubagentWait}
       childSessionIdsByTaskId={childDetail ? undefined : childSessionIdsByExecutionId}
       onOpenChildSession={
-        !childDetail && selected && connected && (ready || childSessions)
+        !childDetail &&
+        selected &&
+        connected &&
+        !childSessions?.reconnecting &&
+        (ready || childSessions)
           ? (childSessionId) =>
               void client
                 .openChildSession(selected, childSessionId)
@@ -980,7 +993,10 @@ export function App({ client }: { client: DesktopClient }) {
                       ? '正在发送消息'
                       : undefined,
               onSettings: () => setSettingsOpen(true),
-              onChange: (value) => setDrafts((values) => ({ ...values, [draftKey]: value })),
+              onChange: (value) => {
+                if (!selected && value) setNewConversation(true);
+                setDrafts((values) => ({ ...values, [draftKey]: value }));
+              },
               onSend: canSubmit
                 ? () => {
                     if (submittingRef.current) return;

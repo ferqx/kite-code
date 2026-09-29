@@ -71,6 +71,7 @@ export interface Message {
     | 'failed'
     | 'rejected'
     | 'cancelled'
+    | 'recovery_required'
     | 'unknown';
   readonly parentToolCallId?: string;
   readonly steps?: readonly {

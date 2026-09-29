@@ -5509,6 +5509,7 @@ export function createChildSessionOrchestrator(input: {
       getParentState: () => parent.getState(),
       readIntent: input.owner.readChildSessionIntent,
       readChildState: (id) => input.owner.storage.sessions.loadSnapshot<RuntimeState>(id),
+      readAuthority: input.owner.readChildExecutionAuthority,
       readChildEvents: (id) => input.owner.storage.sessions.loadEventsStrict(id),
       artifacts: runtime.childResultArtifacts,
       parentArtifactOwnerKey: backgroundSubagentOwnerKey(

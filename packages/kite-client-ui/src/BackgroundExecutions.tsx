@@ -198,7 +198,9 @@ function ExecutionGroup({
           })}
         </ul>
       )}
-      {subagentDetails?.loading && <p role="status">正在读取子 Agent…</p>}
+      {subagentDetails?.loading && executions.length === 0 && (
+        <p role="status">正在读取子 Agent…</p>
+      )}
       {subagentDetails?.error && (
         <p role="alert" className="background-execution-error">
           {subagentDetails.error}{' '}

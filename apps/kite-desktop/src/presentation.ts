@@ -5,6 +5,24 @@ export function isActiveRun(session?: RuntimeSessionProjection) {
   return ['queued', 'running', 'waiting'].includes(session?.currentRun?.status ?? '');
 }
 
+/** A lost Run owner cannot keep an unsealed tool visibly executing. This is display-only. */
+export function showRunRecovery(
+  messages: readonly Message[],
+  session?: RuntimeSessionProjection,
+): readonly Message[] {
+  const run = session?.currentRun;
+  if (run?.status !== 'recovery_required') return messages;
+  const turnId = run.activeTurnId ?? run.initialTurnId;
+  return messages.map((message) =>
+    message.role === 'tool' &&
+    message.turnId === turnId &&
+    !message.settled &&
+    (message.status === 'running' || message.status === 'queued')
+      ? { ...message, status: 'recovery_required' as const }
+      : message,
+  );
+}
+
 export type { Message } from '@kite-ai/kite-client-ui';
 
 /** Service text deltas are cumulative; durable model output wins over late deltas. */
