@@ -2687,7 +2687,7 @@ body {
   top: 0;
   right: 0;
   margin: 16px 16px 0 0;
-  width: min(600px, calc(100% - 32px));
+  width: min(300px, calc(100% - 32px));
   max-height: calc(100% - 32px);
   padding: 18px 20px;
   border-radius: 18px;
@@ -2711,7 +2711,7 @@ body {
   --environment-information-safe-area: 28px;
 }
 .kite-client .session-view.environment-information-docked {
-  --environment-information-safe-area: 644px;
+  --environment-information-safe-area: 344px;
 }
 .kite-client
   .session-view:is(.environment-information-docked, .environment-information-overlay)

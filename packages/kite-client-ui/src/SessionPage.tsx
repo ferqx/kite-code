@@ -28,7 +28,7 @@ const SESSION_HEADER_LABEL_LIMIT = 10;
 const NAVIGATION_MIN_WIDTH = 200;
 const NAVIGATION_MAX_WIDTH = 420;
 const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
-const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 644 + 28;
+const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 344 + 28;
 
 function savedNavigationWidth(): number {
   try {
