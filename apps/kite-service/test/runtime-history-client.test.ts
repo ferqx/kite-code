@@ -82,6 +82,98 @@ function dispatchIntent(invocationId: string, childInvocationId: string): Runtim
 }
 
 describe('Kite Runtime History Client adapter', () => {
+  test('reuses an append-only fixed prefix and rescans rewrites or inserts inside it', async () => {
+    const events = new Map<number, string>([[1, 'original']]);
+    let generation = 1;
+    let reads = 0;
+    let failProof = false;
+    const history = createKiteRuntimeObserverHistoryClient(
+      () => ({
+        getSession: () => ({
+          sessionId: 'appending',
+          name: 'Appending',
+          updatedAt: 1,
+          lastSequence: Math.max(...events.keys()),
+          historyGeneration: generation,
+        }),
+        listSessions: () => ({ entries: [], hasMore: false }),
+        listEvents: (request) => {
+          reads++;
+          return {
+            entries: [...events]
+              .filter(
+                ([sequence]) =>
+                  sequence > (request.afterSequence ?? 0) &&
+                  sequence < (request.beforeSequence ?? Number.POSITIVE_INFINITY),
+              )
+              .sort(([a], [b]) => a - b)
+              .map(([sequence, content]) => ({
+                sessionId: 'appending',
+                sequence,
+                eventId: `event-${sequence}`,
+                createdAt: sequence,
+                event: {
+                  type: 'user.message_appended' as const,
+                  messageId: `message-${sequence}`,
+                  content,
+                },
+              })),
+            hasMore: false,
+            observedLastSequence: Math.max(...events.keys()),
+          };
+        },
+        close: () => undefined,
+      }),
+      undefined,
+      {
+        maxSourceBytes: 100_000,
+        maxProjectedBytes: 100_000,
+        maxRecords: 100,
+        fingerprintEventRows: (_sessionId, throughSequence) => {
+          if (failProof) throw new Error('fingerprint unavailable');
+          return JSON.stringify([...events].filter(([sequence]) => sequence <= throughSequence));
+        },
+      },
+    );
+    const first = await history.loadSession('appending');
+    events.set(3, 'tail');
+    generation++;
+    const reused = await history.loadSession('appending', 1);
+    expect(reused.snapshotDigest).toBe(first.snapshotDigest);
+    expect(reads).toBe(1);
+
+    events.set(1, 'rewritten');
+    generation++;
+    const changed = await history.loadSession('appending', 1);
+    expect(changed.snapshotDigest).not.toBe(first.snapshotDigest);
+    expect(reads).toBe(2);
+
+    const pinned = await history.loadSession('appending', 3);
+    events.set(2, 'inserted in prefix');
+    generation++;
+    await history.loadSession('appending', 3);
+    expect(reads).toBe(4);
+    expect((await history.loadSession('appending', 3)).snapshotDigest).not.toBe(
+      pinned.snapshotDigest,
+    );
+    const readCount = reads;
+    events.set(1, 'replacement after generation reset');
+    generation = 2;
+    const replaced = await history.loadSession('appending', 3);
+    expect(reads).toBe(readCount + 1);
+    expect(replaced.events[0]).toMatchObject({
+      type: 'user.message',
+      text: 'replacement after generation reset',
+    });
+    events.set(4, 'new tail');
+    generation++;
+    failProof = true;
+    const readsBeforeProofFailure = reads;
+    const afterProofFailure = await history.loadSession('appending', 3);
+    expect(afterProofFailure.snapshotDigest).toBe(replaced.snapshotDigest);
+    expect(reads).toBe(readsBeforeProofFailure + 1);
+  });
+
   test('reuses fresh root and child projections, including pinned first loads after a same-sequence rewrite', async () => {
     const content = new Map([
       ['root', 'root one'],
@@ -196,6 +288,8 @@ describe('Kite Runtime History Client adapter', () => {
     expect(observedBeforeSequences).toEqual([3]);
     expect(transcript.session.lastSequence).toBe(2);
     expect(transcript.records.map((record) => record.sequence)).toEqual([1, 2]);
+    await history.loadSession('appending', 2);
+    expect(observedBeforeSequences).toEqual([3, 3]);
   });
 
   test('reuses fixed root and child transcripts across pages but checks child lineage on every read', async () => {
@@ -208,12 +302,19 @@ describe('Kite Runtime History Client adapter', () => {
       }),
     );
     let parent = 'parent';
+    let historyGeneration = 1;
     let rootReads = 0;
     let childReads = 0;
     const reader = (sessionId: string, child: boolean): RuntimeLogQueryPort<RuntimeEvent> => ({
       getSession: (requested) =>
         requested === sessionId && (!child || parent === 'parent')
-          ? { sessionId, name: sessionId, updatedAt: 1, lastSequence: events.length }
+          ? {
+              sessionId,
+              name: sessionId,
+              updatedAt: 1,
+              lastSequence: events.length,
+              historyGeneration,
+            }
           : null,
       listSessions: () => ({ entries: [], hasMore: false }),
       listEvents: (request) => {
@@ -255,6 +356,7 @@ describe('Kite Runtime History Client adapter', () => {
     );
     expect(rootReads).toBe(3);
     events[0] = { type: 'user.message_appended', messageId: 'replacement', content: 'revised' };
+    historyGeneration++;
     const revised = await history.loadSession('root');
     expect(revised.snapshotDigest).not.toBe(root.snapshotDigest);
     expect(revised.events[0]).toMatchObject({ type: 'user.message', text: 'revised' });
@@ -291,6 +393,7 @@ describe('Kite Runtime History Client adapter', () => {
         content: largeContent,
       };
     }
+    historyGeneration++;
     await history.loadSession('root');
     const readsAfterOversizedFirstPage = rootReads;
     const largeContinuation = await history.loadSession('root', 401);

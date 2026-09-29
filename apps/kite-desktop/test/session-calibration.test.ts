@@ -53,6 +53,7 @@ async function fixture(
     }),
   );
   let generation = 0;
+  let detachRequests = 0;
   let failNextRuntimeOpen = false;
   let nextRuntimeOpenGate: ReturnType<typeof gate> | undefined;
   let historyRequests = 0;
@@ -106,12 +107,11 @@ async function fixture(
     if (command === 'runtime_status') return { workspace, connectionId: generation || null } as T;
     if (command === 'activate_workspace' || command === 'pick_workspace') return workspace as T;
     if (command === 'list_projects') return [{ path: workspace, lastOpenedAt: 1 }] as T;
-    if (
-      command === 'check_workspace' ||
-      command === 'runtime_detach' ||
-      command === 'remove_workspace'
-    )
+    if (command === 'runtime_detach') {
+      detachRequests++;
       return undefined as T;
+    }
+    if (command === 'check_workspace' || command === 'remove_workspace') return undefined as T;
     if (command === 'query_workspace_branch')
       return {
         workspace,
@@ -625,6 +625,9 @@ async function fixture(
     },
     get connectionGeneration() {
       return generation;
+    },
+    get detachRequests() {
+      return detachRequests;
     },
     failOneReconnect() {
       failNextRuntimeOpen = true;
@@ -2240,7 +2243,7 @@ test.each([
   }
 }, 20_000);
 
-test('a subscription that never becomes ready times out without hiding first-read history', async () => {
+test('a subscription readiness timeout preserves history and the shared connection', async () => {
   const f = await fixture([{ message: { content: 'Readable during live outage.' } }]);
   try {
     await f.client.selectSession(f.a);
@@ -2253,6 +2256,8 @@ test('a subscription that never becomes ready times out without hiding first-rea
     await f.client.selectSession(f.b);
     await f.client.disconnect();
     await f.client.connect();
+    const connectionGeneration = f.connectionGeneration;
+    const detachRequests = f.detachRequests;
     const held = f.holdSubscription();
     const loading = f.client.selectSession(f.a);
     const timeout = expect(loading).rejects.toThrow('会话加载超时');
@@ -2263,15 +2268,73 @@ test('a subscription that never becomes ready times out without hiding first-rea
     ).toBe(true);
     await timeout;
     expect(f.client.getSnapshot()).toMatchObject({
+      connected: true,
       hasLoadedHistory: true,
       loadingSession: false,
       ready: false,
     });
+    expect(f.detachRequests).toBe(detachRequests);
     held.release();
+    await f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().ready).toBe(true);
     await f.client.selectSession(f.a);
     expect(f.client.getSnapshot().ready).toBe(true);
+    expect(f.connectionGeneration).toBe(connectionGeneration);
+    expect(f.detachRequests).toBe(detachRequests);
     expect(f.model.getRequestCount()).toBe(1);
   } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('a History timeout stays local while another Session Run continues', async () => {
+  const run = gate();
+  const f = await fixture([
+    {
+      response: async () => {
+        run.arrive();
+        await run.released;
+        return { message: { content: 'Run survived another Session History timeout.' } };
+      },
+    },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Keep running while I read another Session.');
+    await run.arrived;
+    const connectionGeneration = f.connectionGeneration;
+    const detachRequests = f.detachRequests;
+    const held = f.holdHistory();
+    const loading = f.client.selectSession(f.b);
+    const timeout = expect(loading).rejects.toThrow('会话加载超时');
+    await held.arrived;
+    await timeout;
+    expect(f.client.getSnapshot()).toMatchObject({
+      connected: true,
+      selected: f.b,
+      loadingSession: false,
+      ready: false,
+    });
+    expect(f.detachRequests).toBe(detachRequests);
+    held.release();
+    await f.client.selectSession(f.a);
+    expect(f.client.getSnapshot()).toMatchObject({ selected: f.a, ready: true });
+    expect(f.client.getSnapshot().projection?.currentRun?.status).toBe('running');
+    expect(f.connectionGeneration).toBe(connectionGeneration);
+    expect(f.cancelCommands).toBe(0);
+    run.release();
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(
+      f.client
+        .getSnapshot()
+        .messages.some(
+          (message) =>
+            message.text === 'Run survived another Session History timeout.' && message.settled,
+        ),
+    ).toBe(true);
+    expect(f.model.getRequestCount()).toBe(1);
+  } finally {
+    run.release();
     await f.close();
   }
 }, 30_000);

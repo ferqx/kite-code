@@ -696,8 +696,12 @@ export class RuntimeClient implements AsyncDisposable {
   async requestApp(
     method: RuntimeProtocolAppMethod,
     request: Readonly<Record<string, unknown>>,
+    options?: { readonly timeoutMs?: number },
   ): Promise<Readonly<Record<string, unknown>>> {
-    const result = await this.#request(method, { request });
+    const timeoutMs = options?.timeoutMs ?? this.#requestTimeoutMs;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)
+      throw new TypeError('App request timeout must be a positive bounded integer.');
+    const result = await this.#request(method, { request }, undefined, undefined, timeoutMs);
     if (
       !('method' in result) ||
       result.method !== method ||
@@ -1147,9 +1151,10 @@ export class RuntimeClient implements AsyncDisposable {
     params: unknown,
     subscriptionState?: SubscriptionState,
     signal?: AbortSignal,
+    timeoutMs = this.#requestTimeoutMs,
   ): Promise<RuntimeProtocolResult> {
     signal?.throwIfAborted();
-    const deadline = Date.now() + this.#requestTimeoutMs;
+    const deadline = Date.now() + timeoutMs;
     if (!this.#connection) {
       let connectTimer: ReturnType<typeof setTimeout> | undefined;
       let onConnectAbort: (() => void) | undefined;

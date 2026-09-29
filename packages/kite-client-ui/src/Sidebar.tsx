@@ -118,7 +118,7 @@ function Workspace({
                 size="icon-sm"
                 aria-label={`移除 ${workspace.label}`}
                 title="移除空间"
-                disabled={props.mutationBusy}
+                disabled={props.busy || props.mutationBusy}
                 onClick={() => props.onRemove?.(workspace.id)}
               >
                 <HugeiconsIcon icon={Delete02Icon} />

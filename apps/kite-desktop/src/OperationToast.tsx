@@ -4,12 +4,14 @@ import { Toaster, toast } from 'sonner';
 /** Operation feedback stays inside the conversation and never takes focus. */
 export function OperationToast(props: {
   message?: string;
+  pendingMessage?: string;
   recovery: boolean;
   busy: boolean;
   onDismiss: () => void;
   onRecover: () => void;
 }) {
   const id = useId();
+  const pendingId = useId();
   const callbacks = useRef(props);
   callbacks.current = props;
   useEffect(() => {
@@ -36,6 +38,18 @@ export function OperationToast(props: {
       toast.dismiss(id);
     };
   }, [id, props.message, props.recovery, props.busy]);
+  useEffect(() => {
+    if (!props.pendingMessage) return;
+    toast.loading('正在移除空间', {
+      id: pendingId,
+      toasterId: id,
+      description: props.pendingMessage,
+      duration: Number.POSITIVE_INFINITY,
+    });
+    return () => {
+      toast.dismiss(pendingId);
+    };
+  }, [id, pendingId, props.pendingMessage]);
   return (
     <div className="operation-toast-anchor">
       <Toaster

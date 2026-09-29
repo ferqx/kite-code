@@ -8,7 +8,7 @@
 
 ## 唯一 Host/Store composition
 
-`app/workspace/remove` 由当前 Service/Store owner 执行。请求的规范路径与持久 digest、projectId、workspaceId 重新交叉核对；删除门禁在 Store writer 中与新 Session 插入互斥，同空间活跃删除不能重入。Service 用准确 Run 身份提交取消，等待本地执行收尾，再通过 Host 的 `delete_session` 删除顶层及其内部子会话树。被删 Session 的订阅关闭，迟到通知被丢弃；HTTP 服务商请求若已发出，不把远端停止确认作为本地删除条件。顶层历史归零后，Service 将持久门禁标记为已完成；客户端再用 token 调用 `finalize` 释放门禁，然后移除本机项目登记。`finalize` 不接受仍在运行或 token 不符的删除，失败时项目登记保留供重试。旧 Service 退出后，新 owner 可接管未完成删除；已完成的门禁可由新 token 接续收尾。回归见 [App Server process](../test/isolated/exclusive/app-server-process.test.ts)、[Store 原子边界](../../../packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-storage.test.ts)与[Desktop navigation](../../kite-desktop/test/navigation.test.ts)。
+`app/workspace/remove` 由 Service owner 执行批量数据删除。服务端取消本机真实运行的会话，并继续管理异步资源收尾；数据删除不等待 cleanup 确认，不读取或恢复业务快照。Store 在一次事务中删除目标空间的根及子会话、关联数据和 authority，统一清理无保留引用的附件，保留 tombstone 拒绝迟到写入。单会话 `delete_session` 使用相同数据路径，并保存绑定当前元数据 revision 的命令回执。删除及其回执重放的空间归属由会话元数据或删除记录核对，不加载历史快照。旧 Run／工具／恢复状态及执行租约不构成删除条件。客户端只发一次移除请求；不再逐条轮询或要求独立收尾。旧 `finalize` 消息仅作兼容应答，目标空间的旧删除标记随数据删除清除。删除完成后关闭相关订阅，客户端移除本机项目登记。
 
 `createKiteServiceRuntimeComposition` 接受一个显式 `checkpointPath`，组合一个 SQLite storage owner、Runtime Host、
 Builtin execution、Runtime Server、raw event/history projector、Runtime Application与operation gate。Service executable的default App Server

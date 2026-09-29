@@ -120,6 +120,27 @@ test('bounded child-process pages retain root and child scope and detect same-se
     });
     expect(second.records).toHaveLength(8);
     expect(second.nextCursor).toBeUndefined();
+    insertEvent.run(
+      'parent',
+      'parent-521',
+      521,
+      SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+      JSON.stringify({
+        type: 'user.message_appended',
+        messageId: 'parent-521',
+        content: 'appended after first-page watermark',
+      }),
+      521,
+    );
+    const appendedContinuation = await pool.loadSessionPage({
+      sessionId: 'parent',
+      throughSequence: first.session.lastSequence,
+      afterSequence: first.nextCursor,
+      snapshotDigest: first.snapshotDigest,
+    });
+    expect(appendedContinuation.records).toEqual(second.records);
+    expect(appendedContinuation.snapshotDigest).toBe(first.snapshotDigest);
+    expect((await pool.loadSessionPage({ sessionId: 'parent' })).session.lastSequence).toBe(521);
     await expect(pool.loadSessionPage({ sessionId: 'child' })).rejects.toMatchObject({
       code: 'session_not_found',
     });

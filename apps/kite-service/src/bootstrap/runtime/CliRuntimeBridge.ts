@@ -273,7 +273,7 @@ export function readBackgroundExecutionSnapshot(input: {
   });
 }
 
-/** Quiesce a completed, configuration-independent Session before its fenced delete. */
+/** Stop process-local execution after data deletion without loading historical State. */
 export async function shutdownSettledSessionWithoutConfig(input: {
   readonly sessionId: string;
   readonly workspace: string;
@@ -283,12 +283,6 @@ export async function shutdownSettledSessionWithoutConfig(input: {
   ) => RuntimeTurnInput['modelInvocationRuntime'];
   readonly runtimeSessionCoordinator: RuntimeSessionCoordinatorAccess;
 }): Promise<void> {
-  const snapshot = readBackgroundExecutionSnapshot({
-    ...input,
-    sessionRevision: 0,
-  });
-  if (snapshot.executions.some((entry) => !entry.cleanupConfirmed))
-    throw new Error('Session background cleanup is not confirmed.');
   const modelRuntime = input.modelInvocationRuntimeFactory(input.workspace);
   await Promise.all([
     managedShellRuntime.disposeOwner(
@@ -305,9 +299,6 @@ export async function shutdownSettledSessionWithoutConfig(input: {
       : undefined,
   ]);
   await input.runtimeSessionCoordinator.release(input.sessionId);
-  const settled = readBackgroundExecutionSnapshot({ ...input, sessionRevision: 0 });
-  if (settled.executions.some((entry) => !entry.cleanupConfirmed))
-    throw new Error('Session background cleanup changed during deletion.');
 }
 
 class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {

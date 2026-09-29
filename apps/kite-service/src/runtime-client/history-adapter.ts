@@ -324,9 +324,16 @@ const HISTORY_CACHE_TTL_MS = 30_000;
 type CachedHistory = Readonly<{
   transcript: RuntimeHistorySessionTranscript;
   historyGeneration?: number;
+  rawPrefixDigest?: string;
   bytes: number;
   expiresAt: number;
 }>;
+
+type HistoryPrefixFingerprinter = (
+  sessionId: string,
+  throughSequence: number,
+  parentSessionId?: string,
+) => string | null;
 
 class HistoryTranscriptCache {
   readonly #entries = new Map<string, CachedHistory>();
@@ -337,18 +344,46 @@ class HistoryTranscriptCache {
     this.#maxBytes = maxBytes;
   }
 
-  get(key: string, historyGeneration?: number): RuntimeHistorySessionTranscript | undefined {
+  get(
+    key: string,
+    historyGeneration?: number,
+    fingerprintPrefix?: () => string | null,
+  ): RuntimeHistorySessionTranscript | undefined {
     const entry = this.#entries.get(key);
     if (!entry) return undefined;
+    if (entry.expiresAt <= Date.now()) {
+      this.#delete(key);
+      return undefined;
+    }
     if (
-      entry.expiresAt <= Date.now() ||
-      (historyGeneration !== undefined && entry.historyGeneration !== historyGeneration)
+      !Number.isSafeInteger(historyGeneration) ||
+      !Number.isSafeInteger(entry.historyGeneration) ||
+      historyGeneration! < 0 ||
+      entry.historyGeneration! < 0
     ) {
       this.#delete(key);
       return undefined;
     }
+    let retainedEntry = entry;
+    if (entry.historyGeneration !== historyGeneration) {
+      if (!fingerprintPrefix || !entry.rawPrefixDigest) {
+        this.#delete(key);
+        return undefined;
+      }
+      let currentDigest: string | null = null;
+      try {
+        currentDigest = fingerprintPrefix();
+      } catch {
+        // A failed proof falls back to the ordinary bounded journal read.
+      }
+      if (currentDigest !== entry.rawPrefixDigest) {
+        this.#delete(key);
+        return undefined;
+      }
+      retainedEntry = { ...entry, historyGeneration };
+    }
     this.#entries.delete(key);
-    this.#entries.set(key, entry);
+    this.#entries.set(key, retainedEntry);
     return entry.transcript;
   }
 
@@ -357,6 +392,7 @@ class HistoryTranscriptCache {
     transcript: RuntimeHistorySessionTranscript,
     retain: boolean,
     historyGeneration?: number,
+    rawPrefixDigest?: string,
   ): RuntimeHistorySessionTranscript {
     // The JSON byte count bounds retained payload size, not actual JS heap use.
     // Replace the old snapshot even when the new one is too large to retain.
@@ -375,6 +411,7 @@ class HistoryTranscriptCache {
     this.#entries.set(key, {
       transcript: withDigest,
       historyGeneration,
+      rawPrefixDigest,
       bytes,
       expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
     });
@@ -577,6 +614,7 @@ function createKiteRuntimeHistoryClientWithCache(
     maxProjectedBytes: number;
     maxRecords: number;
     maxCacheBytes?: number;
+    fingerprintEventRows?: HistoryPrefixFingerprinter;
   }>,
 ): RuntimeHistoryClient {
   return Object.freeze({
@@ -643,14 +681,26 @@ function createKiteRuntimeHistoryClientWithCache(
       if (throughSequence !== undefined && !compatibility) {
         // A pinned load can also be a new request, not only a page continuation.
         // Check the durable generation so same-sequence rewrites are visible.
-        const cached = cache.get(cacheKey, current?.historyGeneration);
+        const cached = cache.get(
+          cacheKey,
+          current?.historyGeneration,
+          limits?.fingerprintEventRows
+            ? () => limits.fingerprintEventRows!(sessionId, session.lastSequence, parentScope)
+            : undefined,
+        );
         if (cached) return { ...cached, session };
       } else if (
         throughSequence === undefined &&
         !compatibility &&
         current?.historyGeneration !== undefined
       ) {
-        const cached = cache.get(cacheKey, current.historyGeneration);
+        const cached = cache.get(
+          cacheKey,
+          current.historyGeneration,
+          limits?.fingerprintEventRows
+            ? () => limits.fingerprintEventRows!(sessionId, session.lastSequence, parentScope)
+            : undefined,
+        );
         if (cached) return { ...cached, session };
       }
       const records = withLogs(logs, (reader) => {
@@ -810,7 +860,27 @@ function createKiteRuntimeHistoryClientWithCache(
             ? 'pending_interaction'
             : 'normal',
       };
-      return cache.set(cacheKey, transcript, !compatibility, current?.historyGeneration);
+      let rawPrefixDigest: string | undefined;
+      if (
+        !compatibility &&
+        limits?.fingerprintEventRows &&
+        Number.isSafeInteger(current?.historyGeneration) &&
+        current!.historyGeneration! >= 0
+      ) {
+        try {
+          rawPrefixDigest =
+            limits.fingerprintEventRows(sessionId, session.lastSequence, parentScope) ?? undefined;
+        } catch {
+          // A failed proof must not fail an otherwise valid journal read.
+        }
+      }
+      return cache.set(
+        cacheKey,
+        transcript,
+        !compatibility && (!limits?.fingerprintEventRows || rawPrefixDigest !== undefined),
+        current?.historyGeneration,
+        rawPrefixDigest,
+      );
     },
     ...(openChildLogs
       ? {
@@ -910,6 +980,7 @@ export function createKiteRuntimeObserverHistoryClient(
     maxProjectedBytes: number;
     maxRecords: number;
     maxCacheBytes?: number;
+    fingerprintEventRows?: HistoryPrefixFingerprinter;
   }>,
 ): RuntimeHistoryClient {
   return createKiteRuntimeHistoryClientWithCache(

@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1404,6 +1405,11 @@ test('execution lease loss aborts all three real subagent model connections and 
     expect(run).toMatchObject({ status: 'ok', run: { status: 'unknown' } });
     expect(storageOwner.recovery.inspect(sessionId).authority.cleanupConfirmed).toBe(false);
     const lost = storageOwner.loadCurrentSnapshot(sessionId)!;
+    expect(
+      Object.values(lost.capabilities.invocations).filter(
+        (item) => item.status === 'running' && item.capabilityId === 'builtin:task',
+      ),
+    ).toHaveLength(3);
     const recoveryBeforePolicy = storageOwner.recovery.inspect(sessionId);
     const policyCommand = {
       schema: RUNTIME_COMMAND_SCHEMA_,
@@ -1439,6 +1445,42 @@ test('execution lease loss aborts all three real subagent model connections and 
       .flatMap(({ event }) => (event.type === 'subagent.started' ? [event.subagent] : []));
     expect(childStarts.filter((child) => child.status === 'creating')).toHaveLength(3);
     expect(childStarts.filter((child) => child.status === 'running')).toHaveLength(3);
+
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    const restartedStorage = await createKiteSessionAppServerStorageComposition({
+      databasePath: join(root, 'kite-session.sqlite'),
+      hostInstanceId: 'lease-model-deletion-owner',
+    });
+    const restartedOwner = createKiteMultiWorkspaceRuntimeServer({
+      checkpointPath: join(root, 'kite-session.sqlite'),
+      storageOwner: restartedStorage,
+      workspaces: [runtimeInput(workspace, `http://127.0.0.1:${model.port}`, 'pending-model')],
+    });
+    const restartedRuntime = client(restartedOwner, admission(workspace), 'lease-model-deletion');
+    try {
+      const stored = await restartedRuntime.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_session_projection',
+        sessionId,
+      });
+      if (stored.status !== 'ok' || !stored.session)
+        throw new Error('Historical Session projection is unavailable.');
+      expect(
+        await restartedRuntime.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'delete_session',
+          commandId: 'delete-recovered-unknown-tree',
+          sessionId,
+          expectedRevision: stored.session.revision,
+        }),
+      ).toMatchObject({ status: 'applied' });
+      expect(restartedStorage.loadCurrentSnapshot(sessionId)).toBeNull();
+      expect(requests).toBe(4);
+    } finally {
+      await restartedRuntime.close();
+      await restartedOwner[Symbol.asyncDispose]();
+    }
   } finally {
     for (const stream of responseStreams) {
       try {
@@ -1453,6 +1495,55 @@ test('execution lease loss aborts all three real subagent model connections and 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Session data deletion uses metadata with a corrupt snapshot and replays its receipt', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-session-data-delete-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const databasePath = join(root, 'kite-session.sqlite');
+  const model = createMockModelServer();
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
+    databasePath,
+    hostInstanceId: 'data-delete-owner',
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: databasePath,
+    storageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'data-delete-model')],
+  });
+  const runtime = client(owner, admission(workspace), 'data-delete-client');
+  const sessionId = 'corrupt-data-delete-session';
+  const db = new Database(databasePath);
+  try {
+    await createSession(runtime, sessionId, workspace);
+    db.query(
+      'UPDATE runtime_snapshots SET state_json = ?, state_checksum = ? WHERE session_id = ?',
+    ).run('{}', 'corrupt', sessionId);
+    const command = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      type: 'delete_session' as const,
+      commandId: 'corrupt-data-delete-command',
+      sessionId,
+      expectedRevision: 0,
+    };
+    expect(await runtime.command(command)).toMatchObject({ status: 'applied', sessionId });
+    expect(await runtime.command(command)).toMatchObject({
+      status: 'idempotent_replay',
+      sessionId,
+    });
+    expect(
+      db.query('SELECT session_id FROM runtime_sessions WHERE session_id = ?').get(sessionId),
+    ).toBeNull();
+    expect(model.getRequestCount()).toBe(0);
+  } finally {
+    db.close();
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    storageOwner.disposeStorage();
+    model.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test('completed idle Sessions survive lease expiry and acquire a fresh generation on continuation', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-idle-authority-'));

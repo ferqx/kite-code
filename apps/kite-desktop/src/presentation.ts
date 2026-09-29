@@ -25,6 +25,88 @@ export function showRunRecovery(
 
 export type { Message } from '@kite-ai/kite-client-ui';
 
+/** Mutable only while replaying one unpublished historical transcript. */
+export class HistoryMessageBuilder {
+  readonly messages: Message[] = [];
+  readonly #byId = new Map<string, number>();
+  readonly #byTurn = new Map<string, Set<number>>();
+  readonly #unscopedThinking = new Set<number>();
+  readonly #approvalInteractions = new Map<string, number>();
+
+  index(id: string): number {
+    return this.#byId.get(id) ?? -1;
+  }
+
+  find(id: string): Message | undefined {
+    const index = this.index(id);
+    return index < 0 ? undefined : this.messages[index];
+  }
+
+  append(message: Message): void {
+    const index = this.messages.length;
+    this.messages.push(message);
+    this.#index(index, message);
+  }
+
+  replace(index: number, message: Message): void {
+    this.#unindex(index, this.messages[index]!);
+    this.messages[index] = message;
+    this.#index(index, message);
+  }
+
+  remove(id: string): void {
+    const index = this.index(id);
+    if (index < 0) return;
+    this.messages.splice(index, 1);
+    this.#byId.clear();
+    this.#byTurn.clear();
+    this.#unscopedThinking.clear();
+    this.#approvalInteractions.clear();
+    this.messages.forEach((message, position) => {
+      this.#index(position, message);
+    });
+  }
+
+  hasApprovalInteraction(id: string): boolean {
+    return this.#approvalInteractions.has(id);
+  }
+
+  terminalIndices(turnId: string): number[] {
+    return [...(this.#byTurn.get(turnId) ?? []), ...this.#unscopedThinking].sort((a, b) => a - b);
+  }
+
+  #index(index: number, message: Message): void {
+    this.#byId.set(message.id, index);
+    if (message.turnId) {
+      let indices = this.#byTurn.get(message.turnId);
+      if (!indices) {
+        indices = new Set();
+        this.#byTurn.set(message.turnId, indices);
+      }
+      indices.add(index);
+    } else if (message.role === 'thinking') this.#unscopedThinking.add(index);
+    if (message.approval?.interactionId) {
+      const id = message.approval.interactionId;
+      this.#approvalInteractions.set(id, (this.#approvalInteractions.get(id) ?? 0) + 1);
+    }
+  }
+
+  #unindex(index: number, message: Message): void {
+    this.#byId.delete(message.id);
+    if (message.turnId) {
+      const indices = this.#byTurn.get(message.turnId);
+      indices?.delete(index);
+      if (indices?.size === 0) this.#byTurn.delete(message.turnId);
+    } else if (message.role === 'thinking') this.#unscopedThinking.delete(index);
+    if (message.approval?.interactionId) {
+      const id = message.approval.interactionId;
+      const remaining = (this.#approvalInteractions.get(id) ?? 1) - 1;
+      if (remaining) this.#approvalInteractions.set(id, remaining);
+      else this.#approvalInteractions.delete(id);
+    }
+  }
+}
+
 /** Service text deltas are cumulative; durable model output wins over late deltas. */
 export function projectEvent(
   messages: readonly Message[],
@@ -38,6 +120,36 @@ export function projectEventWithIdentity(
   event: RuntimeClientEvent,
   identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
 ): readonly Message[] {
+  return projectEventCore(messages, event, identity);
+}
+
+export function projectHistoricalEvent(
+  builder: HistoryMessageBuilder,
+  event: RuntimeClientEvent,
+  identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
+): void {
+  projectEventCore(builder.messages, event, identity, builder);
+}
+
+function projectEventCore(
+  messages: readonly Message[],
+  event: RuntimeClientEvent,
+  identity: Readonly<{ turnId?: string; observedAt?: number }>,
+  builder?: HistoryMessageBuilder,
+): readonly Message[] {
+  const find = (id: string) =>
+    builder ? builder.find(id) : messages.find((message) => message.id === id);
+  const replaceExact = (id: string, message: Message): readonly Message[] => {
+    const index = builder?.index(id) ?? messages.findIndex((item) => item.id === id);
+    if (builder) {
+      if (index < 0) builder.append(message);
+      else builder.replace(index, message);
+      return messages;
+    }
+    return index < 0
+      ? [...messages, message]
+      : messages.map((item) => (item.id === id ? message : item));
+  };
   if (event.type === 'agent.mail_status') {
     const entries =
       event.status === 'result_settled'
@@ -48,7 +160,9 @@ export function projectEventWithIdentity(
           }));
     let next = messages;
     for (const entry of entries) {
-      const previous = next.find((message) => message.id === entry.id);
+      const previous = builder
+        ? builder.find(entry.id)
+        : next.find((message) => message.id === entry.id);
       if (previous?.status === 'running' && event.status === 'accepted') continue;
       const phase =
         event.status === 'accepted'
@@ -71,33 +185,45 @@ export function projectEventWithIdentity(
                 : 'failed',
         settled: event.status === 'result_settled',
       };
-      next = previous
-        ? next.map((item) => (item.id === entry.id ? message : item))
-        : [...next, message];
+      next = builder
+        ? replaceExact(entry.id, message)
+        : previous
+          ? next.map((item) => (item.id === entry.id ? message : item))
+          : [...next, message];
     }
     return next;
   }
   if (event.type === 'model.response_superseded') {
+    if (builder) {
+      builder.remove(`model:${event.requestId}`);
+      return messages;
+    }
     return messages.filter((message) => message.id !== `model:${event.requestId}`);
   }
   if (event.type === 'turn.terminal' || event.type === 'run.terminal') {
     const turnId = event.type === 'turn.terminal' ? event.turnId : (identity.turnId ?? event.runId);
+    const indices = builder
+      ? builder.terminalIndices(turnId)
+      : Array.from({ length: messages.length }, (_, index) => index);
     let finalReplyIndex = -1;
     if (event.type === 'turn.terminal' && event.status === 'completed') {
-      for (let index = 0; index < messages.length; index++) {
+      for (const index of indices) {
         const message = messages[index]!;
         if (message.role === 'assistant' && message.turnId === event.turnId && message.text)
           finalReplyIndex = index;
       }
       if (
         finalReplyIndex >= 0 &&
-        messages
-          .slice(finalReplyIndex + 1)
-          .some((message) => message.role === 'tool' && message.turnId === event.turnId)
+        indices.some((index) => {
+          const message = messages[index]!;
+          return (
+            index > finalReplyIndex && message.role === 'tool' && message.turnId === event.turnId
+          );
+        })
       )
         finalReplyIndex = -1;
     }
-    const settledMessages = messages.map((message, index) => {
+    const settle = (message: Message, index: number): Message => {
       if (
         message.role === 'thinking' &&
         !message.settled &&
@@ -121,10 +247,20 @@ export function projectEventWithIdentity(
           finalReply: event.status === 'completed' && index === finalReplyIndex,
         };
       return message;
-    });
+    };
+    const settledMessages = builder ? messages : messages.map(settle);
+    if (builder) {
+      for (const index of indices) {
+        const message = messages[index]!;
+        const settled = settle(message, index);
+        if (settled !== message) builder.replace(index, settled);
+      }
+    }
     if (event.status !== 'failed') return settledMessages;
     const id = `failure:${turnId}`;
-    const previous = settledMessages.find((message) => message.id === id);
+    const previous = builder
+      ? builder.find(id)
+      : settledMessages.find((message) => message.id === id);
     const reason = event.type === 'run.terminal' ? event.outcome?.reasonCode : undefined;
     const reasonText: Partial<Record<string, string>> = {
       provider_auth_required: '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。',
@@ -144,26 +280,28 @@ export function projectEventWithIdentity(
       settled: true,
     };
     if (previous && (!specificReason || previous.text === notice.text)) return settledMessages;
-    return previous
-      ? settledMessages.map((message) => (message.id === id ? notice : message))
-      : [...settledMessages, notice];
+    return builder
+      ? replaceExact(id, notice)
+      : previous
+        ? settledMessages.map((message) => (message.id === id ? notice : message))
+        : [...settledMessages, notice];
   }
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;
-    const previous = messages.find((message) => message.id === id);
+    const previous = find(id);
     const change: Message = {
       ...(previous ?? { id, role: 'tool', text: event.summary ?? '文件已变更', settled: false }),
       ...(identity.turnId ? { turnId: identity.turnId } : {}),
       changeConfirmed: true,
       ...(event.path ? { changedFile: event.path } : {}),
     };
-    return previous
-      ? messages.map((message) => (message.id === id ? change : message))
-      : [...messages, change];
+    return replaceExact(id, change);
   }
   if (
     event.type === 'interaction.settled' &&
-    messages.some((message) => message.approval?.interactionId === event.interactionId)
+    (builder
+      ? builder.hasApprovalInteraction(event.interactionId)
+      : messages.some((message) => message.approval?.interactionId === event.interactionId))
   )
     return messages;
   // Authorization is attached to its exact tool owner and survives execution terminal events.
@@ -186,7 +324,7 @@ export function projectEventWithIdentity(
     const toolId = event.type === 'tool.review' ? event.toolId : owner?.toolCallId;
     if (toolId && (!owner || owner.kind === 'root_tool')) {
       const id = `tool:${toolId}`;
-      const previous = messages.find((message) => message.id === id);
+      const previous = find(id);
       if (
         previous?.settled &&
         (approvalInteraction || (event.type === 'tool.review' && event.status === 'reviewing'))
@@ -239,9 +377,7 @@ export function projectEventWithIdentity(
             }
           : {}),
       };
-      return previous
-        ? messages.map((item) => (item.id === id ? message : item))
-        : [...messages, message];
+      return replaceExact(id, message);
     }
   }
   let next: Message;
@@ -276,9 +412,7 @@ export function projectEventWithIdentity(
       break;
     }
     case 'reasoning.activity': {
-      const previous = messages.find(
-        (message) => message.id === `thinking:${event.requestId}:${event.segmentId}`,
-      );
+      const previous = find(`thinking:${event.requestId}:${event.segmentId}`);
       const startedAt =
         previous?.thinkingStartedAt ??
         (event.state === 'streaming' ? identity.observedAt : undefined);
@@ -335,7 +469,7 @@ export function projectEventWithIdentity(
       break;
     case 'subagent.step': {
       const id = `subagent:${event.subagentId}`;
-      const previous = messages.find((message) => message.id === id);
+      const previous = find(id);
       if (previous?.settled) return messages;
       const steps = previous?.steps ?? [];
       const existing = steps.find((item) => item.id === event.stepId);
@@ -365,7 +499,7 @@ export function projectEventWithIdentity(
     }
     case 'subagent.completed':
     case 'subagent.failed': {
-      const previous = messages.find((message) => message.id === `subagent:${event.subagentId}`);
+      const previous = find(`subagent:${event.subagentId}`);
       next = {
         id: `subagent:${event.subagentId}`,
         role: 'subagent',
@@ -423,7 +557,7 @@ export function projectEventWithIdentity(
     case 'plan.approved':
     case 'interaction.settled': {
       const id = `interaction:${event.interactionId}`;
-      const previous = messages.find((message) => message.id === id);
+      const previous = find(id);
       if (
         event.type === 'interaction.settled' &&
         event.outcome === 'completed' &&
@@ -564,7 +698,7 @@ export function projectEventWithIdentity(
       };
       break;
     case 'tool.progress': {
-      const existing = messages.find((message) => message.id === `tool:${event.toolId}`);
+      const existing = find(`tool:${event.toolId}`);
       const toolProgress = {
         stdout: event.stream === 'stdout' ? event.summary : existing?.toolProgress?.stdout,
         stderr: event.stream === 'stderr' ? event.summary : existing?.toolProgress?.stderr,
@@ -626,13 +760,23 @@ export function projectEventWithIdentity(
       return messages;
   }
   if (identity.turnId) next = { ...next, turnId: identity.turnId };
-  const index = messages.findIndex((message) => message.id === next.id);
-  if (index < 0) return [...messages, next];
+  const index = builder?.index(next.id) ?? messages.findIndex((message) => message.id === next.id);
+  if (index < 0) {
+    if (builder) {
+      builder.append(next);
+      return messages;
+    }
+    return [...messages, next];
+  }
   const previous = messages[index]!;
   if (previous.settled && !next.settled) return messages;
   if (next.role === 'assistant' && !next.settled && !next.text.startsWith(previous.text))
     return messages;
   if (!next.text) next = { ...next, text: previous.text };
   next = { ...previous, ...next };
+  if (builder) {
+    builder.replace(index, next);
+    return messages;
+  }
   return messages.map((message, position) => (position === index ? next : message));
 }

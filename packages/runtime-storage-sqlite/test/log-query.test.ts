@@ -5,10 +5,12 @@ import { join } from 'node:path';
 import {
   createSqliteRuntimeLogQueryPort,
   createSqliteRuntimeStorage,
+  createSqliteSessionHistoryReader,
   createSqliteWorkspaceRuntimeLogQueryPort,
   ensureSqliteRuntimeGenerationRoot,
   ensureSqliteRuntimeLayoutRoot,
   ensureSqliteWorkspaceStoreDirectory,
+  openKiteSessionStoreDatabase,
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_WORKSPACE_FORMAT_EPOCH,
@@ -368,6 +370,87 @@ describe('SQLite RuntimeLogQueryPort', () => {
       reader.close();
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test('fingerprints bounded raw event prefixes within exact root and child scope', () => {
+    const testFixture = fixture();
+    const databasePath = join(testFixture.path, '..', 'kite-session.sqlite');
+    const database = openKiteSessionStoreDatabase(databasePath);
+    let reader: ReturnType<typeof createSqliteSessionHistoryReader<Event, State>> | undefined;
+    try {
+      database
+        .query(`INSERT INTO workspaces (
+          workspace_id, canonical_path, workspace_identity_digest, project_id,
+          workspace_digest, display_name, created_at, updated_at
+        ) VALUES ('w', '/w', ?, 'p', ?, 'w', 1, 1)`)
+        .run(`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`);
+      const insertSession = database.query(`INSERT INTO runtime_sessions (
+        session_id, workspace_id, project_id, workspace_digest, state_schema,
+        format_epoch, revision, name, updated_at, run_index_from_revision, parent_session_id
+      ) VALUES (?, 'w', 'p', ?, ?, 'fingerprint-test', 0, ?, 1, 0, ?)`);
+      const insertEvent = database.query(`INSERT INTO runtime_events (
+        session_id, event_id, sequence, schema_version, event_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)`);
+      for (const [id, parent] of [
+        ['root', null],
+        ['child', 'root'],
+      ] as const) {
+        insertSession.run(
+          id,
+          `sha256:${'b'.repeat(64)}`,
+          SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+          id,
+          parent,
+        );
+        insertEvent.run(
+          id,
+          `${id}-1`,
+          1,
+          SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+          JSON.stringify({ type: 'message', content: id }),
+          1,
+        );
+      }
+      reader = createSqliteSessionHistoryReader({
+        databasePath,
+        codec,
+        currentEventTypes: ['message'],
+      });
+      const limits = { maxRecords: 2, maxSourceBytes: 1000 };
+      const rootDigest = reader.fingerprintEventRows('root', 1, undefined, limits);
+      const childDigest = reader.fingerprintEventRows('child', 1, 'root', limits);
+      expect(rootDigest).toMatch(/^[a-f0-9]{64}$/u);
+      expect(childDigest).not.toBe(rootDigest);
+      expect(reader.fingerprintEventRows('child', 1, undefined, limits)).toBeNull();
+      expect(reader.fingerprintEventRows('child', 1, 'other', limits)).toBeNull();
+      expect(reader.fingerprintEventRows('root', 1, 'root', limits)).toBeNull();
+      expect(
+        reader.fingerprintEventRows('root', 1, undefined, { ...limits, maxRecords: 0 }),
+      ).toBeNull();
+      expect(
+        reader.fingerprintEventRows('root', 1, undefined, { ...limits, maxSourceBytes: 1 }),
+      ).toBeNull();
+      insertEvent.run(
+        'root',
+        'root-2',
+        2,
+        SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+        JSON.stringify({ type: 'message', content: 'tail' }),
+        2,
+      );
+      expect(reader.fingerprintEventRows('root', 1, undefined, limits)).toBe(rootDigest);
+      database
+        .query('UPDATE runtime_events SET causation_id = ? WHERE session_id = ? AND sequence = 1')
+        .run('changed', 'root');
+      expect(reader.fingerprintEventRows('root', 1, undefined, limits)).not.toBe(rootDigest);
+      database
+        .query('UPDATE runtime_events SET event_json = ? WHERE session_id = ? AND sequence = 1')
+        .run(JSON.stringify({ type: 'message', content: 'revised' }), 'root');
+      expect(reader.fingerprintEventRows('root', 1, undefined, limits)).not.toBe(rootDigest);
+    } finally {
+      reader?.close();
+      database.close(false);
+      testFixture.cleanup();
     }
   });
 });

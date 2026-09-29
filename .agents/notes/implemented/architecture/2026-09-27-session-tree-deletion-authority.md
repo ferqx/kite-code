@@ -2,6 +2,10 @@
 
 Status: implemented
 
+The deletion preconditions and lifecycle ordering recorded below are superseded by [data-only Session and Workspace deletion](2026-09-29-data-only-session-deletion.md). Current deletion sends local cancellation and lets Service track asynchronous cleanup; it does not await cleanup or gate on foreign leases or historical labels. Workspace removal uses one batch transaction without a persistent claim or Desktop finalize dependency. Atomic data scope, receipt/tombstone and retained-reference protections remain. The paragraphs below preserve the earlier reasoning, not the current deletion contract.
+
+The historical-state restrictions below are partially superseded by [live-execution-based deletion](2026-09-29-session-deletion-live-execution.md). Inactive sessions no longer require historical Run/tool/effect uncertainty to be settled before deletion. The tree transaction, receipt/tombstone, cross-tree reference, workspace admission fence and actual live-resource cleanup decisions remain applicable.
+
 ## Problem
 
 Store13 gives each delegated child its own Session, execution authority, Run and history. A public root `delete_session` could not remove the parent alone: the child lineage and cross-Session tables have foreign keys, and a still-running child could write after the parent disappeared. Deletion also needs to work when the workspace directory or current Provider configuration is gone, provided the recorded execution is demonstrably settled.

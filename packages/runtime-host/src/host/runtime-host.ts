@@ -64,6 +64,10 @@ import { SessionRegistry } from './session-registry';
  * Storage, registry snapshots, and composition mechanisms remain bootstrap-only.
  */
 export interface RuntimeHostCoordinatorPort extends RuntimeAccess, AsyncDisposable {
+  /** Trusted data-deletion boundary; starts local abort without waiting for cleanup. */
+  beginSessionDataDeletion(sessionId: string): void;
+  /** Retire an already-deleted Session after a trusted bulk Store transaction. */
+  completeSessionDataDeletion(sessionId: string): void;
   cancelSession(sessionId: string, reason?: string): Promise<void>;
   cancelAllSessions(reason?: string): Promise<void>;
   /** App-only local projection tombstone; it never deletes Store state or cancels work. */
@@ -135,6 +139,12 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     sessionId: string,
     operation: () => Result,
   ) => Result;
+  readonly #runWithSessionDeletion?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly #deleteSessionData?: (
+    sessionId: string,
+    evidence: ReturnType<typeof createRuntimeCommandCommitEvidence>,
+  ) => RuntimeStoredCommandReceipt | null;
+  readonly #beginDeletionCleanup?: (sessionId: string) => void;
   #startPromise: Promise<void> | undefined;
   #disposePromise: Promise<void> | undefined;
   #closing = false;
@@ -151,10 +161,22 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       sessionId: string,
       operation: () => Result,
     ) => Result;
+    readonly runWithSessionDeletion?: <Result>(
+      sessionId: string,
+      operation: () => Result,
+    ) => Result;
+    readonly deleteSessionData?: (
+      sessionId: string,
+      evidence: ReturnType<typeof createRuntimeCommandCommitEvidence>,
+    ) => RuntimeStoredCommandReceipt | null;
+    readonly beginDeletionCleanup?: (sessionId: string) => void;
   }) {
     this.storage = input.storage;
     this.#ownsSessionExecution = input.ownsSessionExecution ?? (() => true);
     this.#runWithSessionExecution = input.runWithSessionExecution;
+    this.#runWithSessionDeletion = input.runWithSessionDeletion;
+    this.#deleteSessionData = input.deleteSessionData;
+    this.#beginDeletionCleanup = input.beginDeletionCleanup;
     this.#releaseSessionExecution = input.releaseSessionExecution;
     this.#moduleRegistry = input.moduleRegistry;
     this.moduleIds = input.moduleRegistry.moduleIds;
@@ -263,6 +285,8 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
           ) {
             throw new Error('Runtime Host internal admission changed command identity.');
           }
+          if (admittedCommand.type === 'delete_session' && this.#deleteSessionData)
+            return this.#deleteSession(admittedCommand, evidence);
           const conflict = await this.#revisionConflict(admittedCommand);
           if (conflict) return conflict;
           if (admittedCommand.type === 'delete_session')
@@ -363,7 +387,8 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
         };
         return await (command.type === 'create_session' ||
         command.type === 'set_interaction_mode' ||
-        command.type === 'recover_session'
+        command.type === 'recover_session' ||
+        command.type === 'delete_session'
           ? execute()
           : this.#withSessionExecution(runtimeCommandSessionId(command), execute));
       } finally {
@@ -481,6 +506,23 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     command: Extract<RuntimeCommand, { readonly type: 'delete_session' }>,
     evidence: ReturnType<typeof createRuntimeCommandCommitEvidence>,
   ): Promise<RuntimeCommandReceipt> {
+    if (this.#deleteSessionData) {
+      this.beginSessionDataDeletion(command.sessionId);
+      const receipt = this.#deleteSessionData(command.sessionId, evidence);
+      if (!receipt)
+        return { status: 'not_found', commandId: command.commandId, code: 'session_not_found' };
+      const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
+      if (
+        !stored ||
+        !sameAppliedReceipt(
+          parseRuntimeStoredCommandReceipt(stored),
+          receiptFromStoredReceipt(receipt),
+        )
+      )
+        throw new Error('Runtime Host data-deletion receipt was not persisted by commit.');
+      this.completeSessionDataDeletion(command.sessionId);
+      return receiptFromStoredReceipt(receipt);
+    }
     const projection = this.#registry.projection(command.sessionId);
     if (!projection) {
       return {
@@ -505,11 +547,25 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       'Runtime session deleted.',
       (notification) => this.#notifications.publish(notification),
     );
-    const receipt = createRuntimeStoredCommandReceipt(evidence, projection.revision);
-    this.storage.sessions.deleteSession(command.sessionId, {
-      expectedRevision: projection.revision,
-      commandReceipt: receipt,
+    // Cleanup may persist a cancellation and advance the Session revision.
+    // The command's original expected revision was checked before cleanup;
+    // the atomic delete must use the post-cleanup Store revision.
+    const settled = await this.#bridge.query({
+      schema: RUNTIME_QUERY_SCHEMA_,
+      type: 'get_session_projection',
+      sessionId: command.sessionId,
     });
+    if (settled.status !== 'ok' || !settled.session)
+      throw new Error('Runtime Session projection disappeared during deletion cleanup.');
+    const settledRevision = settled.session.revision;
+    const receipt = createRuntimeStoredCommandReceipt(evidence, settledRevision);
+    const deleteStored = () =>
+      this.storage.sessions.deleteSession(command.sessionId, {
+        expectedRevision: settledRevision,
+        commandReceipt: receipt,
+      });
+    if (this.#runWithSessionDeletion) this.#runWithSessionDeletion(command.sessionId, deleteStored);
+    else this.#withSessionExecution(command.sessionId, deleteStored);
     const stored = this.#lookupStoredReceipt(command, evidence.requestDigest);
     if (!stored) throw new Error('Runtime Host delete receipt was not persisted by commit.');
     const durable = parseRuntimeStoredCommandReceipt(stored);
@@ -719,6 +775,20 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
     return this.#notifications.removeSession(sessionId);
   }
 
+  beginSessionDataDeletion(sessionId: string): void {
+    this.#assertOpen();
+    this.#lifecycle.abort(sessionId, createRuntimeAbortReason('user', 'Runtime session deleted.'));
+    this.#beginDeletionCleanup?.(sessionId);
+  }
+
+  completeSessionDataDeletion(sessionId: string): void {
+    this.#assertOpen();
+    this.#lifecycle.close(sessionId, 'Runtime session deleted.');
+    this.#recoveredSessions.delete(sessionId);
+    this.#deletedSessions.add(sessionId);
+    this.#notifications.removeSession(sessionId);
+  }
+
   cancelSession(sessionId: string, reason = 'Runtime Host shutdown.'): Promise<void> {
     return this.#beginAccess(() => this.#cancelSession(sessionId, reason));
   }
@@ -894,8 +964,14 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       ...this.#lifecycle.sessionIds(),
       ...this.#registry.projections().map((projection) => projection.sessionId),
     ]);
+    const waitForCleanupIds = [...sessionIds].filter((sessionId) =>
+      this.#lifecycle.isActive(sessionId),
+    );
     for (const sessionId of [...sessionIds]) {
-      if (!this.#ownsSessionExecution(sessionId) && !this.#lifecycle.isActive(sessionId)) {
+      if (
+        this.#deletedSessions.has(sessionId) ||
+        (!this.#ownsSessionExecution(sessionId) && !this.#lifecycle.isActive(sessionId))
+      ) {
         sessionIds.delete(sessionId);
       }
     }
@@ -937,7 +1013,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       if (result.status === 'rejected') failures.push(result.reason);
     }
     await awaitStep(
-      Promise.all([...sessionIds].map((sessionId) => this.#lifecycle.waitForIdle(sessionId))),
+      Promise.all(waitForCleanupIds.map((sessionId) => this.#lifecycle.waitForIdle(sessionId))),
       'session cleanup',
     );
     try {
@@ -1059,6 +1135,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
       type: 'get_session_projection',
       sessionId,
     });
+    if (this.#deletedSessions.has(sessionId)) return undefined;
     const current = this.#registry.projection(sessionId);
     // A storage-only reader cannot reconstruct this Host's closed lifecycle.
     // New cleanup/recovery facts must advance the projection without reopening
@@ -1074,6 +1151,7 @@ export class DefaultRuntimeHost<Event = unknown, State = unknown>
   #commitQueryProjection(result: RuntimeQueryResult): void {
     if (result.status !== 'ok') return;
     const publish = (projection: RuntimeSessionProjection): void => {
+      if (this.#deletedSessions.has(projection.sessionId)) return;
       // Query hydration is an observer projection, not execution ownership.
       // A Host must seed an explicitly subscribed historical Session even
       // when another generation (or no live generation) owns its mutations.

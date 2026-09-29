@@ -61,7 +61,9 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
   let projectReads = 0;
   let failProjectRefreshAfterRemove = false;
   let failNextProjectRefresh = false;
-  let loseFinalizeResult = false;
+  const workspaceRemovalPhases: string[] = [];
+  let nextRemovalFailure: 'structured' | 'generic' | undefined;
+  const removalFailures = new Map<unknown, 'structured' | 'generic'>();
   let modelReads = 0;
   const injectedFailures = new Set<unknown>();
   let loseBranchResult = false;
@@ -181,13 +183,15 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
       }
       if (message.method === 'app/provider_model/snapshot' && failModel)
         injectedFailures.add(message.id);
+      if (message.method === 'app/workspace/remove')
+        workspaceRemovalPhases.push(message.params?.request?.phase);
       if (
-        loseFinalizeResult &&
+        nextRemovalFailure &&
         message.method === 'app/workspace/remove' &&
-        message.params?.request?.phase === 'finalize'
+        message.params?.request?.phase === 'remove'
       ) {
-        loseFinalizeResult = false;
-        injectedFailures.add(message.id);
+        removalFailures.set(message.id, nextRemovalFailure);
+        nextRemovalFailure = undefined;
       }
       if (message.method === 'app/provider_model/snapshot') modelReads++;
       if (message.method === 'app/mcp/action') {
@@ -206,6 +210,27 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
         id?: unknown;
         result?: { sessions?: Array<Record<string, unknown>> };
       };
+      const removalFailure = removalFailures.get(message.id);
+      if (removalFailure) {
+        removalFailures.delete(message.id);
+        return JSON.stringify({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: {
+            code: -32603,
+            message:
+              removalFailure === 'generic' ? 'secret path /private/workspace' : 'Internal error',
+            data:
+              removalFailure === 'structured'
+                ? {
+                    code: 'internal_error',
+                    detailCode: 'workspace_cleanup_pending',
+                    deletedSessions: 1,
+                  }
+                : { code: 'internal_error' },
+          },
+        }) as T;
+      }
       if (injectedFailures.delete(message.id))
         return JSON.stringify({
           jsonrpc: '2.0',
@@ -605,8 +630,16 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
     try {
       await remover.refreshProjects();
       await remover.restoreWorkspace();
-      loseFinalizeResult = true;
-      await expect(remover.removeProject(join(root, 'a'))).rejects.toThrow('服务端收尾尚未确认');
+      const historyReadsBeforeRemoval = historyReads;
+      nextRemovalFailure = 'structured';
+      await expect(remover.removeProject(join(root, 'a'))).rejects.toThrow(
+        '本次已确认删除 1 条主会话；项目仍保留。会话的执行资源尚未停止',
+      );
+      nextRemovalFailure = 'generic';
+      const genericFailure = await remover.removeProject(join(root, 'a')).catch((error) => error);
+      expect(String(genericFailure)).toContain('已删除数量未确认');
+      expect(String(genericFailure)).not.toContain('/private/');
+      expect(historyReads).toBe(historyReadsBeforeRemoval);
       expect(registeredProjects).toEqual(['a', 'b']);
       expect(remover.getSnapshot().projects?.map((project) => project.path)).toEqual([
         join(root, 'a'),
@@ -614,6 +647,7 @@ test('desktop reads across projects, isolates execution, and ignores a supersede
       ]);
       failProjectRefreshAfterRemove = true;
       const removed = await remover.removeProject(join(root, 'a'));
+      expect(workspaceRemovalPhases).toEqual(['remove', 'remove', 'remove']);
       expect(removed.selectedRemoved).toBe(false);
       expect(remover.getSnapshot().projects?.map((project) => project.path)).toEqual([
         join(root, 'b'),

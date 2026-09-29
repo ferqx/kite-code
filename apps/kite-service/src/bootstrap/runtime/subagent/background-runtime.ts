@@ -81,6 +81,7 @@ export interface BackgroundSubagentAdoption {
 
 export interface BackgroundSubagentControlRuntime {
   readonly hasLiveTask: (taskId: string) => boolean;
+  readonly liveRecoveryIdentityForSession: (sessionId: string) => string | null;
   readonly listSnapshot: (
     sessionId: string,
     ownerKey: string,
@@ -246,6 +247,21 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   hasLiveTask(taskId: string): boolean {
     const record = this.#records.get(taskId);
     return record !== undefined && !isTerminal(record.status);
+  }
+
+  liveRecoveryIdentityForSession(sessionId: string): string | null {
+    for (const record of this.#records.values()) {
+      if (record.cleanupConfirmed) continue;
+      let owner: unknown;
+      try {
+        owner = JSON.parse(record.ownerKey);
+      } catch {
+        continue;
+      }
+      if (Array.isArray(owner) && owner[0] === sessionId && typeof owner[1] === 'string')
+        return owner[1];
+    }
+    return null;
   }
 
   adopt(input: Readonly<BackgroundSubagentAdoption>): void {

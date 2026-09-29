@@ -5,13 +5,16 @@ import type {
   RuntimeChildSessionIntentMutation,
   RuntimeLogQueryPort,
   RuntimeStorage,
+  RuntimeStoredCommandReceipt,
   RuntimeTransactionInput,
 } from '@kite-ai/runtime-host/storage';
 import {
+  inspectSqliteWorkspaceAuthorityMetadataKey,
   SQLITE_WORKSPACE_CONTROLLER_RECEIPT_SCHEMA,
   type SqliteWorkspaceControllerOperationResult,
   type SqliteWorkspaceInitialControllerInput,
 } from './authority';
+import { assertSqliteRuntimeCommandReceipt } from './command-receipts';
 import {
   decideChildApprovalProxyInTransaction,
   listPendingChildApprovalProxies,
@@ -157,7 +160,17 @@ import {
 } from './kite-session-runtime-file';
 import { inspectKiteSessionPublication } from './kite-session-store-publication';
 import { assertKiteSessionStoreSourcesReconciled } from './kite-session-store-sources';
-import { createKiteWorkspaceDeletionFence } from './kite-workspace-deletion-fence';
+import {
+  prepareKiteSessionTreeArtifactDeletion,
+  prepareKiteSessionTreeDeletion,
+  prepareKiteWorkspaceSessionDeletion,
+  removeKiteSessionTreeReferences,
+  removeUnreferencedKiteSessionTreeArtifacts,
+} from './kite-session-tree-deletion';
+import {
+  createKiteWorkspaceDeletionFence,
+  workspaceDeletionFenceKey,
+} from './kite-workspace-deletion-fence';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from './log-query';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 import {
@@ -338,6 +351,26 @@ export interface KiteSessionRuntimeStorageOwner<Event, State> extends AsyncDispo
     authority: KiteSessionExecutionAuthorityRecord,
   ): void;
   runWithExecution<Result>(handle: KiteSessionExecutionHandle, operation: () => Result): Result;
+  /** Delete one root tree as data, retaining one exact command receipt. */
+  deleteSessionDataTree(
+    rootSessionId: string,
+    makeReceipt: (currentRevision: number) => RuntimeStoredCommandReceipt,
+  ): RuntimeStoredCommandReceipt | null;
+  /** Delete all Session data in one Workspace in one writer transaction. */
+  deleteWorkspaceSessionData(workspaceId: string): Readonly<{
+    rootSessionIds: readonly string[];
+    sessionIds: readonly string[];
+  }>;
+  /** Read-only metadata enumeration for starting local cancellation before deletion. */
+  listWorkspaceSessionIds(workspaceId: string): readonly string[];
+  /** Metadata-only identity for delete admission, including an existing tombstone. */
+  readSessionDataDeletionIdentity(sessionId: string): Readonly<{
+    workspaceId: string;
+    projectId: string;
+    workspaceDigest: string;
+    canonicalPath: string;
+    deleted: boolean;
+  }> | null;
   readSnapshot<Result>(operation: () => Result): Result;
   /** Receipt-bearing, effect-free State decision when no execution writer is present. */
   commitRecoveryDecision(
@@ -651,6 +684,14 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     ...(input.now ? { nowMs: input.now } : {}),
   });
   const scope = new AsyncLocalStorage<KiteSessionExecutionHandle>();
+  const deletionScope = new AsyncLocalStorage<true>();
+  const rejectDeletionScopeMutation = (): void => {
+    if (deletionScope.getStore())
+      throw new KiteSessionRuntimeStorageError(
+        'execution_scope_required',
+        'Deletion scope cannot perform a general Session mutation.',
+      );
+  };
   // Synchronous and private: callers cannot use this scope for arbitrary Store writes.
   let committingUnownedDecision = false;
   const handles = new WeakMap<object, ExecutionHandleState>();
@@ -664,11 +705,21 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
 
   const executionControl: KiteSessionExecutionControl = Object.freeze({
     read: authority.read,
-    acquire: authority.acquire,
-    renew: authority.renew,
-    detach: authority.detach,
-    release: (request) =>
-      rawWriter.run(() => {
+    acquire: (request) => {
+      rejectDeletionScopeMutation();
+      return authority.acquire(request);
+    },
+    renew: (request) => {
+      rejectDeletionScopeMutation();
+      return authority.renew(request);
+    },
+    detach: (request) => {
+      rejectDeletionScopeMutation();
+      return authority.detach(request);
+    },
+    release: (request) => {
+      rejectDeletionScopeMutation();
+      return rawWriter.run(() => {
         if (!request.cleanupConfirmed) {
           effectPort.markGenerationUnknownInTransaction({
             sessionId: request.sessionId,
@@ -681,11 +732,13 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           );
         }
         return authority.releaseInTransaction(request);
-      }),
+      });
+    },
   });
 
   const recovery: KiteSessionRecoveryPort = Object.freeze({
     confirmCleanup: (request: Parameters<KiteSessionRecoveryPort['confirmCleanup']>[0]) => {
+      rejectDeletionScopeMutation();
       authority.confirmRecoveryCleanup({
         sessionId: request.sessionId,
         expectedRevision: request.expectedAuthorityRevision,
@@ -698,8 +751,9 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
         pendingEffects: effectPort.listPrepared(sessionId),
         unknownEffects: effectPort.listUnknown(sessionId),
       }),
-    reconcile: (request: Parameters<KiteSessionRecoveryPort['reconcile']>[0]) =>
-      rawWriter.run(() => {
+    reconcile: (request: Parameters<KiteSessionRecoveryPort['reconcile']>[0]) => {
+      rejectDeletionScopeMutation();
+      return rawWriter.run(() => {
         const current = authority.read(request.sessionId);
         if (
           current.status !== 'recovery_required' ||
@@ -720,7 +774,8 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           expectedRevision: current.revision,
         });
         return Object.freeze({ authority: reconciled, unknownEffects });
-      }),
+      });
+    },
   });
 
   const currentHandle = (): ExecutionHandleState => {
@@ -746,6 +801,12 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       return rawWriter.inTransaction;
     },
     run<Result>(write: () => Result): Result {
+      const deletion = deletionScope.getStore();
+      if (deletion)
+        throw new KiteSessionRuntimeStorageError(
+          'execution_scope_required',
+          'Deletion scope cannot perform a general Session mutation.',
+        );
       if (committingUnownedDecision) return write();
       const handle = currentHandle();
       const result = mutations.run(handle.current, write);
@@ -1684,6 +1745,11 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     external: KiteSessionExecutionHandle,
     operation: () => Result,
   ): Result => {
+    if (deletionScope.getStore())
+      throw new KiteSessionRuntimeStorageError(
+        'execution_scope_required',
+        'Deletion scope cannot enter a general execution scope.',
+      );
     assertHandle(external);
     const nested = scope.getStore();
     if (nested && nested !== external) {
@@ -1694,6 +1760,145 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     }
     return nested ? operation() : scope.run(external, operation);
   };
+
+  const runDataDeletion = <Result>(operation: () => Result): Result => {
+    if (scope.getStore() || deletionScope.getStore())
+      throw new KiteSessionRuntimeStorageError(
+        'execution_scope_required',
+        'Data deletion cannot share or nest an execution scope.',
+      );
+    return deletionScope.run(true, () => rawWriter.run(operation));
+  };
+
+  const deleteMeta = database.query('DELETE FROM kite_meta WHERE key=?');
+  const selectWorkspaceAuthorityKeys = database.query<{ key: string }, [number, string]>(
+    'SELECT key FROM kite_meta WHERE substr(key,1,?)=? ORDER BY key',
+  );
+  const insertDeletionReceipt = database.query(
+    `INSERT INTO runtime_command_receipts(
+      scope_session_id,command_id,workspace_id,project_id,workspace_digest,
+      request_digest,target_session_id,original_receipt_json,committed_revision,
+      committed_at,result_schema,result_json,result_digest
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  );
+  const deleteSelectedData = (
+    workspaceId: string,
+    sessionIds: readonly string[],
+    wholeWorkspace: boolean,
+  ): void => {
+    const namespace = `workspace_authority/${workspaceId}/`;
+    if (!sessionIds.length) {
+      if (wholeWorkspace)
+        database
+          .query('DELETE FROM kite_meta WHERE substr(key,1,?)=?')
+          .run(namespace.length, namespace);
+      return;
+    }
+    const candidates = prepareKiteSessionTreeArtifactDeletion(database);
+    removeKiteSessionTreeReferences(database);
+    const ids = new Set(sessionIds);
+    for (const sessionId of sessionIds) deleteMeta.run(`session_execution/${sessionId}`);
+    if (wholeWorkspace) {
+      database
+        .query('DELETE FROM kite_meta WHERE substr(key,1,?)=?')
+        .run(namespace.length, namespace);
+    } else {
+      const prefix = `${namespace}workspace_authority_v1:`;
+      for (const { key } of selectWorkspaceAuthorityKeys.all(prefix.length, prefix)) {
+        try {
+          if (
+            ids.has(
+              inspectSqliteWorkspaceAuthorityMetadataKey(key.slice(namespace.length)).sessionId,
+            )
+          )
+            deleteMeta.run(key);
+        } catch {
+          // A malformed historical key has no proven Session owner. It cannot
+          // block deletion of the Session rows or grant a future execution.
+        }
+      }
+    }
+    database
+      .query(
+        `INSERT INTO runtime_session_tombstones(
+          session_id,workspace_id,project_id,workspace_digest,deleted_revision,deleted_at
+        ) SELECT session_id,workspace_id,project_id,workspace_digest,revision,?
+            FROM runtime_sessions
+           WHERE session_id IN (SELECT session_id FROM temp.kite_delete_tree_ids)`,
+      )
+      .run(Math.floor((input.now ?? Date.now)() / 1000));
+    database.run(
+      'DELETE FROM runtime_sessions WHERE session_id IN (SELECT session_id FROM temp.kite_delete_tree_ids)',
+    );
+    removeUnreferencedKiteSessionTreeArtifacts(database, candidates);
+  };
+
+  const deleteSessionDataTree: KiteSessionRuntimeStorageOwner<
+    Event,
+    State
+  >['deleteSessionDataTree'] = (rootSessionId, makeReceipt) =>
+    runDataDeletion(() => {
+      if (!rootSessionId || typeof makeReceipt !== 'function')
+        throw new KiteSessionRuntimeStorageError(
+          'execution_scope_required',
+          'Session data deletion requires one root and a receipt factory.',
+        );
+      const root = database
+        .query<
+          { workspace_id: string; project_id: string; workspace_digest: string; revision: number },
+          [string]
+        >(
+          `SELECT workspace_id,project_id,workspace_digest,revision
+             FROM runtime_sessions WHERE session_id=? LIMIT 1`,
+        )
+        .get(rootSessionId);
+      if (!root) return null;
+      const sessionIds = prepareKiteSessionTreeDeletion(database, rootSessionId, root.workspace_id);
+      const receipt = makeReceipt(root.revision);
+      if (
+        !receipt ||
+        typeof receipt !== 'object' ||
+        receipt.scopeSessionId !== rootSessionId ||
+        receipt.targetSessionId !== rootSessionId
+      )
+        throw new KiteSessionRuntimeStorageError(
+          'execution_scope_required',
+          'Session deletion receipt does not identify its root.',
+        );
+      assertSqliteRuntimeCommandReceipt(receipt, rootSessionId, root.revision, true);
+      deleteSelectedData(root.workspace_id, sessionIds, false);
+      insertDeletionReceipt.run(
+        receipt.scopeSessionId,
+        receipt.commandId,
+        root.workspace_id,
+        root.project_id,
+        root.workspace_digest,
+        receipt.requestDigest,
+        receipt.targetSessionId,
+        receipt.originalReceiptJson,
+        receipt.committedRevision,
+        receipt.committedAt,
+        receipt.resourceResult?.schema ?? null,
+        receipt.resourceResult?.json ?? null,
+        receipt.resourceResult?.digest ?? null,
+      );
+      return receipt;
+    });
+
+  const deleteWorkspaceSessionData: KiteSessionRuntimeStorageOwner<
+    Event,
+    State
+  >['deleteWorkspaceSessionData'] = (workspaceId) =>
+    runDataDeletion(() => {
+      workspaceDeletionFenceKey(workspaceId);
+      const selected = prepareKiteWorkspaceSessionDeletion(database, workspaceId);
+      deleteSelectedData(workspaceId, selected.sessionIds, true);
+      deleteMeta.run(workspaceDeletionFenceKey(workspaceId));
+      return Object.freeze({
+        rootSessionIds: Object.freeze([...selected.rootSessionIds]),
+        sessionIds: Object.freeze([...selected.sessionIds]),
+      });
+    });
 
   const readSnapshot = <Result>(operation: () => Result): Result => {
     if (rawWriter.inTransaction || database.inTransaction) return operation();
@@ -1710,6 +1915,68 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       }
       throw error;
     }
+  };
+
+  const listWorkspaceSessionIds: KiteSessionRuntimeStorageOwner<
+    Event,
+    State
+  >['listWorkspaceSessionIds'] = (workspaceId) => {
+    workspaceDeletionFenceKey(workspaceId);
+    return readSnapshot(() =>
+      database
+        .query<{ session_id: string }, [string]>(
+          'SELECT session_id FROM runtime_sessions WHERE workspace_id=? ORDER BY session_id',
+        )
+        .all(workspaceId)
+        .map((row) => row.session_id),
+    );
+  };
+
+  const readSessionDataDeletionIdentity: KiteSessionRuntimeStorageOwner<
+    Event,
+    State
+  >['readSessionDataDeletionIdentity'] = (sessionId) => {
+    if (!sessionId) return null;
+    return readSnapshot(() => {
+      type IdentityRow = {
+        workspace_id: string;
+        project_id: string;
+        workspace_digest: string;
+        canonical_path: string;
+      };
+      const active = database
+        .query<IdentityRow, [string]>(
+          `SELECT s.workspace_id,s.project_id,s.workspace_digest,w.canonical_path
+             FROM runtime_sessions AS s
+             JOIN workspaces AS w ON w.workspace_id=s.workspace_id
+            WHERE s.session_id=? LIMIT 1`,
+        )
+        .get(sessionId);
+      if (active)
+        return Object.freeze({
+          workspaceId: active.workspace_id,
+          projectId: active.project_id,
+          workspaceDigest: active.workspace_digest,
+          canonicalPath: active.canonical_path,
+          deleted: false,
+        });
+      const deleted = database
+        .query<IdentityRow, [string]>(
+          `SELECT t.workspace_id,t.project_id,t.workspace_digest,w.canonical_path
+             FROM runtime_session_tombstones AS t
+             JOIN workspaces AS w ON w.workspace_id=t.workspace_id
+            WHERE t.session_id=? LIMIT 1`,
+        )
+        .get(sessionId);
+      if (!deleted) return null;
+      return Object.freeze({
+        workspaceId: deleted.workspace_id,
+        projectId: deleted.project_id,
+        workspaceDigest: deleted.workspace_digest,
+        canonicalPath: deleted.canonical_path,
+        deleted: true,
+      });
+    });
   };
 
   const currentExecutionGeneration = (sessionId: string): string => {
@@ -2530,6 +2797,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     authority: executionControl,
     recovery,
     reconcileSettledSession(request) {
+      rejectDeletionScopeMutation();
       return rawWriter.run(() => {
         const current = authority.read(request.sessionId);
         if (
@@ -2556,6 +2824,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       });
     },
     beginRecoveryExecution(request) {
+      rejectDeletionScopeMutation();
       const acquired = rawWriter.run(() => {
         const current = authority.read(request.sessionId);
         if (
@@ -2666,8 +2935,13 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
     bindExecution,
     refreshExecution,
     runWithExecution,
+    deleteSessionDataTree,
+    deleteWorkspaceSessionData,
+    listWorkspaceSessionIds,
+    readSessionDataDeletionIdentity,
     readSnapshot,
     commitRecoveryDecision(transaction, expectedRevision, expectedAuthorityRevision) {
+      rejectDeletionScopeMutation();
       rawWriter.run(() => {
         const stored = storage.sessions.loadSnapshot<State>(transaction.sessionId);
         if (
@@ -2713,6 +2987,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       });
     },
     commitUnownedDecision(transaction, expectedRevision) {
+      rejectDeletionScopeMutation();
       if (
         !Number.isSafeInteger(expectedRevision) ||
         expectedRevision < 0 ||

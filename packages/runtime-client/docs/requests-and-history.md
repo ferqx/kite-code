@@ -4,7 +4,7 @@
 
 发送请求时维护 wire correlation，解码回执后返回 typed result。业务 commandId/revision 由上层语义保留；连接重建不能自动重发可能产生副作用的 mutation。错误应返回调用者，不把 timeout 转成默认成功。
 
-单次请求的默认期限为 30 秒，可通过 `requestTimeoutMs` 调整。期限覆盖建连、transport `send()` 和等待响应；到期后删除本地 correlation，迟到响应被忽略。`request_timeout` 只说明客户端未拿到结果，尤其对 mutation 应保留结果未知状态，并通过原 command ID 查询回执；不能据此生成新命令或自动重放。订阅恢复中的取消旧订阅请求也受同一期限约束，旧请求超时后继续尝试建立替代订阅。
+单次请求的默认期限为 30 秒，可通过 `requestTimeoutMs` 调整。App 调用可通过 `requestApp` 的单请求 `timeoutMs` 指定正整数期限，不改变其他请求的默认值。期限覆盖建连、transport `send()` 和等待响应；到期后删除本地 correlation，迟到响应被忽略。`request_timeout` 只说明客户端未拿到结果，尤其对 mutation 应保留结果未知状态，并通过原 command ID 查询回执；不能据此生成新命令或自动重放。订阅恢复中的取消旧订阅请求也受同一期限约束，旧请求超时后继续尝试建立替代订阅。
 `subscribeReady` 和 `subscribeReadyWithGeneration` 在收到订阅回执后仍等待初始 ready 边界；该等待同样使用配置的期限。ready 一直不到时关闭对应 logical connection，让服务端释放远端订阅，并向调用方返回超时错误。
 订阅请求已经发出、远端 ID 尚未返回时若调用方取消，本地立即结束该订阅的等待，并以原订阅请求 ID 调用 `runtime/unsubscribe`。服务端负责清理待建立或已建立的订阅，取消不依赖原订阅回执；已取得远端 ID 时仍按该 ID 取消。取消接口失败或超时才关闭 logical connection，作为无法核实远端资源时的异常清理边界。旧连接的迟到回执不能作用于替代连接。
 

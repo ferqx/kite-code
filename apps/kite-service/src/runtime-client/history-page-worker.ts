@@ -52,6 +52,13 @@ export async function runHistoryPageWorker(): Promise<void> {
       maxProjectedBytes: MAX_HISTORY_PROJECTED_BYTES,
       maxRecords: MAX_HISTORY_RECORDS,
       maxCacheBytes: 32 * 1024 * 1024,
+      fingerprintEventRows: (sessionId, throughSequence, parentSessionId) => {
+        if (!activeReader) throw new Error('History reader is unavailable.');
+        return activeReader.fingerprintEventRows(sessionId, throughSequence, parentSessionId, {
+          maxRecords: MAX_HISTORY_RECORDS,
+          maxSourceBytes: MAX_HISTORY_SOURCE_BYTES,
+        });
+      },
     },
   );
   const handle = async (

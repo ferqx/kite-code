@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { BuiltinShellTerminalExecutionResult } from '@kite-ai/builtin-runtime';
+import { resolveLocalDeletionCleanupContext } from '../../src/bootstrap/runtime/deletion-cleanup-context';
 import { ManagedShellRuntime } from '../../src/bootstrap/runtime/managed-shell';
 
 const terminal = (overrides: Record<string, unknown> = {}) => ({
@@ -13,6 +14,36 @@ const terminal = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('ManagedShellRuntime', () => {
+  test('finds a live Shell for deletion while its coordinator is closing', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'closing-session\0workspace';
+    const started = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener('abort', () => resolve(terminal()), { once: true }),
+        ),
+    });
+    let identityReads = 0;
+    expect(
+      resolveLocalDeletionCleanupContext({
+        getCoordinatorState: () => {
+          throw new Error('Runtime session is closing.');
+        },
+        shellWorkspace: () => runtime.liveWorkspaceForSession('closing-session'),
+        backgroundRecoveryIdentity: () => null,
+        readRecoveryIdentity: () => {
+          identityReads += 1;
+          return 'recovery-id';
+        },
+      }),
+    ).toEqual({ workspace: 'workspace', recoveryIdentityKey: 'recovery-id' });
+    expect(identityReads).toBe(1);
+    expect(runtime.read(started.shellId, ownerKey).status).toBe('running');
+    await runtime.disposeOwner(ownerKey);
+  });
+
   test('turns execution rejection into a failed terminal and wakes all waiters', async () => {
     const runtime = new ManagedShellRuntime();
     let reject!: (error: Error) => void;

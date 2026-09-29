@@ -15,6 +15,9 @@
 
 ## Mailbox 的边界
 
+
+当前 Store composition 的 `delete_session` 走专用数据事务：保留 mailbox、digest 与持久回执重放，跳过业务投影读取、expectedRevision 预检、busy／恢复门禁和执行权获取。先取消本进程实际执行，由 Service 跟踪异步清理；Store 用事务内当前元数据 revision 绑定删除回执和 tombstone。成功后关闭调度与订阅。空间批量删除直接由 Service 调用 Store，一次删除目标集合。
+
 `set_interaction_mode` 不进入 Host 的 execution lease 包装，也不在回执重放时恢复 Runtime。它保留同一 mailbox、digest、事务回执与通知顺序；每次命令从 Store 投影刷新 revision，避免其他设置写入者提交后仍按旧 registry 冲突。`start_turn` 的 revision 预检也读取 Bridge 的当前投影：跨 Run 邮箱 ACK 可以在上一轮终态后独立推进来源 Session revision，Host 的通知 registry 此时可能尚未收到该事实。预检不提前发布该投影，实际提交仍由 Bridge 与 Store CAS 裁决。commit 失败后若已存在同命令的持久回执，返回其已知结果，不重试写入。执行 bridge 必须在具体提交处裁决：活动 State owner 继续验证执行权，无执行 owner 的专用设置事务须原子验证无并发执行者与 State revision。`recover_session` 同样不获取旧执行权，而是在同一 mailbox 内交由专用 CAS 恢复事务核对 cleanup 与 effect；回执重放不恢复 Runtime。其余执行命令仍进入 execution scope。
 
 SessionMailbox 用 Promise tail 串行化单 Session 的操作，失败也将 tail 收敛为可继续的 Promise，避免污染后续队列；不同 Session 不共用一条队列。进程内串行不能替代 SQLite 多进程 writer fencing。

@@ -42,6 +42,7 @@ import {
   RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_RESULT_SCHEMA_,
   type RuntimeProtocolAppControlMethod,
   type RuntimeProtocolAppMethod,
+  type RuntimeProtocolError,
   type RuntimeProtocolMessage,
   type RuntimeProtocolServerControlMethod,
   type RuntimeProtocolWorkspaceRemovalRequest,
@@ -52,6 +53,7 @@ import type {
   RuntimeServerLogicalMessageConnection,
   RuntimeServerOpenOptions,
 } from '@kite-ai/runtime-server';
+import { WorkspaceRemovalError } from '../app-control/workspace-removal-error';
 import type { KiteHistoryPageClient } from '../runtime-client/history-page-pool';
 
 const DEFAULT_DRAIN_DEADLINE_MS = 5_000;
@@ -1046,7 +1048,9 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
           ? readFailure(error, 'workspace_unavailable')
           : request.method === 'app/provider_model/snapshot'
             ? readFailure(error, 'configuration_unavailable')
-            : undefined,
+            : request.method === 'app/workspace/remove' && error instanceof WorkspaceRemovalError
+              ? { detailCode: error.detailCode, deletedSessions: error.deletedSessions }
+              : undefined,
       );
     }
     return true;
@@ -1096,7 +1100,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   #writeError(
     id: string | null,
     code: keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS,
-    detail?: ReturnType<typeof readFailure>,
+    detail?: Pick<RuntimeProtocolError['data'], 'detailCode' | 'retryable' | 'deletedSessions'>,
   ): Promise<void> {
     const messages: Record<keyof typeof RUNTIME_PROTOCOL_ERROR_NUMBERS, string> = {
       parse_error: 'Parse error',
@@ -1366,7 +1370,7 @@ async function withDeadline<T>(operation: Promise<T>, deadlineMs: number): Promi
 function readFailure(
   error: unknown,
   fallback: 'session_unavailable' | 'workspace_unavailable' | 'configuration_unavailable',
-) {
+): { detailCode: NonNullable<RuntimeProtocolError['data']['detailCode']>; retryable: boolean } {
   const code =
     typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
   const detailCode =

@@ -246,6 +246,12 @@ export interface RuntimeHostModuleCompositionInput<Event = unknown, State = unkn
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly runWithSessionDeletion?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly deleteSessionData?: (
+    sessionId: string,
+    evidence: import('./storage').RuntimeCommandCommitEvidence,
+  ) => import('./storage').RuntimeStoredCommandReceipt | null;
+  readonly beginDeletionCleanup?: (sessionId: string) => void;
   readonly moduleRegistry?: never;
   readonly capabilityRegistrySnapshot?: never;
 }
@@ -258,6 +264,12 @@ export interface RuntimeHostPrebuiltRegistryInput<Event = unknown, State = unkno
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly runWithSessionDeletion?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly deleteSessionData?: (
+    sessionId: string,
+    evidence: import('./storage').RuntimeCommandCommitEvidence,
+  ) => import('./storage').RuntimeStoredCommandReceipt | null;
+  readonly beginDeletionCleanup?: (sessionId: string) => void;
   readonly modules?: never;
 }
 
@@ -286,6 +298,12 @@ export function createRuntimeHost<Event = unknown, State = unknown>(input: {
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly releaseSessionExecution?: (sessionId: string) => Promise<boolean>;
   readonly runWithSessionExecution?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly runWithSessionDeletion?: <Result>(sessionId: string, operation: () => Result) => Result;
+  readonly deleteSessionData?: (
+    sessionId: string,
+    evidence: import('./storage').RuntimeCommandCommitEvidence,
+  ) => import('./storage').RuntimeStoredCommandReceipt | null;
+  readonly beginDeletionCleanup?: (sessionId: string) => void;
 }): RuntimeHost<Event, State>;
 export function createRuntimeHost<Event = unknown, State = unknown>(
   input: RuntimeHostPrebuiltRegistryInput<Event, State>,
@@ -313,6 +331,11 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       ...(input.runWithSessionExecution
         ? { runWithSessionExecution: input.runWithSessionExecution }
         : {}),
+      ...(input.runWithSessionDeletion
+        ? { runWithSessionDeletion: input.runWithSessionDeletion }
+        : {}),
+      ...(input.deleteSessionData ? { deleteSessionData: input.deleteSessionData } : {}),
+      ...(input.beginDeletionCleanup ? { beginDeletionCleanup: input.beginDeletionCleanup } : {}),
     });
   }
 
@@ -335,6 +358,11 @@ export function createRuntimeHost<Event = unknown, State = unknown>(
       ...(input.runWithSessionExecution
         ? { runWithSessionExecution: input.runWithSessionExecution }
         : {}),
+      ...(input.runWithSessionDeletion
+        ? { runWithSessionDeletion: input.runWithSessionDeletion }
+        : {}),
+      ...(input.deleteSessionData ? { deleteSessionData: input.deleteSessionData } : {}),
+      ...(input.beginDeletionCleanup ? { beginDeletionCleanup: input.beginDeletionCleanup } : {}),
     });
   }
 

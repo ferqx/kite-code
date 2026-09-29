@@ -77,6 +77,10 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     RuntimeEvent,
     RuntimeState
   >['readSessionLineage'];
+  readonly readSessionDataDeletionIdentity: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['readSessionDataDeletionIdentity'];
   readonly listChildSessions: KiteSessionRuntimeStorageOwner<
     RuntimeEvent,
     RuntimeState
@@ -188,6 +192,18 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
     sessionId: string,
   ): ReturnType<RuntimeStorage<RuntimeEvent, RuntimeState>['sessions']['getSessionModelRoute']>;
   runWithSessionExecution<Result>(sessionId: string, operation: () => Result): Result;
+  deleteSessionDataTree: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['deleteSessionDataTree'];
+  listWorkspaceSessionIds: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['listWorkspaceSessionIds'];
+  deleteWorkspaceSessionData: KiteSessionRuntimeStorageOwner<
+    RuntimeEvent,
+    RuntimeState
+  >['deleteWorkspaceSessionData'];
   reconcileInterruptedSession(
     sessionId: string,
     recover: (
@@ -778,6 +794,8 @@ export function createKiteSessionAppServerStorage(input: {
     getAdmittedWorkspaceByDigest: target.getAdmittedWorkspaceByDigest,
     openHistoryLogs: target.openHistoryLogs,
     readSessionLineage: (sessionId) => target.readSessionLineage(sessionId),
+    readSessionDataDeletionIdentity: (sessionId) =>
+      target.readSessionDataDeletionIdentity(sessionId),
     listChildSessions: (parentSessionId, limit, cursor) =>
       target.listChildSessions(parentSessionId, limit, cursor),
     readChildSession: (parentSessionId, childSessionId) =>
@@ -842,6 +860,9 @@ export function createKiteSessionAppServerStorage(input: {
     loadCurrentSnapshot: (sessionId) => storage.sessions.loadSnapshot<RuntimeState>(sessionId),
     getCurrentSessionModelRoute: (sessionId) => storage.sessions.getSessionModelRoute(sessionId),
     runWithSessionExecution,
+    deleteSessionDataTree: target.deleteSessionDataTree,
+    listWorkspaceSessionIds: target.listWorkspaceSessionIds,
+    deleteWorkspaceSessionData: target.deleteWorkspaceSessionData,
     reconcileInterruptedSession,
     commitUnownedInteractionMode(transaction, expectedRevision) {
       if (

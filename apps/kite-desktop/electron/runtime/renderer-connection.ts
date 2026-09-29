@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { RUNTIME_PROTOCOL_NOTIFICATION_SCHEMA_ } from '@kite-ai/runtime-protocol';
 import { AsyncMutex } from '../async-mutex';
 import { MAX_FRAME_BYTES } from './service-process';
 
@@ -90,6 +91,13 @@ export class RendererConnection {
     }
     const outbound = await this.#lock.run(() => {
       this.#check(generation);
+      if (message.method === 'history/cancel' && !Object.hasOwn(message, 'id')) {
+        if (!RUNTIME_PROTOCOL_NOTIFICATION_SCHEMA_.safeParse(message).success)
+          throw new Error('无效的协议消息。');
+        const params = message.params as { requestId: string };
+        params.requestId = JSON.stringify([generation, params.requestId]);
+        return JSON.stringify(message);
+      }
       if (!Object.hasOwn(message, 'id')) throw new Error('协议请求缺少身份。');
       const id = message.id as Json;
       if (message.method === 'initialize') {

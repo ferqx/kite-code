@@ -106,6 +106,40 @@ describe('Runtime Protocol', () => {
       expect(safeDecodeRuntimeProtocolMessage(request(value)).success).toBeFalse();
     }
   });
+  test('accepts bounded Workspace removal failure facts and rejects raw diagnostics', () => {
+    const response = (data: Record<string, unknown>) => ({
+      jsonrpc: '2.0',
+      id: 'remove-workspace',
+      error: { code: -32603, message: 'Internal error', data: { code: 'internal_error', ...data } },
+    });
+    expect(
+      safeDecodeRuntimeProtocolMessage(
+        response({ detailCode: 'workspace_cleanup_pending', deletedSessions: 2 }),
+      ).success,
+    ).toBeTrue();
+    for (const data of [
+      { detailCode: 'workspace_cleanup_pending' },
+      { detailCode: 'workspace_cleanup_pending', deletedSessions: -1 },
+      { detailCode: 'workspace_cleanup_pending', deletedSessions: 1.5 },
+      { detailCode: 'workspace_cleanup_pending', deletedSessions: Number.MAX_SAFE_INTEGER + 1 },
+      { detailCode: 'raw internal failure', deletedSessions: 2 },
+      { detailCode: 'history_too_large', deletedSessions: 2 },
+      { deletedSessions: 2 },
+      { detailCode: 'workspace_busy', deletedSessions: 2, path: '/secret' },
+    ])
+      expect(safeDecodeRuntimeProtocolMessage(response(data)).success).toBeFalse();
+    expect(
+      safeDecodeRuntimeProtocolMessage({
+        jsonrpc: '2.0',
+        id: 'remove-workspace',
+        error: {
+          code: -32001,
+          message: 'Overloaded',
+          data: { code: 'overloaded', detailCode: 'workspace_busy', deletedSessions: 2 },
+        },
+      }).success,
+    ).toBeFalse();
+  });
   test('History cancellation is an exact notification bound to one RPC id', () => {
     const notification = {
       jsonrpc: '2.0',
@@ -1367,7 +1401,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '930106a5:175b957e';
+    const expectedDigest = 'cb4660a0:175b957e';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

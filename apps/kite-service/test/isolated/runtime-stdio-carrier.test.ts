@@ -19,6 +19,7 @@ import type {
 } from '@kite-ai/runtime-contract';
 import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
+import { WorkspaceRemovalError } from '#kite-service/app-control/workspace-removal-error';
 import {
   createNodeRuntimeStdioOutput,
   createRuntimeStdioCarrier,
@@ -1016,6 +1017,68 @@ describe('Runtime stdio carrier', () => {
     ]);
     input.close();
     await carrier.done;
+  });
+  test('sends only bounded Workspace removal failure facts and redacts ordinary errors', async () => {
+    const input = new BytesInput();
+    const output = new FakeOutput();
+    let attempts = 0;
+    const carrier = createCarrier({
+      input,
+      output,
+      removeWorkspace: async () => {
+        attempts++;
+        if (attempts === 1)
+          throw new WorkspaceRemovalError('workspace_cleanup_pending', 2, {
+            cause: new Error('secret path /private/child-123'),
+          });
+        throw new Error('secret path /private/workspace-456');
+      },
+    });
+    try {
+      input.pushText(initializeLine());
+      await eventually(() => protocolFrames(output).length === 1);
+      const request = (id: string) =>
+        input.pushText(
+          `${JSON.stringify({
+            jsonrpc: '2.0',
+            id,
+            method: 'app/workspace/remove',
+            params: {
+              request: {
+                phase: 'remove',
+                workspaceDigest: `sha256:${'a'.repeat(64)}`,
+                token: 'removal-1',
+              },
+            },
+          })}\n`,
+        );
+      request('partial');
+      await eventually(() => protocolFrames(output).length === 2);
+      expect(protocolFrames(output)[1]).toEqual({
+        jsonrpc: '2.0',
+        id: 'partial',
+        error: {
+          code: -32603,
+          message: 'Internal error',
+          data: {
+            code: 'internal_error',
+            detailCode: 'workspace_cleanup_pending',
+            deletedSessions: 2,
+          },
+        },
+      });
+      request('ordinary');
+      await eventually(() => protocolFrames(output).length === 3);
+      expect(protocolFrames(output)[2]).toEqual({
+        jsonrpc: '2.0',
+        id: 'ordinary',
+        error: { code: -32603, message: 'Internal error', data: { code: 'internal_error' } },
+      });
+      expect(JSON.stringify(protocolFrames(output))).not.toContain('/private/');
+    } finally {
+      input.close();
+      await carrier.done;
+    }
   });
 
   test('a pending capability read cannot block History or Runtime frames', async () => {

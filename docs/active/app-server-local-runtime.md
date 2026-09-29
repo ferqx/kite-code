@@ -25,7 +25,7 @@ Electron `before-quit` 先经 renderer 使用既有 Runtime 连接完整查询�
 
 桌面[新对话准备](../../apps/kite-desktop/docs/new-conversation.md)不创建 Runtime Session，首次发送沿既有创建／发送命令执行。已打开项目列表属于原生应用偏好，不充当信任或 Session authority。Git 分支选择是显式本地宿主操作，仅切换已登记当前项目的已有本地分支：客户端检查项目任务，关闭自有 Service 并等待清理后，原生宿主再次核实路径、分支、HEAD 与工作区改动。失败或未知结果只重新读取实际状态，不自动重试或回滚；不扩展 Browser REST 写权限，也不承诺协调外部程序的 Git 操作。
 
-桌面空间移除由 Service 的持久 Workspace 门禁和 Store writer 共同保护：同一空间的活跃删除不能被第二个请求接管，首次 Session 插入在同一 Store writer 中检查门禁。Service 只在该空间目录已清空后把删除标记为完成；`finalize` 仅释放已完成且 token 匹配的门禁。Desktop 在解除门禁确认成功后才移除本机项目登记；请求超时或收尾失败保留登记供重试。被删会话的实时订阅关闭，Desktop 在索引重置或重新连接时再核对当前会话是否仍存在，避免离线删除后恢复旧页面。具体失败与恢复见 [Service owner](../../apps/kite-service/docs/runtime-application.md)和[桌面历史](../../apps/kite-desktop/docs/history-and-recovery.md)。
+桌面空间移除由 Service 一次批量数据事务完成。存在本进程实际执行时先发出取消信号，资源收尾由 Service 异步跟踪，不阻塞删除响应。删除不读取历史业务状态，也不要求 cleanup、lease 或恢复标签满足条件。Desktop 收到成功回执后移除本机项目登记，不再前后遍历会话或等待独立 finalize；请求结果未知时保留登记供重试。被删会话的实时订阅关闭，迟到写入由 tombstone 拒绝；旧空间删除标记在数据删除事务中清除。具体失败与恢复见 [Service owner](../../apps/kite-service/docs/runtime-application.md)和[桌面历史](../../apps/kite-desktop/docs/history-and-recovery.md)。
 
 ```text
 default:
@@ -149,7 +149,7 @@ Web shell 注入由 instanceId/buildId 派生的非凭据身份摘要，每个 A
 
 验收与尚待取得的跨平台证据见[实施计划](../plans/daemon-upgrade-lifecycle.md)。
 
-桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。子会话详情在订阅回执前被关闭时，Client 以原订阅请求 ID 调用 `runtime/unsubscribe`，由 Service 清理待建立或已建立的子订阅；只有该取消接口失败才关闭 logical connection，不因正常快速切换切断其他会话的连接。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。后台执行列表在重连后先标记过期；当前代次的新鲜查询即使 aggregate generation、watermark 与会话 revision 未变化，也能确认列表仍有效并解除过期标记，旧代次或较低水位不能解除。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
+桌面长历史通过同一 `history/load_session` 请求的只读分页参数传输，固定首次观察的 source sequence 上界，完整 source record 保持顺序和展示身份；每个响应仍满足协议帧限制。后续页携带首个页面的内容 digest；同水位内容变化时丢弃已收页面并最多重读一次，避免拼接不同版本。客户端汇总 records 后生成完整 transcript，不把分页或重连变成命令重放。RuntimeHistoryClient 的可选读取 signal 会停止客户端后续分页；服务端宣告 `history/cancel` 时，客户端还会按原 RPC id 请求取消已发出的读取。Electron renderer adapter 必须按 notification schema 接受无自身 id 的历史取消，并将目标 requestId 转换为原请求的同一页面代次 wire id；正常取消不能触发共享连接 detach，旧页面代次仍不得取消新页面的请求。子会话详情在订阅回执前被关闭时，Client 以原订阅请求 ID 调用 `runtime/unsubscribe`，由 Service 清理待建立或已建立的子订阅；只有该取消接口失败才关闭 logical connection，不因正常快速切换切断其他会话的连接。桌面先展示已读取的持久历史或当前连接内的有界正文缓存，实时查询／订阅失败仍保留已读内容；操作资格必须等待新订阅与完整历史校准，阅读数据不产生执行 authority；具体预算与失效规则由[桌面历史 owner](../../apps/kite-desktop/docs/history-and-recovery.md#会话正文缓存与校准)维护。同连接内的消息 gap 或订阅 generation 变化也使桌面校准失效，并在保留正文的同时自动补读 History；新的 projection ready 不能单独恢复发送资格。后台执行列表在重连后先标记过期；当前代次的新鲜查询即使 aggregate generation、watermark 与会话 revision 未变化，也能确认列表仍有效并解除过期标记，旧代次或较低水位不能解除。断线后的桌面 ready 立即失效，丢失 mutation 回执先查询原命令的持久回执；查不到或查询失败才保留结果未知并要求检查实际会话与文件，不自动重发。
 
 Service 从持久 Store 读取未由当前进程持有执行权的会话时，已完成／失败／取消的 Run 保留真实终态和 outcome；只有未收尾或 unknown 的运行使用 recovery_required 投影。缺少当前 execution owner 不能推翻已持久化的终态；该读取不修复或改写 Store。桌面历史重启回归同时核对 list_sessions 和 get_session_projection 的 completed 状态。
 

@@ -239,6 +239,16 @@ export class ManagedShellRuntime {
       .reduce((watermark, entry) => Math.max(watermark, entry.revision), 0);
   }
 
+  /** Find a process-local Shell owner without reading historical Session State. */
+  liveWorkspaceForSession(sessionId: string): string | null {
+    const prefix = `${sessionId}\0`;
+    for (const entry of this.#entries.values()) {
+      if (entry.ownerKey.startsWith(prefix) && !shellCleanupConfirmed(entry.result))
+        return entry.ownerKey.slice(prefix.length);
+    }
+    return null;
+  }
+
   waitForOwnerChange(ownerKey: string, watermark: number, signal?: AbortSignal): Promise<void> {
     if (this.ownerWatermark(ownerKey) !== watermark || signal?.aborted) return Promise.resolve();
     return new Promise<void>((resolve) => {

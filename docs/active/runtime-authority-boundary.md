@@ -279,9 +279,7 @@ digest fail closed。State/event/snapshot/revision decision与receipt在同一St
 retry返回原事实，绝不再次prepare或dispatch effect。parse/codec/auth/overload/transport failure不创建receipt。receipt retention是刻意的：
 close、Session delete、target delete保留receipt；fork绝不复制source receipt；不设TTL或capacity pruning；只有删除整个Store才会移除metadata。
 
-Session delete 同样是显式 Runtime command，不是 App/TUI 的 SQLite helper。Host 在 Session mailbox/lifecycle
-边界串行化删除，Store 在一个 `BEGIN IMMEDIATE` 中写入 scoped applied receipt 并删除该 Session 的 durable
-facts，但保留 receipt；Host 随后移除 registry projection，且不会再以 close snapshot 重建已删 Session。
+Session delete 是显式 Runtime command，空间移除是 Service owner 的批量数据删除。Host 取消真实活动实例，服务端继续管理资源收尾，数据删除不等待历史恢复或清理确认。Store 在一次事务中删除目标集合、关联数据及 authority，保留 tombstone；单会话同时保存原命令回执。空间批量删除共用一次附件引用扫描，不逐根调用业务恢复或删除流程。旧运行标签、恢复状态及执行租约不构成删除条件。Host 移除投影及订阅，迟到通知和旧 generation 写入不能重建已删数据。
 
 State 26 / Store 5 / `kite-runtime-modularization-v1-2026-08-19`与State 27 / Store 5 / `kite-runtime-saq-v1-2026-08-25`都是
 explicit source-only compatibility profile，不是writer。用户选中的exact session只能经no-follow isolated copy atomic import到显式legacy

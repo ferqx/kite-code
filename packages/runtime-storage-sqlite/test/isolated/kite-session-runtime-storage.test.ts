@@ -105,6 +105,416 @@ describe('multi-connection Kite Session Runtime storage', () => {
       fixture.remove();
     }
   });
+  test('data deletion fences a live foreign child and rejects late writes', () => {
+    const fixture = createFixture(['parent', 'child']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    seed
+      .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id='child'")
+      .run();
+    seed.close(false);
+    const owner = openOwner(fixture.path);
+    try {
+      const acquired = owner.authority.acquire({
+        sessionId: 'child',
+        expectedRevision: 0,
+        hostInstanceId: 'foreign-host',
+        clientId: 'foreign-client',
+        connectionGeneration: 1,
+        leaseUntilMs: Date.now() + 120_000,
+      });
+      if (acquired.status !== 'acquired') throw new Error('Foreign lease was not acquired.');
+      const lateHandle = owner.bindExecution(acquired.authority);
+      const receipt = owner.deleteSessionDataTree('parent', (revision) =>
+        createRuntimeStoredCommandReceipt(
+          {
+            scopeSessionId: 'parent',
+            commandId: 'delete-live-child',
+            requestDigest: 'a'.repeat(64),
+            targetSessionId: 'parent',
+            committedAt: Date.now(),
+          },
+          revision,
+        ),
+      );
+      expect(receipt?.committedRevision).toBe(0);
+      expect(owner.storage.sessions.loadSnapshot('parent')).toBeNull();
+      expect(owner.storage.sessions.loadSnapshot('child')).toBeNull();
+      expect(owner.storage.commandReceipts.lookup(receipt!).status).toBe('replay');
+      expect(() =>
+        owner.runWithExecution(lateHandle, () =>
+          owner.storage.sessions.setSessionName('child', 'late write'),
+        ),
+      ).toThrow();
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(
+          read.query('SELECT session_id FROM runtime_session_tombstones ORDER BY session_id').all(),
+        ).toEqual([{ session_id: 'child' }, { session_id: 'parent' }]);
+        expect(
+          read.query("SELECT key FROM kite_meta WHERE key='session_execution/child'").all(),
+        ).toEqual([]);
+        expect(read.query('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('data deletion admission reads active and tombstone identity without decoding corrupt State', () => {
+    const fixture = createFixture(['parent']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed.run('PRAGMA ignore_check_constraints=ON');
+      seed
+        .query(
+          "UPDATE runtime_snapshots SET state_json='malformed State' WHERE session_id='parent'",
+        )
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const active = owner.readSessionDataDeletionIdentity('parent');
+      if (!active) throw new Error('Active Session identity was not found.');
+      expect(active).toEqual({
+        workspaceId: WORKSPACE_ID,
+        projectId: PROJECT_ID,
+        workspaceDigest: WORKSPACE_DIGEST,
+        canonicalPath: WORKSPACE_PATH,
+        deleted: false,
+      });
+      const receipt = owner.deleteSessionDataTree('parent', (revision) =>
+        createRuntimeStoredCommandReceipt(
+          {
+            scopeSessionId: 'parent',
+            commandId: 'delete-corrupt-state',
+            requestDigest: 'b'.repeat(64),
+            targetSessionId: 'parent',
+            committedAt: Date.now(),
+          },
+          revision,
+        ),
+      );
+      expect(receipt?.committedRevision).toBe(0);
+      expect(owner.readSessionDataDeletionIdentity('parent')).toEqual({
+        ...active,
+        deleted: true,
+      });
+      expect(owner.readSessionDataDeletionIdentity('missing')).toBeNull();
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('receipt callback cannot mutate general Store state and rolls back on failure', () => {
+    const fixture = createFixture(['parent']);
+    const owner = openOwner(fixture.path);
+    try {
+      expect(() =>
+        owner.deleteSessionDataTree('parent', () => {
+          owner.storage.sessions.setSessionName('parent', 'unauthorized');
+          throw new Error('unreachable');
+        }),
+      ).toThrow();
+      expect(() =>
+        owner.deleteSessionDataTree('parent', () => {
+          throw new Error('receipt failed');
+        }),
+      ).toThrow();
+      expect(owner.storage.sessions.loadSnapshot('parent')).not.toBeNull();
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(read.query('SELECT session_id FROM runtime_session_tombstones').all()).toEqual([]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('data deletion preserves the cross-tree dependency guard', () => {
+    const fixture = createFixture(['parent', 'child', 'other']);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='parent' WHERE session_id='child'")
+        .run();
+      seed
+        .query(`INSERT INTO agent_mail_inbox
+        (target_session_id,message_id,source_session_id,sequence,target_revision,received_at_ms)
+        VALUES ('other','cross-mail','child',1,1,1)`)
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      expect(() =>
+        owner.deleteSessionDataTree('parent', (revision) =>
+          createRuntimeStoredCommandReceipt(
+            {
+              scopeSessionId: 'parent',
+              commandId: 'cross-tree',
+              requestDigest: 'c'.repeat(64),
+              targetSessionId: 'parent',
+              committedAt: Date.now(),
+            },
+            revision,
+          ),
+        ),
+      ).toThrow();
+      expect(owner.storage.sessions.loadSnapshot('parent')).not.toBeNull();
+      expect(owner.storage.sessions.loadSnapshot('child')).not.toBeNull();
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(read.query('SELECT session_id FROM runtime_session_tombstones').all()).toEqual([]);
+        expect(read.query('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('workspace data deletion removes all roots once while preserving another Workspace', () => {
+    const fixture = createFixture(['root-a', 'child-a', 'root-b']);
+    const otherWorkspaceId = `workspace_${'b'.repeat(64)}`;
+    const otherIdentityDigest = `sha256:${'b'.repeat(64)}`;
+    const otherWorkspaceDigest = `sha256:${'c'.repeat(64)}`;
+    const targetArtifact = `pa_${'1'.repeat(64)}`;
+    const sharedArtifact = `pa_${'2'.repeat(64)}`;
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      seed
+        .query("UPDATE runtime_sessions SET parent_session_id='root-a' WHERE session_id='child-a'")
+        .run();
+      seed
+        .query(`INSERT INTO workspaces(
+          workspace_id,canonical_path,workspace_identity_digest,project_id,workspace_digest,
+          display_name,created_at,updated_at
+        ) VALUES (?, '/other', ?, 'project-other', ?, 'Other', 1, 1)`)
+        .run(otherWorkspaceId, otherIdentityDigest, otherWorkspaceDigest);
+      seed
+        .query(`INSERT INTO runtime_sessions(
+          session_id,workspace_id,project_id,workspace_digest,state_schema,format_epoch,
+          revision,name,updated_at,run_index_from_revision
+        ) VALUES ('external',?,'project-other',?,1,?,0,'',1,0)`)
+        .run(otherWorkspaceId, otherWorkspaceDigest, STATE_EPOCH);
+      const externalJson = JSON.stringify(state(0, 'external-recovery'));
+      seed
+        .query(`INSERT INTO runtime_snapshots(
+          session_id,schema_version,format_epoch,revision,state_json,event_position,
+          state_checksum,created_at
+        ) VALUES ('external',1,?,0,?,0,?,1)`)
+        .run(STATE_EPOCH, externalJson, checksum(externalJson));
+      for (const [artifactId, digit] of [
+        [targetArtifact, '1'],
+        [sharedArtifact, '2'],
+      ] as const) {
+        seed
+          .query(`INSERT INTO model_artifacts(
+            artifact_id,kind,integrity_identifier,artifact_format_version,
+            canonical_json,byte_length,created_at
+          ) VALUES (?,'model_surface',?,1,'{}',2,1)`)
+          .run(artifactId, `sha256:${digit.repeat(64)}`);
+      }
+      for (const [sessionId, artifactId] of [
+        ['root-a', targetArtifact],
+        ['root-b', sharedArtifact],
+        ['external', sharedArtifact],
+      ] as const) {
+        const json = JSON.stringify({ ...state(0, 'test-recovery'), refs: [{ artifactId }] });
+        seed
+          .query('UPDATE runtime_snapshots SET state_json=?,state_checksum=? WHERE session_id=?')
+          .run(json, checksum(json), sessionId);
+      }
+      seed
+        .query(`INSERT INTO runtime_runs(
+          session_id,run_id,start_command_id,phase,status,created_revision,last_revision,
+          created_at_ms,started_at_ms
+        ) VALUES ('root-b','stale-run','stale-start','building','running',0,0,1,1)`)
+        .run();
+      seed
+        .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
+        .run(`workspace_deletion:${WORKSPACE_ID}`, 'malformed stale fence');
+      seed.run('PRAGMA ignore_check_constraints=ON');
+      seed
+        .query(
+          "UPDATE runtime_snapshots SET state_json='broken-history' WHERE session_id='child-a'",
+        )
+        .run();
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      expect(owner.listWorkspaceSessionIds(WORKSPACE_ID)).toEqual(['child-a', 'root-a', 'root-b']);
+      acquire(owner, 'root-b', 'foreign-live-owner');
+      const result = owner.deleteWorkspaceSessionData(WORKSPACE_ID);
+      expect(result).toEqual({
+        rootSessionIds: ['root-a', 'root-b'],
+        sessionIds: ['child-a', 'root-a', 'root-b'],
+      });
+      expect(owner.listWorkspaceSessionIds(WORKSPACE_ID)).toEqual([]);
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(
+          read.query<{ session_id: string }, []>('SELECT session_id FROM runtime_sessions').all(),
+        ).toEqual([{ session_id: 'external' }]);
+        expect(
+          read.query('SELECT session_id FROM runtime_session_tombstones ORDER BY session_id').all(),
+        ).toEqual([{ session_id: 'child-a' }, { session_id: 'root-a' }, { session_id: 'root-b' }]);
+        expect(read.query('SELECT artifact_id FROM model_artifacts').all()).toEqual([
+          { artifact_id: sharedArtifact },
+        ]);
+        expect(
+          read
+            .query('SELECT value FROM kite_meta WHERE key=?')
+            .all(`workspace_deletion:${WORKSPACE_ID}`),
+        ).toEqual([]);
+        expect(read.query('PRAGMA foreign_key_check').all()).toEqual([]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('workspace data deletion scales across many roots with one shared artifact pass', () => {
+    const sessionIds = Array.from({ length: 100 }, (_, index) => `root-${index}`);
+    const fixture = createFixture(sessionIds);
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    const largeArtifactId = `pa_${'f'.repeat(64)}`;
+    try {
+      const insertArtifact = seed.query(`INSERT INTO model_artifacts(
+        artifact_id,kind,integrity_identifier,artifact_format_version,
+        canonical_json,byte_length,created_at
+      ) VALUES (?,'model_surface',?,1,?,?,1)`);
+      const updateSnapshot = seed.query(
+        'UPDATE runtime_snapshots SET state_json=?,state_checksum=? WHERE session_id=?',
+      );
+      for (const [index, sessionId] of sessionIds.entries()) {
+        const hex = index.toString(16).padStart(64, '0');
+        const artifactId = `pa_${hex}`;
+        insertArtifact.run(artifactId, `sha256:${hex}`, '{}', 2);
+        const json = JSON.stringify({ ...state(0, `recovery-${index}`), refs: [{ artifactId }] });
+        updateSnapshot.run(json, checksum(json), sessionId);
+      }
+      const largeJson = JSON.stringify({ text: 'x'.repeat(8_000_000) });
+      insertArtifact.run(
+        largeArtifactId,
+        `sha256:${'f'.repeat(64)}`,
+        largeJson,
+        Buffer.byteLength(largeJson),
+      );
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      const started = performance.now();
+      const result = owner.deleteWorkspaceSessionData(WORKSPACE_ID);
+      const elapsedMs = performance.now() - started;
+      expect(result.rootSessionIds).toHaveLength(100);
+      expect(result.sessionIds).toHaveLength(100);
+      expect(elapsedMs).toBeLessThan(5_000);
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(read.query('SELECT artifact_id FROM model_artifacts').all()).toEqual([
+          { artifact_id: largeArtifactId },
+        ]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  }, 20_000);
+
+  test('empty Workspace data deletion clears only its stale metadata', () => {
+    const fixture = createFixture([]);
+    const otherWorkspaceId = `workspace_${'b'.repeat(64)}`;
+    const seed = openKiteSessionStoreDatabase(fixture.path);
+    try {
+      const insert = seed.query('INSERT INTO kite_meta(key,value) VALUES (?,?)');
+      insert.run(`workspace_authority/${WORKSPACE_ID}/orphaned`, 'stale');
+      insert.run(`workspace_deletion:${WORKSPACE_ID}`, 'stale');
+      insert.run(`workspace_authority/${otherWorkspaceId}/preserved`, 'other');
+    } finally {
+      seed.close(false);
+    }
+    const owner = openOwner(fixture.path);
+    try {
+      expect(owner.deleteWorkspaceSessionData(WORKSPACE_ID)).toEqual({
+        rootSessionIds: [],
+        sessionIds: [],
+      });
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(
+          read
+            .query<{ key: string }, []>(
+              "SELECT key FROM kite_meta WHERE key LIKE 'workspace_authority/%' OR key LIKE 'workspace_deletion:%'",
+            )
+            .all(),
+        ).toEqual([{ key: `workspace_authority/${otherWorkspaceId}/preserved` }]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
+  test('workspace data deletion rolls back authority when a tombstone insert fails', () => {
+    const fixture = createFixture(['root-a', 'root-b']);
+    const owner = openOwner(fixture.path);
+    try {
+      acquire(owner, 'root-a', 'active-owner');
+      const seed = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        seed
+          .query(`INSERT INTO runtime_session_tombstones(
+            session_id,workspace_id,project_id,workspace_digest,deleted_revision,deleted_at
+          ) VALUES ('root-b',?,?,?,?,1)`)
+          .run(WORKSPACE_ID, PROJECT_ID, WORKSPACE_DIGEST, 0);
+      } finally {
+        seed.close(false);
+      }
+      expect(() => owner.deleteWorkspaceSessionData(WORKSPACE_ID)).toThrow();
+      const read = openKiteSessionStoreDatabase(fixture.path);
+      try {
+        expect(
+          read.query('SELECT session_id FROM runtime_sessions ORDER BY session_id').all(),
+        ).toEqual([{ session_id: 'root-a' }, { session_id: 'root-b' }]);
+        expect(read.query('SELECT session_id FROM runtime_session_tombstones').all()).toEqual([
+          { session_id: 'root-b' },
+        ]);
+        expect(
+          read.query('SELECT key FROM kite_meta WHERE key=?').all('session_execution/root-a'),
+        ).toEqual([{ key: 'session_execution/root-a' }]);
+      } finally {
+        read.close(false);
+      }
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
   test('atomically deletes a settled child tree with its root receipt', () => {
     const fixture = createFixture(['parent', 'child', 'grandchild', 'other']);
     const seed = openKiteSessionStoreDatabase(fixture.path);

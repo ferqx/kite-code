@@ -2047,9 +2047,30 @@ test('space controls open the picker and require confirmation before removal', a
   expect(confirmations[0]?.message).toContain('停止');
   expect(confirmations[0]?.message).toContain('永久删除');
   allow = true;
+  let finishRemoval!: () => void;
+  const removalPending = new Promise<void>((resolve) => {
+    finishRemoval = resolve;
+  });
+  client.removeProject = async (id) => {
+    removed.push(id);
+    await removalPending;
+    client.update({ projects: client.view.projects?.filter((project) => project.path !== id) });
+    return { selectedRemoved: false, workspace: '/project' };
+  };
   await click(button('移除 another'));
   expect(removed).toEqual(['/another']);
+  await act(() => Bun.sleep(20));
+  expect(document.body.textContent).toContain('正在移除空间“another”…正在停止任务并清理历史。');
+  expect(button('移除 another').hasAttribute('disabled')).toBe(true);
+  await click(button('移除 another'));
+  expect(removed).toEqual(['/another']);
+  await act(async () => {
+    finishRemoval();
+    await Bun.sleep(20);
+  });
   expect(document.querySelector('[aria-label="移除 another"]')).toBeNull();
+  await act(() => Bun.sleep(250));
+  expect(document.querySelector('[data-sonner-toast]')?.getAttribute('data-removed')).toBe('true');
 });
 
 test('server removal of the visible session closes its page and clears saved navigation', async () => {

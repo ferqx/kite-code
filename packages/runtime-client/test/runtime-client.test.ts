@@ -730,6 +730,56 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
+  test('extends only the selected App request deadline and never replays a timed out mutation', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('server-app-deadline')));
+      else if (message.method === 'app/workspace/remove') {
+        setTimeout(
+          () =>
+            target.push(
+              result(message.id, {
+                method: 'app/workspace/remove',
+                response: { deletedSessions: 1, token: 'remove-token' },
+              }),
+            ),
+          50,
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 10,
+    });
+    try {
+      await client.connect();
+      const removal = client.requestApp(
+        'app/workspace/remove',
+        {
+          phase: 'remove',
+          workspaceDigest: `sha256:${'a'.repeat(64)}`,
+          token: 'remove-token',
+        },
+        { timeoutMs: 200 },
+      );
+      await expect(client.command(startCommand())).rejects.toMatchObject({
+        code: 'request_timeout',
+      });
+      await expect(removal).resolves.toEqual({ deletedSessions: 1, token: 'remove-token' });
+      await expect(client.requestApp('app/release/status', {})).rejects.toMatchObject({
+        code: 'request_timeout',
+      });
+      await expect(client.requestApp('app/release/status', {}, { timeoutMs: 0 })).rejects.toThrow(
+        TypeError,
+      );
+      expect(connection.requests('runtime/command')).toHaveLength(1);
+      expect(connection.requests('app/workspace/remove')).toHaveLength(1);
+    } finally {
+      await client.close();
+    }
+  });
+
   test('fails closed when an App Server identity or required capability does not match', async () => {
     for (const expectedServer of [
       { version: 'expected-version', requiredMethods: [] as const },

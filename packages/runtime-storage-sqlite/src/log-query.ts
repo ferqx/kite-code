@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { createHash } from 'node:crypto';
 import type {
   RuntimeLogEventQuery,
   RuntimeLogEventReadPage,
@@ -220,6 +221,12 @@ export function createSqliteSessionHistoryReader<Event = unknown, State = unknow
   readonly database: Database;
   readonly logs: RuntimeLogQueryPort<Event>;
   childLogs(parentSessionId: string, childSessionId: string): RuntimeLogQueryPort<Event>;
+  fingerprintEventRows(
+    sessionId: string,
+    throughSequence: number,
+    parentSessionId?: string,
+    limits?: Readonly<{ maxRecords: number; maxSourceBytes: number }>,
+  ): string | null;
   close(): void;
 } {
   assertNoFollowDatabasePath(input.databasePath);
@@ -241,6 +248,47 @@ export function createSqliteSessionHistoryReader<Event = unknown, State = unknow
           currentEventTypes: input.currentEventTypes,
           childScope: { parentSessionId, childSessionId },
         }),
+      fingerprintEventRows: (sessionId, throughSequence, parentSessionId, limits) => {
+        if (!Number.isSafeInteger(throughSequence) || throughSequence < 0) return null;
+        const visible = database
+          .query<{ session_id: string }, string[]>(
+            `SELECT session_id FROM runtime_sessions WHERE session_id = ? AND parent_session_id ${parentSessionId === undefined ? 'IS NULL' : '= ?'}`,
+          )
+          .get(sessionId, ...(parentSessionId === undefined ? [] : [parentSessionId]));
+        if (!visible) return null;
+        const hash = createHash('sha256');
+        const rows = database.query<EventRow, [string, number]>(
+          `SELECT session_id, event_id, sequence, schema_version, causation_id,
+                  occurred_at, created_at, event_json
+           FROM runtime_events WHERE session_id = ? AND sequence <= ? ORDER BY sequence ASC`,
+        );
+        let recordCount = 0;
+        let sourceBytes = 0;
+        try {
+          for (const row of rows.iterate(sessionId, throughSequence)) {
+            // The same raw row fields feed the decoded log reader. The JSON array
+            // and newline frame preserve boundaries without decoding event_json.
+            const frame = `${JSON.stringify([
+              row.session_id,
+              row.event_id,
+              row.sequence,
+              row.schema_version,
+              row.causation_id,
+              row.occurred_at,
+              row.created_at,
+              row.event_json,
+            ])}\n`;
+            recordCount++;
+            sourceBytes += Buffer.byteLength(frame, 'utf8');
+            if (limits && (recordCount > limits.maxRecords || sourceBytes > limits.maxSourceBytes))
+              return null;
+            hash.update(frame);
+          }
+        } finally {
+          rows.finalize();
+        }
+        return hash.digest('hex');
+      },
       close: () => database.close(),
     };
   } catch (error) {

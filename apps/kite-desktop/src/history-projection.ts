@@ -1,5 +1,5 @@
 import type { RuntimeHistorySessionTranscript } from '@kite-ai/runtime-contract';
-import { type Message, projectEventWithIdentity } from './presentation';
+import { HistoryMessageBuilder, type Message, projectHistoricalEvent } from './presentation';
 
 export interface DesktopCacheMetrics {
   readonly cacheHitTokens: number;
@@ -33,13 +33,13 @@ export async function projectHistory(
   previous: readonly Message[],
   signal: AbortSignal,
 ): Promise<readonly Message[]> {
-  let messages: readonly Message[] = [];
+  const builder = new HistoryMessageBuilder();
   let started = performance.now();
   let count = 0;
   for (const record of records) {
     for (const event of record.events) {
       signal.throwIfAborted();
-      messages = projectEventWithIdentity(messages, event, record.identity);
+      projectHistoricalEvent(builder, event, record.identity);
       if (++count === 200 || performance.now() - started >= 8) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         signal.throwIfAborted();
@@ -49,6 +49,7 @@ export async function projectHistory(
     }
   }
   const byId = new Map(previous.map((message) => [message.id, message]));
+  const messages = builder.messages;
   let unchanged = messages.length === previous.length;
   const shared: Message[] = [];
   for (let index = 0; index < messages.length; index++) {

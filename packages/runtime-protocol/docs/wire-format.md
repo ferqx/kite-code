@@ -4,6 +4,8 @@
 
 请求、回执、通知和查询结果必须通过对应 codec。exact version、允许字段、大小限制和错误形状由该包决定；不能让未知字段进入 raw Runtime event。Service carrier 处理实际 framing 与传输，Protocol 不创建 socket 或进程。
 
+`app/workspace/remove` 的失败可携带封闭的空间移除 `detailCode` 与非负安全整数 `deletedSessions`，后者只表示本次已确认删除的根会话数，不含随根删除的子会话，也不证明空间已清空。该字段仅与空间移除错误类别及 `internal_error` 一同出现；错误不携带会话正文、路径或原始异常。没有结构化计数的客户端不得推断已删除零条。
+
 连接 request identity 用于关联 wire response；业务 command identity 和 Session revision 用于幂等及状态校验，二者不能混用。连接重建不允许自动重放未知副作用命令。
 
 修改 contract 后同时核对 mapper、codec、producer 和 consumer。只有输出字段的投影允许时才能新增客户端信息；生成参考不替代运行 codec。与 Public Agent API 的关系见[整体依赖](../../../docs/development/architecture/dependencies.md)。

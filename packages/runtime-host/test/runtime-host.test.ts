@@ -20,6 +20,7 @@ import {
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   createArtifactPort,
+  createRuntimeStoredCommandReceipt,
   type RuntimeStorage,
   type RuntimeStorageBoundary,
   type RuntimeStoredRun,
@@ -749,11 +750,21 @@ describe('runtime host command and projection authority', () => {
     const shutdowns: string[] = [];
     bridge.shutdownImplementation = async (sessionId) => {
       shutdowns.push(sessionId);
+      bridge.projections.set(sessionId, projection(sessionId, 4));
     };
     bridge.projections.set('session-1', projection('session-1', 3));
+    const deletionScopes: string[] = [];
     const host = createRuntimeHost({
       storage: testStorage(),
       modules: testRuntimeModules(() => bridge),
+      runWithSessionExecution: () => {
+        throw new Error('Deletion must not acquire business execution.');
+      },
+      runWithSessionDeletion: (sessionId, operation) => {
+        expect(shutdowns).toEqual([sessionId]);
+        deletionScopes.push(sessionId);
+        return operation();
+      },
     });
     await host.start();
     const deleted = await host.command({
@@ -767,7 +778,7 @@ describe('runtime host command and projection authority', () => {
       status: 'applied',
       commandId: 'delete-1',
       sessionId: 'session-1',
-      revision: 3,
+      revision: 4,
     });
     expect(
       (
@@ -780,6 +791,7 @@ describe('runtime host command and projection authority', () => {
     ).toBe('not_found');
     expect(bridge.calls).toEqual([]);
     expect(shutdowns).toEqual(['session-1']);
+    expect(deletionScopes).toEqual(['session-1']);
 
     await expect(
       host.command({
@@ -793,11 +805,97 @@ describe('runtime host command and projection authority', () => {
       status: 'idempotent_replay',
       commandId: 'delete-1',
       sessionId: 'session-1',
-      originalRevision: 3,
+      originalRevision: 4,
     });
     expect(bridge.recoveries).toEqual([]);
     expect(shutdowns).toEqual(['session-1']);
     await host[Symbol.asyncDispose]();
+  });
+
+  test('data deletion uses the Store revision and starts cleanup without loading a projection', async () => {
+    const storage = testStorage();
+    const cleanup: string[] = [];
+    const host = createRuntimeHost({
+      storage,
+      modules: testRuntimeModules(() => new TestExecutionBridge()),
+      beginDeletionCleanup: (sessionId) => cleanup.push(sessionId),
+      deleteSessionData: (sessionId, evidence) => {
+        const receipt = createRuntimeStoredCommandReceipt(evidence, 7);
+        storage.sessions.deleteSession(sessionId, {
+          expectedRevision: 7,
+          commandReceipt: receipt,
+        });
+        return receipt;
+      },
+      runWithSessionExecution: () => {
+        throw new Error('Data deletion cannot acquire execution.');
+      },
+    });
+    try {
+      expect(
+        await host.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'delete_session',
+          commandId: 'delete-data',
+          sessionId: 'historical-session',
+          expectedRevision: 1,
+        }),
+      ).toMatchObject({ status: 'applied', revision: 7 });
+      expect(cleanup).toEqual(['historical-session']);
+      expect(
+        await host.command({
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          type: 'delete_session',
+          commandId: 'delete-data',
+          sessionId: 'historical-session',
+          expectedRevision: 1,
+        }),
+      ).toMatchObject({ status: 'idempotent_replay', originalRevision: 7 });
+      expect(cleanup).toEqual(['historical-session']);
+    } finally {
+      await host[Symbol.asyncDispose]();
+    }
+  });
+
+  test('a delayed projection query cannot republish a deleted Session', async () => {
+    const sessionId = 'deleted-during-query';
+    const bridge = new TestExecutionBridge();
+    bridge.projections.set(sessionId, projection(sessionId, 4));
+    const queryGate = deferred();
+    const queryEntered = deferred();
+    const originalQuery = bridge.query.bind(bridge);
+    bridge.query = async (query) => {
+      if (query.type === 'get_session_projection' && query.sessionId === sessionId) {
+        queryEntered.resolve();
+        await queryGate.promise;
+      }
+      return originalQuery(query);
+    };
+    const host = createRuntimeHost({
+      storage: testStorage(),
+      modules: testRuntimeModules(() => bridge),
+      ownsSessionExecution: () => false,
+    });
+    try {
+      await host.start();
+      const pending = host.query({
+        schema: RUNTIME_QUERY_SCHEMA_,
+        type: 'get_session_projection',
+        sessionId,
+      });
+      await queryEntered.promise;
+      host.completeSessionDataDeletion(sessionId);
+      queryGate.resolve();
+      expect(await pending).toMatchObject({ status: 'not_found' });
+      expect(
+        await host.query({ schema: RUNTIME_QUERY_SCHEMA_, type: 'list_sessions' }),
+      ).toMatchObject({
+        sessions: [],
+      });
+    } finally {
+      queryGate.resolve();
+      await host[Symbol.asyncDispose]();
+    }
   });
 
   test('emits an App-only session projection tombstone without touching Store or work', async () => {

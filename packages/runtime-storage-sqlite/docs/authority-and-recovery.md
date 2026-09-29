@@ -16,7 +16,7 @@ controllerGeneration 与 authority revision 描述持久执行所有权；PID、
 
 recovery.inspect 只读 authority、pending 与 unknown effects；reconcile 绑定预期 authority revision，并返回需要处理的 unknown effects。无完整结果的操作不能标记成“没有执行”。Kernel/Host 根据这些 facts 决定继续、拒绝或要求处理，SQLite 不自行重跑 Provider。
 
-进程退出、连接中断、业务取消和会话删除是不同事件。删除需要防止迟到写入复活数据，回执与 tombstone 的保留按各自语义处理。
+进程退出、连接中断、业务取消和数据删除是不同操作。可信 Service owner 的数据删除入口直接操作元数据及关联行，不取得执行权或恢复快照，不要求旧 Run、工具、effect、租约或 cleanup 标签先成为终态。单会话删除在同一事务中保存绑定当前元数据 revision 的命令回执；空间删除对全部根及子会话执行一次事务，共用一次附件候选和引用扫描。数据与 authority 一并移除，tombstone 阻止旧句柄及迟到写入复活数据。Service 负责取消真实执行实例并管理异步收尾。事务保留目标范围和引用一致性，共享附件不误删。
 
 ## Store 维护准入
 

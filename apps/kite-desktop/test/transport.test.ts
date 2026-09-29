@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test';
+import {
+  RendererConnection,
+  type ServiceProcessCarrier,
+} from '../electron/runtime/renderer-connection';
 import type { DesktopRuntimeBridge } from '../src/transport';
 import { desktopTransport } from '../src/transport';
 
@@ -51,4 +55,57 @@ test('late receive from a closed connection cannot reach the client', async () =
   await connection.close();
   resolve(JSON.stringify(message));
   expect(await received).toEqual({ done: true, value: undefined });
+});
+
+test('history cancellation crosses the renderer bridge without detaching the connection', async () => {
+  const sent: string[] = [];
+  const service: ServiceProcessCarrier = {
+    finished: false,
+    async send(frame) {
+      sent.push(frame);
+    },
+    async receive() {
+      return new Promise<string>(() => undefined);
+    },
+    async waitForReceiver() {},
+    async close() {},
+  };
+  const renderer = new RendererConnection(service, 'test');
+  await renderer.attach(info.connectionId);
+  let detaches = 0;
+  const bridge: DesktopRuntimeBridge = {
+    runtimeSend: (_id, frame) => renderer.send(info.connectionId, frame),
+    runtimeReceive: (_id) => renderer.receive(info.connectionId),
+    async runtimeDetach() {
+      detaches++;
+    },
+  };
+  const connection = await desktopTransport(info, bridge).connect();
+  await connection.send({
+    jsonrpc: '2.0',
+    id: 'history-1',
+    method: 'history/load_session',
+    params: { sessionId: 'session-1' },
+  });
+  const wireId = JSON.parse(sent.at(-1)!).id;
+  await connection.send({
+    jsonrpc: '2.0',
+    method: 'history/cancel',
+    params: { requestId: 'history-1' },
+  });
+  expect(JSON.parse(sent.at(-1)!)).toEqual({
+    jsonrpc: '2.0',
+    method: 'history/cancel',
+    params: { requestId: wireId },
+  });
+  await connection.send({
+    jsonrpc: '2.0',
+    id: 'history-2',
+    method: 'history/load_session',
+    params: { sessionId: 'session-2' },
+  });
+  expect(JSON.parse(sent.at(-1)!).params.sessionId).toBe('session-2');
+  expect(detaches).toBe(0);
+  await connection.close();
+  expect(detaches).toBe(1);
 });

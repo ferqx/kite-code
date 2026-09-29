@@ -23,7 +23,6 @@ import {
   createKiteMultiWorkspaceRuntimeServer,
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
-import { isUnknownRunOnlyCancelledChildModelUsage } from '../../src/bootstrap/runtime/session-deletion-proof';
 import { createKiteRuntimeObserverHistoryClient } from '../../src/runtime-client/history-adapter';
 import { APP_PREPARED_SHELL_EXECUTION_ } from '../../src/sandbox/prepared-tool-pipeline';
 
@@ -714,60 +713,6 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
         ).toHaveLength(1);
         expect(storage.recovery.inspect(parentSessionId).authority.status).toBe('active');
         expect(storage.ownsSessionExecution(parentSessionId)).toBe(true);
-        if (!parent) throw new Error('Parent snapshot disappeared before deletion.');
-        const unknownRuns =
-          storage.storage.runs?.list({ sessionId: parentSessionId, status: 'unknown', limit: 2 })
-            .entries ?? [];
-        const child = storage.loadCurrentSnapshot(childThreadId);
-        if (!child) throw new Error('Child snapshot disappeared before deletion.');
-        const proof = {
-          parent,
-          unknownRuns,
-          readSettledChild: (sessionId: string) =>
-            sessionId === childThreadId ? child : undefined,
-        };
-        expect(isUnknownRunOnlyCancelledChildModelUsage(proof)).toBe(true);
-        expect(
-          isUnknownRunOnlyCancelledChildModelUsage({
-            ...proof,
-            readSettledChild: () => undefined,
-          }),
-        ).toBe(false);
-        expect(
-          isUnknownRunOnlyCancelledChildModelUsage({
-            ...proof,
-            parent: {
-              ...parent,
-              turn: { ...parent.turn, abortReason: 'Unknown external tool outcome.' },
-            },
-          }),
-        ).toBe(false);
-        const childBudget = child.resourceBudget;
-        if (childBudget.status !== 'active')
-          throw new Error('Cancelled child budget is unavailable.');
-        const unknownChildReservation = Object.values(childBudget.reservations).find(
-          (reservation) => reservation.state === 'unknown',
-        );
-        if (!unknownChildReservation)
-          throw new Error('Cancelled child model reservation is unavailable.');
-        expect(
-          isUnknownRunOnlyCancelledChildModelUsage({
-            ...proof,
-            readSettledChild: () => ({
-              ...child,
-              resourceBudget: {
-                ...childBudget,
-                reservations: {
-                  ...childBudget.reservations,
-                  [unknownChildReservation.reservationId]: {
-                    ...unknownChildReservation,
-                    resourceKind: 'tool',
-                  },
-                },
-              },
-            }),
-          }),
-        ).toBe(false);
       }
       let deleted: Awaited<ReturnType<typeof client.command>> | undefined;
       for (let attempt = 0; attempt < 40; attempt++) {

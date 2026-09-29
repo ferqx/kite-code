@@ -70,6 +70,7 @@ export function App({ client }: { client: DesktopClient }) {
     directory: directorySnapshot,
   } = view;
   const [operation, setOperation] = useState<'foreground' | 'background'>();
+  const [removingWorkspace, setRemovingWorkspace] = useState<string>();
   const busy = operation === 'foreground';
   const [pendingPermission, setPendingPermission] = useState<{
     sessionId: string;
@@ -362,16 +363,21 @@ export function App({ client }: { client: DesktopClient }) {
         defaultCancel: true,
       });
       if (!confirmed) return;
-      const result = await client.removeProject(id);
-      navigationRevision.current++;
-      if (result.selectedRemoved || newConversationWorkspace === id || workspace === id) {
-        client.leaveSessionPage();
-        setNewConversation(true);
-        setNewConversationWorkspace(undefined);
-        setNewConversationBranch(undefined);
-        setNewConversationTargetBranch(undefined);
-        setScheduledTasksView(false);
-        rememberNavigation(result.workspace);
+      setRemovingWorkspace(label);
+      try {
+        const result = await client.removeProject(id);
+        navigationRevision.current++;
+        if (result.selectedRemoved || newConversationWorkspace === id || workspace === id) {
+          client.leaveSessionPage();
+          setNewConversation(true);
+          setNewConversationWorkspace(undefined);
+          setNewConversationBranch(undefined);
+          setNewConversationTargetBranch(undefined);
+          setScheduledTasksView(false);
+          rememberNavigation(result.workspace);
+        }
+      } finally {
+        setRemovingWorkspace(undefined);
       }
     });
   useEffect(() => {
@@ -835,6 +841,11 @@ export function App({ client }: { client: DesktopClient }) {
         <>
           <OperationToast
             message={operationError}
+            pendingMessage={
+              removingWorkspace
+                ? `正在移除空间“${removingWorkspace}”…正在停止任务并清理历史。`
+                : undefined
+            }
             recovery={operationError === view.error && !!view.recoverySessionId}
             busy={busy}
             onDismiss={dismissOperationError}

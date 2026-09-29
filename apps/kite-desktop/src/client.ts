@@ -336,57 +336,48 @@ export class DesktopClient {
     if (!project && !this.#view.directory?.some((entry) => entry.workspaceDigest === digest))
       throw new Error('空间已不在目录中，请刷新后重试。');
     const connection = this.#requireConnection();
-    const roots = await this.#listWorkspaceSessions(connection, digest);
-    const selectedRemoved = Boolean(
-      this.#view.selected &&
-        (roots.includes(this.#view.selected) || this.#view.projection?.workspaceDigest === digest),
-    );
-    let deleted = 0;
     const token = this.#workspaceRemovalTokens.get(digest) ?? crypto.randomUUID();
     this.#workspaceRemovalTokens.set(digest, token);
-    let removeConfirmed = false;
-    const finalize = async () => {
-      await (this.#connection ?? connection).runtime.requestApp('app/workspace/remove', {
-        phase: 'finalize',
-        workspaceDigest: digest,
-        token,
-        ...(project ? { workspace: project.path } : {}),
-      });
-      this.#workspaceRemovalTokens.delete(digest);
-    };
     try {
-      const response = await connection.runtime.requestApp('app/workspace/remove', {
-        phase: 'remove',
-        workspaceDigest: digest,
-        token,
-        ...(project ? { workspace: project.path } : {}),
-      });
+      const response = await connection.runtime.requestApp(
+        'app/workspace/remove',
+        {
+          phase: 'remove',
+          workspaceDigest: digest,
+          token,
+          ...(project ? { workspace: project.path } : {}),
+        },
+        { timeoutMs: 150_000 },
+      );
       if (response.token !== token || typeof response.deletedSessions !== 'number')
         throw new Error('服务端空间移除回执无效。');
-      removeConfirmed = true;
-      deleted = response.deletedSessions;
-      for (const sessionId of roots) this.#removeDeletedSessionFromView(sessionId);
-      if ((await this.#listWorkspaceSessions(connection, digest)).length)
-        throw new Error('空间中出现新的会话，请重新核对后再移除。');
     } catch (error) {
-      if (removeConfirmed) await finalize();
       // A lost remove response is retryable with this operation token. The
       // registration stays visible so the user can repeat the same removal.
-      throw new Error(`空间移除未完成，已删除 ${deleted} 条会话；项目仍保留。${messageOf(error)}`);
-    }
-    if (this.#connection !== connection) {
-      await finalize();
-      throw new Error('连接已改变，项目仍保留，请刷新后核对。');
-    }
-    // Keep the native registration available until the durable deletion gate
-    // has been released. A failed finalize can then be retried with this token.
-    try {
-      await finalize();
-    } catch (error) {
+      const reported = workspaceRemovalDeletedSessions(error);
+      const progress =
+        reported === undefined ? '已删除数量未确认' : `本次已确认删除 ${reported} 条主会话`;
       throw new Error(
-        `空间历史已删除，但服务端收尾尚未确认；项目仍保留，请稍后重试。${messageOf(error)}`,
+        `空间移除未完成，${progress}；项目仍保留。${workspaceRemovalMessageOf(error)}`,
       );
     }
+    this.#workspaceRemovalTokens.delete(digest);
+    const knownSessions = [...(this.#view.directory ?? []), ...this.#view.sessions]
+      .filter(
+        (entry) =>
+          entry.workspaceDigest === digest ||
+          (project !== undefined && entry.workspace === project.path),
+      )
+      .map((entry) => entry.sessionId);
+    const selectedRemoved = Boolean(
+      this.#view.selected &&
+        (knownSessions.includes(this.#view.selected) ||
+          this.#view.projection?.workspaceDigest === digest),
+    );
+    for (const sessionId of new Set(knownSessions)) this.#removeDeletedSessionFromView(sessionId);
+    this.#historyCache.clear();
+    this.#childSessionCache.clear();
+    this.#backgroundDisplayCache.clear();
     if (project) {
       await this.#native().removeWorkspace(project.path);
       // The native registration is already gone. Keep the confirmed result in
@@ -418,7 +409,11 @@ export class DesktopClient {
       });
       await this.connect();
     }
-    await this.refreshDirectory();
+    try {
+      await this.refreshDirectory();
+    } catch {
+      this.#publish({ projectError: '空间已移除，会话列表暂时无法刷新。' });
+    }
     return { selectedRemoved, workspace: this.#view.workspace };
   }
 
@@ -465,22 +460,6 @@ export class DesktopClient {
           }
         : {}),
     });
-  }
-
-  async #listWorkspaceSessions(
-    connection: KiteAppServerConnection,
-    digest: string,
-  ): Promise<string[]> {
-    const entries = await readCompleteSessionDirectory((cursor) =>
-      connection.history.listSessions({
-        limit: 100,
-        workspaceDigest: digest,
-        ...(cursor ? { cursor } : {}),
-      }),
-    );
-    if (entries.some((entry) => entry.workspace?.workspaceDigest !== digest))
-      throw new Error('会话空间身份不一致，未继续删除。');
-    return entries.map((entry) => entry.sessionId);
   }
 
   async activateProject(path: string) {
@@ -2319,11 +2298,10 @@ export class DesktopClient {
       }
       this.#publish({ ready: false });
       if (timedOut) {
-        await connection.close().catch(() => undefined);
-        if (this.#connection === connection) {
-          this.#connection = undefined;
-          this.#publish({ connected: false });
-        }
+        // The selection owns its History read and subscription, not the shared
+        // connection. Aborting it releases those resources while other Session
+        // reads and the directory subscription remain connected. RuntimeClient
+        // still closes the peer if remote subscription cleanup itself fails.
         throw new Error('会话加载超时，请重新加载会话。');
       }
       if (this.#view.hasLoadedHistory)
@@ -2685,8 +2663,8 @@ function messageOf(error: unknown) {
     if (error.code === 'history_too_large') return '会话历史超过当前客户端的单次读取容量';
     if (error.code === 'request_overloaded') return '历史读取请求过多，请稍后重试';
     const detail = error.protocol?.data.detailCode;
-    if (detail)
-      return {
+    if (detail) {
+      const messages: Record<string, string> = {
         workspace_unavailable: '工作目录已不存在或无法访问',
         configuration_unavailable: '模型配置无法读取',
         temporarily_unavailable: '历史存储正忙，稍后将重新读取',
@@ -2696,9 +2674,40 @@ function messageOf(error: unknown) {
         invalid_request: '历史读取请求无效',
         history_snapshot_changed: '会话历史在读取期间发生变化，请重试',
         history_too_large: '会话历史超过当前客户端的单次读取容量',
-      }[detail];
+      };
+      const message = messages[detail];
+      if (message) return message;
+    }
   }
   return error instanceof Error ? error.message : String(error);
+}
+function workspaceRemovalDeletedSessions(error: unknown): number | undefined {
+  if (!(error instanceof RuntimeClientError) || error.protocol?.data.code !== 'internal_error')
+    return undefined;
+  const count = error.protocol.data.deletedSessions;
+  return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 ? count : undefined;
+}
+function workspaceRemovalMessageOf(error: unknown): string {
+  if (error instanceof RuntimeClientError && error.protocol?.data.code === 'internal_error') {
+    switch (error.protocol.data.detailCode) {
+      case 'workspace_cleanup_pending':
+        return '会话的执行资源尚未停止，暂不能删除。';
+      case 'workspace_busy':
+        return '会话仍在运行或存储正忙，请稍后重试。';
+      case 'workspace_recovery_required':
+        return '会话存在待核对的运行结果，请先完成恢复。';
+      case 'workspace_removal_timeout':
+        return '等待会话停止超时，请稍后重试。';
+      case 'workspace_identity_unavailable':
+        return '空间身份无法确认，请刷新后重试。';
+      case 'workspace_removal_failed':
+        return '删除过程未完成，请刷新后核对。';
+    }
+  }
+  if (error instanceof Error) {
+    if (error.message === '服务端空间移除回执无效。') return error.message;
+  }
+  return '请刷新后核对，再重试。';
 }
 async function pathDigest(path: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(path));

@@ -233,6 +233,68 @@ test('request-id cancellation is translated and its late subscribe ack cannot re
   ).toHaveLength(2);
 });
 
+test('history cancellation accepts only a valid notification and targets the host-scoped request', async () => {
+  const service = new FakeService();
+  const connection = new RendererConnection(service, 'server-v1');
+  await connection.attach(1);
+  await connection.send(
+    1,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'history-1',
+      method: 'history/load_session',
+      params: { sessionId: 'session-1' },
+    }),
+  );
+  const wireId = JSON.parse(service.sent.at(-1)!).id;
+  await connection.send(
+    1,
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'history/cancel',
+      params: { requestId: 'history-1' },
+    }),
+  );
+  expect(JSON.parse(service.sent.at(-1)!)).toEqual({
+    jsonrpc: '2.0',
+    method: 'history/cancel',
+    params: { requestId: wireId },
+  });
+  const sent = service.sent.length;
+  await expect(
+    connection.send(
+      1,
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'history/cancel',
+        params: { requestId: 'history-1', extra: true },
+      }),
+    ),
+  ).rejects.toThrow('无效的协议消息');
+  await expect(
+    connection.send(
+      1,
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'runtime/query',
+        params: {},
+      }),
+    ),
+  ).rejects.toThrow('协议请求缺少身份');
+  await connection.attach(2);
+  await expect(
+    connection.send(
+      1,
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'history/cancel',
+        params: { requestId: 'history-1' },
+      }),
+    ),
+  ).rejects.toThrow('页面连接已被替换');
+  expect(service.sent).toHaveLength(sent);
+});
+
 test('renderer reattach cancels pending subscribe by its host-scoped request id', async () => {
   const service = new FakeService();
   const connection = new RendererConnection(service, 'server-v1');

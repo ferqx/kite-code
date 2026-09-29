@@ -817,6 +817,17 @@ export const RUNTIME_PROTOCOL_ERROR_CODE_SCHEMA_ = z.enum([
   'resync_required',
 ]);
 export type RuntimeProtocolErrorCode = z.infer<typeof RUNTIME_PROTOCOL_ERROR_CODE_SCHEMA_>;
+export const RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_DETAIL_CODE_SCHEMA_ = z.enum([
+  'workspace_cleanup_pending',
+  'workspace_busy',
+  'workspace_recovery_required',
+  'workspace_removal_timeout',
+  'workspace_identity_unavailable',
+  'workspace_removal_failed',
+]);
+export type RuntimeProtocolWorkspaceRemovalDetailCode = z.infer<
+  typeof RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_DETAIL_CODE_SCHEMA_
+>;
 export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
   .object({
     code: z.union([
@@ -849,8 +860,10 @@ export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
             'invalid_request',
             'history_snapshot_changed',
             'history_too_large',
+            ...RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_DETAIL_CODE_SCHEMA_.options,
           ])
           .optional(),
+        deletedSessions: safeRevision.optional(),
       })
       .strict(),
   })
@@ -862,6 +875,23 @@ export const RUNTIME_PROTOCOL_ERROR_SCHEMA_ = z
         message: 'JSON-RPC error number does not match its stable code',
         path: ['code'],
       });
+    const workspaceRemovalDetail = RUNTIME_PROTOCOL_WORKSPACE_REMOVAL_DETAIL_CODE_SCHEMA_.safeParse(
+      value.data.detailCode,
+    ).success;
+    if (workspaceRemovalDetail) {
+      if (value.data.code !== 'internal_error' || value.data.deletedSessions === undefined)
+        context.addIssue({
+          code: 'custom',
+          message: 'Workspace removal failures require an internal error and confirmed count',
+          path: ['data'],
+        });
+    } else if (value.data.deletedSessions !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only Workspace removal failures may report a confirmed deletion count',
+        path: ['data', 'deletedSessions'],
+      });
+    }
   });
 export type RuntimeProtocolError = z.infer<typeof RUNTIME_PROTOCOL_ERROR_SCHEMA_>;
 
