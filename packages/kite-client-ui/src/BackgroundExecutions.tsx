@@ -61,7 +61,7 @@ export function BackgroundExecutions({
         aria-label="环境信息"
       >
         <header>
-          <strong>环境信息</strong>
+          <span>环境信息</span>
           {stale && <span className="background-stale">上次状态 · 正在核对</span>}
         </header>
         <ExecutionGroup

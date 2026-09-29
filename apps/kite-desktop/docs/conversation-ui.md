@@ -8,7 +8,7 @@
 
 [App](../src/App.tsx)是桌面数据与宿主适配入口，调用 Web 同时使用的 [SessionPage](../../../packages/kite-client-ui/src/SessionPage.tsx)。主页面、侧栏、会话阅读、输入区、Markdown 与基础控件和样式由[共享页面包](../../../packages/kite-client-ui/README.md)唯一维护。桌面入口提供当前已授权的任务操作、原生文件打开、信任与辅助面板，不在共享组件中判断运行平台。
 
-macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗口顶边且隐藏重复窗口标题。页面顶部是一个 52 px、横跨窗口的单行 header；原生交通灯定位为 x=13/y=19，header 内图标、标题和操作在 52 px 高度内垂直居中；移除旧宿主的向上偏移，展开态的 kite 标识从 x=80 开始。header 按 236 px 侧栏和会话区显示为不同背景：左段显示 kite 标识并把侧栏收起图标靠右放置，右段显示当前页面或会话标题及操作按钮；侧栏关闭后，右段先为交通灯保留 80 px，再显示展开图标。非交互 header 通过 CSS `-webkit-app-region: drag` 交给 Electron，按钮、输入和其他交互元素使用 `no-drag`；双击只调用具名 `toggleWindowMaximize` bridge。窗口底色与页面一致。该适配只存在于 Desktop 入口，不向共享页面导入宿主协议；拖拽、双击和快速缩放仍须真实 Electron 窗口验收。
+macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗口顶边且隐藏重复窗口标题。页面顶部是一个 52 px、横跨窗口的单行 header；原生交通灯定位为 x=13/y=19，header 内图标、标题和操作在 52 px 高度内垂直居中；移除旧宿主的向上偏移，展开态的 kite 标识从 x=80 开始。header 随左侧栏实际宽度分成不同背景的左段和会话区：左段显示 kite 标识并把侧栏收起图标靠右放置，右段显示当前页面或会话标题及操作按钮；侧栏关闭后，右段先为交通灯保留 80 px，再显示展开图标。非交互 header 通过 CSS `-webkit-app-region: drag` 交给 Electron，按钮、输入和其他交互元素使用 `no-drag`；双击只调用具名 `toggleWindowMaximize` bridge。窗口底色与页面一致。该适配只存在于 Desktop 入口，不向共享页面导入宿主协议；拖拽、双击和快速缩放仍须真实 Electron 窗口验收。
 
 `DesktopClient` 仍是 Runtime／App Control／History 适配 owner，由 `main.tsx` 持有，App 热更新复用该实例。Electron 宿主也会跨 renderer 热更新保留既有 Service 进程；只改 renderer 的页面刷新不会加载 Service 源码或 wire projection 变更，这类开发改动必须完整退出并重启应用后验证。完整页面刷新后的宿主自动重接与会话定位见[新对话与项目恢复](new-conversation.md#页面刷新与连接恢复)。UI 只保存折叠、草稿、阅读位置、展开项、编辑器选择和命令提交反馈。草稿与阅读状态以 `workspace + sessionId` 隔离，保留到进程结束；没有浏览器持久缓存或第二套 Run 状态。停止反馈绑定原会话和 runId，从提交开始到真实终态期间禁用重复停止和局部回答；失败显示错误，断线清除本地提交标记，重连不自动重发。
 

@@ -2687,7 +2687,7 @@ body {
   top: 0;
   right: 0;
   margin: 16px 16px 0 0;
-  width: min(340px, calc(100% - 32px));
+  width: min(600px, calc(100% - 32px));
   max-height: calc(100% - 32px);
   padding: 18px 20px;
   border-radius: 18px;
@@ -2711,7 +2711,7 @@ body {
   --environment-information-safe-area: 28px;
 }
 .kite-client .session-view.environment-information-docked {
-  --environment-information-safe-area: 384px;
+  --environment-information-safe-area: 644px;
 }
 .kite-client
   .session-view:is(.environment-information-docked, .environment-information-overlay)
@@ -2774,8 +2774,11 @@ body {
   line-height: inherit;
   color: var(--muted-foreground);
 }
-.kite-client .environment-information > header strong {
-  font-weight: 500;
+.kite-client .environment-information > header {
+  font-weight: 400;
+}
+.kite-client .environment-information button {
+  font-weight: 400;
 }
 .kite-client .environment-information .background-execution-group + .background-execution-group {
   margin-top: 14px;
@@ -2790,7 +2793,7 @@ body {
   min-height: 24px;
   font-size: inherit;
   line-height: inherit;
-  font-weight: 500;
+  font-weight: 400;
 }
 .kite-client .environment-information .background-execution-group h3 svg {
   width: 18px;

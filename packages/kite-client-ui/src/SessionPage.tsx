@@ -25,7 +25,21 @@ import { Button } from './ui';
 import { Workbench } from './Workbench';
 
 const SESSION_HEADER_LABEL_LIMIT = 10;
-const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 384 + 28;
+const NAVIGATION_MIN_WIDTH = 200;
+const NAVIGATION_MAX_WIDTH = 420;
+const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
+const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 644 + 28;
+
+function savedNavigationWidth(): number {
+  try {
+    const width = Number(window.localStorage.getItem(NAVIGATION_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(width) && width >= NAVIGATION_MIN_WIDTH && width <= NAVIGATION_MAX_WIDTH)
+      return width;
+  } catch {
+    // A storage failure must not prevent the page from opening.
+  }
+  return NAVIGATION_MIN_WIDTH;
+}
 
 function sessionHeaderLabel(label: string): string {
   const characters = Array.from(label);
@@ -90,6 +104,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 600px)').matches,
   );
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
+  const [navigationWidth] = useState(savedNavigationWidth);
   const navigationPanel = useRef<PanelImperativeHandle>(null);
   const detailsPanel = useRef<PanelImperativeHandle>(null);
   const panelGroupElement = useRef<HTMLDivElement>(null);
@@ -407,6 +422,19 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         orientation="horizontal"
         elementRef={panelGroupElement}
         className="client-panels"
+        onLayoutChanged={(layout, meta) => {
+          if (!meta.isUserInteraction || narrow) return;
+          const groupWidth = Array.from(
+            panelGroupElement.current?.querySelectorAll<HTMLElement>(':scope > [data-panel]') ?? [],
+          ).reduce((width, panel) => width + panel.offsetWidth, 0);
+          const width = Math.round(((layout.navigation ?? 0) / 100) * groupWidth);
+          if (width < NAVIGATION_MIN_WIDTH || width > NAVIGATION_MAX_WIDTH) return;
+          try {
+            window.localStorage.setItem(NAVIGATION_WIDTH_STORAGE_KEY, String(width));
+          } catch {
+            // Resizing remains available when preference storage is unavailable.
+          }
+        }}
       >
         {!narrow && (
           <>
@@ -416,9 +444,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               panelRef={navigationPanel}
               collapsible
               collapsedSize="0px"
-              defaultSize="236px"
-              minSize="200px"
-              maxSize="420px"
+              defaultSize={`${navigationWidth}px`}
+              minSize={`${NAVIGATION_MIN_WIDTH}px`}
+              maxSize={`${NAVIGATION_MAX_WIDTH}px`}
             >
               <div
                 className="collapsible-sidebar-content"

@@ -34,7 +34,7 @@ class TestResizeObserver {
     this.targets.add(target);
     if (target.matches('.session-view')) {
       this.callback(
-        [{ target, contentRect: { width: 1200 } } as ResizeObserverEntry],
+        [{ target, contentRect: { width: 1500 } } as ResizeObserverEntry],
         this as unknown as ResizeObserver,
       );
     }
@@ -604,7 +604,7 @@ test('the session header toggles environment information without removing the co
   // Collapsing the navigation keeps the panel subtree mounted while the environment
   // observer continues following the same session view.
   await click(document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!);
-  await act(() => TestResizeObserver.resize(1131, '.session-view'));
+  await act(() => TestResizeObserver.resize(1391, '.session-view'));
   expect(document.querySelector('.environment-information')).not.toBeNull();
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-closed',
@@ -618,19 +618,19 @@ test('the session header toggles environment information without removing the co
       ?.getAttribute('aria-expanded'),
   ).toBe('false');
 
-  await act(() => TestResizeObserver.resize(1132, '.session-view'));
+  await act(() => TestResizeObserver.resize(1392, '.session-view'));
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-closed',
   );
 
-  await act(() => TestResizeObserver.resize(1131, '.session-view'));
+  await act(() => TestResizeObserver.resize(1391, '.session-view'));
   await click(document.querySelector<HTMLButtonElement>('[aria-label="显示环境信息"]')!);
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-overlay',
   );
   expect(document.querySelector('.conversation-viewport')).not.toBeNull();
 
-  await act(() => TestResizeObserver.resize(1132, '.session-view'));
+  await act(() => TestResizeObserver.resize(1392, '.session-view'));
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-docked',
   );
