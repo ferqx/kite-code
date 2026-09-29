@@ -6,6 +6,7 @@ import {
   Folder02Icon,
   Home03Icon,
   MoreHorizontalIcon,
+  PencilEdit02Icon,
   UserCircleIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
@@ -107,7 +108,7 @@ function Workspace({
                 disabled={props.mutationBusy}
                 onClick={() => props.onNewSession?.(workspace.id)}
               >
-                <HugeiconsIcon icon={Add01Icon} />
+                <HugeiconsIcon icon={PencilEdit02Icon} />
               </Button>
             )}
             {props.onRemove && (
@@ -256,7 +257,7 @@ export function Sidebar({
               disabled={props.busy || props.mutationBusy}
               onClick={actions.newSession}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={Add01Icon} />
+              <HugeiconsIcon data-icon="inline-start" icon={PencilEdit02Icon} />
               <span>新对话</span>
             </Button>
           )}

@@ -1290,7 +1290,7 @@ body {
 .kite-client .space-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   border-radius: 10px;
 }
 .kite-client .space-heading:hover {
@@ -1305,12 +1305,44 @@ body {
 }
 .kite-client :where(.space-new-session, .space-remove) {
   flex: none;
-  width: 32px;
-  height: 32px;
-  padding: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+}
+.kite-client .nav-label .space-add,
+.kite-client .space-heading :where(.space-new-session, .space-remove) {
+  color: var(--muted-foreground);
+}
+.kite-client .nav-label .space-add:is(:hover, :focus-visible):not(:disabled),
+.kite-client
+  .space-heading
+  :where(.space-new-session, .space-remove):is(:hover, :focus-visible):not(:disabled) {
+  color: var(--foreground);
 }
 .kite-client :where(.space-new-session, .space-remove):disabled {
   opacity: 1;
+}
+.kite-client .nav-label .space-add,
+.kite-client .space-heading :where(.space-new-session, .space-remove) {
+  opacity: 0;
+  pointer-events: none;
+}
+.kite-client :is(.nav-label:hover, .nav-label:focus-within) .space-add,
+.kite-client
+  :is(.space-heading:hover, .space-heading:focus-within)
+  :where(.space-new-session, .space-remove) {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  .kite-client .nav-label .space-add,
+  .kite-client .space-heading :where(.space-new-session, .space-remove) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+.kite-client :where(.space-add, .space-new-session, .space-remove):disabled {
+  pointer-events: none;
 }
 .kite-client .space-name-muted {
   color: var(--muted-foreground);
