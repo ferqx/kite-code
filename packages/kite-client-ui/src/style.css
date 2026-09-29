@@ -1783,94 +1783,70 @@ body {
   min-width: 0;
   margin: 8px 0 24px;
 }
+.kite-client .agent-turn-summary-row {
+  box-shadow: inset 0 -1px var(--border);
+}
 .kite-client .agent-turn-summary {
   display: flex;
   align-items: center;
-  width: 100%;
-  min-height: 42px;
-  padding: 0 0 14px;
-  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 32px;
+  height: auto;
+  padding: 4px 0;
+  gap: 6px;
   justify-content: flex-start;
   border: 0;
-  border-bottom: 1px solid var(--border);
   border-radius: 0;
-  background: transparent;
+  background-color: transparent;
   color: var(--muted-foreground);
   text-align: left;
   font-size: var(--conversation-text-size);
+  line-height: 24px;
 }
-.kite-client .agent-turn-summary:hover,
-.kite-client .agent-turn-summary:focus-visible {
-  background: transparent;
+.kite-client .agent-turn-summary:hover:not(:disabled),
+.kite-client .agent-turn-summary:focus-visible,
+.kite-client .agent-turn-summary:active:not(:disabled),
+.kite-client .agent-turn-summary[aria-expanded="true"] {
+  background-color: transparent;
   color: var(--foreground);
 }
 .kite-client .agent-turn-summary-static,
 .kite-client .agent-turn-summary-static:hover {
+  width: 100%;
+  box-shadow: inset 0 -1px var(--border);
   color: var(--muted-foreground);
   cursor: default;
 }
-.kite-client .agent-turn-status-icon {
-  display: grid;
-  flex: none;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  color: var(--success);
-}
-.kite-client .agent-turn-status-icon svg {
-  width: 16px;
-  height: 16px;
-}
-.kite-client .agent-turn-status-icon.is-active {
-  color: var(--muted-foreground);
-}
-.kite-client .agent-turn-status-icon.is-active svg {
-  animation: agent-turn-spin 1.35s linear infinite;
-}
-.kite-client .agent-turn[data-turn-status="failed"] .agent-turn-status-icon,
-.kite-client .agent-turn[data-turn-status="cancelled"] .agent-turn-status-icon,
-.kite-client .agent-turn[data-turn-status="recovery_required"] .agent-turn-status-icon {
-  color: var(--destructive);
-}
-@keyframes agent-turn-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 .kite-client .agent-turn-status-label {
-  font-weight: 560;
+  font-weight: 400;
 }
-.kite-client .agent-turn-issues {
+.kite-client .agent-turn[data-turn-status="failed"] .agent-turn-status-label,
+.kite-client .agent-turn[data-turn-status="cancelled"] .agent-turn-status-label,
+.kite-client .agent-turn[data-turn-status="aborted"] .agent-turn-status-label,
+.kite-client .agent-turn[data-turn-status="recovery_required"] .agent-turn-status-label {
   color: var(--destructive);
-  font-size: 12px;
-}
-.kite-client .agent-turn-action {
-  margin-left: auto;
-  color: var(--directory-tertiary-foreground);
-  font-size: 12px;
 }
 .kite-client .agent-turn-chevron {
   width: 16px;
   height: 16px;
   flex: none;
-  transform: rotate(-90deg);
-  transition: transform 120ms ease;
-}
-.kite-client .agent-turn-summary[aria-expanded="true"] .agent-turn-chevron {
-  transform: rotate(0);
 }
 .kite-client .agent-turn-process-messages {
-  padding: 20px 0 12px;
+  padding: 8px 0 12px;
   border-bottom: 1px solid var(--border);
 }
 .kite-client .agent-turn-process-messages > .message-group:has(> .message.assistant) {
   margin-block: 16px;
 }
+.kite-client .agent-turn-process-messages > .message-group:first-child:has(> .message.assistant) {
+  margin-top: 8px;
+}
 .kite-client .agent-turn-process-messages .message.assistant {
   margin-bottom: 0;
 }
 .kite-client .agent-turn-final .message.assistant {
-  margin: 20px 0 32px;
+  margin: 16px 0 32px;
 }
 .kite-client .reading-column > .tool-activity + .message-group:has(> .message.assistant) {
   margin-top: 16px;
@@ -2014,30 +1990,30 @@ body {
   padding: 0;
   list-style: none;
 }
-.kite-client .tool-activity-content {
+.kite-client .collapsible-motion-content {
   overflow: hidden;
 }
-.kite-client .tool-activity-reveal {
+.kite-client .collapsible-motion-reveal {
   display: grid;
   grid-template-rows: 1fr;
 }
-.kite-client .tool-activity-reveal-inner {
+.kite-client .collapsible-motion-reveal-inner {
   min-height: 0;
   overflow: hidden;
 }
-.kite-client .tool-activity-content[data-state="open"] .tool-activity-reveal {
-  animation: tool-activity-expand 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.kite-client .collapsible-motion-content[data-state="open"] .collapsible-motion-reveal {
+  animation: collapsible-motion-expand 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 .kite-client
   .tool-activity[data-restored-expanded="true"]
-  > .tool-activity-content[data-state="open"]
-  .tool-activity-reveal {
+  > .collapsible-motion-content[data-state="open"]
+  .collapsible-motion-reveal {
   animation: none;
 }
-.kite-client .tool-activity-content[data-state="closed"] {
-  animation: tool-activity-collapse 240ms ease-in-out;
+.kite-client .collapsible-motion-content[data-state="closed"] {
+  animation: collapsible-motion-collapse 240ms ease-in-out;
 }
-@keyframes tool-activity-expand {
+@keyframes collapsible-motion-expand {
   from {
     grid-template-rows: 0fr;
   }
@@ -2045,7 +2021,7 @@ body {
     grid-template-rows: 1fr;
   }
 }
-@keyframes tool-activity-collapse {
+@keyframes collapsible-motion-collapse {
   from {
     height: var(--radix-collapsible-content-height);
   }
@@ -2244,10 +2220,10 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kite-client .tool-activity-content[data-state="closed"] {
+  .kite-client .collapsible-motion-content[data-state="closed"] {
     animation: none;
   }
-  .kite-client .tool-activity-content[data-state="open"] .tool-activity-reveal {
+  .kite-client .collapsible-motion-content[data-state="open"] .collapsible-motion-reveal {
     animation: none;
   }
   .kite-client .is-running > .tool-activity-summary .tool-label,
@@ -2690,7 +2666,7 @@ body {
   overflow: hidden;
 }
 
-/* Compact disclosure headers share hover, focus and expanded visibility. */
+/* Tool disclosure headers show their chevrons on hover, focus, and expand. */
 .kite-client .tool-activity-summary {
   column-gap: 6px;
 }
@@ -2707,11 +2683,13 @@ body {
   opacity: 1;
 }
 .kite-client .tool-activity-chevron,
+.kite-client .agent-turn-chevron,
 .kite-client .tool-diff-toggle > svg {
   transform: rotate(-90deg);
   transition: transform 120ms ease;
 }
 .kite-client .tool-activity-summary[aria-expanded="true"] .tool-activity-chevron,
+.kite-client .agent-turn-summary[aria-expanded="true"] .agent-turn-chevron,
 .kite-client .tool-diff-toggle[aria-expanded="true"] > svg {
   transform: rotate(0);
 }
@@ -2720,9 +2698,6 @@ body {
   .kite-client .tool-diff-toggle > svg,
   .kite-client .agent-turn-chevron {
     transition: none;
-  }
-  .kite-client .agent-turn-status-icon.is-active svg {
-    animation: none;
   }
 }
 .background-executions {

@@ -118,13 +118,20 @@ test('failed model run is visible without an assistant reply and replay does not
   });
   expect(withFailure[1]?.text).toContain('凭据');
   expect(projectEventWithIdentity(withFailure, failed)).toEqual(withFailure);
-  expect(
-    projectEventWithIdentity(withFailure, {
-      type: 'turn.terminal',
-      turnId: 't1',
-      status: 'failed',
-    }),
-  ).toEqual(withFailure);
+  const withTurnTerminal = projectEventWithIdentity(withFailure, {
+    type: 'turn.terminal',
+    turnId: 't1',
+    status: 'failed',
+  });
+  expect(withTurnTerminal).toHaveLength(3);
+  expect(withTurnTerminal[2]).toMatchObject({
+    id: 'turn-terminal:t1',
+    turnId: 't1',
+    systemKind: 'turn_terminal',
+    turnTerminalStatus: 'failed',
+    settled: true,
+  });
+  expect(projectEventWithIdentity(withTurnTerminal, failed)).toEqual(withTurnTerminal);
 });
 
 test('generic runtime failure does not misclassify the model service', () => {
@@ -165,8 +172,10 @@ test('a classified run failure replaces the generic turn notice and survives rep
     },
   } as const;
   const classified = projectEventWithIdentity(generic, terminal);
-  expect(classified).toHaveLength(1);
-  expect(classified[0]?.text).toContain('工具纠错次数已用尽');
+  expect(classified).toHaveLength(2);
+  expect(classified.find((message) => message.id === 'failure:t1')?.text).toContain(
+    '工具纠错次数已用尽',
+  );
   expect(projectEventWithIdentity(classified, terminal)).toEqual(classified);
 });
 
@@ -176,8 +185,8 @@ test('turn and run terminal failures share one notice and remain scoped to their
     turnId: 't1',
     status: 'failed',
   });
-  expect(messages).toHaveLength(1);
-  expect(messages[0]?.text).toContain('失败');
+  expect(messages).toHaveLength(2);
+  expect(messages.find((message) => message.id === 'failure:t1')?.text).toContain('失败');
   messages = projectEventWithIdentity(messages, {
     type: 'run.terminal',
     runId: 't1',
@@ -189,8 +198,8 @@ test('turn and run terminal failures share one notice and remain scoped to their
       recoveryEntry: 'operator_action',
     },
   });
-  expect(messages).toHaveLength(1);
-  expect(messages[0]?.text).toContain('凭据');
+  expect(messages).toHaveLength(2);
+  expect(messages.find((message) => message.id === 'failure:t1')?.text).toContain('凭据');
   messages = projectEventWithIdentity(
     messages,
     { type: 'user.message', messageId: 'm2', kind: 'task', text: '再试一次' },
@@ -201,9 +210,12 @@ test('turn and run terminal failures share one notice and remain scoped to their
     turnId: 't2',
     status: 'completed',
   });
-  expect(messages).toHaveLength(2);
+  expect(messages).toHaveLength(4);
   expect(messages[0]?.turnId).toBe('t1');
-  expect(messages[1]?.turnId).toBe('t2');
+  expect(messages.find((message) => message.id === 'turn-terminal:t2')).toMatchObject({
+    turnId: 't2',
+    turnTerminalStatus: 'completed',
+  });
   expect(
     projectEventWithIdentity(messages, { type: 'run.terminal', runId: 't1', status: 'failed' }),
   ).toEqual(messages);
@@ -220,7 +232,32 @@ test('cancelled turns and runs do not show failure notices', () => {
     runId: 't1',
     status: 'cancelled',
   });
-  expect(messages).toEqual([]);
+  expect(messages).toMatchObject([
+    {
+      id: 'turn-terminal:t1',
+      turnId: 't1',
+      systemKind: 'turn_terminal',
+      turnTerminalStatus: 'cancelled',
+    },
+  ]);
+});
+
+test('every Turn terminal status has one exact hidden marker without a source timestamp', () => {
+  for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const) {
+    const terminal = { type: 'turn.terminal', turnId: 't1', status } as const;
+    const messages = projectEventWithIdentity([], terminal, { turnId: 'unrelated' });
+    const marker = messages.find((message) => message.id === 'turn-terminal:t1');
+    expect(marker).toMatchObject({
+      turnId: 't1',
+      role: 'system',
+      systemKind: 'turn_terminal',
+      turnTerminalStatus: status,
+      text: '',
+      settled: true,
+    });
+    expect(messages.filter((message) => message.systemKind === 'turn_terminal')).toHaveLength(1);
+    expect(projectEventWithIdentity(messages, terminal)).toEqual(messages);
+  }
 });
 
 test('failed and cancelled Turns settle partial assistant text without a final reply', () => {
@@ -230,6 +267,10 @@ test('failed and cancelled Turns settle partial assistant text without a final r
       { type: 'turn.terminal', turnId: 't1', status },
     );
     expect(messages[0]).toMatchObject({ settled: true, finalReply: false });
+    expect(messages.find((message) => message.id === 'turn-terminal:t1')).toMatchObject({
+      turnId: 't1',
+      turnTerminalStatus: status,
+    });
     if (status === 'cancelled') expect(messages[0]?.status).toBe('cancelled');
   }
 });
@@ -270,7 +311,17 @@ test('run terminal uses its projected turn identity and leaves another turn thin
     turnId: 'old-turn',
     status: 'failed',
   });
-  expect(paired).toEqual(lateFailure);
+  expect(paired).toHaveLength(lateFailure.length + 1);
+  expect(paired.find((message) => message.id === 'turn-terminal:old-turn')).toMatchObject({
+    turnTerminalStatus: 'failed',
+  });
+  expect(
+    projectEventWithIdentity(paired, {
+      type: 'turn.terminal',
+      turnId: 'old-turn',
+      status: 'failed',
+    }),
+  ).toEqual(paired);
   expect(paired[1]?.settled).toBe(false);
 });
 

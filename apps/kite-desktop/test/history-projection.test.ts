@@ -353,5 +353,33 @@ test('historical Turn duration comes from persisted event times', async () => {
       turnStartedAtMs: Date.parse('2026-09-29T10:00:00.000Z'),
       turnFinishedAtMs: Date.parse('2026-09-29T10:02:18.000Z'),
     },
+    {
+      id: 'turn-terminal:t1',
+      turnId: 't1',
+      systemKind: 'turn_terminal',
+      turnTerminalStatus: 'completed',
+    },
   ]);
+});
+
+test('historical Turn terminals retain exact status without a timing start', async () => {
+  for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const) {
+    const records = [
+      {
+        sequence: 1,
+        events: [{ type: 'turn.terminal', turnId: 'older-turn', status } as const],
+        identity: { turnId: 'newer-turn' },
+      },
+    ];
+    const first = await projectHistory(records, [], new AbortController().signal);
+    const marker = first.find((message) => message.id === 'turn-terminal:older-turn');
+    expect(marker).toMatchObject({
+      turnId: 'older-turn',
+      systemKind: 'turn_terminal',
+      turnTerminalStatus: status,
+      settled: true,
+    });
+    expect(first.find((message) => message.id === 'turn-terminal:newer-turn')).toBeUndefined();
+    expect(await projectHistory(records, first, new AbortController().signal)).toBe(first);
+  }
 });

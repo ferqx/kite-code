@@ -15,7 +15,9 @@ export interface Message {
   readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
-  readonly systemKind?: 'compaction' | 'ask' | 'approval' | 'turn_timing';
+  readonly systemKind?: 'compaction' | 'ask' | 'approval' | 'turn_timing' | 'turn_terminal';
+  /** Exact terminal fact for a hidden Turn marker; independent of message status. */
+  readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {
     readonly state: 'reviewing' | 'awaiting_user' | 'approved' | 'rejected';
     readonly source: 'auto' | 'user';

@@ -3,12 +3,15 @@ import {
   Copy01Icon,
   CopyXIcon,
   KiteIcon,
-  Loading03Icon,
   Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
+import {
+  AnimatedCollapsibleContent,
+  Collapsible,
+  CollapsibleTrigger,
+} from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
@@ -37,22 +40,38 @@ function isVisibleTool(message: Message): boolean {
 
 function formatTurnElapsed(milliseconds: number): string {
   const totalSeconds = Math.floor(milliseconds / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+  if (days) return `${days} 天 ${hours} 小时 ${minutes} 分 ${seconds} 秒`;
   if (hours) return `${hours} 小时 ${minutes} 分 ${seconds} 秒`;
   if (minutes) return `${minutes} 分 ${seconds} 秒`;
   return `${seconds} 秒`;
+}
+
+function turnElapsedMilliseconds(startedAtMs?: number, endedAtMs?: number): number | undefined {
+  if (
+    startedAtMs === undefined ||
+    endedAtMs === undefined ||
+    !Number.isFinite(startedAtMs) ||
+    !Number.isFinite(endedAtMs) ||
+    endedAtMs < startedAtMs
+  )
+    return undefined;
+  return endedAtMs - startedAtMs;
 }
 
 function TurnElapsed({
   startedAtMs,
   finishedAtMs,
   running,
+  prefix,
 }: {
   startedAtMs?: number;
   finishedAtMs?: number;
   running: boolean;
+  prefix: string;
 }) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
@@ -62,19 +81,12 @@ function TurnElapsed({
     return () => clearInterval(timer);
   }, [running, startedAtMs, finishedAtMs]);
   const end = finishedAtMs ?? (running ? now : undefined);
-  if (
-    startedAtMs === undefined ||
-    end === undefined ||
-    !Number.isFinite(startedAtMs) ||
-    !Number.isFinite(end) ||
-    end < startedAtMs
-  )
-    return null;
+  const elapsed = turnElapsedMilliseconds(startedAtMs, end);
+  if (elapsed === undefined) return null;
   return (
     <span aria-hidden={running || undefined}>
-      {' · '}
-      {running && '已用 '}
-      {formatTurnElapsed(end - startedAtMs)}
+      {prefix}
+      {formatTurnElapsed(elapsed)}
     </span>
   );
 }
@@ -511,7 +523,8 @@ export function Conversation({
   );
   const shown = messages.filter((message) => {
     if (message.role === 'thinking') return false;
-    if (message.systemKind === 'turn_timing') return false;
+    if (message.systemKind === 'turn_timing' || message.systemKind === 'turn_terminal')
+      return false;
     if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
     if (message.role === 'system')
       return message.systemKind === 'ask' || message.settled || !!message.status;
@@ -525,6 +538,11 @@ export function Conversation({
     messages
       .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
       .map((message) => [message.turnId!, message]),
+  );
+  const terminalByTurn = new Map(
+    messages
+      .filter((message) => message.systemKind === 'turn_terminal' && message.turnId)
+      .map((message) => [message.turnId!, message.turnTerminalStatus]),
   );
   for (const message of shown) {
     if (
@@ -678,11 +696,16 @@ export function Conversation({
     const processGroups = entry.groups.filter((group) => group !== finalGroup);
     const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
     const timing = timingByTurn.get(entry.turnId);
-    const active = activity
-      ? ['queued', 'running', 'waiting', 'recovery_required'].includes(activity.status)
-      : !turnActivity && processGroups.some((group) => group.some((message) => !message.settled));
+    const terminalStatus = terminalByTurn.get(entry.turnId);
+    const active =
+      !terminalStatus &&
+      (activity
+        ? ['queued', 'running', 'waiting', 'recovery_required'].includes(activity.status)
+        : !turnActivity &&
+          processGroups.some((group) => group.some((message) => !message.settled)));
     const failed =
       activity?.status === 'failed' ||
+      terminalStatus === 'failed' ||
       processGroups.some((group) =>
         group.some(
           (message) =>
@@ -693,9 +716,11 @@ export function Conversation({
       );
     const cancelled =
       activity?.status === 'cancelled' ||
+      terminalStatus === 'cancelled' ||
       processGroups.some((group) =>
         group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
       );
+    const aborted = terminalStatus === 'aborted';
     const runningTool = messages.some(
       (message) => message.turnId === entry.turnId && message.role === 'tool' && !message.settled,
     );
@@ -703,72 +728,67 @@ export function Conversation({
       (message) =>
         message.turnId === entry.turnId && message.role === 'thinking' && !message.settled,
     );
-    const issueMessages = processGroups
-      .flat()
-      .filter((message) => message.role === 'tool' || message.role === 'subagent');
-    const issueSummary = (
-      [
-        ['failed', '失败'],
-        ['rejected', '已拒绝'],
-        ['unknown', '结果未知'],
-        ['cancelled', '已停止'],
-      ] as const
-    )
-      .map(([status, text]) => {
-        const count = issueMessages.filter((message) => message.status === status).length;
-        return count ? `${text} ${count} 项` : undefined;
-      })
-      .filter(Boolean)
-      .join(' · ');
+    const completed =
+      !failed &&
+      !cancelled &&
+      !aborted &&
+      (!!finalGroup || terminalStatus === 'completed' || activity?.status === 'completed');
+    const finishedDuration = completed
+      ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
+      : undefined;
+    const runningTimer =
+      !completed &&
+      !terminalStatus &&
+      ['running', 'waiting'].includes(activity?.status ?? '') &&
+      turnElapsedMilliseconds(timing?.turnStartedAtMs, Date.now()) !== undefined;
     const label = failed
       ? '本轮失败'
       : cancelled
         ? '已停止'
-        : activity?.status === 'recovery_required'
-          ? '需要恢复'
-          : activity?.status === 'waiting'
-            ? '正在等待'
-            : activity?.status === 'queued'
-              ? '等待处理'
-              : active && thinking && !runningTool
-                ? '正在思考'
-                : active
-                  ? '正在处理'
-                  : finalGroup || activity?.status === 'completed'
-                    ? '已处理'
-                    : '处理过程';
-    const showProcess = processGroups.length > 0 || active || cancelled;
-    // Completion is a new reading state: the process closes once when the
-    // final answer arrives, then a reader can reopen and keep that choice.
-    const turnKey = `turn:${entry.turnId}:${finalGroup ? 'complete' : 'process'}`;
-    const open = expanded[turnKey] ?? !finalGroup;
-    const animated = active && activity?.status !== 'recovery_required';
+        : aborted
+          ? '已中断'
+          : completed
+            ? finishedDuration === undefined
+              ? '已完成'
+              : '用时'
+            : activity?.status === 'recovery_required'
+              ? '需要恢复'
+              : activity?.status === 'waiting'
+                ? '正在等待'
+                : activity?.status === 'queued'
+                  ? '等待处理'
+                  : active && thinking && !runningTool
+                    ? '正在思考'
+                    : active
+                      ? runningTimer
+                        ? '已处理'
+                        : '正在处理'
+                      : '处理过程';
+    const showProcess = processGroups.length > 0 || active || cancelled || aborted;
+    // A settled Turn starts a new reading state even when no final reply was
+    // confirmed. Its process closes once, then the reader's choice persists.
+    const settled =
+      !!terminalStatus ||
+      !!finalGroup ||
+      ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
+    const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
+    const open = expanded[turnKey] ?? !settled;
+    const elapsedPrefix =
+      finishedDuration !== undefined || (runningTimer && label === '已处理')
+        ? ' '
+        : runningTimer
+          ? ' · 已处理 '
+          : ' · 用时 ';
     const statusContent = (
-      <>
-        <span
-          className={`agent-turn-status-icon${animated ? ' is-active' : ''}`}
-          aria-hidden="true"
-        >
-          {animated ? (
-            <HugeiconsIcon icon={Loading03Icon} />
-          ) : failed || cancelled || activity?.status === 'recovery_required' ? (
-            '!'
-          ) : finalGroup || activity?.status === 'completed' ? (
-            <HugeiconsIcon icon={Tick02Icon} />
-          ) : (
-            '·'
-          )}
-        </span>
-        <span className="agent-turn-status-label" role={active ? 'status' : undefined}>
-          {label}
-          <TurnElapsed
-            startedAtMs={timing?.turnStartedAtMs}
-            finishedAtMs={timing?.turnFinishedAtMs}
-            running={['queued', 'running', 'waiting'].includes(activity?.status ?? '')}
-          />
-        </span>
-        {issueSummary && <span className="agent-turn-issues">{issueSummary}</span>}
-      </>
+      <span className="agent-turn-status-label" role={active ? 'status' : undefined}>
+        {label}
+        <TurnElapsed
+          startedAtMs={timing?.turnStartedAtMs}
+          finishedAtMs={timing?.turnFinishedAtMs}
+          running={runningTimer}
+          prefix={elapsedPrefix}
+        />
+      </span>
     );
     return (
       <section
@@ -779,32 +799,36 @@ export function Conversation({
             ? 'failed'
             : cancelled
               ? 'cancelled'
-              : (activity?.status ?? (active ? 'running' : 'unknown'))
+              : aborted
+                ? 'aborted'
+                : (terminalStatus ?? activity?.status ?? (active ? 'running' : 'unknown'))
         }
       >
         {showProcess && (
           <Collapsible asChild open={open} onOpenChange={(next) => onToggle(turnKey, next)}>
             <div className="agent-turn-process">
-              <CollapsibleTrigger asChild>
-                <Button
-                  className="agent-turn-summary"
-                  variant="ghost"
-                  aria-label={`${label}${issueSummary ? `，${issueSummary}` : ''}，${open ? '收起' : '展开'}本轮处理过程`}
-                >
-                  {statusContent}
-                  <span className="agent-turn-action">{open ? '收起过程' : '查看过程'}</span>
-                  <HugeiconsIcon
-                    className="agent-turn-chevron"
-                    icon={ArrowDown01Icon}
-                    aria-hidden="true"
-                  />
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="agent-turn-content">
+              <div className="agent-turn-summary-row">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    className="agent-turn-summary"
+                    variant="ghost"
+                    aria-label={`${finishedDuration === undefined ? label : `用时 ${formatTurnElapsed(finishedDuration)}`}，${open ? '收起' : '展开'}本轮处理过程`}
+                  >
+                    {statusContent}
+                    <HugeiconsIcon
+                      className="agent-turn-chevron"
+                      icon={ArrowDown01Icon}
+                      aria-hidden="true"
+                      data-icon="inline-end"
+                    />
+                  </Button>
+                </CollapsibleTrigger>
+              </div>
+              <AnimatedCollapsibleContent className="agent-turn-content">
                 <section className="agent-turn-process-messages" aria-label="本轮处理过程">
                   {processGroups.map(renderGroup)}
                 </section>
-              </CollapsibleContent>
+              </AnimatedCollapsibleContent>
             </div>
           </Collapsible>
         )}

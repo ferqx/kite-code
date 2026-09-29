@@ -298,11 +298,30 @@ function projectEventCore(
         if (settled !== message) builder.replace(index, settled);
       }
     }
-    if (event.status !== 'failed') return settledMessages;
+    const withTerminal = (() => {
+      if (event.type !== 'turn.terminal') return settledMessages;
+      const id = `turn-terminal:${event.turnId}`;
+      const previous = builder
+        ? builder.find(id)
+        : settledMessages.find((message) => message.id === id);
+      if (previous?.turnTerminalStatus === event.status) return settledMessages;
+      const marker: Message = {
+        id,
+        turnId: event.turnId,
+        role: 'system',
+        systemKind: 'turn_terminal',
+        turnTerminalStatus: event.status,
+        text: '',
+        settled: true,
+      };
+      if (builder) return replaceExact(id, marker);
+      return previous
+        ? settledMessages.map((message) => (message.id === id ? marker : message))
+        : [...settledMessages, marker];
+    })();
+    if (event.status !== 'failed') return withTerminal;
     const id = `failure:${turnId}`;
-    const previous = builder
-      ? builder.find(id)
-      : settledMessages.find((message) => message.id === id);
+    const previous = builder ? builder.find(id) : withTerminal.find((message) => message.id === id);
     const reason = event.type === 'run.terminal' ? event.outcome?.reasonCode : undefined;
     const reasonText: Partial<Record<string, string>> = {
       provider_auth_required: '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。',
@@ -321,12 +340,12 @@ function projectEventCore(
       status: 'failed',
       settled: true,
     };
-    if (previous && (!specificReason || previous.text === notice.text)) return settledMessages;
+    if (previous && (!specificReason || previous.text === notice.text)) return withTerminal;
     return builder
       ? replaceExact(id, notice)
       : previous
-        ? settledMessages.map((message) => (message.id === id ? notice : message))
-        : [...settledMessages, notice];
+        ? withTerminal.map((message) => (message.id === id ? notice : message))
+        : [...withTerminal, notice];
   }
   if (event.type === 'tool.file_changed') {
     const id = `tool:${event.toolId}`;

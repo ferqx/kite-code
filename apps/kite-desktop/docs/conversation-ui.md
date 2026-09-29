@@ -34,7 +34,7 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 ## 消息与交互
 
-共享 [Conversation](../../../packages/kite-client-ui/src/Conversation.tsx)只在消息有精确 `turnId` 时建立轮次容器；夹在同一精确 Turn 两端之间的无身份非用户消息沿原顺序留在该过程内，不据此生成新的 Turn。[App](../src/App.tsx)从当前 Run 传入 `turnActivity`，区分 queued、running、waiting、recovery_required 与终态；当前交互 ID 与活动 Run 精确匹配时，临时补入的 Ask 沿用该 Turn 身份。[消息投影](../src/presentation.ts)保持 Agent 邮件状态行首次确认的 Turn 身份，仅在完成的 `turn.terminal` 且末尾没有工具时标记 `finalReply`。轮次活动时阶段说明与工具过程默认展开；最终回复落定时切到完成阶段的折叠状态，最终回复保留在外层；直接回复也保留不可展开的完成状态行。工具进度不覆盖用户手动选择；完成后用户重新展开过程的选择随现有阅读状态保存。失败、取消、等待与需要恢复继续在轮次顶部可见，尚无正文的取消也保留“已停止”状态；没有最终回复时不把最后一段正文冒充结论。
+共享 [Conversation](../../../packages/kite-client-ui/src/Conversation.tsx)只在消息有精确 `turnId` 时建立轮次容器；夹在同一精确 Turn 两端之间的无身份非用户消息沿原顺序留在该过程内，不据此生成新的 Turn。[App](../src/App.tsx)从当前 Run 传入 `turnActivity`，区分 queued、running、waiting、recovery_required 与终态；当前交互 ID 与活动 Run 精确匹配时，临时补入的 Ask 沿用该 Turn 身份。[消息投影](../src/presentation.ts)保持 Agent 邮件状态行首次确认的 Turn 身份，仅在完成的 `turn.terminal` 且末尾没有工具时标记 `finalReply`；每个 `turn.terminal` 还保留隐藏的精确终态标记，供历史中的轮次折叠使用；取舍见[轮次终态阅读状态 Agent Note](../../../.agents/notes/implemented/architecture/2026-09-29-terminal-turn-reading-state.md)。轮次活动时阶段说明与工具过程默认展开；轮次完成、失败、取消或中断后切到默认折叠的阅读状态，已确认的最终回复保留在外层；直接回复也保留不可展开的完成状态行。中断时未确认完成的正文仍在可展开的过程中，不凭最后一段正文推测结论。轮次状态行只保留状态、耗时和紧邻箭头，没有前置状态图标；工具异常仍在工具消息中展示，轮次与工具详情共用动画折叠内容组件。工具进度不覆盖用户手动选择；结束后用户重新展开过程的选择随现有阅读状态保存。失败、取消、等待与需要恢复继续在轮次顶部可见，尚无正文的取消也保留“已停止”状态。
 
 工具标题展开后使用与 hover 相同的主文字色，标题图标、文件名和箭头继承高亮；文件 diff 通过所属箭头的 `aria-expanded`，工具摘要通过共享 Collapsible 的 `aria-expanded` 驱动。摘要及工具步骤使用共享 Marker，收起恢复辅助色，不增加背景或间距。
 
@@ -143,7 +143,7 @@ Ask 投影保留服务提供的 toolCallId 和有序问题；input.answered.answ
 
 Ask 历史沿用 TUI 单题/多题信息结构，使用共享 UI 的有序明细、悬挂缩进与每项五行截断；取消内容仅显示“已取消”，不重复题目。数据归属和问题 ID 映射保持不变。
 
-思考段的 `thinkingStartedAt`／`thinkingEndedAt` 仍可由投影保留，但共享 UI 不显示思考正文或分段计时，也不以分段时间推算整轮耗时。`turn.started` 与 `turn.terminal` 的持久事件时间经实时通知或历史记录进入同一投影，以隐藏的 `turn_timing` 标记关联精确 Turn；活动轮次在起点已知时显示已用时间，终点也已知时固定显示耗时。旧历史缺少起点、完成后缺少终点或时间倒序时不显示耗时；客户端接收及历史重放时间不代替事件时间。
+思考段的 `thinkingStartedAt`／`thinkingEndedAt` 仍可由投影保留，但共享 UI 不显示思考正文或分段计时，也不以分段时间推算整轮耗时。`turn.started` 与 `turn.terminal` 的持久事件时间经实时通知或历史记录进入同一投影，以隐藏的 `turn_timing` 标记关联精确 Turn；活动轮次在起点可靠时显示“已处理 …”，明确的思考、等待等阶段保留阶段文案并附已处理时长；成功终态在起止时间均可靠时显示“用时 …”，时长按秒、分、小时、天切换。旧历史缺少起点、完成后缺少终点或时间倒序时不显示耗时；客户端接收及历史重放时间不代替事件时间。
 
 ## 用户菜单与外观
 

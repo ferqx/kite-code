@@ -14,7 +14,11 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
+import {
+  AnimatedCollapsibleContent,
+  Collapsible,
+  CollapsibleTrigger,
+} from './components/ui/collapsible';
 import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
 import { FileDiff } from './FileChanges';
 import { statusLabel } from './status';
@@ -698,71 +702,67 @@ export function ToolActivity({
         ) : (
           <Marker className="tool-activity-summary">{heading}</Marker>
         )}
-        <CollapsibleContent className="tool-activity-content">
-          <div className="tool-activity-reveal">
-            <div className="tool-activity-reveal-inner">
-              {grouped && (
-                <div className="tool-activity-steps">
-                  {messages.map((item) =>
-                    item.toolName === 'shell_execute' ? (
-                      <ToolActivity
-                        key={item.id}
-                        messages={[item]}
-                        expanded={expandedItems?.[item.id]}
-                        onToggle={(next) => onToggleItem?.(item.id, next)}
-                        activityId={item.id}
-                        restoredExpanded={restoredExpanded}
-                        openFile={openFile}
-                        renderChildren={renderChildren}
-                      />
-                    ) : (
-                      <ToolRow key={item.id} message={item} openFile={openFile} />
-                    ),
-                  )}
-                </div>
+        <AnimatedCollapsibleContent className="tool-activity-content">
+          {grouped && (
+            <div className="tool-activity-steps">
+              {messages.map((item) =>
+                item.toolName === 'shell_execute' ? (
+                  <ToolActivity
+                    key={item.id}
+                    messages={[item]}
+                    expanded={expandedItems?.[item.id]}
+                    onToggle={(next) => onToggleItem?.(item.id, next)}
+                    activityId={item.id}
+                    restoredExpanded={restoredExpanded}
+                    openFile={openFile}
+                    renderChildren={renderChildren}
+                  />
+                ) : (
+                  <ToolRow key={item.id} message={item} openFile={openFile} />
+                ),
               )}
-              {shell && <ShellOutput message={message} />}
-              {hasDiff && <FileDiff message={message} />}
-              {ask && (
-                <div className="tool-ask-answers">
-                  {message.status === 'cancelled' ? (
-                    <span>已取消</span>
-                  ) : askMultiple ? (
-                    ask.questions.map((question, index) => (
-                      <div className="tool-ask-answer" key={question.id}>
-                        <span className="tool-ask-prefix">{index + 1}. </span>
-                        <span className="tool-ask-text">
-                          {question.question.replace(/[：:]\s*$/, '')}：
-                          {ask.answers?.[question.id] ?? '尚未回答'}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="tool-ask-answer">
-                      <span className="tool-ask-prefix">回答：</span>
-                      <span className="tool-ask-text">
-                        {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              )}
-              {!grouped &&
-                !ask &&
-                !shell &&
-                (!edit || childIssue) &&
-                (!read || childIssue) &&
-                message.toolName !== 'task' &&
-                !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
-                (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
-                  <pre className="tool-detail">
-                    {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
-                  </pre>
-                )}
-              <div className="tool-activity-children">{children}</div>
             </div>
-          </div>
-        </CollapsibleContent>
+          )}
+          {shell && <ShellOutput message={message} />}
+          {hasDiff && <FileDiff message={message} />}
+          {ask && (
+            <div className="tool-ask-answers">
+              {message.status === 'cancelled' ? (
+                <span>已取消</span>
+              ) : askMultiple ? (
+                ask.questions.map((question, index) => (
+                  <div className="tool-ask-answer" key={question.id}>
+                    <span className="tool-ask-prefix">{index + 1}. </span>
+                    <span className="tool-ask-text">
+                      {question.question.replace(/[：:]\s*$/, '')}：
+                      {ask.answers?.[question.id] ?? '尚未回答'}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="tool-ask-answer">
+                  <span className="tool-ask-prefix">回答：</span>
+                  <span className="tool-ask-text">
+                    {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+          {!grouped &&
+            !ask &&
+            !shell &&
+            (!edit || childIssue) &&
+            (!read || childIssue) &&
+            message.toolName !== 'task' &&
+            !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
+            (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
+              <pre className="tool-detail">
+                {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
+              </pre>
+            )}
+          <div className="tool-activity-children">{children}</div>
+        </AnimatedCollapsibleContent>
       </article>
     </Collapsible>
   );
