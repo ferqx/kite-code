@@ -1152,6 +1152,96 @@ test('tool activity stays on its side of replies and preserves explicit folding 
   );
 });
 
+test('adjacent exploration batches in one explicit Turn share one activity across model groups', async () => {
+  const read = (id: string, presentationGroupId: string): Message => ({
+    id: `tool:${id}`,
+    turnId: 'turn-1',
+    role: 'tool',
+    toolName: 'read_file',
+    presentation: 'exploration',
+    presentationGroupId,
+    arguments: { path: `${id}.ts` },
+    text: '',
+    settled: true,
+    status: 'completed',
+  });
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  const messages = [read('first', 'model-1'), read('second', 'model-2')];
+  await render(<Conversation {...props} messages={messages} />);
+  expect(document.querySelectorAll('.tool-activity')).toHaveLength(1);
+  const summary = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+  expect(summary.textContent).toContain('读取 2 次');
+  await click(summary);
+  await act(() =>
+    root!.render(<Conversation {...props} messages={[...messages, read('third', 'model-3')]} />),
+  );
+  expect(summary.getAttribute('aria-expanded')).toBe('true');
+  expect(summary.textContent).toContain('读取 3 次');
+  expect(
+    [...document.querySelectorAll('.tool-activity-steps .tool-activity-step')].map(
+      (step) => step.textContent,
+    ),
+  ).toEqual([
+    expect.stringContaining('first.ts'),
+    expect.stringContaining('second.ts'),
+    expect.stringContaining('third.ts'),
+  ]);
+});
+
+test('exploration visual grouping respects visible boundaries and explicit group identity', async () => {
+  const read = (id: string, turnId: string | undefined, presentationGroupId: string): Message => ({
+    id: `tool:${id}`,
+    ...(turnId ? { turnId } : {}),
+    role: 'tool',
+    toolName: 'read_file',
+    presentation: 'exploration',
+    presentationGroupId,
+    arguments: { path: `${id}.ts` },
+    text: '',
+    settled: true,
+    status: 'completed',
+  });
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        read('a', 'turn-1', 'model-1'),
+        read('b', 'turn-1', 'model-2'),
+        { id: 'prose', turnId: 'turn-1', role: 'assistant', text: '继续检查', settled: true },
+        read('c', 'turn-1', 'model-3'),
+        { ...read('standalone', 'turn-1', 'model-3'), presentation: 'standalone' },
+        { ...read('no-group', 'turn-1', 'model-4'), presentationGroupId: undefined },
+        read('d', 'turn-1', 'model-4'),
+        { ...read('hidden', 'turn-1', 'model-4'), presentation: 'hidden' },
+        read('after-hidden', 'turn-1', 'model-4'),
+        read('e', 'turn-2', 'model-4'),
+        read('f', undefined, 'model-5'),
+        read('g', undefined, 'model-6'),
+        read('h', undefined, 'model-6'),
+      ]}
+    />,
+  );
+  const activities = [...document.querySelectorAll('.tool-activity')];
+  expect(activities).toHaveLength(8);
+  expect(activities[0]?.querySelector('.tool-activity-summary')?.textContent).toContain(
+    '读取 2 次',
+  );
+  expect(activities[1]?.textContent).toContain('c.ts');
+  expect(activities[2]?.textContent).toContain('standalone.ts');
+  expect(activities[3]?.textContent).toContain('no-group.ts');
+  expect(activities[4]?.querySelector('.tool-activity-summary')?.textContent).toContain(
+    '读取 2 次',
+  );
+  expect(activities[5]?.textContent).toContain('e.ts');
+  expect(activities[6]?.textContent).toContain('f.ts');
+  expect(activities[7]?.querySelector('.tool-activity-summary')?.textContent).toContain(
+    '读取 2 次',
+  );
+});
+
 test('a failed shell keeps its state visible and reveals its output on demand', async () => {
   await render(
     <Conversation

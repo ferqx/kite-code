@@ -1839,10 +1839,23 @@ body {
 }
 .kite-client .agent-turn-process-messages {
   padding: 8px 0 12px;
+}
+.kite-client .agent-turn:has(> .agent-turn-final) .agent-turn-process-messages {
   border-bottom: 1px solid var(--border);
 }
 .kite-client .agent-turn-process-messages > .message-group:has(> .message.assistant) {
   margin-block: 16px;
+}
+.kite-client
+  .agent-turn-process-messages
+  > .message-group:has(> .message.assistant):has(+ .tool-activity) {
+  margin-bottom: 8px;
+}
+.kite-client
+  .agent-turn-process-messages
+  > .tool-activity
+  + .message-group:has(> .message.assistant) {
+  margin-top: 8px;
 }
 .kite-client .agent-turn-process-messages > .message-group:first-child:has(> .message.assistant) {
   margin-top: 8px;

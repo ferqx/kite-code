@@ -154,7 +154,7 @@
 
 一轮会话保留用户输入、必要的阶段说明、工具过程、明确来源的子 Agent 回传、最终回复，以及真实终态。工具完成与整轮完成分别表达，工具不能把前后不同阶段的正文合成一段，也不能在终态后留下第二条 loading 记录。
 
-工具调用以既有 `toolId` 稳定更新。桌面应保留 [Runtime Client](../../packages/runtime-contract/src/notifications.ts) 已提供的 `presentation` 和 `presentationGroupId`，分别处理 `exploration`、`standalone`、`hidden`；分类的生产来源是 [model effect](../../apps/kite-service/src/bootstrap/runtime/model-effect.ts) 和 [event projector](../../apps/kite-service/src/runtime-client/event-projector.ts)。同一明确分组中的连续探索可以聚合，保留调用顺序和每项结果；不同分组、正文、独立操作、交互或子代理归属是分隔边界。缺失分组时不按时间接近或相同名称补造父关系。
+工具调用以既有 `toolId` 稳定更新。桌面应保留 [Runtime Client](../../packages/runtime-contract/src/notifications.ts) 已提供的 `presentation` 和 `presentationGroupId`，分别处理 `exploration`、`standalone`、`hidden`；分类的生产来源是 [model effect](../../apps/kite-service/src/bootstrap/runtime/model-effect.ts) 和 [event projector](../../apps/kite-service/src/runtime-client/event-projector.ts)。同一准确 Turn 内、各有明确分组 ID 的相邻探索工具可以跨模型批次视觉聚合，保留每条的原始分组 ID、调用顺序和结果；正文、独立操作、交互、子代理归属或不同 Turn 是分隔边界。缺少准确 Turn 时只聚合相同明确分组；缺失分组时不按时间接近或相同名称补造父关系。
 
 `hidden` 不生成普通工具卡，但不能连带丢掉对应的子代理摘要或必须处理的交互。只读 `task` 的外层调用可能被服务标为 hidden；主消息展示子代理的真实来源、状态和回传正文，不再重复铺一份原始 `task` JSON。写入型委派若是 standalone，可保留可折叠的父工具；结果正文仍只呈现一次。发送／接收回执只有在对应事实存在时显示，不能由 completed 推断“已收到”。
 

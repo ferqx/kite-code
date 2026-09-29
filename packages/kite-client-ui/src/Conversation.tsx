@@ -557,7 +557,9 @@ export function Conversation({
   const assistantTurnCopies = new Map(
     [...finalReplyByTurn.values()].map((message) => [message.id, message.text]),
   );
-  // Contiguous tool calls share one visual activity without rewriting runtime facts.
+  // Contiguous exploration calls in one explicit Turn share a visual activity,
+  // even when separate model responses supplied different presentation groups.
+  // Unscoped history still needs the exact presentation group to merge.
   const groups: Message[][] = [];
   for (const message of shown) {
     const previous = groups.at(-1);
@@ -567,8 +569,9 @@ export function Conversation({
       message.presentationGroupId &&
       previous?.[0]?.role === 'tool' &&
       previous[0].presentation === 'exploration' &&
-      previous[0].presentationGroupId === message.presentationGroupId &&
-      previous[0].turnId === message.turnId
+      previous[0].presentationGroupId &&
+      previous[0].turnId === message.turnId &&
+      (previous[0].presentationGroupId === message.presentationGroupId || !!message.turnId)
     )
       previous.push(message);
     else groups.push([message]);
