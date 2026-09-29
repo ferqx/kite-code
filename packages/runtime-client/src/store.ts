@@ -158,6 +158,41 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
       current?.snapshot.aggregateGeneration === input.snapshot.aggregateGeneration &&
       input.snapshot.watermark <= current.snapshot.watermark
     ) {
+      if (
+        current.stale &&
+        input.snapshot.watermark === current.snapshot.watermark &&
+        input.snapshot.sessionRevision === current.snapshot.sessionRevision
+      ) {
+        // A fresh query can confirm an unchanged aggregate after reconnect.
+        // Reconcile its items with newer detail reads before clearing stale.
+        const priorById = new Map(
+          current.snapshot.executions.map((execution) => [execution.executionId, execution]),
+        );
+        const snapshot: RuntimeBackgroundExecutionSnapshot = {
+          ...input.snapshot,
+          executions: input.snapshot.executions.map((execution) => {
+            const prior = priorById.get(execution.executionId);
+            if (!prior || prior.ownerGeneration !== execution.ownerGeneration) return execution;
+            if (prior.status === 'unavailable') return execution;
+            return prior.revision > execution.revision ||
+              (isTerminalBackground(prior) && execution.status === 'running')
+              ? prior
+              : execution;
+          }),
+        };
+        this.#replace({
+          ...this.#snapshot,
+          background: {
+            ...this.#snapshot.background,
+            [snapshot.sessionId]: {
+              snapshot,
+              connectionGeneration: input.connectionGeneration,
+              stale: false,
+            },
+          },
+        });
+        return 'applied';
+      }
       return this.#advanceBackgroundSessionRevision(
         current,
         input.snapshot.sessionId,
@@ -354,7 +389,7 @@ export class RuntimeSnapshotStore implements ObservableSnapshot<RuntimeClientSna
     readonly notification: RuntimeNotification;
     readonly reset?: boolean;
     readonly ready?: boolean;
-    /** A parent-authorized child stream may be joined after its first ephemeral frame. */
+    /** Permit one first-seen stream frame to establish a cursor when its subscriber joined an active Run. */
     readonly allowInitialEphemeralSequence?: boolean;
   }): RuntimeSnapshotApplyResult {
     if (!this.#acceptConnection(input.connectionGeneration)) return 'ignored';

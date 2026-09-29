@@ -362,7 +362,9 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   await page
     .getByText('Electron streaming survives reload complete.', { exact: false })
     .waitFor({ timeout: 30_000 });
-  assert.equal(await page.getByText('正在回复…', { exact: true }).count(), 0);
+  await page
+    .getByText('正在回复…', { exact: true })
+    .waitFor({ state: 'detached', timeout: 30_000 });
   assert.equal(await page.locator('.message-copy').count(), 2);
   if (!executionRecovery) {
     assert.deepEqual(
@@ -700,6 +702,15 @@ __kiteNativeSmoke.dialog.showMessageBox = async () => ({ response: 0, checkboxCh
   assert.equal(readBackgroundFacts().runId, initiallyWaiting.runId);
   assert.equal(await page.getByRole('button', { name: '停止任务' }).count(), 1);
   const initialTaskIds = initiallyWaiting.waitingReason.taskIds!;
+  const parentRow = page.locator('.session-row').filter({ hasText: 'ELECTRON_BACKGROUND_PARENT' });
+  const otherRow = page.locator('.session-row').filter({ hasText: 'Workspace B independent task' });
+  for (let index = 0; index < 70; index++) {
+    await otherRow.click();
+    await parentRow.click();
+  }
+  await waitStatus.getByText('正在等待子 Agent 结果', { exact: true }).waitFor({ timeout: 15_000 });
+  assert.equal(readBackgroundFacts().runId, initiallyWaiting.runId);
+  assert.equal(await page.getByRole('button', { name: '停止任务' }).count(), 1);
   backgroundGates[0]!.resolve();
   await Promise.race([
     backgroundStarted[2]!.promise,

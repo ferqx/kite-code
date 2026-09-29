@@ -296,6 +296,8 @@ interface SubscriptionState {
   subscribeRequestId?: string;
   subscribeRequestGeneration?: number;
   resyncing?: boolean;
+  /** A parent Run already active when this subscription became ready may have unreplayable frames. */
+  joinedActiveParentRunId?: string;
   onAbort?: () => void;
 }
 
@@ -324,12 +326,14 @@ export class RuntimeClient implements AsyncDisposable {
   readonly #requestTimeoutMs: number;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #subscriptions = new Map<string, SubscriptionState>();
+  readonly #appliedBackgroundListQueries = new Map<string, number>();
   readonly #activeHistoryLoads = new Set<AbortController>();
   readonly #waitingHistoryLoads: WaitingHistoryLoad[] = [];
   #connection: RuntimeClientConnection | undefined;
   #connectionGeneration = 0;
   #nextRequest = 0;
   #nextSubscription = 0;
+  #nextBackgroundListQuery = 0;
   #connectPromise: Promise<void> | undefined;
   #closed = false;
   #features: RuntimeClientFeatures = NO_RUNTIME_FEATURES;
@@ -637,6 +641,10 @@ export class RuntimeClient implements AsyncDisposable {
       );
     }
     const connectionGeneration = this.#connectionGeneration;
+    const backgroundSessionId =
+      query.type === 'list_background_executions' ? query.sessionId : undefined;
+    const backgroundListQuery =
+      query.type === 'list_background_executions' ? ++this.#nextBackgroundListQuery : undefined;
     const backgroundSubscribers =
       query.type === 'list_background_executions' || query.type === 'get_background_execution'
         ? [...this.#subscriptions.values()]
@@ -656,12 +664,19 @@ export class RuntimeClient implements AsyncDisposable {
       result.status === 'ok' &&
       result.queryType === 'list_background_executions' &&
       result.backgroundSnapshot !== undefined &&
-      backgroundSubscribers.some((id) => this.#subscriptions.has(id))
+      backgroundSubscribers.some((id) => this.#subscriptions.has(id)) &&
+      connectionGeneration === this.#connectionGeneration &&
+      backgroundSessionId !== undefined &&
+      backgroundListQuery !== undefined &&
+      backgroundListQuery > (this.#appliedBackgroundListQueries.get(backgroundSessionId) ?? 0)
     ) {
+      // Aggregate generations are opaque: a slower, older list must not
+      // replace a newer list merely because its generation differs.
       this.#store.applyBackgroundSnapshot({
         connectionGeneration,
         snapshot: result.backgroundSnapshot,
       });
+      this.#appliedBackgroundListQueries.set(backgroundSessionId, backgroundListQuery);
     }
     if (
       result.status === 'ok' &&
@@ -870,8 +885,10 @@ export class RuntimeClient implements AsyncDisposable {
           (remaining.spec.scope === 'child_session' &&
             remaining.spec.childSessionId === releasedSessionId),
       )
-    )
+    ) {
       this.#store.discardSession(releasedSessionId);
+      this.#appliedBackgroundListQueries.delete(releasedSessionId);
+    }
     const remoteId = state.remoteId;
     const remoteConnectionGeneration = state.connectionGeneration;
     const subscribeRequestId = state.subscribeRequestId;
@@ -907,6 +924,7 @@ export class RuntimeClient implements AsyncDisposable {
   async close(reason = 'runtime_client_closed'): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    this.#appliedBackgroundListQueries.clear();
     this.#failHistoryLoads(closedError());
     this.#store.setConnection({ generation: this.#connectionGeneration, status: 'draining' });
     this.#rejectPending(this.#connectionGeneration, closedError());
@@ -1051,6 +1069,7 @@ export class RuntimeClient implements AsyncDisposable {
 
   async #activateSubscription(state: SubscriptionState): Promise<void> {
     if (!this.#subscriptions.has(state.id)) return;
+    state.joinedActiveParentRunId = undefined;
     const result = await this.#request(
       'runtime/subscribe',
       { subscription: state.spec },
@@ -1526,6 +1545,7 @@ export class RuntimeClient implements AsyncDisposable {
         this.#pushSubscriptionNotification(state, message, connectionGeneration);
         return;
       case 'reset':
+        state.joinedActiveParentRunId = undefined;
         for (const session of message.sessions) {
           const notification = durableNotification(session);
           const applied = this.#store.applySessionNotification({
@@ -1541,12 +1561,27 @@ export class RuntimeClient implements AsyncDisposable {
       case 'notification': {
         if (message.durability === 'ephemeral') {
           const notification = ephemeralNotification(message);
+          const joinedRunId = state.joinedActiveParentRunId;
+          const currentRun =
+            spec.scope === 'session'
+              ? this.#store.getSnapshot().sessions[spec.sessionId]?.projection.currentRun
+              : undefined;
           const applied = this.#store.applySessionNotification({
             connectionGeneration,
             subscriptionGeneration,
             notification,
-            ...(spec.scope === 'child_session' ? { allowInitialEphemeralSequence: true } : {}),
+            // Only the parent Run already active at ready may have skipped
+            // frames. A Run started after ready must begin at sequence one.
+            ...(spec.scope === 'child_session' ||
+            (spec.scope === 'session' &&
+              joinedRunId !== undefined &&
+              joinedRunId === currentRun?.runId &&
+              (notification.runId === undefined || notification.runId === joinedRunId))
+              ? { allowInitialEphemeralSequence: true }
+              : {}),
           });
+          if (spec.scope === 'session' && applied === 'applied')
+            state.joinedActiveParentRunId = undefined;
           if (applied === 'resync_required') void this.#resubscribeAfterResync(state);
           if (applied !== 'applied') return;
           this.#pushSubscriptionNotification(state, notification, connectionGeneration);
@@ -1557,6 +1592,7 @@ export class RuntimeClient implements AsyncDisposable {
           ...(message.taskId === undefined ? {} : { taskId: message.taskId }),
           ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
         });
+        state.joinedActiveParentRunId = undefined;
         const applied = this.#store.applySessionNotification({
           connectionGeneration,
           subscriptionGeneration,
@@ -1575,6 +1611,11 @@ export class RuntimeClient implements AsyncDisposable {
             subscriptionGeneration,
             sessionId: spec.scope === 'session' ? spec.sessionId : spec.childSessionId,
           });
+        }
+        if (spec.scope === 'session') {
+          const run = this.#store.getSnapshot().sessions[spec.sessionId]?.projection.currentRun;
+          state.joinedActiveParentRunId =
+            run?.status === 'running' || run?.status === 'waiting' ? run.runId : undefined;
         }
         state.ready?.resolve();
         return;

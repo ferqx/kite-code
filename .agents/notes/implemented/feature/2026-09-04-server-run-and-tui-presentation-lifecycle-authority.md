@@ -35,7 +35,8 @@ reconnect、stale revision 与后台 Session。
 7. Client completion waiter 绑定 `sessionId + runId + commandId + revisionFloor`，只接受 authoritative exact Run query/event
    的 `completed|failed|cancelled`。`recovery_required` 不正常 resolve，也不允许 successor admission。
 8. durable notification 必须先由 RuntimeClient generation/revision store 接受再 dispatch；ephemeral presentation 保留
-   work/turn/actor/attempt/composition/stream/request/sequence fencing。gap 进入 `presentation_incomplete`，不能提交截断回答。
+   work/turn/actor/attempt/composition/stream/request/sequence fencing。父／子 Session 在模型流中途接入时没有先前的本地游标，
+   首个观察到的 sequence 建立游标；此后的 gap 进入重新同步或 `presentation_incomplete`，不能提交截断回答。
 9. TUI 每 Session 分开保存 Server RunView、本地 Start/Cancel/Prompt command、Request/Thought/Timeline projection 与
    RenderLifecycle。Timeline projector 一次性发布 `LiveItem | SealedItem`；renderer 只提交连续 sealed 前缀，不再解释业务终态。
 10. Resource Budget 的 current persistent `runId` 只在 typed view 中称为 `budgetScopeId`，不得用于 RuntimeRun waiter/query/
@@ -50,6 +51,7 @@ reconnect、stale revision 与后台 Session。
 - 保留 `activeWork/running` 作为第二终态权威：拒绝；它把兼容 DTO、本地提交和 Server terminal 混为一体。
 - 新旧 lifecycle 通过 feature flag 或双发并行：拒绝；会形成 production dual authority，且无法保证同一连接的 exact 语义。
 - 让 renderer 从 tool/thought flags 推断 settled：拒绝；业务 projector 与物理 Static owner 会重复决定完成。
+- 新订阅的首个 ephemeral 帧一律要求 sequence 为 1：拒绝；订阅 reset 不重播已经发出的短暂流帧，中途进入父会话会把正常的首帧误判为缺帧并循环重同步。已有本地游标之后仍严格检查连续性。
 
 ## Consequences
 - Provider continuation、restart、live/history 与 completion waiter 都保留 accepted receipt 的 stable Run identity。

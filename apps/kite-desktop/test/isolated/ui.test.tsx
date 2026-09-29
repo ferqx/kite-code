@@ -133,6 +133,7 @@ class UiClient extends DesktopClient {
         parentSessionId,
         childSessionId,
         loading: false,
+        hasLoadedHistory: true,
         messages: [
           {
             id: `${childSessionId}:answer`,
@@ -363,6 +364,28 @@ test('environment information opens three private child details without selectin
   expect(document.querySelectorAll('.session-row')).toHaveLength(2);
   expect(document.querySelector('[aria-label="父 Agent 树"]')).toBeNull();
   expect(document.querySelectorAll('.background-execution-detail')).toHaveLength(3);
+  expect(button('查看子 Agent 详情：子任务 c').closest('li')?.textContent).toContain('状态待确认');
+  const confirmedUnavailable = {
+    ...client.view.background!.s0!,
+    snapshot: {
+      ...client.view.background!.s0!.snapshot,
+      executions: [
+        ...client.view.background!.s0!.snapshot.executions,
+        {
+          executionId: entries[2]!.taskId,
+          displayName: entries[2]!.displayName,
+          sessionId: 's0',
+          sessionRevision: 1,
+          kind: 'subagent' as const,
+          status: 'unavailable' as const,
+          ownerGeneration: 'test-children',
+          revision: 1,
+          cleanupConfirmed: false,
+        },
+      ],
+    },
+  };
+  await act(() => client.update({ background: { s0: confirmedUnavailable } }));
   expect(button('查看子 Agent 详情：子任务 c').closest('li')?.textContent).toContain('不可用');
   await click(button('查看子 Agent 详情：子任务 a'));
   expect(document.body.textContent).toContain('答复 private-a');
@@ -383,6 +406,78 @@ test('environment information opens three private child details without selectin
   await click(button('返回父会话'));
   expect(input()).not.toBeNull();
   expect(client.view.selected).toBe('s0');
+});
+
+test('returning to a parent keeps last-known environment rows readable but not actionable', async () => {
+  const client = new UiClient();
+  const snapshot = {
+    sessionId: 's0',
+    sessionRevision: 1,
+    aggregateGeneration: 'previous-environment',
+    watermark: 1,
+    executions: [
+      {
+        executionId: 'shell-1',
+        displayName: 'shell-1',
+        sessionId: 's0',
+        sessionRevision: 1,
+        kind: 'shell' as const,
+        status: 'running' as const,
+        ownerGeneration: 'previous-environment',
+        revision: 1,
+        cleanupConfirmed: false,
+      },
+      {
+        executionId: 'task-1',
+        displayName: '检查仓库',
+        sessionId: 's0',
+        sessionRevision: 1,
+        kind: 'subagent' as const,
+        status: 'running' as const,
+        ownerGeneration: 'previous-environment',
+        revision: 1,
+        cleanupConfirmed: false,
+      },
+    ],
+  };
+  client.update({
+    ready: false,
+    background: {},
+    backgroundDisplay: { sessionId: 's0', snapshot, stale: true },
+    childSessions: {
+      parentSessionId: 's0',
+      loading: false,
+      entries: [
+        {
+          sessionId: 'private-a',
+          parentSessionId: 's0',
+          agentId: 'agent-a',
+          taskId: 'task-1',
+          displayName: '检查仓库',
+          revision: 1,
+          updatedAtMs: 1,
+        },
+      ],
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('[aria-label="环境信息"]')?.textContent).toContain(
+    '上次状态 · 正在核对',
+  );
+  expect(document.querySelector('[aria-label="当前运行的 Shell"]')?.textContent).toContain(
+    'shell-1',
+  );
+  expect(button('查看子 Agent 详情：检查仓库')).not.toBeNull();
+  expect(document.querySelectorAll('.background-execution-stop')).toHaveLength(0);
+  await act(() =>
+    client.update({
+      ready: true,
+      background: { s0: { snapshot, connectionGeneration: 1, stale: false } },
+      backgroundDisplay: { sessionId: 's0', snapshot, stale: false },
+    }),
+  );
+  expect(document.querySelector('[aria-label="环境信息"]')?.textContent).not.toContain('正在核对');
+  expect(document.querySelectorAll('.background-execution-stop')).toHaveLength(2);
 });
 
 test('parent task tool gains a child detail entry when its exact session is listed', async () => {
@@ -459,6 +554,7 @@ test('private child read error stays in parent tree and switching roots removes 
       parentSessionId: 's0',
       childSessionId: 'private-a',
       loading: false,
+      hasLoadedHistory: false,
       messages: [],
       error: '无法读取',
     },
@@ -470,6 +566,98 @@ test('private child read error stays in parent tree and switching roots removes 
   expect(client.selectedIds).toEqual(['s1']);
   expect(client.view.childDetail).toBeUndefined();
   expect(document.body.textContent).not.toContain('子会话读取失败');
+});
+
+test('cached child history remains visible while its detail refreshes', async () => {
+  const client = new UiClient();
+  client.update({
+    childDetail: {
+      parentSessionId: 's0',
+      childSessionId: 'private-a',
+      loading: true,
+      hasLoadedHistory: true,
+      messages: [
+        { id: 'private-a:answer', role: 'assistant', text: '已缓存的子会话答复', settled: true },
+      ],
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('.message.assistant')?.textContent).toContain('已缓存的子会话答复');
+  expect(document.querySelector('.conversation-loading')).toBeNull();
+  expect(button('刷新详情').hasAttribute('disabled')).toBe(true);
+  expect(input()).toBeNull();
+});
+
+test('an already loaded empty child history does not flash the loading overlay', async () => {
+  const client = new UiClient();
+  client.update({
+    childDetail: {
+      parentSessionId: 's0',
+      childSessionId: 'private-a',
+      loading: true,
+      hasLoadedHistory: true,
+      messages: [],
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('.conversation-loading')).toBeNull();
+  expect(document.body.textContent).toContain('暂无消息');
+});
+
+test('cached child history remains readable when refresh fails and retry is offered', async () => {
+  const client = new UiClient();
+  client.update({
+    childDetail: {
+      parentSessionId: 's0',
+      childSessionId: 'private-a',
+      loading: false,
+      hasLoadedHistory: true,
+      messages: [
+        { id: 'private-a:answer', role: 'assistant', text: '刷新前的子会话答复', settled: true },
+      ],
+      error: '订阅暂时不可用',
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('.message.assistant')?.textContent).toContain('刷新前的子会话答复');
+  expect(document.body.textContent).toContain('子会话更新失败，已保留已读内容');
+  expect(document.body.textContent).toContain('订阅暂时不可用');
+  expect(document.querySelector('.conversation-loading')).toBeNull();
+  await click(button('重试'));
+  expect(document.body.textContent).toContain('答复 private-a');
+  expect(document.body.textContent).not.toContain('子会话更新失败，已保留已读内容');
+});
+
+test('child detail without cached history retains loading and full error states', async () => {
+  const client = new UiClient();
+  client.update({
+    childDetail: {
+      parentSessionId: 's0',
+      childSessionId: 'private-a',
+      loading: true,
+      hasLoadedHistory: false,
+      messages: [],
+    },
+  });
+  await render(<App client={client} />);
+  expect(document.querySelector('.conversation-loading')).not.toBeNull();
+  expect(document.querySelector('.message')).toBeNull();
+  await act(() =>
+    client.update({
+      childDetail: {
+        parentSessionId: 's0',
+        childSessionId: 'private-a',
+        loading: false,
+        hasLoadedHistory: false,
+        messages: [],
+        error: '无法读取',
+      },
+    }),
+  );
+  expect(document.body.textContent).toContain('子会话读取失败');
+  expect(document.querySelector('.conversation-loading')).toBeNull();
+  expect(document.querySelector('.message')).toBeNull();
+  expect(button('重试')).toBeDefined();
 });
 
 async function render(element: React.ReactNode) {
@@ -2275,6 +2463,7 @@ test('required child wait is limited to the loaded selected parent conversation'
         parentSessionId: 's0',
         childSessionId: 'child-a',
         loading: false,
+        hasLoadedHistory: true,
         messages: [{ id: 'child-reply', role: 'assistant', text: '子任务过程', settled: true }],
       },
     }),

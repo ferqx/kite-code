@@ -23,7 +23,7 @@ generation天然不同而丢弃刷新。
 
 Store11 App Server 可选提供 `loadChildSession(parentSessionId, childSessionId, throughSequence?, { signal }?)`。客户端逐页核验子 Session ID 和固定 source sequence；父子血缘由服务端每页核对。普通 `loadSession(childSessionId)` 继续拒绝，知道子 ID 不取得子 History 的读取权。未组合该能力的 RuntimeHistoryClient 不提供此方法。
 
-`subscribeChildReadyWithGeneration` 使用父、子 ID 的专用 wire 选择器，等待初始 ready 后返回与普通会话相同的安全通知及连接代际。Desktop 先读子 History，再从该 source sequence 订阅并按消息 identity 投影后续事件；重连或离开详情时取消旧订阅并重读历史。子 Session 可能在订阅前已开始发送短暂流事件；经过父子准入及初始 reset 后，客户端允许首个观察到的子流帧以其真实 sequence 建立本地游标，后续仍必须连续，缺帧时照常重新同步。普通 Session 的首帧规则不变。此入口不把子 Session ID 转成普通顶层会话授权。
+`subscribeChildReadyWithGeneration` 使用父、子 ID 的专用 wire 选择器，等待初始 ready 后返回与普通会话相同的安全通知及连接代际。Desktop 先读子 History，再从该 source sequence 订阅并按消息 identity 投影后续事件；重连或离开详情时取消旧订阅并重读历史。子 Session 可能在订阅前已开始发送短暂流事件，允许首个观察到的子流帧以其真实 sequence 建立本地游标；父 Session 只对初始 ready 时已运行的 Run 放宽这一首帧规则。后续帧仍必须连续，缺帧时照常重新同步。此入口不把子 Session ID 转成普通顶层会话授权。
 
 `loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。服务端在初始化时宣告 `history/cancel` 能力且单页请求已经发出时，客户端在调用方取消或响应超时后向同一连接发送携带原 RPC id 的取消通知；旧服务端未宣告此能力时，已发出的读取仍可能完成。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
 

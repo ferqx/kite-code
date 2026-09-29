@@ -60,6 +60,17 @@ async function fixture(
   let nextSubscriptionGate: ReturnType<typeof gate> | undefined;
   let nextSubscriptionScope: 'child_session' | undefined;
   let nextChildProjectionGate: ReturnType<typeof gate> | undefined;
+  let nextChildHistoryGate: ReturnType<typeof gate> | undefined;
+  let nextBackgroundGate: { sessionId: string; gate: ReturnType<typeof gate> } | undefined;
+  let nextBackgroundOverride: { sessionId: string; status: 'running' | 'completed' } | undefined;
+  const backgroundOverrides = new Map<
+    unknown,
+    { sessionId: string; status: 'running' | 'completed' }
+  >();
+  let omitNextChildList = false;
+  let failNextChildList = false;
+  let notFoundNextChildProjection = false;
+  const notFoundChildProjections = new Set<unknown>();
   let nextFailure: 'temporary' | 'unauthorized' | 'missing' | undefined;
   let nextGate: ReturnType<typeof gate> | undefined;
   let nextDirectoryGate: ReturnType<typeof gate> | undefined;
@@ -72,11 +83,14 @@ async function fixture(
   const sendCommands: Array<{ type: string; commandId: string }> = [];
   const backgroundQueries: Array<{ sessionId: string; parentRunStatus: string | undefined }> = [];
   let childSubscriptionRequests = 0;
+  let childHistoryRequests = 0;
+  let childListRequests = 0;
   let parentSubscriptionRequests = 0;
   let unsubscribeRequests = 0;
   let cancelCommands = 0;
   let indexResetEnds = 0;
   const rewrittenProjections = new Map<unknown, 'stale' | 'active'>();
+  const omittedChildLists = new Set<unknown>();
   const bufferedMessages: unknown[] = [];
   let injectedMode: 'auto' | 'full' = 'auto';
   const allGates: ReturnType<typeof gate>[] = [];
@@ -90,7 +104,12 @@ async function fixture(
     if (command === 'runtime_status') return { workspace, connectionId: generation || null } as T;
     if (command === 'activate_workspace' || command === 'pick_workspace') return workspace as T;
     if (command === 'list_projects') return [{ path: workspace, lastOpenedAt: 1 }] as T;
-    if (command === 'check_workspace' || command === 'runtime_detach') return undefined as T;
+    if (
+      command === 'check_workspace' ||
+      command === 'runtime_detach' ||
+      command === 'remove_workspace'
+    )
+      return undefined as T;
     if (command === 'query_workspace_branch')
       return {
         workspace,
@@ -141,11 +160,22 @@ async function fixture(
       if (
         message.method === 'runtime/query' &&
         message.params.query.type === 'list_background_executions'
-      )
+      ) {
         backgroundQueries.push({
           sessionId: message.params.query.sessionId,
           parentRunStatus: client.getSnapshot().projection?.currentRun?.status,
         });
+        const backgroundGate = nextBackgroundGate;
+        if (backgroundGate && backgroundGate.sessionId === message.params.query.sessionId) {
+          gated.set(message.id, backgroundGate.gate);
+          nextBackgroundGate = undefined;
+        }
+        const backgroundOverride = nextBackgroundOverride;
+        if (backgroundOverride && backgroundOverride.sessionId === message.params.query.sessionId) {
+          backgroundOverrides.set(message.id, backgroundOverride);
+          nextBackgroundOverride = undefined;
+        }
+      }
       if (
         message.method === 'runtime/query' &&
         message.params.query.type === 'get_child_session_projection' &&
@@ -153,6 +183,35 @@ async function fixture(
       ) {
         gated.set(message.id, nextChildProjectionGate);
         nextChildProjectionGate = undefined;
+      }
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'get_child_session_projection' &&
+        notFoundNextChildProjection
+      ) {
+        notFoundChildProjections.add(message.id);
+        notFoundNextChildProjection = false;
+      }
+      if (message.method === 'history/load_child_session') {
+        childHistoryRequests++;
+        if (nextChildHistoryGate) {
+          gated.set(message.id, nextChildHistoryGate);
+          nextChildHistoryGate = undefined;
+        }
+      }
+      if (
+        message.method === 'runtime/query' &&
+        message.params.query.type === 'list_child_sessions'
+      ) {
+        childListRequests++;
+        if (omitNextChildList) {
+          omittedChildLists.add(message.id);
+          omitNextChildList = false;
+        }
+        if (failNextChildList) {
+          failures.set(message.id, 'temporary');
+          failNextChildList = false;
+        }
       }
       if (
         message.method === 'runtime/subscribe' &&
@@ -270,6 +329,28 @@ async function fixture(
       }
       if (item.done) throw new Error('closed');
       const message = item.value as { id?: unknown };
+      if (omittedChildLists.delete(message.id)) {
+        const response = structuredClone(message) as {
+          result?: { childSessions?: unknown[]; nextChildCursor?: unknown };
+        };
+        if (!response.result) throw new Error('Expected child-list fixture response');
+        response.result.childSessions = [];
+        delete response.result.nextChildCursor;
+        return JSON.stringify(response) as T;
+      }
+      if (notFoundChildProjections.delete(message.id)) {
+        const response = structuredClone(message) as {
+          result?: { status?: string; queryType?: string; code?: string };
+        };
+        if (response.result?.queryType !== 'get_child_session_projection')
+          throw new Error('Expected child-projection fixture response');
+        response.result = {
+          status: 'not_found',
+          queryType: 'get_child_session_projection',
+          code: 'session_not_found',
+        };
+        return JSON.stringify(response) as T;
+      }
       if (
         (message as { params?: { message?: { type?: string } } }).params?.message?.type ===
         'index_reset_end'
@@ -280,6 +361,41 @@ async function fixture(
         gated.delete(message.id);
         waiting.arrive();
         await waiting.released;
+      }
+      const backgroundOverride = backgroundOverrides.get(message.id);
+      if (backgroundOverride) {
+        backgroundOverrides.delete(message.id);
+        const response = structuredClone(message) as {
+          result?: {
+            status?: string;
+            backgroundSnapshot?: {
+              sessionId: string;
+              sessionRevision: number;
+              aggregateGeneration: string;
+              watermark: number;
+              executions: unknown[];
+            };
+          };
+        };
+        if (response.result?.status !== 'ok' || !response.result.backgroundSnapshot)
+          throw new Error('Expected background list fixture response');
+        const snapshot = response.result.backgroundSnapshot;
+        snapshot.aggregateGeneration = `fixture-${backgroundOverride.sessionId}`;
+        snapshot.watermark += 1;
+        snapshot.executions = [
+          {
+            executionId: 'fixture-shell',
+            sessionId: backgroundOverride.sessionId,
+            sessionRevision: snapshot.sessionRevision,
+            kind: 'shell',
+            status: backgroundOverride.status,
+            ownerGeneration: 'fixture-shell-owner',
+            revision: snapshot.watermark,
+            cleanupConfirmed: backgroundOverride.status === 'completed',
+            cursor: 1,
+          },
+        ];
+        return JSON.stringify(response) as T;
       }
       if (lostCreations.delete(message.id))
         return JSON.stringify({
@@ -405,6 +521,35 @@ async function fixture(
       allGates.push(nextChildProjectionGate);
       return nextChildProjectionGate;
     },
+    holdChildHistory() {
+      nextChildHistoryGate = gate();
+      allGates.push(nextChildHistoryGate);
+      return nextChildHistoryGate;
+    },
+    holdBackground(sessionId: string) {
+      const held = gate();
+      nextBackgroundGate = { sessionId, gate: held };
+      allGates.push(held);
+      return held;
+    },
+    injectBackground(sessionId: string, status: 'running' | 'completed') {
+      nextBackgroundOverride = { sessionId, status };
+    },
+    get childHistoryRequests() {
+      return childHistoryRequests;
+    },
+    get childListRequests() {
+      return childListRequests;
+    },
+    omitOneChildList() {
+      omitNextChildList = true;
+    },
+    failOneChildList() {
+      failNextChildList = true;
+    },
+    notFoundChildProjection() {
+      notFoundNextChildProjection = true;
+    },
     get childSubscriptionRequests() {
       return childSubscriptionRequests;
     },
@@ -496,6 +641,62 @@ async function waitFor(check: () => boolean) {
   }
 }
 
+async function completedChildFixture() {
+  let parentRequests = 0;
+  const f = await fixture(
+    [
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'invalidation-child',
+              name: 'task',
+              args: {
+                name: 'Invalidation child',
+                subagent_type: 'review',
+                task: 'INVALIDATION_CHILD_TASK',
+                background: true,
+                result_disposition: 'required',
+              },
+            },
+          ],
+        },
+        toolContinuation: 'required',
+      },
+      ...Array.from({ length: 5 }, () => ({
+        response: async ({ messages }: { messages: readonly unknown[] }) => {
+          const transcript = JSON.stringify(messages);
+          if (
+            transcript.includes('INVALIDATION_CHILD_TASK') &&
+            !transcript.includes('INVALIDATION_PARENT_TASK')
+          )
+            return { message: { content: 'Child finished.' } };
+          parentRequests++;
+          return parentRequests === 1
+            ? {
+                message: { content: 'Parent waiting.' },
+                expectedRequest: { toolResults: [{ toolCallId: 'invalidation-child' }] },
+              }
+            : { message: { content: 'Parent finished.' } };
+        },
+      })),
+    ],
+    undefined,
+    { childSessions: true },
+  );
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('INVALIDATION_PARENT_TASK');
+    await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 1);
+    const childSessionId = f.client.getSnapshot().childSessions!.entries[0]!.sessionId;
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    return { ...f, childSessionId };
+  } catch (error) {
+    await f.close();
+    throw error;
+  }
+}
+
 test('desktop makes one final background read when the selected Run finishes', async () => {
   const f = await fixture([{ message: { content: 'Final answer.' } }]);
   try {
@@ -540,6 +741,121 @@ test('leaving the reading page releases its stream while the Service Run continu
     await f.close();
   }
 }, 20_000);
+
+test('rapid session switches retain the shared connection and running session', async () => {
+  let releaseRun!: () => void;
+  let enteredRun = false;
+  const runGate = new Promise<void>((resolve) => {
+    releaseRun = resolve;
+  });
+  const f = await fixture([
+    {
+      response: async () => {
+        enteredRun = true;
+        await runGate;
+        return { message: { content: 'Run A completed.' } };
+      },
+    },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('Run A while I browse.');
+    await waitFor(() => enteredRun);
+    const connectionGeneration = f.connectionGeneration;
+    const selections: Promise<void>[] = [];
+    for (let index = 0; index < 100; index++)
+      selections.push(f.client.selectSession(index % 2 === 0 ? f.b : f.a));
+    await Promise.all(selections);
+    await f.client.selectSession(f.a);
+    const subscriptionsBefore = f.parentSubscriptionRequests;
+    const unsubscribesBefore = f.unsubscribeRequests;
+    for (let index = 0; index < 72; index++)
+      await f.client.selectSession(index % 2 === 0 ? f.b : f.a);
+    expect(f.client.getSnapshot()).toMatchObject({ selected: f.a, ready: true });
+    expect(f.client.getSnapshot().projection?.currentRun?.status).toBe('running');
+    expect(f.parentSubscriptionRequests - subscriptionsBefore).toBe(72);
+    expect(f.unsubscribeRequests - unsubscribesBefore).toBeGreaterThanOrEqual(72);
+    expect(f.connectionGeneration).toBe(connectionGeneration);
+    expect(f.cancelCommands).toBe(0);
+    releaseRun();
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(
+      f.client.getSnapshot().messages.some((message) => message.text === 'Run A completed.'),
+    ).toBe(true);
+  } finally {
+    releaseRun();
+    await f.close();
+  }
+}, 60_000);
+
+test('switching a parent with three running children retains its Run', async () => {
+  const childGates = [gate(), gate(), gate()];
+  const startedChildren = new Set<number>();
+  let parentRequests = 0;
+  const f = await fixture(
+    [
+      {
+        message: {
+          tool_calls: childGates.map((_, index) => ({
+            id: `child-${index}`,
+            name: 'task',
+            args: {
+              name: `Child ${index}`,
+              subagent_type: 'review',
+              task: `MULTI_CHILD_${index}`,
+              background: true,
+              result_disposition: 'required',
+            },
+          })),
+        },
+        toolContinuation: 'required',
+      },
+      ...Array.from({ length: 6 }, () => ({
+        response: async ({ messages }: { messages: readonly unknown[] }) => {
+          const transcript = JSON.stringify(messages);
+          for (let index = 0; index < childGates.length; index++) {
+            if (
+              transcript.includes(`MULTI_CHILD_${index}`) &&
+              !transcript.includes('MULTI_PARENT')
+            ) {
+              startedChildren.add(index);
+              await childGates[index]!.released;
+              return { message: { content: `Child ${index} finished.` } };
+            }
+          }
+          parentRequests++;
+          return parentRequests === 1
+            ? {
+                message: { content: 'Parent waiting.' },
+                expectedRequest: {
+                  toolResults: childGates.map((_, index) => ({ toolCallId: `child-${index}` })),
+                },
+              }
+            : { message: { content: 'Parent finished.' } };
+        },
+      })),
+    ],
+    undefined,
+    { childSessions: true },
+  );
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('MULTI_PARENT');
+    await waitFor(() => startedChildren.size >= 2);
+    for (let index = 0; index < 70; index++) {
+      await f.client.selectSession(f.b);
+      await f.client.selectSession(f.a);
+    }
+    expect(f.client.getSnapshot()).toMatchObject({ selected: f.a, ready: true });
+    expect(f.client.getSnapshot().projection?.currentRun?.status).toBe('waiting');
+    for (const child of childGates) child.release();
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    expect(f.cancelCommands).toBe(0);
+  } finally {
+    for (const child of childGates) child.release();
+    await f.close();
+  }
+}, 60_000);
 
 test('the directory follows two concurrent Runs after leaving the reading page', async () => {
   const f = await fixture([
@@ -626,6 +942,86 @@ test('a cached session can be selected while the connection is recovering', asyn
   }
 }, 20_000);
 
+test('a confirmed environment snapshot stays visible while a reopened parent is revalidated', async () => {
+  const f = await fixture();
+  try {
+    f.injectBackground(f.a, 'running');
+    await f.client.selectSession(f.a);
+    await waitFor(() =>
+      Boolean(
+        f.client
+          .getSnapshot()
+          .backgroundDisplay?.snapshot.executions.some(
+            (execution) => execution.executionId === 'fixture-shell',
+          ),
+      ),
+    );
+    expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+      sessionId: f.a,
+      stale: false,
+      snapshot: { executions: [{ status: 'running' }] },
+    });
+
+    await f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().backgroundDisplay?.sessionId).toBe(f.b);
+    const held = f.holdBackground(f.a);
+    f.injectBackground(f.a, 'completed');
+    const reopen = f.client.selectSession(f.a);
+    expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+      sessionId: f.a,
+      stale: true,
+      snapshot: { executions: [{ status: 'running' }] },
+    });
+    await held.arrived;
+    expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+      sessionId: f.a,
+      stale: true,
+      snapshot: { executions: [{ status: 'running' }] },
+    });
+    held.release();
+    await reopen;
+    await waitFor(() => f.client.getSnapshot().backgroundDisplay?.stale === false);
+    expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+      sessionId: f.a,
+      snapshot: { executions: [{ status: 'completed' }] },
+    });
+    await f.client.removeProject(f.client.getSnapshot().workspace);
+    expect(f.client.getSnapshot().backgroundDisplay).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('returning to a parent refreshes a cached child list without loading flicker', async () => {
+  const f = await fixture([], undefined, { childSessions: true });
+  try {
+    await f.client.selectSession(f.a);
+    await waitFor(() => f.client.getSnapshot().childSessions?.parentSessionId === f.a);
+    await f.client.selectSession(f.b);
+    const loadingStates: boolean[] = [];
+    const unsubscribe = f.client.subscribe(() => {
+      const view = f.client.getSnapshot();
+      if (view.selected === f.a && view.childSessions?.parentSessionId === f.a)
+        loadingStates.push(view.childSessions.loading);
+    });
+    try {
+      await f.client.selectSession(f.a);
+      await waitFor(() => f.client.getSnapshot().childSessions?.parentSessionId === f.a);
+      expect(loadingStates.length).toBeGreaterThan(0);
+      expect(loadingStates).not.toContain(true);
+      for (let attempt = 0; !loadingStates.includes(true) && attempt < 10; attempt++) {
+        await f.client.refreshChildSessions(f.a, { silent: false });
+        if (!loadingStates.includes(true)) await Bun.sleep(10);
+      }
+      expect(loadingStates).toContain(true);
+    } finally {
+      unsubscribe();
+    }
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
 for (const openAfterFirstFrame of [false, true])
   test(`child detail renders live text when opened ${openAfterFirstFrame ? 'after' : 'before'} the first frame`, async () => {
     let releaseChild!: () => void;
@@ -685,6 +1081,16 @@ for (const openAfterFirstFrame of [false, true])
       await f.client.send('PARENT_STREAM_TASK');
       await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 1);
       const childSessionId = f.client.getSnapshot().childSessions!.entries[0]!.sessionId;
+      if (openAfterFirstFrame)
+        await waitFor(() =>
+          Boolean(
+            f.client
+              .getSnapshot()
+              .backgroundDisplay?.snapshot.executions.some(
+                (execution) => execution.kind === 'subagent',
+              ),
+          ),
+        );
       if (openAfterFirstFrame) {
         await waitFor(() => childEnteredGate);
         releaseChild();
@@ -721,11 +1127,27 @@ for (const openAfterFirstFrame of [false, true])
       if (openAfterFirstFrame) {
         expect(document.body.textContent).toContain('CHILD_STREAM_ALPHA');
         f.client.leaveChildSession();
+        expect(f.client.getSnapshot().backgroundDisplay).toMatchObject({
+          sessionId: f.a,
+          stale: true,
+        });
+        expect(
+          f.client
+            .getSnapshot()
+            .backgroundDisplay?.snapshot.executions.some(
+              (execution) => execution.kind === 'subagent',
+            ),
+        ).toBe(true);
         await waitFor(() => f.client.getSnapshot().ready);
         await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
         await f.client.selectSession(f.b);
         expect(f.client.getSnapshot().childSessions?.parentSessionId).not.toBe(f.a);
-        await f.client.selectSession(f.a);
+        const returningToParent = f.client.selectSession(f.a);
+        expect(f.client.getSnapshot().childSessions).toMatchObject({
+          parentSessionId: f.a,
+          entries: [{ sessionId: childSessionId }],
+        });
+        await returningToParent;
         await waitFor(() =>
           (f.client.getSnapshot().childSessions?.entries ?? []).some(
             (entry) => entry.sessionId === childSessionId,
@@ -791,6 +1213,142 @@ for (const openAfterFirstFrame of [false, true])
       await f.close();
     }
   }, 30_000);
+
+test('child history remains visible across sibling and parent navigation while every reopen revalidates', async () => {
+  const childGates = [gate(), gate()];
+  let parentRequests = 0;
+  const f = await fixture(
+    [
+      {
+        message: {
+          tool_calls: childGates.map((_, index) => ({
+            id: `cache-child-${index}`,
+            name: 'task',
+            args: {
+              name: `Cache child ${index}`,
+              subagent_type: 'review',
+              task: `CACHE_CHILD_${index}`,
+              background: true,
+              result_disposition: 'required',
+            },
+          })),
+        },
+        toolContinuation: 'required',
+      },
+      ...Array.from({ length: 5 }, () => ({
+        response: async ({ messages }: { messages: readonly unknown[] }) => {
+          const transcript = JSON.stringify(messages);
+          for (let index = 0; index < childGates.length; index++) {
+            if (
+              transcript.includes(`CACHE_CHILD_${index}`) &&
+              !transcript.includes('CACHE_PARENT')
+            ) {
+              await childGates[index]!.released;
+              return { message: { content: `Cache child ${index} finished.` } };
+            }
+          }
+          parentRequests++;
+          return parentRequests === 1
+            ? {
+                message: { content: 'Parent waiting.' },
+                expectedRequest: {
+                  toolResults: childGates.map((_, index) => ({
+                    toolCallId: `cache-child-${index}`,
+                  })),
+                },
+              }
+            : { message: { content: 'Parent finished.' } };
+        },
+      })),
+    ],
+    undefined,
+    { childSessions: true },
+  );
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('CACHE_PARENT');
+    await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 2);
+    const children = f.client.getSnapshot().childSessions!.entries;
+    const first = children[0]!.sessionId;
+    const second = children[1]!.sessionId;
+    for (const child of childGates) child.release();
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+
+    await f.client.openChildSession(f.a, first);
+    const firstMessages = f.client.getSnapshot().childDetail!.messages;
+    expect(firstMessages.length).toBeGreaterThan(0);
+    f.client.leaveChildSession();
+    await waitFor(() => f.client.getSnapshot().ready);
+    await f.client.openChildSession(f.a, second);
+    expect(f.client.getSnapshot().childDetail?.childSessionId).toBe(second);
+    f.client.leaveChildSession();
+    await waitFor(() => f.client.getSnapshot().ready);
+
+    const historyBefore = f.childHistoryRequests;
+    const subscriptionBefore = f.childSubscriptionRequests;
+    const freshHistory = f.holdChildHistory();
+    const reopening = f.client.openChildSession(f.a, first);
+    expect(f.client.getSnapshot().childDetail).toMatchObject({
+      childSessionId: first,
+      hasLoadedHistory: true,
+      loading: true,
+      messages: firstMessages,
+    });
+    await freshHistory.arrived;
+    expect(f.childHistoryRequests).toBe(historyBefore + 1);
+    freshHistory.release();
+    await reopening;
+    expect(f.client.getSnapshot().childDetail?.loading).toBe(false);
+    expect(f.childSubscriptionRequests).toBe(subscriptionBefore + 1);
+
+    // A late response from the old detail cannot overwrite a different child.
+    f.client.leaveChildSession();
+    await waitFor(() => f.client.getSnapshot().ready);
+    const staleHistory = f.holdChildHistory();
+    const staleOpen = f.client.openChildSession(f.a, first);
+    await staleHistory.arrived;
+    const currentOpen = f.client.openChildSession(f.a, second);
+    staleHistory.release();
+    await Promise.all([staleOpen, currentOpen]);
+    expect(f.client.getSnapshot().childDetail?.childSessionId).toBe(second);
+
+    f.client.leaveChildSession();
+    await waitFor(() => f.client.getSnapshot().ready);
+    await f.client.selectSession(f.b);
+    expect(f.client.getSnapshot().childDetail).toBeUndefined();
+    await expect(f.client.openChildSession(f.b, first)).rejects.toThrow();
+    expect(f.client.getSnapshot().childDetail).toBeUndefined();
+    await f.client.selectSession(f.a);
+    const afterSwitch = f.holdChildHistory();
+    const reopeningAfterSwitch = f.client.openChildSession(f.a, first);
+    expect(f.client.getSnapshot().childDetail).toMatchObject({
+      childSessionId: first,
+      hasLoadedHistory: true,
+      loading: true,
+      messages: firstMessages,
+    });
+    await afterSwitch.arrived;
+    afterSwitch.release();
+    await reopeningAfterSwitch;
+    expect(f.client.getSnapshot().childDetail?.loading).toBe(false);
+    f.client.leaveChildSession();
+    await waitFor(() => f.client.getSnapshot().ready);
+    const childListBefore = f.childListRequests;
+    f.omitOneChildList();
+    for (let attempt = 0; f.childListRequests === childListBefore && attempt < 100; attempt++) {
+      await f.client.refreshChildSessions(f.a);
+      if (f.childListRequests === childListBefore) await Bun.sleep(10);
+    }
+    expect(f.childListRequests).toBeGreaterThan(childListBefore);
+    expect(f.client.getSnapshot().childSessions?.entries).toEqual([]);
+    await expect(f.client.openChildSession(f.a, first)).rejects.toThrow();
+    expect(f.client.getSnapshot().childDetail).toBeUndefined();
+    expect(f.cancelCommands).toBe(0);
+  } finally {
+    for (const child of childGates) child.release();
+    await f.close();
+  }
+}, 30_000);
 
 test('provider authentication failure is visible once during live delivery and after history reload', async () => {
   let requests = 0;
@@ -1097,6 +1655,77 @@ test.each([
     await f.close();
   }
 }, 20_000);
+
+test('a refused parent history removes its cached child entries and environment state', async () => {
+  const f = await completedChildFixture();
+  try {
+    await waitFor(() =>
+      Boolean(
+        f.client
+          .getSnapshot()
+          .backgroundDisplay?.snapshot.executions.some(
+            (execution) => execution.kind === 'subagent',
+          ),
+      ),
+    );
+    await f.client.selectSession(f.b);
+    f.failHistory('unauthorized');
+    await expect(f.client.selectSession(f.a)).rejects.toThrow();
+    expect(f.client.getSnapshot()).toMatchObject({
+      selected: f.a,
+      ready: false,
+      hasLoadedHistory: false,
+      childSessions: undefined,
+      backgroundDisplay: undefined,
+    });
+    await Bun.sleep(30);
+    expect(f.client.getSnapshot().childSessions).toBeUndefined();
+    expect(f.client.getSnapshot().backgroundDisplay).toBeUndefined();
+    await f.client.selectSession(f.a);
+    await waitFor(() => f.client.getSnapshot().ready);
+    await waitFor(() => (f.client.getSnapshot().childSessions?.entries.length ?? 0) === 1);
+    expect(f.client.getSnapshot().childSessions?.entries[0]?.sessionId).toBe(f.childSessionId);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('same-workspace reconnect requires a fresh child list and reports its failure', async () => {
+  const f = await completedChildFixture();
+  try {
+    expect(f.client.getSnapshot().childSessions?.entries).toHaveLength(1);
+    await f.client.disconnect();
+    f.failOneChildList();
+    await f.client.connect();
+    await waitFor(() => !!f.client.getSnapshot().childSessions?.error);
+    expect(f.client.getSnapshot().childSessions).toMatchObject({
+      parentSessionId: f.a,
+      entries: [],
+      loading: false,
+    });
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
+test('a child projection confirmed missing removes its parent detail entry', async () => {
+  const f = await completedChildFixture();
+  try {
+    f.notFoundChildProjection();
+    await f.client.openChildSession(f.a, f.childSessionId);
+    expect(f.client.getSnapshot().childDetail).toMatchObject({
+      childSessionId: f.childSessionId,
+      hasLoadedHistory: false,
+      loading: false,
+    });
+    expect(f.client.getSnapshot().childDetail?.error).toContain('子会话已不可用');
+    expect(f.client.getSnapshot().childSessions?.entries).toEqual([]);
+    f.client.leaveChildSession();
+    expect(f.client.getSnapshot().childSessions?.entries).toEqual([]);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
 
 test('late failed selection cannot clear the next view and reconnect discards inactive cache', async () => {
   const f = await fixture();

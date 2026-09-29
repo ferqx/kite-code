@@ -116,10 +116,16 @@ export function App({ client }: { client: DesktopClient }) {
   const childSessionIdsByExecutionId = new Map(
     childSessions?.entries.map((entry) => [entry.taskId, entry.sessionId] as const) ?? [],
   );
+  const currentBackground = selected ? view.background?.[selected] : undefined;
+  const freshBackground =
+    ready && currentBackground && !currentBackground.stale ? currentBackground : undefined;
+  const backgroundDisplay =
+    view.hasLoadedHistory && view.backgroundDisplay?.sessionId === selected
+      ? view.backgroundDisplay
+      : undefined;
   const backgroundExecutions =
-    selected && !view.background?.[selected]?.stale
-      ? (view.background?.[selected]?.snapshot.executions ?? [])
-      : [];
+    freshBackground?.snapshot.executions ?? backgroundDisplay?.snapshot.executions ?? [];
+  const backgroundStale = !freshBackground && !!backgroundDisplay;
   const backgroundChildIds = new Set(
     backgroundExecutions
       .filter((execution) => execution.kind === 'subagent')
@@ -133,7 +139,7 @@ export function App({ client }: { client: DesktopClient }) {
         executionId: entry.taskId,
         displayName: entry.displayName,
         kind: 'subagent' as const,
-        status: 'unavailable' as const,
+        status: 'unconfirmed' as const,
         cleanupConfirmed: false,
       })),
   ];
@@ -624,7 +630,7 @@ export function App({ client }: { client: DesktopClient }) {
       }
       loading={
         childDetail
-          ? childDetail.loading
+          ? childDetail.loading && !childDetail.hasLoadedHistory
           : !optimisticMessage &&
             !scheduledTasksView &&
             !preparing &&
@@ -660,7 +666,7 @@ export function App({ client }: { client: DesktopClient }) {
         ) : undefined
       }
       historyError={
-        childDetail?.error
+        childDetail?.error && !childDetail.hasLoadedHistory
           ? {
               title: '子会话读取失败',
               detail: childDetail.error,
@@ -670,6 +676,23 @@ export function App({ client }: { client: DesktopClient }) {
                   .catch((error) => client.report(error)),
             }
           : undefined
+      }
+      statusNotice={
+        childDetail?.error && childDetail.hasLoadedHistory ? (
+          <section className="notice error" role="alert">
+            <strong>子会话更新失败，已保留已读内容</strong>
+            <p>{childDetail.error}</p>
+            <Button
+              onClick={() =>
+                void client
+                  .openChildSession(selected!, childDetail.childSessionId)
+                  .catch((error) => client.report(error))
+              }
+            >
+              重试
+            </Button>
+          </section>
+        ) : undefined
       }
       readOnlyReason={childDetail ? '子 Agent 会话仅供查看。' : undefined}
       actions={{
@@ -699,6 +722,7 @@ export function App({ client }: { client: DesktopClient }) {
           <BackgroundExecutions
             id="session-environment-information"
             executions={environmentExecutions}
+            stale={backgroundStale}
             currentOnly
             stoppingExecutionId={stoppingBackground}
             subagentDetails={
@@ -713,42 +737,49 @@ export function App({ client }: { client: DesktopClient }) {
                         .catch((error) => client.report(error)),
                     onRefresh: () =>
                       void client
-                        .refreshChildSessions(selected)
+                        .refreshChildSessions(selected, { silent: false })
                         .catch((error) => client.report(error)),
                   }
                 : undefined
             }
-            onStop={(execution) => {
-              if (
-                !execution.sessionId ||
-                execution.sessionRevision === undefined ||
-                !execution.ownerGeneration ||
-                execution.revision === undefined ||
-                stoppingBackgroundRef.current.has(execution.executionId)
-              )
-                return;
-              stoppingBackgroundRef.current.add(execution.executionId);
-              setStoppingBackground(execution.executionId);
-              void client
-                .stopBackgroundExecution({
-                  executionId: execution.executionId,
-                  kind: execution.kind,
-                  status: execution.status,
-                  cleanupConfirmed: execution.cleanupConfirmed,
-                  ...(execution.cursor === undefined ? {} : { cursor: execution.cursor }),
-                  sessionId: execution.sessionId,
-                  sessionRevision: execution.sessionRevision,
-                  ownerGeneration: execution.ownerGeneration,
-                  revision: execution.revision,
-                })
-                .catch((error) => client.report(error))
-                .finally(() => {
-                  stoppingBackgroundRef.current.delete(execution.executionId);
-                  setStoppingBackground((current) =>
-                    current === execution.executionId ? undefined : current,
-                  );
-                });
-            }}
+            onStop={
+              ready && freshBackground
+                ? (execution) => {
+                    if (
+                      !ready ||
+                      !freshBackground ||
+                      execution.status === 'unconfirmed' ||
+                      !execution.sessionId ||
+                      execution.sessionRevision === undefined ||
+                      !execution.ownerGeneration ||
+                      execution.revision === undefined ||
+                      stoppingBackgroundRef.current.has(execution.executionId)
+                    )
+                      return;
+                    stoppingBackgroundRef.current.add(execution.executionId);
+                    setStoppingBackground(execution.executionId);
+                    void client
+                      .stopBackgroundExecution({
+                        executionId: execution.executionId,
+                        kind: execution.kind,
+                        status: execution.status,
+                        cleanupConfirmed: execution.cleanupConfirmed,
+                        ...(execution.cursor === undefined ? {} : { cursor: execution.cursor }),
+                        sessionId: execution.sessionId,
+                        sessionRevision: execution.sessionRevision,
+                        ownerGeneration: execution.ownerGeneration,
+                        revision: execution.revision,
+                      })
+                      .catch((error) => client.report(error))
+                      .finally(() => {
+                        stoppingBackgroundRef.current.delete(execution.executionId);
+                        setStoppingBackground((current) =>
+                          current === execution.executionId ? undefined : current,
+                        );
+                      });
+                  }
+                : undefined
+            }
           />
         ) : undefined
       }

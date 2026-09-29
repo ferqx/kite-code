@@ -37,6 +37,70 @@ describe('Runtime Snapshot Store', () => {
     ).toBe('ignored');
   });
 
+  test('an unchanged fresh background query clears reconnect staleness without regressing detail', () => {
+    const store = new RuntimeSnapshotStore();
+    const listed = background('session-1', 'owner-1', 5, 'running');
+    store.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-1' });
+    expect(store.applyBackgroundSnapshot({ connectionGeneration: 1, snapshot: listed })).toBe(
+      'applied',
+    );
+    const detail = { ...listed.executions[0]!, revision: 6, status: 'completed' as const };
+    expect(store.applyBackgroundExecution({ connectionGeneration: 1, execution: detail })).toBe(
+      'applied',
+    );
+
+    store.setConnection({ generation: 2, status: 'active', serverInstanceId: 'server-1' });
+    expect(store.getSnapshot().background['session-1']?.stale).toBeTrue();
+    expect(store.applyBackgroundSnapshot({ connectionGeneration: 1, snapshot: listed })).toBe(
+      'ignored',
+    );
+    expect(
+      store.applyBackgroundSnapshot({
+        connectionGeneration: 2,
+        snapshot: { ...listed, watermark: listed.watermark - 1 },
+      }),
+    ).toBe('ignored');
+    expect(store.getSnapshot().background['session-1']?.stale).toBeTrue();
+    expect(store.applyBackgroundSnapshot({ connectionGeneration: 2, snapshot: listed })).toBe(
+      'applied',
+    );
+    expect(store.getSnapshot().background['session-1']).toMatchObject({
+      stale: false,
+      connectionGeneration: 2,
+      snapshot: { watermark: 5, executions: [{ revision: 6, status: 'completed' }] },
+    });
+    expect(store.applyBackgroundSnapshot({ connectionGeneration: 2, snapshot: listed })).toBe(
+      'ignored',
+    );
+
+    store.setConnection({ generation: 3, status: 'active', serverInstanceId: 'server-2' });
+    expect(store.getSnapshot().background['session-1']?.stale).toBeTrue();
+    expect(store.applyBackgroundSnapshot({ connectionGeneration: 3, snapshot: listed })).toBe(
+      'applied',
+    );
+    expect(store.getSnapshot().background['session-1']).toMatchObject({
+      stale: false,
+      connectionGeneration: 3,
+      snapshot: { executions: [{ revision: 6, status: 'completed' }] },
+    });
+
+    const stillRunning = new RuntimeSnapshotStore();
+    stillRunning.setConnection({ generation: 1, status: 'active', serverInstanceId: 'server-1' });
+    stillRunning.applyBackgroundSnapshot({ connectionGeneration: 1, snapshot: listed });
+    stillRunning.setConnection({ generation: 2, status: 'active', serverInstanceId: 'server-2' });
+    expect(stillRunning.getSnapshot().background['session-1']).toMatchObject({
+      stale: true,
+      snapshot: { executions: [{ status: 'unavailable' }] },
+    });
+    expect(
+      stillRunning.applyBackgroundSnapshot({ connectionGeneration: 2, snapshot: listed }),
+    ).toBe('applied');
+    expect(stillRunning.getSnapshot().background['session-1']).toMatchObject({
+      stale: false,
+      snapshot: { executions: [{ status: 'running' }] },
+    });
+  });
+
   test('ignores lower background watermarks and never reverses terminal work', () => {
     const store = new RuntimeSnapshotStore();
     store.setConnection({ generation: 1, status: 'active' });
