@@ -8,11 +8,14 @@ export interface Message {
   /** Client-observed reasoning segment timing, in epoch milliseconds. */
   readonly thinkingStartedAt?: number;
   readonly thinkingEndedAt?: number;
+  /** Source event times for one Turn; the timing marker is hidden from the transcript. */
+  readonly turnStartedAtMs?: number;
+  readonly turnFinishedAtMs?: number;
   /** A settled model response with no following tool calls is the Turn's final reply. */
   readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
-  readonly systemKind?: 'compaction' | 'ask' | 'approval';
+  readonly systemKind?: 'compaction' | 'ask' | 'approval' | 'turn_timing';
   readonly approval?: {
     readonly state: 'reviewing' | 'awaiting_user' | 'approved' | 'rejected';
     readonly source: 'auto' | 'user';
@@ -83,6 +86,19 @@ export interface Message {
     readonly summary?: string;
     readonly status: 'started' | 'completed' | 'failed' | 'cancelled';
   }[];
+}
+
+/** Host-confirmed state for the current or most recently settled presentation Turn. */
+export interface TurnActivity {
+  readonly turnId: string;
+  readonly status:
+    | 'queued'
+    | 'running'
+    | 'waiting'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'recovery_required';
 }
 
 export interface SessionSummary {

@@ -1134,12 +1134,21 @@ test('tool activity stays on its side of replies and preserves explicit folding 
   await render(<Conversation {...props} messages={messages} />);
   expect(document.querySelectorAll('.tool-activity')).toHaveLength(2);
   const first = document.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
-  expect(first.textContent).toContain('读取 2 次');
-  await click(first);
-  await act(() => root!.render(<Conversation {...props} messages={[...messages, read('d')]} />));
+  expect(first.textContent).toContain('正在执行 2 项');
+  expect(first.textContent).toContain('b');
+  expect(first.querySelector('[data-slot="marker-content"]')?.getAttribute('aria-live')).toBe(
+    'polite',
+  );
+  expect(first.querySelector('[data-slot="marker-content"]')?.getAttribute('aria-atomic')).toBe(
+    'true',
+  );
   expect(first.getAttribute('aria-expanded')).toBe('false');
+  await click(first);
+  expect(first.getAttribute('aria-expanded')).toBe('true');
+  await act(() => root!.render(<Conversation {...props} messages={[...messages, read('d')]} />));
+  expect(first.getAttribute('aria-expanded')).toBe('true');
   expect(document.querySelectorAll('.tool-activity-summary')[1]?.textContent).toContain(
-    '读取 2 次',
+    '正在执行 2 项',
   );
 });
 
@@ -1182,7 +1191,7 @@ test('tool activity preserves waiting, rejected and cancelled terminal states', 
   const tool = (id: string, status: Message['status'], settled: boolean): Message => ({
     id: `tool:${id}`,
     role: 'tool',
-    title: id,
+    title: id === 'running' ? '读取文件' : id,
     text: `${id} output`,
     settled,
     status,
@@ -1206,8 +1215,15 @@ test('tool activity preserves waiting, rejected and cancelled terminal states', 
     />,
   );
   const activity = document.querySelector('.tool-activity')!;
-  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('执行 5 项');
-  expect(activity.querySelector('.tool-activity-summary .tool-activity-state')).toBeNull();
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('正在读取文件');
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).not.toContain(
+    '正在执行 2 项',
+  );
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('已拒绝 1 项');
+  expect(activity.querySelector('.tool-activity-summary')?.textContent).toContain('结果未知 1 项');
+  expect(activity.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
   expect(activity.querySelector('.tool-step-preview')).toBeNull();
   expect(activity.querySelector('.tool-activity-summary')?.textContent).not.toContain('进行中');
   await click(activity.querySelector<HTMLButtonElement>('.tool-activity-summary')!);
@@ -1732,7 +1748,7 @@ test('task generic failure is hidden only when a terminal child has a concrete r
   expect(document.querySelector('.tool-activity')?.textContent).toContain('Tool execution failed.');
 });
 
-test('reasoning and plan progress remain readable without raw tool metadata', async () => {
+test('thinking status and plan progress remain readable without reasoning content or raw tool metadata', async () => {
   await render(
     <Conversation
       loading={false}
@@ -1740,9 +1756,16 @@ test('reasoning and plan progress remain readable without raw tool metadata', as
       connected
       saveReading={() => {}}
       messages={[
-        { id: 'thinking:r:s', role: 'thinking', text: '正在核对状态', settled: false },
+        {
+          id: 'thinking:r:s',
+          turnId: 'turn-1',
+          role: 'thinking',
+          text: '私有思考内容',
+          settled: false,
+        },
         {
           id: 'plan:p',
+          turnId: 'turn-1',
           role: 'system',
           title: '计划进度',
           text: '执行第 2 步',
@@ -1751,6 +1774,7 @@ test('reasoning and plan progress remain readable without raw tool metadata', as
         },
         {
           id: 'tool:limited',
+          turnId: 'turn-1',
           role: 'tool',
           title: '读取大文件',
           text: '片段',
@@ -1765,9 +1789,11 @@ test('reasoning and plan progress remain readable without raw tool metadata', as
           },
         },
       ]}
+      turnActivity={{ turnId: 'turn-1', status: 'running' }}
     />,
   );
-  expect(document.body.textContent).toContain('思考中');
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('正在思考');
+  expect(document.body.textContent).not.toContain('私有思考内容');
   expect(document.body.textContent).toContain('计划进度');
   expect(document.body.textContent).toContain('正在工作');
   expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe('true');
@@ -2567,28 +2593,394 @@ test('cancelled tool status does not repeat the generic event summary', async ()
   expect(document.querySelector('.shell-output pre')?.textContent).toBe('命令已停止。');
 });
 
-test('thinking seconds update while collapsed and freeze when settled', async () => {
-  const startedAt = Date.now() - 2000;
-  const message: Message = {
-    id: 'timed-thinking',
-    role: 'thinking',
-    text: '检查',
-    settled: false,
-    thinkingStartedAt: startedAt,
+test('a confirmed Turn folds its process after the final reply and keeps the answer readable', async () => {
+  const user: Message = { id: 'u', role: 'user', text: '检查消息形态', settled: true };
+  const progress: Message = {
+    id: 'progress',
+    turnId: 'turn-1',
+    role: 'assistant',
+    text: '先核对代码',
+    settled: true,
   };
-  const view = (item: Message) => (
-    <Conversation loading={false} selected connected saveReading={() => {}} messages={[item]} />
+  const tool = (id: string, settled: boolean): Message => ({
+    id: `tool:${id}`,
+    turnId: 'turn-1',
+    role: 'tool',
+    toolName: 'read_file',
+    presentation: 'exploration',
+    presentationGroupId: 'reads',
+    arguments: { path: `${id}.tsx` },
+    text: '读取结果',
+    settled,
+    status: settled ? 'completed' : 'running',
+  });
+  const thinking: Message = {
+    id: 'thinking',
+    turnId: 'turn-1',
+    role: 'thinking',
+    text: '模型内部思考',
+    settled: false,
+  };
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(
+    <Conversation
+      {...props}
+      turnActivity={{ turnId: 'turn-1', status: 'running' }}
+      messages={[user, progress, tool('a', true), tool('b', false), thinking]}
+    />,
   );
-  await render(view(message));
-  expect(document.body.textContent).toContain('思考中 · 2 秒');
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-  });
-  expect(document.body.textContent).toContain('思考中 · 3 秒');
-  await render(view({ ...message, settled: true, thinkingEndedAt: startedAt + 4000 }));
-  expect(document.body.textContent).toContain('已思考 · 4 秒');
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-  });
-  expect(document.body.textContent).toContain('已思考 · 4 秒');
+  const summary = document.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+  expect(summary.textContent).toContain('正在处理');
+  expect(summary.getAttribute('aria-expanded')).toBe('true');
+  expect(document.body.textContent).toContain('先核对代码');
+  expect(document.body.textContent).not.toContain('模型内部思考');
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('b.tsx');
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+  await click(summary);
+  await click(summary);
+  expect(summary.getAttribute('aria-expanded')).toBe('true');
+
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        turnActivity={{ turnId: 'turn-1', status: 'completed' }}
+        messages={[
+          user,
+          progress,
+          tool('a', true),
+          tool('b', true),
+          { ...thinking, settled: true },
+          {
+            id: 'final',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '最终结论',
+            settled: true,
+            finalReply: true,
+          },
+        ]}
+      />,
+    ),
+  );
+  expect(summary.textContent).toContain('已处理');
+  expect(summary.getAttribute('aria-expanded')).toBe('false');
+  expect(document.querySelector('.agent-turn-content')?.getAttribute('data-state')).toBe('closed');
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('最终结论');
+  expect(document.querySelector('.agent-turn-final .agent-turn-content')).toBeNull();
+  await click(summary);
+  expect(document.body.textContent).toContain('先核对代码');
+  expect(document.querySelector('.tool-activity-summary')?.textContent).toContain('读取 2 次');
+  expect(document.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+});
+
+test('an unscoped system message between exact Turn messages does not split the process', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      turnActivity={{ turnId: 'turn-1', status: 'completed' }}
+      messages={[
+        { id: 'progress', turnId: 'turn-1', role: 'assistant', text: '检查中', settled: true },
+        { id: 'mail', role: 'system', text: 'Agent 消息已送达', settled: true },
+        {
+          id: 'final',
+          turnId: 'turn-1',
+          role: 'assistant',
+          text: '检查完成',
+          settled: true,
+          finalReply: true,
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelectorAll('.agent-turn')).toHaveLength(1);
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('检查完成');
+  await click(document.querySelector<HTMLButtonElement>('.agent-turn-summary')!);
+  expect(document.querySelector('.agent-turn-process-messages')?.textContent).toContain(
+    'Agent 消息已送达',
+  );
+});
+
+test('a direct final reply retains a completed status without an empty disclosure', async () => {
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(
+    <Conversation
+      {...props}
+      messages={[]}
+      turnActivity={{ turnId: 'turn-1', status: 'running' }}
+    />,
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('正在处理');
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        turnActivity={{ turnId: 'turn-1', status: 'completed' }}
+        messages={[
+          {
+            id: 'final',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '直接回复',
+            settled: true,
+            finalReply: true,
+          },
+        ]}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已处理');
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('role')).toBe('status');
+  expect(document.querySelector('.agent-turn-content')).toBeNull();
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('直接回复');
+});
+
+test('a Turn shows persisted elapsed time and hides its timing marker', async () => {
+  const startedAtMs = Date.now() - 138_000;
+  const marker: Message = {
+    id: 'turn-timing:turn-1',
+    turnId: 'turn-1',
+    role: 'system',
+    systemKind: 'turn_timing',
+    text: '',
+    settled: false,
+    turnStartedAtMs: startedAtMs,
+  };
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(
+    <Conversation
+      {...props}
+      messages={[marker]}
+      turnActivity={{ turnId: 'turn-1', status: 'running' }}
+    />,
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已用 2 分 18 秒');
+  expect(document.querySelector('.agent-turn-status-label [aria-hidden="true"]')).not.toBeNull();
+  expect(document.querySelector('.message.system')).toBeNull();
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          { ...marker, settled: true, turnFinishedAtMs: startedAtMs + 138_000 },
+          {
+            id: 'final',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '处理完成',
+            settled: true,
+            finalReply: true,
+          },
+        ]}
+        turnActivity={{ turnId: 'turn-1', status: 'completed' }}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain(
+    '已处理 · 2 分 18 秒',
+  );
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('role')).toBe('status');
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('处理完成');
+});
+
+test('thinking-only and interrupted Turns show status without exposing reasoning', async () => {
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  const thinking: Message = {
+    id: 'thinking',
+    turnId: 'turn-1',
+    role: 'thinking',
+    text: '私有推理',
+    settled: false,
+  };
+  await render(
+    <Conversation
+      {...props}
+      messages={[thinking]}
+      turnActivity={{ turnId: 'turn-1', status: 'running' }}
+    />,
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('正在思考');
+  expect(document.body.textContent).not.toContain('私有推理');
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          { ...thinking, settled: true },
+          {
+            id: 'partial',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '已完成的阶段说明',
+            settled: true,
+          },
+        ]}
+        turnActivity={{ turnId: 'turn-1', status: 'failed' }}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('本轮失败');
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+  expect(document.body.textContent).toContain('已完成的阶段说明');
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          { ...thinking, settled: true },
+          {
+            id: 'partial',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '已完成的阶段说明',
+            settled: true,
+          },
+        ]}
+        turnActivity={{ turnId: 'turn-1', status: 'cancelled' }}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已停止');
+  expect(document.body.textContent).not.toContain('私有推理');
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          {
+            id: 'partial',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '阶段说明',
+            settled: true,
+            status: 'cancelled',
+          },
+        ]}
+        turnActivity={{ turnId: 'turn-2', status: 'completed' }}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已停止');
+});
+
+test('an accepted Turn appears before messages and keeps tool issues visible after folding', async () => {
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(
+    <Conversation {...props} messages={[]} turnActivity={{ turnId: 'turn-1', status: 'queued' }} />,
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('等待处理');
+  expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe('true');
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          {
+            id: 'tool:failure',
+            turnId: 'turn-1',
+            role: 'tool',
+            title: '运行检查',
+            text: '失败详情',
+            settled: true,
+            status: 'failed',
+          },
+          {
+            id: 'answer',
+            turnId: 'turn-1',
+            role: 'assistant',
+            text: '检查完成',
+            settled: true,
+            finalReply: true,
+          },
+        ]}
+        turnActivity={{ turnId: 'turn-1', status: 'completed' }}
+      />,
+    ),
+  );
+  const summary = document.querySelector('.agent-turn-summary');
+  expect(summary?.getAttribute('aria-expanded')).toBe('false');
+  expect(summary?.textContent).toContain('失败 1 项');
+  expect(summary?.getAttribute('aria-label')).toContain('已处理，失败 1 项');
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('检查完成');
+});
+
+test('a cancelled Turn without output still shows its stopped status', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[{ id: 'user', role: 'user', text: '执行任务', settled: true }]}
+      turnActivity={{ turnId: 'turn-1', status: 'cancelled' }}
+    />,
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已停止');
+  expect(document.querySelector('.agent-turn')?.getAttribute('data-turn-status')).toBe('cancelled');
+});
+
+test('a Turn keeps keyboard focus when its first visible message arrives', async () => {
+  const props = { loading: false, selected: true, connected: true, saveReading: () => {} };
+  await render(
+    <Conversation {...props} messages={[]} turnActivity={{ turnId: 'turn-1', status: 'queued' }} />,
+  );
+  const summary = document.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+  summary.focus();
+  expect(document.activeElement).toBe(summary);
+  await act(() =>
+    root!.render(
+      <Conversation
+        {...props}
+        messages={[
+          { id: 'progress', turnId: 'turn-1', role: 'assistant', text: '开始检查', settled: false },
+        ]}
+        turnActivity={{ turnId: 'turn-1', status: 'running' }}
+      />,
+    ),
+  );
+  expect(document.querySelector('.agent-turn-summary')).toBe(summary);
+  expect(document.activeElement).toBe(summary);
+});
+
+test('history without exact Turn identities stays in order and hides raw thinking', async () => {
+  await render(
+    <Conversation
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+      messages={[
+        { id: 'a', role: 'assistant', text: '阶段说明', settled: true },
+        { id: 'thought', role: 'thinking', text: '不展示的思考', settled: true },
+        { id: 'tool:t', role: 'tool', title: '运行检查', text: '结果', settled: true },
+        { id: 'b', role: 'assistant', text: '回复', settled: true },
+      ]}
+    />,
+  );
+  expect(document.querySelector('.agent-turn')).toBeNull();
+  expect(document.body.textContent).not.toContain('不展示的思考');
+  const articles = [
+    ...document.querySelectorAll(
+      '.reading-column > .message-group, .reading-column > .tool-activity',
+    ),
+  ];
+  expect(
+    articles.map((item) =>
+      item.textContent?.includes('阶段说明')
+        ? 'progress'
+        : item.textContent?.includes('运行检查')
+          ? 'tool'
+          : 'reply',
+    ),
+  ).toEqual(['progress', 'tool', 'reply']);
 });

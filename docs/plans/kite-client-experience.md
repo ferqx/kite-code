@@ -124,6 +124,8 @@
 
 2026-09-14 本轮已按用户确认的 HTML 原型落实读取／搜索聚合、Shell 输出展开、文件 diff、Ask 回执、压缩标记、子 Agent 仅工具过程及分体审批按钮。该轮明确取舍优先于下方早期样例中的参数面板、Shell 内重复命令和子 Agent 常驻结果；当前行为与视觉以[共享 UI owner](../../packages/kite-client-ui/README.md)及[设计规范](../../packages/kite-client-ui/docs/design-system.md#会话消息结构)为准。其余丰富工具结果、子会话下钻等仍属未完成目标，不因本轮展示调整宣称交付。
 
+2026-09-29 已确认 Desktop 的单轮消息形态以准确 Turn 身份组织过程和最终回复：过程在活动时展开、最终回复落定后默认折叠，工具聚合始终默认折叠且运行中摘要显示当前动作与目标；原始思考正文不展示，仅活动 Turn 顶部显示简短状态。Web Public History 缺少可信轮次身份，继续平铺。此取舍优先于下方早期样例中“成功后收起工具”“思考卡片”的默认态描述；当前实现边界以[桌面会话 owner](../../apps/kite-desktop/docs/conversation-ui.md)、[共享 UI owner](../../packages/kite-client-ui/README.md)及[Web 会话 owner](../../apps/kite-web/docs/session-presentation.md)为准。
+
 2026-09-11 按“仔细检查 Agent 会话消息、涵盖所有工具消息”补齐设计。以下是共享桌面／Web 的目标呈现；Figma 已有可编辑样例，客户端尚未完整实现，不能用样例中的状态、文件、回答或计数证明真实执行。视觉数值由[设计规范](../../packages/kite-client-ui/docs/design-system.md#会话消息结构)维护。
 
 ### 默认阅读只保留有用的信息

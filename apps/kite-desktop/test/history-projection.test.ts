@@ -326,3 +326,32 @@ test('mixed replay matches immutable live projection through late terminal event
   expect(extended.at(-1)?.text).toBe('New');
   expect(frozenPrevious).toEqual(before);
 });
+
+test('historical Turn duration comes from persisted event times', async () => {
+  const messages = await projectHistory(
+    [
+      {
+        sequence: 1,
+        occurredAt: '2026-09-29T10:00:00.000Z',
+        events: [{ type: 'turn.started', turnId: 't1' }],
+        identity: { turnId: 't1' },
+      },
+      {
+        sequence: 2,
+        occurredAt: '2026-09-29T10:02:18.000Z',
+        events: [{ type: 'turn.terminal', turnId: 't1', status: 'completed' }],
+        identity: { turnId: 't1' },
+      },
+    ],
+    [],
+    new AbortController().signal,
+  );
+  expect(messages).toMatchObject([
+    {
+      id: 'turn-timing:t1',
+      settled: true,
+      turnStartedAtMs: Date.parse('2026-09-29T10:00:00.000Z'),
+      turnFinishedAtMs: Date.parse('2026-09-29T10:02:18.000Z'),
+    },
+  ]);
+});

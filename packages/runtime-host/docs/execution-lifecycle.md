@@ -6,6 +6,8 @@
 
 Kernel 选择 effect；Host 将已提交命令对应的 prepared execution 绑定准确 Session、操作和 committed revision。外部 Provider work 前完成 durable attempt acknowledgement。准备对象与一次 attempt 的执行身份不能由 UI、Server 或工具参数重新拼装。
 
+StateRuntimeSession 仅在事务成功后公开最近一批已应用事件及按位置对应的持久 envelope metadata；Service 可用同一对象与 revision 将 `occurredAt` 关联到通知。提交失败不公开候选时间，metadata 不参与 effect lease、执行许可或终态判断。
+
 Tool coordinator 在 preparation、dispatch、receipt 和结果提交之间维持同一 identity。Builtin 提供实际执行机制，Host 管理 attempt、lease 和提交资格，Store 验证持久 generation/revision。三者职责不能合并为“执行器返回成功即可完成”。
 
 续轮子工具审批的父 Tool 身份使用 [Host storage codec](../src/storage/followup-child-approval-identity.ts) 统一编码和解析。Service 审批路由与 SQLite Store 使用同一版本前缀、字段界限及 canonical 复编码规则；SQLite 保留原公开导出作兼容，但 Service 的运行时逻辑不从具体 Store 包取得该解析权威。格式回归见 [Store 审批代理测试](../../runtime-storage-sqlite/test/kite-child-approval-proxy.test.ts) 与 [Service 代理测试](../../../apps/kite-service/test/child-approval-proxy.test.ts)。

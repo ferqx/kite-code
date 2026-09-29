@@ -810,6 +810,7 @@ function clientVisibleRuntimeEventFixtures(): ReadonlyMap<RuntimeEvent['type'], 
       event({ type: 'turn.aborted', turnId: 'turn-1', reason: 'Aborted.', cause: 'user' }),
     ],
     ['turn.completed', event({ type: 'turn.completed', turnId: 'turn-1' })],
+    ['turn.started', event({ type: 'turn.started', turnId: 'turn-1' })],
     [
       'user.message_appended',
       event({ type: 'user.message_appended', messageId: 'message-1', content: 'Hello.' }),

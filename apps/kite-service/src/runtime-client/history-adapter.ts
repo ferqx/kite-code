@@ -310,7 +310,16 @@ type HistoricalRecord = {
   sequence: number;
   events: readonly RuntimeClientEvent[];
   identity?: RuntimeHistoryRecordIdentity;
+  occurredAt?: string;
 };
+
+function canonicalOccurredAt(value: unknown): value is string {
+  if (typeof value !== 'string' || (value.length !== 20 && value.length !== 24)) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const canonical = new Date(parsed).toISOString();
+  return canonical === value || canonical === `${value.slice(0, -1)}.000Z`;
+}
 
 // Desktop and Native History read a fixed sequence across multiple protocol pages.
 // Keep the projected transcript so a later page does not scan and project the
@@ -792,6 +801,7 @@ function createKiteRuntimeHistoryClientWithCache(
               sequence: record.sequence,
               events,
               ...(Object.keys(identity).length === 0 ? {} : { identity }),
+              ...(canonicalOccurredAt(record.occurredAt) ? { occurredAt: record.occurredAt } : {}),
             });
             if (limits) {
               projectedBytes += Buffer.byteLength(JSON.stringify(all.at(-1)), 'utf8');

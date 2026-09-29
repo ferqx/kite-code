@@ -1596,6 +1596,7 @@ export class RuntimeClient implements AsyncDisposable {
           ...(message.runId === undefined ? {} : { runId: message.runId }),
           ...(message.taskId === undefined ? {} : { taskId: message.taskId }),
           ...(message.turnId === undefined ? {} : { turnId: message.turnId }),
+          ...(message.occurredAt === undefined ? {} : { occurredAt: message.occurredAt }),
         });
         state.joinedActiveParentRunId = undefined;
         const applied = this.#store.applySessionNotification({
@@ -1788,7 +1789,12 @@ function durableNotification(
   session: RuntimeSessionProjection,
   revision = session.revision,
   event?: RuntimeClientEvent,
-  identity: Readonly<{ runId?: string; taskId?: string; turnId?: string }> = {},
+  identity: Readonly<{
+    runId?: string;
+    taskId?: string;
+    turnId?: string;
+    occurredAt?: string;
+  }> = {},
 ): Extract<RuntimeNotification, { durability: 'durable' }> {
   return {
     schema: 'kite.runtime-notification.v2' as const,
@@ -1798,6 +1804,7 @@ function durableNotification(
     ...(identity.runId === undefined ? {} : { runId: identity.runId }),
     ...(identity.taskId === undefined ? {} : { taskId: identity.taskId }),
     ...(identity.turnId === undefined ? {} : { turnId: identity.turnId }),
+    ...(identity.occurredAt === undefined ? {} : { occurredAt: identity.occurredAt }),
     projection: { kind: 'session' as const, session, ...(event === undefined ? {} : { event }) },
   };
 }
@@ -1823,11 +1830,17 @@ export function toAcceptedPresentationEnvelope(
       ? event.taskId
       : undefined;
   const eventTurnId = event.type === 'turn.terminal' ? event.turnId : undefined;
+  const startedTurnId = event.type === 'turn.started' ? event.turnId : undefined;
   const envelope = Object.freeze({
     sessionId: notification.sessionId,
     connectionGeneration,
     durability: notification.durability,
-    ...(notification.durability === 'durable' ? { revision: notification.revision } : {}),
+    ...(notification.durability === 'durable'
+      ? {
+          revision: notification.revision,
+          ...(notification.occurredAt === undefined ? {} : { occurredAt: notification.occurredAt }),
+        }
+      : {}),
     ...(notification.durability === 'ephemeral'
       ? {
           ...((notification.runId ?? eventRunId)
@@ -1836,7 +1849,7 @@ export function toAcceptedPresentationEnvelope(
           ...((eventTaskId ?? notification.taskId ?? notification.workId)
             ? { taskId: eventTaskId ?? notification.taskId ?? notification.workId }
             : {}),
-          turnId: eventTurnId ?? notification.turnId,
+          turnId: startedTurnId ?? eventTurnId ?? notification.turnId,
         }
       : {
           ...((notification.runId ?? eventRunId ?? run?.runId)
@@ -1854,10 +1867,18 @@ export function toAcceptedPresentationEnvelope(
                   notification.projection.session.activeTask?.taskId,
               }
             : {}),
-          ...((notification.turnId ?? eventTurnId ?? run?.activeTurnId ?? run?.initialTurnId)
+          ...((notification.turnId ??
+          startedTurnId ??
+          eventTurnId ??
+          run?.activeTurnId ??
+          run?.initialTurnId)
             ? {
                 turnId:
-                  notification.turnId ?? eventTurnId ?? run?.activeTurnId ?? run?.initialTurnId,
+                  notification.turnId ??
+                  startedTurnId ??
+                  eventTurnId ??
+                  run?.activeTurnId ??
+                  run?.initialTurnId,
               }
             : {}),
         }),

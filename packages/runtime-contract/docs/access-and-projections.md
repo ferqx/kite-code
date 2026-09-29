@@ -14,6 +14,8 @@
 
 准确字段以源码为准，语义变化同时检查 [Protocol](../../runtime-protocol/docs/wire-format.md)、[Client](../../runtime-client/docs/requests-and-history.md) 和真实 projector。验证：[contract tests](../test/)。
 
+封闭的 `RuntimeClientEvent` 包含准确 Turn 身份的 `turn.started` 与 `turn.terminal`。Durable notification、accepted presentation envelope 和 History record 可选地携带同一持久事件的规范化 `occurredAt`；这仅是展示时间，不授予新的执行或结算权限。旧记录缺少时间时保持缺失，客户端不能以收到通知、重放历史或 Run 起止时间代替。
+
 后台执行列表的`aggregateGeneration`属于组合目录；每项`ownerGeneration`和`revision`属于其原生执行owner。
 列表和单项同时携带读取时的`sessionRevision`，它才是`stop_background_execution.expectedRevision`的来源。
 组合目录generation、执行owner generation、执行revision都不能充当Session CAS。

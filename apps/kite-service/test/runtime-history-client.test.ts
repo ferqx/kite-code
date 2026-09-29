@@ -1002,6 +1002,44 @@ describe('Kite Runtime History Client adapter', () => {
     expect(transcript.records[3]?.identity).toEqual(transcript.records[0]?.identity);
   });
 
+  test('replays exact durable Turn timestamps and omits absent legacy times', async () => {
+    const events: RuntimeEvent[] = [
+      { type: 'turn.started', turnId: 'turn-1' },
+      { type: 'model.requested', requestId: 'request-1' },
+      { type: 'turn.completed', turnId: 'turn-1' },
+    ];
+    const logs: RuntimeLogQueryPort<RuntimeEvent> = {
+      listSessions: () => ({
+        entries: [{ sessionId: 'timed-session', name: '', updatedAt: 42, lastSequence: 3 }],
+        hasMore: false,
+      }),
+      listEvents: () => ({
+        entries: events.map((event, index) => ({
+          sessionId: 'timed-session',
+          sequence: index + 1,
+          eventId: `event-${index + 1}`,
+          createdAt: 42 + index,
+          ...(index === 1 ? {} : { occurredAt: `2026-09-29T01:02:0${index + 1}.000Z` }),
+          event,
+        })),
+        hasMore: false,
+        observedLastSequence: 3,
+      }),
+      close: () => undefined,
+    };
+    const transcript = await createKiteRuntimeHistoryClient(logs).loadSession('timed-session');
+    expect(transcript.records[0]).toMatchObject({
+      occurredAt: '2026-09-29T01:02:01.000Z',
+      identity: { turnId: 'turn-1' },
+      events: [{ type: 'turn.started', turnId: 'turn-1' }],
+    });
+    expect(transcript.records[1]).not.toHaveProperty('occurredAt');
+    expect(transcript.records[2]).toMatchObject({
+      occurredAt: '2026-09-29T01:02:03.000Z',
+      events: [{ type: 'turn.terminal', turnId: 'turn-1', status: 'completed' }],
+    });
+  });
+
   test('does not bind a planning prompt to the predecessor turn carried by task.started', async () => {
     const events: RuntimeEvent[] = [
       {

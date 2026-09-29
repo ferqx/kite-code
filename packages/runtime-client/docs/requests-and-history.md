@@ -10,6 +10,8 @@
 
 通知更新客户端投影与订阅。event-free snapshot 可以修正活动/交互状态，但不伪造批准、取消或完成事件。历史读取通过独立注入的 HistoryClient 获取完整 durable transcript；短期 replay window 不能代替它。
 
+Durable notification 的 `occurredAt` 原样进入 accepted presentation envelope，History record 的同名字段保持在完整 transcript 中；二者都指向各自持久事件的发生时间。客户端只透传，不用本地接收或重放时间填补缺失，也不把 Run 时间解释为 Turn 时间。
+
 客户端缓存只服务读取与展示，业务 State 仍由服务端决定。最后一个会话／子会话订阅结束时，Store 回收该会话投影、临时流、后台执行快照与终止 Run 过滤记录；同会话多个订阅读取期间继续共享。后台列表与详情查询始终向调用方返回 Service DTO；只有发起与收到结果时同一读取订阅仍存在，才把结果写入展示快照，避免离开后迟到响应或重进同一会话的旧响应恢复过期状态。UI 本地 pending feedback 与 accepted receipt、durable event 的合并由相应客户端实现处理，不由本包猜测消息文本 identity。
 
 后台停止必须使用同一个list/detail投影中的`sessionRevision`作为Session CAS，并保留该item的

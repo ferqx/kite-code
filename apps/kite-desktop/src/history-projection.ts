@@ -39,7 +39,10 @@ export async function projectHistory(
   for (const record of records) {
     for (const event of record.events) {
       signal.throwIfAborted();
-      projectHistoricalEvent(builder, event, record.identity);
+      projectHistoricalEvent(builder, event, {
+        ...record.identity,
+        occurredAt: record.occurredAt,
+      });
       if (++count === 200 || performance.now() - started >= 8) {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         signal.throwIfAborted();

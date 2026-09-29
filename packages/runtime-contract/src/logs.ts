@@ -156,6 +156,8 @@ export interface RuntimeHistorySessionTranscript {
     readonly sequence: number;
     readonly events: readonly RuntimeClientEvent[];
     readonly identity?: RuntimeHistoryRecordIdentity;
+    /** Durable State event occurrence time; absent in older logs. */
+    readonly occurredAt?: string;
   }[];
   readonly events: readonly RuntimeClientEvent[];
   /** Folded history fallback; an admitted live Host projection remains authoritative. */

@@ -28,6 +28,13 @@ const rpcId = z
   .max(RUNTIME_PROTOCOL_LIMITS.maxRpcIdLength)
   .refine((value) => !/\p{Cc}/u.test(value));
 const safeRevision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const canonicalOccurredAt = z.string().refine((value) => {
+  if (value.length !== 20 && value.length !== 24) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const canonical = new Date(parsed).toISOString();
+  return canonical === value || canonical === `${value.slice(0, -1)}.000Z`;
+});
 const shortText = z.string().max(8_192).refine(noForbiddenControls);
 const approvalCommand = z.string().max(16_384).refine(noForbiddenControls);
 const runtimeToolDisplayName = z.enum(RUNTIME_TOOL_DISPLAY_NAMES_);
@@ -1527,6 +1534,7 @@ const historyTranscript = z
           .object({
             sequence: safeRevision,
             events: z.array(z.lazy(() => RUNTIME_PROTOCOL_EVENT_SCHEMA_)),
+            occurredAt: canonicalOccurredAt.optional(),
             identity: z
               .object({
                 runId: identifier.optional(),
@@ -1936,6 +1944,12 @@ export const RUNTIME_PROTOCOL_EVENT_SCHEMA_ = z.discriminatedUnion('type', [
     .strict(),
   z
     .object({
+      type: z.literal('turn.started'),
+      turnId: identifier,
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal('turn.terminal'),
       turnId: identifier,
       status: z.enum(['completed', 'aborted', 'failed', 'cancelled']),
@@ -2048,7 +2062,7 @@ function validateDurablePresentationIdentity(
         : (value.session.activeTask?.taskId ?? currentRun?.taskId)),
     turnId:
       value.turnId ??
-      (event.type === 'turn.terminal'
+      (event.type === 'turn.started' || event.type === 'turn.terminal'
         ? event.turnId
         : (currentRun?.activeTurnId ?? currentRun?.initialTurnId)),
   };
@@ -2089,6 +2103,7 @@ const durablePresentationNotification = z
     runId: identifier.optional(),
     taskId: identifier.optional(),
     turnId: identifier.optional(),
+    occurredAt: canonicalOccurredAt.optional(),
     event: RUNTIME_PROTOCOL_EVENT_SCHEMA_.optional(),
     session: RUNTIME_PROTOCOL_SESSION_SCHEMA_,
   })

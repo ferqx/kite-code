@@ -412,6 +412,10 @@ export type RuntimeClientEvent =
       readonly summary?: string;
     }
   | {
+      readonly type: 'turn.started';
+      readonly turnId: string;
+    }
+  | {
       readonly type: 'turn.terminal';
       readonly turnId: string;
       readonly status: 'completed' | 'aborted' | 'failed' | 'cancelled';
@@ -457,6 +461,8 @@ export interface AcceptedPresentationEnvelope {
   readonly runId?: string;
   readonly taskId?: string;
   readonly turnId?: string;
+  /** Persisted source occurrence time for durable events only. */
+  readonly occurredAt?: string;
   readonly event: RuntimeClientEvent;
   readonly stream?: {
     readonly actorId: string;
@@ -519,6 +525,7 @@ const RUNTIME_CLIENT_EVENT_IDENTITY_SCOPES_ = {
   'subagent.failed': 'turn',
   'context.compaction': 'session',
   'task.terminal': 'task',
+  'turn.started': 'turn',
   'turn.terminal': 'turn',
   'run.terminal': 'run',
   'rewind.terminal': 'session',
@@ -556,6 +563,7 @@ export function isRuntimeClientEventIdentitySatisfied(
     case 'planning.entered':
     case 'planning.exited':
       return identity.taskId === event.taskId;
+    case 'turn.started':
     case 'turn.terminal':
       return identity.turnId === event.turnId;
     case 'run.terminal':
@@ -569,7 +577,7 @@ export function isAcceptedPresentationEnvelope(
   value: unknown,
 ): value is AcceptedPresentationEnvelope {
   if (!isRecord(value)) return false;
-  const optional = ['revision', 'runId', 'taskId', 'turnId', 'stream'];
+  const optional = ['revision', 'runId', 'taskId', 'turnId', 'occurredAt', 'stream'];
   if (
     !hasExactKeys(value, [
       'sessionId',
@@ -586,6 +594,7 @@ export function isAcceptedPresentationEnvelope(
     (Object.hasOwn(value, 'runId') && !isIdentifier(value.runId)) ||
     (Object.hasOwn(value, 'taskId') && !isIdentifier(value.taskId)) ||
     (Object.hasOwn(value, 'turnId') && !isIdentifier(value.turnId)) ||
+    (Object.hasOwn(value, 'occurredAt') && !isCanonicalOccurredAt(value.occurredAt)) ||
     !isRuntimeClientEvent(value.event)
   ) {
     return false;
@@ -594,6 +603,7 @@ export function isAcceptedPresentationEnvelope(
   if (value.durability === 'durable') {
     return Object.hasOwn(value, 'revision') && !Object.hasOwn(value, 'stream');
   }
+  if (Object.hasOwn(value, 'occurredAt')) return false;
   const stream = value.stream;
   return (
     isRecord(stream) &&
@@ -604,6 +614,14 @@ export function isAcceptedPresentationEnvelope(
     isIdentifier(stream.streamId) &&
     isNonNegativeSafeInteger(stream.sequence)
   );
+}
+
+function isCanonicalOccurredAt(value: unknown): value is string {
+  if (typeof value !== 'string' || (value.length !== 20 && value.length !== 24)) return false;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return false;
+  const canonical = new Date(parsed).toISOString();
+  return canonical === value || canonical === `${value.slice(0, -1)}.000Z`;
 }
 
 export function assertAcceptedPresentationEnvelope(
@@ -629,6 +647,8 @@ export type RuntimeNotification =
       readonly runId?: string;
       readonly taskId?: string;
       readonly turnId?: string;
+      /** Persisted occurrence time of this exact source event when available. */
+      readonly occurredAt?: string;
       readonly projection: RuntimeProjectionDelta;
     }
   | {
@@ -1321,6 +1341,8 @@ export function isRuntimeClientEvent(value: unknown): value is RuntimeClientEven
       );
     case 'task.terminal':
       return isTerminalEvent(value, 'taskId', ['completed', 'cancelled', 'failed']);
+    case 'turn.started':
+      return hasExactKeys(value, ['type', 'turnId']) && isIdentifier(value.turnId);
     case 'turn.terminal':
       return (
         isTerminalEvent(

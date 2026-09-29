@@ -1817,6 +1817,9 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
         ...(runId === undefined ? {} : { runId }),
         ...(taskId === undefined ? {} : { taskId }),
         ...(turnId === undefined ? {} : { turnId }),
+        ...(coordinator.occurredAtForEvent?.(event)
+          ? { occurredAt: coordinator.occurredAtForEvent(event) }
+          : {}),
         projection: {
           kind,
           session,

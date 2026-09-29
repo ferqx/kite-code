@@ -1,20 +1,20 @@
 import {
   ArrowDown01Icon,
-  BulbIcon,
   Copy01Icon,
   CopyXIcon,
   KiteIcon,
+  Loading03Icon,
   Tick02Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './components/ui/collapsible';
-import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
+import { Marker, MarkerContent } from './components/ui/marker';
 import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
-import type { Message } from './types';
+import type { Message, TurnActivity } from './types';
 import { Button } from './ui';
 
 export interface ReadingState {
@@ -35,24 +35,46 @@ function isVisibleTool(message: Message): boolean {
   );
 }
 
-function ThinkingLabel({ message }: { message: Message }) {
+function formatTurnElapsed(milliseconds: number): string {
+  const totalSeconds = Math.floor(milliseconds / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours) return `${hours} 小时 ${minutes} 分 ${seconds} 秒`;
+  if (minutes) return `${minutes} 分 ${seconds} 秒`;
+  return `${seconds} 秒`;
+}
+
+function TurnElapsed({
+  startedAtMs,
+  finishedAtMs,
+  running,
+}: {
+  startedAtMs?: number;
+  finishedAtMs?: number;
+  running: boolean;
+}) {
   const [now, setNow] = useState(Date.now);
-  const startedAt = message.thinkingStartedAt;
   useEffect(() => {
-    if (message.settled || startedAt === undefined) return;
+    if (!running || startedAtMs === undefined || finishedAtMs !== undefined) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [message.settled, startedAt]);
-  const end = message.settled ? message.thinkingEndedAt : now;
-  const seconds =
-    startedAt !== undefined && end !== undefined
-      ? Math.max(0, Math.floor((end - startedAt) / 1000))
-      : undefined;
+  }, [running, startedAtMs, finishedAtMs]);
+  const end = finishedAtMs ?? (running ? now : undefined);
+  if (
+    startedAtMs === undefined ||
+    end === undefined ||
+    !Number.isFinite(startedAtMs) ||
+    !Number.isFinite(end) ||
+    end < startedAtMs
+  )
+    return null;
   return (
-    <span className="tool-label">
-      {message.settled ? '已思考' : '思考中'}
-      {seconds !== undefined && ` · ${seconds} 秒`}
+    <span aria-hidden={running || undefined}>
+      {' · '}
+      {running && '已用 '}
+      {formatTurnElapsed(end - startedAtMs)}
     </span>
   );
 }
@@ -122,39 +144,8 @@ const MessageItem = memo(function MessageItem({
       if (attempt === copyAttempt.current) setCopyState('failed');
     }
   };
-  if (message.role === 'thinking')
-    return (
-      <Collapsible
-        asChild
-        open={Boolean(expanded)}
-        onOpenChange={(open) => onToggle(message.id, open)}
-      >
-        <article
-          className={`message tool-activity thinking-activity${!message.settled ? ' is-running' : ''}`}
-        >
-          <CollapsibleTrigger asChild>
-            <Marker asChild className="tool-activity-summary">
-              <Button variant="ghost">
-                <MarkerIcon className="tool-activity-marker-icon">
-                  <HugeiconsIcon className="tool-activity-kind-icon" icon={BulbIcon} />
-                </MarkerIcon>
-                <MarkerContent className="tool-activity-marker-content">
-                  <ThinkingLabel message={message} />
-                </MarkerContent>
-                <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />
-              </Button>
-            </Marker>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="tool-activity-content">
-            <div className="tool-activity-reveal">
-              <div className="tool-activity-reveal-inner">
-                <pre className="tool-output">{message.text.trimEnd()}</pre>
-              </div>
-            </div>
-          </CollapsibleContent>
-        </article>
-      </Collapsible>
-    );
+  // Raw model reasoning is never part of the readable transcript.
+  if (message.role === 'thinking') return null;
   if (message.role === 'tool') return null;
   if (message.role === 'subagent') {
     if (!showProcess) return null;
@@ -343,6 +334,7 @@ const MessageItem = memo(function MessageItem({
 export function Conversation({
   messages,
   loading,
+  turnActivity,
   requiredSubagentWait,
   selected,
   connected,
@@ -356,6 +348,7 @@ export function Conversation({
 }: {
   messages: readonly Message[];
   loading: boolean;
+  turnActivity?: TurnActivity;
   requiredSubagentWait?: boolean;
   selected: boolean;
   connected: boolean;
@@ -517,6 +510,8 @@ export function Conversation({
       .filter(Boolean),
   );
   const shown = messages.filter((message) => {
+    if (message.role === 'thinking') return false;
+    if (message.systemKind === 'turn_timing') return false;
     if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
     if (message.role === 'system')
       return message.systemKind === 'ask' || message.settled || !!message.status;
@@ -526,6 +521,11 @@ export function Conversation({
     return !message.settled || !!message.text;
   });
   const finalReplyByTurn = new Map<string, Message>();
+  const timingByTurn = new Map(
+    messages
+      .filter((message) => message.systemKind === 'turn_timing' && message.turnId)
+      .map((message) => [message.turnId!, message]),
+  );
   for (const message of shown) {
     if (
       message.role === 'assistant' &&
@@ -555,6 +555,268 @@ export function Conversation({
       previous.push(message);
     else groups.push([message]);
   }
+  // Exact Turn identities bound a process. Unscoped non-user messages between
+  // two parts of that same Turn stay in their original order inside it.
+  const entries: { key: string; turnId?: string; groups: Message[][] }[] = [];
+  const seenTurnIds = new Set<string>();
+  const unscoped: Message[][] = [];
+  const flushUnscoped = () => {
+    for (const group of unscoped) entries.push({ key: group[0]!.id, groups: [group] });
+    unscoped.length = 0;
+  };
+  for (const group of groups) {
+    const message = group[0]!;
+    const turnId = message.role === 'user' ? undefined : message.turnId;
+    if (!turnId && message.role !== 'user') {
+      unscoped.push(group);
+      continue;
+    }
+    const previous = entries.at(-1);
+    if (turnId && previous?.turnId === turnId) {
+      previous.groups.push(...unscoped, group);
+      unscoped.length = 0;
+      continue;
+    }
+    flushUnscoped();
+    entries.push({
+      key: turnId
+        ? seenTurnIds.has(turnId)
+          ? `turn:${turnId}:after:${message.id}`
+          : `turn:${turnId}`
+        : message.id,
+      turnId,
+      groups: [group],
+    });
+    if (turnId) seenTurnIds.add(turnId);
+  }
+  flushUnscoped();
+  if (
+    turnActivity &&
+    ['queued', 'running', 'waiting', 'recovery_required', 'cancelled'].includes(
+      turnActivity.status,
+    ) &&
+    !seenTurnIds.has(turnActivity.turnId)
+  ) {
+    entries.push({
+      key: `turn:${turnActivity.turnId}`,
+      turnId: turnActivity.turnId,
+      groups: [],
+    });
+  }
+  const renderGroup = (group: Message[]) => {
+    const message = group[0]!;
+    const activityKey = `activity:${message.id}`;
+    return message.role === 'tool' ? (
+      <ToolActivity
+        key={activityKey}
+        messages={group}
+        suppressGenericFailure={
+          message.toolName === 'task' &&
+          (children.get(message.id.slice(5)) ?? []).some(
+            (child) =>
+              child.role === 'subagent' &&
+              ['failed', 'interrupted', 'cancelled'].includes(child.status ?? '') &&
+              !!child.text?.trim(),
+          )
+        }
+        expanded={expanded[activityKey]}
+        activityId={activityKey}
+        restoredExpanded={restoredExpanded.current}
+        expandedItems={expanded}
+        onToggleItem={onToggle}
+        onToggle={(open) => onToggle(activityKey, open)}
+        openFile={openFile}
+        childDetail={parentTaskDetail(message, group.length)}
+        renderChildren={(toolCallId, taskExpanded) =>
+          children
+            .get(toolCallId)
+            ?.map((child) =>
+              child.role === 'subagent' ? (
+                <MessageItem
+                  key={child.id}
+                  message={childWithUniqueSteps(child)}
+                  inlineProcess
+                  childTools={childTools.get(child.id.slice(9))}
+                  expandedItems={expanded}
+                  restoredExpanded={restoredExpanded.current}
+                  expanded={expanded[child.id]}
+                  showProcess={taskExpanded}
+                  onToggle={onToggle}
+                  openFile={openFile}
+                />
+              ) : null,
+            )
+        }
+      />
+    ) : (
+      <div key={message.id} className="message-group">
+        <MessageItem
+          message={childWithUniqueSteps(message)}
+          childDetail={childDetail(message)}
+          childTools={message.role === 'subagent' ? childTools.get(message.id.slice(9)) : undefined}
+          expandedItems={expanded}
+          restoredExpanded={restoredExpanded.current}
+          expanded={expanded[message.id]}
+          onToggle={onToggle}
+          openFile={openFile}
+          writeClipboardText={writeClipboardText}
+          copyText={
+            message.role === 'user' && message.settled && !message.delivery && message.text
+              ? message.text
+              : assistantTurnCopies.get(message.id)
+          }
+          copyRole={message.role === 'user' ? 'user' : 'assistant'}
+        />
+      </div>
+    );
+  };
+  const renderEntry = (entry: (typeof entries)[number]) => {
+    if (!entry.turnId) return <Fragment key={entry.key}>{entry.groups.map(renderGroup)}</Fragment>;
+    const finalGroup = entry.groups.find(
+      ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
+    );
+    const processGroups = entry.groups.filter((group) => group !== finalGroup);
+    const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
+    const timing = timingByTurn.get(entry.turnId);
+    const active = activity
+      ? ['queued', 'running', 'waiting', 'recovery_required'].includes(activity.status)
+      : !turnActivity && processGroups.some((group) => group.some((message) => !message.settled));
+    const failed =
+      activity?.status === 'failed' ||
+      processGroups.some((group) =>
+        group.some(
+          (message) =>
+            message.role === 'system' &&
+            message.status === 'failed' &&
+            message.id === `failure:${entry.turnId}`,
+        ),
+      );
+    const cancelled =
+      activity?.status === 'cancelled' ||
+      processGroups.some((group) =>
+        group.some((message) => message.role === 'assistant' && message.status === 'cancelled'),
+      );
+    const runningTool = messages.some(
+      (message) => message.turnId === entry.turnId && message.role === 'tool' && !message.settled,
+    );
+    const thinking = messages.some(
+      (message) =>
+        message.turnId === entry.turnId && message.role === 'thinking' && !message.settled,
+    );
+    const issueMessages = processGroups
+      .flat()
+      .filter((message) => message.role === 'tool' || message.role === 'subagent');
+    const issueSummary = (
+      [
+        ['failed', '失败'],
+        ['rejected', '已拒绝'],
+        ['unknown', '结果未知'],
+        ['cancelled', '已停止'],
+      ] as const
+    )
+      .map(([status, text]) => {
+        const count = issueMessages.filter((message) => message.status === status).length;
+        return count ? `${text} ${count} 项` : undefined;
+      })
+      .filter(Boolean)
+      .join(' · ');
+    const label = failed
+      ? '本轮失败'
+      : cancelled
+        ? '已停止'
+        : activity?.status === 'recovery_required'
+          ? '需要恢复'
+          : activity?.status === 'waiting'
+            ? '正在等待'
+            : activity?.status === 'queued'
+              ? '等待处理'
+              : active && thinking && !runningTool
+                ? '正在思考'
+                : active
+                  ? '正在处理'
+                  : finalGroup || activity?.status === 'completed'
+                    ? '已处理'
+                    : '处理过程';
+    const showProcess = processGroups.length > 0 || active || cancelled;
+    // Completion is a new reading state: the process closes once when the
+    // final answer arrives, then a reader can reopen and keep that choice.
+    const turnKey = `turn:${entry.turnId}:${finalGroup ? 'complete' : 'process'}`;
+    const open = expanded[turnKey] ?? !finalGroup;
+    const animated = active && activity?.status !== 'recovery_required';
+    const statusContent = (
+      <>
+        <span
+          className={`agent-turn-status-icon${animated ? ' is-active' : ''}`}
+          aria-hidden="true"
+        >
+          {animated ? (
+            <HugeiconsIcon icon={Loading03Icon} />
+          ) : failed || cancelled || activity?.status === 'recovery_required' ? (
+            '!'
+          ) : finalGroup || activity?.status === 'completed' ? (
+            <HugeiconsIcon icon={Tick02Icon} />
+          ) : (
+            '·'
+          )}
+        </span>
+        <span className="agent-turn-status-label" role={active ? 'status' : undefined}>
+          {label}
+          <TurnElapsed
+            startedAtMs={timing?.turnStartedAtMs}
+            finishedAtMs={timing?.turnFinishedAtMs}
+            running={['queued', 'running', 'waiting'].includes(activity?.status ?? '')}
+          />
+        </span>
+        {issueSummary && <span className="agent-turn-issues">{issueSummary}</span>}
+      </>
+    );
+    return (
+      <section
+        key={entry.key}
+        className="agent-turn"
+        data-turn-status={
+          failed
+            ? 'failed'
+            : cancelled
+              ? 'cancelled'
+              : (activity?.status ?? (active ? 'running' : 'unknown'))
+        }
+      >
+        {showProcess && (
+          <Collapsible asChild open={open} onOpenChange={(next) => onToggle(turnKey, next)}>
+            <div className="agent-turn-process">
+              <CollapsibleTrigger asChild>
+                <Button
+                  className="agent-turn-summary"
+                  variant="ghost"
+                  aria-label={`${label}${issueSummary ? `，${issueSummary}` : ''}，${open ? '收起' : '展开'}本轮处理过程`}
+                >
+                  {statusContent}
+                  <span className="agent-turn-action">{open ? '收起过程' : '查看过程'}</span>
+                  <HugeiconsIcon
+                    className="agent-turn-chevron"
+                    icon={ArrowDown01Icon}
+                    aria-hidden="true"
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="agent-turn-content">
+                <section className="agent-turn-process-messages" aria-label="本轮处理过程">
+                  {processGroups.map(renderGroup)}
+                </section>
+              </CollapsibleContent>
+            </div>
+          </Collapsible>
+        )}
+        {!showProcess && finalGroup && (
+          <div className="agent-turn-summary agent-turn-summary-static" role="status">
+            {statusContent}
+          </div>
+        )}
+        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup)}</div>}
+      </section>
+    );
+  };
   return (
     <div className="conversation-container">
       <ScrollArea
@@ -566,15 +828,17 @@ export function Conversation({
           'aria-label': '会话消息',
           'aria-busy':
             loading ||
+            ['queued', 'running', 'waiting'].includes(turnActivity?.status ?? '') ||
             messages.some(
               (message) =>
-                message.delivery === 'sending' ||
-                ((message.role === 'assistant' ||
-                  message.role === 'tool' ||
-                  message.role === 'subagent' ||
-                  message.role === 'thinking' ||
-                  message.role === 'system') &&
-                  !message.settled),
+                message.systemKind !== 'turn_timing' &&
+                (message.delivery === 'sending' ||
+                  ((message.role === 'assistant' ||
+                    message.role === 'tool' ||
+                    message.role === 'subagent' ||
+                    message.role === 'thinking' ||
+                    message.role === 'system') &&
+                    !message.settled)),
             ),
           onScroll: () => {
             const element = viewport.current;
@@ -591,7 +855,7 @@ export function Conversation({
       >
         <div className="reading-column">
           {!loading &&
-            (!shown.length ? (
+            (!entries.length ? (
               <div className="welcome">
                 <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
                 <p>
@@ -604,80 +868,7 @@ export function Conversation({
                 </p>
               </div>
             ) : (
-              groups.map((group) => {
-                const message = group[0]!;
-                const activityKey = `activity:${message.id}`;
-                return message.role === 'tool' ? (
-                  <ToolActivity
-                    key={activityKey}
-                    messages={group}
-                    suppressGenericFailure={
-                      message.toolName === 'task' &&
-                      (children.get(message.id.slice(5)) ?? []).some(
-                        (child) =>
-                          child.role === 'subagent' &&
-                          ['failed', 'interrupted', 'cancelled'].includes(child.status ?? '') &&
-                          !!child.text?.trim(),
-                      )
-                    }
-                    expanded={expanded[activityKey]}
-                    activityId={activityKey}
-                    restoredExpanded={restoredExpanded.current}
-                    expandedItems={expanded}
-                    onToggleItem={onToggle}
-                    onToggle={(open) => onToggle(activityKey, open)}
-                    openFile={openFile}
-                    childDetail={parentTaskDetail(message, group.length)}
-                    renderChildren={(toolCallId, taskExpanded) =>
-                      children
-                        .get(toolCallId)
-                        ?.map((child) =>
-                          child.role === 'subagent' ? (
-                            <MessageItem
-                              key={child.id}
-                              message={childWithUniqueSteps(child)}
-                              inlineProcess
-                              childTools={childTools.get(child.id.slice(9))}
-                              expandedItems={expanded}
-                              restoredExpanded={restoredExpanded.current}
-                              expanded={expanded[child.id]}
-                              showProcess={taskExpanded}
-                              onToggle={onToggle}
-                              openFile={openFile}
-                            />
-                          ) : null,
-                        )
-                    }
-                  />
-                ) : (
-                  <div key={message.id} className="message-group">
-                    <MessageItem
-                      message={childWithUniqueSteps(message)}
-                      childDetail={childDetail(message)}
-                      childTools={
-                        message.role === 'subagent'
-                          ? childTools.get(message.id.slice(9))
-                          : undefined
-                      }
-                      expandedItems={expanded}
-                      restoredExpanded={restoredExpanded.current}
-                      expanded={expanded[message.id]}
-                      onToggle={onToggle}
-                      openFile={openFile}
-                      writeClipboardText={writeClipboardText}
-                      copyText={
-                        message.role === 'user' &&
-                        message.settled &&
-                        !message.delivery &&
-                        message.text
-                          ? message.text
-                          : assistantTurnCopies.get(message.id)
-                      }
-                      copyRole={message.role === 'user' ? 'user' : 'assistant'}
-                    />
-                  </div>
-                );
-              })
+              entries.map(renderEntry)
             ))}
           {!loading && selected && requiredSubagentWait && (
             <Marker className="mt-4" role="status">

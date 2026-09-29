@@ -39,6 +39,58 @@ test('Agent mailbox statuses use durable metadata and do not confuse acceptance 
   expect(messages[1]).toMatchObject({ status: 'completed', text: '结果已结算（completed）' });
 });
 
+test('Agent mailbox status keeps its source turn when later phases update the same row', () => {
+  const accepted = {
+    type: 'agent.mail_status',
+    status: 'accepted',
+    messageIds: ['mail-1'],
+  } as const;
+  let messages = projectEventWithIdentity([], accepted, { turnId: 'turn-1' });
+  expect(messages[0]?.turnId).toBe('turn-1');
+  messages = projectEventWithIdentity(
+    messages,
+    { ...accepted, status: 'input_prepared' },
+    { turnId: 'turn-2' },
+  );
+  expect(messages[0]).toMatchObject({ turnId: 'turn-1', status: 'running' });
+  messages = projectEventWithIdentity(messages, accepted);
+  expect(messages[0]).toMatchObject({ turnId: 'turn-1', status: 'running' });
+  expect(projectEvent([], accepted)[0]?.turnId).toBeUndefined();
+});
+
+test('Turn elapsed time uses only persisted start and terminal event timestamps', () => {
+  const start = { type: 'turn.started', turnId: 't1' } as const;
+  const terminal = { type: 'turn.terminal', turnId: 't1', status: 'completed' } as const;
+  expect(projectEventWithIdentity([], start)).toEqual([]);
+  let messages = projectEventWithIdentity([], start, {
+    turnId: 't1',
+    occurredAt: '2026-09-29T10:00:00.000Z',
+  });
+  expect(messages[0]).toMatchObject({
+    id: 'turn-timing:t1',
+    turnStartedAtMs: Date.parse('2026-09-29T10:00:00.000Z'),
+    settled: false,
+  });
+  messages = projectEventWithIdentity(messages, terminal, {
+    turnId: 't1',
+    occurredAt: '2026-09-29T10:02:18.000Z',
+  });
+  expect(messages[0]).toMatchObject({
+    turnStartedAtMs: Date.parse('2026-09-29T10:00:00.000Z'),
+    turnFinishedAtMs: Date.parse('2026-09-29T10:02:18.000Z'),
+    settled: true,
+  });
+  expect(
+    projectEventWithIdentity(messages, start, { occurredAt: '2026-09-29T10:00:10.000Z' }),
+  ).toEqual(messages);
+  const withoutTerminalTime = projectEventWithIdentity(
+    projectEventWithIdentity([], start, { occurredAt: '2026-09-29T10:00:00.000Z' }),
+    terminal,
+  );
+  expect(withoutTerminalTime[0]).toMatchObject({ settled: true });
+  expect(withoutTerminalTime[0]).not.toHaveProperty('turnFinishedAtMs');
+});
+
 test('failed model run is visible without an assistant reply and replay does not duplicate it', () => {
   const user = projectEventWithIdentity(
     [],
@@ -169,6 +221,17 @@ test('cancelled turns and runs do not show failure notices', () => {
     status: 'cancelled',
   });
   expect(messages).toEqual([]);
+});
+
+test('failed and cancelled Turns settle partial assistant text without a final reply', () => {
+  for (const status of ['failed', 'cancelled'] as const) {
+    const messages = projectEventWithIdentity(
+      [{ id: 'model:r', role: 'assistant', turnId: 't1', text: '阶段说明', settled: false }],
+      { type: 'turn.terminal', turnId: 't1', status },
+    );
+    expect(messages[0]).toMatchObject({ settled: true, finalReply: false });
+    if (status === 'cancelled') expect(messages[0]?.status).toBe('cancelled');
+  }
 });
 
 test('run terminal uses its projected turn identity and leaves another turn thinking', () => {

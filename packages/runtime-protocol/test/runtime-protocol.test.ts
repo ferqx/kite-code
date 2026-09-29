@@ -1151,6 +1151,43 @@ describe('Runtime Protocol', () => {
     });
   });
 
+  test('passes exact durable Turn lifecycle time through the closed wire', () => {
+    const message = mapRuntimeNotificationToSubscriptionMessage({
+      schema: 'kite.runtime-notification.v2',
+      durability: 'durable',
+      sessionId: 'session-1',
+      revision: 3,
+      turnId: 'turn-1',
+      occurredAt: '2026-09-29T01:02:03.000Z',
+      projection: {
+        kind: 'turn',
+        session: {
+          schema: 'kite.runtime-projection.v2',
+          sessionId: 'session-1',
+          revision: 3,
+          lifecycle: 'open',
+          interactionQueue: { revision: 3, interactions: [] },
+        },
+        event: { type: 'turn.started', turnId: 'turn-1' },
+      },
+    });
+    expect(message).toMatchObject({
+      turnId: 'turn-1',
+      occurredAt: '2026-09-29T01:02:03.000Z',
+      event: { type: 'turn.started', turnId: 'turn-1' },
+    });
+    expect(RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_.safeParse(message).success).toBe(true);
+    expect(
+      RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_.safeParse({
+        ...message,
+        occurredAt: '2026-09-29',
+      }).success,
+    ).toBe(false);
+    expect(
+      RUNTIME_SUBSCRIPTION_MESSAGE_SCHEMA_.safeParse({ ...message, turnId: 'turn-2' }).success,
+    ).toBe(false);
+  });
+
   test('preserves closed session-index reset boundaries for the client store', () => {
     const wire = mapRuntimeAccessNotificationToSubscriptionMessage({
       type: 'session_upsert',
@@ -1401,7 +1438,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = 'cb4660a0:175b957e';
+    const expectedDigest = 'b50778c2:175b957e';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

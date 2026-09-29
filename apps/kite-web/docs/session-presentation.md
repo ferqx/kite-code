@@ -8,9 +8,11 @@ rejected 是 pre-dispatch 结果，独立显示脱敏原因，不渲染不存在
 
 Web 不重现 TUI Static、Thought 聚合与 scrollback。共享结果含义，主页面、侧栏和消息渲染与桌面端共用 [kite-client-ui](../../../packages/kite-client-ui/README.md)，REST 更新方式仍由 Web owner 负责。loading/empty/error/selected 保持可读文字，不以颜色作为唯一状态表达。
 
+Public History 目前没有可供共享页面使用的准确 `turnId` 和 `finalReply`，所以 Web 助手正文与工具保持原有顺序平铺；不依据目录 Run 状态、相邻消息或文本推测整轮过程与最终回复。Web 投影仍可接收 `model.reasoning`，但共享会话不渲染原始思考正文；缺少活动 Turn 身份时也不显示“正在思考”轮次状态。
+
 验证：[presentation reducer](../test/presentation-reducer.test.ts)、[共享目录与阅读回归](../../../packages/kite-client-ui/test/reading.test.tsx)。视觉规则见[设计系统](ui-design-system.md)。
 
-按轮复制由共享 Conversation 根据正文与 settled 状态提供；剪贴板操作仅复制页面已有文本，不增加 Runtime 写权限。流式助手正文下显示“正在回复”，落定后移除。
+复制操作仅针对页面已有文本，不增加 Runtime 写权限。Web 缺少最终回复标记时不推测按轮复制目标；流式助手正文下显示“正在回复”，落定后移除。
 
 ## Run 汇总与工具终态边界
 

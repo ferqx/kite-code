@@ -4,6 +4,8 @@
 
 只消费 accepted client presentation envelope，保留 Session、generation、durability、revision、Run/Task/Turn 与 stream identity。未知或不可安全投影的事实明确 unavailable，不传入 raw Store event 或 any。
 
+`turn.started` 经过同一 envelope 身份与 revision 栅栏，但不单独生成可见块；TUI 仍由用户消息、模型输出和后续终态组成当前轮的展示。该事件的可选源时间不改变 TUI 现有消息形态。
+
 Message Projector 是聚合及 Live→Sealed 的业务 owner。OutputBlock 为单向兼容渲染 DTO，每个变体必须有 projector-owned presentationState；Timeline 产生 identity、visualDigest 和 render model。renderer 不再按 Tool/Thought/Subagent 字段推导第三套 terminal。
 
 同一 epoch 下 sealed item 不重新打开；迟到包不能修改已封口模型内容或追加第二份正文。canonical messageId 实现 live/replay 幂等，不按正文去重。两个相同文本但不同 identity 的消息必须保留两条。

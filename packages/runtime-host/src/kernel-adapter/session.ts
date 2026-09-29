@@ -807,6 +807,7 @@ export interface StateRuntimeSession {
     expectedRevision: number,
   ): StateRuntimeProcessEventResult;
   getLastAppliedEvents(): readonly KernelEvent[];
+  getLastAppliedEventMetadata(): readonly RuntimeEventMetadata[];
   selectPendingEffects(
     state?: Readonly<AgentState>,
     facts?: SchedulerFacts,
@@ -901,6 +902,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
   readonly #effectLeases = new Map<string, StateRuntimeSessionEffectLease>();
   #state: AgentState;
   #lastAppliedEvents: readonly KernelEvent[] = [];
+  #lastAppliedMetadata: readonly RuntimeEventMetadata[] = [];
   #lastProcessedEventId: string | undefined;
   #runnerId: string | null = null;
   #currentRunId: string | undefined;
@@ -2781,6 +2783,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     this.#revisionWaiters.clear();
     if (runCommit?.mutation.type === 'insert') this.#currentRunId = runCommit.mutation.run.runId;
     this.#lastAppliedEvents = [...decision.events];
+    this.#lastAppliedMetadata = metadata;
     this.#lastProcessedEventId = decision.envelopes[0]?.eventId;
     const completedTurn = decision.events.find(
       (event): event is Extract<KernelEvent, { readonly type: 'turn.completed' }> =>
@@ -2815,6 +2818,10 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
 
   getLastAppliedEvents(): readonly KernelEvent[] {
     return this.#lastAppliedEvents;
+  }
+
+  getLastAppliedEventMetadata(): readonly RuntimeEventMetadata[] {
+    return this.#lastAppliedEvents.length === 0 ? [] : this.#lastAppliedMetadata;
   }
 
   selectPendingEffects(

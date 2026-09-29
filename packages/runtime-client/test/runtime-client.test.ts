@@ -53,6 +53,30 @@ describe('RuntimeClient protocol state machine', () => {
     });
   });
 
+  test('carries durable Turn start time without accepting a mismatched Turn', () => {
+    const notification = {
+      schema: 'kite.runtime-notification.v2' as const,
+      durability: 'durable' as const,
+      sessionId: 'session-1',
+      revision: 3,
+      turnId: 'turn-1',
+      occurredAt: '2026-09-29T01:02:03.000Z',
+      projection: {
+        kind: 'turn' as const,
+        session: session('session-1', 3),
+        event: { type: 'turn.started' as const, turnId: 'turn-1' },
+      },
+    };
+    expect(toAcceptedPresentationEnvelope(notification, 1)).toMatchObject({
+      turnId: 'turn-1',
+      occurredAt: '2026-09-29T01:02:03.000Z',
+      event: { type: 'turn.started', turnId: 'turn-1' },
+    });
+    expect(() => toAcceptedPresentationEnvelope({ ...notification, turnId: 'turn-2' }, 1)).toThrow(
+      'Invalid AcceptedPresentationEnvelope',
+    );
+  });
+
   test('rejects a predecessor envelope identity when the terminal event names a successor Run', () => {
     expect(() =>
       toAcceptedPresentationEnvelope(

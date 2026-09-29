@@ -233,6 +233,22 @@ function activitySummary(messages: readonly Message[]) {
   return parts.join(' · ') || `${messages.length} 项工具操作`;
 }
 
+function groupedIssueSummary(messages: readonly Message[]): string | undefined {
+  const issues = [
+    ['failed', '失败'],
+    ['rejected', '已拒绝'],
+    ['unknown', '结果未知'],
+    ['cancelled', '已停止'],
+  ] as const;
+  const parts = issues
+    .map(([status, label]) => {
+      const count = messages.filter((message) => message.status === status).length;
+      return count ? `${label} ${count} 项` : undefined;
+    })
+    .filter(Boolean);
+  return parts.length ? parts.join(' · ') : undefined;
+}
+
 function stoppedDuringAutoReview(message: Message): boolean {
   return (
     message.settled &&
@@ -485,13 +501,16 @@ export function ToolActivity({
       message.toolName ?? '',
     );
   const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
-  const active = messages.some((item) => !item.settled);
   const running = messages.some((item) => !item.settled && item.status === 'running');
+  const activeItems = grouped ? messages.filter((item) => !item.settled) : [];
+  const runningItems = activeItems.filter((item) => item.status === 'running');
+  const runningCount = runningItems.length;
+  const currentTool = runningItems.at(-1) ?? activeItems.at(-1);
   const issues = messages.filter((item) =>
     ['failed', 'rejected', 'unknown'].includes(item.status ?? ''),
   );
   const childIssue = childProcess && issues.length > 0;
-  const open = expanded ?? (grouped && active);
+  const open = expanded ?? false;
   const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
   const pendingReview = !message.settled && message.approval?.state === 'reviewing';
@@ -508,7 +527,13 @@ export function ToolActivity({
       !!message.text ||
       children.some(Boolean));
   const label = grouped
-    ? activitySummary(messages)
+    ? currentTool
+      ? running
+        ? runningCount > 1
+          ? `正在执行 ${runningCount} 项 · ${toolTitle(currentTool)}`
+          : `正在${toolTitle(currentTool)}`
+        : `等待执行 · ${toolTitle(currentTool)}${activeItems.length > 1 ? `等 ${activeItems.length} 项` : ''}`
+      : activitySummary(messages)
     : ask
       ? askMultiple
         ? `询问用户 · ${message.status === 'completed' ? '已回答 ' : ''}${ask.questions.length} 项`
@@ -518,9 +543,10 @@ export function ToolActivity({
     ? !askMultiple
       ? ask.questions[0]?.question
       : undefined
-    : !grouped
-      ? toolTarget(message)
-      : undefined;
+    : grouped
+      ? currentTool && toolTarget(currentTool)
+      : toolTarget(message);
+  const groupedIssues = grouped ? groupedIssueSummary(messages) : undefined;
   const status =
     ask && message.status === 'cancelled'
       ? open
@@ -537,7 +563,11 @@ export function ToolActivity({
           icon={grouped ? Search01Icon : toolIcon(message)}
         />
       </MarkerIcon>
-      <MarkerContent className="tool-activity-marker-content">
+      <MarkerContent
+        className="tool-activity-marker-content"
+        aria-live={grouped ? 'polite' : undefined}
+        aria-atomic={grouped ? 'true' : undefined}
+      >
         <span className="tool-activity-title tool-label">{label}</span>
         {target &&
           (shell ? (
@@ -559,6 +589,11 @@ export function ToolActivity({
           role="status"
         >
           {status}
+        </span>
+      )}
+      {groupedIssues && !open && (
+        <span className="tool-activity-state" data-status="issue" role="status">
+          {groupedIssues}
         </span>
       )}
       {managedShell && (

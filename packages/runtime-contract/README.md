@@ -98,6 +98,9 @@ Session projection 可携带已持久化的 `workspaceDigest`，供桌面目录�
   fail closed；同ID/revision但command、grants或其他kind-specific字段不同同样非法。
 - Live notification 与 History transcript 必须通过同一个 exact `RuntimeClientEvent` validator；closed DTO
   新增可选字段时，类型、validator 与 wire codec 必须同步，不能让实时订阅可见而恢复/回放拒绝同一事件。
+- Client-safe `turn.started` 和 `turn.terminal` 以准确 Turn identity 传达生命周期；持久事件的 `occurredAt`
+  可选地随 durable notification 和 History record 传递，供客户端计算同一 Turn 的展示耗时。旧记录缺失时保持缺失，
+  不用客户端接收时刻、历史重放时刻或 Run 总耗时替代。
 - 模型展示事件的 `requestId` 是 exact closed DTO 的必填字段；缺字段或额外字段均不进入 client boundary。
 - 新写入的tool queue projection用`presentationGroupId`与`model.responded.messageId`精确配对；该字段只参与
   Presentation grouping，不是execution、authorization或settlement identity。旧History没有该可选字段时仍可回放。

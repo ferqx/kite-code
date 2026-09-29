@@ -165,6 +165,8 @@ export interface RuntimeSessionCoordinator {
   getState(): Readonly<RuntimeState>;
   /** Exact persisted revision assigned to one event yielded by this coordinator. */
   revisionForEvent?(event: RuntimeEvent): number | undefined;
+  /** Durable source time of the exact committed event. */
+  occurredAtForEvent?(event: RuntimeEvent): string | undefined;
   /** Drain the existing canonical commit queue in revision order for Bridge publication. */
   takeCommittedEventsThrough(revision: number): readonly RuntimeEvent[];
   /** Exact post-event State retained for current-process notification projection. */
@@ -415,6 +417,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     processEvents(events: RuntimeEvent[]): void;
   };
   readonly #eventRevisions = new WeakMap<object, number>();
+  readonly #eventOccurredAt = new WeakMap<object, string>();
   readonly #eventStates = new WeakMap<object, Readonly<RuntimeState>>();
   readonly #pendingEventRevisions: Array<{
     readonly event: RuntimeEvent;
@@ -601,6 +604,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 
   revisionForEvent(event: RuntimeEvent): number | undefined {
     return this.#eventRevisions.get(event);
+  }
+
+  occurredAtForEvent(event: RuntimeEvent): string | undefined {
+    return this.#eventOccurredAt.get(event);
   }
 
   takeCommittedEventsThrough(revision: number): readonly RuntimeEvent[] {
@@ -1696,6 +1703,9 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 
   #recordLastAppliedEventRevisions(before: Readonly<RuntimeState>): void {
     const events = this.session.getLastAppliedEvents();
+    const metadata = this.session.getLastAppliedEventMetadata();
+    if (metadata.length !== events.length)
+      throw new Error('Committed Runtime event metadata does not match events.');
     const finalRevision = this.session.getState().revision;
     const firstRevision = finalRevision - events.length + 1;
     let projectedState = before;
@@ -1707,6 +1717,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       } as RuntimeState;
       if (revision <= this.#lastRecordedEventRevision) continue;
       this.#eventRevisions.set(event, revision);
+      if (metadata[index]?.occurredAt) this.#eventOccurredAt.set(event, metadata[index].occurredAt);
       this.#eventStates.set(event, projectedState);
       this.#pendingEventRevisions.push({ event, revision });
       this.#lastRecordedEventRevision = revision;

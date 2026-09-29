@@ -1397,11 +1397,13 @@ test('provider authentication failure is visible once during live delivery and a
     await f.client.selectSession(f.a);
     await f.client.send('Hello');
     await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'failed');
-    await waitFor(() =>
-      f.client.getSnapshot().messages.some((message) => message.role === 'system'),
-    );
     const notices = () =>
-      f.client.getSnapshot().messages.filter((message) => message.role === 'system');
+      f.client
+        .getSnapshot()
+        .messages.filter(
+          (message) => message.role === 'system' && message.systemKind !== 'turn_timing',
+        );
+    await waitFor(() => notices().length === 1);
     const live = notices();
     expect(live).toHaveLength(1);
     expect(live[0]).toMatchObject({ status: 'failed', settled: true });

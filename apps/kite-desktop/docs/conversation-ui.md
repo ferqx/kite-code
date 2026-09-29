@@ -34,11 +34,11 @@ macOS Electron 主窗口使用 `hiddenInset` 标题栏，renderer 延伸到窗�
 
 ## 消息与交互
 
-思考及普通工具到非最终正文统一使用 8 px 间距，到最终回复为 16 px，思考 `pre` 底部外距为 0；展示文本用 `trimEnd()` 去除末尾空白，原消息数据不变，内部换行保留。思考父容器用 flow-root 包含内部边距，统一由父容器承担 8 px 外距，内部活动外距为 0；展开和收起使用相同衔接间距。2026-09-16 浏览器使用真实组件与隔离消息实测：展开思考、收起思考、普通 task 工具到非最终正文均为 8 px；共享 UI 45 项测试通过。Figma 工具当前不可用，本轮未同步。
+共享 [Conversation](../../../packages/kite-client-ui/src/Conversation.tsx)只在消息有精确 `turnId` 时建立轮次容器；夹在同一精确 Turn 两端之间的无身份非用户消息沿原顺序留在该过程内，不据此生成新的 Turn。[App](../src/App.tsx)从当前 Run 传入 `turnActivity`，区分 queued、running、waiting、recovery_required 与终态；当前交互 ID 与活动 Run 精确匹配时，临时补入的 Ask 沿用该 Turn 身份。[消息投影](../src/presentation.ts)保持 Agent 邮件状态行首次确认的 Turn 身份，仅在完成的 `turn.terminal` 且末尾没有工具时标记 `finalReply`。轮次活动时阶段说明与工具过程默认展开；最终回复落定时切到完成阶段的折叠状态，最终回复保留在外层；直接回复也保留不可展开的完成状态行。工具进度不覆盖用户手动选择；完成后用户重新展开过程的选择随现有阅读状态保存。失败、取消、等待与需要恢复继续在轮次顶部可见，尚无正文的取消也保留“已停止”状态；没有最终回复时不把最后一段正文冒充结论。
 
-工具标题展开后使用与 hover 相同的主文字色，标题图标、文件名和箭头继承高亮；文件 diff 通过所属箭头的 `aria-expanded`，工具和思考摘要通过共享 Collapsible 的 `aria-expanded` 驱动。摘要及工具步骤使用共享 Marker，收起恢复辅助色，不增加背景或间距。
+工具标题展开后使用与 hover 相同的主文字色，标题图标、文件名和箭头继承高亮；文件 diff 通过所属箭头的 `aria-expanded`，工具摘要通过共享 Collapsible 的 `aria-expanded` 驱动。摘要及工具步骤使用共享 Marker，收起恢复辅助色，不增加背景或间距。
 
-消息间距由共享样式统一维护：用户／助手最终回复后 32 px，助手非最终正文后 8 px（按 Runtime `finalReply` 区分），工具或思考记录到下一段非最终正文 8 px、最终回复 16 px，工具活动外距 8 px。2026-09-15 使用真实共享组件与参考图同类隔离消息核对，首轮浏览器实测思考到正文 16 px、正文到工具 32 px，无重叠。随后按用户反馈将非最终正文到工具收紧为 8 px，保留最终回复的 32 px；修正后的共享 UI 45 项测试、类型与文档检查通过，浏览器验证接口连续两次审批超时，未完成本次视觉复核。此次未验证 Electron 原生窗口或窄窗口。
+消息间距由共享样式统一维护：用户／助手最终回复后 32 px，助手非最终正文后 8 px（按 Runtime `finalReply` 区分），工具记录到下一段非最终正文 8 px、到最终回复 16 px；隐藏的思考内容不占用间距。此前独立思考卡片的间距与浏览器核对属于旧实现证据，不能证明新的轮次容器布局。
 
 Desktop 的消息复制不依赖 renderer 的 Web Clipboard API；共享会话组件把经 turn 归属选定的最终纯文本交给桌面宿主，preload 只暴露具名 `writeClipboardText`，IPC 核对主窗口 frame、封闭 `{text}` 参数和 1 MiB UTF-8 上限后，由 Electron 主进程写入系统剪贴板。宿主写入失败时按钮显示失败状态，不伪装成已复制。
 
@@ -48,7 +48,7 @@ Provider 配置由 [models](../src/models.ts)分别处理写入回执和随后�
 
 [投影](../src/presentation.ts)对历史与实时事件使用同一映射，仍以 message/request/tool/subagent/interaction identity 幂等，不按正文去重；终态不能被迟到进度重新打开。工具记录保留 queued 与 Runtime 提供的 presentation/group identity、结构化参数、分别累积的 stdout/stderr、明确失败／拒绝／取消和文件证据，会话按工具类型展示：读取不展开正文，Shell 可展开真实输出及底部状态，文件修改展开已确认的工具差异，不新增原始参数面板。会话正文、工具活动和后续正文保持同一阅读列；连续工具活动使用无容器底色的紧凑日志结构，总览与步骤共享左侧图标轨道，步骤将动作和主要目标排在同一行。已完成状态由记录留在活动流中表达，不逐项重复绘制徽标；运行、等待、排队与异常仍显示文字状态，错误摘要保持可见。
 
-Runtime 明确提供的 `reasoning.activity` 按 request/segment identity 显示为可折叠思考活动，不接收或推导私有 reasoning 字段；`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `exhausted` 在 Shell 底部标明已达到输出限制，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
+Runtime 明确提供的 `reasoning.activity` 仍按 request/segment identity 投影，但共享会话不显示原始思考正文；只有当前 Turn 确有未结束的思考活动且没有运行工具时，轮次标题显示“正在思考”。`plan.progress` 与 `plan.completed` 按 plan identity 原位更新轻量计划状态。工具终态的 `exhausted` 在 Shell 底部标明已达到输出限制，缺失时不猜测截断；问题回答回执优先使用 Runtime 提供的安全 summary。
 
 当 Runtime 提供 `model.cache` 样本时，Desktop 按会话累计命中与未命中 token，在 Composer 底栏显示整数缓存命中率。历史读取从已保存事件重建，实时订阅只追加历史水位之后的样本；无样本时不显示，切换会话不沿用上一会话指标。
 
@@ -143,7 +143,7 @@ Ask 投影保留服务提供的 toolCallId 和有序问题；input.answered.answ
 
 Ask 历史沿用 TUI 单题/多题信息结构，使用共享 UI 的有序明细、悬挂缩进与每项五行截断；取消内容仅显示“已取消”，不重复题目。数据归属和问题 ID 映射保持不变。
 
-思考段计时由实时订阅传入 observedAt，消息投影保留首个 thinkingStartedAt 并在思考完成或 turn/run 终态写入 thinkingEndedAt；历史投影不使用重放时间生成耗时，只保留当前会话已有的对应段计时。共享标题以“思考中／已思考”表示生命周期，每秒重绘；思考完成或 turn/run 中断均落定为“已思考”并冻结已有计时，完成及卸载清理定时器，不新增 Runtime 时间协议。
+思考段的 `thinkingStartedAt`／`thinkingEndedAt` 仍可由投影保留，但共享 UI 不显示思考正文或分段计时，也不以分段时间推算整轮耗时。`turn.started` 与 `turn.terminal` 的持久事件时间经实时通知或历史记录进入同一投影，以隐藏的 `turn_timing` 标记关联精确 Turn；活动轮次在起点已知时显示已用时间，终点也已知时固定显示耗时。旧历史缺少起点、完成后缺少终点或时间倒序时不显示耗时；客户端接收及历史重放时间不代替事件时间。
 
 ## 用户菜单与外观
 

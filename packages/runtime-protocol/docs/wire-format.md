@@ -10,6 +10,8 @@
 
 修改 contract 后同时核对 mapper、codec、producer 和 consumer。只有输出字段的投影允许时才能新增客户端信息；生成参考不替代运行 codec。与 Public Agent API 的关系见[整体依赖](../../../docs/development/architecture/dependencies.md)。
 
+`turn.started` 与 `turn.terminal` 使用同一封闭事件 codec 和精确 Turn identity 校验。持久订阅通知和 History record 的可选 `occurredAt` 只接受规范化 UTC 毫秒 ISO 时间；ephemeral 帧没有该字段。旧记录缺失时间时可正常解码，wire 层不填补时间。
+
 验证：[Protocol tests](../test/)、[Server tests](../../runtime-server/test/runtime-server.test.ts)、[Client tests](../../runtime-client/test/runtime-client.test.ts)。
 
 `history/load_session` 的可选 `page` 参数携带 `afterSequence`、`throughSequence` 与后续页的 `snapshotDigest`。分页响应为闭集 `history_session_page`，只传 source-sequence records，不重复传 flattened events；服务端可附 64 位十六进制内容 digest，请求携带 digest 的后续页不符时返回 `history_snapshot_changed`，新客户端重新读取完整 transcript，不拼接不同版本。旧客户端省略 digest 的后续页仍可读取，但没有跨页内容改写检测。单帧仍受 1 MiB 限制，不分页的显式读取保留完整响应语义。

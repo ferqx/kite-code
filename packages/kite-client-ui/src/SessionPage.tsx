@@ -20,7 +20,7 @@ import {
 import { RightSidebar } from './RightSidebar';
 import { ScheduledTaskEditor, ScheduledTasks, type ScheduledTasksProps } from './ScheduledTasks';
 import { type PageActions, Sidebar } from './Sidebar';
-import type { Message, WorkspaceSummary } from './types';
+import type { Message, TurnActivity, WorkspaceSummary } from './types';
 import { Button } from './ui';
 import { Workbench } from './Workbench';
 
@@ -53,6 +53,8 @@ export interface SessionPageProps {
   sessionLabel: string;
   readingKey: string;
   messages: readonly Message[];
+  /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
+  turnActivity?: TurnActivity;
   loading: boolean;
   connected: boolean;
   connectionLabel: string;
@@ -591,6 +593,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                           <Conversation
                             key={props.readingKey}
                             messages={messages}
+                            turnActivity={props.turnActivity}
                             loading={props.loading}
                             requiredSubagentWait={props.requiredSubagentWait}
                             selected={!!props.selected}

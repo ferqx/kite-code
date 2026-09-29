@@ -179,6 +179,7 @@ export function mapRuntimeClientEventToProtocol(
     case 'subagent.failed':
     case 'context.compaction':
     case 'task.terminal':
+    case 'turn.started':
     case 'turn.terminal':
     case 'run.terminal':
     case 'rewind.terminal':
@@ -305,6 +306,7 @@ export function mapRuntimeNotificationToSubscriptionMessage(
       ...(notification.runId === undefined ? {} : { runId: notification.runId }),
       ...(notification.taskId === undefined ? {} : { taskId: notification.taskId }),
       ...(notification.turnId === undefined ? {} : { turnId: notification.turnId }),
+      ...(notification.occurredAt === undefined ? {} : { occurredAt: notification.occurredAt }),
       session: mapSession(notification.projection.session),
       ...(event === undefined ? {} : { event }),
     };

@@ -2056,6 +2056,9 @@ export class DesktopClient {
             messages: projectEventWithIdentity(detail.messages, event, {
               turnId: notification.turnId,
               observedAt: Date.now(),
+              ...(notification.durability === 'durable'
+                ? { occurredAt: notification.occurredAt }
+                : {}),
             }),
           },
         });
@@ -2362,6 +2365,9 @@ export class DesktopClient {
             messages: projectEventWithIdentity(this.#view.messages, event, {
               turnId: notification.turnId,
               observedAt: Date.now(),
+              ...(notification.durability === 'durable'
+                ? { occurredAt: notification.occurredAt }
+                : {}),
             }),
             cacheMetrics: addCacheMetrics(this.#view.cacheMetrics, event),
             ...(event.type === 'interaction_mode.changed' ? { interactionMode: event.mode } : {}),

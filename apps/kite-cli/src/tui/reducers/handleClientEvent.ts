@@ -616,6 +616,9 @@ function reducePresentationBlocks(
     case 'task.terminal':
       if (!terminalMatchesCurrentAuthority(state, event, envelope)) return state;
       return settleTerminal(state, event.summary, false, terminalOutcome(event.status));
+    case 'turn.started':
+      // The TUI opens presentation from the user message and subsequent output.
+      return state;
     case 'turn.terminal':
       if (!terminalMatchesCurrentAuthority(state, event, envelope)) return state;
       return event.status === 'cancelled' && event.cause === 'user'

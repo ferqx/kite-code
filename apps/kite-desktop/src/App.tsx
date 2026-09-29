@@ -17,7 +17,7 @@ import appIcon from '../app-icon.svg';
 import { CommandResultUnknown, type DesktopClient } from './client';
 import { Interaction } from './Interaction';
 import { OperationToast } from './OperationToast';
-import { isActiveRun, projectEvent, showRunRecovery } from './presentation';
+import { isActiveRun, projectEventWithIdentity, showRunRecovery } from './presentation';
 import { Settings } from './Settings';
 import { useDesktopTheme } from './theme';
 import './startup.css';
@@ -497,7 +497,18 @@ export function App({ client }: { client: DesktopClient }) {
     interaction &&
     interaction.kind === 'input' &&
     !view.messages.some((message) => message.id === `interaction:${interaction.interactionId}`)
-      ? projectEvent(view.messages, { type: 'interaction.available', interaction })
+      ? projectEventWithIdentity(
+          view.messages,
+          { type: 'interaction.available', interaction },
+          {
+            turnId:
+              projection?.sessionId === selected &&
+              isActiveRun(projection) &&
+              projection.interactionQueue.activeInteractionId === interaction.interactionId
+                ? (projection.currentRun?.activeTurnId ?? projection.currentRun?.initialTurnId)
+                : undefined,
+          },
+        )
       : view.messages;
   const displayedMessages = optimisticMessage
     ? preparing
@@ -516,6 +527,17 @@ export function App({ client }: { client: DesktopClient }) {
         displayedMessages,
         projection?.sessionId === selected ? projection : undefined,
       );
+  const readingRun = childDetail
+    ? childDetail.projection?.currentRun
+    : projection && projection.sessionId === selected
+      ? projection.currentRun
+      : undefined;
+  const turnActivity = readingRun
+    ? {
+        turnId: readingRun.activeTurnId ?? readingRun.initialTurnId,
+        status: readingRun.status,
+      }
+    : undefined;
   const requiredSubagentWait =
     !preparing &&
     !scheduledTasksView &&
@@ -633,6 +655,7 @@ export function App({ client }: { client: DesktopClient }) {
       }
       readingKey={childDetail ? `child:${selected}:${childDetail.childSessionId}` : draftKey}
       messages={readingMessages}
+      turnActivity={turnActivity}
       requiredSubagentWait={requiredSubagentWait}
       childSessionIdsByTaskId={childDetail ? undefined : childSessionIdsByExecutionId}
       onOpenChildSession={

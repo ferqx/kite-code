@@ -622,6 +622,8 @@ export function projectRuntimeClientEvent(
       return { type: 'task.terminal', taskId: event.taskId, status: 'failed' };
     case 'task.cancelled':
       return { type: 'task.terminal', taskId: event.taskId, status: 'cancelled' };
+    case 'turn.started':
+      return { type: 'turn.started', turnId: event.turnId };
     case 'turn.completed':
       return { type: 'turn.terminal', turnId: event.turnId, status: 'completed' };
     case 'turn.aborted':

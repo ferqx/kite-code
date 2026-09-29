@@ -69,6 +69,7 @@ const CLIENT_VISIBLE = [
   'tool.started',
   'turn.aborted',
   'turn.completed',
+  'turn.started',
   'user.message_appended',
   'user_input.answered',
   'user_input.cancelled',
@@ -180,7 +181,6 @@ const NORMALIZED_BY = [
   'session.rewind_completed',
   'session.rewind_failed',
   'task.started',
-  'turn.started',
 ] as const satisfies readonly RuntimeEvent['type'][];
 
 const CLIENT_UNAVAILABLE = [] as const satisfies readonly RuntimeEvent['type'][];

@@ -574,6 +574,55 @@ test('a Run requiring recovery does not leave its pending task_wait visibly runn
   expect(document.querySelector('.tool-activity-state')?.textContent).toContain('正在工作');
 });
 
+test('Desktop passes exact Run and Turn state to the shared process disclosure', async () => {
+  const client = new UiClient();
+  const running = {
+    ...session('s0'),
+    currentRun: {
+      runId: 'run-current',
+      initialTurnId: 'turn-current',
+      activeTurnId: 'turn-current',
+      status: 'running' as const,
+      revision: 1,
+    },
+  };
+  const progress = {
+    id: 'progress',
+    turnId: 'turn-current',
+    role: 'assistant' as const,
+    text: '阶段说明',
+    settled: true,
+  };
+  client.view = { ...client.view, projection: running, messages: [progress] };
+  await render(<App client={client} />);
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('正在处理');
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+  await act(() =>
+    client.update({
+      projection: {
+        ...running,
+        currentRun: { ...running.currentRun, status: 'completed', revision: 2 },
+      },
+      messages: [
+        progress,
+        {
+          id: 'final',
+          turnId: 'turn-current',
+          role: 'assistant',
+          text: '最终回复',
+          settled: true,
+          finalReply: true,
+        },
+      ],
+    }),
+  );
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已处理');
+  expect(document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
+    'false',
+  );
+  expect(document.querySelector('.agent-turn-final')?.textContent).toContain('最终回复');
+});
+
 test('private child read error stays in parent tree and switching roots removes its detail', async () => {
   const client = new UiClient();
   client.update({
@@ -2835,6 +2884,9 @@ test('ask questionnaire submits a selected option through the input interaction'
 
   await render(<App client={client} />);
   expect(document.querySelector('.ask-questionnaire')).not.toBeNull();
+  expect(document.querySelector('.agent-turn .tool-activity-summary')?.textContent).toContain(
+    '使用哪个方案？',
+  );
   expect(document.querySelector('fieldset legend')?.textContent).toBe('使用哪个方案？');
   expect(document.querySelector('.ask-questionnaire-description')?.textContent).toBe(
     '选择最符合预期的处理方式。',

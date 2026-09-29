@@ -107,6 +107,12 @@ export class HistoryMessageBuilder {
   }
 }
 
+function persistedEventTime(occurredAt?: string): number | undefined {
+  if (!occurredAt) return undefined;
+  const time = Date.parse(occurredAt);
+  return Number.isFinite(time) ? time : undefined;
+}
+
 /** Service text deltas are cumulative; durable model output wins over late deltas. */
 export function projectEvent(
   messages: readonly Message[],
@@ -118,7 +124,7 @@ export function projectEvent(
 export function projectEventWithIdentity(
   messages: readonly Message[],
   event: RuntimeClientEvent,
-  identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
+  identity: Readonly<{ turnId?: string; observedAt?: number; occurredAt?: string }> = {},
 ): readonly Message[] {
   return projectEventCore(messages, event, identity);
 }
@@ -126,7 +132,7 @@ export function projectEventWithIdentity(
 export function projectHistoricalEvent(
   builder: HistoryMessageBuilder,
   event: RuntimeClientEvent,
-  identity: Readonly<{ turnId?: string; observedAt?: number }> = {},
+  identity: Readonly<{ turnId?: string; observedAt?: number; occurredAt?: string }> = {},
 ): void {
   projectEventCore(builder.messages, event, identity, builder);
 }
@@ -134,7 +140,7 @@ export function projectHistoricalEvent(
 function projectEventCore(
   messages: readonly Message[],
   event: RuntimeClientEvent,
-  identity: Readonly<{ turnId?: string; observedAt?: number }>,
+  identity: Readonly<{ turnId?: string; observedAt?: number; occurredAt?: string }>,
   builder?: HistoryMessageBuilder,
 ): readonly Message[] {
   const find = (id: string) =>
@@ -150,6 +156,23 @@ function projectEventCore(
       ? [...messages, message]
       : messages.map((item) => (item.id === id ? message : item));
   };
+  if (event.type === 'turn.started') {
+    const startedAtMs = persistedEventTime(identity.occurredAt);
+    if (startedAtMs === undefined) return messages;
+    const id = `turn-timing:${event.turnId}`;
+    const previous = find(id);
+    if (previous?.turnStartedAtMs !== undefined) return messages;
+    const marker: Message = {
+      id,
+      turnId: event.turnId,
+      role: 'system',
+      systemKind: 'turn_timing',
+      text: '',
+      settled: previous?.settled ?? false,
+      turnStartedAtMs: startedAtMs,
+    };
+    return replaceExact(id, previous ? { ...previous, ...marker } : marker);
+  }
   if (event.type === 'agent.mail_status') {
     const entries =
       event.status === 'result_settled'
@@ -170,8 +193,10 @@ function projectEventCore(
           : event.status === 'input_prepared'
             ? '已准备进入目标模型输入'
             : `结果已结算（${event.resultStatus}）`;
+      const turnId = previous?.turnId ?? identity.turnId;
       const message: Message = {
         id: entry.id,
+        ...(turnId ? { turnId } : {}),
         role: 'system',
         title: entry.label,
         text: phase,
@@ -223,6 +248,8 @@ function projectEventCore(
       )
         finalReplyIndex = -1;
     }
+    const finishedAtMs =
+      event.type === 'turn.terminal' ? persistedEventTime(identity.occurredAt) : undefined;
     const settle = (message: Message, index: number): Message => {
       if (
         message.role === 'thinking' &&
@@ -243,9 +270,24 @@ function projectEventCore(
       )
         return {
           ...message,
-          ...(event.status === 'completed' ? { settled: true } : {}),
+          settled: true,
+          ...(event.status === 'cancelled' ? { status: 'cancelled' as const } : {}),
           finalReply: event.status === 'completed' && index === finalReplyIndex,
         };
+      if (
+        event.type === 'turn.terminal' &&
+        message.id === `turn-timing:${event.turnId}` &&
+        message.turnStartedAtMs !== undefined
+      ) {
+        const setFinish = finishedAtMs !== undefined && message.turnFinishedAtMs === undefined;
+        return message.settled && !setFinish
+          ? message
+          : {
+              ...message,
+              settled: true,
+              ...(setFinish ? { turnFinishedAtMs: finishedAtMs } : {}),
+            };
+      }
       return message;
     };
     const settledMessages = builder ? messages : messages.map(settle);

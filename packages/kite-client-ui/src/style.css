@@ -1779,22 +1779,105 @@ body {
   font-size: var(--conversation-text-size);
   font-family: var(--font-geist, inherit);
 }
-.kite-client
-  .reading-column
-  > :is(.tool-activity, .message-group:has(.thinking-activity))
-  + .message-group:has(> .message.assistant) {
+.kite-client .agent-turn {
+  min-width: 0;
+  margin: 8px 0 24px;
+}
+.kite-client .agent-turn-summary {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 0 14px;
+  gap: 10px;
+  justify-content: flex-start;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  font-size: var(--conversation-text-size);
+}
+.kite-client .agent-turn-summary:hover,
+.kite-client .agent-turn-summary:focus-visible {
+  background: transparent;
+  color: var(--foreground);
+}
+.kite-client .agent-turn-summary-static,
+.kite-client .agent-turn-summary-static:hover {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.kite-client .agent-turn-status-icon {
+  display: grid;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--success);
+}
+.kite-client .agent-turn-status-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.kite-client .agent-turn-status-icon.is-active {
+  color: var(--muted-foreground);
+}
+.kite-client .agent-turn-status-icon.is-active svg {
+  animation: agent-turn-spin 1.35s linear infinite;
+}
+.kite-client .agent-turn[data-turn-status="failed"] .agent-turn-status-icon,
+.kite-client .agent-turn[data-turn-status="cancelled"] .agent-turn-status-icon,
+.kite-client .agent-turn[data-turn-status="recovery_required"] .agent-turn-status-icon {
+  color: var(--destructive);
+}
+@keyframes agent-turn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.kite-client .agent-turn-status-label {
+  font-weight: 560;
+}
+.kite-client .agent-turn-issues {
+  color: var(--destructive);
+  font-size: 12px;
+}
+.kite-client .agent-turn-action {
+  margin-left: auto;
+  color: var(--directory-tertiary-foreground);
+  font-size: 12px;
+}
+.kite-client .agent-turn-chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+.kite-client .agent-turn-summary[aria-expanded="true"] .agent-turn-chevron {
+  transform: rotate(0);
+}
+.kite-client .agent-turn-process-messages {
+  padding: 20px 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.kite-client .agent-turn-process-messages > .message-group:has(> .message.assistant) {
+  margin-block: 16px;
+}
+.kite-client .agent-turn-process-messages .message.assistant {
+  margin-bottom: 0;
+}
+.kite-client .agent-turn-final .message.assistant {
+  margin: 20px 0 32px;
+}
+.kite-client .reading-column > .tool-activity + .message-group:has(> .message.assistant) {
   margin-top: 16px;
 }
-.kite-client .reading-column > .message-group:has(> .thinking-activity) {
-  display: flow-root;
-  margin: 8px 0;
-}
-.kite-client .reading-column > .message-group > .thinking-activity {
-  margin: 0;
-}
 .kite-client
   .reading-column
-  > :is(.tool-activity, .message-group:has(> .thinking-activity))
+  > .tool-activity
   + .message-group:has(> .message.assistant[data-final-reply="false"]) {
   margin-top: 8px;
 }
@@ -2142,7 +2225,6 @@ body {
   border: 0;
   color: var(--destructive);
 }
-.kite-client .thinking-activity.is-running .tool-label,
 .kite-client .is-running > .tool-activity-summary .tool-label,
 .kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
 .kite-client .tool-activity-step.running .tool-label,
@@ -2168,7 +2250,6 @@ body {
   .kite-client .tool-activity-content[data-state="open"] .tool-activity-reveal {
     animation: none;
   }
-  .kite-client .thinking-activity.is-running .tool-label,
   .kite-client .is-running > .tool-activity-summary .tool-label,
   .kite-client .is-running > .tool-activity-heading-row > .tool-activity-summary .tool-label,
   .kite-client .tool-activity-step.running .tool-label,
@@ -2634,20 +2715,14 @@ body {
 .kite-client .tool-diff-toggle[aria-expanded="true"] > svg {
   transform: rotate(0);
 }
-.kite-client .thinking-activity .tool-output {
-  margin: 4px 0 0;
-  padding-left: calc(1em + 8px);
-  max-height: 240px;
-  font: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  overflow: auto;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .kite-client .tool-activity-chevron,
-  .kite-client .tool-diff-toggle > svg {
+  .kite-client .tool-diff-toggle > svg,
+  .kite-client .agent-turn-chevron {
     transition: none;
+  }
+  .kite-client .agent-turn-status-icon.is-active svg {
+    animation: none;
   }
 }
 .background-executions {

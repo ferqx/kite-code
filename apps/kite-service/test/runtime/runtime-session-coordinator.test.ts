@@ -701,6 +701,62 @@ describe('retained TUI session coordinator', () => {
     }
   });
 
+  test('publishes persisted Turn start and terminal times with their exact revisions', async () => {
+    const sessionId = 'retained-turn-start-time';
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      modelTransport: async () => ({
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Finished.' }] },
+        finishReason: 'stop',
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+        providerMetadata: { responseId: 'timed-turn-response' },
+      }),
+    });
+    const access = fixture.binding.access();
+    const bridge = createFixtureBridge(sessionId, fixture, access);
+    try {
+      await bridge.recoverSession(sessionId, () => undefined);
+      const inspected = await bridge.inspectCommand(startCommand(sessionId, 0), {
+        targetSessionId: sessionId,
+      });
+      if (inspected.kind !== 'accepted') throw new Error('Start was not accepted');
+      const committed = await inspected.decision.commit(commandEvidence(sessionId));
+      const published: import('@kite-ai/runtime-contract').RuntimeNotification[] = [];
+      await committed.activation?.((notification) => published.push(notification));
+      const start = published.find(
+        (notification) =>
+          notification.durability === 'durable' &&
+          notification.projection.event?.type === 'turn.started',
+      );
+      if (start?.durability !== 'durable') throw new Error('Turn start not published');
+      const controller = new AbortController();
+      await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      const terminal = published.find(
+        (notification) =>
+          notification.durability === 'durable' &&
+          notification.projection.event?.type === 'turn.terminal',
+      );
+      if (terminal?.durability !== 'durable') throw new Error('Turn terminal not published');
+      const persisted = fixture.store.sessions.loadEventsStrict(sessionId);
+      expect(persisted.find((record) => record.revision === start.revision)?.occurred_at).toBe(
+        start.occurredAt,
+      );
+      expect(persisted.find((record) => record.revision === terminal.revision)?.occurred_at).toBe(
+        terminal.occurredAt,
+      );
+      expect(start.projection.event).toMatchObject({ type: 'turn.started' });
+      expect(terminal.projection.event).toMatchObject({ type: 'turn.terminal' });
+      expect(start.occurredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(terminal.occurredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   test('commits a steer input into the active Turn without creating another Turn', async () => {
     const sessionId = 'retained-command-steer';
     const fixture = createFixture(sessionId);
