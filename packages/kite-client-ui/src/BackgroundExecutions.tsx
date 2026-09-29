@@ -6,7 +6,14 @@ export interface BackgroundExecutionSummary {
   readonly executionId: string;
   readonly displayName?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
-  readonly status: 'running' | 'stopping' | 'completed' | 'failed' | 'cancelled' | 'unavailable';
+  readonly status:
+    | 'running'
+    | 'stopping'
+    | 'completed'
+    | 'failed'
+    | 'cancelled'
+    | 'unavailable'
+    | 'unconfirmed';
   readonly cleanupConfirmed: boolean;
   readonly cursor?: number;
   readonly sessionId?: string;
@@ -41,13 +48,12 @@ export function BackgroundExecutions({
   subagentDetails,
 }: BackgroundExecutionsProps) {
   if (currentOnly) {
-    const fresh = stale ? [] : executions;
-    const shells = fresh.filter(
+    const shells = executions.filter(
       (execution) =>
         execution.kind === 'shell' &&
         (execution.status === 'running' || execution.status === 'stopping'),
     );
-    const subagents = fresh.filter((execution) => execution.kind === 'subagent');
+    const subagents = executions.filter((execution) => execution.kind === 'subagent');
     return (
       <section
         className="background-executions environment-information"
@@ -56,6 +62,7 @@ export function BackgroundExecutions({
       >
         <header>
           <strong>环境信息</strong>
+          {stale && <span className="background-stale">上次状态 · 正在核对</span>}
         </header>
         <ExecutionGroup
           icon={TerminalIcon}
@@ -63,7 +70,7 @@ export function BackgroundExecutions({
           emptyLabel="无运行中的 Shell"
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
-          onStop={onStop}
+          onStop={stale ? undefined : onStop}
         />
         <ExecutionGroup
           icon={BotIcon}
@@ -71,7 +78,7 @@ export function BackgroundExecutions({
           emptyLabel="暂无子智能体记录"
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
-          onStop={onStop}
+          onStop={stale ? undefined : onStop}
           subagentDetails={subagentDetails}
         />
       </section>
@@ -210,6 +217,7 @@ function kindLabel(kind: BackgroundExecutionSummary['kind']): string {
 }
 
 function statusLabel(status: BackgroundExecutionSummary['status']): string {
+  if (status === 'unconfirmed') return '状态待确认';
   if (status === 'running') return '运行中';
   if (status === 'stopping') return '正在停止';
   if (status === 'completed') return '已完成';

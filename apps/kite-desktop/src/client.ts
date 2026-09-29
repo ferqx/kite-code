@@ -108,6 +108,11 @@ export interface DesktopView {
   loadingSession: boolean;
   hasLoadedHistory: boolean;
   background?: Readonly<Record<string, RuntimeClientBackgroundState>>;
+  backgroundDisplay?: {
+    readonly sessionId: string;
+    readonly snapshot: RuntimeClientBackgroundState['snapshot'];
+    readonly stale: boolean;
+  };
   childSessions?: {
     readonly parentSessionId: string;
     readonly entries: readonly RuntimeChildSessionSummary[];
@@ -118,6 +123,7 @@ export interface DesktopView {
     readonly parentSessionId: string;
     readonly childSessionId: string;
     readonly loading: boolean;
+    readonly hasLoadedHistory: boolean;
     readonly messages: readonly Message[];
     readonly projection?: RuntimeSessionProjection;
     readonly error?: string;
@@ -142,6 +148,14 @@ export async function readCompleteSessionDirectory(
       throw new Error('会话目录分页未继续前进。');
     cursor = page.nextCursor;
   }
+}
+
+function childHistoryKey(parentSessionId: string, childSessionId: string): string {
+  return `child:${parentSessionId}\0${childSessionId}`;
+}
+
+function childHistoryPrefix(parentSessionId: string): string {
+  return `child:${parentSessionId}\0`;
 }
 
 export class DesktopClient {
@@ -172,6 +186,9 @@ export class DesktopClient {
   };
   #childListRead = 0;
   #childListRefreshInFlight?: { readonly sessionId: string; readonly promise: Promise<void> };
+  readonly #childSessionCache = new Map<string, readonly RuntimeChildSessionSummary[]>();
+  readonly #backgroundDisplayCache = new Map<string, RuntimeClientBackgroundState['snapshot']>();
+  readonly #invalidatedPresentationSessions = new Set<string>();
   #selectionLoad?: {
     sessionId: string;
     connection: KiteAppServerConnection;
@@ -406,7 +423,11 @@ export class DesktopClient {
 
   #removeDeletedSessionFromView(sessionId: string) {
     this.#admitted.delete(sessionId);
+    this.#childSessionCache.delete(sessionId);
+    this.#backgroundDisplayCache.delete(sessionId);
+    this.#invalidatedPresentationSessions.delete(sessionId);
     this.#historyCache.take(sessionId);
+    this.#historyCache.evictWhere((key) => key.startsWith(childHistoryPrefix(sessionId)));
     ++this.#directoryRead;
     const selected = this.#view.selected === sessionId;
     if (selected) {
@@ -439,6 +460,7 @@ export class DesktopClient {
             hasLoadedHistory: false,
             childSessions: undefined,
             childDetail: undefined,
+            backgroundDisplay: undefined,
           }
         : {}),
     });
@@ -612,7 +634,12 @@ export class DesktopClient {
     );
     this.#connection = connection;
     this.#connectionId = info.connectionId;
-    if (this.#view.workspace !== info.workspace) this.#childRestore = undefined;
+    if (this.#view.workspace !== info.workspace) {
+      this.#childRestore = undefined;
+      this.#childSessionCache.clear();
+      this.#backgroundDisplayCache.clear();
+      this.#historyCache.clear();
+    }
     this.#publish({
       workspace: info.workspace,
       error: undefined,
@@ -625,6 +652,7 @@ export class DesktopClient {
             ready: false,
             loadingSession: false,
             hasLoadedHistory: false,
+            backgroundDisplay: undefined,
           }
         : {}),
     });
@@ -685,6 +713,10 @@ export class DesktopClient {
           ? { directory }
           : {}),
         background: snapshot.background,
+        backgroundDisplay: this.#backgroundDisplayFor(
+          this.#view.selected,
+          this.#view.selected ? snapshot.background[this.#view.selected] : undefined,
+        ),
         ...(childDetail &&
         childSession?.projection &&
         childSession.projection !== childDetail.projection &&
@@ -944,6 +976,9 @@ export class DesktopClient {
     this.#selectionLoad = undefined;
     this.#calibratedSelection = undefined;
     this.#historyCache.clear();
+    this.#childSessionCache.clear();
+    this.#backgroundDisplayCache.clear();
+    this.#invalidatedPresentationSessions.clear();
     this.#historyConnection = undefined;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
@@ -956,6 +991,7 @@ export class DesktopClient {
       loadingSession: false,
       childSessions: undefined,
       childDetail: undefined,
+      backgroundDisplay: undefined,
     });
     if (connection) await connection.close();
   }
@@ -1512,18 +1548,56 @@ export class DesktopClient {
     this.#admitted.add(sessionId);
     return sessionId;
   }
+  #backgroundDisplayFor(
+    sessionId: string | undefined,
+    state?: RuntimeClientBackgroundState,
+  ): DesktopView['backgroundDisplay'] {
+    if (!sessionId || this.#invalidatedPresentationSessions.has(sessionId)) return undefined;
+    if (state && !state.stale) {
+      if (this.#backgroundDisplayCache.get(sessionId) !== state.snapshot) {
+        this.#backgroundDisplayCache.delete(sessionId);
+        this.#backgroundDisplayCache.set(sessionId, state.snapshot);
+        if (this.#backgroundDisplayCache.size > 16)
+          this.#backgroundDisplayCache.delete(this.#backgroundDisplayCache.keys().next().value!);
+      }
+      const current = this.#view.backgroundDisplay;
+      return current?.sessionId === sessionId &&
+        current.snapshot === state.snapshot &&
+        !current.stale
+        ? current
+        : { sessionId, snapshot: state.snapshot, stale: false };
+    }
+    const snapshot = this.#backgroundDisplayCache.get(sessionId);
+    if (!snapshot) return undefined;
+    const current = this.#view.backgroundDisplay;
+    return current?.sessionId === sessionId && current.snapshot === snapshot && current.stale
+      ? current
+      : { sessionId, snapshot, stale: true };
+  }
+
   selectSession(sessionId: string): Promise<void> {
     if (this.#view.childSessions?.entries.some((entry) => entry.sessionId === sessionId))
       return Promise.reject(new Error('子会话只能通过父会话的环境信息读取。'));
     this.#readingPageSuspended = false;
+    const cachedChildren = this.#childSessionCache.get(sessionId);
     if (sessionId !== this.#view.selected) {
+      this.#cacheCurrentChildDetail();
       this.#childRestore = undefined;
       this.#childRead?.abort();
       this.#childRead = undefined;
       this.#calibratedChild = undefined;
       this.#childListRead++;
       this.#childListRefreshInFlight = undefined;
-      this.#publish({ childSessions: undefined, childDetail: undefined });
+      this.#publish({
+        childSessions: cachedChildren
+          ? { parentSessionId: sessionId, entries: cachedChildren, loading: false }
+          : undefined,
+        childDetail: undefined,
+      });
+    } else if (!this.#view.childSessions && cachedChildren) {
+      this.#publish({
+        childSessions: { parentSessionId: sessionId, entries: cachedChildren, loading: false },
+      });
     }
     const connection = this.#connection;
     if (connection?.status !== 'active') {
@@ -1549,7 +1623,10 @@ export class DesktopClient {
   ): Promise<void> {
     if (this.#childListRefreshInFlight?.sessionId === parentSessionId)
       return this.#childListRefreshInFlight.promise;
-    const promise = this.#readChildSessions(parentSessionId, options).finally(() => {
+    const effectiveOptions = {
+      silent: options?.silent ?? this.#childSessionCache.has(parentSessionId),
+    };
+    const promise = this.#readChildSessions(parentSessionId, effectiveOptions).finally(() => {
       if (this.#childListRefreshInFlight?.promise === promise)
         this.#childListRefreshInFlight = undefined;
     });
@@ -1606,11 +1683,21 @@ export class DesktopClient {
         this.#view.selected === parentSessionId &&
         read === this.#childListRead
       ) {
+        this.#childSessionCache.delete(parentSessionId);
+        this.#childSessionCache.set(parentSessionId, entries);
+        if (this.#childSessionCache.size > 16)
+          this.#childSessionCache.delete(this.#childSessionCache.keys().next().value!);
         if (
           this.#view.childDetail?.parentSessionId === parentSessionId &&
           !entries.some((entry) => entry.sessionId === this.#view.childDetail?.childSessionId)
         )
           this.leaveChildSession();
+        const validChildKeys = new Set(
+          entries.map((entry) => childHistoryKey(parentSessionId, entry.sessionId)),
+        );
+        this.#historyCache.evictWhere(
+          (key) => key.startsWith(childHistoryPrefix(parentSessionId)) && !validChildKeys.has(key),
+        );
         if (
           !this.#view.childSessions ||
           this.#view.childSessions.parentSessionId !== parentSessionId ||
@@ -1662,6 +1749,7 @@ export class DesktopClient {
 
   leaveChildSession(options: { readonly restoreParent?: boolean } = {}) {
     const parentSessionId = this.#view.childDetail?.parentSessionId;
+    this.#cacheCurrentChildDetail();
     this.#childRestore = undefined;
     this.#childRead?.abort();
     this.#childRead = undefined;
@@ -1685,6 +1773,46 @@ export class DesktopClient {
     this.#publish({ ready: false });
   }
 
+  #cacheCurrentChildDetail(): void {
+    const detail = this.#view.childDetail;
+    if (
+      !detail?.hasLoadedHistory ||
+      !this.#connection ||
+      this.#historyConnection !== this.#connection ||
+      !this.#historyWorkspaceDigest ||
+      (detail.projection && detail.projection.workspaceDigest !== this.#historyWorkspaceDigest)
+    )
+      return;
+    this.#historyCache.save(
+      childHistoryKey(detail.parentSessionId, detail.childSessionId),
+      this.#historyWorkspaceDigest,
+      detail.messages,
+    );
+  }
+
+  #removeInvalidChildFromView(parentSessionId: string, childSessionId: string): void {
+    const cached = this.#childSessionCache.get(parentSessionId);
+    if (cached) {
+      this.#childSessionCache.set(
+        parentSessionId,
+        cached.filter((entry) => entry.sessionId !== childSessionId),
+      );
+    }
+    this.#historyCache.take(childHistoryKey(parentSessionId, childSessionId));
+    ++this.#childListRead;
+    this.#childListRefreshInFlight = undefined;
+    if (this.#childRestore?.childSessionId === childSessionId) this.#childRestore = undefined;
+    const childSessions = this.#view.childSessions;
+    if (childSessions?.parentSessionId === parentSessionId)
+      this.#publish({
+        childSessions: {
+          ...childSessions,
+          entries: childSessions.entries.filter((entry) => entry.sessionId !== childSessionId),
+          loading: false,
+        },
+      });
+  }
+
   async openChildSession(parentSessionId: string, childSessionId: string): Promise<void> {
     const connection = this.#requireConnection();
     if (
@@ -1696,6 +1824,19 @@ export class DesktopClient {
       throw new Error('请先从父会话的环境信息或工具消息选择子会话。');
     const loadChildSession = connection.history.loadChildSession;
     if (!loadChildSession) throw new Error('当前服务不支持子会话历史读取。');
+    const sameChild =
+      this.#view.childDetail?.parentSessionId === parentSessionId &&
+      this.#view.childDetail.childSessionId === childSessionId;
+    const cached = sameChild
+      ? undefined
+      : this.#historyCache.take(childHistoryKey(parentSessionId, childSessionId));
+    const usableCache =
+      cached &&
+      this.#historyConnection === connection &&
+      cached.workspaceDigest === this.#historyWorkspaceDigest
+        ? cached
+        : undefined;
+    if (!sameChild) this.#cacheCurrentChildDetail();
     if (!this.#view.childDetail) {
       // The parent remains an executing Service Session, but its reading stream
       // belongs to the departing page and must not follow the child page.
@@ -1714,13 +1855,18 @@ export class DesktopClient {
       this.#childRead === controller &&
       this.#connection === connection &&
       this.#view.selected === parentSessionId;
-    const previous =
-      this.#view.childDetail?.parentSessionId === parentSessionId &&
-      this.#view.childDetail.childSessionId === childSessionId
-        ? this.#view.childDetail.messages
-        : [];
+    const previous = sameChild ? this.#view.childDetail!.messages : (usableCache?.messages ?? []);
+    const hasLoadedHistory = sameChild
+      ? this.#view.childDetail!.hasLoadedHistory
+      : (usableCache?.hasLoadedHistory ?? false);
     this.#publish({
-      childDetail: { parentSessionId, childSessionId, loading: true, messages: previous },
+      childDetail: {
+        parentSessionId,
+        childSessionId,
+        loading: true,
+        hasLoadedHistory,
+        messages: previous,
+      },
     });
     try {
       let [transcript, result] = await Promise.all([
@@ -1732,6 +1878,7 @@ export class DesktopClient {
           childSessionId,
         }),
       ]);
+      if (result.status === 'not_found') throw new InvalidHistoryIdentity('子会话已不可用。');
       if (result.status !== 'ok' || !result.session) throw new Error('子会话详情暂时不可用。');
       if (
         result.session.sessionId !== childSessionId ||
@@ -1746,6 +1893,7 @@ export class DesktopClient {
           parentSessionId,
           childSessionId,
           loading: true,
+          hasLoadedHistory: true,
           messages,
           projection: result.session,
         },
@@ -1802,19 +1950,25 @@ export class DesktopClient {
         transcript.session.lastSequence,
       );
     } catch (error) {
-      if (currentRead())
+      if (currentRead()) {
+        const invalid = invalidatesHistory(error);
+        if (invalid) this.#removeInvalidChildFromView(parentSessionId, childSessionId);
         this.#publish({
           childDetail: {
             parentSessionId,
             childSessionId,
             loading: false,
-            messages:
-              this.#view.childDetail?.childSessionId === childSessionId
+            hasLoadedHistory:
+              !invalid && (this.#view.childDetail?.hasLoadedHistory ?? hasLoadedHistory),
+            messages: invalid
+              ? []
+              : this.#view.childDetail?.childSessionId === childSessionId
                 ? this.#view.childDetail.messages
                 : previous,
             error: messageOf(error),
           },
         });
+      }
     }
   }
 
@@ -1912,6 +2066,10 @@ export class DesktopClient {
         : undefined;
     this.#publish({
       selected: sessionId,
+      backgroundDisplay: this.#backgroundDisplayFor(
+        sessionId,
+        connection.snapshotStore.getSnapshot().background[sessionId],
+      ),
       messages: sameSelection ? this.#view.messages : (usableCache?.messages ?? []),
       cacheMetrics: sameSelection ? this.#view.cacheMetrics : undefined,
       hasLoadedHistory: sameSelection
@@ -1981,6 +2139,7 @@ export class DesktopClient {
       )
         throw new InvalidHistoryIdentity('会话所属空间已改变，请重新加载会话。');
       this.#historyWorkspaceDigest = result.session.workspaceDigest;
+      this.#invalidatedPresentationSessions.delete(sessionId);
       if (!this.#view.directory?.some((session) => session.sessionId === sessionId)) {
         const matches = await Promise.all(
           (this.#view.projects ?? []).map(async (project) =>
@@ -2074,6 +2233,12 @@ export class DesktopClient {
       controller.abort();
       this.#calibratedSelection = undefined;
       if (invalidatesHistory(error)) {
+        this.#invalidatedPresentationSessions.add(sessionId);
+        this.#childSessionCache.delete(sessionId);
+        this.#backgroundDisplayCache.delete(sessionId);
+        this.#childRestore = undefined;
+        ++this.#childListRead;
+        this.#childListRefreshInFlight = undefined;
         this.#historyWorkspaceDigest = undefined;
         this.#historyConnection = undefined;
         this.#publish({
@@ -2081,6 +2246,9 @@ export class DesktopClient {
           cacheMetrics: undefined,
           hasLoadedHistory: false,
           projection: undefined,
+          childSessions: undefined,
+          childDetail: undefined,
+          backgroundDisplay: undefined,
         });
       }
       this.#publish({ ready: false });

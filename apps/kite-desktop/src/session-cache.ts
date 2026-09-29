@@ -25,6 +25,12 @@ export class SessionHistoryCache {
     return entry;
   }
 
+  evictWhere(matches: (sessionId: string) => boolean): void {
+    for (const sessionId of this.#entries.keys()) {
+      if (matches(sessionId)) this.take(sessionId);
+    }
+  }
+
   save(sessionId: string, workspaceDigest: string, messages: readonly Message[]): void {
     this.take(sessionId);
     const bytes = estimateBytes(messages) + sessionId.length * 2 + workspaceDigest.length * 2;

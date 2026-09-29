@@ -35,6 +35,17 @@ test('revisiting a cached session makes it the most recent when it leaves the vi
   expect(cache.take('0')).toBeDefined();
 });
 
+test('evicting a parent child namespace removes only its inactive histories', () => {
+  const cache = new SessionHistoryCache();
+  cache.save('parent-a', 'workspace', messages('parent'));
+  cache.save('child:parent-a\0child-1', 'workspace', messages('child-a'));
+  cache.save('child:parent-b\0child-1', 'workspace', messages('child-b'));
+  cache.evictWhere((key) => key.startsWith('child:parent-a\0'));
+  expect(cache.take('child:parent-a\0child-1')).toBeUndefined();
+  expect(cache.take('parent-a')?.messages[0]?.text).toBe('parent');
+  expect(cache.take('child:parent-b\0child-1')?.messages[0]?.text).toBe('child-b');
+});
+
 test('payload budget evicts before count limit, rejects oversize and clears all references', () => {
   const cache = new SessionHistoryCache();
   const large = messages('x'.repeat(6 * 1024 * 1024));

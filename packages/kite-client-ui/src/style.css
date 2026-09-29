@@ -2668,6 +2668,8 @@ body {
   pointer-events: none;
   transform: translateX(12px) scale(0.98);
   transform-origin: top right;
+}
+.kite-client .session-view.environment-information-animated > .environment-information {
   transition:
     opacity 160ms ease,
     transform 180ms ease,
@@ -2686,6 +2688,13 @@ body {
   visibility: visible;
   pointer-events: auto;
   transform: translateX(0) scale(1);
+}
+.kite-client
+  .session-view.environment-information-animated:is(
+    .environment-information-docked,
+    .environment-information-overlay
+  )
+  > .environment-information {
   transition:
     opacity 160ms ease,
     transform 180ms ease,
@@ -2696,20 +2705,35 @@ body {
 }
 .kite-client .session-view:has(> .environment-information) .conversation-viewport {
   padding-right: var(--environment-information-safe-area);
-  transition: padding-right 180ms ease;
 }
 .kite-client .session-view:has(> .environment-information) .conversation-footer {
   padding-right: var(--environment-information-safe-area);
-  transition: padding-right 180ms ease;
 }
 .kite-client .session-view.environment-information-docked :is(.reading-column, .bottom-controls) {
   max-width: 720px;
 }
-.kite-client .session-view:has(> .environment-information) :is(.reading-column, .bottom-controls) {
+.kite-client
+  .session-view.environment-information-animated:has(> .environment-information)
+  .conversation-viewport {
+  transition: padding-right 180ms ease;
+}
+.kite-client
+  .session-view.environment-information-animated:has(> .environment-information)
+  .conversation-footer {
+  transition: padding-right 180ms ease;
+}
+.kite-client
+  .session-view.environment-information-animated:has(> .environment-information)
+  :is(.reading-column, .bottom-controls) {
   transition: max-width 180ms ease;
 }
 .kite-client .session-view:has(> .environment-information) .history-panel > .notice {
   margin-right: var(--environment-information-safe-area);
+}
+.kite-client
+  .session-view.environment-information-animated:has(> .environment-information)
+  .history-panel
+  > .notice {
   transition: margin-right 180ms ease;
 }
 .kite-client .environment-information > header {

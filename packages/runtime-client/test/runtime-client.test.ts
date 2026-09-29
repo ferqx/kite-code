@@ -1461,6 +1461,71 @@ describe('RuntimeClient protocol state machine', () => {
     }
   });
 
+  test('resyncs when an idle parent subscription misses the first frame of a later Run', async () => {
+    let subscriptions = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('parent-new-run-gap')));
+      if (message.method === 'runtime/subscribe') {
+        subscriptions++;
+        target.push(
+          result(message.id, {
+            subscriptionId: `subscription-${subscriptions}`,
+            generation: subscriptions,
+          }),
+        );
+      }
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      await client.subscribeHandle({
+        scope: 'session',
+        sessionId: 'session-1',
+        includeEphemeral: true,
+      });
+      connection.push(
+        subscriptionUpdate(1, { type: 'reset', sessions: [session('session-1', 1)] }),
+      );
+      connection.push(subscriptionUpdate(1, { type: 'ready', scope: 'session' }));
+      await until(() => client.snapshotStore.getSnapshot().sessions['session-1']?.ready === true);
+
+      // The subscription was ready while idle. The new Run starts after ready,
+      // then its sequence-one model frame is lost before sequence two arrives.
+      connection.push(
+        subscriptionUpdate(1, {
+          type: 'notification',
+          durability: 'durable',
+          sessionId: 'session-1',
+          revision: 2,
+          session: {
+            ...session('session-1', 2),
+            currentRun: {
+              runId: 'run-1',
+              initialTurnId: 'turn-1',
+              activeTurnId: 'turn-1',
+              status: 'running',
+              revision: 1,
+            },
+          },
+        }),
+      );
+      await until(
+        () => client.snapshotStore.getSnapshot().sessions['session-1']?.projection.revision === 2,
+      );
+      connection.push(ephemeralUpdate(2));
+      await until(() => subscriptions === 2);
+      expect(Object.values(client.snapshotStore.getSnapshot().streams)).toHaveLength(0);
+      expect(connection.requests('runtime/unsubscribe')).toHaveLength(1);
+    } finally {
+      await client.close();
+    }
+  });
+
   test('an old resync cannot activate a second subscription after explicit reconnect', async () => {
     const first = new FakeConnection((message, target) => {
       if (message.method === 'initialize')
@@ -1982,6 +2047,103 @@ describe('RuntimeClient protocol state machine', () => {
     }
   });
 
+  test('keeps the newer child list when an earlier aggregate response arrives last', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('background-query-order', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (message.method === 'runtime/subscribe')
+        target.push(result(message.id, { subscriptionId: 'subscription-1', generation: 1 }));
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    const query = () =>
+      client.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId: 'session-1',
+      });
+    const reply = (index: number, children: readonly string[]) => {
+      const request = connection.requests('runtime/query')[index]!;
+      connection.push(
+        result(request.id, {
+          status: 'ok',
+          queryType: 'list_background_executions',
+          backgroundSnapshot: {
+            sessionId: 'session-1',
+            sessionRevision: children.length,
+            aggregateGeneration: `children-${children.length}`,
+            watermark: children.length,
+            executions: children.map((executionId) => ({
+              executionId,
+              sessionId: 'session-1',
+              sessionRevision: children.length,
+              kind: 'subagent',
+              status: 'running',
+              ownerGeneration: `child:${executionId}`,
+              revision: 1,
+              cleanupConfirmed: false,
+            })),
+          },
+        }),
+      );
+    };
+    try {
+      const subscription = await client.subscribeHandle({
+        scope: 'session',
+        sessionId: 'session-1',
+      });
+      const older = query();
+      await until(() => connection.requests('runtime/query').length === 1);
+      const newer = query();
+      await until(() => connection.requests('runtime/query').length === 2);
+      reply(1, ['child-1', 'child-2']);
+      await newer;
+      reply(0, ['child-1']);
+      await older;
+      expect(
+        client.snapshotStore
+          .getSnapshot()
+          .background['session-1']?.snapshot.executions.map((execution) => execution.executionId),
+      ).toEqual(['child-1', 'child-2']);
+
+      const failed = query();
+      await until(() => connection.requests('runtime/query').length === 3);
+      const afterFailure = query();
+      await until(() => connection.requests('runtime/query').length === 4);
+      connection.push(
+        result(connection.requests('runtime/query')[3]!.id, {
+          status: 'unavailable',
+          queryType: 'list_background_executions',
+          code: 'session_unavailable',
+        }),
+      );
+      await expect(afterFailure).resolves.toMatchObject({ status: 'unavailable' });
+      reply(2, ['child-1', 'child-2', 'child-3']);
+      await failed;
+      expect(
+        client.snapshotStore
+          .getSnapshot()
+          .background['session-1']?.snapshot.executions.map((execution) => execution.executionId),
+      ).toEqual(['child-1', 'child-2', 'child-3']);
+      await subscription.unsubscribe();
+    } finally {
+      await client.close();
+    }
+  });
+
   test('reconstructs a complete ephemeral RuntimeAccess notification from the closed Protocol event', async () => {
     const connection = respondingConnection('server-1');
     const client = new RuntimeClient({
@@ -2095,6 +2257,75 @@ describe('RuntimeClient protocol state machine', () => {
     });
     await iterator.return?.();
     await client.close();
+  });
+
+  test('a parent session joins an active ephemeral stream without resyncing, but resyncs on a later gap', async () => {
+    let subscriptions = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('parent-stream-join')));
+      if (message.method === 'runtime/subscribe') {
+        subscriptions++;
+        target.push(
+          result(message.id, {
+            subscriptionId: `subscription-${subscriptions}`,
+            generation: subscriptions,
+          }),
+        );
+      }
+      if (message.method === 'runtime/unsubscribe')
+        target.push(result(message.id, { unsubscribed: true }));
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      await client.subscribeHandle({
+        scope: 'session',
+        sessionId: 'session-1',
+        includeEphemeral: true,
+      });
+      connection.push(
+        subscriptionUpdate(1, {
+          type: 'reset',
+          sessions: [
+            {
+              ...session('session-1', 1),
+              currentRun: {
+                runId: 'run-1',
+                initialTurnId: 'turn-1',
+                activeTurnId: 'turn-1',
+                status: 'running',
+                revision: 1,
+              },
+            },
+          ],
+        }),
+      );
+      connection.push(subscriptionUpdate(1, { type: 'ready', scope: 'session' }));
+      await until(() => client.snapshotStore.getSnapshot().sessions['session-1']?.ready === true);
+
+      // Opening an already-running parent has no earlier ephemeral frames to replay.
+      connection.push(ephemeralUpdate(9));
+      await until(
+        () => Object.values(client.snapshotStore.getSnapshot().streams)[0]?.sequence === 9,
+      );
+      connection.push(ephemeralUpdate(10));
+      await until(
+        () => Object.values(client.snapshotStore.getSnapshot().streams)[0]?.sequence === 10,
+      );
+      expect(client.snapshotStore.getSnapshot().sessions['session-1']?.ready).toBe(true);
+      expect(subscriptions).toBe(1);
+      expect(connection.requests('runtime/unsubscribe')).toHaveLength(0);
+
+      // Once the stream has a local cursor, a missing frame is a real gap.
+      connection.push(ephemeralUpdate(12));
+      await until(() => subscriptions === 2);
+      expect(connection.requests('runtime/unsubscribe')).toHaveLength(1);
+    } finally {
+      await client.close();
+    }
   });
 
   test('evicts queued ephemeral notifications before a durable subscription fact', async () => {

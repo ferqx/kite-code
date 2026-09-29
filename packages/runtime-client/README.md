@@ -16,6 +16,7 @@
 - 最后一个会话／子会话订阅离开后，释放该会话的投影、临时流、后台执行展示缓存与终止 Run 过滤记录；其他同会话订阅仍在时保留共享快照。后台查询仍返回原 DTO，只有查询开始和返回时都存在同一会话读取订阅，结果才写入展示缓存；旧页面的迟到结果不能重新填回已释放的状态。
 - Store mutation返回`applied`后notification才进入consumer queue；ignored、same-revision divergence、durable gap或ephemeral sequence
   gap均不dispatch原event。`resync_required`把Session置为not-ready并在同connection复用既有subscription重新订阅，不重放mutation。
+- 父 Session 仅在订阅 ready 时已运行的 Run 上允许首个观察到的 ephemeral sequence 建立本地游标；ready 后有新的持久更新或新 Run 时，首帧必须从 sequence 1 开始，否则重新同步。子 Session 在活动模型流中途建立订阅时仍允许首见序号建立游标；已有游标后的缺帧继续触发重新同步。
 - 自动重订阅失败时关闭该订阅的本地 iterator，让客户端结束等待并显示恢复入口；旧 connection generation 的恢复任务
   不关闭或重复激活替代连接。durable gap 在收到缺口的当次通知就失效 ready；恢复后的 projection ready 不证明正文已经补齐，
   Native presentation owner 仍须按 subscription generation 重新校准完整 History。
@@ -51,6 +52,11 @@
 - 后台执行facade从投影的`sessionRevision`构造Session CAS，从item `ownerGeneration + revision`构造准确执行fence；Store以
   `aggregateGeneration`判断列表替换、以item generation/revision判断单项新旧，不再把组合generation与原生owner相等
   作为detail合并条件。
+- 同一会话并发后台列表查询按请求发起顺序接纳成功回执；较早查询即使晚返回且 aggregate generation 不同，也不覆盖
+  较新查询的展示列表。较新查询失败时仍可接受尚未完成的较早成功回执；最后一个读取订阅离开时清除该顺序水位。
+- 连接恢复后，若已过期的后台列表收到当前代次的同一 aggregate generation、watermark 与 session revision 查询结果，
+  Store 将其重新标为新鲜；列表项保留先前更高 revision 的 detail 和已确认终态，曾因 Server 更换而标为不可用的项目
+  则以这次新鲜查询的实际状态恢复。旧代次查询与较低 watermark 仍不解除过期状态。
 
 ## 允许依赖
 

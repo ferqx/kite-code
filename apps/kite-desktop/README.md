@@ -43,15 +43,15 @@
 
 `build` 只执行 Vite renderer 构建，用于 workspace 默认构建。`build:electron` 要求已有 `service/desktop.json`，将其中经过验证的 candidate ID、服务摘要、expected server version 与环境白名单编入 `dist-electron/main.cjs`；运行时不会信任被替换的资源清单。`dev` 绑定开发端口后调用 `prepare:service`，避免 renderer 热更新与旧 Host 协议混用；`prepare:service` 复用 release owner 构建或验证 candidate，只把配套 `kite-service` 与 `desktop.json` 提取到 `apps/kite-desktop/service`。服务使用当前 OS 用户的 `.kite-code` 配置；开发包与打包版均由 [Electron host](electron/host.ts) 将 canonical config root 作为 runtimeRoot，不再按 checkout 或 Store epoch 自动分库；自动验证必须传入隔离 home/workspace，不能改动开发者已有信任与凭据。
 
-检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
+检查：`bun run --cwd apps/kite-desktop typecheck`、`test`、`build` 和 `build:electron`。准备服务后运行 `bun run test:desktop:native`；构建应用后运行 `bun run test:desktop:window`，后者需要本机图形会话，使用源码外隔离应用和本机模型 fixture。[真实模型原生切换测试](scripts/native-live-session-switch.ts)单独以 `KITE_RUN_LIVE_NATIVE_SWITCH=1` 和 `KITE_LIVE_DEEPSEEK_API_KEY` 显式启用，在隔离打包窗口中验证运行中的子会话详情往返、父会话恢复与 B/A 反复切换，不属于默认 smoke。全局类型与边界检查包含 renderer 与 Electron owner。原生窗口、preload、安装、隐藏、重接、退出和崩溃清理需要独立真实 Electron 场景，单元测试、DOM 预览与构建通过不替代它们。
 
 ## 当前限制
 
-配置读写、模型选择、信任、新建/历史会话、输入/流式结果、取消、单次工具审批/拒绝、问题回答与计划审核已接入。[变更阅读与外部编辑器](docs/results-and-editor.md)使用成功文件工具记录；迁移前的 Tauri 版本曾在本机 macOS 确认 VS Code 实际打开，Electron 版本仍需重做该原生验收。自动更新和非 macOS 发布未交付。扩展/验证交互明确提示限制并允许取消，不自动应答。目录使用现有 Runtime list_sessions（服务最多 1,000 条），按工作区摘要过滤；选择时再次核实归属。助手正文支持 Markdown，工具过程按需展开；点击会话直接加载消息，无标题搜索或二次确认。独立子 Agent 的只读详情可从当前父会话的环境信息卡片打开，不能作为平级会话直接进入；没有匹配独立子会话的旧后台记录只显示状态。运行中纯文本引导可追加到同一 Run，但后继消息队列尚未接入。
+配置读写、模型选择、信任、新建/历史会话、输入/流式结果、取消、单次工具审批/拒绝、问题回答与计划审核已接入。[变更阅读与外部编辑器](docs/results-and-editor.md)使用成功文件工具记录；迁移前的 Tauri 版本曾在本机 macOS 确认 VS Code 实际打开，Electron 版本仍需重做该原生验收。自动更新和非 macOS 发布未交付。扩展/验证交互明确提示限制并允许取消，不自动应答。目录使用现有 Runtime list_sessions（服务最多 1,000 条），按工作区摘要过滤；选择时再次核实归属。助手正文支持 Markdown，工具过程按需展开；点击会话直接加载消息，无标题搜索或二次确认。独立子 Agent 的只读详情可从当前父会话的环境信息卡片打开，不能作为平级会话直接进入；没有匹配独立子会话的旧后台记录只显示状态。已读主会话重进时，环境卡片复用同连接上一份已确认的展示摘要并静默核对新状态；上一状态明确标记且不能用于停止操作，具体失效边界见[历史与恢复](docs/history-and-recovery.md)。运行中纯文本引导可追加到同一 Run，但后继消息队列尚未接入。
 
 最新[项目进入与资料副层设计](../../docs/plans/kite-client-experience.md#workspace设置与恢复)已接入用户主动添加／选择项目即授权，由现有 Service 信任接口记录；普通重连不自动授权，关联外部目录仍单独确认。子代理已沿用正文样式；有匹配子会话时独立只读详情可用，交接回执仍待真实数据支持。文件工具记录已通过右侧副层呈现，不扩展为完整资料工作区。
 
-Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配置文件，API key 不放入 DesktopView 或浏览器持久存储，提交时清空输入。结果未知时查询配置且不自动重放；模型选择使用 App Control revision CAS。macOS standalone Service 已嵌入现有 MCP 原生 keyring 模块，其源码与编译程序的隔离读写删除 smoke 通过；迁移前的 Tauri 包内 Service 还完成了本机模拟 OAuth、Keychain 保存与重启后认证恢复。Provider 配置写入仍遵循原配置 owner，不因此改为 keyring 存储。真实 DeepSeek 的服务协议闭环属于宿主无关 Service 证据；Electron 窗口中的模型与扩展流程仍按原生验收记录中的剩余范围验证。用户行为与验证限制见[桌面手册](../../docs/handbook/clients/desktop/README.md)。
+Provider 设置经现有 Native `write_provider_api_key` 接口写入用户配置文件，API key 不放入 DesktopView 或浏览器持久存储，提交时清空输入。结果未知时查询配置且不自动重放；模型选择使用 App Control revision CAS。macOS standalone Service 已嵌入现有 MCP 原生 keyring 模块，其源码与编译程序的隔离读写删除 smoke 通过；迁移前的 Tauri 包内 Service 还完成了本机模拟 OAuth、Keychain 保存与重启后认证恢复。Provider 配置写入仍遵循原配置 owner，不因此改为 keyring 存储。真实 DeepSeek 已在隔离的 Electron 窗口中完成两子会话运行时的子详情往返与跨会话切换定向验证；Provider 设置、扩展及其他原生流程的证据边界见[原生验收](docs/native-validation.md)。用户行为与验证限制见[桌面手册](../../docs/handbook/clients/desktop/README.md)。
 
 
 ## 本次验证与剩余项

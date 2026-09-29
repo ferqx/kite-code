@@ -223,7 +223,7 @@ test('only an exactly matched child session opens from environment information',
   expect(refreshed).toBe(2);
 });
 
-test('current environment information stays visible with no fresh running work', async () => {
+test('stale environment information retains last known work without stop controls', async () => {
   await render(
     <BackgroundExecutions
       currentOnly
@@ -234,9 +234,10 @@ test('current environment information stays visible with no fresh running work',
     />,
   );
   expect(document.querySelector('.environment-information')).not.toBeNull();
-  expect(document.body.textContent).toContain('无运行中的 Shell');
+  expect(document.body.textContent).toContain('上次状态 · 正在核对');
   expect(document.body.textContent).toContain('暂无子智能体记录');
-  expect(document.body.textContent).not.toContain('shell-1');
+  expect(document.body.textContent).toContain('shell-1');
+  expect(document.querySelector('.background-execution-stop')).toBeNull();
 });
 
 test('directory does not surface background execution counts', async () => {
@@ -564,6 +565,9 @@ test('the session header toggles environment information without removing the co
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-closed',
   );
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-animated',
+  );
   const show = document.querySelector<HTMLButtonElement>('[aria-label="显示环境信息"]')!;
   expect(show.getAttribute('aria-expanded')).toBe('false');
   expect(document.querySelector('.history-panel')).not.toBeNull();
@@ -586,9 +590,15 @@ test('the session header toggles environment information without removing the co
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-closed',
   );
+  expect(document.querySelector('.session-view')?.classList).not.toContain(
+    'environment-information-animated',
+  );
   await click(show);
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-docked',
+  );
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-animated',
   );
 
   // Collapsing the navigation keeps the panel subtree mounted while the environment
@@ -598,6 +608,9 @@ test('the session header toggles environment information without removing the co
   expect(document.querySelector('.environment-information')).not.toBeNull();
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-closed',
+  );
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-animated',
   );
   expect(
     document
@@ -620,6 +633,50 @@ test('the session header toggles environment information without removing the co
   await act(() => TestResizeObserver.resize(1132, '.session-view'));
   expect(document.querySelector('.session-view')?.classList).toContain(
     'environment-information-docked',
+  );
+});
+
+test('returning from a child detail restores the environment card without an entrance transition', async () => {
+  const props = {
+    workspaces: [],
+    selected: 'parent',
+    sessionLabel: 'Parent',
+    messages: [],
+    loading: false,
+    connected: true,
+    connectionLabel: '',
+    actions: {},
+  };
+  const environmentInformation = <BackgroundExecutions currentOnly executions={[]} />;
+  await render(
+    <SessionPage
+      {...props}
+      readingKey="workspace/parent"
+      environmentInformation={environmentInformation}
+    />,
+  );
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-docked',
+  );
+  await act(() =>
+    root!.render(<SessionPage {...props} readingKey="child:parent:one" readOnlyReason="只读" />),
+  );
+  expect(document.querySelector('.environment-information')).toBeNull();
+  await act(() =>
+    root!.render(
+      <SessionPage
+        {...props}
+        readingKey="workspace/parent"
+        environmentInformation={environmentInformation}
+      />,
+    ),
+  );
+  expect(document.querySelector('.environment-information')).not.toBeNull();
+  expect(document.querySelector('.session-view')?.classList).toContain(
+    'environment-information-docked',
+  );
+  expect(document.querySelector('.session-view')?.classList).not.toContain(
+    'environment-information-animated',
   );
 });
 test('select all stays in visible message text and leaves editable fields to the browser', async () => {

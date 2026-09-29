@@ -104,6 +104,18 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     'default',
   );
   const [environmentFits, setEnvironmentFits] = useState(false);
+  const [environmentAnimationKey, setEnvironmentAnimationKey] = useState<string>();
+  const lastAnimationReadingKey = useRef(props.readingKey);
+  const environmentAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const startEnvironmentAnimation = useCallback(() => {
+    if (environmentAnimationTimer.current !== undefined)
+      clearTimeout(environmentAnimationTimer.current);
+    setEnvironmentAnimationKey(props.readingKey);
+    environmentAnimationTimer.current = setTimeout(() => {
+      environmentAnimationTimer.current = undefined;
+      setEnvironmentAnimationKey(undefined);
+    }, 200);
+  }, [props.readingKey]);
   const environmentMode = !props.environmentInformation
     ? 'closed'
     : environmentFits
@@ -114,6 +126,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         ? 'overlay'
         : 'closed';
   const environmentVisible = environmentMode !== 'closed';
+  const animateEnvironment = environmentAnimationKey === props.readingKey;
   const previousEnvironmentFits = useRef(environmentFits);
   const previousEnvironmentMode = useRef(environmentMode);
   const rightSidebarOpen = changesOpen || (scheduledEditorOpen && !!props.scheduledTasks);
@@ -159,9 +172,19 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
       if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
+      if (environmentAnimationTimer.current !== undefined)
+        clearTimeout(environmentAnimationTimer.current);
     },
     [],
   );
+  useLayoutEffect(() => {
+    if (lastAnimationReadingKey.current === props.readingKey) return;
+    lastAnimationReadingKey.current = props.readingKey;
+    if (environmentAnimationTimer.current !== undefined)
+      clearTimeout(environmentAnimationTimer.current);
+    environmentAnimationTimer.current = undefined;
+    setEnvironmentAnimationKey(undefined);
+  }, [props.readingKey]);
   useLayoutEffect(() => {
     if (changesKey !== undefined && changesKey !== props.readingKey) {
       collapseDetails();
@@ -178,7 +201,14 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     const element = sessionViewElement;
     if (!element) return;
     const update = (width: number) => {
-      if (width > 0) setEnvironmentFits(width >= ENVIRONMENT_INFORMATION_MIN_WIDTH);
+      if (width <= 0) return;
+      if (
+        width < ENVIRONMENT_INFORMATION_MIN_WIDTH &&
+        previousEnvironmentFits.current &&
+        previousEnvironmentMode.current === 'docked'
+      )
+        startEnvironmentAnimation();
+      setEnvironmentFits(width >= ENVIRONMENT_INFORMATION_MIN_WIDTH);
     };
     const measure = () => update(element.getBoundingClientRect().width);
     let frame: number | undefined;
@@ -205,7 +235,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       window.removeEventListener('resize', measureAfterLayout);
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [sessionViewElement]);
+  }, [sessionViewElement, startEnvironmentAnimation]);
   useLayoutEffect(() => {
     const previouslyFit = previousEnvironmentFits.current;
     const previousMode = previousEnvironmentMode.current;
@@ -447,6 +477,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                   aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
                   title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
                   onClick={() => {
+                    startEnvironmentAnimation();
                     setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
                   }}
                 >
@@ -483,7 +514,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               {props.notices}
               <div className="session-body">
                 <div
-                  className={`session-view environment-information-${environmentMode}`}
+                  className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
                   ref={setSessionViewElement}
                 >
                   {props.environmentInformation}
