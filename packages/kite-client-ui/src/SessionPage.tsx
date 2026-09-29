@@ -424,6 +424,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         className="client-panels"
         onLayoutChanged={(layout, meta) => {
           if (!meta.isUserInteraction || narrow) return;
+          setSidebarOpen((layout.navigation ?? 0) > 0);
           const groupWidth = Array.from(
             panelGroupElement.current?.querySelectorAll<HTMLElement>(':scope > [data-panel]') ?? [],
           ).reduce((width, panel) => width + panel.offsetWidth, 0);

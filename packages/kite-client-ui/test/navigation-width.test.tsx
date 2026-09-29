@@ -177,3 +177,35 @@ test('navigation starts at 200px and restores a user-adjusted width after remoun
   await act(() => collapse.click());
   expect(window.localStorage.getItem('kite.client.navigationWidth')).toBe('250');
 });
+
+test('resizing navigation to collapsed shows the header control to reopen it', async () => {
+  await renderPage();
+  Object.defineProperty(document.querySelector('#client-layout')!, 'offsetWidth', {
+    configurable: true,
+    value: 1000,
+  });
+  const separator = document.querySelector<HTMLElement>('#navigation-resize')!;
+  await act(() =>
+    separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })),
+  );
+
+  expect(document.querySelector<HTMLElement>('#navigation')?.style.flexGrow).toBe('0');
+  expect(document.querySelector('.collapsible-sidebar-content')?.getAttribute('aria-hidden')).toBe(
+    'true',
+  );
+  expect(separator.getAttribute('data-open')).toBe('false');
+  expect(
+    document.querySelector<HTMLButtonElement>('.session-header [aria-label="展开侧栏"]'),
+  ).not.toBeNull();
+  expect(window.localStorage.getItem('kite.client.navigationWidth')).toBeNull();
+
+  await act(() =>
+    document.querySelector<HTMLButtonElement>('.session-header [aria-label="展开侧栏"]')!.click(),
+  );
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(document.querySelector<HTMLElement>('#navigation')?.style.flexGrow).toBe('20');
+  expect(document.querySelector('.collapsible-sidebar-content')?.getAttribute('aria-hidden')).toBe(
+    'false',
+  );
+  expect(separator.getAttribute('data-open')).toBe('true');
+});
