@@ -13,6 +13,7 @@ const originalOffsetLeft = Object.getOwnPropertyDescriptor(
   dom.window.HTMLElement.prototype,
   'offsetLeft',
 );
+let groupWidth = 1000;
 Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetLeft', {
   configurable: true,
   get() {
@@ -36,14 +37,17 @@ Object.defineProperty(dom.window.HTMLElement.prototype, 'ariaDisabled', {
 Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', {
   configurable: true,
   get() {
-    if (this.id === 'navigation') return 200;
-    if (this.id === 'content') return 800;
+    if (this.id === 'navigation')
+      return Math.round((groupWidth * Number(this.style.flexGrow || 20)) / 100);
+    if (this.id === 'content')
+      return Math.round((groupWidth * Number(this.style.flexGrow || 80)) / 100);
     if (this.id === 'details') return 0;
     return 0;
   },
 });
 dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
-  if (this.matches('[data-slot="resizable-panel-group"]')) return new DOMRect(0, 0, 1000, 800);
+  if (this.matches('[data-slot="resizable-panel-group"]'))
+    return new DOMRect(0, 0, groupWidth, 800);
   return originalBounds.call(this);
 };
 
@@ -58,15 +62,15 @@ class TestResizeObserver {
     TestResizeObserver.observers.add(this);
     this.targets.add(target);
   }
-  static resizeAll() {
+  static resizeAll(width = groupWidth) {
     for (const observer of TestResizeObserver.observers)
       for (const target of observer.targets)
         observer.callback(
           [
             {
               target,
-              contentRect: { width: 1000, height: 800 },
-              borderBoxSize: [{ inlineSize: 1000, blockSize: 800 }],
+              contentRect: { width, height: 800 },
+              borderBoxSize: [{ inlineSize: width, blockSize: 800 }],
             } as unknown as ResizeObserverEntry,
           ],
           observer as unknown as ResizeObserver,
@@ -80,6 +84,13 @@ class TestResizeObserver {
     TestResizeObserver.observers.delete(this);
   }
 }
+const narrowMediaListeners = new Set<() => void>();
+const narrowMedia = {
+  matches: false,
+  addEventListener: (_type: string, listener: () => void) => narrowMediaListeners.add(listener),
+  removeEventListener: (_type: string, listener: () => void) =>
+    narrowMediaListeners.delete(listener),
+};
 Object.defineProperty(dom.window, 'ResizeObserver', {
   configurable: true,
   value: TestResizeObserver,
@@ -100,6 +111,7 @@ const globals = {
   DOMRect: dom.window.DOMRect,
   getComputedStyle: dom.window.getComputedStyle,
   ResizeObserver: TestResizeObserver,
+  matchMedia: () => narrowMedia as unknown as MediaQueryList,
   requestAnimationFrame: (callback: FrameRequestCallback) =>
     setTimeout(() => callback(Date.now()), 0),
   cancelAnimationFrame: (handle: number) => clearTimeout(handle),
@@ -139,6 +151,9 @@ afterEach(async () => {
   root = undefined;
   document.body.innerHTML = '';
   window.localStorage.clear();
+  groupWidth = 1000;
+  narrowMedia.matches = false;
+  narrowMediaListeners.clear();
 });
 afterAll(() => {
   if (originalOffsetLeft)
@@ -176,6 +191,71 @@ test('navigation starts at 200px and restores a user-adjusted width after remoun
   const collapse = document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!;
   await act(() => collapse.click());
   expect(window.localStorage.getItem('kite.client.navigationWidth')).toBe('250');
+});
+
+test('window resizing preserves the navigation pixel width before and after user resizing', async () => {
+  await renderPage();
+  const navigation = document.querySelector<HTMLElement>('#navigation')!;
+  const navigationPixels = () => (groupWidth * Number(navigation.style.flexGrow)) / 100;
+  expect(navigationPixels()).toBeCloseTo(200, 0);
+  expect(navigation.hasAttribute('data-animate-width')).toBe(false);
+
+  groupWidth = 1200;
+  await act(() => TestResizeObserver.resizeAll());
+  expect(navigationPixels()).toBeCloseTo(200, 0);
+  expect(navigation.hasAttribute('data-animate-width')).toBe(false);
+
+  groupWidth = 1000;
+  await act(() => TestResizeObserver.resizeAll());
+  const separator = document.querySelector<HTMLElement>('#navigation-resize')!;
+  await act(() =>
+    separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })),
+  );
+  expect(navigationPixels()).toBeCloseTo(250, 0);
+  expect(window.localStorage.getItem('kite.client.navigationWidth')).toBe('250');
+
+  groupWidth = 900;
+  await act(() => TestResizeObserver.resizeAll());
+  expect(navigationPixels()).toBeCloseTo(250, 0);
+  expect(window.localStorage.getItem('kite.client.navigationWidth')).toBe('250');
+  expect(navigation.hasAttribute('data-animate-width')).toBe(false);
+
+  await act(() => document.querySelector<HTMLButtonElement>('[aria-label="收起侧栏"]')!.click());
+  expect(navigation.getAttribute('data-animate-width')).toBe('true');
+  await act(() =>
+    document.querySelector<HTMLButtonElement>('.session-header [aria-label="展开侧栏"]')!.click(),
+  );
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(navigationPixels()).toBeCloseTo(250, 0);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 250)));
+  expect(navigation.hasAttribute('data-animate-width')).toBe(false);
+});
+
+test('navigation restores the latest drag width after a narrow-screen round trip', async () => {
+  await renderPage();
+  const separator = document.querySelector<HTMLElement>('#navigation-resize')!;
+  await act(() =>
+    separator.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })),
+  );
+  expect(window.localStorage.getItem('kite.client.navigationWidth')).toBe('250');
+
+  await act(() => {
+    groupWidth = 600;
+    narrowMedia.matches = true;
+    for (const listener of [...narrowMediaListeners]) listener();
+  });
+  expect(document.querySelector('#navigation')).toBeNull();
+
+  await act(() => {
+    groupWidth = 900;
+    narrowMedia.matches = false;
+    for (const listener of [...narrowMediaListeners]) listener();
+  });
+  const open = document.querySelector<HTMLButtonElement>('.session-header [aria-label="展开侧栏"]');
+  if (open) await act(() => open.click());
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  const navigation = document.querySelector<HTMLElement>('#navigation')!;
+  expect((groupWidth * Number(navigation.style.flexGrow)) / 100).toBeCloseTo(250, 0);
 });
 
 test('resizing navigation to collapsed shows the header control to reopen it', async () => {

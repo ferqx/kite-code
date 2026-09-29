@@ -106,11 +106,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 600px)').matches,
   );
   const [sidebarOpen, setSidebarOpen] = useState(!narrow);
-  const [navigationWidth] = useState(savedNavigationWidth);
+  const [navigationAnimating, setNavigationAnimating] = useState(false);
+  const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
   const detailsPanel = useRef<PanelImperativeHandle>(null);
   const panelGroupElement = useRef<HTMLDivElement>(null);
   const navigationPanelFrame = useRef<number | undefined>(undefined);
+  const navigationAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
   const [changesKey, setChangesKey] = useState<string>();
@@ -172,7 +174,16 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const setDesktopSidebarOpen = useCallback(
     (open: boolean) => {
       setSidebarOpen(open);
-      if (!narrow) schedulePanelChange(navigationPanelFrame, navigationPanel, open);
+      if (!narrow) {
+        setNavigationAnimating(true);
+        if (navigationAnimationTimer.current !== undefined)
+          clearTimeout(navigationAnimationTimer.current);
+        navigationAnimationTimer.current = setTimeout(() => {
+          navigationAnimationTimer.current = undefined;
+          setNavigationAnimating(false);
+        }, 240);
+        schedulePanelChange(navigationPanelFrame, navigationPanel, open);
+      }
     },
     [narrow, schedulePanelChange],
   );
@@ -188,6 +199,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => () => {
       if (navigationPanelFrame.current !== undefined)
         cancelAnimationFrame(navigationPanelFrame.current);
+      if (navigationAnimationTimer.current !== undefined)
+        clearTimeout(navigationAnimationTimer.current);
       if (detailsPanelFrame.current !== undefined) cancelAnimationFrame(detailsPanelFrame.current);
       if (environmentAnimationTimer.current !== undefined)
         clearTimeout(environmentAnimationTimer.current);
@@ -432,6 +445,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           ).reduce((width, panel) => width + panel.offsetWidth, 0);
           const width = Math.round(((layout.navigation ?? 0) / 100) * groupWidth);
           if (width < NAVIGATION_MIN_WIDTH || width > NAVIGATION_MAX_WIDTH) return;
+          navigationWidth.current = width;
           try {
             window.localStorage.setItem(NAVIGATION_WIDTH_STORAGE_KEY, String(width));
           } catch {
@@ -444,10 +458,12 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             <ResizablePanel
               id="navigation"
               className="collapsible-sidebar-viewport"
+              data-animate-width={navigationAnimating ? 'true' : undefined}
               panelRef={navigationPanel}
               collapsible
               collapsedSize="0px"
-              defaultSize={`${navigationWidth}px`}
+              defaultSize={`${navigationWidth.current}px`}
+              groupResizeBehavior="preserve-pixel-size"
               minSize={`${NAVIGATION_MIN_WIDTH}px`}
               maxSize={`${NAVIGATION_MAX_WIDTH}px`}
             >

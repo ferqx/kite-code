@@ -178,8 +178,13 @@ body {
     height: 100%;
     min-height: 0;
   }
-  .client-panels > #navigation,
+  .client-panels > #navigation {
+    transition: none;
+  }
   .client-panels > #details {
+    transition: flex-grow 180ms ease-out;
+  }
+  .client-panels > #navigation[data-animate-width='true'] {
     transition: flex-grow 180ms ease-out;
   }
   .collapsible-sidebar-content {
