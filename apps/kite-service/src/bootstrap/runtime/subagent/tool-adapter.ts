@@ -267,6 +267,7 @@ function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | u
   if (state && input.modelInvocationParentReservationId && !budget)
     throw new DescendantResourceAdmissionError('reconciliation_required');
   if (budget?.status !== 'active') return configured;
+  if (budget.budget.durationOnlyChildRun === true) return configured;
   const remaining =
     budget.budget.maxRunOutputTokens - committedResourceUsage(budget).counters.outputTokens;
   if (remaining <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
@@ -588,6 +589,8 @@ async function executeCoreSubagentToolAdapter(
       throw new Error('ModelInvocationGateway execution context is unavailable.');
     }
     const resourceBudget = input.modelInvocationPersistence.getState().resourceBudget;
+    const ignoreNonSafetyCeilings =
+      resourceBudget.status === 'active' && resourceBudget.budget.durationOnlyChildRun === true;
     const modelLoop = createBuiltinSubagentModelLoopEngine<
       RuntimeState,
       RuntimeEvent,
@@ -737,6 +740,7 @@ async function executeCoreSubagentToolAdapter(
                 mode: 'model_correction',
                 taskId: recoveryScopeId,
                 turnId: recoveryScopeId,
+                ignoreNonSafetyCeilings,
               });
               if (admission.admitted && admission.recoveryOf) {
                 toolRecovery = recordRecoveryInvocation(toolRecovery, {
@@ -837,6 +841,7 @@ async function executeCoreSubagentToolAdapter(
                   mode: 'model_correction',
                   taskId: recoveryScopeId,
                   turnId: recoveryScopeId,
+                  ignoreNonSafetyCeilings,
                 });
                 if (admission.admitted && admission.recoveryOf) {
                   toolRecovery = recordRecoveryInvocation(toolRecovery, {
@@ -955,6 +960,7 @@ async function executeCoreSubagentToolAdapter(
               mode: 'model_correction',
               taskId: recoveryScopeId,
               turnId: recoveryScopeId,
+              ignoreNonSafetyCeilings,
             });
             const recoveryOf = recoveryAdmission.recoveryOf;
             if (!recoveryAdmission.admitted) {

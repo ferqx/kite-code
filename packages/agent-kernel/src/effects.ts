@@ -18,7 +18,7 @@ export type RuntimeEffect =
       readonly type: 'call_model';
       readonly resourceEstimate?: {
         readonly inputTokens: number;
-        readonly maxOutputTokens: number;
+        readonly maxOutputTokens?: number;
       };
     }
   | { readonly type: 'compact_context'; readonly compactionId: string }

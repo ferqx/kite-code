@@ -15,17 +15,22 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-test('an exhausted child Provider attempt marks the required parent Run unknown without task_read', async () => {
+test('child Provider retries keep the required parent waiting and then complete without an attempt cap', async () => {
   const fixture = await createFixture('required-child-failure');
   const { model, runtime, storage, sessionId } = fixture;
   const parentInput = 'Start one required failing child and wait for it.';
   let parentRequests = 0;
+  let childRequests = 0;
   model.setResponses(
     Array.from({ length: 12 }, () => ({
       response: ({ messages }: { messages: readonly unknown[] }) => {
         const request = JSON.stringify(messages);
-        if (request.includes('REQUIRED_CHILD_FAILURE') && !request.includes(parentInput))
-          return { error: 'injected child provider failure' };
+        if (request.includes('REQUIRED_CHILD_FAILURE') && !request.includes(parentInput)) {
+          childRequests += 1;
+          return childRequests <= 2
+            ? { error: 'injected child provider failure' }
+            : { message: { content: 'The child recovered after two Provider retries.' } };
+        }
         parentRequests += 1;
         if (parentRequests === 1)
           return {
@@ -47,7 +52,7 @@ test('an exhausted child Provider attempt marks the required parent Run unknown 
             toolContinuation: 'required' as const,
           };
         return {
-          message: { content: 'The parent must remain waiting for its required child.' },
+          message: { content: 'The required child completed successfully.' },
           expectedRequest: { toolResults: [{ toolCallId: 'required-failing-child' }] },
         };
       },
@@ -58,26 +63,30 @@ test('an exhausted child Provider attempt marks the required parent Run unknown 
     await createAndStart(runtime, fixture, parentInput);
     const active = await waitForActiveRun(storage, sessionId);
     const originRunId = active.runId;
-    await waitFor(() => storage.loadCurrentSnapshot(sessionId)?.turn.status !== 'active');
-
-    const snapshot = storage.loadCurrentSnapshot(sessionId);
+    await waitFor(() =>
+      storage.storage.sessions
+        .loadEventsStrict(sessionId)
+        .some(({ event }) => event.type === 'resource_budget.required_child_wait_started'),
+    );
     const events = storage.storage.sessions.loadEventsStrict(sessionId).map(({ event }) => event);
-    expect(storage.storage.runs?.get(sessionId, originRunId)).toMatchObject({
-      runId: originRunId,
-      status: 'unknown',
-      terminal: { reasonCode: 'unknown', safeRetry: false, recoveryEntry: 'reconcile' },
-    });
-    expect(snapshot?.turn.status).toBe('aborted');
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'subagent.child_terminal_imported',
-      }),
+    const childSessionId = events.find(
+      (event) => event.type === 'subagent.child_session_intended',
+    )?.childThreadId;
+    if (!childSessionId) throw new Error('Required child Session was not created.');
+    await waitFor(() =>
+      storage.storage.sessions
+        .loadEventsStrict(childSessionId)
+        .some(({ event }) => event.type === 'model.retry' && event.attempt >= 2),
     );
-    expect(events).toContainEqual(
-      expect.objectContaining({ type: 'subagent.background_result_persisted' }),
+    const childEvents = storage.storage.sessions
+      .loadEventsStrict(childSessionId)
+      .map(({ event }) => event);
+    expect(childEvents).toContainEqual(
+      expect.objectContaining({ type: 'model.retry', maxAttempts: Number.MAX_SAFE_INTEGER }),
     );
+    expect(storage.storage.runs?.getActive(sessionId)?.runId).toBe(originRunId);
+    expect(events.some((event) => event.type === 'subagent.child_terminal_imported')).toBe(false);
     expect(parentRequests).toBe(2);
-    expect(model.getRequestCount()).toBe(7);
     expect(
       model
         .getRequests()
@@ -92,6 +101,15 @@ test('an exhausted child Provider attempt marks the required parent Run unknown 
           ),
         ),
     ).toBe(false);
+    await waitFor(() => storage.loadCurrentSnapshot(sessionId)?.turn.status === 'completed');
+    await waitFor(() => !storage.storage.runs?.getActive(childSessionId));
+    expect(storage.loadCurrentSnapshot(childSessionId)?.turn.status).toBe('completed');
+    expect(childRequests).toBe(3);
+    expect(
+      storage.storage.sessions
+        .loadEventsStrict(sessionId)
+        .some(({ event }) => event.type === 'subagent.child_terminal_imported'),
+    ).toBe(true);
   } finally {
     await fixture.dispose();
   }

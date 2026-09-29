@@ -109,7 +109,7 @@ export interface BuiltinPrimaryAutoCompactionFacts {
 
 export interface BuiltinPrimaryModelResourceAdmission {
   readonly inputTokens: number;
-  readonly maxOutputTokens: number;
+  readonly maxOutputTokens?: number;
 }
 
 export interface BuiltinPrimaryCapabilityBindingFacts {
@@ -177,7 +177,7 @@ export interface BuiltinPreparedPrimaryModelResumeInput<
   readonly expectedRouteFingerprint: string;
   readonly surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
   readonly surfaceIntegrityIdentifier: string;
-  readonly hardAttemptTimeoutMs: number;
+  readonly hardAttemptTimeoutMs?: number;
   readonly beforeDispatch: Parameters<
     ModelInvocationGateway['resumePrepared']
   >[0]['beforeDispatch'];
@@ -387,7 +387,6 @@ export async function executeBuiltinPrimaryModelEffect<
             });
             if (
               !Array.isArray(prepared.frames) ||
-              prepared.frames.length > 8 ||
               prepared.frames.some(
                 (frame) =>
                   frame.type !== 'human' ||

@@ -197,13 +197,19 @@ test('recovery rejects a changed persisted ceiling and never extends its duratio
   ).toThrow();
 });
 
-test('recovery grants a new 30-minute child turn after the parent deadline only with the persisted marker', () => {
+test.each([
+  false,
+  true,
+])('recovery grants a new 30-minute child turn after the parent deadline with duration-only %p', (durationOnlyChildRun) => {
   const base = fixture();
   const upper = {
     ...base.upper,
     unboundedToolInvocations: true as const,
     independentChildTurnDeadline: true as const,
-    counters: { ...base.upper.counters, toolInvocations: 0 },
+    ...(durationOnlyChildRun ? { durationOnlyChildRun: true as const } : {}),
+    counters: durationOnlyChildRun
+      ? createZeroResourceUsage().counters
+      : { ...base.upper.counters, toolInvocations: 0 },
     gauges: {
       ...base.upper.gauges,
       elapsedRunMs: 30 * 60_000,
@@ -229,6 +235,7 @@ test('recovery grants a new 30-minute child turn after the parent deadline only 
   };
   const intent = {
     ...base.intent,
+    role: durationOnlyChildRun ? ('code' as const) : base.intent.role,
     delegatedReservationId: reservationId,
     delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(upper),
     delegatedUpperBoundJson: JSON.stringify(upper),
@@ -243,8 +250,19 @@ test('recovery grants a new 30-minute child turn after the parent deadline only 
   expect(result.childDeadlineAt).toBe(new Date(nowMs + 30 * 60_000).toISOString());
   expect(result.childBudget.maxRunDurationMs).toBe(30 * 60_000);
   expect(result.childBudget.maxToolInvocations).toBe(0);
-  expect(result.childBudget.maxConcurrentToolInvocations).toBe(1);
+  expect(result.childBudget.maxConcurrentToolInvocations).toBe(
+    durationOnlyChildRun ? Number.MAX_SAFE_INTEGER : 1,
+  );
+  expect(result.childBudget.maxConcurrentShellInvocations).toBe(
+    durationOnlyChildRun ? Number.MAX_SAFE_INTEGER : 0,
+  );
   expect(result.childBudget.unboundedToolInvocations).toBe(true);
+  expect(result.childBudget.durationOnlyChildRun).toBe(durationOnlyChildRun ? true : undefined);
+  if (durationOnlyChildRun) {
+    expect(result.childBudget.maxModelRequests).toBe(0);
+    expect(result.childBudget.maxRunInputTokens).toBe(0);
+    expect(result.childBudget.maxConcurrentWriters).toBe(Number.MAX_SAFE_INTEGER);
+  }
   expect(() =>
     recoverChildDelegatedBudget({
       intent: { ...intent, delegatedUpperBoundJson: JSON.stringify(base.upper) },

@@ -38,6 +38,7 @@ export async function submitRealParentFollowup(
   }: CompletedChildOrchestrationFixture,
   body: string,
   legacyV1Admission = false,
+  toolCallId = 'followup-tool',
 ) {
   model.setResponses([
     {
@@ -45,7 +46,7 @@ export async function submitRealParentFollowup(
         message: {
           tool_calls: [
             {
-              id: 'followup-tool',
+              id: toolCallId,
               name: 'followup_task',
               args: { agent_id: childSessionId, message: body },
             },
@@ -76,7 +77,7 @@ export async function submitRealParentFollowup(
     }),
   );
   const state = parentCoordinator.getState();
-  expect(state.tools.calls['followup-tool']).toMatchObject({
+  expect(state.tools.calls[toolCallId]).toMatchObject({
     name: 'followup_task',
     status: 'queued',
   });
@@ -84,12 +85,12 @@ export async function submitRealParentFollowup(
   const abort = new AbortController();
   const lease = parentCoordinator.session.beginEffect({
     type: 'run_tools',
-    toolCallIds: ['followup-tool'],
+    toolCallIds: [toolCallId],
   });
   expect(
     parentCoordinator.session.applyEffectEvents(
       lease,
-      [{ type: 'tool.started', toolCallId: 'followup-tool' }],
+      [{ type: 'tool.started', toolCallId }],
       'attempt_start',
     ),
   ).toBe(true);
@@ -251,26 +252,30 @@ export async function submitRealParentFollowup(
     currentRunId: () =>
       parentCoordinator.session.getLifecycleProjection().currentRun?.runId ?? null,
     storage,
-    toolCallId: 'followup-tool',
+    toolCallId,
     signal: abort.signal,
     authorizeFollowup: ({ state: current, preparedPolicyDigest }) => ({
       phaseCeiling: 'building',
       authorizationDigest: Object.values(current.capabilities.invocations).find(
-        (item) => item.toolCallId === 'followup-tool',
+        (item) => item.toolCallId === toolCallId,
       )!.authorizationDigest,
       admissionDigest: Object.values(current.capabilities.invocations).find(
-        (item) => item.toolCallId === 'followup-tool',
+        (item) => item.toolCallId === toolCallId,
       )!.admissionDigest!,
       effectiveEffectsDigest: Object.values(current.capabilities.invocations).find(
-        (item) => item.toolCallId === 'followup-tool',
+        (item) => item.toolCallId === toolCallId,
       )!.effectiveEffectsDigest,
       capabilityDigest: current.capabilities.catalogRevision,
       policyRevision: preparedPolicyDigest,
       workspaceDigest: current.session.canonicalWorkspaceDigest!,
       interactionModeRevision: current.interactionModeRevision,
-      contextWindowTokens: bridgeInput.config.modelCapabilities?.contextWindowTokens ?? 4_096,
-      maxOutputTokens: bridgeInput.config.modelCapabilities?.maxOutputTokens ?? 64,
-      firstAttemptTimeoutMs: 10_000,
+      ...(legacyV1Admission
+        ? {
+            contextWindowTokens: bridgeInput.config.modelCapabilities?.contextWindowTokens ?? 4_096,
+            maxOutputTokens: bridgeInput.config.modelCapabilities?.maxOutputTokens ?? 64,
+            firstAttemptTimeoutMs: 10_000,
+          }
+        : {}),
       boundedContext: true,
     }),
   });
@@ -289,7 +294,7 @@ export async function submitRealParentFollowup(
   });
   const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
   const catalog = createBuiltinToolCatalogProjection(registry.snapshot());
-  const call = parentCoordinator.getState().tools.calls['followup-tool']!;
+  const call = parentCoordinator.getState().tools.calls[toolCallId]!;
   const context = createAppToolTurnContext({
     workspace,
     config: bridgeInput.config,
@@ -411,9 +416,9 @@ export async function submitRealParentFollowup(
   const sourceEvents = owner.storage.sessions
     .loadEventsStrict(parentSessionId)
     .map(({ event }) => event);
-  const accepted = sourceEvents.find(
-    (event) => event.type === 'agent.mail_accepted' && event.mode === 'trigger_turn',
-  );
+  const accepted = [...sourceEvents]
+    .reverse()
+    .find((event) => event.type === 'agent.mail_accepted' && event.mode === 'trigger_turn');
   expect(accepted?.type).toBe('agent.mail_accepted');
   if (accepted?.type !== 'agent.mail_accepted' || !accepted.submissionId)
     throw new Error('The real parent Tool did not durably accept followup.');

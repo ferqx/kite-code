@@ -198,7 +198,8 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     expect(upper).toMatchObject({
       independentFollowupTurn: true,
       unboundedToolInvocations: true,
-      counters: { turns: 1, modelRequests: 24, toolInvocations: 0 },
+      durationOnlyChildRun: true,
+      counters: { turns: 0, modelRequests: 0, toolInvocations: 0 },
       gauges: {
         elapsedRunMs: 1_800_000,
         activeSubagents: 1,
@@ -242,10 +243,11 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
         budget: {
           ...LIMITED_RESOURCE_BUDGET_,
           maxRunDurationMs: 1_800_000,
-          maxTurns: 1,
+          maxTurns: 0,
           maxModelRequests: upper.counters.modelRequests,
           maxToolInvocations: 0,
           unboundedToolInvocations: true,
+          durationOnlyChildRun: true,
           maxRunInputTokens: upper.counters.inputTokens,
           maxRunOutputTokens: upper.counters.outputTokens,
           maxArtifactBytes: upper.counters.artifactBytes,
@@ -325,6 +327,58 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
         },
       }),
     ).toThrow('source envelope');
+
+    // Persisted v2 grants created before duration-only child Runs retain their
+    // finite counters and must still activate under their original authority.
+    const { durationOnlyChildRun: _upperMarker, ...legacyUpperFields } = upper;
+    const legacyUpper = {
+      ...legacyUpperFields,
+      counters: {
+        ...upper.counters,
+        turns: 1,
+        modelRequests: 3,
+        inputTokens: 500,
+        outputTokens: 60,
+        artifactBytes: 4096,
+      },
+    };
+    const { durationOnlyChildRun: _budgetMarker, ...legacyBudgetFields } =
+      activeTargetBudget.budget;
+    const legacyFunded = {
+      ...funded,
+      resourceBudget: {
+        ...funded.resourceBudget,
+        reservations: {
+          ...funded.resourceBudget.reservations,
+          [planned.admission.backupReservationId]: {
+            ...funded.resourceBudget.reservations[planned.admission.backupReservationId]!,
+            executableUpperBound: legacyUpper,
+          },
+        },
+      },
+    } as AgentState;
+    const legacyTarget = {
+      ...targetState,
+      resourceBudget: {
+        ...activeTargetBudget,
+        budget: {
+          ...legacyBudgetFields,
+          maxTurns: 1,
+          maxModelRequests: 3,
+          maxRunInputTokens: 500,
+          maxRunOutputTokens: 60,
+          maxArtifactBytes: 4096,
+        },
+      },
+    } as AgentState;
+    expect(
+      planCrossSessionIndependentTurnActivation({
+        ...input,
+        fundingState: legacyFunded,
+        targetState: legacyTarget,
+        admission: { ...planned.admission, executableUpperBound: legacyUpper },
+      }).status,
+    ).toBe('planned');
   });
   test('v2 followups share subagent capacity without holding Tool or Shell slots', () => {
     const base = source();
@@ -365,7 +419,7 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     expect(committedResourceUsage(fundingState.resourceBudget).gauges.activeSubagents).toBe(2);
   });
 
-  test('v2 code followup reserves one writer under the original role', () => {
+  test('v2 code followup uses only a subagent slot under the original role', () => {
     const sourceState = source();
     const planned = planCrossSessionTriggerTurnBackup({
       ...backupInput(),
@@ -378,9 +432,54 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
       },
     });
     if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
-    expect(planned.admission.executableUpperBound.gauges.activeWriters).toBe(1);
+    expect(planned.admission.executableUpperBound.gauges.activeWriters).toBe(0);
     expect(planned.admission.executableUpperBound.counters.toolInvocations).toBe(0);
     expect(planned.admission.executableUpperBound.unboundedToolInvocations).toBe(true);
+  });
+  test('new v2 followup can acquire its own slot after an unrelated reservation became unknown', () => {
+    const base = source();
+    const unrelated = createZeroResourceUsage('versioned_upper_bound', 'unrelated-unknown-v1');
+    let budget = reduceResourceBudgetState(base.resourceBudget, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        version: 1,
+        reservationId: 'unrelated',
+        runId: 'funding-run',
+        invocationId: 'unrelated',
+        resourceKind: 'subagent',
+        executableUpperBound: unrelated,
+        state: 'reserved',
+      },
+    });
+    budget = reduceResourceBudgetState(budget, {
+      type: 'resource_budget.unknown',
+      reservationId: 'unrelated',
+    });
+    const sourceState = { ...base, resourceBudget: budget };
+    const planned = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState,
+      policy: {
+        ...policy(sourceState),
+        executionMode: 'independent_turn_v2',
+        targetRole: 'explore',
+        targetGrantDigest: `sha256:${'e'.repeat(64)}`,
+      },
+    });
+    if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
+    budget = reduceResourceBudgetState(budget, planned.reservationEvent);
+    const slot = planCrossSessionFollowupSlotAcquisition({
+      sourceState: { ...sourceState, resourceBudget: budget },
+      sourceSessionId: 'source',
+      fundingRunId: 'funding-run',
+      submissionId: 'submission',
+      backupReservationId: planned.admission.backupReservationId,
+    });
+    expect(slot.status).toBe('ready');
+    if (slot.status !== 'ready') throw new Error('V2 slot was unavailable.');
+    budget = reduceResourceBudgetState(budget, slot.event);
+    expect(budget.reservations[planned.admission.backupReservationId]?.state).toBe('reserved');
+    expect(budget.reservations.unrelated?.state).toBe('unknown');
   });
   test('plans one deterministic source-funded backup after receipt preflight', () => {
     const input = backupInput();

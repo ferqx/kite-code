@@ -1,5 +1,4 @@
 import type { SubagentTaskArtifact, SubagentTaskRequestArtifact } from '@kite-ai/runtime-spi';
-import { SUBAGENT_TASK_ARTIFACT_MAX_BYTES } from '@kite-ai/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,
@@ -10,7 +9,6 @@ import {
 import { subagentTaskArtifactRoot } from './artifact-paths';
 import { subagentTaskDigest } from './continuation-codec';
 
-const DEFAULT_MAX_BYTES = SUBAGENT_TASK_ARTIFACT_MAX_BYTES;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/u;
 
@@ -34,7 +32,6 @@ export interface SubagentTaskArtifactStoreOptions {
   readonly backend?: PrivateImmutableArtifactStorageBackend<
     'subagent_task_request' | 'subagent_task'
   >;
-  readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
   readonly secureWindowsPath?: (path: string) => void;
   readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
@@ -73,7 +70,7 @@ export interface SubagentResultArtifactAccess {
   }>[];
 }
 
-/** Bounded immutable terminal report store. Repeated reads never consume Provider observation. */
+/** Immutable terminal report store. Repeated reads never consume Provider observation. */
 export class SubagentResultArtifactStore implements SubagentResultArtifactAccess {
   readonly #storage: PrivateImmutableArtifactStorage<'subagent_task'>;
   constructor(
@@ -88,7 +85,6 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
         : { root: options.root ?? subagentTaskArtifactRoot() }),
       namespace: 'subagent-tasks',
       partitions: [{ kind: 'subagent_task', directory: 'results', extension: '.json' }],
-      maxArtifactBytes: DEFAULT_MAX_BYTES,
     });
   }
   write(input: {
@@ -107,10 +103,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
         'invalid_task',
         'Subagent result owner identity is invalid.',
       );
-    if (
-      input.displayName !== undefined &&
-      (input.displayName.length === 0 || input.displayName.length > 256)
-    )
+    if (input.displayName !== undefined && input.displayName.length === 0)
       throw new SubagentTaskArtifactError(
         'invalid_task',
         'Subagent result display name is invalid.',
@@ -171,9 +164,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
         value.artifactFormatVersion !== 1 ||
         value.taskId !== taskId ||
         (value.displayName !== undefined &&
-          (typeof value.displayName !== 'string' ||
-            value.displayName.length === 0 ||
-            value.displayName.length > 256)) ||
+          (typeof value.displayName !== 'string' || value.displayName.length === 0)) ||
         !value.result ||
         typeof value.result !== 'object' ||
         Array.isArray(value.result)
@@ -246,7 +237,6 @@ export class SubagentTaskRequestArtifactStore implements SubagentTaskRequestArti
             extension: '.json',
           },
         ],
-        maxArtifactBytes: DEFAULT_MAX_BYTES,
       });
     } catch (error) {
       throw mapStorageError(error, 'storage_boundary_violation');
@@ -404,7 +394,6 @@ export class SubagentTaskArtifactStore implements SubagentTaskArtifactAccess {
           : { root: this.#options.root ?? subagentTaskArtifactRoot() }),
         namespace: 'subagent-tasks',
         partitions: [{ kind: 'subagent_task', directory: 'tasks', extension: '.json' }],
-        maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
         ...(this.#options.platform ? { platform: this.#options.platform } : {}),
         ...(this.#options.secureWindowsPath
           ? { secureWindowsPath: this.#options.secureWindowsPath }
@@ -473,8 +462,7 @@ function validateRequestPayload(value: unknown): Readonly<{
     value.artifactFormatVersion !== 1 ||
     typeof value.name !== 'string' ||
     value.name.trim() !== value.name ||
-    value.name.length < 2 ||
-    value.name.length > 80 ||
+    value.name.length < 1 ||
     /[\r\n]/u.test(value.name) ||
     typeof value.parentModelInvocationId !== 'string' ||
     !SAFE_ID.test(value.parentModelInvocationId) ||

@@ -577,12 +577,20 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
     case 'agent.followup_turn_prepared': {
       const origin = state.childSessionOrigin;
       if (
-        origin?.terminal?.status !== 'completed' ||
+        (origin?.terminal?.status !== 'completed' &&
+          !(
+            origin?.terminal?.status === 'unknown' &&
+            event.checkpointRef === undefined &&
+            Number.isSafeInteger(event.sourceRevision) &&
+            typeof event.sourceStateDigest === 'string'
+          )) ||
         origin.parentSessionId !== event.sourceSessionId ||
         state.activeFollowupTurn ||
         state.activeTaskId !== null ||
-        state.terminalOutcome?.status !== 'completed' ||
-        state.turn.status !== 'completed' ||
+        (state.terminalOutcome?.status !== 'completed' &&
+          !(state.terminalOutcome?.status === 'unknown' && event.checkpointRef === undefined)) ||
+        (state.turn.status !== 'completed' &&
+          !(state.turn.status === 'aborted' && event.checkpointRef === undefined)) ||
         state.turn.turnId === event.targetRunId ||
         state.tasks[event.taskId]
       )
@@ -594,7 +602,9 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
           submissionId: event.submissionId,
           targetRunId: event.targetRunId,
           taskId: event.taskId,
-          checkpointRef: event.checkpointRef,
+          ...(event.checkpointRef ? { checkpointRef: event.checkpointRef } : {}),
+          ...(event.sourceRevision !== undefined ? { sourceRevision: event.sourceRevision } : {}),
+          ...(event.sourceStateDigest ? { sourceStateDigest: event.sourceStateDigest } : {}),
           grantRef: event.grantRef,
           grantDigest: event.grantDigest,
         },

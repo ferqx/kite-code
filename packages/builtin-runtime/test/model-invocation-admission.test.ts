@@ -37,8 +37,13 @@ function ref<K extends 'model_surface' | 'model_response'>(
   };
 }
 
-function fixture(admitted = true, maxOutputTokens?: number) {
+function fixture(
+  admitted = true,
+  maxOutputTokens?: number,
+  options: { durationOnlyChildRun?: boolean; retryableFailures?: number } = {},
+) {
   const order: string[] = [];
+  let providerCalls = 0;
   const batches: Array<{
     invocationId: string;
     events: readonly { type: string }[];
@@ -54,6 +59,15 @@ function fixture(admitted = true, maxOutputTokens?: number) {
   const source: ModelResponseSource = {
     attempt: async () => {
       order.push('provider');
+      providerCalls += 1;
+      if (providerCalls <= (options.retryableFailures ?? 0)) {
+        return {
+          schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+          kind: 'retryable_failure',
+          classification: 'provider_unavailable',
+          retryObservation: { providerStatusCode: 503, timedOut: false },
+        };
+      }
       return {
         schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
         kind: 'success',
@@ -71,6 +85,7 @@ function fixture(admitted = true, maxOutputTokens?: number) {
     artifacts,
     source,
     operationExecution: { execute: (attempt) => attempt.attempt() },
+    sleep: async () => {},
     runtimeIdSource: { next: () => 'admission-invocation-1', now: () => 1_000 },
     planResource: (_state, input) => {
       order.push(`plan:${input.invocationId}:${input.inputTokens}`);
@@ -86,7 +101,9 @@ function fixture(admitted = true, maxOutputTokens?: number) {
       revision: 1,
       session: { threadId: 'admission-thread' },
       turn: { turnId: 'admission-turn' },
-      resourceBudget: { status: 'unconfigured' },
+      resourceBudget: options.durationOnlyChildRun
+        ? { status: 'active', budget: { durationOnlyChildRun: true } }
+        : { status: 'unconfigured' },
     }),
     persistEvents: async (events) => {
       order.push(`events:${events.map((event) => event.type).join(',')}`);
@@ -101,10 +118,43 @@ function fixture(admitted = true, maxOutputTokens?: number) {
   const invoke = (
     prepareSurface: Parameters<ModelInvocationGateway['invoke']>[0]['prepareSurface'],
   ) => gateway.invoke({ model, prepareSurface, persistence, provenance, resourceKind: 'model' });
-  return { invoke, order, batches, persistence };
+  return { invoke, order, batches, persistence, providerCalls: () => providerCalls };
 }
 
 describe('Gateway prepared Surface admission', () => {
+  test('retries a duration-only child beyond the legacy five-attempt ceiling', async () => {
+    const value = fixture(true, undefined, {
+      durationOnlyChildRun: true,
+      retryableFailures: 6,
+    });
+    const pending = await value.invoke(() => ({
+      compiled: compileModelSurface({
+        purpose: 'subagent',
+        config,
+        model,
+        messages: [humanMessage('finish child task')],
+        tools: {},
+        estimatedInputTokens: 8,
+      }),
+    }));
+    await pending.commit();
+    expect(value.providerCalls()).toBe(7);
+
+    const legacy = fixture(true, undefined, { retryableFailures: 6 });
+    await expect(
+      legacy.invoke(() => ({
+        compiled: compileModelSurface({
+          purpose: 'subagent',
+          config,
+          model,
+          messages: [humanMessage('finish child task')],
+          tools: {},
+          estimatedInputTokens: 8,
+        }),
+      })),
+    ).rejects.toThrow();
+    expect(legacy.providerCalls()).toBe(5);
+  });
   test('allocates once, compiles before publication, and atomically acknowledges mail with model preparation', async () => {
     const value = fixture();
     let prepareCalls = 0;

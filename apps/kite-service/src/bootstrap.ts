@@ -2404,13 +2404,18 @@ export function createKiteMultiWorkspaceRuntimeServer(
                       scope.effectAttemptId ||
                     !preparedPolicyDigest ||
                     !/^sha256:[a-f0-9]{64}$/u.test(state.session.canonicalWorkspaceDigest ?? '') ||
-                    !state.capabilities.catalogRevision ||
-                    !Number.isSafeInteger(caps?.contextWindowTokens) ||
-                    !Number.isSafeInteger(caps?.maxOutputTokens) ||
-                    (caps?.contextWindowTokens ?? 0) <= (caps?.maxOutputTokens ?? 0) ||
-                    (caps?.maxOutputTokens ?? 0) < 1
+                    !state.capabilities.catalogRevision
                   )
                     return null;
+                  const contextWindowTokens =
+                    Number.isSafeInteger(caps?.contextWindowTokens) &&
+                    (caps?.contextWindowTokens ?? 0) > 0
+                      ? caps!.contextWindowTokens
+                      : undefined;
+                  const maxOutputTokens =
+                    Number.isSafeInteger(caps?.maxOutputTokens) && (caps?.maxOutputTokens ?? 0) > 0
+                      ? caps!.maxOutputTokens
+                      : undefined;
                   return {
                     phaseCeiling: getAgentPhase(runtimeHostStateActivePlanning(state)),
                     authorizationDigest: invocation.authorizationDigest,
@@ -2420,9 +2425,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
                     policyRevision: preparedPolicyDigest,
                     workspaceDigest: state.session.canonicalWorkspaceDigest!,
                     interactionModeRevision: state.interactionModeRevision,
-                    contextWindowTokens: caps!.contextWindowTokens!,
-                    maxOutputTokens: caps!.maxOutputTokens!,
-                    firstAttemptTimeoutMs: 60_000,
+                    ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+                    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
                     boundedContext: true as const,
                   };
                 },
@@ -2563,7 +2567,15 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 {
                   ...bridgeInput,
                   ...(independentChildren ? { childSessionAcceptance: independentChildren } : {}),
-                  onCommittedCancel: () => {
+                  onCommittedCancel: (runId) => {
+                    try {
+                      independentChildren?.cancelOriginRun?.(runId);
+                    } catch (error) {
+                      console.error('Cancelled child Run still requires recovery.', {
+                        runId,
+                        errorName: error instanceof Error ? error.name : 'UnknownError',
+                      });
+                    }
                     if (mailRecoveryClosing || !scanPendingTerminalReplies) return;
                     void Promise.resolve()
                       .then(() =>

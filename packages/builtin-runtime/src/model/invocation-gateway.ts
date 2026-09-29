@@ -41,7 +41,10 @@ export interface ModelInvocationStateView {
   readonly revision: number;
   readonly session: { readonly threadId: string; readonly projectId?: string };
   readonly turn: { readonly turnId: string };
-  readonly resourceBudget?: { readonly status: string };
+  readonly resourceBudget?: {
+    readonly status: string;
+    readonly budget?: { readonly durationOnlyChildRun?: boolean };
+  };
 }
 
 /** Minimum durable facts required to resume one prepared, unattempted request. */
@@ -71,6 +74,7 @@ export interface ModelPreparedResumeStateView extends ModelInvocationStateView {
   >;
   readonly resourceBudget: Readonly<{
     status: string;
+    budget?: Readonly<{ durationOnlyChildRun?: boolean }>;
     runId?: string;
     reservations?: Readonly<
       Record<
@@ -83,6 +87,7 @@ export interface ModelPreparedResumeStateView extends ModelInvocationStateView {
           state: string;
           parentReservationId?: string;
           executableUpperBound: Readonly<{
+            unboundedModelTokens?: boolean;
             counters: Readonly<{
               modelRequests: number;
               inputTokens: number;
@@ -342,7 +347,6 @@ export class ModelInvocationGateway {
       throw new Error('Model mail preparation identity is invalid.');
     if (mailPreparation && !input.persistence.persistAdmission)
       throw new Error('Model mail preparation requires atomic admission persistence.');
-    const limits = normalizeLimits(input.limits);
     if (
       input.hardAttemptTimeoutMs !== undefined &&
       (!Number.isSafeInteger(input.hardAttemptTimeoutMs) || input.hardAttemptTimeoutMs <= 0)
@@ -357,6 +361,21 @@ export class ModelInvocationGateway {
     // only leave an immutable orphan eligible for reachability-based GC.
     const surfaceArtifact = this.#artifacts.writeSurface(compiled.surface);
     const state = input.persistence.getState();
+    // The child Run's durable deadline and cancellation signal own its retry
+    // horizon. Persist safe-integer sentinels so the legacy invocation record
+    // stays decodable without imposing another attempts/time budget.
+    const limits = normalizeLimits(
+      input.limits ??
+        (input.hardAttemptTimeoutMs === undefined &&
+        state.resourceBudget?.status === 'active' &&
+        state.resourceBudget.budget?.durationOnlyChildRun === true
+          ? {
+              maxAttempts: Number.MAX_SAFE_INTEGER,
+              perAttemptTimeoutMs: 0,
+              totalTimeBudgetMs: Number.MAX_SAFE_INTEGER,
+            }
+          : undefined),
+    );
 
     const resource = this.#planResource(state, {
       invocationId,
@@ -433,7 +452,7 @@ export class ModelInvocationGateway {
     readonly expectedRouteFingerprint: string;
     readonly surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
     readonly surfaceIntegrityIdentifier: string;
-    readonly hardAttemptTimeoutMs: number;
+    readonly hardAttemptTimeoutMs?: number;
     /** The target owner checks route plus source activation receipt before any attempt fact. */
     readonly beforeDispatch: (
       identity: Readonly<{
@@ -457,6 +476,13 @@ export class ModelInvocationGateway {
     const reservationId =
       prepared?.budget.kind === 'reservation' ? prepared.budget.reservationId : '';
     const reservation = state.resourceBudget.reservations?.[reservationId];
+    // A legacy current-turn proof can retain its single-attempt limit inside a
+    // duration-only child Run; its token reservation is still unbounded.
+    const durationOnlyBudget =
+      state.resourceBudget.status === 'active' &&
+      state.resourceBudget.budget?.durationOnlyChildRun === true &&
+      reservation?.executableUpperBound.unboundedModelTokens === true;
+    const durationOnlyPrepared = durationOnlyBudget && input.hardAttemptTimeoutMs === undefined;
     if (
       !prepared ||
       !input.invocationId ||
@@ -482,11 +508,15 @@ export class ModelInvocationGateway {
       prepared.surfaceArtifact.byteLength !== input.surfaceArtifact.byteLength ||
       prepared.surfaceIntegrityIdentifier !== input.surfaceIntegrityIdentifier ||
       prepared.surfaceIntegrityIdentifier !== input.surfaceArtifact.integrityIdentifier ||
-      prepared.limits.maxAttempts !== 1 ||
-      !Number.isSafeInteger(input.hardAttemptTimeoutMs) ||
-      input.hardAttemptTimeoutMs <= 0 ||
-      prepared.limits.perAttemptTimeoutMs !== input.hardAttemptTimeoutMs ||
-      prepared.limits.totalTimeBudgetMs !== input.hardAttemptTimeoutMs ||
+      (durationOnlyPrepared
+        ? prepared.limits.maxAttempts !== Number.MAX_SAFE_INTEGER ||
+          prepared.limits.perAttemptTimeoutMs !== 0 ||
+          prepared.limits.totalTimeBudgetMs !== Number.MAX_SAFE_INTEGER
+        : prepared.limits.maxAttempts !== 1 ||
+          !Number.isSafeInteger(input.hardAttemptTimeoutMs) ||
+          (input.hardAttemptTimeoutMs ?? 0) <= 0 ||
+          prepared.limits.perAttemptTimeoutMs !== input.hardAttemptTimeoutMs ||
+          prepared.limits.totalTimeBudgetMs !== input.hardAttemptTimeoutMs) ||
       state.resourceBudget.status !== 'active' ||
       state.resourceBudget.runId !== input.expectedTurnId ||
       !reservation ||
@@ -498,7 +528,8 @@ export class ModelInvocationGateway {
       (reservation.parentReservationId ?? null) !== prepared.budget.parentReservationId ||
       reservation.executableUpperBound.counters.modelRequests !== 1 ||
       !Number.isSafeInteger(reservation.executableUpperBound.counters.inputTokens) ||
-      prepared.estimatedInputTokens! > reservation.executableUpperBound.counters.inputTokens ||
+      (!durationOnlyBudget &&
+        prepared.estimatedInputTokens! > reservation.executableUpperBound.counters.inputTokens) ||
       !Number.isSafeInteger(reservation.executableUpperBound.counters.outputTokens)
     )
       throw new Error('Prepared Model invocation has stale or attempted durable authority.');
@@ -515,9 +546,12 @@ export class ModelInvocationGateway {
       verifiedRef.byteLength !== input.surfaceArtifact.byteLength ||
       surface.purpose !== prepared.purpose ||
       surface.route.routeFingerprint !== prepared.routeFingerprint ||
-      surface.request.maxOutputTokens === null ||
-      surface.request.maxOutputTokens === undefined ||
-      surface.request.maxOutputTokens > reservation.executableUpperBound.counters.outputTokens
+      (!durationOnlyBudget &&
+        (surface.request.maxOutputTokens === null ||
+          surface.request.maxOutputTokens === undefined)) ||
+      (surface.request.maxOutputTokens != null &&
+        !durationOnlyBudget &&
+        surface.request.maxOutputTokens > reservation.executableUpperBound.counters.outputTokens)
     )
       throw new Error('Prepared Model Surface differs from its durable artifact.');
     const surfaceDigest = computeModelSurfaceDigest(surface);

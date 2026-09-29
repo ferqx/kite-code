@@ -15,15 +15,21 @@ compiled model surface 确定 messages、tools 和请求设置，以 digest 绑�
 
 ## 调用与证据
 
-Gateway 组织 model invocation identity、resource preparation、attempt 与 response record。Host 完成所需 acknowledgement 后才调用 Provider；attempt 结果、私有证据与 terminal facts 按原 identity 关联。具体超时和重试参数以 gateway 当前代码为准，不从历史文档恢复旧的 per-attempt 定时机制。
+Gateway 组织 model invocation identity、resource preparation、attempt 与 response record。Host 完成所需 acknowledgement 后才调用 Provider；attempt 结果、私有证据与 terminal facts 按原 identity 关联。新 `durationOnlyChildRun` 的模型请求在未显式指定单次硬超时时，以子 Run 的持久截止时间和取消信号管理临时 Provider 错误重试；旧的默认 5 次／60 秒尝试额度不截断该子 Run。无 Provider 或配置给出的输出 token 上限时，也不注入过去任意的本地 4096 token 默认值；Provider 声明的输出上限仍生效。已明确指定的单次硬超时和 Provider 自身的上下文／输出能力仍生效。其他 Run 沿原有模型重试界限执行。
 
-阶段 D 的 [Agent 邮箱输入](../src/model/invocation-gateway.ts)使用可选的 `prepareSurface(invocationId)`：Gateway 先分配准确 invocation ID，可信 Service 在当前执行 scope 内读取私有邮件并构造低权限帧，然后以包含邮件的冻结 Surface 计算模型预算。QueueOnly 邮件的 `persistAdmission` 在同一 Host/Store 事务内提交模型准备、预算准入和 `agent.mail_input_prepared` 水位；`followup_task` 的 `new_turn` 由新 grant 与新 Run 准入，受限 `current_turn` 则在准确旧 call_model lease 下把已准备旧 Run Surface 与路由、水位绑定，并待来源后备释放 ACK 后才派发。缺少对应持久事务端口会拒绝调用；普通无邮件调用保持原有 Surface 与持久化路径。默认独立父子 Session 的完整 Host Agent 通信 Port 已开放 `followup_task` 与 `interrupt_agent`，QueueOnly 端口仍只披露列表、等待和发送。
+阶段 D 的 [Agent 邮箱输入](../src/model/invocation-gateway.ts)使用可选的 `prepareSurface(invocationId)`：Gateway 先分配准确 invocation ID，可信 Service 在当前执行 scope 内读取私有邮件并构造低权限帧，然后以包含邮件的冻结 Surface 计算模型预算。QueueOnly 邮件的 `persistAdmission` 在同一 Host/Store 事务内提交模型准备、预算准入和 `agent.mail_input_prepared` 水位；`followup_task` 的 `new_turn` 由新 grant 与新 Run 准入，受限 `current_turn` 则在准确旧 call_model lease 下把已准备旧 Run Surface 与路由、水位绑定，并待来源后备释放 ACK 后才派发。缺少对应持久事务端口会拒绝调用；普通无邮件调用保持原有 Surface 与持久化路径。默认独立父子 Session 的完整 Host Agent 通信 Port 已开放 `followup_task` 与 `interrupt_agent`，QueueOnly 端口仍只披露列表、等待和发送。无 checkpoint 的新 v2 续轮若 grant 签有 `priorOutcomeUnknown`，Service 在首个冻结模型 Surface 加入执行状态观察提示：旧外部调用可能已生效，须检查持久记录和外部现状；这不把旧 attempt 重新派发。
 
 已持久准备但尚未尝试的目标模型请求可由 `resumePrepared` 使用原 invocation ID、原 Surface Artifact 与原预算 reservation 续派发。Gateway 核对准确 Turn／State revision、Surface ref／digest、prepared status／零 attempts、单次硬超时及持久 `estimatedInputTokens`，再调用目标 owner 提供的路由与来源资金 ACK 门禁；门禁确认后才提交同一 invocation 的 dispatch／attempt 事实。该入口不生成新 ID、Surface 或 prepared 事件，已有 attempt、unknown、缺失 Artifact／预算或旧格式缺少准确输入估计时失败封闭。`executeBuiltinPrimaryModelEffect` 的普通路径不改变；D3 的 route-only 与来源已释放两种 SIGKILL 窗口已验证同 ID、单次 Provider 派发。
+
+Model Surface／Response 私有 Artifact 不再使用默认 16 MiB 单件字节上限；写入和读取仍核对 canonical 内容、ref 字节长度与摘要。Provider 自身的上下文窗口和输出能力仍分别裁决请求与响应。
 
 模型流是累计 reasoning/text 与完成边界。partial tool call 不作为完整工具调用执行，完整响应再交给工具解析。取消、Provider 错误、surface 改变或持久化不可用分别形成明确结果，不用猜测填补缺失证据。
 
 持久 attempt acknowledgement 后、真正进入 Provider transport 前再检查一次取消信号；信号已取消就不发起 HTTP 请求。请求已经发出时，服务商仍可能继续处理并产生用量；本地取消后 Gateway 忽略迟到的文本和 reasoning 流回调，已关闭的 Runtime 事件通道不接收迟到的持久事实。
+
+## 子 Agent 私有产物与生命周期
+
+Builtin 的子任务请求、结果、checkpoint、continuation 与 lifecycle 私有 Artifact 不再在单件写入处施加固定字节上限；canonical JSON、owner 身份、摘要和读取完整性仍逐项校验。Provider 观察结果不再因摘要 100 万字符或私有 payload 4 MiB 固定阈值返回容量失败，但结构及 JSON 有效性仍须成立。子任务待注册记录、Provider 清理墓碑和已消费 grant 的内存表不再分别以 256／1024／4096 个固定数量提前拒绝；过期时间、grant 防重放和执行权核验仍生效。物理存储及 Provider 自身的能力边界独立于这些 Runtime 人为额度。
 
 ## 压缩
 

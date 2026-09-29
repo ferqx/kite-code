@@ -164,6 +164,10 @@ export function sealChildTerminalCheckpointInTransaction(
     : null;
   const prepared = priorPrepared ? parse(priorPrepared.event_json) : {};
   const previousRef = record(prepared.checkpointRef);
+  const priorCheckpointless =
+    followup &&
+    prepared.checkpointRef === undefined &&
+    verifiedCheckpointlessFollowupRun(database, sessionId, mutation.terminalRunId);
   const route = followup
     ? readCrossSessionFollowupRoute(database, sessionId, mutation.submissionId!)
     : null;
@@ -237,9 +241,10 @@ export function sealChildTerminalCheckpointInTransaction(
         prepared.taskId !== mutation.terminalTaskId ||
         prepared.sourceSessionId !== origin.parentSessionId ||
         !priorPrepared ||
-        node.artifact_id !== previousRef.artifactId ||
-        node.integrity !== previousRef.integrityIdentifier ||
-        node.byte_length !== previousRef.byteLength
+        (!priorCheckpointless &&
+          (node.artifact_id !== previousRef.artifactId ||
+            node.integrity !== previousRef.integrityIdentifier ||
+            node.byte_length !== previousRef.byteLength))
       : terminalEvent.type !== 'subagent.child_terminal_sealed' ||
         terminalEvent.status !== 'completed' ||
         mutation.terminalTaskId !== origin.childInvocationId ||
@@ -276,7 +281,8 @@ export function sealChildTerminalCheckpointInTransaction(
     ref.byteLength !== Buffer.byteLength(mutation.canonicalJson, 'utf8')
   )
     invalid();
-  if (followup && !readChildTerminalCheckpoint(database, sessionId)) unavailable();
+  if (followup && !readChildTerminalCheckpoint(database, sessionId) && !priorCheckpointless)
+    unavailable();
   if (node.artifact_id && !followup) {
     if (
       node.artifact_id !== ref.artifactId ||
@@ -304,9 +310,13 @@ export function sealChildTerminalCheckpointInTransaction(
       ref.integrityIdentifier,
       ref.byteLength,
       sessionId,
-      followup ? String(previousRef.artifactId) : null,
-      followup ? String(previousRef.integrityIdentifier) : null,
-      followup ? Number(previousRef.byteLength) : null,
+      priorCheckpointless ? node.artifact_id : followup ? String(previousRef.artifactId) : null,
+      priorCheckpointless
+        ? node.integrity
+        : followup
+          ? String(previousRef.integrityIdentifier)
+          : null,
+      priorCheckpointless ? node.byte_length : followup ? Number(previousRef.byteLength) : null,
     ).changes;
   if (changed !== 1) conflict();
   createKiteHomeArtifactStore(database).readSubagentCheckpoint(ref);
@@ -343,6 +353,7 @@ function validIndependentFollowupGrant(
   const upper = record(admission.executableUpperBound);
   const upperCounters = record(upper.counters);
   const upperGauges = record(upper.gauges);
+  const durationOnlyChildRun = upper.durationOnlyChildRun === true;
   const allowed = Array.isArray(grantPayload.allowedTools) ? grantPayload.allowedTools : [];
   const original = readChildSealedGrant(database, sourceSessionId, targetSessionId);
   const originalGrant = original ? parse(original.sealedGrantJson) : {};
@@ -372,7 +383,9 @@ function validIndependentFollowupGrant(
     ['maxRunInputTokens', upperCounters.inputTokens],
     ['maxRunOutputTokens', upperCounters.outputTokens],
     ['maxArtifactBytes', upperCounters.artifactBytes],
-    ['maxConcurrentWriters', upperGauges.activeWriters],
+    ...(durationOnlyChildRun
+      ? []
+      : ([['maxConcurrentWriters', upperGauges.activeWriters]] as [string, unknown][])),
     // A zero v2 gauge means Tool/Shell concurrency is not source funded.
     // Retain the bounded check for previously admitted v2 envelopes.
     ...(upperGauges.activeToolInvocations === 0 && upperGauges.activeShellInvocations === 0
@@ -410,6 +423,9 @@ function validIndependentFollowupGrant(
     upper.source === 'versioned_upper_bound' &&
     upper.independentFollowupTurn === true &&
     upper.unboundedToolInvocations === true &&
+    (durationOnlyChildRun
+      ? Object.values(upperCounters).every((value) => value === 0)
+      : upper.durationOnlyChildRun === undefined) &&
     upperCounters.toolInvocations === 0 &&
     upperGauges.elapsedRunMs === FOLLOWUP_TURN_DURATION_MS &&
     admission.sourceSessionId === sourceSessionId &&
@@ -428,6 +444,7 @@ function validIndependentFollowupGrant(
     sameCanonicalValue(backup.executableUpperBound, upper) &&
     grantBudget.version === 1 &&
     grantBudget.unboundedToolInvocations === true &&
+    grantBudget.durationOnlyChildRun === upper.durationOnlyChildRun &&
     grantBudget.maxToolInvocations === 0 &&
     grantBudget.maxConcurrentSubagents === 0 &&
     grantBudget.maxRunDurationMs === FOLLOWUP_TURN_DURATION_MS &&
@@ -442,9 +459,10 @@ function validIndependentFollowupGrant(
         Number(grantBudget[key]) >= 0 &&
         Number(grantBudget[key]) <= Number(maximum),
     ) &&
-    (intentRole === 'code'
-      ? grantBudget.maxConcurrentWriters === 1
-      : grantBudget.maxConcurrentWriters === 0)
+    (durationOnlyChildRun ||
+      (intentRole === 'code'
+        ? grantBudget.maxConcurrentWriters === 1
+        : grantBudget.maxConcurrentWriters === 0))
   );
 }
 
@@ -454,6 +472,7 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     readonly targetSessionId: string;
     readonly mutation: RuntimeFollowupRunStartMutation;
     readonly preparedEvent: Readonly<Record<string, unknown>>;
+    readonly priorFollowupSnapshot?: Readonly<{ stateJson: string; revision: number }> | null;
   },
 ): void {
   requireTransaction(database);
@@ -506,11 +525,46 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     .all(targetSessionId);
   const checkpoint = readChildTerminalCheckpoint(database, targetSessionId);
   const checkpointPayload = checkpoint ? parse(checkpoint.canonicalJson) : {};
+  const prior = input.priorFollowupSnapshot;
+  const priorState = prior ? parse(prior.stateJson) : {};
   const grant = mutation.grant;
   const grantHash = `sha256:${createHash('sha256').update(grant.canonicalJson).digest('hex')}`;
   const grantPayload = parse(grant.canonicalJson);
   const grantBudget = record(grantPayload.budget);
   const targetState = target ? parse(target.state_json) : {};
+  const priorOutcomeStatus = record(priorState.terminalOutcome).status;
+  const priorOriginStatus = record(record(priorState.childSessionOrigin).terminal).status;
+  const priorUnknownFollowup =
+    priorOriginStatus === 'completed' &&
+    priorOutcomeStatus === 'unknown' &&
+    runs[1]?.status === 'unknown' &&
+    runs[1].start_command_id.startsWith('followup:') &&
+    parse(
+      database
+        .query<{ event_json: string }, [string, string]>(
+          `SELECT event_json FROM runtime_events WHERE session_id=?
+           AND json_extract(event_json,'$.type')='agent.followup_turn_settled'
+           AND json_extract(event_json,'$.targetRunId')=? ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(targetSessionId, runs[1].run_id)?.event_json ?? '{}',
+    ).status === 'unknown';
+  const checkpointless =
+    grantPayload.schema === 'kite.child-followup-grant.v2' &&
+    mutation.checkpointRef === undefined &&
+    prior !== null &&
+    prior !== undefined &&
+    Number.isSafeInteger(mutation.sourceRevision) &&
+    mutation.sourceRevision === prior.revision &&
+    priorState.revision === prior.revision &&
+    mutation.sourceStateDigest ===
+      `sha256:${createHash('sha256').update(prior.stateJson).digest('hex')}` &&
+    record(priorState.session).threadId === targetSessionId &&
+    (priorOriginStatus === priorOutcomeStatus || priorUnknownFollowup) &&
+    ['completed', 'unknown'].includes(String(record(priorState.terminalOutcome).status)) &&
+    sameCanonicalValue(
+      record(priorState.transcript).messages,
+      record(targetState.transcript).messages,
+    );
   const targetLedger = record(targetState.resourceBudget);
   const activeFollowup = record(targetState.activeFollowupTurn);
   const admissionRow = outbox?.followup_admission_artifact_id
@@ -584,16 +638,18 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     !outbox.followup_admission_artifact_id ||
     !outbox.followup_admission_digest ||
     !inbox ||
-    !checkpoint ||
-    !sameCanonicalValue(checkpoint.ref, mutation.checkpointRef) ||
+    (!checkpointless &&
+      (!checkpoint || !sameCanonicalValue(checkpoint.ref, mutation.checkpointRef))) ||
     !runs[0] ||
     runs[0].run_id !== mutation.targetRunId ||
     runs[0].status !== 'queued' ||
     runs[0].start_command_id !== `followup:${mutation.submissionId}` ||
     runs[0].phase !== mutation.phase ||
     !runs[1] ||
-    runs[1].status !== 'completed' ||
-    checkpointPayload.terminalRunId !== runs[1].run_id ||
+    (runs[1].status !== 'completed' && !(checkpointless && runs[1].status === 'unknown')) ||
+    (checkpointless
+      ? record(priorState.turn).turnId !== runs[1].run_id
+      : checkpointPayload.terminalRunId !== runs[1].run_id) ||
     (inbox.target_run_id !== null && inbox.target_run_id !== runs[1].run_id) ||
     event.type !== 'agent.followup_turn_prepared' ||
     event.sourceSessionId !== mutation.sourceSessionId ||
@@ -602,6 +658,8 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     event.taskId !== mutation.taskId ||
     event.grantDigest !== mutation.grantDigest ||
     !sameCanonicalValue(event.checkpointRef, mutation.checkpointRef) ||
+    event.sourceRevision !== mutation.sourceRevision ||
+    event.sourceStateDigest !== mutation.sourceStateDigest ||
     !sameCanonicalValue(event.grantRef, grant.ref) ||
     grant.ref.kind !== 'agent_followup_grant' ||
     grant.ref.artifactId !== `pa_${grantHash.slice(7)}` ||
@@ -618,6 +676,10 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     grantPayload.targetRunId !== mutation.targetRunId ||
     grantPayload.taskId !== mutation.taskId ||
     !sameCanonicalValue(grantPayload.checkpointRef, mutation.checkpointRef) ||
+    grantPayload.sourceRevision !== mutation.sourceRevision ||
+    grantPayload.sourceStateDigest !== mutation.sourceStateDigest ||
+    (checkpointless &&
+      grantPayload.priorOutcomeUnknown !== (priorOutcomeStatus === 'unknown' ? true : undefined)) ||
     grantPayload.originRole !== intent.role ||
     grantPayload.originRole !== record(targetState.childSessionOrigin).role ||
     grantPayload.workspaceDigest !== target.workspace_digest ||
@@ -648,6 +710,8 @@ export function assertCrossSessionFollowupRunStartInTransaction(
     activeFollowup.grantDigest !== mutation.grantDigest ||
     !sameCanonicalValue(activeFollowup.grantRef, grant.ref) ||
     !sameCanonicalValue(activeFollowup.checkpointRef, mutation.checkpointRef) ||
+    activeFollowup.sourceRevision !== mutation.sourceRevision ||
+    activeFollowup.sourceStateDigest !== mutation.sourceStateDigest ||
     !Object.entries(record(targetLedger.budget)).every(([key, value]) => grantBudget[key] === value)
   )
     invalid();
@@ -1093,7 +1157,12 @@ export function readCrossSessionFollowupDeliveryForTarget(
     outbox.mode !== 'trigger_turn' ||
     outbox.targetSessionId !== targetSessionId ||
     row.target_status === null ||
-    row.target_status === 'context_unavailable' ||
+    (row.target_status === 'context_unavailable' &&
+      !(
+        row.admission_json &&
+        parse(row.admission_json).schema === 'kite.cross-session-followup-admission.v2' &&
+        isCheckpointlessIndependentFollowupTarget(database, sourceSessionId, targetSessionId)
+      )) ||
     !row.admission_json ||
     !row.admission_artifact_id ||
     !row.admission_digest ||
@@ -1104,7 +1173,7 @@ export function readCrossSessionFollowupDeliveryForTarget(
     bodyDigest !== outbox.bodyRef.integrityIdentifier ||
     outbox.bodyRef.artifactId !== `pa_${bodyDigest.slice(7)}` ||
     outbox.bodyRef.byteLength !== Buffer.byteLength(row.body_text, 'utf8') ||
-    outbox.bodyRef.byteLength > 4096
+    outbox.bodyRef.byteLength < 1
   )
     invalid();
   const payload = parse(row.admission_json);
@@ -1181,6 +1250,12 @@ export function verifyPersistedCrossSessionFollowupRunStart(
   const prepared = parse(preparedRow.event_json);
   const grantRef = record(prepared.grantRef);
   const checkpointRef = record(prepared.checkpointRef);
+  const checkpointless =
+    prepared.checkpointRef === undefined &&
+    Number.isSafeInteger(prepared.sourceRevision) &&
+    Number(prepared.sourceRevision) >= 0 &&
+    Number(prepared.sourceRevision) < preparedRow.sequence &&
+    DIGEST.test(String(prepared.sourceStateDigest));
   const sourceSessionId = String(prepared.sourceSessionId ?? '');
   const row = database
     .query<
@@ -1225,7 +1300,7 @@ export function verifyPersistedCrossSessionFollowupRunStart(
     row.admission_bytes !== Buffer.byteLength(row.admission_json, 'utf8') ||
     !DIGEST.test(String(prepared.grantDigest)) ||
     grantRef.integrityIdentifier !== prepared.grantDigest ||
-    checkpointRef.kind !== 'subagent_checkpoint'
+    (!checkpointless && checkpointRef.kind !== 'subagent_checkpoint')
   )
     return false;
   const admission = parse(row.admission_json);
@@ -1235,9 +1310,17 @@ export function verifyPersistedCrossSessionFollowupRunStart(
       'SELECT canonical_json,integrity_identifier,byte_length FROM subagent_checkpoint_artifacts WHERE artifact_id=?',
     )
     .get(String(checkpointRef.artifactId));
-  if (!grant || !checkpoint) return false;
+  if (!grant || (!checkpoint && !checkpointless)) return false;
   const grantPayload = parse(grant.canonicalJson);
-  const checkpointPayload = parse(checkpoint.canonical_json);
+  const checkpointPayload = checkpoint ? parse(checkpoint.canonical_json) : {};
+  const priorRun = checkpointless
+    ? database
+        .query<{ run_id: string; status: string; start_command_id: string }, [string, number]>(
+          `SELECT run_id,status,start_command_id FROM runtime_runs WHERE session_id=? AND created_revision<?
+           ORDER BY created_revision DESC LIMIT 1`,
+        )
+        .get(run.sessionId, run.createdRevision)
+    : null;
   const expiredReleased =
     row.accepted_release_source_revision === null ||
     readProvenUnfundedExpiredFollowupRelease(database, sourceSessionId, run.sessionId, submissionId)
@@ -1255,7 +1338,25 @@ export function verifyPersistedCrossSessionFollowupRunStart(
     grantPayload.targetSessionId === run.sessionId &&
     grantPayload.submissionId === submissionId &&
     grantPayload.targetRunId === run.runId &&
-    sameCanonicalValue(grantPayload.checkpointRef, checkpointRef) &&
+    sameCanonicalValue(grantPayload.checkpointRef, prepared.checkpointRef) &&
+    (checkpointless
+      ? grantPayload.schema === 'kite.child-followup-grant.v2' &&
+        grantPayload.sourceRevision === prepared.sourceRevision &&
+        grantPayload.sourceStateDigest === prepared.sourceStateDigest &&
+        priorRun !== null &&
+        (['completed', 'unknown'].includes(priorRun.status) ||
+          (priorRun.start_command_id.startsWith('followup:') &&
+            parse(
+              database
+                .query<{ event_json: string }, [string, string]>(
+                  `SELECT event_json FROM runtime_events WHERE session_id=?
+                   AND json_extract(event_json,'$.type')='agent.followup_turn_settled'
+                   AND json_extract(event_json,'$.targetRunId')=? ORDER BY sequence DESC LIMIT 1`,
+                )
+                .get(run.sessionId, priorRun.run_id)?.event_json ?? '{}',
+            ).status === 'unknown'))
+      : grantPayload.sourceRevision === undefined &&
+        grantPayload.sourceStateDigest === undefined) &&
     sameCanonicalValue(grantPayload.sourceAdmissionRef, {
       artifactId: row.admission_artifact_id,
       kind: 'agent_followup_admission',
@@ -1267,14 +1368,66 @@ export function verifyPersistedCrossSessionFollowupRunStart(
     admission.targetSessionId === run.sessionId &&
     admission.submissionId === submissionId &&
     admission.messageId === row.message_id &&
-    checkpointRef.integrityIdentifier === checkpoint.integrity_identifier &&
-    checkpointRef.byteLength === checkpoint.byte_length &&
-    checkpointRef.artifactId === `pa_${checkpoint.integrity_identifier.slice(7)}` &&
-    `sha256:${createHash('sha256').update(checkpoint.canonical_json).digest('hex')}` ===
-      checkpoint.integrity_identifier &&
-    checkpoint.byte_length === Buffer.byteLength(checkpoint.canonical_json, 'utf8') &&
-    checkpointPayload.childSessionId === run.sessionId &&
-    checkpointPayload.terminalStatus === 'completed'
+    (checkpointless ||
+      (checkpoint !== undefined &&
+        checkpoint !== null &&
+        checkpointRef.integrityIdentifier === checkpoint.integrity_identifier &&
+        checkpointRef.byteLength === checkpoint.byte_length &&
+        checkpointRef.artifactId === `pa_${checkpoint.integrity_identifier.slice(7)}` &&
+        `sha256:${createHash('sha256').update(checkpoint.canonical_json).digest('hex')}` ===
+          checkpoint.integrity_identifier &&
+        checkpoint.byte_length === Buffer.byteLength(checkpoint.canonical_json, 'utf8') &&
+        checkpointPayload.childSessionId === run.sessionId &&
+        checkpointPayload.terminalStatus === 'completed'))
+  );
+}
+
+function verifiedCrossSessionFollowupRunStart(
+  database: Database,
+  targetSessionId: string,
+  targetRunId: string,
+): boolean {
+  const run = database
+    .query<
+      {
+        session_id: string;
+        run_id: string;
+        start_command_id: string;
+        created_revision: number;
+        origin_session_id: string | null;
+      },
+      [string, string]
+    >(
+      `SELECT session_id,run_id,start_command_id,created_revision,origin_session_id
+       FROM runtime_runs WHERE session_id=? AND run_id=?`,
+    )
+    .get(targetSessionId, targetRunId);
+  if (!run || run.origin_session_id !== null) return false;
+  return verifyPersistedCrossSessionFollowupRunStart(database, {
+    sessionId: run.session_id,
+    runId: run.run_id,
+    startCommandId: run.start_command_id,
+    createdRevision: run.created_revision,
+    originSessionId: undefined,
+  });
+}
+
+function verifiedCheckpointlessFollowupRun(
+  database: Database,
+  targetSessionId: string,
+  targetRunId: string,
+): boolean {
+  const prepared = database
+    .query<{ event_json: string }, [string, string]>(
+      `SELECT event_json FROM runtime_events WHERE session_id=?
+       AND json_extract(event_json,'$.type')='agent.followup_turn_prepared'
+       AND json_extract(event_json,'$.targetRunId')=? ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get(targetSessionId, targetRunId);
+  return Boolean(
+    prepared &&
+      parse(prepared.event_json).checkpointRef === undefined &&
+      verifiedCrossSessionFollowupRunStart(database, targetSessionId, targetRunId),
   );
 }
 
@@ -1846,7 +1999,26 @@ export function receiveCrossSessionFollowupInTransaction(
   if (!delivery || delivery.messageId !== input.messageId) invalid();
   if (delivery.status === 'received')
     return { sequence: delivery.sequence, targetRevision: delivery.targetRevision };
-  return receiveCrossSessionQueueMailInTransaction(database, input);
+  const independentTurn =
+    database
+      .query<{ schema: string | null }, [string, string]>(
+        `SELECT json_extract(a.canonical_json,'$.schema') AS schema
+       FROM agent_mail_outbox o JOIN agent_followup_admission_artifacts a
+         ON a.artifact_id=o.followup_admission_artifact_id
+       WHERE o.source_session_id=? AND o.submission_id=?`,
+      )
+      .get(input.sourceSessionId, input.submissionId)?.schema ===
+    'kite.cross-session-followup-admission.v2';
+  return receiveCrossSessionQueueMailInTransaction(
+    database,
+    input,
+    independentTurn &&
+      isCheckpointlessIndependentFollowupTarget(
+        database,
+        input.sourceSessionId,
+        input.targetSessionId,
+      ),
+  );
 }
 
 type RecordValue = Record<string, unknown>;
@@ -4502,6 +4674,7 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
           record(input.sourceSnapshot.retainedResourceBudgets)[String(admission.fundingRunId)],
         );
   const backup = record(record(sourceLedger.reservations)[String(admission.backupReservationId)]);
+  const durationOnlyChildRun = record(backup.executableUpperBound).durationOnlyChildRun === true;
   const route = readCrossSessionFollowupRoute(database, input.targetSessionId, input.submissionId);
   const run = database
     .query<
@@ -4533,11 +4706,17 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
   const evidenceDigest = targetRow
     ? `sha256:${createHash('sha256').update(targetRow.state_json).digest('hex')}`
     : '';
+  const settledUnknownSlot =
+    input.disposition === 'unknown' &&
+    durationOnlyChildRun &&
+    event.type === 'resource_budget.reconciled';
   const expectedEvent =
     input.disposition === 'completed'
       ? 'resource_budget.reconciled'
       : input.disposition === 'unknown'
-        ? 'resource_budget.unknown'
+        ? settledUnknownSlot
+          ? 'resource_budget.reconciled'
+          : 'resource_budget.unknown'
         : 'resource_budget.released';
   if (
     !proof ||
@@ -4574,7 +4753,8 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
     audit.evidenceDigest !== evidenceDigest ||
     audit.createdAtMs !== input.createdAtMs ||
     (input.disposition === 'completed' && backup.state !== 'reconciled') ||
-    (input.disposition === 'unknown' && backup.state !== 'unknown') ||
+    (input.disposition === 'unknown' &&
+      backup.state !== (settledUnknownSlot ? 'reconciled' : 'unknown')) ||
     (input.disposition === 'pre_dispatch_released' && backup.state !== 'released')
   )
     invalid();
@@ -4595,17 +4775,29 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
       actual.source !== 'actual' ||
       !sameCanonicalValue(backup.actual, actual) ||
       !boundedUsage(actual, record(backup.executableUpperBound)) ||
-      actualCounters.turns !== 1 ||
-      record(actual.gauges).activeSubagents !== 1 ||
+      (durationOnlyChildRun
+        ? Object.values(actualCounters).some((value) => value !== 0)
+        : actualCounters.turns !== 1) ||
+      record(actual.gauges).activeSubagents !== (durationOnlyChildRun ? 0 : 1) ||
       !['modelRequests', 'toolInvocations', 'inputTokens', 'outputTokens', 'artifactBytes'].every(
         (key) =>
-          Number.isSafeInteger(targetCounters[key]) && actualCounters[key] === targetCounters[key],
+          Number.isSafeInteger(targetCounters[key]) &&
+          (durationOnlyChildRun
+            ? actualCounters[key] === 0
+            : actualCounters[key] === targetCounters[key]),
       )
     )
       invalid();
   } else if (input.disposition === 'unknown') {
     if (
       run.status !== 'unknown' ||
+      (settledUnknownSlot &&
+        (budgetEvents.length !== 1 ||
+          actual.source !== 'actual' ||
+          !sameCanonicalValue(backup.actual, actual) ||
+          !boundedUsage(actual, record(backup.executableUpperBound)) ||
+          Object.values(actualCounters).some((value) => value !== 0) ||
+          Object.values(record(actual.gauges)).some((value) => value !== 0))) ||
       !hasIndependentFollowupSourceActivation(database, input.sourceSessionId, admission)
     )
       invalid();
@@ -6040,8 +6232,8 @@ function routeIndependentCrossSessionFollowupInTransaction(
     !sameCanonicalValue(prepared.messageIds, [input.messageId])
   )
     invalid();
-  const checkpoint = readChildTerminalCheckpoint(database, input.targetSessionId);
-  if (!checkpoint) unavailable();
+  if (!verifiedCrossSessionFollowupRunStart(database, input.targetSessionId, input.targetRunId))
+    unavailable();
   const changed = database
     .query(`UPDATE agent_mail_inbox SET
       target_run_id=?,prepared_invocation_id=?,prepared_model_admission_id=?
@@ -6310,6 +6502,7 @@ export function routeCrossSessionFollowupInTransaction(
   const checkpoint = readChildTerminalCheckpoint(database, input.targetSessionId);
   if (
     !checkpoint ||
+    !sameCanonicalValue(checkpoint.ref, followupTurn.checkpointRef) ||
     (inbox.target_run_id && parse(checkpoint.canonicalJson).terminalRunId !== inbox.target_run_id)
   )
     unavailable();
@@ -6514,6 +6707,7 @@ export function acceptCrossSessionFollowupInTransaction(
   const gauges = record(upper.gauges);
   const deadlineAt = Date.parse(String(budget.deadlineAt));
   const isIndependentTurnProtocol = policy.executionMode === 'independent_turn_v2';
+  const durationOnlyChildRun = isIndependentTurnProtocol && upper.durationOnlyChildRun === true;
   const minimumWindow = isIndependentTurnProtocol
     ? 1
     : Math.max(60_000, Number(policy.firstAttemptTimeoutMs) + 5_000);
@@ -6538,13 +6732,16 @@ export function acceptCrossSessionFollowupInTransaction(
         upper.independentFollowupTurn !== true ||
         upper.unboundedToolInvocations !== true ||
         counters.toolInvocations !== 0 ||
-        Number(counters.artifactBytes) < 1 ||
+        (durationOnlyChildRun
+          ? Object.values(counters).some((value) => value !== 0)
+          : Number(counters.artifactBytes) < 1) ||
         gauges.elapsedRunMs !== FOLLOWUP_TURN_DURATION_MS ||
         !(
           (gauges.activeToolInvocations === 0 && gauges.activeShellInvocations === 0) ||
           (gauges.activeToolInvocations === 1 && gauges.activeShellInvocations === 1)
         ) ||
-        gauges.activeWriters !== (policy.targetRole === 'code' ? 1 : 0))) ||
+        gauges.activeWriters !==
+          (durationOnlyChildRun ? 0 : policy.targetRole === 'code' ? 1 : 0))) ||
     (!isIndependentTurnProtocol &&
       (upper.independentFollowupTurn === true || upper.unboundedToolInvocations === true)) ||
     payload.submissionId !== input.submissionId ||
@@ -6586,11 +6783,12 @@ export function acceptCrossSessionFollowupInTransaction(
     policy.effectiveEffectsDigest !== invocation.effectiveEffectsDigest ||
     typeof policy.policyRevision !== 'string' ||
     !policy.policyRevision ||
-    !Number.isSafeInteger(policy.contextWindowTokens) ||
-    !Number.isSafeInteger(policy.maxOutputTokens) ||
-    Number(policy.contextWindowTokens) <= Number(policy.maxOutputTokens) ||
-    !Number.isSafeInteger(policy.firstAttemptTimeoutMs) ||
-    Number(policy.firstAttemptTimeoutMs) <= 0 ||
+    (!isIndependentTurnProtocol &&
+      (!Number.isSafeInteger(policy.contextWindowTokens) ||
+        !Number.isSafeInteger(policy.maxOutputTokens) ||
+        Number(policy.contextWindowTokens) <= Number(policy.maxOutputTokens) ||
+        !Number.isSafeInteger(policy.firstAttemptTimeoutMs) ||
+        Number(policy.firstAttemptTimeoutMs) <= 0)) ||
     turn.turnId !== input.sourceTurnId ||
     turn.status !== 'active' ||
     call.name !== 'followup_task' ||
@@ -6602,7 +6800,8 @@ export function acceptCrossSessionFollowupInTransaction(
       `${invocation.invocationId}:attempt:${invocation.attemptsStarted}` ||
     budget.status !== 'active' ||
     budget.runId !== input.sourceRunId ||
-    Object.values(reservations).some((item) => record(item).state === 'unknown') ||
+    (!durationOnlyChildRun &&
+      Object.values(reservations).some((item) => record(item).state === 'unknown')) ||
     reservationEvent.type !== 'resource_budget.reserved' ||
     reservation.version !== 1 ||
     (reservation.state !== 'reserved' && reservation.state !== 'queued') ||
@@ -6613,22 +6812,24 @@ export function acceptCrossSessionFollowupInTransaction(
     reservation.reservationId !== payload.backupReservationId ||
     !sameCanonicalValue(reservation, storedReservation) ||
     !sameCanonicalValue(payload.executableUpperBound, upper) ||
-    counters.turns !== 1 ||
-    (isIndependentTurnProtocol
-      ? Number(counters.modelRequests) < 1
-      : counters.modelRequests !== 1) ||
-    !Number.isSafeInteger(counters.inputTokens) ||
-    Number(counters.inputTokens) < 1 ||
-    (isIndependentTurnProtocol
-      ? Number(counters.inputTokens) <
-        2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))
-      : Number(counters.inputTokens) >
-        2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))) ||
-    !Number.isSafeInteger(counters.outputTokens) ||
-    Number(counters.outputTokens) < 1 ||
-    (isIndependentTurnProtocol
-      ? Number(counters.outputTokens) < Number(policy.maxOutputTokens)
-      : Number(counters.outputTokens) > Number(policy.maxOutputTokens)) ||
+    (durationOnlyChildRun
+      ? Object.values(counters).some((value) => value !== 0)
+      : counters.turns !== 1 ||
+        (isIndependentTurnProtocol
+          ? Number(counters.modelRequests) < 1
+          : counters.modelRequests !== 1) ||
+        !Number.isSafeInteger(counters.inputTokens) ||
+        Number(counters.inputTokens) < 1 ||
+        (isIndependentTurnProtocol
+          ? Number(counters.inputTokens) <
+            2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))
+          : Number(counters.inputTokens) >
+            2 * (Number(policy.contextWindowTokens) - Number(policy.maxOutputTokens))) ||
+        !Number.isSafeInteger(counters.outputTokens) ||
+        Number(counters.outputTokens) < 1 ||
+        (isIndependentTurnProtocol
+          ? Number(counters.outputTokens) < Number(policy.maxOutputTokens)
+          : Number(counters.outputTokens) > Number(policy.maxOutputTokens))) ||
     gauges.activeSubagents !== 1 ||
     accepted.type !== 'agent.mail_accepted' ||
     accepted.mode !== 'trigger_turn' ||
@@ -6669,13 +6870,21 @@ export function acceptCrossSessionFollowupInTransaction(
        WHERE s.session_id=?`,
     )
     .get(input.targetSessionId);
+  const checkpointlessIndependentTurn =
+    isIndependentTurnProtocol &&
+    isCheckpointlessIndependentFollowupTarget(
+      database,
+      input.sourceSessionId,
+      input.targetSessionId,
+    );
   if (
     target?.parent_session_id !== input.sourceSessionId ||
-    target.status === 'context_unavailable'
+    (target.status === 'context_unavailable' && !checkpointlessIndependentTurn)
   )
     unavailable();
-  if (target.status === 'idle') assertTargetCheckpoint(database, input.targetSessionId);
-  acceptCrossSessionQueueMailInTransaction(database, input);
+  if (target.status === 'idle' && !checkpointlessIndependentTurn)
+    assertTargetCheckpoint(database, input.targetSessionId);
+  acceptCrossSessionQueueMailInTransaction(database, input, checkpointlessIndependentTurn);
   createKiteHomeArtifactStore(database).writeAgentFollowupAdmission({
     ref: admission.ref,
     artifactFormatVersion: 1,
@@ -6903,6 +7112,54 @@ export function readChildTerminalCheckpoint(
     canonicalJson: stored.canonicalJson,
     terminalRevision: Number(payload.terminalRevision),
   });
+}
+
+export function isCheckpointlessIndependentFollowupTarget(
+  database: Database,
+  sourceSessionId: string,
+  targetSessionId: string,
+): boolean {
+  const row = database
+    .query<
+      {
+        parent_session_id: string | null;
+        state_json: string;
+        status: string;
+        run_id: string;
+        start_command_id: string;
+      },
+      [string]
+    >(
+      `SELECT s.parent_session_id,p.state_json,r.status,r.run_id,r.start_command_id FROM runtime_sessions s
+       JOIN runtime_snapshots p ON p.session_id=s.session_id
+       JOIN runtime_runs r ON r.session_id=s.session_id
+       WHERE s.session_id=? ORDER BY r.created_revision DESC LIMIT 1`,
+    )
+    .get(targetSessionId);
+  if (!row || row.parent_session_id !== sourceSessionId) return false;
+  const state = parse(row.state_json);
+  const terminal = record(record(state.childSessionOrigin).terminal);
+  const outcome = record(state.terminalOutcome);
+  const priorUnknownFollowup =
+    row.status === 'unknown' &&
+    terminal.status === 'completed' &&
+    row.start_command_id.startsWith('followup:') &&
+    parse(
+      database
+        .query<{ event_json: string }, [string, string]>(
+          `SELECT event_json FROM runtime_events WHERE session_id=?
+         AND json_extract(event_json,'$.type')='agent.followup_turn_settled'
+         AND json_extract(event_json,'$.targetRunId')=? ORDER BY sequence DESC LIMIT 1`,
+        )
+        .get(targetSessionId, row.run_id)?.event_json ?? '{}',
+    ).status === 'unknown';
+  return (
+    ['completed', 'unknown'].includes(row.status) &&
+    (terminal.status === row.status || priorUnknownFollowup) &&
+    outcome.status === row.status &&
+    record(state.turn).status !== 'active' &&
+    state.activeTaskId === null
+  );
 }
 
 function assertTargetCheckpoint(database: Database, targetSessionId: string): void {

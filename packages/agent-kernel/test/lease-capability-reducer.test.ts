@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { childThreadIdForToolAttempt } from '../src/child-session';
 import { reduceLeaseState } from '../src/core/lease/reducer';
 import { reduceCapabilityState } from '../src/domains/capability/reducer';
 import type { KernelEvent } from '../src/events';
@@ -94,6 +95,89 @@ function reservation(
 }
 
 describe('State lease reducer', () => {
+  test('duration-only child persists concurrent write usage with bounded marker provenance', () => {
+    const lineage = {
+      parentSessionId: 'parent-session',
+      parentInvocationId: 'parent-invocation',
+      parentToolCallId: 'parent-tool',
+      attempt: 1,
+    };
+    let state: AgentState = {
+      ...createInitialAgentState({
+        threadId: childThreadIdForToolAttempt(lineage),
+        userId: 'user-1',
+        workspace: '/workspace',
+        turnId: 'turn-1',
+        recoveryIdentityKey: IDENTITY_KEY,
+      }),
+      childSessionOrigin: {
+        ...lineage,
+        childInvocationId: 'child-invocation',
+        grantDigest: `sha256:${'a'.repeat(64)}`,
+        taskArtifactRef: {
+          artifactId: 'task-artifact',
+          kind: 'subagent_task',
+          integrityIdentifier: `sha256:${'b'.repeat(64)}`,
+          byteLength: 1,
+        },
+        taskArtifactDigest: `sha256:${'b'.repeat(64)}`,
+        taskTextDigest: `sha256:${'c'.repeat(64)}`,
+        role: 'code',
+        fundingRunId: 'parent-run',
+        delegatedReservationId: 'child-allotment:child',
+        delegatedUpperBoundDigest: `sha256:${'d'.repeat(64)}`,
+        deadlineAt: DEADLINE_AT,
+      },
+    };
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: STARTED_AT,
+      deadlineAt: DEADLINE_AT,
+      budget: {
+        ...budget(0),
+        maxTurns: 0,
+        maxModelRequests: 0,
+        unboundedToolInvocations: true,
+        durationOnlyChildRun: true,
+        maxRunInputTokens: 0,
+        maxRunOutputTokens: 0,
+        maxArtifactBytes: 0,
+      },
+    } as KernelEvent);
+    for (const id of ['write-a', 'write-b']) {
+      const upper = usage('versioned_upper_bound', 1);
+      upper.unboundedArtifactBytes = true;
+      const event = reservation(id, id);
+      if (event.type !== 'resource_budget.reserved') throw new Error('Expected reservation event.');
+      state = reduceLeaseState(state, {
+        ...event,
+        reservation: { ...event.reservation, executableUpperBound: upper },
+      } as KernelEvent);
+    }
+    for (const [id, bytes] of [
+      ['write-a', 300_000_000],
+      ['write-b', 400_000_000],
+    ] as const) {
+      state = reduceLeaseState(state, {
+        type: 'resource_budget.dispatch_started',
+        reservationId: id,
+      } as KernelEvent);
+      const actual = usage('actual', 1);
+      (actual.counters as Record<string, number>).artifactBytes = bytes;
+      state = reduceLeaseState(state, {
+        type: 'resource_budget.reconciled',
+        reservationId: id,
+        actual,
+      } as KernelEvent);
+    }
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
+    expect(
+      state.resourceBudget.status === 'active' &&
+        state.resourceBudget.reconciledUsage.counters.artifactBytes,
+    ).toBe(700_000_000);
+  });
+
   test('retains child Tool audit separately from the parent Tool allowance', () => {
     let state = configure(undefined, 2);
     const upper = usage('versioned_upper_bound');

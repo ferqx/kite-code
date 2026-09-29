@@ -117,6 +117,15 @@ function assertResourceBudget(value: ResourceBudget): void {
     throw new Error('Unsupported ResourceBudget version.');
   const candidate = value as unknown as Record<string, unknown>;
   const zeroAllowed = new Set<keyof ResourceBudget>([
+    ...(value.durationOnlyChildRun === true
+      ? ([
+          'maxTurns',
+          'maxModelRequests',
+          'maxRunInputTokens',
+          'maxRunOutputTokens',
+          'maxConcurrencyWaitMs',
+        ] as const)
+      : []),
     'maxToolInvocations',
     'maxArtifactBytes',
     'maxConcurrentSubagents',
@@ -132,6 +141,19 @@ function assertResourceBudget(value: ResourceBudget): void {
     (value.unboundedToolInvocations !== true || value.maxToolInvocations !== 0)
   )
     throw new Error('Unbounded Tool budget must use a zero numeric placeholder.');
+  if (
+    value.durationOnlyChildRun !== undefined &&
+    (value.durationOnlyChildRun !== true ||
+      [
+        'maxTurns',
+        'maxModelRequests',
+        'maxToolInvocations',
+        'maxRunInputTokens',
+        'maxRunOutputTokens',
+        'maxArtifactBytes',
+      ].some((field) => (value as unknown as Record<string, number>)[field] !== 0))
+  )
+    throw new Error('Duration-only child budget requires zero cumulative placeholders.');
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
   if (value.maxConcurrentWriters > value.maxConcurrentToolInvocations)
@@ -162,10 +184,23 @@ function assertResourceUsage(value: ResourceUsage): void {
       (value.source !== 'versioned_upper_bound' ||
         value.unboundedToolInvocations !== true ||
         value.counters.toolInvocations !== 0)) ||
+    (value.unboundedArtifactBytes !== undefined &&
+      (value.source !== 'versioned_upper_bound' ||
+        value.unboundedArtifactBytes !== true ||
+        value.counters.artifactBytes !== 0)) ||
+    (value.unboundedModelTokens !== undefined &&
+      (value.source !== 'versioned_upper_bound' ||
+        value.unboundedModelTokens !== true ||
+        value.counters.inputTokens !== 0 ||
+        value.counters.outputTokens !== 0)) ||
     (value.independentChildTurnDeadline !== undefined &&
       (value.source !== 'versioned_upper_bound' || value.independentChildTurnDeadline !== true)) ||
     (value.independentFollowupTurn !== undefined &&
-      (value.source !== 'versioned_upper_bound' || value.independentFollowupTurn !== true))
+      (value.source !== 'versioned_upper_bound' || value.independentFollowupTurn !== true)) ||
+    (value.durationOnlyChildRun !== undefined &&
+      (value.source !== 'versioned_upper_bound' ||
+        value.durationOnlyChildRun !== true ||
+        COUNTER_FIELDS.some((field) => value.counters[field] !== 0)))
   )
     throw new Error('Resource usage authority markers are invalid.');
 }
@@ -174,6 +209,10 @@ function withinUpperBound(actual: ResourceUsage, upper: ResourceUsage): boolean 
   return (
     COUNTER_FIELDS.every(
       (field) =>
+        upper.durationOnlyChildRun === true ||
+        (field === 'artifactBytes' && upper.unboundedArtifactBytes === true) ||
+        ((field === 'inputTokens' || field === 'outputTokens') &&
+          upper.unboundedModelTokens === true) ||
         (field === 'toolInvocations' && upper.unboundedToolInvocations === true) ||
         actual.counters[field] <= upper.counters[field],
     ) && GAUGE_FIELDS.every((field) => actual.gauges[field] <= upper.gauges[field])
@@ -189,13 +228,18 @@ function withinBudget(
     Number.isSafeInteger(delegatedToolInvocations) &&
     delegatedToolInvocations >= 0 &&
     delegatedToolInvocations <= usage.counters.toolInvocations &&
-    usage.counters.turns <= budget.maxTurns &&
-    usage.counters.modelRequests <= budget.maxModelRequests &&
-    (budget.unboundedToolInvocations === true ||
+    (budget.durationOnlyChildRun === true || usage.counters.turns <= budget.maxTurns) &&
+    (budget.durationOnlyChildRun === true ||
+      usage.counters.modelRequests <= budget.maxModelRequests) &&
+    (budget.durationOnlyChildRun === true ||
+      budget.unboundedToolInvocations === true ||
       usage.counters.toolInvocations - delegatedToolInvocations <= budget.maxToolInvocations) &&
-    usage.counters.inputTokens <= budget.maxRunInputTokens &&
-    usage.counters.outputTokens <= budget.maxRunOutputTokens &&
-    usage.counters.artifactBytes <= budget.maxArtifactBytes &&
+    (budget.durationOnlyChildRun === true ||
+      usage.counters.inputTokens <= budget.maxRunInputTokens) &&
+    (budget.durationOnlyChildRun === true ||
+      usage.counters.outputTokens <= budget.maxRunOutputTokens) &&
+    (budget.durationOnlyChildRun === true ||
+      usage.counters.artifactBytes <= budget.maxArtifactBytes) &&
     usage.gauges.elapsedRunMs <= budget.maxRunDurationMs &&
     usage.gauges.activeSubagents <= budget.maxConcurrentSubagents &&
     usage.gauges.activeWriters <= budget.maxConcurrentWriters &&
@@ -331,6 +375,28 @@ function assertReservation(value: ResourceReservation): void {
       value.invocationId !== value.reservationId)
   )
     throw new Error('Independent child deadline requires an exact child allotment.');
+  if (
+    value.executableUpperBound.durationOnlyChildRun === true &&
+    (value.resourceKind !== 'subagent' ||
+      !(
+        (value.reservationId.startsWith('child-allotment:') &&
+          value.invocationId === value.reservationId &&
+          value.executableUpperBound.independentChildTurnDeadline === true) ||
+        (/^backup_[a-f0-9]{64}$/u.test(value.reservationId) &&
+          value.executableUpperBound.independentFollowupTurn === true)
+      ))
+  )
+    throw new Error('Duration-only authority requires exact independent child funding.');
+  if (
+    value.executableUpperBound.unboundedArtifactBytes === true &&
+    !['tool', 'mcp', 'skill'].includes(value.resourceKind)
+  )
+    throw new Error('Unbounded Artifact authority requires a Tool reservation.');
+  if (
+    value.executableUpperBound.unboundedModelTokens === true &&
+    !['model', 'compaction', 'verification'].includes(value.resourceKind)
+  )
+    throw new Error('Unbounded Model token authority requires a Model reservation.');
   if (
     value.state === 'queued' &&
     (value.resourceKind !== 'subagent' ||
@@ -676,6 +742,16 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
         throw new Error('Parent resource dispatch is suspended for required child turns.');
       const candidate = payload.reservation as ResourceReservation;
       assertReservation(candidate);
+      if (
+        candidate.executableUpperBound.unboundedArtifactBytes === true &&
+        active.budget.durationOnlyChildRun !== true
+      )
+        throw new Error('Unbounded Artifact authority requires a duration-only child Run.');
+      if (
+        candidate.executableUpperBound.unboundedModelTokens === true &&
+        active.budget.durationOnlyChildRun !== true
+      )
+        throw new Error('Unbounded Model token authority requires a duration-only child Run.');
       if (candidate.replacesReservationId)
         throw new Error('Bounded replacements require the atomic replacement event.');
       if (candidate.state !== 'reserved' && candidate.state !== 'queued')

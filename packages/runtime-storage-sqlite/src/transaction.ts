@@ -137,6 +137,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       | 'receipt_evidence'
       | 'terminal_recovery',
     transaction: RuntimeTransactionInput<Event, State>,
+    priorFollowupSnapshot?: Readonly<{ stateJson: string; revision: number }> | null,
   ) => void;
   /** Only Store13's fenced child owner may authorize a receipt-free internal followup Run. */
   readonly authorizeInternalFollowupRunStart?: (
@@ -347,8 +348,24 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       // persisting the decision, so a duplicate scoped key rolls back all
       // event/session metadata and snapshot writes as one unit.
       inTransaction(() => {
+        const priorFollowupSnapshot = transaction.followupRunStart
+          ? input.db
+              .query<{ state_json: string; state_revision: number }, [string]>(
+                'SELECT state_json,revision AS state_revision FROM runtime_snapshots WHERE session_id=?',
+              )
+              .get(transaction.sessionId)
+          : null;
         persist(transaction, channel);
-        input.afterPersistInTransaction?.(channel, transaction);
+        input.afterPersistInTransaction?.(
+          channel,
+          transaction,
+          priorFollowupSnapshot
+            ? {
+                stateJson: priorFollowupSnapshot.state_json,
+                revision: priorFollowupSnapshot.state_revision,
+              }
+            : null,
+        );
       });
     } catch (error) {
       throwRuntimeTransactionError(error, transaction);

@@ -859,13 +859,18 @@ describe('durable recovery journal', () => {
           mode: 'model_correction',
           taskId: 'invalid-task',
           turnId: 'invalid-turn',
+          ignoreNonSafetyCeilings: true,
         }),
       ).toMatchObject({ admitted: false });
       expect(
-        isToolRecoveryQualityBlocked(journal, {
-          taskId: 'different-task',
-          turnId: 'different-turn',
-        }),
+        isToolRecoveryQualityBlocked(
+          journal,
+          {
+            taskId: 'different-task',
+            turnId: 'different-turn',
+          },
+          { ignoreNonSafetyCeilings: true },
+        ),
       ).toBe(true);
       expect(
         admitRecoveryAttempt(journal, {
@@ -1142,6 +1147,16 @@ describe('durable recovery journal', () => {
       recoveryOf: childFailureId,
       detailCode: 'recovery_exhausted',
     });
+    expect(
+      admitRecoveryAttempt(restored, {
+        toolCallId: 'third',
+        toolName: 'read_file',
+        invocationFingerprint: 'third-private-fingerprint',
+        modelMessageId: 'model-3',
+        mode: 'model_correction',
+        ignoreNonSafetyCeilings: true,
+      }),
+    ).toEqual({ admitted: true, recoveryOf: childFailureId });
     restored = recordRecoveryFailure(restored, {
       toolCallId: 'third',
       toolName: 'read_file',
@@ -1589,6 +1604,25 @@ describe('durable recovery journal', () => {
       }
     }
     expect(journal.qualityGuard).toMatchObject({ blocked: true, reasonCode: 'no_progress' });
+    expect(
+      isToolRecoveryQualityBlocked(
+        journal,
+        { taskId: 'quality-task', turnId: 'quality-turn' },
+        { ignoreNonSafetyCeilings: true },
+      ),
+    ).toBe(false);
+    expect(
+      admitRecoveryAttempt(journal, {
+        toolCallId: 'continue-after-quality-guard',
+        toolName: 'read_file',
+        invocationFingerprint: 'new-fingerprint',
+        modelMessageId: 'new-model',
+        mode: 'model_correction',
+        taskId: 'quality-task',
+        turnId: 'quality-turn',
+        ignoreNonSafetyCeilings: true,
+      }),
+    ).toEqual({ admitted: true });
     expect(journal.qualityGuard.observedFailures).toBeLessThan(250);
     expect(
       normalizeToolRecoveryJournal(structuredClone(journal), TEST_RECOVERY_IDENTITY_KEY)

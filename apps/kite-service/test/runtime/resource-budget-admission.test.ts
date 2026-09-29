@@ -62,6 +62,211 @@ function apply(
 }
 
 describe('runtime resource budget admission', () => {
+  test('Agent control tools do not require workspace Artifact capacity', () => {
+    const state = configuredState({ maxArtifactBytes: 0 });
+    for (const name of ['send_message', 'interrupt_agent', 'task_cancel']) {
+      const toolCallId = `control-${name}`;
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-control',
+        name,
+        args: {},
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+      const plan = planRuntimeBudgetAdmission(
+        state,
+        { type: 'run_tools', toolCallIds: [toolCallId] },
+        new Date('2026-07-30T00:00:01Z'),
+      );
+      expect(plan.status).toBe('admitted');
+      expect(plan.preparationEvents).toContainEqual(
+        expect.objectContaining({
+          type: 'resource_budget.reserved',
+          reservation: expect.objectContaining({
+            executableUpperBound: expect.objectContaining({
+              counters: expect.objectContaining({ artifactBytes: 0 }),
+            }),
+          }),
+        }),
+      );
+    }
+  });
+  test('duration-only child model admission does not apply a local 2x token ceiling', () => {
+    let state = configuredState();
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected an active budget.');
+    state = {
+      ...state,
+      resourceBudget: {
+        ...state.resourceBudget,
+        budget: {
+          ...state.resourceBudget.budget,
+          maxTurns: 0,
+          maxModelRequests: 0,
+          maxToolInvocations: 0,
+          durationOnlyChildRun: true,
+          maxRunInputTokens: 0,
+          maxRunOutputTokens: 0,
+          maxArtifactBytes: 0,
+        },
+      },
+    };
+    const planned = planModelInvocationResource(state, {
+      invocationId: 'large-child-surface',
+      inputTokens: 10_000_000,
+      requestedMaxOutputTokens: 8_192,
+      resourceKind: 'model',
+    });
+    expect(planned.maxOutputTokens).toBe(8_192);
+    const reserved = planned.preparationEvents.find(
+      (event) => event.type === 'resource_budget.reserved',
+    );
+    expect(
+      reserved?.type === 'resource_budget.reserved' && reserved.reservation.executableUpperBound,
+    ).toMatchObject({
+      unboundedModelTokens: true,
+      counters: { inputTokens: 0, outputTokens: 0, modelRequests: 1 },
+    });
+  });
+  test('duration-only child leaves model output unbounded when provider declares no limit', () => {
+    let state = configuredState();
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected an active budget.');
+    state = {
+      ...state,
+      resourceBudget: {
+        ...state.resourceBudget,
+        budget: {
+          ...state.resourceBudget.budget,
+          maxTurns: 0,
+          maxModelRequests: 0,
+          maxToolInvocations: 0,
+          maxRunInputTokens: 0,
+          maxRunOutputTokens: 0,
+          maxArtifactBytes: 0,
+          durationOnlyChildRun: true,
+        },
+      },
+    };
+    const config = {
+      apiKey: 'test-key',
+      baseURL: 'https://example.invalid',
+      modelName: 'unbounded-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+    } as AgentConfig;
+    const effect = prepareRuntimeEffectForBudget({ type: 'call_model' }, state, {
+      config,
+      model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
+      builtinToolCatalog: testBuiltinToolCatalog(),
+    });
+    expect(
+      effect.type === 'call_model' && effect.resourceEstimate?.maxOutputTokens,
+    ).toBeUndefined();
+    const planned = planModelInvocationResource(state, {
+      invocationId: 'no-local-output-ceiling',
+      inputTokens: 10_000_000,
+      resourceKind: 'model',
+    });
+    expect(planned.maxOutputTokens).toBeUndefined();
+    const reserved = planned.preparationEvents.find(
+      (event) => event.type === 'resource_budget.reserved',
+    );
+    expect(
+      reserved?.type === 'resource_budget.reserved' && reserved.reservation.executableUpperBound,
+    ).toMatchObject({
+      unboundedModelTokens: true,
+      counters: { inputTokens: 0, outputTokens: 0, modelRequests: 1 },
+    });
+  });
+  test('duration-only child admits concurrent writes and records their actual bytes', () => {
+    let state = configuredState();
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected an active budget.');
+    state = {
+      ...state,
+      resourceBudget: {
+        ...state.resourceBudget,
+        budget: {
+          ...state.resourceBudget.budget,
+          maxTurns: 0,
+          maxModelRequests: 0,
+          maxToolInvocations: 0,
+          unboundedToolInvocations: true,
+          durationOnlyChildRun: true,
+          maxRunInputTokens: 0,
+          maxRunOutputTokens: 0,
+          maxArtifactBytes: 0,
+        },
+      },
+    };
+    for (const toolCallId of ['write-a', 'write-b']) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-writes',
+        name: 'write_file',
+        args: { path: `${toolCallId}.txt`, content: 'content' },
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const first = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-a'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(first.status).toBe('admitted');
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const second = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-b'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(second.status).toBe('admitted');
+    expect([...first.preparationEvents, ...second.preparationEvents]).toEqual([
+      expect.objectContaining({
+        type: 'resource_budget.reserved',
+        reservation: expect.objectContaining({
+          executableUpperBound: expect.objectContaining({
+            unboundedArtifactBytes: true,
+            counters: expect.objectContaining({ artifactBytes: 0 }),
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        type: 'resource_budget.reserved',
+        reservation: expect.objectContaining({
+          executableUpperBound: expect.objectContaining({
+            unboundedArtifactBytes: true,
+            counters: expect.objectContaining({ artifactBytes: 0 }),
+          }),
+        }),
+      }),
+    ]);
+    state = apply(state, [...second.preparationEvents, ...second.dispatchEvents]);
+    for (const [reservationId, bytes] of [
+      [first.reservationIds[0], 300_000_000],
+      [second.reservationIds[0], 400_000_000],
+    ] as const) {
+      if (!reservationId) throw new Error('Expected a write reservation.');
+      const actual = createZeroResourceUsage('actual');
+      actual.counters.toolInvocations = 1;
+      actual.counters.artifactBytes = bytes;
+      state = reduceRuntimeState(state, {
+        type: 'resource_budget.reconciled',
+        reservationId,
+        actual,
+      });
+    }
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      reconciledUsage: { counters: { artifactBytes: 700_000_000 } },
+    });
+  });
+
   test('persists reservation before dispatch and reconciles terminal usage', () => {
     const state = configuredState();
     const plan = planModelInvocationResource(state, {
@@ -325,6 +530,41 @@ describe('runtime resource budget admission', () => {
         now: new Date('2026-07-30T00:00:02Z'),
       }),
     ).toThrow('reconciliation_required');
+  });
+
+  test('unknown independent child result does not block a distinct parent model call', () => {
+    const state = configuredState();
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'independent-child-v2');
+    upper.gauges.elapsedRunMs = 30 * 60 * 1000;
+    upper.gauges.activeSubagents = 1;
+    upper.unboundedToolInvocations = true;
+    upper.independentFollowupTurn = true;
+    upper.durationOnlyChildRun = true;
+    const reservationId = `backup_${'a'.repeat(64)}`;
+    const unknown = apply(state, [
+      {
+        type: 'resource_budget.reserved',
+        reservation: {
+          version: 1,
+          reservationId,
+          runId: 'run-1',
+          invocationId: 'prior-child-followup',
+          resourceKind: 'subagent',
+          executableUpperBound: upper,
+          state: 'reserved',
+        },
+      },
+      { type: 'resource_budget.unknown', reservationId },
+    ]);
+    const planned = planModelInvocationResource(unknown, {
+      invocationId: 'new-parent-model',
+      inputTokens: 1,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:02Z'),
+    });
+    expect(planned.budget.kind).toBe('reservation');
+    expect(unknown.resourceBudget.reservations[reservationId]?.state).toBe('unknown');
   });
 
   test('releases dispatch-started usage only with local Provider denial proof', () => {

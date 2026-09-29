@@ -280,6 +280,33 @@ test('completed parent can decide an exact active independent followup approval'
     },
   );
   expect(committed).toHaveLength(1);
+  const unknownChildState = {
+    ...childState,
+    childSessionOrigin: {
+      ...childState.childSessionOrigin,
+      terminal: { status: 'unknown', cleanupConfirmed: false },
+    },
+    activeFollowupTurn: {
+      ...childState.activeFollowupTurn,
+      sourceRevision: 42,
+      sourceStateDigest: `sha256:${'f'.repeat(64)}`,
+    },
+    resourceBudget: {
+      ...childState.resourceBudget,
+      budget: { durationOnlyChildRun: true },
+    },
+  } as Input['childState'];
+  await provider.requestAction(
+    { type: 'request_tool_approval', interactionId: 'child-approval', toolCallId: 'child-tool' },
+    unknownChildState,
+    {
+      commit: (action, evidence, revision) => {
+        committed.push({ action, evidence, revision });
+        return { descriptor: { kind: 'precommitted_interaction_action' } } as never;
+      },
+    },
+  );
+  expect(committed).toHaveLength(2);
   expect(
     projectChildApprovalProxy({
       parentState,

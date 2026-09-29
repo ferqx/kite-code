@@ -73,7 +73,6 @@ export function createCrossSessionRootAgentMailModelInput(input: {
       if (
         !Number.isSafeInteger(batch.fromSequence) ||
         batch.fromSequence < 0 ||
-        batch.rows.length > 8 ||
         batch.rows.some((row, index) =>
           index === 0
             ? row.sequence <= batch.fromSequence

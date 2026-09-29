@@ -95,10 +95,9 @@ export function createAgentMessageContextFrame(input: {
   if (
     !input.messageId.trim() ||
     !input.senderAgentId.trim() ||
-    (input.sourceTaskId !== undefined && !input.sourceTaskId.trim()) ||
-    new TextEncoder().encode(input.body).byteLength > 4_096
+    (input.sourceTaskId !== undefined && !input.sourceTaskId.trim())
   )
-    throw new Error('Agent message frame identity or body bound is invalid.');
+    throw new Error('Agent message frame identity is invalid.');
   const attributes = [
     `message_id="${escapeXml(input.messageId)}"`,
     `sender_agent_id="${escapeXml(input.senderAgentId)}"`,

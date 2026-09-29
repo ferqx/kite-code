@@ -225,7 +225,9 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     funding.target_run_id !== route.target_run_id ||
     funding.funding_run_id !== submitted.source_run_id ||
     funding.model_invocation_id !== route.invocation_id ||
-    !['completed', 'pre_dispatch_released'].includes(String(funding.terminal_disposition)) ||
+    !['completed', 'unknown', 'pre_dispatch_released'].includes(
+      String(funding.terminal_disposition),
+    ) ||
     !funding.terminal_target_revision ||
     !funding.terminal_source_revision ||
     !funding.terminal_evidence_digest ||
@@ -259,6 +261,8 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
   const settled = JSON.parse(settledRow.event_json) as Record<string, unknown>;
   const status = settled.status;
   const completed = funding.terminal_disposition === 'completed' && status === 'completed';
+  const uncertain =
+    independent && funding.terminal_disposition === 'unknown' && status === 'unknown';
   const released =
     funding.terminal_disposition === 'pre_dispatch_released' &&
     (status === 'failed' || status === 'cancelled');
@@ -268,7 +272,7 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     settled.submissionId !== input.submissionId ||
     settled.targetRunId !== route.target_run_id ||
     settled.taskId !== route.task_id ||
-    (!completed && !released)
+    (!completed && !uncertain && !released)
   )
     invalidSource();
   const run = database
@@ -365,7 +369,7 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
     taskReadHint: `Use task_read with task_id ${route.task_id} for the full result.`,
   });
   const byteLength = Buffer.byteLength(bodyText, 'utf8');
-  if (byteLength < 1 || byteLength > 4096) invalidSource();
+  if (!Number.isSafeInteger(byteLength) || byteLength < 1) invalidSource();
   const bodyDigest = createHash('sha256').update(bodyText).digest('hex');
   const bodyId = `pa_${bodyDigest}`;
   const requestDigest = createHash('sha256')
@@ -414,15 +418,6 @@ export function acceptCrossSessionFollowupTerminalReplyInTransaction(
           )
           .get(input.parentSessionId, target.current_task_id)
       : null;
-  const pending = database
-    .query<{ count: number }, [string]>(
-      `SELECT count(*) AS count FROM agent_mail_outbox o
-       LEFT JOIN agent_mail_inbox i ON i.target_session_id=o.target_session_id
-         AND i.source_session_id=o.source_session_id AND i.message_id=o.message_id
-       WHERE o.target_session_id=? AND i.prepared_invocation_id IS NULL`,
-    )
-    .get(input.parentSessionId);
-  if ((pending?.count ?? 0) >= 8) unavailable();
   const duplicateCommand = database
     .query<{ message_id: string }, [string, string]>(
       'SELECT message_id FROM agent_mail_outbox WHERE source_session_id=? AND command_id=?',
@@ -776,15 +771,6 @@ function acceptCurrentTurnTerminalReply(
     )
     .get(input.parentSessionId);
   if (!target || target.status === 'context_unavailable') unavailable();
-  const pending = database
-    .query<{ count: number }, [string]>(
-      `SELECT count(*) AS count FROM agent_mail_outbox o
-       LEFT JOIN agent_mail_inbox i ON i.target_session_id=o.target_session_id
-         AND i.source_session_id=o.source_session_id AND i.message_id=o.message_id
-       WHERE o.target_session_id=? AND i.prepared_invocation_id IS NULL`,
-    )
-    .get(input.parentSessionId);
-  if ((pending?.count ?? 0) >= 8) unavailable();
   const activeTargetRun =
     target.status === 'active' && target.current_task_id
       ? database
@@ -1074,7 +1060,7 @@ export function acceptCrossSessionAcceptedReleaseNoticeInTransaction(
     reason,
   });
   const byteLength = Buffer.byteLength(bodyText, 'utf8');
-  if (byteLength < 1 || byteLength > 4096) invalidSource();
+  if (!Number.isSafeInteger(byteLength) || byteLength < 1) invalidSource();
   const bodyDigest = createHash('sha256').update(bodyText).digest('hex');
   const bodyId = `pa_${bodyDigest}`;
   const requestDigest = createHash('sha256')
@@ -1123,15 +1109,6 @@ export function acceptCrossSessionAcceptedReleaseNoticeInTransaction(
           )
           .get(input.parentSessionId, node.current_task_id)
       : null;
-  const pending = database
-    .query<{ count: number }, [string]>(
-      `SELECT count(*) AS count FROM agent_mail_outbox o
-       LEFT JOIN agent_mail_inbox i ON i.target_session_id=o.target_session_id
-         AND i.source_session_id=o.source_session_id AND i.message_id=o.message_id
-       WHERE o.target_session_id=? AND i.prepared_invocation_id IS NULL`,
-    )
-    .get(input.parentSessionId);
-  if ((pending?.count ?? 0) >= 8) unavailable();
   const duplicateCommand = database
     .query<{ message_id: string }, [string, string]>(
       'SELECT message_id FROM agent_mail_outbox WHERE source_session_id=? AND command_id=?',
@@ -1251,6 +1228,7 @@ type OutboxRow = {
 export function acceptCrossSessionQueueMailInTransaction(
   database: Database,
   input: CrossSessionMailIntent,
+  allowContextUnavailableTarget = false,
 ): CrossSessionMailOutboxRecord {
   requireTransaction(database);
   if (
@@ -1275,7 +1253,7 @@ export function acceptCrossSessionQueueMailInTransaction(
   )
     invalidSource();
   const byteLength = Buffer.byteLength(input.bodyText, 'utf8');
-  if (byteLength < 1 || byteLength > 4096) invalidSource();
+  if (!Number.isSafeInteger(byteLength) || byteLength < 1) invalidSource();
   const bodyDigest = createHash('sha256').update(input.bodyText).digest('hex');
   const bodyId = `pa_${bodyDigest}`;
   const existing = readCrossSessionMail(database, input.sourceSessionId, input.messageId);
@@ -1343,7 +1321,8 @@ export function acceptCrossSessionQueueMailInTransaction(
       'SELECT status,current_task_id FROM agent_nodes WHERE session_id=? AND agent_id=session_id',
     )
     .get(input.targetSessionId);
-  if (!target || target.status === 'context_unavailable') unavailable();
+  if (!target || (target.status === 'context_unavailable' && !allowContextUnavailableTarget))
+    unavailable();
   const activeTargetRun =
     target.status === 'active' && target.current_task_id
       ? database
@@ -1353,15 +1332,6 @@ export function acceptCrossSessionQueueMailInTransaction(
           .get(input.targetSessionId, target.current_task_id)
       : null;
   const targetRunId = activeTargetRun?.run_id ?? null;
-  const pending = database
-    .query<{ count: number }, [string]>(
-      `SELECT count(*) AS count FROM agent_mail_outbox o
-       LEFT JOIN agent_mail_inbox i ON i.target_session_id=o.target_session_id
-         AND i.source_session_id=o.source_session_id AND i.message_id=o.message_id
-       WHERE o.target_session_id=? AND i.prepared_invocation_id IS NULL`,
-    )
-    .get(input.targetSessionId);
-  if ((pending?.count ?? 0) >= 8) unavailable();
 
   database
     .query(`INSERT OR IGNORE INTO agent_mail_bodies
@@ -1431,6 +1401,7 @@ export function receiveCrossSessionQueueMailInTransaction(
     readonly targetRevision: number;
     readonly receivedAtMs: number;
   },
+  allowContextUnavailableTarget = false,
 ): { readonly sequence: number; readonly targetRevision: number } {
   requireTransaction(database);
   const outbox = readCrossSessionMail(database, input.sourceSessionId, input.messageId);
@@ -1484,7 +1455,8 @@ export function receiveCrossSessionQueueMailInTransaction(
       'SELECT status FROM agent_nodes WHERE session_id=? AND agent_id=session_id',
     )
     .get(input.targetSessionId);
-  if (!node || node.status === 'context_unavailable') unavailable();
+  if (!node || (node.status === 'context_unavailable' && !allowContextUnavailableTarget))
+    unavailable();
   const sequence = nextCrossSessionTargetSequence(database, input.targetSessionId);
   database
     .query(`INSERT INTO agent_mail_inbox
@@ -1996,7 +1968,7 @@ export function listQueuedCrossSessionInbox(
   currentRunId: string,
   limit: number,
 ): readonly CrossSessionQueuedMail[] {
-  if (!targetSessionId || !currentRunId || !Number.isSafeInteger(limit) || limit < 1 || limit > 8)
+  if (!targetSessionId || !currentRunId || !Number.isSafeInteger(limit) || limit < 1)
     invalidSource();
   assertTargetCurrentRun(database, targetSessionId, currentRunId);
   const rows = database
@@ -2176,14 +2148,10 @@ export function prepareCrossSessionQueueMailInputInTransaction(
          AND o.target_session_id=i.target_session_id
        WHERE i.target_session_id=? AND i.prepared_invocation_id=? AND i.target_run_id=?
          AND o.mode IN ('queue_only','reply')
-       ORDER BY sequence LIMIT 9`,
+       ORDER BY sequence`,
     )
     .all(input.targetSessionId, input.modelInvocationId, input.currentRunId);
-  if (
-    already.length > 8 ||
-    already.some((row) => row.prepared_model_admission_id !== input.modelAdmissionId)
-  )
-    conflict();
+  if (already.some((row) => row.prepared_model_admission_id !== input.modelAdmissionId)) conflict();
   const selected =
     already.length > 0
       ? already
@@ -2197,7 +2165,7 @@ export function prepareCrossSessionQueueMailInputInTransaction(
          AND o.message_id=i.message_id AND o.target_session_id=i.target_session_id
        WHERE i.target_session_id=? AND i.target_run_id=? AND i.prepared_invocation_id IS NULL
          AND o.mode IN ('queue_only','reply')
-       ORDER BY sequence LIMIT 8`,
+       ORDER BY sequence`,
           )
           .all(input.targetSessionId, input.currentRunId);
   if (already.length === 0) {

@@ -27,7 +27,6 @@ import {
 } from './surface-canonicalizer';
 
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
-const DEFAULT_MODEL_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const INTEGRITY_IDENTIFIER = /^sha256:[0-9a-f]{64}$/;
 const MODEL_RESPONSE_FINISH_REASONS = new Set([
@@ -89,7 +88,9 @@ export class ModelArtifactStore {
         : { root: options.root ?? modelArtifactRoot() }),
       namespace: 'model-artifacts',
       partitions: MODEL_ARTIFACT_PARTITIONS,
-      maxArtifactBytes: options.maxArtifactBytes ?? DEFAULT_MODEL_ARTIFACT_MAX_BYTES,
+      ...(options.maxArtifactBytes === undefined
+        ? {}
+        : { maxArtifactBytes: options.maxArtifactBytes }),
       ...(options.platform ? { platform: options.platform } : {}),
       ...(options.secureWindowsPath ? { secureWindowsPath: options.secureWindowsPath } : {}),
       ...(options.faultInjector ? { faultInjector: options.faultInjector } : {}),

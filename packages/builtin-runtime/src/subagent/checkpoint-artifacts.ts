@@ -7,8 +7,6 @@ import {
 import { canonicalModelJson } from '../model/surface-canonicalizer';
 import { subagentCheckpointArtifactRoot } from './artifact-paths';
 
-const MAX_CHECKPOINT_BYTES = 16 * 1024 * 1024;
-
 export type SubagentCheckpointArtifactRef = PrivateImmutableArtifactRef<'subagent_checkpoint'>;
 
 export interface SubagentCheckpoint {
@@ -34,7 +32,6 @@ export class SubagentCheckpointArtifactStore {
         : { root: options.root ?? subagentCheckpointArtifactRoot() }),
       namespace: 'subagent-checkpoints',
       partitions: [{ kind: 'subagent_checkpoint', directory: 'checkpoints', extension: '.json' }],
-      maxArtifactBytes: MAX_CHECKPOINT_BYTES,
     });
   }
 

@@ -1,6 +1,6 @@
 # Runtime SQLite Storage
 
-> 当前物理格式为 Store14；已验证的旧 Store9/10/11/12/13 先在私有候选副本中逐级转换并校验，再发布到普通 App Server。原 Session ID、State、Event 和 History 保留，旧文件不原位改写。未知或未证明的格式明确拒绝。状态见[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)。
+> 当前物理格式为 Store15；已验证的旧 Store9/10/11/12/13/14 先在私有候选副本中逐级转换并校验，再发布到普通 App Server。原 Session ID、State、Event 和 History 保留，旧文件不原位改写。未知或未证明的格式明确拒绝。状态见[会话存储兼容性与连续性 V1](../../docs/plans/session-store-compatibility-and-continuity.md)。
 
 
 `@kite-ai/runtime-storage-sqlite` 是 Host storage port 的 SQLite concrete adapter。默认 App Server 的物理数据库由 Session Store owner 管理；历史 adapter 与迁移代码仍有独立消费者，不代表普通启动有多个可选 writer。
@@ -11,7 +11,7 @@
 
 | 范围 | 格式 | 实际用途 |
 | --- | --- | --- |
-| 开发工作树的默认 TUI/CLI child 与显式 daemon | `kite-session.sqlite`，Store14 候选，`kite-session-history-generation-2026-09-28` | `openKiteSessionRuntimeStorage`；多连接、按 Session execution authority 写入；D3 TriggerTurn 与直接子停止已通过受控正式入口验收 |
+| 开发工作树的默认 TUI/CLI child 与显式 daemon | `kite-session.sqlite`，Store15 候选，`kite-session-unbounded-child-artifacts-2026-09-29` | `openKiteSessionRuntimeStorage`；多连接、按 Session execution authority 写入；D3 TriggerTurn 与直接子停止已通过受控正式入口验收 |
 | 逻辑 Runtime State/Run | State 27 与 `SQLITE_RUNTIME_RUN_FORMAT_EPOCH` | 由 App 显式注入；不是 Session Store 的物理 schema/epoch |
 | 旧单 Service | Home Store 9，`kite-home-single-service-v1-2026-08-30` | 显式旧 composition/测试；不能作为默认 child 或 daemon 的 fallback |
 | Workspace Worker 布局 | Store 8，`kite-agent-server-api-v1-2026-08-29` | 保留的 Worker factory、布局验证及迁移机制；不属于默认 release 启动拓扑 |
@@ -19,7 +19,7 @@
 | 旧 Runtime adapter | Store 6，`kite-runtime-server-v1-2026-08-26` | 显式 legacy adapter/兼容导入 target；不是默认 App Server writer |
 | 已知历史 source | State 26/Store 5、State 27/Store 5 | 仅经隔离只读 compatibility reader 导入显式 Store 6；不由当前 Session Store 自动导入 |
 
-表中保留代码的存在不等于发布承诺。不得按任意版本号选择 fallback，也不得把物理 Store14 的 epoch 写入逻辑 Session State 的 format 字段。
+表中保留代码的存在不等于发布承诺。不得按任意版本号选择 fallback，也不得把物理 Store15 的 epoch 写入逻辑 Session State 的 format 字段。
 
 阶段 D0 已确认每个子 Agent 需要独立持久 Session。Store11 增加 `runtime_sessions.parent_session_id`、根 Session 查询过滤和父 Tool 意图约束下的原子子 Session 创建。父 dispatch ACK、子首轮预算激活和有界恢复查询已有 Store primitive，Service 的完整创建／结果桥接与跨线程恢复仍在验收。同 Session 的 Agent 邮箱仍是未开放候选。Store10→11 候选转换与多来源发布保留旧根会话 ID、State/Event 和历史读取；普通启动对已验证格式执行准备，未知格式不清空旧库。准确格式与完整性证明见[方案 §4.0](../../docs/plans/background-agent-shell-conversation-coordination.md)。
 
@@ -27,7 +27,7 @@
 
 ## 当前数据库与执行所有权
 
-[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件先只读读取 schema/epoch 并分类兼容性，再检查受支持的完整结构。普通可变打开只接受准确 Store14 epoch；旧 Store10/11/12/13 经独占维护、备份、私有候选逐级转换及内容校验后发布，不原位升级。未知 epoch、较新 schema、partial 或 corrupt 返回 `store_incompatible`。兼容性错误携带实际与预期 schema；拒绝发生在读写打开前。不能用数字范围或仅能解析历史来声明完整 Runtime 只读兼容。它不自动探测、导入或改写 `kite.sqlite`。
+[文件 owner](src/kite-session-runtime-file.ts) 只接受 `kite-session.sqlite`：空文件在 `BEGIN IMMEDIATE` 内初始化，已有文件先只读读取 schema/epoch 并分类兼容性，再检查受支持的完整结构。普通可变打开只接受准确 Store15 epoch；旧 Store10/11/12/13/14 经独占维护、备份、私有候选逐级转换及内容校验后发布，不原位升级。未知 epoch、较新 schema、partial 或 corrupt 返回 `store_incompatible`。兼容性错误携带实际与预期 schema；拒绝发生在读写打开前。不能用数字范围或仅能解析历史来声明完整 Runtime 只读兼容。它不自动探测、导入或改写 `kite.sqlite`。
 
 [Session runtime storage](src/kite-session-runtime-storage.ts) 为各 WAL connection 提供执行 scope。[execution authority](src/kite-session-execution-authority.ts) 持久保存 generation、revision、lease deadline 与 cleanup 状态，acquire/renew/detach/release 使用 SQLite CAS。fresh Session 的 generation 1 与 Session 创建同事务；过期且 cleanup 未确认的 owner 进入恢复边界，不能直接重放。
 
@@ -45,7 +45,7 @@
 - Run insert/transition 与所属 State/event/receipt 提交一致。start 后的 queued→running row-only activation 可以复用相同 State revision；其他 transition 仍按 revision/lifecycle 校验。Run list 使用稳定 keyset，单页最多 200 项。
 - rewind 只在允许的 coverage/between-turn 边界修改；fork 克隆 checkpoint 范围内可复制的终态 Run，重绑 identity。target facts、receipt 与初始 authority 在同一事务，任一步失败整体回滚。
 - Directory、History、Checkpoint 与 Agent API 复用已打开 owner 的有界 read ports，不建立 Catalog mirror 或第二 writer。Directory 不返回 canonical path；空会话名的首条用户消息 fallback 只读、不写回命名事实。
-- 当前 Store14 的 `runtime_sessions.parent_session_id` 是父血缘字段（根为 NULL、子为准确父 Session ID），有外键／身份校验。Directory、History 搜索与最近会话、Workspace/Space 分页以及旧 `sessions.listSessions` 在 SQL 的排序、游标与 LIMIT 之前过滤根 Session；Store 公共日志读取和 Service 普通顶层详情拒绝已知子 ID。父 Agent 树授权的只读子详情已由 TUI 与 Desktop 接入，具体可见性和恢复资格见[会话手册](../../docs/handbook/features/sessions.md)及[后台 Agent 协调计划](../../docs/plans/background-agent-shell-conversation-coordination.md)。
+- 当前 Store15 的 `runtime_sessions.parent_session_id` 是父血缘字段（根为 NULL、子为准确父 Session ID），有外键／身份校验。Directory、History 搜索与最近会话、Workspace/Space 分页以及旧 `sessions.listSessions` 在 SQL 的排序、游标与 LIMIT 之前过滤根 Session；Store 公共日志读取和 Service 普通顶层详情拒绝已知子 ID。父 Agent 树授权的只读子详情已由 TUI 与 Desktop 接入，具体可见性和恢复资格见[会话手册](../../docs/handbook/features/sessions.md)及[后台 Agent 协调计划](../../docs/plans/background-agent-shell-conversation-coordination.md)。
 - Artifact 按 Model/Plan/Capability/filesystem preimage/Sandbox/Subagent 领域存储，不建立通用 blob authority。当前 Session Store 仍禁用 Artifact GC，不能把旧 Home Store 的 GC 接到普通 Session 读取。
 
 详细机制与测试入口：[事务与数据](docs/transactions-and-state.md)、[Writer/Effect/恢复](docs/authority-and-recovery.md)、[查询与 Artifact](docs/queries-and-artifacts.md)。
@@ -73,7 +73,7 @@
 
 当前文件格式：[Session file tests](test/isolated/kite-session-runtime-file.test.ts)；业务机制见上述三个专题，完整测试目录见 [test](test)。格式、恢复或日志语义变化同步 [Runtime Authority](../../docs/active/runtime-authority-boundary.md) 和[日志查询](../../docs/active/sqlite-runtime-log-query.md)。产品预期从[开发入口](../../docs/development/README.md)定位对应手册。
 
-App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-preparation.ts)，只对准确已知格式执行维护锁、来源备份、私有候选转换、旧行摘要与连续性校验，再发布 Store14；随后[Session 文件 preflight](src/kite-session-runtime-file.ts)只读核对当前格式。持久 Store11 lineage 格式不含跨 Session mail 的 outbox/inbox 表；Store11→12 候选转换补建这两张空表及索引，再核对旧行未变。release restart 复用这些检查，失败时不停止旧实例。未知不兼容文件保持原样；absent preflight 不创建文件。旧会话通过原 Session ID 与 History 读取，不清空用户配置、凭据或信任资料。
+App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-preparation.ts)，只对准确已知格式执行维护锁、来源备份、私有候选转换、旧行摘要与连续性校验，再发布 Store15；随后[Session 文件 preflight](src/kite-session-runtime-file.ts)只读核对当前格式。持久 Store11 lineage 格式不含跨 Session mail 的 outbox/inbox 表；Store11→12 候选转换补建这两张空表及索引，再核对旧行未变。release restart 复用这些检查，失败时不停止旧实例。未知不兼容文件保持原样；absent preflight 不创建文件。旧会话通过原 Session ID 与 History 读取，不清空用户配置、凭据或信任资料。
 
 
 当前启动先核对文件安全、格式与精确 schema，不扫描所有会话正文。Session snapshot 读取在同一只读事务内校验该会话的绑定、事件顺序／codec、snapshot checksum／revision、Run 与 receipt；损坏会话不阻止先列出目录。Artifact 内容由 typed reader 在访问时验证。完整 physical/FK 扫描保留于显式文件 preflight，不能在每个组合 reader 创建时重复执行。实现与测试见[事务与状态](docs/transactions-and-state.md)。
@@ -81,7 +81,7 @@ App Server 打开可变 Store 前先调用[启动准备](src/kite-session-store-
 
 ## 已知会话格式的启动准备
 
-[准备编排](src/kite-session-store-preparation.ts)由普通 App Server 在 owner 打开前调用。它在迁移期取得 canonical 与全部历史源的独占锁，调用方须提供旧 writer 准入，再以[一致性备份](src/kite-session-recovery-backup.ts)和[私有候选](src/kite-session-store-candidate.ts)处理已证明的 Store 9–13 格式。转换只对私有候选执行；旧表内容摘要与目标 schema 的完整转换证明必须通过，原位 main/WAL 保持一致，不接受遗漏非空 WAL 来源。Store 13→14 在旧 writer 已排除后把候选内遗留的 `active`／`detached` execution owner 栅栏化为 `recovery_required`、提升 generation/revision 并保持 cleanup 未确认；合法且已确认清理的恢复标记不改，原 Store 不写。完整连续性校验仍拒绝带活跃 owner 的候选。
+[准备编排](src/kite-session-store-preparation.ts)由普通 App Server 在 owner 打开前调用。它在迁移期取得 canonical 与全部历史源的独占锁，调用方须提供旧 writer 准入，再以[一致性备份](src/kite-session-recovery-backup.ts)和[私有候选](src/kite-session-store-candidate.ts)处理已证明的 Store 9–14 格式。转换只对私有候选执行；旧表内容摘要与目标 schema 的完整转换证明必须通过，原位 main/WAL 保持一致，不接受遗漏非空 WAL 来源。Store 13→14 在旧 writer 已排除后把候选内遗留的 `active`／`detached` execution owner 栅栏化为 `recovery_required`、提升 generation/revision 并保持 cleanup 未确认；合法且已确认清理的恢复标记不改，原 Store 不写。Store 14→15 重建模型、子 Agent 私有产物及续跑授权产物表，移除逐件字节上限，并核对除格式元数据外的所有旧表行摘要。完整连续性校验仍拒绝带活跃 owner 的候选。
 
 生产 Service 显式传入已验证的 build ID。准备器在全部维护锁和旧 writer 准入下按已捕获的源 main/WAL SHA 生成私有、持久的 `preparation-attempt.json`，先落盘再建立大型候选；同一 build/source 的重复失败返回 `store_preparation_retry_blocked`，不再复制备份。新 build 或源变化可再次准备，已提交 publication intent 优先接续；成功、已确认取消或瞬态失败清除匹配标记。标记损坏或权限不安全时拒绝继续，不删除既有恢复资产。此规则限制同一 build/source 的重复空间消耗，不是跨构建总磁盘配额；验证见[启动准备测试](test/isolated/kite-session-store-preparation.test.ts)。
 

@@ -670,6 +670,9 @@ export async function* executeRuntimeTurn(
         }
       } else {
         const startedAt = new Date();
+        const maxConcurrentSubagents =
+          input.config.resources?.maxConcurrentSubagents ??
+          LIMITED_RESOURCE_BUDGET_.maxConcurrentSubagents;
         const event: RuntimeEvent = {
           type: 'resource_budget.configured',
           runId: budgetRunId ?? randomUUID(),
@@ -679,9 +682,8 @@ export async function* executeRuntimeTurn(
           ).toISOString(),
           budget: {
             ...LIMITED_RESOURCE_BUDGET_,
-            maxConcurrentSubagents:
-              input.config.resources?.maxConcurrentSubagents ??
-              LIMITED_RESOURCE_BUDGET_.maxConcurrentSubagents,
+            maxConcurrentSubagents,
+            maxConcurrentWriters: maxConcurrentSubagents,
           },
         };
         const applied = kernel.processEventBatch([event]);
@@ -1107,6 +1109,7 @@ export async function* executeRuntimeTurn(
                   pendingIndependentTaskIds.slice(offset, offset + 8),
                   60_000,
                   taskWaitController.signal,
+                  { wakeOnModelRetry: false },
                 )
                 .then(() => 'background_changed' as const),
             );

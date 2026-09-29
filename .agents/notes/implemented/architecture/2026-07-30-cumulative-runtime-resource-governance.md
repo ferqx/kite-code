@@ -56,3 +56,5 @@ Runtime 需要持久 reservation/waiter、迁移、replay、fault 和 soak tests
 补充：[Agent Note 0001](2026-07-02-runtime-kernel.md)、[Agent Note 0048](../bug-fix/2026-07-29-durable-user-turn-cancellation.md)、[Agent Note 0049](../bug-fix/2026-07-30-effect-aware-read-scheduling.md)
 
 关联：D-11、Phase 1C
+
+2026-09-29 的[独立子 Run 执行时限决定](2026-09-29-independent-child-run-duration-only.md)已部分替代第 1–3 条对新独立子 Run 累计模型、token、turn、工具和 Artifact 份额的适用范围。本记录对父 Run 自身、其他有限执行、持久 reservation、并发许可、未知结果与准确终态仍适用；旧有限子 Run 仍按原持久上界恢复。

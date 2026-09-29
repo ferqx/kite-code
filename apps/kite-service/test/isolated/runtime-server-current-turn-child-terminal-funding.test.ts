@@ -280,7 +280,8 @@ test('independent followup releases source funding and replies when its new Run 
     expect(targetState?.resourceBudget.status).toBe('active');
     if (targetState?.resourceBudget.status !== 'active')
       throw new Error('Target ledger is unavailable.');
-    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(24);
+    expect(targetState.resourceBudget.budget.durationOnlyChildRun).toBe(true);
+    expect(targetState.resourceBudget.budget.maxModelRequests).toBe(0);
     expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(0);
     expect(targetEvents.filter((event) => event.type === 'run.completed')).toHaveLength(1);
     expect(

@@ -1493,7 +1493,9 @@ function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
   const packageName = edge.targetPackage?.name;
   if (!packageName || edge.valueBindings.length === 0) return undefined;
   if (packageName === '@kite-ai/runtime-storage-sqlite') {
-    return edge.valueBindings[0] ?? '*';
+    // The error class is consumed as a typed failure from an injected Store
+    // owner; importing it does not construct a second Store authority.
+    return edge.valueBindings.find((binding) => binding !== 'KiteHomeWriteError');
   }
   const exact: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
     '@kite-ai/runtime-host': new Set([

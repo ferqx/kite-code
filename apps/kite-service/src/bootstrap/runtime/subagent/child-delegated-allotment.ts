@@ -1,6 +1,5 @@
 import { DEFAULT_SUBAGENT_TIMEOUT_MS } from '@kite-ai/builtin-runtime/subagent';
 import {
-  type ActiveResourceBudgetRuntimeState,
   actualUsageForReservation,
   assertResourceBudget,
   type BudgetReservation,
@@ -16,54 +15,9 @@ import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 type RunningTaskTerminal = Extract<RuntimeEvent, { type: 'tool.finished' }>;
 type ChildRole = 'explore' | 'plan' | 'code' | 'review';
 
-const COUNTERS = [
-  ['maxTurns', 'turns'],
-  ['maxModelRequests', 'modelRequests'],
-  ['maxRunInputTokens', 'inputTokens'],
-  ['maxRunOutputTokens', 'outputTokens'],
-  ['maxArtifactBytes', 'artifactBytes'],
-] as const;
-
-/** A child must receive at least one unit of every finite counter. */
-export function hasPositiveChildCounterShare(budget: Readonly<ResourceBudget>): boolean {
-  const divisor = budget.maxConcurrentSubagents + 2;
-  return COUNTERS.every(([limit]) => Math.floor(budget[limit] / divisor) >= 1);
-}
-
-/** Project the exact Task Artifact charge and sibling child shares before staging. */
-export function canFundStagedChildCounterShares(input: {
-  readonly ledger: ActiveResourceBudgetRuntimeState;
-  readonly children: readonly Readonly<{ parentToolCallId: string; taskArtifactBytes: number }>[];
-}): boolean {
-  const { ledger, children } = input;
-  if (!hasPositiveChildCounterShare(ledger.budget)) return false;
-  const divisor = ledger.budget.maxConcurrentSubagents + 2;
-  const committed = committedResourceUsage(ledger);
-  const transients = children.map((child) => {
-    const matches = Object.values(ledger.reservations).filter(
-      (reservation) =>
-        reservation.runId === ledger.runId &&
-        reservation.resourceKind === 'subagent' &&
-        reservation.invocationId === `tool:${child.parentToolCallId}` &&
-        ['dispatch_started', 'unknown'].includes(reservation.state),
-    );
-    return matches.length === 1 ? matches[0] : undefined;
-  });
-  if (transients.some((reservation) => !reservation)) return false;
-  return COUNTERS.every(([limit, counter]) => {
-    let remaining = ledger.budget[limit] - committed.counters[counter];
-    const share = Math.floor(ledger.budget[limit] / divisor);
-    for (const [index, child] of children.entries()) {
-      remaining += transients[index]!.executableUpperBound.counters[counter];
-      if (counter === 'artifactBytes') remaining -= child.taskArtifactBytes;
-      if (index < children.length - 1) remaining -= share;
-    }
-    return remaining >= 1;
-  });
-}
-
-/** Pure parent-ledger admission for one independently budgeted child Session.
- * The receipt reserves a 30-minute ceiling; the child Run clock starts at activation.
+/** Reserve only the child execution slot and deadline in the parent ledger.
+ * The child Run clock starts at activation; its cumulative work is not charged
+ * against the parent's model, token, turn or Artifact counters.
  */
 export function planChildDelegatedAllotment(input: {
   readonly state: Readonly<RuntimeState>;
@@ -109,9 +63,8 @@ export function planChildDelegatedAllotment(input: {
   const originalDeadline = Date.parse(ledger.deadlineAt);
   // The parent must still own a live funding Run when it accepts the Task.
   // Each child Run later starts its own 30-minute clock at activation.
-  // Finite counters remain additive. Child creation is rejected at capacity;
+  // Child creation is rejected at capacity;
   // no child Session or execution lease is created for an unadmitted request.
-  const divisor = ledger.budget.maxConcurrentSubagents + 2;
   const duration = DEFAULT_SUBAGENT_TIMEOUT_MS;
   if (
     !Number.isSafeInteger(originalDeadline) ||
@@ -123,7 +76,7 @@ export function planChildDelegatedAllotment(input: {
   const toolActual = actualUsageForReservation(state, transient, [toolFinished]);
   const actual = {
     ...toolActual,
-    counters: { ...toolActual.counters, artifactBytes: input.taskArtifactBytes },
+    counters: { ...toolActual.counters, artifactBytes: 0 },
   };
   if (actual.counters.artifactBytes > transient.executableUpperBound.counters.artifactBytes)
     throw new Error('Task Artifact exceeds its parent Tool reservation.');
@@ -137,54 +90,35 @@ export function planChildDelegatedAllotment(input: {
   const projected = reduceResourceBudgetState(ledger, reconciled);
   if (projected.status !== 'active') throw new Error('Child allotment funding ledger closed.');
   const committed = committedResourceUsage(projected);
-  const allotments = Object.fromEntries(
-    COUNTERS.map(([limit, counter]) => [
-      limit,
-      Math.min(
-        Math.floor(ledger.budget[limit] / divisor),
-        ledger.budget[limit] - committed.counters[counter],
-      ),
-    ]),
-  ) as Record<(typeof COUNTERS)[number][0], number>;
-  if (COUNTERS.some(([limit]) => !Number.isSafeInteger(allotments[limit]) || allotments[limit] < 1))
-    throw new Error('Child allotment has no positive counter budget.');
-  const slotAvailable =
-    committed.gauges.activeSubagents < ledger.budget.maxConcurrentSubagents &&
-    (role !== 'code' || committed.gauges.activeWriters < ledger.budget.maxConcurrentWriters);
+  const slotAvailable = committed.gauges.activeSubagents < ledger.budget.maxConcurrentSubagents;
   if (!slotAvailable) throw new Error('Sub-agent concurrency capacity is full.');
-  const waitMs = Math.min(ledger.budget.maxConcurrencyWaitMs, duration);
-  if (waitMs < 1) throw new Error('Child allotment concurrency wait is unavailable.');
   const childBudget: ResourceBudget = {
     version: 1,
     maxRunDurationMs: duration,
-    maxTurns: allotments.maxTurns,
-    maxModelRequests: allotments.maxModelRequests,
+    maxTurns: 0,
+    maxModelRequests: 0,
     maxToolInvocations: 0,
     unboundedToolInvocations: true,
-    maxRunInputTokens: allotments.maxRunInputTokens,
-    maxRunOutputTokens: allotments.maxRunOutputTokens,
-    maxArtifactBytes: allotments.maxArtifactBytes,
+    durationOnlyChildRun: true,
+    maxRunInputTokens: 0,
+    maxRunOutputTokens: 0,
+    maxArtifactBytes: 0,
     maxConcurrentSubagents: 1,
-    maxConcurrentWriters: 1,
-    maxConcurrentToolInvocations: 1,
-    maxConcurrentShellInvocations: 0,
-    maxConcurrencyWaitMs: waitMs,
+    maxConcurrentWriters: Number.MAX_SAFE_INTEGER,
+    maxConcurrentToolInvocations: Number.MAX_SAFE_INTEGER,
+    maxConcurrentShellInvocations: Number.MAX_SAFE_INTEGER,
+    maxConcurrencyWaitMs: duration,
   };
   assertResourceBudget(childBudget);
   const reservationId = `child-allotment:${childThreadId}`;
   if (projected.reservations[reservationId])
     throw new Error('Child allotment identity is already reserved.');
   const upper = createZeroResourceUsage('versioned_upper_bound', 'child-delegated-allotment-v2');
-  upper.counters.turns = childBudget.maxTurns;
-  upper.counters.modelRequests = childBudget.maxModelRequests;
   upper.unboundedToolInvocations = true;
   upper.independentChildTurnDeadline = true;
-  upper.counters.inputTokens = childBudget.maxRunInputTokens;
-  upper.counters.outputTokens = childBudget.maxRunOutputTokens;
-  upper.counters.artifactBytes = childBudget.maxArtifactBytes;
+  upper.durationOnlyChildRun = true;
   upper.gauges.elapsedRunMs = duration;
   upper.gauges.activeSubagents = 1;
-  upper.gauges.activeWriters = role === 'code' ? 1 : 0;
   const reservation: BudgetReservation = {
     version: 1,
     reservationId,

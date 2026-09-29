@@ -308,7 +308,7 @@ quality fact 与 CompletionGuard blocker；exhausted 不是 recovered。只有�
 `recoveryOf`。quality guard 允许 Plan、询问用户与 capability search 等逃逸工具形成真实替代进展。
 主 Runtime 与 Subagent 的 deny 重提、MCP binding failure、restart 与 parent merge 全部走同一 typed
 terminal/journal 路径，不保留另一套正文或计数旁路。Runtime State continuation 只携带当前 canonical
-`executionJournal/exhaustedFingerprints`；旧字节不读取、不归一，Kernel journal 是唯一 recovery ceiling。
+`executionJournal/exhaustedFingerprints`；旧字节不读取、不归一，Kernel journal 是有限预算 Run 的 recovery ceiling。新 `durationOnlyChildRun` 子 Run 仍记录同一 journal 和失败血缘，但工具准入、调度与计划完成检查不因 `maximumAdditionalCalls` 或普通 `no_progress` 次数阻断；损坏的 `journal_invalid`、策略拒绝和没有安全重复证明的操作仍失败关闭。历史有限预算 Run 保持原恢复额度。
 Subagent 的正常执行与 approval resume 都只能把 `ToolExecutionResult` 的 canonical public model content
 追加到下一次 Provider context；该内容与 parent reducer 共用唯一 helper，success 选择
 `stdout || stderr || ''`，failure 选择 `stderr || stdout || ''`，并同时读取 `ok`/terminal status。
@@ -368,15 +368,15 @@ phase 不改变 production builtin declaration：Planning 与 Building 使用相
 
 `ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
 
-Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。独立子 Session 的新首轮委派在父 Run 仍有有效预算时受理，在子 Run 激活时才开始自身完整的 30 分钟期限；父预算将并发时长按最大值核算，累计模型请求、turn、token、Artifact 与并发仍有限预留，但带新委派标记的子 Run 不受累计工具调用次数上限约束。默认 Limited 的 120 次模型请求按子并发上限 3 加两份父级余量分配，每个子任务最多预留 24 次。旧委派缺少标记时保留原父 deadline 与有限工具次数上界。新委派的 required child 成为 CompletionGuard 唯一 blocker 时，父 Run 的等待时长在原 Run 恢复前补回，等待期间不得派发新的父资源；旧委派保留原期限规则。新标记的子 Run 不启用 Builtin child 的 12 轮含工具响应 soft ceiling，由自身时长和有限资源预算约束；旧委派和未启用 `resourceBudget` 的 child 仍在 12 轮后执行一次无工具总结调用，总结仍返回工具调用时按现有失败终态闭合。旧路径的 soft ceiling 从 continuation 的 `modelInvocationOrdinal` 延续，不能经审批暂停/恢复重置。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、authorization、sandbox、protected path、execution surface 和累计预算。interaction mode 通常继承 Parent；唯一特化是父级 `accept_edits` 下，同一模型响应内的多个结构化 Explore sibling 使用 Auto reviewer，父级 Full 不降级。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
+Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只要求 trim 后非空，不设任务文字或单行名称的固定长度上限，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。独立子 Session 的新首轮委派在父 Run 仍有有效预算时受理，在子 Run 激活时才开始自身完整的 30 分钟期限；父 Run 自身预算继续约束发起委派的工具；新子 Run 只保留自身 30 分钟执行期限，不设模型请求、turn、token、工具调用或 Artifact 字节的累计额度。父 Run 的可配置子 Agent 并发上限继续在受理时核验；新委派的 code 子 Agent 不占独立写者槽位，旧委派沿用持久写者额度。旧委派缺少标记时保留原父 deadline 与有限计数上界。新委派的 required child 成为 CompletionGuard 唯一 blocker 时，父 Run 的等待时长在原 Run 恢复前补回，等待期间不得派发新的父资源；旧委派保留原期限规则。新标记的子 Run 不启用 Builtin child 的 12 轮含工具响应 soft ceiling，由自身执行期限约束；旧委派和未启用 `resourceBudget` 的 child 仍在 12 轮后执行一次无工具总结调用，总结仍返回工具调用时按现有失败终态闭合。旧路径的 soft ceiling 从 continuation 的 `modelInvocationOrdinal` 延续，不能经审批暂停/恢复重置。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、authorization、sandbox、protected path 和 execution surface；父 Run 自身预算及子 Agent 并发额度继续适用；旧委派仍按持久写者额度执行。interaction mode 通常继承 Parent；唯一特化是父级 `accept_edits` 下，同一模型响应内的多个结构化 Explore sibling 使用 Auto reviewer，父级 Full 不降级。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 审批只解决具体调用的 Runtime policy gate，不能扩大 Subagent role ceiling。explore/plan/review 的
-`followup_task` 新 `independent_turn_v2` 是独立 child 新 Run 的另一条预算入口：来源 Run 在受理时以准确 submission 预留有限 Model、token、Artifact、turn 与并发上界，目标 Run 启动时独立获得最长 30 分钟。持久 v2 标记只解除累计 Tool 次数上限，不能提升原角色 grant、phase、Policy、审批、sandbox 或工具目录交集。来源 Run 完成后，已受理的目标新 Run 仍按自己的期限和来源备付继续；确定未派发的失败释放备付，外部调用已尝试而结果不明时保持 unknown，不重复派发。旧 v1 followup grant 按原 deadline、一次 Model 与零 Tool 回放。初始 child 的新派发仍要求未过期、未消费的短期启动 grant；已激活并持久 ACK 的首轮恢复只把原 grant 作为历史身份与工具上界核验，不重新消费它。恢复须先隔离旧执行者，再核对 grant 在激活时有效、父资金已派发、子 Run 尚未到期且没有模型、工具或其他外部尝试记录；缺一则保持恢复诊断或 unknown，不按过期 grant 创建新子 Run。
+`followup_task` 新 `independent_turn_v2` 是独立 child 新 Run 的另一条预算入口：来源 Run 在受理时以准确 submission 核验自身预算与可配置并发上限，目标 Run 启动时独立获得最长 30 分钟，且不设其他累计资源上限。持久 `durationOnlyChildRun` 标记只改变子 Run 的累计额度，不能提升原角色 grant、phase、Policy、审批、sandbox 或工具目录交集。来源 Run 完成或到达原截止时间后，已受理且排队的新 v2 续轮不因此过期，取得并发位后才启动目标 Run 并开始自己的 30 分钟期限；来源 Run 的用户取消仍可按准确受理事实结算。目标新 Run 按自己的期限和来源受理事实继续；确定未派发的失败释放来源占用，外部调用已尝试而结果不明时保持 unknown，不重复派发。旧 v1 followup grant 按原 deadline、一次 Model 与零 Tool 回放。新 v2 无 checkpoint 时只在 Store 能证明目标先前 completed／unknown 终态、准确 State revision／digest 与 transcript 延续后启动；先前 unknown 外部调用由签名 grant 的 `priorOutcomeUnknown` 进入首次模型提示，不得作为可重放授权。初始 child 的新派发仍要求未过期、未消费的短期启动 grant；已激活并持久 ACK 的首轮恢复只把原 grant 作为历史身份与工具上界核验，不重新消费它。恢复须先隔离旧执行者，再核对 grant 在激活时有效、父资金已派发、子 Run 尚未到期且没有模型、工具或其他外部尝试记录；缺一则保持恢复诊断或 unknown，不按过期 grant 创建新子 Run。
 
 非只读 Shell 即使在暂停后获得批准，resume 仍必须经过与首次 child loop 相同的只读 executor 并被拒绝。
 plan child 返回后的唯一 continuation 是 `write_plan:save`
 再 `write_plan:submit`。同一模型响应中连续、属于同一 task、尚未暂停且经 Policy 判定为无需审批的
 独立 `task` sibling 可以组成同批并发调用，Kernel 不再按固定批次数量截断；Service 在成功回执前按当前 Run 的
-`maxConcurrentSubagents`、writer ceiling 和正的有限预算份额逐个准入，满额立即拒绝而不排队。模型应把有价值的独立任务一起派发，依赖
+`maxConcurrentSubagents`、与其同值的新 Run writer ceiling 和父 Run 自身预算逐个准入，满额立即拒绝而不排队。模型应把有价值的独立任务一起派发，依赖
 前序结果或写范围重叠的任务必须串行；若减少用户要求的数量，需要明确说明原因。多个并发 child
 动态请求审批时只呈现一个 focused、可见的 canonical interaction，其余 continuation 以
 每个 child 的 canonical approval record 持久化在 Session queue，随后从 snapshot 继续，不得重启 child 模型。每个 child 的
@@ -384,7 +384,7 @@ plan child 返回后的唯一 continuation 是 `write_plan:save`
 auto-review，缺少该字段的历史 snapshot 必须保守回退到人工审批。重新呈现排队审批不是新的
 Sub-agent lifecycle attempt，不创建或结算 parent/tool reservation；真正获批恢复时才打开新的
 parent attempt。已经自动或人工获批的 active continuation 优先于 queued sibling；获批 child
-完成或再次暂停前，后者不得插队占用 canonical interaction。每个 child 的 model/tool reservation
+完成或再次暂停前，后者不得插队占用 canonical interaction。旧同 Session continuation 的每个 child model/tool reservation
 仍来自父 run 的共享累计预算 ledger（[Agent Note 0104](../../.agents/notes/implemented/feature/2026-08-13-bounded-concurrent-subagent-dispatch.md)）。自动审查升级人工审批时，内部 `reviewFailure` 继续
 记录 reviewer 的判断或技术失败，但按 [Agent Note 0142](../../.agents/notes/implemented/feature/2026-08-26-runtime-server-client-protocol-boundary.md) 不作为 raw client payload；App projector 只可输出有界、
 低敏感度的 approval title/summary，TUI 不得重新读取 raw command、scope、Provider body 或 Host payload。

@@ -15,7 +15,7 @@ import {
   createKiteSessionAppServerStorageComposition,
 } from '../../src/bootstrap';
 
-type Outcome = 'release_slot' | 'capacity_timeout';
+type Outcome = 'release_slot' | 'wait_past_old_timeout';
 
 async function until(check: () => boolean, stage: string, waitMs = 12_000): Promise<void> {
   const deadline = Date.now() + waitMs;
@@ -291,6 +291,7 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
       throw new Error('Funding Run is absent.');
     const fundingRunId = source.resourceBudget.runId;
     expect(source.resourceBudget.budget.maxConcurrentSubagents).toBe(2);
+    expect(source.resourceBudget.budget.maxConcurrentWriters).toBe(2);
     const occupied = Object.values(source.resourceBudget.reservations).filter(
       (reservation) =>
         reservation.resourceKind === 'subagent' && reservation.state === 'dispatch_started',
@@ -343,54 +344,38 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
       runId: fundingRunId,
     });
     expect(targetRequests).toBe(1);
-    if (outcome === 'release_slot') {
-      gateA.resolve();
-      await until(() => targetRequests === 2, 'one resumed target Model');
-      await until(
-        () =>
-          storage!.storage.sessions
-            .loadEventsStrict(targetId)
-            .some(({ event }) => event.type === 'agent.followup_turn_settled'),
-        'followup terminal',
-      );
-      const targetEvents = storage.storage.sessions
-        .loadEventsStrict(targetId)
-        .map(({ event }) => event);
-      expect(targetEvents.filter((event) => event.type === 'agent.followup_routed')).toEqual([
-        expect.objectContaining({ route: 'new_turn', submissionId: accepted.submissionId }),
-      ]);
-      expect(
-        targetEvents.filter((event) => event.type === 'agent.followup_turn_settled'),
-      ).toHaveLength(1);
-      expect(targetRequests).toBe(2);
-    } else {
-      await until(
-        () =>
-          storage!.runWithSessionExecution(
-            parentSessionId,
-            () =>
-              storage!.storage.crossSessionQueueMail.readLastReleasedFollowupForDirectChild(
-                parentSessionId,
-                fundingRunId,
-                targetId,
-              )?.reason === 'capacity_timeout',
-          ),
-        'capacity timeout settlement',
-        20_000,
-      );
+    if (outcome === 'wait_past_old_timeout') {
+      await Bun.sleep(16_000);
       expect(targetRequests).toBe(1);
-      expect(storage.loadCurrentSnapshot(parentSessionId)?.resourceBudget).toMatchObject({
-        reservations: { [backup!.reservationId]: { state: 'released' } },
-      });
       expect(
-        storage.runWithSessionExecution(targetId, () =>
-          storage!.storage.crossSessionQueueMail.readFollowupRoute(
+        storage.runWithSessionExecution(parentSessionId, () =>
+          storage!.storage.crossSessionQueueMail.readLastReleasedFollowupForDirectChild(
+            parentSessionId,
+            fundingRunId,
             targetId,
-            accepted.submissionId!,
           ),
         ),
       ).toBeNull();
     }
+    gateA.resolve();
+    await until(() => targetRequests === 2, 'one resumed target Model');
+    await until(
+      () =>
+        storage!.storage.sessions
+          .loadEventsStrict(targetId)
+          .some(({ event }) => event.type === 'agent.followup_turn_settled'),
+      'followup terminal',
+    );
+    const targetEvents = storage.storage.sessions
+      .loadEventsStrict(targetId)
+      .map(({ event }) => event);
+    expect(targetEvents.filter((event) => event.type === 'agent.followup_routed')).toEqual([
+      expect.objectContaining({ route: 'new_turn', submissionId: accepted.submissionId }),
+    ]);
+    expect(
+      targetEvents.filter((event) => event.type === 'agent.followup_turn_settled'),
+    ).toHaveLength(1);
+    expect(targetRequests).toBe(2);
     model.assertComplete({ allowUnconsumedResponses: true });
   } catch (error) {
     failed = true;
@@ -433,7 +418,7 @@ test(
   45_000,
 );
 test(
-  'two occupied child slots expire a queued followup without target dispatch',
-  () => exerciseCapacity('capacity_timeout'),
+  'two occupied child slots retain a queued followup past the old 15 second wait',
+  () => exerciseCapacity('wait_past_old_timeout'),
   45_000,
 );

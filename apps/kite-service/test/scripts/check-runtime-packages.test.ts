@@ -375,4 +375,19 @@ describe('runtime workspace package gate', () => {
     writeFileSync(path, `${statement}\nexport const alternateAuthority = true;\n`);
     expectViolation(root, 'COMPOSITION_ROOT_BYPASS');
   });
+
+  test('allows a Store error type without allowing a second Store factory', () => {
+    const root = createFixture();
+    const path = join(root, 'apps/kite-service/src/alternate-authority.ts');
+    writeFileSync(
+      path,
+      "import { KiteHomeWriteError } from '@kite-ai/runtime-storage-sqlite';\nvoid KiteHomeWriteError;\n",
+    );
+    expect(analyzeRuntimePackages(root).violations).toEqual([]);
+    writeFileSync(
+      path,
+      "import { KiteHomeWriteError, createSqliteRuntimeStorage } from '@kite-ai/runtime-storage-sqlite';\nvoid KiteHomeWriteError;\nvoid createSqliteRuntimeStorage;\n",
+    );
+    expectViolation(root, 'COMPOSITION_ROOT_BYPASS');
+  });
 });

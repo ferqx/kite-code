@@ -272,15 +272,16 @@ test('source TriggerTurn seals a full independent child turn from trusted origin
     state: 'queued',
   });
   expect(accepted.reservationEvent.reservation.executableUpperBound.counters).toMatchObject({
-    turns: 1,
-    modelRequests: 24,
+    turns: 0,
+    modelRequests: 0,
     toolInvocations: 0,
-    inputTokens: 200_000,
-    outputTokens: 50_000,
+    inputTokens: 0,
+    outputTokens: 0,
   });
   expect(accepted.reservationEvent.reservation.executableUpperBound).toMatchObject({
     unboundedToolInvocations: true,
     independentFollowupTurn: true,
+    durationOnlyChildRun: true,
     gauges: { elapsedRunMs: 30 * 60_000, activeWriters: 0 },
   });
   expect(accepted.receipt).toMatchObject({
@@ -329,12 +330,12 @@ test('source TriggerTurn refuses missing persisted target origin proof', async (
   expect(f.acceptCount).toBe(0);
 });
 
-test('source TriggerTurn reserves a writer only for an original code child', async () => {
+test('source TriggerTurn keeps the code role without reserving a writer slot', async () => {
   const f = fixture();
   f.setOriginProof('code', `sha256:${'d'.repeat(64)}`);
   expect(await f.port.submitMessage(f.request)).toEqual({ ok: true });
   const accepted = f.accepted[0]!;
-  expect(accepted.reservationEvent.reservation.executableUpperBound.gauges.activeWriters).toBe(1);
+  expect(accepted.reservationEvent.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
   expect(JSON.parse(accepted.intent.admission.canonicalJson).policy).toMatchObject({
     targetRole: 'code',
     targetGrantDigest: `sha256:${'d'.repeat(64)}`,

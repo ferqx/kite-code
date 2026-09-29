@@ -23,7 +23,7 @@ import {
   testBuiltinToolCatalog,
 } from '../../../../tests/helpers/runtime-model';
 
-test('child model stops before Provider dispatch when only its estimated input fits', async () => {
+async function exerciseChildInputAdmission(durationOnlyChildRun: boolean): Promise<void> {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-child-input-budget-'));
   const threadId = childThreadIdForToolAttempt({
     parentSessionId: 'parent-session',
@@ -32,7 +32,7 @@ test('child model stops before Provider dispatch when only its estimated input f
     attempt: 1,
   });
   const store = openStateStoreForTest(join(root, 'state.sqlite'), { sessionId: threadId });
-  const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
+  const model = createMockModel([{ message: aiMessage({ content: 'child model dispatched' }) }]);
   const config: AgentConfig = {
     apiKey: 'unused',
     baseURL: 'https://example.invalid',
@@ -73,7 +73,19 @@ test('child model stops before Provider dispatch when only its estimated input f
       runId: 'child-budget-run',
       startedAt: new Date(now - 1_000).toISOString(),
       deadlineAt: new Date(now + 29 * 60_000).toISOString(),
-      budget: { ...LIMITED_RESOURCE_BUDGET_, version: 1 },
+      budget: durationOnlyChildRun
+        ? {
+            ...LIMITED_RESOURCE_BUDGET_,
+            maxTurns: 0,
+            maxModelRequests: 0,
+            maxToolInvocations: 0,
+            unboundedToolInvocations: true,
+            durationOnlyChildRun: true,
+            maxRunInputTokens: 0,
+            maxRunOutputTokens: 0,
+            maxArtifactBytes: 0,
+          }
+        : { ...LIMITED_RESOURCE_BUDGET_, version: 1 },
     });
     if (active.resourceBudget.status !== 'active') throw new Error('Child budget is not active.');
     const childState: RuntimeState = {
@@ -108,6 +120,7 @@ test('child model stops before Provider dispatch when only its estimated input f
     }
     const estimate = projected.resourceEstimate.inputTokens;
     expect(estimate).toBeGreaterThan(0);
+    if (durationOnlyChildRun) expect(projected.resourceEstimate.maxOutputTokens).toBeUndefined();
     const ceiling = Math.floor(estimate * 1.5);
     expect(ceiling).toBeGreaterThanOrEqual(estimate);
     expect(ceiling).toBeLessThan(estimate * 2);
@@ -115,7 +128,10 @@ test('child model stops before Provider dispatch when only its estimated input f
       ...childState,
       resourceBudget: {
         ...active.resourceBudget,
-        budget: { ...active.resourceBudget.budget, maxRunInputTokens: ceiling },
+        budget: {
+          ...active.resourceBudget.budget,
+          ...(durationOnlyChildRun ? {} : { maxRunInputTokens: ceiling }),
+        },
       },
     };
     const kernel = new StateHostSessionHarness({
@@ -132,23 +148,37 @@ test('child model stops before Provider dispatch when only its estimated input f
       events.push(event.type);
     }
 
-    expect(model.callCount.count).toBe(0);
-    expect(events).toContain('run.error');
-    expect(events).toContain('turn.aborted');
-    expect(events).not.toContain('resource_budget.dispatch_started');
     const persisted = store.loadSnapshot(threadId);
-    expect(persisted?.terminalOutcome).toMatchObject({
-      status: 'budget_exhausted',
-      reasonCode: 'budget_exhausted',
-    });
-    expect(persisted && childTerminalResult(persisted, '')).toMatchObject({
-      ok: false,
-      terminalStatus: 'exhausted',
-      error: 'budget_exhausted',
-    });
+    if (durationOnlyChildRun) {
+      expect(model.callCount.count).toBe(1);
+      expect(events).toContain('resource_budget.dispatch_started');
+      expect(persisted?.terminalOutcome?.status).not.toBe('budget_exhausted');
+    } else {
+      expect(model.callCount.count).toBe(0);
+      expect(events).toContain('run.error');
+      expect(events).toContain('turn.aborted');
+      expect(events).not.toContain('resource_budget.dispatch_started');
+      expect(persisted?.terminalOutcome).toMatchObject({
+        status: 'budget_exhausted',
+        reasonCode: 'budget_exhausted',
+      });
+      expect(persisted && childTerminalResult(persisted, '')).toMatchObject({
+        ok: false,
+        terminalStatus: 'exhausted',
+        error: 'budget_exhausted',
+      });
+    }
     kernel.close();
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+test('legacy finite child model stops before Provider dispatch when only its estimated input fits', async () => {
+  await exerciseChildInputAdmission(false);
+});
+
+test('duration-only child model dispatches despite the old cumulative input threshold', async () => {
+  await exerciseChildInputAdmission(true);
 });

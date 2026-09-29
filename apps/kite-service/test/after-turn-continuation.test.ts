@@ -108,7 +108,7 @@ function afterTurnModel() {
     ...fixture,
     capabilityMetadata: {
       ...fixture.capabilityMetadata,
-      contextWindowTokens: 4_096,
+      contextWindowTokens: 16_384,
       maxOutputTokens: 64,
     },
   };

@@ -58,9 +58,9 @@ describe('Builtin catalog schema-hint formatter', () => {
     });
     expect(
       taskWait.parse({ task_ids: Array.from({ length: 9 }, (_, index) => `child-${index}`) }),
-    ).toMatchObject({ success: false });
+    ).toMatchObject({ success: true });
     expect(taskWait.parse({ task_ids: ['child-1'], timeout_ms: 60_001 })).toMatchObject({
-      success: false,
+      success: true,
     });
     expect(formatBuiltinToolSchemaHint(modelEntry('shell_execute'))).not.toContain('exitCode');
   });

@@ -14,7 +14,6 @@ import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 import { SubagentGrantError, type SubagentGrantVerifier } from './grant-authority';
 
 const DEFAULT_TOMBSTONE_TTL_MS = 5 * 60_000;
-const MAX_PROVIDER_TOMBSTONES_TOTAL = 1_024;
 
 export interface LocalSubagentLifecycleDriver {
   start(
@@ -73,18 +72,13 @@ export class LocalSubagentProvider implements SubagentProvider {
   readonly #taskArtifacts: BuiltinSubagentTaskArtifactAccess;
   readonly #providerInstanceId: string;
   readonly #ownerProcessStartIdentity: string;
-  /**
-   * These are only same-process recovery hints.  They are deliberately
-   * bounded and expire; an evicted/expired handle falls through to the
-   * conservative recovery-required path below.
-   */
+  /** Same-process recovery evidence expires after the tombstone TTL. */
   readonly #unconfirmed = new Map<string, number>();
   readonly #stopped = new Map<string, number>();
   readonly #now: () => number;
   /** Wall clocks can move backwards; expired hints must not revive. */
   #clockHighWaterMs = -1;
   readonly #tombstoneTtlMs: number;
-  readonly #maxProviderTombstones: number;
 
   constructor(
     verifier: SubagentGrantVerifier,
@@ -95,7 +89,6 @@ export class LocalSubagentProvider implements SubagentProvider {
     options: {
       readonly now?: () => number;
       readonly tombstoneTtlMs?: number;
-      readonly maxProviderTombstones?: number;
     } = {},
   ) {
     this.#verifier = verifier;
@@ -106,7 +99,6 @@ export class LocalSubagentProvider implements SubagentProvider {
     this.#ownerProcessStartIdentity = currentProcessStartIdentity();
     this.#now = options.now ?? Date.now;
     this.#tombstoneTtlMs = options.tombstoneTtlMs ?? DEFAULT_TOMBSTONE_TTL_MS;
-    this.#maxProviderTombstones = options.maxProviderTombstones ?? MAX_PROVIDER_TOMBSTONES_TOTAL;
     if (!Number.isSafeInteger(cleanupGraceMs) || cleanupGraceMs < 1 || cleanupGraceMs > 3_000) {
       throw new Error('Subagent cleanup grace is invalid.');
     }
@@ -116,13 +108,6 @@ export class LocalSubagentProvider implements SubagentProvider {
       this.#tombstoneTtlMs > DEFAULT_TOMBSTONE_TTL_MS
     ) {
       throw new Error('Subagent provider tombstone TTL is invalid.');
-    }
-    if (
-      !Number.isSafeInteger(this.#maxProviderTombstones) ||
-      this.#maxProviderTombstones < 1 ||
-      this.#maxProviderTombstones > MAX_PROVIDER_TOMBSTONES_TOTAL
-    ) {
-      throw new Error('Subagent provider tombstone capacity is invalid.');
     }
     this.#effectiveNow();
     this.#cleanupGraceMs = cleanupGraceMs;
@@ -152,7 +137,7 @@ export class LocalSubagentProvider implements SubagentProvider {
         running.controller,
         this.#cleanupGraceMs,
       );
-      const observation = boundedObservation(running.handle, driverResult);
+      const observation = validatedObservation(running.handle, driverResult);
       this.#runs.delete(input.handle.handleId);
       this.#rememberTombstone(this.#stopped, input.handle.handleId);
       return { ok: true, value: observation } as const;
@@ -167,9 +152,6 @@ export class LocalSubagentProvider implements SubagentProvider {
       }
       this.#runs.delete(input.handle.handleId);
       this.#rememberTombstone(this.#stopped, input.handle.handleId);
-      if (error instanceof ObservationTooLargeError) {
-        return failure('observation_too_large', error.message);
-      }
       return failure(
         running.controller.signal.aborted || input.signal?.aborted ? 'cancelled' : 'driver_crashed',
         running.controller.signal.aborted || input.signal?.aborted
@@ -263,7 +245,7 @@ export class LocalSubagentProvider implements SubagentProvider {
       return failure('recovery_required', 'Subagent cleanup remains unconfirmed.');
     }
     if (verified.providerInstanceId === this.#providerInstanceId) {
-      // A same-instance tombstone may have expired or been evicted.  Do not
+      // A same-instance tombstone may have expired. Do not
       // infer stopped from absence: that would turn lost cleanup evidence into
       // a successful recovery.  The caller must reconcile again from durable
       // authority or keep the Runtime blocked.
@@ -360,23 +342,10 @@ export class LocalSubagentProvider implements SubagentProvider {
       throw new Error('Subagent provider tombstone expiry is invalid.');
     }
     this.#pruneTombstonesAt(now);
-    // A handle identity can only have one terminal cleanup fact. Remove an
-    // older classification before accounting for the shared provider cap.
+    // A handle identity can only have one terminal cleanup fact.
     this.#unconfirmed.delete(handleId);
     this.#stopped.delete(handleId);
     tombstones.delete(handleId);
-    while (this.#unconfirmed.size + this.#stopped.size >= this.#maxProviderTombstones) {
-      const oldestUnconfirmed = this.#unconfirmed.entries().next().value as
-        | [string, number]
-        | undefined;
-      const oldestStopped = this.#stopped.entries().next().value as [string, number] | undefined;
-      if (!oldestUnconfirmed && !oldestStopped) break;
-      if (oldestUnconfirmed && (!oldestStopped || oldestUnconfirmed[1] <= oldestStopped[1])) {
-        this.#unconfirmed.delete(oldestUnconfirmed[0]);
-      } else if (oldestStopped) {
-        this.#stopped.delete(oldestStopped[0]);
-      }
-    }
     tombstones.set(handleId, expiresAtMs);
   }
 
@@ -472,8 +441,6 @@ function typedFailure(
 }
 
 class DriverCleanupPendingError extends Error {}
-class ObservationTooLargeError extends Error {}
-
 async function boundedCompletion<T>(
   promise: Promise<T>,
   controller: AbortController,
@@ -509,7 +476,7 @@ function cleanupRace<T>(promise: Promise<T>, cleanupGraceMs: number): Promise<T>
   });
 }
 
-function boundedObservation(
+function validatedObservation(
   handle: SubagentHandle,
   result: LocalSubagentDriverResult,
 ): Readonly<SubagentObservation> {
@@ -519,7 +486,6 @@ function boundedObservation(
       result.status,
     ) ||
     typeof result.summary !== 'string' ||
-    result.summary.length > 1_000_000 ||
     !Number.isSafeInteger(result.toolCallCount) ||
     result.toolCallCount < 0 ||
     !Number.isSafeInteger(result.durationMs) ||
@@ -527,17 +493,14 @@ function boundedObservation(
   ) {
     throw new Error('Child Runtime driver returned an invalid bounded result.');
   }
-  let payload: string;
+  let payload: string | undefined;
   try {
     payload = JSON.stringify(result.privatePayload);
   } catch {
     throw new Error('Child Runtime driver returned a non-JSON private payload.');
   }
-  if (Buffer.byteLength(payload) > 4 * 1024 * 1024) {
-    throw new ObservationTooLargeError(
-      'Child Runtime driver observation exceeds the transport bound.',
-    );
-  }
+  if (payload === undefined)
+    throw new Error('Child Runtime driver returned a non-JSON private payload.');
   const body = {
     schema: SUBAGENT_PROVIDER_SCHEMA_,
     handleId: handle.handleId,

@@ -45,7 +45,7 @@ test(
 );
 
 test(
-  'real child Provider retries wake task_wait and settle a classified failure for the parent',
+  'real child Provider retry wakes task_wait and completes without an attempt cap',
   () =>
     exerciseChildOrchestration(
       false,
@@ -68,7 +68,9 @@ test(
           ok: true,
           status: 'running',
           reason: 'model_retry',
-          tasks: [{ status: 'running', retry: { attempt: 1, maxAttempts: 5 } }],
+          tasks: [
+            { status: 'running', retry: { attempt: 1, maxAttempts: Number.MAX_SAFE_INTEGER } },
+          ],
         });
       },
       undefined,

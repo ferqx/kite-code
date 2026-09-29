@@ -96,14 +96,14 @@ describe('KASD parent-owned App Server process', () => {
       await eventually(() => model.getRequests().length === 1, 400);
       const digest = `sha256:${createHash('sha256').update(workspace).digest('hex')}`;
       const token = 'workspace-remove-token';
-      await expect(
-        connection.runtime.requestApp('app/workspace/remove', {
+      expect(
+        await connection.runtime.requestApp('app/workspace/remove', {
           phase: 'finalize',
           workspace,
           workspaceDigest: digest,
           token,
         }),
-      ).rejects.toThrow();
+      ).toEqual({ deletedSessions: 0, token });
       expect(
         await connection.runtime.requestApp('app/workspace/remove', {
           phase: 'remove',

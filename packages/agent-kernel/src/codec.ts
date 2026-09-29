@@ -323,13 +323,24 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         throw new Error('Agent mail acceptance identity is invalid.');
       break;
     case 'agent.followup_turn_prepared':
-      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(value.checkpointRef === undefined ? [] : ['checkpointRef']),
+        ...(value.sourceRevision === undefined ? [] : ['sourceRevision']),
+        ...(value.sourceStateDigest === undefined ? [] : ['sourceStateDigest']),
+      ]);
       if (
         !validAgentId(value.sourceSessionId) ||
         !validAgentId(value.submissionId) ||
         !validAgentId(value.targetRunId) ||
         !validAgentId(value.taskId) ||
-        !validPrivateRef(value.checkpointRef, 'subagent_checkpoint') ||
+        (value.checkpointRef === undefined
+          ? !Number.isSafeInteger(value.sourceRevision) ||
+            (value.sourceRevision as number) < 0 ||
+            !validAgentDigest(value.sourceStateDigest)
+          : !validPrivateRef(value.checkpointRef, 'subagent_checkpoint') ||
+            value.sourceRevision !== undefined ||
+            value.sourceStateDigest !== undefined) ||
         !validPrivateRef(value.grantRef, 'agent_followup_grant') ||
         !validAgentDigest(value.grantDigest) ||
         (isRecord(value.grantRef) && value.grantRef.integrityIdentifier !== value.grantDigest)

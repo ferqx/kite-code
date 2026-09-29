@@ -433,7 +433,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task_wait: {
     summary: 'Wait for an actionable update from one or more background sub-agents.',
     useWhen:
-      'Use one bounded wait when a child result or model retry changes the next action, for example which independent result to inspect or which dependent task to start. Pass one to eight exact task_ids. When only required children remain before the final answer, submit the final candidate and let Runtime wait automatically.',
+      'Use one bounded wait when a child result or model retry changes the next action, for example which independent result to inspect or which dependent task to start. Pass exact task_ids. When only required children remain before the final answer, submit the final candidate and let Runtime wait automatically.',
     returns: {
       format: 'json',
       description:
@@ -441,7 +441,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       fields: ['ok', 'reason', 'cursor', 'tasks'],
     },
     constraints:
-      'task_ids must contain one to eight distinct Runtime-owned task identities. timeout_ms is bounded to 0-60000 and defaults to 30000. Do not repeatedly call task_wait after an unchanged timeout or model retry, and do not replace it with sleep or task_read polling.',
+      'task_ids must contain distinct Runtime-owned task identities. timeout_ms is nonnegative and defaults to 30000; the Run deadline and cancellation still apply. Do not repeatedly call task_wait after an unchanged timeout or model retry, and do not replace it with sleep or task_read polling.',
     recovery:
       'On timeout, continue meaningful independent work or yield to automatic required-result delivery. Treat missing or foreign task identities as terminal for that invocation; user input or cancellation interrupts the wait.',
   },
@@ -484,7 +484,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       fields: ['timed_out', 'reason'],
     },
     constraints:
-      'timeout_ms defaults to 30000 and is bounded to 0–60000. Waiting does not mark messages read, consume the mailbox, or cancel any Agent.',
+      'timeout_ms defaults to 30000 and must be nonnegative; the Run deadline and cancellation still apply. Waiting does not mark messages read, consume the mailbox, or cancel any Agent.',
     recovery:
       'After an unchanged timeout, continue independent work or yield; do not poll with repeated short waits.',
   },
@@ -498,7 +498,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
         'Empty success after durable acceptance; it does not mean the target read or acted on the message.',
     },
     constraints:
-      'agent_id names a direct parent or child Agent Session, not a task_id. message is at most 4096 UTF-8 bytes; the target can have at most eight pending messages. This is QueueOnly and never starts a new turn. An idle target keeps the message queued until an explicit eligible continuation.',
+      'agent_id names a direct parent or child Agent Session, not a task_id. This is QueueOnly and never starts a new turn. An idle target keeps the message queued until an explicit eligible continuation.',
     recovery:
       'On a rejected or unknown receipt, inspect the durable Agent state; do not blindly resend or assume delivery.',
   },
@@ -512,7 +512,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
         'Empty success after durable admission, without a new task ID or a promise that execution started.',
     },
     constraints:
-      'agent_id names a non-root Agent, not a task_id. message is at most 4096 UTF-8 bytes. The Host must admit exact caller scope, authorization, deadline and bounded backup budget before success; old grants are not reused.',
+      'agent_id names a non-root Agent, not a task_id. The Host must admit exact caller scope, authorization and deadline before success; old grants are not reused.',
     recovery:
       'Use wait_agent or list_agents for progress. Rejection or unknown admission is not safe to replay blindly; inspect the durable receipt first.',
   },

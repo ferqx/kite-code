@@ -261,6 +261,23 @@ describe('BackgroundSubagentRuntime', () => {
       result: { summary: 'serial-256' },
     });
   });
+  test('tracks more than 256 simultaneously live children without a second owner cap', async () => {
+    const owner = runtime();
+    const ownerKey = backgroundSubagentOwnerKey('concurrent', 'recovery');
+    const completion = deferred<SubAgentResult>();
+    for (let index = 0; index < 257; index += 1) {
+      owner.adopt({
+        taskId: `concurrent-${index}`,
+        ownerKey,
+        ...ORIGIN,
+        observe: () => completion.promise,
+        cancel: async () => {},
+      });
+    }
+    expect(owner.hasLiveTask('concurrent-256')).toBe(true);
+    completion.resolve(terminal());
+    while (owner.hasLiveTask('concurrent-256')) await Bun.sleep(0);
+  });
   test('reads and lists a durable terminal result after owner reconstruction', async () => {
     type Ref = PrivateImmutableArtifactRef<'subagent_task'>;
     const rows = new Map<

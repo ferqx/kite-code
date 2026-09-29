@@ -70,7 +70,6 @@ export class SubagentContinuationArtifactStore implements SubagentContinuationAr
             extension: '.json',
           },
         ],
-        maxArtifactBytes: 4 * 1024 * 1024,
       });
     } catch (error) {
       throw map(error, 'storage_boundary_violation');

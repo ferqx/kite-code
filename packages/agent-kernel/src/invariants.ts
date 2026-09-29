@@ -146,6 +146,15 @@ function assertResourceBudget(state: AgentState): void {
     'maxArtifactBytes',
   ];
   const zeroAllowedBudgetFields = new Set([
+    ...(budget.durationOnlyChildRun === true
+      ? [
+          'maxTurns',
+          'maxModelRequests',
+          'maxRunInputTokens',
+          'maxRunOutputTokens',
+          'maxConcurrencyWaitMs',
+        ]
+      : []),
     'maxToolInvocations',
     'maxArtifactBytes',
     'maxConcurrentSubagents',
@@ -165,6 +174,19 @@ function assertResourceBudget(state: AgentState): void {
     budget.unboundedToolInvocations === undefined ||
       (budget.unboundedToolInvocations === true && budget.maxToolInvocations === 0),
     'unbounded Tool budget marker is invalid.',
+  );
+  assert(
+    budget.durationOnlyChildRun === undefined ||
+      (budget.durationOnlyChildRun === true &&
+        [
+          'maxTurns',
+          'maxModelRequests',
+          'maxToolInvocations',
+          'maxRunInputTokens',
+          'maxRunOutputTokens',
+          'maxArtifactBytes',
+        ].every((field) => numberValue(budget, field) === 0)),
+    'duration-only child budget marker is invalid.',
   );
   assert(
     (numberValue(budget, 'maxConcurrentShellInvocations') ?? 0) <=
@@ -280,6 +302,30 @@ function assertResourceBudget(state: AgentState): void {
           reservation.reservationId === reservation.invocationId &&
           (stringValue(reservation, 'reservationId') ?? '').startsWith('child-allotment:'),
         'independent child deadline requires an exact child allotment.',
+      );
+    if (childUpper?.durationOnlyChildRun === true)
+      assert(
+        reservation.resourceKind === 'subagent' &&
+          (((stringValue(reservation, 'reservationId') ?? '').startsWith('child-allotment:') &&
+            reservation.reservationId === reservation.invocationId &&
+            childUpper.independentChildTurnDeadline === true) ||
+            (/^backup_[a-f0-9]{64}$/u.test(stringValue(reservation, 'reservationId') ?? '') &&
+              childUpper.independentFollowupTurn === true)),
+        'duration-only authority requires exact independent child funding.',
+      );
+    if (childUpper?.unboundedArtifactBytes === true)
+      assert(
+        budget.durationOnlyChildRun === true &&
+          ['tool', 'mcp', 'skill'].includes(stringValue(reservation, 'resourceKind') ?? ''),
+        'unbounded Artifact authority requires a duration-only child Tool.',
+      );
+    if (childUpper?.unboundedModelTokens === true)
+      assert(
+        budget.durationOnlyChildRun === true &&
+          ['model', 'compaction', 'verification'].includes(
+            stringValue(reservation, 'resourceKind') ?? '',
+          ),
+        'unbounded model token authority requires a duration-only child model invocation.',
       );
     const actual = recordValue(reservation, 'actual');
     if (actual) {
@@ -424,8 +470,11 @@ function assertUsage(
           'source',
           'estimatorVersion',
           'unboundedToolInvocations',
+          'unboundedArtifactBytes',
+          'unboundedModelTokens',
           'independentChildTurnDeadline',
           'independentFollowupTurn',
+          'durationOnlyChildRun',
         ].includes(key),
       ),
     `${label} shape is invalid.`,
@@ -467,10 +516,30 @@ function assertUsage(
       (source === 'versioned_upper_bound' &&
         value.unboundedToolInvocations === true &&
         numberValue(counters, 'toolInvocations') === 0)) &&
+      (value.unboundedArtifactBytes === undefined ||
+        (source === 'versioned_upper_bound' &&
+          value.unboundedArtifactBytes === true &&
+          numberValue(counters, 'artifactBytes') === 0)) &&
+      (value.unboundedModelTokens === undefined ||
+        (source === 'versioned_upper_bound' &&
+          value.unboundedModelTokens === true &&
+          numberValue(counters, 'inputTokens') === 0 &&
+          numberValue(counters, 'outputTokens') === 0)) &&
       (value.independentChildTurnDeadline === undefined ||
         (source === 'versioned_upper_bound' && value.independentChildTurnDeadline === true)) &&
       (value.independentFollowupTurn === undefined ||
-        (source === 'versioned_upper_bound' && value.independentFollowupTurn === true)),
+        (source === 'versioned_upper_bound' && value.independentFollowupTurn === true)) &&
+      (value.durationOnlyChildRun === undefined ||
+        (source === 'versioned_upper_bound' &&
+          value.durationOnlyChildRun === true &&
+          [
+            'turns',
+            'modelRequests',
+            'toolInvocations',
+            'inputTokens',
+            'outputTokens',
+            'artifactBytes',
+          ].every((field) => numberValue(counters, field) === 0))),
     `${label} authority marker is invalid.`,
   );
 }
@@ -489,7 +558,12 @@ function assertUsageWithin(
     'outputTokens',
     'artifactBytes',
   ])
-    if (field !== 'toolInvocations' || upper.unboundedToolInvocations !== true)
+    if (
+      upper.durationOnlyChildRun !== true &&
+      (field !== 'toolInvocations' || upper.unboundedToolInvocations !== true) &&
+      (field !== 'artifactBytes' || upper.unboundedArtifactBytes !== true) &&
+      ((field !== 'inputTokens' && field !== 'outputTokens') || upper.unboundedModelTokens !== true)
+    )
       assert(
         (numberValue(recordValue(actual, 'counters'), field) ?? 0) <=
           (numberValue(recordValue(upper, 'counters'), field) ?? -1),
@@ -585,6 +659,7 @@ function committedUsageWithinBudget(
   return (
     Object.entries(counterLimits).every(
       ([field, limit]) =>
+        budget.durationOnlyChildRun === true ||
         (field === 'toolInvocations' && budget.unboundedToolInvocations === true) ||
         counterSums[field]! - (field === 'toolInvocations' ? delegatedToolInvocations : 0) <=
           (numberValue(budget, limit) ?? -1),
@@ -2005,19 +2080,36 @@ export function assertAgentStateInvariants(state: AgentState): void {
   }
   assertResourceBudget(state);
   assertRetainedResourceBudgets(state);
+  if (
+    state.resourceBudget.status === 'active' &&
+    state.resourceBudget.budget.durationOnlyChildRun === true
+  )
+    assert(
+      state.childSessionOrigin !== undefined,
+      'duration-only budget requires a child Session origin.',
+    );
   assert(!state.activeFollowupTurn || state.childSessionOrigin, 'followup requires child origin.');
   if (state.childSessionOrigin) {
     const origin = state.childSessionOrigin;
     const followup = state.activeFollowupTurn;
     if (followup)
       assert(
-        origin.terminal?.status === 'completed' &&
+        (origin.terminal?.status === 'completed' ||
+          (origin.terminal?.status === 'unknown' &&
+            followup.checkpointRef === undefined &&
+            Number.isSafeInteger(followup.sourceRevision) &&
+            /^sha256:[a-f0-9]{64}$/u.test(followup.sourceStateDigest ?? ''))) &&
           followup.sourceSessionId === origin.parentSessionId &&
           validString(followup.submissionId) &&
           validString(followup.targetRunId) &&
           validString(followup.taskId) &&
           followup.taskId !== origin.childInvocationId &&
-          validPrivateArtifact(followup.checkpointRef, 'subagent_checkpoint') &&
+          (followup.checkpointRef === undefined ||
+            validPrivateArtifact(followup.checkpointRef, 'subagent_checkpoint')) &&
+          (followup.checkpointRef !== undefined ||
+            (Number.isSafeInteger(followup.sourceRevision) &&
+              (followup.sourceRevision ?? -1) >= 0 &&
+              /^sha256:[a-f0-9]{64}$/u.test(followup.sourceStateDigest ?? ''))) &&
           validPrivateArtifact(followup.grantRef, 'agent_followup_grant') &&
           followup.grantRef.integrityIdentifier === followup.grantDigest &&
           /^sha256:[a-f0-9]{64}$/u.test(followup.grantDigest),

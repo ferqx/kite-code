@@ -164,7 +164,6 @@ function childTerminalCheckpointForState(
     transcript: state.transcript,
   });
   const integrityIdentifier = hash(canonicalJson);
-  if (Buffer.byteLength(canonicalJson, 'utf8') > 16 * 1024 * 1024) return undefined;
   return {
     ref: {
       artifactId: `pa_${integrityIdentifier.slice('sha256:'.length)}`,
@@ -1403,6 +1402,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     mutation: RuntimeFollowupRunStartMutation,
   ): readonly KernelEvent[] {
     const origin = this.#state.childSessionOrigin;
+    const checkpointlessUnknownSource =
+      mutation.checkpointRef === undefined &&
+      Number.isSafeInteger(mutation.sourceRevision) &&
+      mutation.sourceRevision === this.#state.revision &&
+      /^sha256:[0-9a-f]{64}$/.test(mutation.sourceStateDigest ?? '') &&
+      this.#state.terminalOutcome?.status === 'unknown' &&
+      this.#state.turn.status === 'aborted';
     const prepared = events[0];
     const configured = events[1];
     const task = events[2];
@@ -1410,10 +1416,11 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     if (
       events.length !== 4 ||
       !origin?.terminal ||
-      origin.terminal.status !== 'completed' ||
+      (origin.terminal.status !== 'completed' &&
+        !(checkpointlessUnknownSource && origin.terminal.status === 'unknown')) ||
       origin.parentSessionId !== mutation.sourceSessionId ||
       this.#state.activeTaskId !== null ||
-      this.#state.terminalOutcome?.status !== 'completed' ||
+      (this.#state.terminalOutcome?.status !== 'completed' && !checkpointlessUnknownSource) ||
       prepared?.type !== 'agent.followup_turn_prepared' ||
       prepared.sourceSessionId !== mutation.sourceSessionId ||
       prepared.submissionId !== mutation.submissionId ||
@@ -1423,6 +1430,8 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       JSON.stringify(prepared.grantRef) !== JSON.stringify(mutation.grant.ref) ||
       mutation.grant.ref.integrityIdentifier !== mutation.grantDigest ||
       JSON.stringify(prepared.checkpointRef) !== JSON.stringify(mutation.checkpointRef) ||
+      prepared.sourceRevision !== mutation.sourceRevision ||
+      prepared.sourceStateDigest !== mutation.sourceStateDigest ||
       configured?.type !== 'resource_budget.configured' ||
       configured.runId !== mutation.targetRunId ||
       task?.type !== 'task.started' ||
@@ -1646,11 +1655,12 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
             events.at(-1)?.type !== 'agent.followup_independent_settled' ||
             (events.length === 1
               ? mutation.disposition !== 'unknown'
-              : events[0]?.type !==
-                (mutation.disposition === 'completed'
-                  ? 'resource_budget.reconciled'
-                  : mutation.disposition === 'unknown'
-                    ? 'resource_budget.unknown'
+              : mutation.disposition === 'unknown'
+                ? events[0]?.type !== 'resource_budget.unknown' &&
+                  events[0]?.type !== 'resource_budget.reconciled'
+                : events[0]?.type !==
+                  (mutation.disposition === 'completed'
+                    ? 'resource_budget.reconciled'
                     : 'resource_budget.released'))
           : mutation.kind === 'replace_followup_backup'
             ? events.length !== 1 || events[0]?.type !== 'resource_budget.bounded_replaced'
@@ -1822,9 +1832,12 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     if (!unknownUsage && input.resourceEvent.type === 'resource_budget.reconciled') {
       const actual = childBudget.reconciledUsage;
       const reported = input.resourceEvent.actual;
+      const durationOnly = delegated.executableUpperBound.durationOnlyChildRun === true;
       if (
         reported.source !== 'actual' ||
-        JSON.stringify(reported.counters) !== JSON.stringify(actual.counters) ||
+        (durationOnly
+          ? Object.values(reported.counters).some((value) => value !== 0)
+          : JSON.stringify(reported.counters) !== JSON.stringify(actual.counters)) ||
         actual.gauges.activeSubagents !== 0 ||
         reported.gauges.activeSubagents !== 0 ||
         Object.entries(reported.gauges).some(
@@ -3097,8 +3110,11 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       (allotment.state !== 'reserved' && allotment.state !== 'queued') ||
       allotment.invocationId !== `child-allotment:${intent.childThreadId}` ||
       allotment.executableUpperBound.gauges.activeSubagents !== 1 ||
-      (intent.role === 'code' && allotment.executableUpperBound.gauges.activeWriters < 1) ||
-      (intent.role !== 'code' && allotment.executableUpperBound.gauges.activeWriters !== 0) ||
+      (allotment.executableUpperBound.durationOnlyChildRun === true
+        ? allotment.executableUpperBound.gauges.activeWriters !== 0
+        : intent.role === 'code'
+          ? allotment.executableUpperBound.gauges.activeWriters < 1
+          : allotment.executableUpperBound.gauges.activeWriters !== 0) ||
       upperBoundDigest !== intent.delegatedUpperBoundDigest ||
       (intent.disposition === 'after_turn' &&
         (!report ||

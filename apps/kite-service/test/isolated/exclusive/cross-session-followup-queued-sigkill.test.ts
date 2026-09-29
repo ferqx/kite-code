@@ -94,7 +94,7 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
       process.execPath,
       'test',
       '--test-name-pattern',
-      '^two occupied child slots expire a queued followup without target dispatch$',
+      '^two occupied child slots queue a followup until one slot releases$',
       join(import.meta.dir, '../runtime-server-followup-capacity-queue.test.ts'),
       '--parallel=1',
       '--max-concurrency=1',
@@ -132,7 +132,7 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
     await until(() => {
       home = seedHome(root);
       return home !== undefined && acceptedQueued(join(home, 'kite-session.sqlite')) !== undefined;
-    }, 'durable queued followup before capacity timeout');
+    }, 'durable queued followup before slot release');
     const databasePath = join(home!, 'kite-session.sqlite');
     seed.kill('SIGKILL');
     await seed.exited;

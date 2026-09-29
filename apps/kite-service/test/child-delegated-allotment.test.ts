@@ -126,13 +126,19 @@ test('three read-only child allotments reconcile transient Tools and coexist und
     expect(plan.events[0].actual.gauges.activeSubagents).toBe(0);
     expect(plan.reservation.invocationId).toBe(`child-allotment:${childId(index)}`);
     expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
-    expect(plan.childBudget.maxTurns).toBe(10);
-    expect(plan.childBudget.maxModelRequests).toBe(36);
+    expect(plan.childBudget.maxTurns).toBe(0);
+    expect(plan.childBudget.maxModelRequests).toBe(0);
+    expect(plan.childBudget.durationOnlyChildRun).toBe(true);
+    expect(plan.childBudget.maxRunInputTokens).toBe(0);
+    expect(plan.childBudget.maxRunOutputTokens).toBe(0);
+    expect(plan.childBudget.maxArtifactBytes).toBe(0);
     expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
     expect(plan.childBudget.unboundedToolInvocations).toBe(true);
     expect(plan.childBudget.maxToolInvocations).toBe(0);
     expect(plan.reservation.executableUpperBound.unboundedToolInvocations).toBe(true);
     expect(plan.reservation.executableUpperBound.independentChildTurnDeadline).toBe(true);
+    expect(plan.reservation.executableUpperBound.durationOnlyChildRun).toBe(true);
+    expect(Object.values(plan.reservation.executableUpperBound.counters)).toEqual(Array(6).fill(0));
     expect(Date.parse(plan.deadlineAt)).toBe(NOW + 30 * 60_000);
     reservations.push(plan.reservation);
     state = applyPlanned(state, plan.events);
@@ -143,6 +149,23 @@ test('three read-only child allotments reconcile transient Tools and coexist und
   );
   expect(committedResourceUsage(state.resourceBudget).gauges.activeSubagents).toBe(3);
   expect(committedResourceUsage(state.resourceBudget).counters.toolInvocations).toBe(3);
+});
+
+test('large private Task input does not consume parent output Artifact budget', () => {
+  const state = withTransient(initialState(LIMITED_RESOURCE_BUDGET_), 1);
+  const plan = planChildDelegatedAllotment({
+    state,
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'explore',
+    taskArtifactBytes: 20 * 1024 * 1024,
+    now: NOW,
+  });
+  expect(plan.events[0].actual.counters.artifactBytes).toBe(0);
+  expect(plan.childBudget.maxConcurrencyWaitMs).toBe(plan.childBudget.maxRunDurationMs);
+  expect(plan.childBudget.maxConcurrentToolInvocations).toBe(Number.MAX_SAFE_INTEGER);
+  expect(plan.childBudget.maxConcurrentShellInvocations).toBe(Number.MAX_SAFE_INTEGER);
 });
 
 test('child allotments use subagent slots without reserving Tool or Shell slots', () => {
@@ -185,7 +208,7 @@ test('LIMITED budget admits three child allotments and rejects a fourth without 
       now: NOW,
     });
     expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
-    expect(plan.childBudget.maxModelRequests).toBe(24);
+    expect(plan.childBudget.maxModelRequests).toBe(0);
     expect(Date.parse(plan.deadlineAt)).toBe(NOW + plan.childBudget.maxRunDurationMs);
     expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(
       plan.childBudget.maxRunDurationMs,
@@ -243,8 +266,12 @@ test('short remaining parent deadline does not shorten the new child turn', () =
   expect(plan.reservation.executableUpperBound.gauges.elapsedRunMs).toBe(30 * 60_000);
 });
 
-test('code children consume the parent writer gauge without overbooking', () => {
-  let state = initialState();
+test('code children use only parent subagent slots', () => {
+  let state = initialState({
+    ...INTERNAL_RESOURCE_BUDGET_,
+    maxConcurrentSubagents: 2,
+    maxConcurrentWriters: 0,
+  });
   for (let index = 1; index <= 2; index += 1) {
     state = withTransient(state, index);
     const plan = planChildDelegatedAllotment({
@@ -256,7 +283,8 @@ test('code children consume the parent writer gauge without overbooking', () => 
       taskArtifactBytes: 1,
       now: NOW,
     });
-    expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(1);
+    expect(plan.reservation.executableUpperBound.gauges.activeWriters).toBe(0);
+    expect(plan.childBudget.maxConcurrentWriters).toBe(Number.MAX_SAFE_INTEGER);
     state = applyPlanned(state, plan.events);
   }
   state = withTransient(state, 3);
@@ -273,19 +301,19 @@ test('code children consume the parent writer gauge without overbooking', () => 
   ).toThrow('Sub-agent concurrency capacity is full');
 });
 
-test('insufficient finite counters and expired deadline reject before child reservation', () => {
+test('finite parent counters do not shrink child work; expired parent deadline rejects it', () => {
   const low = initialState({ ...INTERNAL_RESOURCE_BUDGET_, maxTurns: 3 });
-  expect(() =>
-    planChildDelegatedAllotment({
-      state: withTransient(low, 1),
-      transientReservationId: transientId(1),
-      toolFinished: finished(1),
-      childThreadId: childId(1),
-      role: 'review',
-      taskArtifactBytes: 1,
-      now: NOW,
-    }),
-  ).toThrow('no positive counter budget');
+  const plan = planChildDelegatedAllotment({
+    state: withTransient(low, 1),
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'review',
+    taskArtifactBytes: 1,
+    now: NOW,
+  });
+  expect(plan.childBudget.durationOnlyChildRun).toBe(true);
+  expect(plan.reservation.executableUpperBound.counters.turns).toBe(0);
   expect(() =>
     planChildDelegatedAllotment({
       state: withTransient(initialState(), 1),

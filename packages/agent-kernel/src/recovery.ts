@@ -359,6 +359,8 @@ export function admitRecoveryAttempt(
     readonly mode: ToolRecoveryAttemptMode;
     readonly taskId?: string;
     readonly turnId?: string;
+    /** A duration-only child Run may retry until its Run deadline; safety advice still applies. */
+    readonly ignoreNonSafetyCeilings?: boolean;
   },
 ): RecoveryAdmission {
   if (journalInvalid(journal)) return { admitted: false, detailCode: 'no_progress' };
@@ -369,7 +371,8 @@ export function admitRecoveryAttempt(
     journal.qualityGuard.blocked &&
     (journal.qualityGuard.taskId == null || journal.qualityGuard.taskId === input.taskId) &&
     (journal.qualityGuard.turnId == null || journal.qualityGuard.turnId === input.turnId);
-  if (qualityApplies && !escapeTool) return { admitted: false, detailCode: 'no_progress' };
+  if (qualityApplies && !escapeTool && !input.ignoreNonSafetyCeilings)
+    return { admitted: false, detailCode: 'no_progress' };
   const failure = candidateFailure(journal, input);
   if (!failure) return { admitted: true };
   if (
@@ -383,7 +386,7 @@ export function admitRecoveryAttempt(
     input.mode === 'model_correction'
       ? recovery.disposition === 'correct_args' || recovery.disposition === 'alternative'
       : recovery.disposition === 'retry_once' && recovery.safeAutomaticRetry;
-  if (!allowed || recovery.maximumAdditionalCalls === 0)
+  if (!allowed || (!input.ignoreNonSafetyCeilings && recovery.maximumAdditionalCalls === 0))
     return {
       admitted: false,
       recoveryOf: failure.failureInstanceId,
@@ -393,7 +396,7 @@ export function admitRecoveryAttempt(
     input.mode === 'model_correction'
       ? failure.modelCorrectionAttempts
       : failure.automaticRetryAttempts;
-  if (attempts >= recovery.maximumAdditionalCalls)
+  if (!input.ignoreNonSafetyCeilings && attempts >= recovery.maximumAdditionalCalls)
     return {
       admitted: false,
       recoveryOf: failure.failureInstanceId,
@@ -476,10 +479,12 @@ export function hasActiveUnresolvedToolFailures(
 export function isToolRecoveryQualityBlocked(
   journal: ToolRecoveryJournal,
   scope: { readonly taskId?: string | null; readonly turnId?: string },
+  options?: { readonly ignoreNonSafetyCeilings?: boolean },
 ): boolean {
   return (
     journalInvalid(journal) ||
-    (journal.qualityGuard.blocked &&
+    (!options?.ignoreNonSafetyCeilings &&
+      journal.qualityGuard.blocked &&
       (journal.qualityGuard.taskId == null || journal.qualityGuard.taskId === scope.taskId) &&
       (journal.qualityGuard.turnId == null || journal.qualityGuard.turnId === scope.turnId))
   );

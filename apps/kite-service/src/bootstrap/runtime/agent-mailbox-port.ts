@@ -42,9 +42,6 @@ interface RootAgentMetadataReader {
   nextSequence(sessionId: string, sourceAgentId: string): number;
 }
 
-const MAX_MAIL_BYTES = 4096;
-const MAX_PENDING_MAIL = 8;
-
 /** The cross-Session Store owner implements these calls under the owning Session fence. */
 export interface CrossSessionQueueMailPort {
   /** Source-owned, bounded direct-child tree; contains metadata only. */
@@ -346,9 +343,9 @@ export interface RootFollowupPolicyEvidence {
   readonly policyRevision: string;
   readonly workspaceDigest: string;
   readonly interactionModeRevision: number;
-  readonly contextWindowTokens: number;
-  readonly maxOutputTokens: number;
-  readonly firstAttemptTimeoutMs: number;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly firstAttemptTimeoutMs?: number;
   /** Attests that the first child Surface will be cropped to these model bounds. */
   readonly boundedContext: true;
   /** Exact prepared request facts, present only for independently routed child Sessions. */
@@ -426,13 +423,14 @@ function validFollowupPolicy(
       evidence.phaseCeiling === getAgentPhase(runtimeHostStateActivePlanning(state)) &&
       typeof evidence.policyRevision === 'string' &&
       evidence.policyRevision.length > 0 &&
-      Number.isSafeInteger(evidence.contextWindowTokens) &&
-      evidence.contextWindowTokens > 0 &&
-      Number.isSafeInteger(evidence.maxOutputTokens) &&
-      evidence.maxOutputTokens > 0 &&
-      evidence.contextWindowTokens > evidence.maxOutputTokens &&
-      Number.isSafeInteger(evidence.firstAttemptTimeoutMs) &&
-      evidence.firstAttemptTimeoutMs > 0,
+      (evidence.preparedTool !== undefined ||
+        (Number.isSafeInteger(evidence.contextWindowTokens) &&
+          (evidence.contextWindowTokens ?? 0) > 0 &&
+          Number.isSafeInteger(evidence.maxOutputTokens) &&
+          (evidence.maxOutputTokens ?? 0) > 0 &&
+          (evidence.contextWindowTokens ?? 0) > (evidence.maxOutputTokens ?? 0) &&
+          Number.isSafeInteger(evidence.firstAttemptTimeoutMs) &&
+          (evidence.firstAttemptTimeoutMs ?? 0) > 0)),
   );
 }
 
@@ -808,7 +806,7 @@ function createCrossSessionMailboxPort(
       )
         return { ok: false, code: 'invalid_target' };
       const byteLength = Buffer.byteLength(message, 'utf8');
-      if (byteLength < 1 || byteLength > MAX_MAIL_BYTES)
+      if (!Number.isSafeInteger(byteLength) || byteLength < 1)
         return { ok: false, code: 'capacity_exceeded' };
       const source = {
         runId: scope.runId,
@@ -1349,7 +1347,7 @@ export function createRootAgentMailboxPort(
       if (typeof agentId !== 'string' || agentId.length === 0 || typeof message !== 'string')
         return { ok: false, code: 'invalid_input' };
       const byteLength = Buffer.byteLength(message, 'utf8');
-      if (byteLength < 1 || byteLength > MAX_MAIL_BYTES)
+      if (!Number.isSafeInteger(byteLength) || byteLength < 1)
         return { ok: false, code: 'capacity_exceeded' };
       const source = {
         runId: scope.runId,
@@ -1376,7 +1374,6 @@ export function createRootAgentMailboxPort(
       try {
         const target = metadata.readAgent(caller.sessionId, caller.sourceAgentId, agentId);
         if (!target) return { ok: false, code: 'agent_not_found' };
-        if (target.unreadCount >= MAX_PENDING_MAIL) return { ok: false, code: 'capacity_exceeded' };
         const sequence = metadata.nextSequence(caller.sessionId, caller.sourceAgentId);
         if (!validScope(scope, signal)) return { ok: false, code: 'invalid_source' };
         let followup:
@@ -1403,7 +1400,7 @@ export function createRootAgentMailboxPort(
             return { ok: false, code: 'budget_unconfigured' };
           const nowMs = Date.now();
           const deadlineAt = Date.parse(budget.deadlineAt);
-          const minimumWindow = Math.max(60_000, policy.firstAttemptTimeoutMs + 5_000);
+          const minimumWindow = Math.max(60_000, (policy.firstAttemptTimeoutMs ?? 0) + 5_000);
           if (
             !Number.isSafeInteger(minimumWindow) ||
             !Number.isFinite(deadlineAt) ||
@@ -1412,7 +1409,8 @@ export function createRootAgentMailboxPort(
             return { ok: false, code: 'expired' };
           if (Object.values(budget.reservations).some((item) => item.state === 'unknown'))
             return { ok: false, code: 'reconciliation_required' };
-          const inputTokens = 2 * (policy.contextWindowTokens - policy.maxOutputTokens);
+          const inputTokens =
+            2 * ((policy.contextWindowTokens ?? 0) - (policy.maxOutputTokens ?? 0));
           if (!Number.isSafeInteger(inputTokens)) return { ok: false, code: 'budget_exhausted' };
           const upper = createZeroResourceUsage(
             'versioned_upper_bound',
@@ -1421,7 +1419,7 @@ export function createRootAgentMailboxPort(
           upper.counters.turns = 1;
           upper.counters.modelRequests = 1;
           upper.counters.inputTokens = inputTokens;
-          upper.counters.outputTokens = policy.maxOutputTokens;
+          upper.counters.outputTokens = policy.maxOutputTokens ?? 0;
           upper.gauges.activeSubagents = 1;
           const submissionId = `submission_${sha256(JSON.stringify([messageId, 'trigger_turn']))}`;
           const backupReservationId = `backup_${sha256(JSON.stringify([submissionId, scope.runId]))}`;

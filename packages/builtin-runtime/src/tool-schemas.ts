@@ -294,8 +294,7 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
     name: z
       .string()
       .trim()
-      .min(2)
-      .max(80)
+      .min(1)
       .regex(/^[^\r\n]+$/u)
       .describe('Public sub-agent name that briefly states what the child is doing'),
     subagent_type: z
@@ -304,8 +303,7 @@ export const BUILTIN_TASK_PUBLIC_SCHEMA_ = z
     task: z
       .string()
       .trim()
-      .min(8)
-      .max(8_000)
+      .min(1)
       .describe(
         'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
       ),
@@ -329,8 +327,7 @@ export const BUILTIN_TASK_PRIVATE_SCHEMA_ = z
     name: z
       .string()
       .trim()
-      .min(2)
-      .max(80)
+      .min(1)
       .regex(/^[^\r\n]+$/u),
     subagent_type: z.enum(['explore', 'plan', 'code', 'review']),
     taskArtifact: z
@@ -370,18 +367,16 @@ export const BUILTIN_TASK_WAIT_SCHEMA_ = z
     task_ids: z
       .array(BUILTIN_TASK_ID_SCHEMA_)
       .min(1)
-      .max(8)
       .refine((taskIds) => new Set(taskIds).size === taskIds.length, {
         message: 'task_ids must not contain duplicates',
       })
-      .describe('One to eight distinct stable background task identities returned by task'),
+      .describe('Distinct stable background task identities returned by task'),
     timeout_ms: z
       .number()
       .int()
       .min(0)
-      .max(60_000)
       .optional()
-      .describe('Bounded wait in milliseconds; defaults to 30000'),
+      .describe('Wait in milliseconds; defaults to 30000'),
   })
   .strict();
 
@@ -397,18 +392,13 @@ const BUILTIN_AGENT_ID_SCHEMA_ = z
   .max(256)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 
-const BUILTIN_AGENT_MESSAGE_SCHEMA_ = z
-  .string()
-  .min(1)
-  .refine((value) => new TextEncoder().encode(value).byteLength <= 4 * 1024, {
-    message: 'message exceeds 4096 UTF-8 bytes',
-  });
+const BUILTIN_AGENT_MESSAGE_SCHEMA_ = z.string().min(1);
 
 export const BUILTIN_LIST_AGENTS_SCHEMA_ = z.object({}).strict();
 
 export const BUILTIN_WAIT_AGENT_SCHEMA_ = z
   .object({
-    timeout_ms: z.number().int().min(0).max(60_000).optional(),
+    timeout_ms: z.number().int().min(0).optional(),
   })
   .strict();
 
@@ -437,7 +427,7 @@ export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
     .positive()
     .optional()
     .describe(
-      'Maximum runtime in milliseconds. Commands default to 600000ms when omitted; set a shorter limit for a TUI, dev server, watcher, or other long-running process, or a longer limit for an unusually slow finite command.',
+      'Maximum runtime in milliseconds. In an independent sub-agent Run, an omitted value uses the remaining Run time. Other finite commands default to 600000ms; set an explicit limit when needed.',
     ),
   yield_ms: z
     .number()

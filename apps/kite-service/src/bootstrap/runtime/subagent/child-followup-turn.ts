@@ -8,6 +8,7 @@ import type {
   CrossSessionFollowupAdmission,
   ResourceBudget,
 } from '@kite-ai/runtime-host/kernel-adapter';
+import { encodeCurrentAgentStateJson } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
   RuntimeAgentArtifactRef,
   RuntimeFollowupRunStartMutation,
@@ -36,7 +37,7 @@ export interface ChildFollowupTurnPlan {
   readonly mutation: RuntimeFollowupRunStartMutation;
   readonly budget: ResourceBudget;
   readonly deadlineAt: string;
-  readonly firstAttemptTimeoutMs: number;
+  readonly firstAttemptTimeoutMs?: number;
 }
 
 /** The target grant uses a current directory read at exactly this State revision. */
@@ -67,7 +68,7 @@ export function planChildFollowupTurn(input: {
   readonly admission: Readonly<CrossSessionFollowupAdmission>;
   readonly sourceAdmissionRef: RuntimeAgentArtifactRef<'agent_followup_admission'>;
   readonly sourceAdmissionDigest: string;
-  readonly checkpoint: VerifiedChildFollowupCheckpoint;
+  readonly checkpoint?: VerifiedChildFollowupCheckpoint;
   readonly nowMs: number;
   /** Exact model-visible target tools after role, original grant and catalog attenuation. */
   readonly allowedTools?: readonly string[];
@@ -80,13 +81,23 @@ export function planChildFollowupTurn(input: {
 }): ChildFollowupTurnPlan {
   const { state, admission, checkpoint } = input;
   const origin = state.childSessionOrigin;
-  const checkpointPayload = JSON.parse(checkpoint.canonicalJson) as Record<string, unknown>;
-  const checkpointDigest = sha256(checkpoint.canonicalJson);
-  const checkpointTaskId = checkpointPayload.terminalTaskId;
+  const independent = admission.policy.executionMode === 'independent_turn_v2';
+  const checkpointPayload = checkpoint
+    ? (JSON.parse(checkpoint.canonicalJson) as Record<string, unknown>)
+    : null;
+  const checkpointDigest = checkpoint ? sha256(checkpoint.canonicalJson) : null;
+  const checkpointTaskId = checkpointPayload?.terminalTaskId;
   if (
-    origin?.terminal?.status !== 'completed' ||
-    state.terminalOutcome?.status !== 'completed' ||
-    state.turn.status !== 'completed' ||
+    (origin?.terminal?.status !== 'completed' &&
+      !(independent && origin?.terminal?.status === 'unknown')) ||
+    (state.terminalOutcome?.status !== 'completed' &&
+      !(independent && state.terminalOutcome?.status === 'unknown')) ||
+    (state.turn.status !== 'completed' &&
+      !(
+        independent &&
+        state.turn.status === 'aborted' &&
+        state.terminalOutcome?.status === 'unknown'
+      )) ||
     state.activeTaskId !== null ||
     state.activeFollowupTurn ||
     state.session.threadId !== admission.targetSessionId ||
@@ -96,35 +107,42 @@ export function planChildFollowupTurn(input: {
     input.targetPolicy.capabilityDigest !== state.capabilities.catalogRevision ||
     (admission.policy.phaseCeiling === 'planning' &&
       input.targetPolicy.phaseCeiling !== 'planning') ||
-    checkpoint.ref.kind !== 'subagent_checkpoint' ||
-    checkpoint.ref.integrityIdentifier !== checkpointDigest ||
-    checkpoint.ref.artifactId !== `pa_${checkpointDigest.slice(7)}` ||
-    checkpoint.ref.byteLength !== Buffer.byteLength(checkpoint.canonicalJson, 'utf8') ||
-    checkpointPayload.artifactFormatVersion !== 1 ||
-    checkpointPayload.childSessionId !== state.session.threadId ||
-    checkpointPayload.terminalRevision !== checkpoint.terminalRevision ||
-    checkpoint.terminalRevision > state.revision ||
-    checkpointPayload.terminalRunId !== state.turn.turnId ||
-    checkpointPayload.terminalStatus !== 'completed' ||
-    typeof checkpointTaskId !== 'string' ||
-    state.tasks[checkpointTaskId]?.status !== 'completed' ||
-    JSON.stringify(checkpointPayload.transcript) !== JSON.stringify(state.transcript) ||
+    (!checkpoint && !independent) ||
+    (checkpoint &&
+      (checkpoint.ref.kind !== 'subagent_checkpoint' ||
+        checkpoint.ref.integrityIdentifier !== checkpointDigest ||
+        checkpoint.ref.artifactId !== `pa_${checkpointDigest?.slice(7)}` ||
+        checkpoint.ref.byteLength !== Buffer.byteLength(checkpoint.canonicalJson, 'utf8') ||
+        checkpointPayload?.artifactFormatVersion !== 1 ||
+        checkpointPayload.childSessionId !== state.session.threadId ||
+        checkpointPayload.terminalRevision !== checkpoint.terminalRevision ||
+        checkpoint.terminalRevision > state.revision ||
+        checkpointPayload.terminalRunId !== state.turn.turnId ||
+        checkpointPayload.terminalStatus !== 'completed' ||
+        typeof checkpointTaskId !== 'string' ||
+        state.tasks[checkpointTaskId]?.status !== 'completed' ||
+        JSON.stringify(checkpointPayload.transcript) !== JSON.stringify(state.transcript))) ||
     !Number.isSafeInteger(input.nowMs) ||
     input.nowMs < 0 ||
-    !Number.isSafeInteger(admission.policy.firstAttemptTimeoutMs) ||
-    admission.policy.firstAttemptTimeoutMs <= 0
+    (!independent &&
+      (!Number.isSafeInteger(admission.policy.firstAttemptTimeoutMs) ||
+        (admission.policy.firstAttemptTimeoutMs ?? 0) <= 0))
   )
     throw new Error('Child followup lacks a current settled checkpoint and restricted policy.');
-  const independent = admission.policy.executionMode === 'independent_turn_v2';
+  const sourceRevision = checkpoint ? undefined : state.revision;
+  const sourceStateDigest = checkpoint ? undefined : sha256(encodeCurrentAgentStateJson(state));
   const remaining = admission.deadlineAt - input.nowMs;
-  if (!independent && remaining < admission.policy.firstAttemptTimeoutMs + 5_000)
+  if (!independent && remaining < (admission.policy.firstAttemptTimeoutMs ?? 0) + 5_000)
     throw new Error('Child followup funding deadline cannot cover its first Model attempt.');
   const upper = admission.executableUpperBound;
+  const durationOnlyChildRun = independent && upper.durationOnlyChildRun === true;
   if (
-    upper.counters.turns < 1 ||
-    upper.counters.modelRequests < 1 ||
-    upper.counters.inputTokens < 1 ||
-    upper.counters.outputTokens < 1 ||
+    (durationOnlyChildRun
+      ? Object.values(upper.counters).some((value) => value !== 0)
+      : upper.counters.turns < 1 ||
+        upper.counters.modelRequests < 1 ||
+        upper.counters.inputTokens < 1 ||
+        upper.counters.outputTokens < 1) ||
     upper.counters.toolInvocations !== 0
   )
     throw new Error('Child followup source backup lacks a bounded turn envelope.');
@@ -136,7 +154,7 @@ export function planChildFollowupTurn(input: {
       upper.independentFollowupTurn !== true ||
       upper.unboundedToolInvocations !== true ||
       upper.gauges.elapsedRunMs !== 30 * 60_000 ||
-      upper.counters.artifactBytes < 1 ||
+      (!durationOnlyChildRun && upper.counters.artifactBytes < 1) ||
       !allowed ||
       allowed.length === 0 ||
       new Set(allowed).size !== allowed.length ||
@@ -149,27 +167,35 @@ export function planChildFollowupTurn(input: {
   const duration = independent
     ? 30 * 60_000
     : Math.min(remaining, upper.gauges.elapsedRunMs || remaining);
-  if (!Number.isSafeInteger(duration) || duration < admission.policy.firstAttemptTimeoutMs + 5_000)
+  if (
+    !Number.isSafeInteger(duration) ||
+    duration < (independent ? 1 : (admission.policy.firstAttemptTimeoutMs ?? 0) + 5_000)
+  )
     throw new Error('Child followup delegated duration is unavailable.');
   const budget: ResourceBudget = {
     version: 1,
     maxRunDurationMs: duration,
-    maxTurns: 1,
-    maxModelRequests: independent ? upper.counters.modelRequests : 1,
+    maxTurns: durationOnlyChildRun ? 0 : 1,
+    maxModelRequests: durationOnlyChildRun ? 0 : independent ? upper.counters.modelRequests : 1,
     maxToolInvocations: 0,
     ...(independent ? { unboundedToolInvocations: true as const } : {}),
-    maxRunInputTokens: upper.counters.inputTokens,
-    maxRunOutputTokens: independent
-      ? upper.counters.outputTokens
-      : Math.min(upper.counters.outputTokens, admission.policy.maxOutputTokens),
-    maxArtifactBytes: independent ? upper.counters.artifactBytes : 0,
+    ...(durationOnlyChildRun ? { durationOnlyChildRun: true as const } : {}),
+    maxRunInputTokens: durationOnlyChildRun ? 0 : upper.counters.inputTokens,
+    maxRunOutputTokens: durationOnlyChildRun
+      ? 0
+      : independent
+        ? upper.counters.outputTokens
+        : Math.min(upper.counters.outputTokens, admission.policy.maxOutputTokens ?? 0),
+    maxArtifactBytes: durationOnlyChildRun ? 0 : independent ? upper.counters.artifactBytes : 0,
     maxConcurrentSubagents: 0,
-    maxConcurrentWriters: independent ? upper.gauges.activeWriters : 0,
-    // The v2 grant's Tool/Shell fields retain their schema shape, but tool
-    // dispatch does not consume a numeric concurrency slot.
-    maxConcurrentToolInvocations: independent ? 1 : 0,
-    maxConcurrentShellInvocations: independent ? 1 : 0,
-    maxConcurrencyWaitMs: independent ? 15_000 : 1,
+    maxConcurrentWriters: durationOnlyChildRun
+      ? Number.MAX_SAFE_INTEGER
+      : independent
+        ? upper.gauges.activeWriters
+        : 0,
+    maxConcurrentToolInvocations: independent ? Number.MAX_SAFE_INTEGER : 0,
+    maxConcurrentShellInvocations: independent ? Number.MAX_SAFE_INTEGER : 0,
+    maxConcurrencyWaitMs: independent ? duration : 1,
   };
   const targetRunId = derived('run', admission.submissionId);
   const taskId = derived('task', admission.submissionId);
@@ -182,7 +208,10 @@ export function planChildFollowupTurn(input: {
     submissionId: admission.submissionId,
     targetRunId,
     taskId,
-    checkpointRef: checkpoint.ref,
+    ...(checkpoint ? { checkpointRef: checkpoint.ref } : { sourceRevision, sourceStateDigest }),
+    ...(independent && state.terminalOutcome?.status === 'unknown'
+      ? { priorOutcomeUnknown: true }
+      : {}),
     originRole: origin.role,
     workspaceDigest: input.targetPolicy.workspaceDigest,
     interactionModeRevision: input.targetPolicy.interactionModeRevision,
@@ -194,7 +223,7 @@ export function planChildFollowupTurn(input: {
     denyTools: !independent,
     allowedTools: independent ? [...input.allowedTools!] : [],
     budget: { ...budget, deadlineAt },
-    firstAttemptTimeoutMs: admission.policy.firstAttemptTimeoutMs,
+    ...(independent ? {} : { firstAttemptTimeoutMs: admission.policy.firstAttemptTimeoutMs }),
   });
   const grantDigest = sha256(grantCanonicalJson);
   const grantRef: RuntimeAgentArtifactRef<'agent_followup_grant'> = {
@@ -209,7 +238,7 @@ export function planChildFollowupTurn(input: {
     targetRunId,
     taskId,
     phase: input.targetPolicy.phaseCeiling,
-    checkpointRef: checkpoint.ref,
+    ...(checkpoint ? { checkpointRef: checkpoint.ref } : { sourceRevision, sourceStateDigest }),
     grantDigest,
     grant: { ref: grantRef, canonicalJson: grantCanonicalJson, createdAt: input.nowMs },
   };
@@ -220,7 +249,7 @@ export function planChildFollowupTurn(input: {
       submissionId: admission.submissionId,
       targetRunId,
       taskId,
-      checkpointRef: checkpoint.ref,
+      ...(checkpoint ? { checkpointRef: checkpoint.ref } : { sourceRevision, sourceStateDigest }),
       grantRef,
       grantDigest,
     },
@@ -233,6 +262,6 @@ export function planChildFollowupTurn(input: {
     mutation: Object.freeze(mutation),
     budget: Object.freeze(budget),
     deadlineAt,
-    firstAttemptTimeoutMs: admission.policy.firstAttemptTimeoutMs,
+    ...(independent ? {} : { firstAttemptTimeoutMs: admission.policy.firstAttemptTimeoutMs }),
   });
 }

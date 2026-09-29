@@ -661,7 +661,9 @@ export interface RuntimeFollowupRunStartMutation {
   readonly targetRunId: string;
   readonly taskId: string;
   readonly phase: 'planning' | 'building';
-  readonly checkpointRef: RuntimeAgentArtifactRef<'subagent_checkpoint'>;
+  readonly checkpointRef?: RuntimeAgentArtifactRef<'subagent_checkpoint'>;
+  readonly sourceRevision?: number;
+  readonly sourceStateDigest?: string;
   readonly grantDigest: string;
   readonly grant: Readonly<{
     ref: RuntimeAgentArtifactRef<'agent_followup_grant'>;

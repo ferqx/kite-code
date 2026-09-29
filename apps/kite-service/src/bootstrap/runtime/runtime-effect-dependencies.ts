@@ -120,6 +120,8 @@ export interface RuntimeExecutorDependencies {
       accepted: import('./subagent/child-session-acceptance').AcceptedChildSession,
       parentSignal?: AbortSignal,
     ) => void | Promise<void>;
+    /** Propagate a committed parent Run cancellation to locally owned child executions. */
+    cancelOriginRun?: (runId: string) => void;
     taskControl?: import('@kite-ai/builtin-runtime/subagent').BuiltinTaskControlExecutionMechanism;
     backgroundSnapshot?: () => Readonly<{
       aggregateGeneration: string;
@@ -302,22 +304,28 @@ export function prepareRuntimeEffectForBudget(
   });
   const providerOutputLimit =
     preflight.reservedOutputTokens ?? configuredMaxOutput ?? capabilities.maxOutputTokens;
+  const durationOnlyChildRun =
+    state.resourceBudget.status === 'active' &&
+    state.resourceBudget.budget.durationOnlyChildRun === true;
   const remainingOutputTokens =
     state.resourceBudget.status === 'active'
-      ? state.resourceBudget.budget.maxRunOutputTokens -
-        committedResourceUsage(state.resourceBudget).counters.outputTokens
+      ? durationOnlyChildRun
+        ? providerOutputLimit
+        : state.resourceBudget.budget.maxRunOutputTokens -
+          committedResourceUsage(state.resourceBudget).counters.outputTokens
       : providerOutputLimit;
-  if (remainingOutputTokens == null) {
+  if (remainingOutputTokens == null && !durationOnlyChildRun) {
     throw new Error('Model output admission requires a configured Runtime resource budget.');
   }
+  const maxOutputTokens =
+    remainingOutputTokens == null
+      ? undefined
+      : Math.max(1, Math.min(providerOutputLimit ?? remainingOutputTokens, remainingOutputTokens));
   return {
     ...effect,
     resourceEstimate: {
       inputTokens: preflight.estimate.totalInputTokens,
-      maxOutputTokens: Math.max(
-        1,
-        Math.min(providerOutputLimit ?? remainingOutputTokens, remainingOutputTokens),
-      ),
+      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     },
   };
 }

@@ -425,6 +425,9 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         mode: recoveryMode,
         taskId,
         turnId: state.turn.turnId,
+        ignoreNonSafetyCeilings:
+          state.resourceBudget.status === 'active' &&
+          state.resourceBudget.budget.durationOnlyChildRun === true,
       });
       const effect = suppliedEffect(payload, name, args);
       const presentation =

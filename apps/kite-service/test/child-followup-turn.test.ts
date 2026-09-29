@@ -316,7 +316,8 @@ test('settled child plans one fresh zero-Tool followup Run from its exact checkp
     maxModelRequests: 12,
     maxToolInvocations: 0,
     unboundedToolInvocations: true,
-    maxConcurrentToolInvocations: 1,
+    maxConcurrentToolInvocations: Number.MAX_SAFE_INTEGER,
+    maxConcurrentShellInvocations: Number.MAX_SAFE_INTEGER,
   });
   expect(JSON.parse(independent.mutation.grant.canonicalJson)).toMatchObject({
     schema: 'kite.child-followup-grant.v2',

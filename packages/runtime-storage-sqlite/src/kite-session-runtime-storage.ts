@@ -82,6 +82,7 @@ import {
   type CrossSessionFollowupRouteReceipt,
   type CrossSessionFollowupTerminalReceipt,
   isAdmittedQueuedChildFollowupTarget,
+  isCheckpointlessIndependentFollowupTarget,
   listPendingCrossSessionFollowupFunding,
   listPendingCrossSessionFollowupSources,
   type PendingCrossSessionFollowupFunding,
@@ -925,6 +926,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       | 'receipt_evidence'
       | 'terminal_recovery',
     transaction: Parameters<RuntimeStorage<Event, State>['transactions']['commitDecision']>[0],
+    priorFollowupSnapshot?: Readonly<{ stateJson: string; revision: number }> | null,
   ): void => {
     persistChildSessionIntentInTransaction(database, channel, transaction);
     assertChildRecoveryDiagnosticInTransaction(database, channel, transaction);
@@ -1014,6 +1016,7 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
         targetSessionId: transaction.sessionId,
         mutation: transaction.followupRunStart,
         preparedEvent: prepared[0] as Record<string, unknown>,
+        priorFollowupSnapshot,
       });
     }
     if (transaction.childTerminalCheckpointMutation) {
@@ -1508,8 +1511,8 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
           transaction.sessionId,
           crossMail.currentRunId,
         );
-        if (crossMail.messageIds.length < 1 || crossMail.messageIds.length > 8)
-          unsupported('Cross-Session model input batch must contain one to eight messages.');
+        if (crossMail.messageIds.length < 1)
+          unsupported('Cross-Session model input batch must contain a message.');
         const queued = listQueuedCrossSessionInbox(
           database,
           transaction.sessionId,
@@ -2237,12 +2240,13 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
               run.run_id,
             ));
         const checkpointReady =
-          target.node_status === 'idle' &&
-          readChildTerminalCheckpoint(database, targetSessionId) !== null;
+          (target.node_status === 'idle' &&
+            readChildTerminalCheckpoint(database, targetSessionId) !== null) ||
+          isCheckpointlessIndependentFollowupTarget(database, sourceSessionId, targetSessionId);
         return Object.freeze({
           targetSessionId,
           status:
-            target.node_status === 'context_unavailable'
+            target.node_status === 'context_unavailable' && !checkpointReady
               ? ('context_unavailable' as const)
               : run?.status === 'waiting'
                 ? ('waiting' as const)
@@ -2728,17 +2732,12 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       >(`SELECT m.message_id,m.sequence,m.sender_agent_id,m.source_task_id,m.mode,
       b.body_id,b.integrity_identifier,b.byte_length,b.body_text FROM agent_mail m
       JOIN agent_mail_bodies b ON b.session_id=m.session_id AND b.body_id=m.body_id
-      WHERE m.session_id=? AND m.target_agent_id=? AND ${where}${recipientClause} ORDER BY m.sequence LIMIT 9`)
+      WHERE m.session_id=? AND m.target_agent_id=? AND ${where}${recipientClause} ORDER BY m.sequence`)
       .all(
         sessionId,
         targetAgentId,
         ...params,
         ...(targetAgentId === sessionId ? [currentTaskId] : []),
-      );
-    if (rows.length > 8)
-      throw new KiteSessionRuntimeStorageError(
-        'unsupported_mutation',
-        'Agent model mail batch exceeds eight messages.',
       );
     return Object.freeze(
       rows.map((row) => {

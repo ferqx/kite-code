@@ -310,6 +310,7 @@ export interface BuiltinTaskControlExecutionMechanism {
     taskIds: readonly string[],
     timeoutMs: number,
     signal?: AbortSignal,
+    options?: Readonly<{ wakeOnModelRetry?: boolean }>,
   ): Promise<Readonly<Record<string, unknown>>>;
   cancelTask(
     taskId: string,
@@ -748,7 +749,7 @@ async function executeAgentMailboxOperation(
     const result = await port.listAgents({ scope, signal: context.signal });
     if (result.ok !== true) return agentMailboxRejection(result.code);
     if (!Array.isArray(result.agents)) return operationFailure('Agent tree projection is invalid.');
-    const agents = result.agents.slice(0, 64).map((entry) => {
+    const agents = result.agents.map((entry) => {
       const record = asRecord(entry);
       return record ? projectAgentListEntry(record) : undefined;
     });
@@ -1592,7 +1593,7 @@ export function validateDelegatedTask(input: {
   readonly delegatedTask: string;
 }): Readonly<{ valid: boolean; reason: 'valid' | 'task_not_bounded' }> {
   const task = input.delegatedTask.trim();
-  return task.length >= 8 && task.length <= 8_000
+  return task.length > 0
     ? { valid: true, reason: 'valid' }
     : { valid: false, reason: 'task_not_bounded' };
 }

@@ -23,14 +23,14 @@ const config = {
 };
 const model = createChatModel(config);
 
-function fixture() {
+function fixture(withOutputLimit = true) {
   const compiled = compileModelSurface({
     purpose: 'primary_agent',
     config,
     model,
     messages: [humanMessage('Durably admitted followup mail')],
     tools: {},
-    maxOutputTokens: 16,
+    ...(withOutputLimit ? { maxOutputTokens: 16 } : {}),
     estimatedInputTokens: 20,
   });
   const canonical = canonicalModelJson(compiled.surface);
@@ -199,6 +199,79 @@ test('resumes one durable prepared primary invocation after the source gate with
   );
   expect(f.order.filter((item) => item === 'provider')).toHaveLength(1);
   await pending.commit();
+});
+
+test('resumes an exact duration-only child preparation without a separate attempt limit', async () => {
+  const f = fixture(false);
+  const state = f.state;
+  const prepared = state.modelInvocations.invocation!;
+  const reservation = state.resourceBudget.reservations!.reservation!;
+  const durationState: ModelPreparedResumeStateView = {
+    ...state,
+    modelInvocations: {
+      invocation: {
+        ...prepared,
+        limits: {
+          maxAttempts: Number.MAX_SAFE_INTEGER,
+          perAttemptTimeoutMs: 0,
+          totalTimeBudgetMs: Number.MAX_SAFE_INTEGER,
+        },
+      },
+    },
+    resourceBudget: {
+      ...state.resourceBudget,
+      budget: { durationOnlyChildRun: true },
+      reservations: {
+        reservation: {
+          ...reservation,
+          executableUpperBound: {
+            unboundedModelTokens: true,
+            counters: { modelRequests: 1, inputTokens: 0, outputTokens: 0 },
+          },
+        },
+      },
+    },
+  };
+  f.setState(durationState);
+  const { hardAttemptTimeoutMs: _legacyTimeout, ...unboundedInput } = f.input;
+  const pending = await f.gateway.resumePrepared(unboundedInput);
+  await pending.commit();
+  expect(f.order).toContain('provider');
+
+  const forged = fixture();
+  forged.setState({
+    ...durationState,
+    resourceBudget: { ...durationState.resourceBudget, budget: undefined },
+  });
+  const { hardAttemptTimeoutMs: _forgedTimeout, ...forgedInput } = forged.input;
+  await expect(forged.gateway.resumePrepared(forgedInput)).rejects.toThrow(
+    'stale or attempted durable authority',
+  );
+});
+
+test('resumes a legacy single-attempt preparation inside a duration-only child budget', async () => {
+  const f = fixture();
+  const state = f.state;
+  const reservation = state.resourceBudget.reservations!.reservation!;
+  f.setState({
+    ...state,
+    resourceBudget: {
+      ...state.resourceBudget,
+      budget: { durationOnlyChildRun: true },
+      reservations: {
+        reservation: {
+          ...reservation,
+          executableUpperBound: {
+            unboundedModelTokens: true,
+            counters: { modelRequests: 1, inputTokens: 0, outputTokens: 0 },
+          },
+        },
+      },
+    },
+  });
+  const pending = await f.gateway.resumePrepared(f.input);
+  await pending.commit();
+  expect(f.order).toContain('provider');
 });
 
 test('refuses a missing ACK without changing the prepared invocation, then resumes the same identity', async () => {

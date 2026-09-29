@@ -27,8 +27,6 @@ export interface ChildSessionTaskControlPort {
   ) => Promise<void> | null;
 }
 
-const MAX_WAIT_MS = 60_000;
-
 type TaskRead = Readonly<{
   snapshot: Snapshot;
   childThreadId?: string;
@@ -128,7 +126,12 @@ function waitResult(
 /** Read-only Task controls for one exact parent/child lineage. No Provider observation occurs. */
 export function createChildSessionTaskControl(input: ChildSessionTaskControlPort): Readonly<{
   readTask(taskId: string): Promise<Snapshot>;
-  waitTasks(taskIds: readonly string[], timeoutMs: number, signal?: AbortSignal): Promise<Snapshot>;
+  waitTasks(
+    taskIds: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+    options?: Readonly<{ wakeOnModelRetry?: boolean }>,
+  ): Promise<Snapshot>;
 }> {
   const readAt = (parent: Readonly<RuntimeState>, taskId: string): TaskRead => {
     if (!taskId || parent.session.threadId !== input.parentSessionId)
@@ -302,16 +305,15 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
     taskIds: readonly string[],
     timeoutMs: number,
     signal?: AbortSignal,
+    options?: Readonly<{ wakeOnModelRetry?: boolean }>,
   ): Promise<Snapshot> => {
     if (
       taskIds.length < 1 ||
-      taskIds.length > 8 ||
       new Set(taskIds).size !== taskIds.length ||
-      !Number.isFinite(timeoutMs) ||
-      timeoutMs < 0 ||
-      timeoutMs > MAX_WAIT_MS
+      !Number.isSafeInteger(timeoutMs) ||
+      timeoutMs < 0
     )
-      throw new Error('task_wait requires 1–8 distinct task IDs and a timeout within 0–60000 ms.');
+      throw new Error('task_wait requires distinct task IDs and a non-negative timeout.');
     const nowMs = input.nowMs ?? Date.now;
     const deadline = nowMs() + timeoutMs;
     const initialParent = input.getParentState();
@@ -340,7 +342,7 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
         )
       )
         return waitResult(tasks, 'running', true, 'user_input');
-      if (tasks.some((task) => task.retry))
+      if (options?.wakeOnModelRetry !== false && tasks.some((task) => task.retry))
         return waitResult(tasks, 'running', true, 'model_retry');
       const now = nowMs();
       const remaining = deadline - now;

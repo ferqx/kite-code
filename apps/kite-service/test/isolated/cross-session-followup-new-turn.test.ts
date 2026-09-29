@@ -203,7 +203,7 @@ test('user-cancelled followup before dispatch releases funding and replies with 
   );
 }, 30_000);
 
-test('committed first Model attempt keeps uncertain followup fail closed without reply', async () => {
+test('committed first Model attempt settles unknown without replay and replies once', async () => {
   await exerciseChildOrchestration(
     false,
     false,
@@ -214,7 +214,7 @@ test('committed first Model attempt keeps uncertain followup fail closed without
     false,
     false,
     async (fixture) => {
-      const { owner, services, parentSessionId, childSessionId, orchestrator } = fixture;
+      const { owner, services, parentSessionId, childSessionId, orchestrator, model } = fixture;
       const { accepted, raw } = await submitRealParentFollowup(
         fixture,
         'Treat uncertain Provider usage as unknown.',
@@ -247,10 +247,10 @@ test('committed first Model attempt keeps uncertain followup fail closed without
         transactions.commit = originalCommit;
       }
       expect(attempted).toBe(true);
+      const requestsBeforeRecovery = model.getRequestCount();
       const recovery = await orchestrator.recoverPendingFollowups();
-      expect(recovery.recoveryRequired).toContainEqual(
-        expect.objectContaining({ submissionId: accepted.submissionId }),
-      );
+      expect(recovery.recoveryRequired).toEqual([]);
+      expect(model.getRequestCount()).toBe(requestsBeforeRecovery);
       expect(
         owner.runWithSessionExecution(parentSessionId, () =>
           raw.readFollowupTerminalForSource(parentSessionId, accepted.submissionId),
@@ -260,7 +260,9 @@ test('committed first Model attempt keeps uncertain followup fail closed without
         owner.runWithSessionExecution(childSessionId, () =>
           raw.listPendingTerminalReplies(childSessionId, 8),
         ),
-      ).toEqual([]);
+      ).toEqual([
+        expect.objectContaining({ mode: 'reply', sourceEffectAttemptId: accepted.submissionId }),
+      ]);
     },
   );
 }, 30_000);

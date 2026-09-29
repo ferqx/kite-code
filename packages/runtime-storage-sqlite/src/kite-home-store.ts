@@ -294,10 +294,11 @@ export const KITE_SESSION_STORE13_TABLE_COLUMNS = Object.freeze({
   agent_followup_grant_artifacts: KITE_CROSS_SESSION_FOLLOWUP_GRANT_COLUMNS,
   agent_interrupt_intents: KITE_CROSS_SESSION_INTERRUPT_COLUMNS,
 } as const);
-export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
+export const KITE_SESSION_STORE14_TABLE_COLUMNS = Object.freeze({
   ...KITE_SESSION_STORE13_TABLE_COLUMNS,
   runtime_sessions: [...KITE_SESSION_STORE13_TABLE_COLUMNS.runtime_sessions, 'history_generation'],
 });
+export const KITE_SESSION_STORE_TABLE_COLUMNS = KITE_SESSION_STORE14_TABLE_COLUMNS;
 
 const DIGEST_CHECK = "length(%s) = 64 AND %s NOT GLOB '*[^a-f0-9]*'";
 const digestCheck = (column: string): string => DIGEST_CHECK.replaceAll('%s', column);
@@ -598,7 +599,7 @@ const historyGenerationSessionDdl = (statement: string): string => {
   );
 };
 
-export const KITE_SESSION_STORE_DDL = Object.freeze([
+export const KITE_SESSION_STORE14_DDL = Object.freeze([
   ...KITE_SESSION_STORE13_DDL.map((statement) =>
     statement.startsWith('CREATE TABLE runtime_sessions ')
       ? historyGenerationSessionDdl(statement)
@@ -606,6 +607,33 @@ export const KITE_SESSION_STORE_DDL = Object.freeze([
   ),
   ...KITE_HISTORY_GENERATION_TRIGGERS,
 ]);
+
+/** Only these private payload tables shed their historical per-item admission caps. */
+export const KITE_SESSION_STORE15_UNBOUNDED_TABLES = Object.freeze([
+  'model_artifacts',
+  'subagent_task_artifacts',
+  'subagent_lifecycle_artifacts',
+  'subagent_continuation_artifacts',
+  'agent_mail_bodies',
+  'subagent_checkpoint_artifacts',
+  'agent_followup_admission_artifacts',
+  'agent_followup_grant_artifacts',
+] as const);
+
+const unboundedPrivateArtifactDdl = (statement: string): string => {
+  const table = KITE_SESSION_STORE15_UNBOUNDED_TABLES.find((name) =>
+    statement.startsWith(`CREATE TABLE ${name} (`),
+  );
+  if (!table) return statement;
+  const updated = statement.replace(/byte_length BETWEEN 1 AND [0-9]+/u, 'byte_length >= 1');
+  if (updated === statement)
+    throw new Error(`Store 14 ${table} does not contain its expected byte-length bound.`);
+  return updated;
+};
+
+export const KITE_SESSION_STORE_DDL = Object.freeze(
+  KITE_SESSION_STORE14_DDL.map(unboundedPrivateArtifactDdl),
+);
 
 interface ExactKiteStoreProfile {
   readonly schemaVersion: number;
@@ -629,6 +657,21 @@ const kiteSessionStoreProfile = (): ExactKiteStoreProfile => ({
   formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
   ddl: KITE_SESSION_STORE_DDL,
   tableColumns: KITE_SESSION_STORE_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+    'child_approval_proxies_parent_pending',
+    'agent_interrupt_intents_target_pending',
+  ],
+  triggers: KITE_HISTORY_GENERATION_TRIGGER_NAMES,
+});
+
+const kiteSessionStore14Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 14,
+  formatEpoch: 'kite-session-history-generation-2026-09-28',
+  ddl: KITE_SESSION_STORE14_DDL,
+  tableColumns: KITE_SESSION_STORE14_TABLE_COLUMNS,
   indexes: [
     ...KITE_HOME_STORE_INDEXES,
     ...KITE_SESSION_AGENT_INDEXES,
@@ -772,6 +815,12 @@ export function assertKiteSessionStoreSchema(database: Database): void {
     )
       fail('Kite Session Store child approval FK is incompatible.');
   }
+}
+
+/** Read-only source assertion for the frozen Store 14 candidate format. */
+export function assertKiteSessionStore14Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore14Profile());
+  assertKiteSessionLineageForeignKeys(database);
 }
 
 export function assertKiteSessionStore11Schema(database: Database): void {

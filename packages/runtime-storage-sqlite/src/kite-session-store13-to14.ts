@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite';
 import { KITE_HISTORY_GENERATION_TRIGGERS } from './kite-history-generation';
 import {
   assertKiteSessionStore13Schema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore14Schema,
   assertKiteStoreIntegrity,
   KITE_SESSION_STORE13_TABLE_COLUMNS,
 } from './kite-home-store';
@@ -12,7 +12,6 @@ import {
   KITE_SESSION_EXECUTION_AUTHORITY_SCHEMA,
   type KiteSessionExecutionAuthorityRecord,
 } from './kite-session-execution-authority';
-import { KITE_SESSION_STORE_FORMAT_EPOCH } from './kite-session-store-format';
 import { captureSqliteTableContentDigests } from './sqlite-table-content';
 
 /** Convert only a verified private Store 13 candidate; the source remains untouched. */
@@ -79,9 +78,9 @@ export function convertKiteSessionStore13CandidateTo14(input: {
     database.query('UPDATE kite_meta SET value=? WHERE key=?').run('14', 'schema_version');
     database
       .query('UPDATE kite_meta SET value=? WHERE key=?')
-      .run(KITE_SESSION_STORE_FORMAT_EPOCH, 'format_epoch');
+      .run('kite-session-history-generation-2026-09-28', 'format_epoch');
     database.run('PRAGMA user_version = 14');
-    assertKiteSessionStoreSchema(database);
+    assertKiteSessionStore14Schema(database);
     assertKiteStoreIntegrity(database);
     const after = captureSqliteTableContentDigests(database, KITE_SESSION_STORE13_TABLE_COLUMNS);
     for (const table of Object.keys(KITE_SESSION_STORE13_TABLE_COLUMNS)) {
@@ -98,6 +97,6 @@ export function convertKiteSessionStore13CandidateTo14(input: {
     }
     throw error;
   }
-  assertKiteSessionStoreSchema(database);
+  assertKiteSessionStore14Schema(database);
   assertKiteStoreIntegrity(database);
 }

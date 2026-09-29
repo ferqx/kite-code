@@ -23,7 +23,7 @@ const storeFormatOwners = new Set([
   'kite-session-runtime-file.ts',
 ]);
 const storeConversionModule =
-  /^kite-session-store(?:9-conversion|10-to11|11-conversion|11-to12|12-to13|13-to14)\.ts$/u;
+  /^kite-session-store(?:9-conversion|10-to11|11-conversion|11-to12|12-to13|13-to14|14-to15)\.ts$/u;
 const storageSourcePrefix = 'packages/runtime-storage-sqlite/src/';
 
 const activeStoreContractOwners = new Set([

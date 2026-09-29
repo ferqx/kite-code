@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('Subagent terminal result Artifact', () => {
-  test('persists one bounded result for repeatable non-consuming reads', () => {
+  test('persists one result for repeatable non-consuming reads', () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-subagent-result-'));
     roots.push(root);
     const store = new SubagentResultArtifactStore({ root: join(root, 'subagent-tasks') });

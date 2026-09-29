@@ -39,9 +39,9 @@ export interface CrossSessionFollowupPolicy {
   readonly policyRevision: string;
   readonly interactionModeRevision: number;
   readonly boundedContext: true;
-  readonly contextWindowTokens: number;
-  readonly maxOutputTokens: number;
-  readonly firstAttemptTimeoutMs: number;
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly firstAttemptTimeoutMs?: number;
   /** Persisted on the private admission Artifact for target attenuation. */
   readonly interactionMode?: AgentState['mode'];
   readonly workspaceAccess?: AgentState['workspaceAccess'];
@@ -144,7 +144,8 @@ export function planCrossSessionFollowupSlotAcquisition(input: {
     backup.invocationId !== input.submissionId ||
     backup.resourceKind !== 'subagent' ||
     backup.executableUpperBound.gauges.activeSubagents !== 1 ||
-    Object.values(ledger.reservations).some((item) => item.state === 'unknown')
+    (backup.executableUpperBound.durationOnlyChildRun !== true &&
+      Object.values(ledger.reservations).some((item) => item.state === 'unknown'))
   )
     fail('reconciliation_required', 'TriggerTurn slot funding is unavailable or unknown.');
   if (backup.state === 'reserved') return { status: 'already_acquired' };
@@ -207,6 +208,7 @@ function sameUsage(left: ResourceUsage, right: ResourceUsage): boolean {
     left.estimatorVersion === right.estimatorVersion &&
     left.unboundedToolInvocations === right.unboundedToolInvocations &&
     left.independentFollowupTurn === right.independentFollowupTurn &&
+    left.durationOnlyChildRun === right.durationOnlyChildRun &&
     counterFields.every((field) => left.counters[field] === right.counters[field]) &&
     gaugeFields.every((field) => left.gauges[field] === right.gauges[field])
   );
@@ -232,10 +234,11 @@ function assertPolicy(policy: CrossSessionFollowupPolicy, state: AgentState): vo
     policy.capabilityDigest !== state.capabilities.catalogRevision ||
     policy.workspaceDigest !== state.session.canonicalWorkspaceDigest ||
     policy.interactionModeRevision !== state.interactionModeRevision ||
-    !positive(policy.contextWindowTokens) ||
-    !positive(policy.maxOutputTokens) ||
-    policy.contextWindowTokens <= policy.maxOutputTokens ||
-    !positive(policy.firstAttemptTimeoutMs)
+    (policy.executionMode !== 'independent_turn_v2' &&
+      (!positive(policy.contextWindowTokens ?? 0) ||
+        !positive(policy.maxOutputTokens ?? 0) ||
+        (policy.contextWindowTokens ?? 0) <= (policy.maxOutputTokens ?? 0) ||
+        !positive(policy.firstAttemptTimeoutMs ?? 0)))
   )
     fail('policy_changed', 'TriggerTurn policy evidence is incomplete or stale.');
 }
@@ -303,12 +306,12 @@ export function planCrossSessionTriggerTurnBackup<Receipt>(input: {
     );
   if (ledger.runId !== fundingRunId)
     fail('budget_unconfigured', 'The current source Run does not own the funding ledger.');
-  assertNoUnknown(state, fundingRunId);
+  if (input.policy.executionMode !== 'independent_turn_v2') assertNoUnknown(state, fundingRunId);
   const deadlineAt = Date.parse(ledger.deadlineAt);
   const independent = input.policy.executionMode === 'independent_turn_v2';
   const minimumWindow = independent
     ? 1
-    : Math.max(60_000, input.policy.firstAttemptTimeoutMs + 5_000);
+    : Math.max(60_000, (input.policy.firstAttemptTimeoutMs ?? 0) + 5_000);
   if (
     !Number.isSafeInteger(input.nowMs) ||
     !Number.isFinite(deadlineAt) ||
@@ -316,51 +319,25 @@ export function planCrossSessionTriggerTurnBackup<Receipt>(input: {
     deadlineAt - input.nowMs < minimumWindow
   )
     fail('budget_exhausted', 'Funding Run deadline leaves no bounded first attempt.');
-  const inputTokens = 2 * (input.policy.contextWindowTokens - input.policy.maxOutputTokens);
+  const inputTokens = independent
+    ? 0
+    : 2 * ((input.policy.contextWindowTokens ?? 0) - (input.policy.maxOutputTokens ?? 0));
   if (!Number.isSafeInteger(inputTokens))
     fail('budget_exhausted', 'TriggerTurn input envelope exceeds safe integer bounds.');
   const upper = createZeroResourceUsage(
     'versioned_upper_bound',
     independent ? 'cross-session-followup-backup-v2' : 'cross-session-followup-backup-v1',
   );
-  upper.counters.turns = 1;
+  upper.counters.turns = independent ? 0 : 1;
   if (independent) {
-    const committed = committedResourceUsage(ledger);
-    const divisor = ledger.budget.maxConcurrentSubagents + 2;
-    const allotment = (limit: number, used: number): number =>
-      Math.min(Math.floor(limit / divisor), limit - used);
-    upper.counters.modelRequests = allotment(
-      ledger.budget.maxModelRequests,
-      committed.counters.modelRequests,
-    );
-    upper.counters.inputTokens = allotment(
-      ledger.budget.maxRunInputTokens,
-      committed.counters.inputTokens,
-    );
-    upper.counters.outputTokens = allotment(
-      ledger.budget.maxRunOutputTokens,
-      committed.counters.outputTokens,
-    );
-    upper.counters.artifactBytes = allotment(
-      ledger.budget.maxArtifactBytes,
-      committed.counters.artifactBytes,
-    );
     upper.gauges.elapsedRunMs = 30 * 60 * 1000;
-    upper.gauges.activeWriters = input.policy.targetRole === 'code' ? 1 : 0;
     upper.unboundedToolInvocations = true;
     upper.independentFollowupTurn = true;
-    if (
-      upper.counters.modelRequests < 1 ||
-      upper.counters.inputTokens < inputTokens ||
-      upper.counters.outputTokens < input.policy.maxOutputTokens ||
-      upper.counters.artifactBytes < 1 ||
-      input.policy.firstAttemptTimeoutMs + 5_000 > upper.gauges.elapsedRunMs
-    )
-      fail('budget_exhausted', 'Independent child followup lacks a complete turn envelope.');
+    upper.durationOnlyChildRun = true;
   } else {
     upper.counters.modelRequests = 1;
     upper.counters.inputTokens = inputTokens;
-    upper.counters.outputTokens = input.policy.maxOutputTokens;
+    upper.counters.outputTokens = input.policy.maxOutputTokens ?? 0;
   }
   upper.gauges.activeSubagents = 1;
   const backupReservationId = identity('backup', [input.submissionId, fundingRunId]);
@@ -431,7 +408,8 @@ export function planCrossSessionIndependentTurnActivation(input: {
   const ledger =
     fundingBudgetForRun(fundingState, admission.fundingRunId) ??
     fail('budget_unconfigured', 'Independent followup funding Run is unavailable.');
-  assertNoUnknown(fundingState, admission.fundingRunId);
+  if (admission.executableUpperBound.durationOnlyChildRun !== true)
+    assertNoUnknown(fundingState, admission.fundingRunId);
   const backup =
     ledger.reservations[admission.backupReservationId] ??
     fail('reconciliation_required', 'Independent followup backup is unavailable.');
@@ -484,6 +462,7 @@ export function planCrossSessionIndependentTurnActivation(input: {
     fail('policy_changed', 'Independent followup target grant exceeds the original child role.');
   const upper = backup.executableUpperBound;
   const budget = targetBudget.budget;
+  const durationOnlyChildRun = upper.durationOnlyChildRun === true;
   const started = Date.parse(targetBudget.startedAt);
   const deadline = Date.parse(targetBudget.deadlineAt);
   if (
@@ -495,16 +474,19 @@ export function planCrossSessionIndependentTurnActivation(input: {
     deadline - started > 30 * 60 * 1000 ||
     deadline - started > upper.gauges.elapsedRunMs ||
     budget.maxRunDurationMs > upper.gauges.elapsedRunMs ||
-    budget.maxTurns !== 1 ||
-    budget.maxTurns > upper.counters.turns ||
-    budget.maxModelRequests > upper.counters.modelRequests ||
+    (durationOnlyChildRun
+      ? budget.durationOnlyChildRun !== true
+      : budget.durationOnlyChildRun !== undefined ||
+        budget.maxTurns !== 1 ||
+        budget.maxTurns > upper.counters.turns ||
+        budget.maxModelRequests > upper.counters.modelRequests ||
+        budget.maxRunInputTokens > upper.counters.inputTokens ||
+        budget.maxRunOutputTokens > upper.counters.outputTokens ||
+        budget.maxArtifactBytes > upper.counters.artifactBytes) ||
     budget.maxToolInvocations !== 0 ||
     budget.unboundedToolInvocations !== true ||
-    budget.maxRunInputTokens > upper.counters.inputTokens ||
-    budget.maxRunOutputTokens > upper.counters.outputTokens ||
-    budget.maxArtifactBytes > upper.counters.artifactBytes ||
     budget.maxConcurrentSubagents !== 0 ||
-    budget.maxConcurrentWriters > upper.gauges.activeWriters ||
+    (!durationOnlyChildRun && budget.maxConcurrentWriters > upper.gauges.activeWriters) ||
     ((upper.gauges.activeToolInvocations !== 0 || upper.gauges.activeShellInvocations !== 0) &&
       (budget.maxConcurrentToolInvocations > upper.gauges.activeToolInvocations ||
         budget.maxConcurrentShellInvocations > upper.gauges.activeShellInvocations))
@@ -603,7 +585,7 @@ export function planCrossSessionFirstModelReplacement<Receipt>(input: {
     !positive(frozenSurface.maxOutputTokens)
   )
     fail('surface_unverified', 'First model Surface lacks exact verified bounds.');
-  if (frozenSurface.maxOutputTokens > admission.policy.maxOutputTokens)
+  if (frozenSurface.maxOutputTokens > (admission.policy.maxOutputTokens ?? 0))
     fail('budget_exhausted', 'First model output exceeds the accepted context ceiling.');
   const ledger =
     fundingBudgetForRun(fundingState, admission.fundingRunId) ??

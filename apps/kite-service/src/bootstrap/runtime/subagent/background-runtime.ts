@@ -9,7 +9,6 @@ import type { RuntimeBackgroundExecutionProjection } from '@kite-ai/runtime-cont
 import type { RuntimeState } from '../state-runtime';
 import type { SubAgentResult } from './types';
 
-const MAX_BACKGROUND_SUBAGENTS = 256;
 const MAX_BACKGROUND_REPORT_CHARS = 2_000;
 
 export interface BackgroundSubagentCompletionNotification {
@@ -267,12 +266,6 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
   adopt(input: Readonly<BackgroundSubagentAdoption>): void {
     if (this.#records.has(input.taskId)) {
       throw new Error('Background sub-agent task identity collided.');
-    }
-    if (
-      [...this.#records.values()].filter((record) => !isTerminal(record.status)).length >=
-      MAX_BACKGROUND_SUBAGENTS
-    ) {
-      throw new Error('Background sub-agent owner capacity is exhausted.');
     }
     const record = {
       taskId: input.taskId,

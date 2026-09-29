@@ -59,6 +59,8 @@ export interface AppBuiltinPreassembledMechanismResolverInput {
   readonly signal: AbortSignal;
   readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcher>;
   readonly shellExecutor?: Readonly<AppBuiltinShellExecutor>;
+  /** Runtime-owned deadline for a duration-only child Run, never model supplied. */
+  readonly durationOnlyChildRunDeadlineAt?: string;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** One exact wrapper for web, MCP, Skill, or planning. */
   readonly preassembledMechanism?: BuiltinMechanismRecord;
@@ -224,6 +226,11 @@ function shellMechanism(
     fail('invalid_facts');
   }
   const executor = input.shellExecutor;
+  const timeoutWasExplicit =
+    input.canonicalArguments !== null &&
+    typeof input.canonicalArguments === 'object' &&
+    !Array.isArray(input.canonicalArguments) &&
+    Object.hasOwn(input.canonicalArguments, 'timeout_ms');
   const mechanism = Object.freeze({
     execute: (
       shellInput: Readonly<{
@@ -234,19 +241,27 @@ function shellMechanism(
       }>,
     ) => {
       if (input.signal.aborted) fail('signal_aborted');
+      const remainingChildRunMs = input.durationOnlyChildRunDeadlineAt
+        ? Date.parse(input.durationOnlyChildRunDeadlineAt) - Date.now()
+        : undefined;
+      // Builtin's finite Shell wrapper supplies its legacy 10-minute default.
+      // The canonical request distinguishes that default from a user timeout.
+      const timeoutMs =
+        input.durationOnlyChildRunDeadlineAt && shellInput.mode !== 'service' && !timeoutWasExplicit
+          ? remainingChildRunMs
+          : shellInput.timeoutMs;
       if (
         typeof shellInput.command !== 'string' ||
         shellInput.command !== command ||
-        (shellInput.timeoutMs !== undefined &&
-          (!Number.isSafeInteger(shellInput.timeoutMs) || shellInput.timeoutMs <= 0)) ||
-        (shellInput.timeoutMs === undefined && shellInput.mode !== 'service')
+        (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) ||
+        (timeoutMs === undefined && shellInput.mode !== 'service')
       ) {
         fail('invalid_facts');
       }
       return executor.execute({
         workspace: input.workspace,
         command: shellInput.command,
-        ...(shellInput.timeoutMs === undefined ? {} : { timeoutMs: shellInput.timeoutMs }),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
         signal: input.signal,
         readOnly,
         networkAccess,

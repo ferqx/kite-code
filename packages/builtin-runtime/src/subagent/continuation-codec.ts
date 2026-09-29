@@ -35,7 +35,7 @@ export function subagentContinuationCursorId(snapshot: SuspendedSubagentSnapshot
 }
 
 export function subagentTaskDigest(task: string): string {
-  if (typeof task !== 'string' || task.length < 1 || task.length > 8_000) {
+  if (typeof task !== 'string' || task.length < 1) {
     throw new Error('Subagent task is outside the immutable Artifact boundary.');
   }
   return `sha256:${createHash('sha256').update(Buffer.from(task, 'utf8')).digest('hex')}`;

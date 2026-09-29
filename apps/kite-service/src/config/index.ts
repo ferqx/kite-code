@@ -11,7 +11,6 @@ import {
   acquireConfigFileMutationLocks,
   replaceConfigFileAtomically,
 } from '@kite-ai/kite-local-runtime/config';
-import { LIMITED_RESOURCE_BUDGET_ } from '@kite-ai/runtime-host/kernel-adapter';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
 import { admitProductionExecutionBoundary } from './execution-boundary';
@@ -284,6 +283,8 @@ const featuresSchema = z
   .strict()
   .optional();
 
+const MAX_CONFIGURED_CONCURRENT_SUBAGENTS = 28;
+
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
   /** Last model route explicitly selected by the user. */
@@ -300,7 +301,7 @@ export const configSchema = z.object({
         .number()
         .int()
         .min(1)
-        .max(LIMITED_RESOURCE_BUDGET_.maxTurns - 2)
+        .max(MAX_CONFIGURED_CONCURRENT_SUBAGENTS)
         .optional(),
     })
     .strict()

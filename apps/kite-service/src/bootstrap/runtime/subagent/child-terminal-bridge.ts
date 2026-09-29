@@ -4,6 +4,7 @@ import type {
 } from '@kite-ai/builtin-runtime/subagent';
 import {
   childTerminalReceiptDigest,
+  createZeroResourceUsage,
   type StateRuntimeSession,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeEvent, RuntimeState } from '../state-runtime';
@@ -227,6 +228,14 @@ export function importChildTerminalResult(input: {
     resultRef: terminal.resultRef,
   };
   const resource = childState.resourceBudget;
+  const funding =
+    parentState.resourceBudget.status === 'active' &&
+    parentState.resourceBudget.runId === link.fundingRunId
+      ? parentState.resourceBudget
+      : parentState.retainedResourceBudgets[link.fundingRunId];
+  const durationOnlyChildRun =
+    funding?.reservations[link.delegatedReservationId]?.executableUpperBound
+      .durationOnlyChildRun === true;
   const unknownUsage = Object.values(resource.reservations).some((reservation) =>
     ['reserved', 'dispatch_started', 'unknown'].includes(reservation.state),
   );
@@ -238,6 +247,7 @@ export function importChildTerminalResult(input: {
           reservationId: link.delegatedReservationId,
           actual: {
             ...resource.reconciledUsage,
+            ...(durationOnlyChildRun ? { counters: createZeroResourceUsage().counters } : {}),
             gauges: {
               ...resource.reconciledUsage.gauges,
               // Cleanup is confirmed before import: the child no longer
@@ -246,11 +256,6 @@ export function importChildTerminalResult(input: {
             },
           },
         };
-  const funding =
-    parentState.resourceBudget.status === 'active' &&
-    parentState.resourceBudget.runId === link.fundingRunId
-      ? parentState.resourceBudget
-      : parentState.retainedResourceBudgets[link.fundingRunId];
   const reportReservation = Object.values(funding?.reservations ?? {}).find(
     (reservation) =>
       reservation.invocationId === `model-invocation:after-turn:${origin.childInvocationId}`,

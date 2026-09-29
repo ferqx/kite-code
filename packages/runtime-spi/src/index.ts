@@ -82,7 +82,6 @@ export type {
 } from './subagent';
 export {
   SUBAGENT_PROVIDER_SCHEMA_,
-  SUBAGENT_TASK_ARTIFACT_MAX_BYTES,
   type SubagentAgentPhase,
   type SubagentAuthorizationContext,
   type SubagentCapabilityCeiling,

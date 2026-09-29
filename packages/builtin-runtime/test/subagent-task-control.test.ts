@@ -1,9 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { createBuiltinRuntimeModules } from '@kite-ai/builtin-runtime';
+import { BUILTIN_TASK_WAIT_SCHEMA_, createBuiltinRuntimeModules } from '@kite-ai/builtin-runtime';
 import { SUBAGENT_CAPABILITY_REVISIONS_ } from '@kite-ai/builtin-runtime/subagent';
 import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
 
 describe('Builtin background task control projection', () => {
+  test('task_wait accepts more than eight distinct child identities', () => {
+    expect(
+      BUILTIN_TASK_WAIT_SCHEMA_.safeParse({
+        task_ids: Array.from({ length: 12 }, (_, index) => `child-${index}`),
+        timeout_ms: 120_000,
+      }).success,
+    ).toBe(true);
+  });
   for (const [operationId, method] of [
     ['builtin:task_read', 'readTask'],
     ['builtin:task_cancel', 'cancelTask'],

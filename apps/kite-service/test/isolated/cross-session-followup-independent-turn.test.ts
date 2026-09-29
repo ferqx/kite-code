@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +22,14 @@ test('independent followup completes more than twelve role-authorized Tool round
         fixture,
         'Read the workspace input in fourteen separate steps, then summarize it.',
       );
+      const sourceAtAdmission = owner.loadCurrentSnapshot(parentSessionId);
+      if (sourceAtAdmission?.resourceBudget.status !== 'active')
+        throw new Error('Source funding budget is unavailable.');
+      const backup = Object.values(sourceAtAdmission.resourceBudget.reservations).find(
+        (reservation) => reservation.invocationId === accepted.submissionId,
+      );
+      expect(backup?.executableUpperBound.durationOnlyChildRun).toBe(true);
+      expect(Object.values(backup!.executableUpperBound.counters)).toEqual(Array(6).fill(0));
       expect(
         await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
       ).toBe(true);
@@ -86,7 +95,16 @@ test('independent followup completes more than twelve role-authorized Tool round
         Date.parse(target.resourceBudget.deadlineAt) - Date.parse(target.resourceBudget.startedAt),
       ).toBe(30 * 60_000);
       expect(target.resourceBudget.budget.unboundedToolInvocations).toBe(true);
+      expect(target.resourceBudget.budget.durationOnlyChildRun).toBe(true);
+      expect(target.resourceBudget.reconciledUsage.counters.modelRequests).toBeGreaterThan(12);
       expect(target.resourceBudget.reconciledUsage.counters.toolInvocations).toBe(14);
+      const settledSource = owner.loadCurrentSnapshot(parentSessionId);
+      if (settledSource?.resourceBudget.status !== 'active')
+        throw new Error('Settled source budget is unavailable.');
+      const settledBackup = settledSource.resourceBudget.reservations[backup!.reservationId];
+      expect(settledBackup?.state).toBe('reconciled');
+      expect(Object.values(settledBackup!.actual!.counters)).toEqual(Array(6).fill(0));
+      expect(settledBackup?.actual?.gauges.activeSubagents).toBe(0);
       expect(
         owner.runWithSessionExecution(parentSessionId, () =>
           raw.readFollowupTerminalForSource(parentSessionId, accepted.submissionId),
@@ -97,6 +115,76 @@ test('independent followup completes more than twelve role-authorized Tool round
           .loadEventsStrict(parentSessionId)
           .filter(({ event }) => event.type === 'agent.followup_independent_settled'),
       ).toHaveLength(1);
+      for (let ordinal = 2; ordinal <= 4; ordinal++) {
+        const next = await submitRealParentFollowup(
+          fixture,
+          `Continue in independent Run ${ordinal}.`,
+          false,
+          `followup-tool-${ordinal}`,
+        );
+        expect(
+          await orchestrator.receiveAcceptedFollowup(childSessionId, next.accepted.submissionId),
+        ).toBe(true);
+        model.setResponses([
+          { response: async () => ({ message: { content: `RUN_${ordinal}_COMPLETE` } }) },
+        ]);
+        expect(
+          await orchestrator.executeAcceptedFollowupFirstModel(
+            childSessionId,
+            next.accepted.submissionId,
+          ),
+        ).toBe(true);
+      }
+      expect(
+        owner.storage.sessions
+          .loadEventsStrict(parentSessionId)
+          .filter(({ event }) => event.type === 'agent.followup_independent_settled'),
+      ).toHaveLength(4);
+    },
+  );
+}, 30_000);
+
+test('independent followup starts from durable child state when the terminal checkpoint is absent', async () => {
+  await exerciseChildOrchestration(
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    async (fixture) => {
+      const { owner, childSessionId, parentSessionId, orchestrator, model, bridgeInput } = fixture;
+      const database = new Database(bridgeInput.checkpointPath);
+      try {
+        database
+          .query(`UPDATE agent_nodes SET status='context_unavailable',
+          latest_checkpoint_artifact_id=NULL,latest_checkpoint_integrity_identifier=NULL,
+          latest_checkpoint_byte_length=NULL WHERE session_id=? AND agent_id=session_id`)
+          .run(childSessionId);
+      } finally {
+        database.close();
+      }
+      const target = owner.runWithSessionExecution(parentSessionId, () =>
+        owner.storage.crossSessionQueueMail.readFollowupTarget(parentSessionId, childSessionId),
+      );
+      expect(target?.checkpointReady).toBe(true);
+      const { accepted } = await submitRealParentFollowup(
+        fixture,
+        'Continue from the durable transcript.',
+      );
+      expect(
+        await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
+      ).toBe(true);
+      model.setResponses([{ response: async () => ({ message: { content: 'CONTINUED' } }) }]);
+      expect(
+        await orchestrator.executeAcceptedFollowupFirstModel(childSessionId, accepted.submissionId),
+      ).toBe(true);
+      const continued = owner.loadCurrentSnapshot(childSessionId);
+      expect(continued?.activeFollowupTurn).toBeUndefined();
+      expect(continued?.turn.status).toBe('completed');
+      expect(continued?.transcript.final).toBe('CONTINUED');
     },
   );
 }, 30_000);
@@ -120,9 +208,6 @@ test('uncertain independent followup Model attempt settles unknown without repla
       expect(
         await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
       ).toBe(true);
-      model.setResponses([
-        { response: async () => ({ message: { content: 'UNREACHABLE_AFTER_LOST_ACK' } }) },
-      ]);
       const transactions = services.transactions as { commit: typeof services.transactions.commit };
       const originalCommit = transactions.commit;
       let lostAck = false;
@@ -147,7 +232,8 @@ test('uncertain independent followup Model attempt settles unknown without repla
       }
       expect(lostAck).toBe(true);
       const requestsBeforeRecovery = model.getRequestCount();
-      await orchestrator.recoverPendingFollowups();
+      const recovery = await orchestrator.recoverPendingFollowups();
+      expect(recovery.recoveryRequired).toEqual([]);
       expect(model.getRequestCount()).toBe(requestsBeforeRecovery);
       expect(owner.loadCurrentSnapshot(childSessionId)?.terminalOutcome?.status).toBe('unknown');
       expect(
@@ -155,11 +241,47 @@ test('uncertain independent followup Model attempt settles unknown without repla
           raw.readFollowupTerminalForSource(parentSessionId, accepted.submissionId),
         ),
       ).toMatchObject({ disposition: 'unknown' });
+      const sourceAfterUnknown = owner.loadCurrentSnapshot(parentSessionId);
+      if (sourceAfterUnknown?.resourceBudget.status !== 'active')
+        throw new Error('Unknown source funding budget is unavailable.');
+      const unknownBackup = Object.values(sourceAfterUnknown.resourceBudget.reservations).find(
+        (reservation) => reservation.invocationId === accepted.submissionId,
+      );
+      expect(unknownBackup?.state).toBe('reconciled');
+      expect(unknownBackup?.actual?.gauges.activeSubagents).toBe(0);
       expect(
         owner.runWithSessionExecution(childSessionId, () =>
           raw.listPendingTerminalReplies(childSessionId, 8),
         ),
-      ).toEqual([]);
+      ).toEqual([
+        expect.objectContaining({ mode: 'reply', sourceEffectAttemptId: accepted.submissionId }),
+      ]);
+      const next = await submitRealParentFollowup(
+        fixture,
+        'Inspect the unknown previous result, then continue in a new Run.',
+        false,
+        'followup-tool-after-unknown',
+      );
+      expect(
+        await orchestrator.receiveAcceptedFollowup(childSessionId, next.accepted.submissionId),
+      ).toBe(true);
+      model.setResponses([
+        {
+          response: async ({ messages }: { messages: readonly unknown[] }) => {
+            expect(JSON.stringify(messages)).toContain('unknown external-call result');
+            return { message: { content: 'OBSERVED_UNKNOWN_AND_CONTINUED' } };
+          },
+        },
+      ]);
+      expect(
+        await orchestrator.executeAcceptedFollowupFirstModel(
+          childSessionId,
+          next.accepted.submissionId,
+        ),
+      ).toBe(true);
+      expect(owner.loadCurrentSnapshot(childSessionId)?.transcript.final).toBe(
+        'OBSERVED_UNKNOWN_AND_CONTINUED',
+      );
     },
   );
 }, 30_000);

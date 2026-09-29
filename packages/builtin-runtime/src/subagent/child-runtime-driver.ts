@@ -2,7 +2,6 @@ import type { SubagentDelegationGrant, SubagentResumeGrant } from '@kite-ai/runt
 import type { LocalSubagentDriverResult, LocalSubagentLifecycleDriver } from './local-provider';
 
 const DEFAULT_PENDING_REGISTRATION_TTL_MS = 5 * 60_000;
-const MAX_PENDING_REGISTRATIONS = 256;
 
 interface ChildRuntimeRegistrationIdentity {
   readonly childInvocationId: string;
@@ -42,21 +41,10 @@ export class BuiltinChildRuntimeDriver implements LocalSubagentLifecycleDriver {
   readonly #starts = new Map<string, StoredRegistration<BuiltinChildRuntimeStartRegistration>>();
   readonly #resumes = new Map<string, StoredRegistration<BuiltinChildRuntimeResumeRegistration>>();
   readonly #now: () => number;
-  readonly #maxPendingRegistrations: number;
   #clockHighWaterMs = -1;
 
-  constructor(
-    options: { readonly now?: () => number; readonly maxPendingRegistrations?: number } = {},
-  ) {
+  constructor(options: { readonly now?: () => number } = {}) {
     this.#now = options.now ?? Date.now;
-    this.#maxPendingRegistrations = options.maxPendingRegistrations ?? MAX_PENDING_REGISTRATIONS;
-    if (
-      !Number.isSafeInteger(this.#maxPendingRegistrations) ||
-      this.#maxPendingRegistrations < 1 ||
-      this.#maxPendingRegistrations > MAX_PENDING_REGISTRATIONS
-    ) {
-      throw new Error('Child Runtime pending-registration capacity is invalid.');
-    }
     this.#effectiveNow();
   }
 
@@ -118,9 +106,6 @@ export class BuiltinChildRuntimeDriver implements LocalSubagentLifecycleDriver {
     this.#pruneExpired();
     if (this.#starts.has(grantId) || this.#resumes.has(grantId)) {
       throw new Error('Child Runtime grant registration collided.');
-    }
-    if (this.#starts.size + this.#resumes.size >= this.#maxPendingRegistrations) {
-      throw new Error('Child Runtime pending-registration capacity is exhausted.');
     }
     const now = this.#effectiveNow();
     const expiresAtMs = registration.expiresAtMs ?? now + DEFAULT_PENDING_REGISTRATION_TTL_MS;

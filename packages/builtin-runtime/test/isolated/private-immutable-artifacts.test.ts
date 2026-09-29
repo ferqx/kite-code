@@ -65,6 +65,18 @@ function artifactPath(storageRoot: string, kind: FixtureKind, artifactId: string
 }
 
 describe('PrivateImmutableArtifactStorage', () => {
+  test('omitting a size quota preserves large private artifacts and their integrity check', () => {
+    const artifacts = new PrivateImmutableArtifactStorage({
+      root: root(),
+      namespace: 'private-store',
+      partitions: PARTITIONS,
+    });
+    const payload = Buffer.alloc(2 * 1024 * 1024, 0x61);
+    const ref = artifacts.write('surface', payload);
+    expect(ref.byteLength).toBe(payload.byteLength);
+    expect(Buffer.from(artifacts.read(ref))).toEqual(payload);
+  });
+
   test('publishes owner-only immutable content under content-addressed identities', () => {
     const storageRoot = root();
     const artifacts = store(storageRoot);

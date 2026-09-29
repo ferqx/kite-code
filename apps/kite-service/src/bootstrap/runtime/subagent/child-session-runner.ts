@@ -58,8 +58,16 @@ export function createChildApprovalActionProvider(input: {
       if (!origin || origin.parentSessionId !== input.parentSessionId)
         throw new Error('Child approval request has no active parent lineage.');
       const active = state.activeFollowupTurn;
+      const provenUnknownFollowup =
+        active?.checkpointRef === undefined &&
+        Number.isSafeInteger(active?.sourceRevision) &&
+        /^sha256:[a-f0-9]{64}$/u.test(active?.sourceStateDigest ?? '') &&
+        state.resourceBudget.status === 'active' &&
+        state.resourceBudget.budget.durationOnlyChildRun === true;
       const followup =
-        active && origin.terminal?.status === 'completed' && origin.terminal.cleanupConfirmed
+        active &&
+        ((origin.terminal?.status === 'completed' && origin.terminal.cleanupConfirmed) ||
+          (origin.terminal?.status === 'unknown' && provenUnknownFollowup))
           ? {
               submissionId: active.submissionId,
               targetRunId: active.targetRunId,

@@ -47,7 +47,7 @@ interface PreparationAttempt {
 }
 
 /**
- * One bounded startup preparation for the observed Store 9–13 paths. It never runs from a
+ * One bounded startup preparation for the observed Store 9–14 paths. It never runs from a
  * history query. Ordinary current-format startup only inspects metadata and known locations.
  */
 export async function prepareKiteSessionStore<Event, State>(input: {
@@ -156,6 +156,8 @@ async function prepare<Event, State>(
             error.compatibility.actualEpoch === 'kite-session-child-approval-2026-09-25') ||
           (error.compatibility?.actualSchema === 13 &&
             error.compatibility.actualEpoch === 'kite-session-cross-followup-2026-09-25') ||
+          (error.compatibility?.actualSchema === 14 &&
+            error.compatibility.actualEpoch === 'kite-session-history-generation-2026-09-28') ||
           (error.compatibility?.actualSchema === 10 &&
             error.compatibility.actualEpoch === 'kite-session-app-server-2026-09-02')
         )

@@ -82,6 +82,22 @@ function value(receipt: Awaited<ReturnType<typeof execute>>): Record<string, unk
 }
 
 describe('Builtin Agent mailbox tools', () => {
+  test('list_agents includes every authorized child after more than 64 serial runs', async () => {
+    const port = portWith({
+      listAgents: async () => ({
+        ok: true,
+        agents: Array.from({ length: 65 }, (_, index) => ({
+          agent_id: `child-${index}`,
+          status: 'idle',
+        })),
+      }),
+    });
+    const result = value(await execute('builtin:list_agents', {}, port));
+    const agents = JSON.parse(String(result.stdout)).agents as Array<{ agent_id: string }>;
+    expect(agents).toHaveLength(65);
+    expect(agents.at(-1)?.agent_id).toBe('child-64');
+  });
+
   test('QueueOnly context exposes list, wait, and send while hiding followup and interrupt', () => {
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: {
@@ -140,7 +156,7 @@ describe('Builtin Agent mailbox tools', () => {
     }
   });
 
-  test('enforces exact Agent IDs and 4096 UTF-8 bytes before execution', () => {
+  test('enforces exact Agent IDs and accepts messages above the former 4096-byte limit', () => {
     const projection = createBuiltinToolCatalogProjection(registry, {
       turnContext: { featureFlags: { agentMailbox: true } },
     });
@@ -148,12 +164,23 @@ describe('Builtin Agent mailbox tools', () => {
     if (send?.visibility !== 'model') throw new Error('send_message is missing');
     expect(send.parseModelInput({ agent_id: 'agent-1', message: '你好' }).success).toBe(true);
     expect(send.parseModelInput({ agent_id: 'agent-1', message: '界'.repeat(1366) }).success).toBe(
-      false,
+      true,
     );
+    expect(send.parseModelInput({ agent_id: 'agent-1', message: '' }).success).toBe(false);
     expect(send.parseModelInput({ agent_id: 'bad/id', message: 'hello' }).success).toBe(false);
     expect(
       send.parseModelInput({ agent_id: 'agent-1', message: 'hello', task_id: 'old' }).success,
     ).toBe(false);
+  });
+
+  test('wait_agent accepts timeouts above the former 60-second limit', () => {
+    const projection = createBuiltinToolCatalogProjection(registry, {
+      turnContext: { featureFlags: { agentMailbox: true } },
+    });
+    const wait = projection.entries.find((entry) => entry.operationId === 'builtin:wait_agent');
+    if (wait?.visibility !== 'model') throw new Error('wait_agent is missing');
+    expect(wait.parseModelInput({ timeout_ms: 120_000 }).success).toBe(true);
+    expect(wait.parseModelInput({ timeout_ms: -1 }).success).toBe(false);
   });
 
   test('send and followup forward exact source attempt, preserve modes and return empty success', async () => {

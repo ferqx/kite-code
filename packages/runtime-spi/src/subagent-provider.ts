@@ -12,7 +12,6 @@ export type SubagentWorkspaceAccess = 'write';
 
 /** Protocol-first contract for the governed child lifecycle seam. */
 export const SUBAGENT_PROVIDER_SCHEMA_ = 'kite.subagent-provider.v1' as const;
-export const SUBAGENT_TASK_ARTIFACT_MAX_BYTES = 1024 * 1024;
 
 /** SPI-facing alias for the neutral Runtime Contract task artifact identity. */
 export type SubagentTaskArtifact = RuntimeContractSubagentTaskArtifact;

@@ -69,7 +69,8 @@ export interface PrivateImmutableArtifactStorageOptions<Kind extends string> {
   root?: string;
   namespace: string;
   partitions: readonly PrivateArtifactPartition<Kind>[];
-  maxArtifactBytes: number;
+  /** Optional per-artifact ceiling. Omit when the owner has no size quota. */
+  maxArtifactBytes?: number;
   /** App-owned durable backend; exactly one of `root` or `backend` must be supplied. */
   backend?: PrivateImmutableArtifactStorageBackend<Kind>;
   platform?: NodeJS.Platform;
@@ -197,7 +198,7 @@ export function derivePrivateImmutableArtifactReference<Kind extends string>(
 export class PrivateImmutableArtifactStorage<Kind extends string> {
   private readonly root: string;
   private readonly namespace: string;
-  private readonly maxArtifactBytes: number;
+  private readonly maxArtifactBytes?: number;
   private readonly platform: NodeJS.Platform;
   private readonly secureWindowsPath: (path: string) => void;
   private readonly faultInjector?: (point: PrivateArtifactWriteFaultPoint) => void;
@@ -208,7 +209,10 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
     if (!SAFE_STORAGE_SEGMENT.test(options.namespace)) {
       storageError('storage_boundary_violation', 'Private Artifact namespace is invalid.');
     }
-    if (!Number.isSafeInteger(options.maxArtifactBytes) || options.maxArtifactBytes < 1) {
+    if (
+      options.maxArtifactBytes !== undefined &&
+      (!Number.isSafeInteger(options.maxArtifactBytes) || options.maxArtifactBytes < 1)
+    ) {
       storageError('storage_boundary_violation', 'Private Artifact byte limit is invalid.');
     }
 
@@ -506,7 +510,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
     bytes: Buffer,
   ): PrivateImmutableArtifactRef<SpecificKind> {
     this.partition(kind);
-    if (bytes.byteLength > this.maxArtifactBytes) {
+    if (this.maxArtifactBytes !== undefined && bytes.byteLength > this.maxArtifactBytes) {
       storageError('artifact_too_large', 'Private Artifact exceeds its byte limit.');
     }
     return derivePrivateImmutableArtifactReference(this.namespace, kind, bytes);
@@ -536,7 +540,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
       !INTEGRITY_IDENTIFIER.test(ref.integrityIdentifier) ||
       !Number.isSafeInteger(ref.byteLength) ||
       ref.byteLength < 0 ||
-      ref.byteLength > this.maxArtifactBytes
+      (this.maxArtifactBytes !== undefined && ref.byteLength > this.maxArtifactBytes)
     ) {
       storageError('invalid_reference', 'Private Artifact reference is invalid.');
     }
@@ -762,7 +766,7 @@ export class PrivateImmutableArtifactStorage<Kind extends string> {
     if (this.platform !== 'win32' && (stats.mode & 0o777) !== 0o600) {
       storageError('storage_boundary_violation', message);
     }
-    if (stats.size > this.maxArtifactBytes) {
+    if (this.maxArtifactBytes !== undefined && stats.size > this.maxArtifactBytes) {
       storageError('artifact_too_large', 'Private Artifact exceeds its byte limit.');
     }
   }

@@ -45,7 +45,6 @@ export class SubagentLifecycleArtifactStore implements SubagentLifecycleArtifact
           : { root: options.root ?? subagentLifecycleArtifactRoot() }),
         namespace: 'subagent-lifecycles',
         partitions: [{ kind: 'subagent_handle', directory: 'handles', extension: '.json' }],
-        maxArtifactBytes: 64 * 1024,
       });
     } catch (error) {
       throw map(error, 'storage_boundary_violation');

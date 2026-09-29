@@ -277,7 +277,16 @@ export function startRootAgentRunInTransaction<Event, State>(
       .run(transaction.sessionId, transaction.sessionId, run.runId, run.createdAtMs);
     return;
   }
-  if (root.parent_agent_id !== null || root.status !== 'idle' || root.current_task_id !== null)
+  const checkpointlessFollowup =
+    transaction.followupRunStart?.checkpointRef === undefined &&
+    Number.isSafeInteger(transaction.followupRunStart?.sourceRevision) &&
+    typeof transaction.followupRunStart?.sourceStateDigest === 'string';
+  if (
+    root.parent_agent_id !== null ||
+    (root.status !== 'idle' &&
+      !(root.status === 'context_unavailable' && checkpointlessFollowup)) ||
+    root.current_task_id !== null
+  )
     conflict();
   database
     .query(
@@ -449,7 +458,7 @@ function acceptMail<Event, State>(
   const digest = `sha256:${createHash('sha256').update(mutation.bodyText).digest('hex')}`;
   if (
     bodyBytes < 1 ||
-    bodyBytes > 4096 ||
+    !Number.isSafeInteger(bodyBytes) ||
     !/^pa_[a-f0-9]{64}$/u.test(mutation.bodyRef.artifactId) ||
     mutation.bodyRef.byteLength !== bodyBytes ||
     mutation.bodyRef.kind !== 'agent_mail' ||
@@ -540,17 +549,6 @@ function acceptMail<Event, State>(
       conflict();
     return;
   }
-  const pending =
-    database
-      .query<{ count: number }, [string, string]>(
-        "SELECT count(*) AS count FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='queued'",
-      )
-      .get(sessionId, mutation.targetAgentId)?.count ?? 0;
-  if (pending >= 8)
-    throw new KiteSessionAgentMailboxError(
-      'capacity_exceeded',
-      'Target Agent inbox has eight pending messages.',
-    );
   const next = database
     .query<{ sequence: number }, [string]>(
       'SELECT coalesce(max(sequence),0)+1 AS sequence FROM agent_mail WHERE session_id=?',
@@ -628,7 +626,6 @@ function prepareInput(
   if (
     target?.status !== 'active' ||
     mutation.messageIds.length < 1 ||
-    mutation.messageIds.length > 8 ||
     !mutation.modelAdmissionId ||
     !mutation.modelInvocationId
   )
@@ -644,7 +641,7 @@ function prepareInput(
       { message_id: string; sequence: number; model_admission_id: string },
       (string | number)[]
     >(
-      `SELECT message_id,sequence,model_admission_id FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='prepared' AND prepared_invocation_id=?${recipientClause} ORDER BY sequence LIMIT 8`,
+      `SELECT message_id,sequence,model_admission_id FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='prepared' AND prepared_invocation_id=?${recipientClause} ORDER BY sequence`,
     );
     const rows = replay.all(
       sessionId,
@@ -666,7 +663,7 @@ function prepareInput(
     );
   const rows = database
     .query<{ message_id: string; sequence: number }, (string | number)[]>(
-      `SELECT message_id,sequence FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='queued' AND sequence>?${recipientClause} ORDER BY sequence LIMIT 8`,
+      `SELECT message_id,sequence FROM agent_mail WHERE session_id=? AND target_agent_id=? AND status='queued' AND sequence>?${recipientClause} ORDER BY sequence`,
     )
     .all(
       sessionId,

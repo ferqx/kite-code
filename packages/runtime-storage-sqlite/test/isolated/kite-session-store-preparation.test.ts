@@ -24,6 +24,7 @@ import {
   KITE_SESSION_STORE10_DDL,
   KITE_SESSION_STORE12_DDL,
   KITE_SESSION_STORE13_DDL,
+  KITE_SESSION_STORE14_DDL,
 } from '../../src/kite-home-store';
 import { validateKiteSessionStoreContinuity } from '../../src/kite-session-continuity-validation';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
@@ -40,6 +41,7 @@ import { KITE_SESSION_STORE11_DDL } from '../../src/kite-session-store11-convers
 import { convertKiteSessionStore11CandidateTo12 } from '../../src/kite-session-store11-to12';
 import { convertKiteSessionStore12CandidateTo13 } from '../../src/kite-session-store12-to13';
 import { convertKiteSessionStore13CandidateTo14 } from '../../src/kite-session-store13-to14';
+import { convertKiteSessionStore14CandidateTo15 } from '../../src/kite-session-store14-to15';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from '../../src/log-query';
 import { checksum, SQLITE_RUNTIME_RUN_FORMAT_EPOCH } from '../../src/preflight';
 
@@ -92,12 +94,16 @@ function fixture() {
   };
 }
 
-function singleRetiredStore(version: 12 | 13, epoch: string) {
+function singleRetiredStore(version: 12 | 13 | 14, epoch: string) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-preparation-single-')));
   const databasePath = join(root, 'kite-session.sqlite');
   const database = new Database(databasePath);
   chmodSync(databasePath, 0o600);
-  for (const sql of version === 12 ? KITE_SESSION_STORE12_DDL : KITE_SESSION_STORE13_DDL)
+  for (const sql of version === 12
+    ? KITE_SESSION_STORE12_DDL
+    : version === 13
+      ? KITE_SESSION_STORE13_DDL
+      : KITE_SESSION_STORE14_DDL)
     database.run(sql);
   database
     .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
@@ -278,8 +284,9 @@ await prepareKiteSessionStore({
   for (const [version, epoch] of [
     [12, 'kite-session-child-approval-2026-09-25'],
     [13, 'kite-session-cross-followup-2026-09-25'],
+    [14, 'kite-session-history-generation-2026-09-28'],
   ] as const) {
-    test(`upgrades a single exact Store ${version} to Store 14 at startup`, async () => {
+    test(`upgrades a single exact Store ${version} to Store 15 at startup`, async () => {
       using data = singleRetiredStore(version, epoch);
       const result = await prepareKiteSessionStore({
         databasePath: data.databasePath,
@@ -292,7 +299,7 @@ await prepareKiteSessionStore({
       assertKiteSessionStoreSchema(upgraded);
       expect(
         upgraded.query("SELECT value FROM kite_meta WHERE key='schema_version'").get(),
-      ).toEqual({ value: '14' });
+      ).toEqual({ value: '15' });
     });
   }
 
@@ -524,7 +531,7 @@ await prepareKiteSessionStore({
     expect(admissions).toBe(2);
     using database = new Database(data.databasePath, { readonly: true });
     expect(database.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual({
-      value: '14',
+      value: '15',
     });
   });
   test('writer admission lease spans candidate validation and publication and is released on success', async () => {
@@ -798,6 +805,7 @@ await prepareKiteSessionStore({
       convertKiteSessionStore11CandidateTo12({ database: candidateWriter });
       convertKiteSessionStore12CandidateTo13({ database: candidateWriter });
       convertKiteSessionStore13CandidateTo14({ database: candidateWriter });
+      convertKiteSessionStore14CandidateTo15({ database: candidateWriter });
     } finally {
       candidateWriter.close(false);
     }

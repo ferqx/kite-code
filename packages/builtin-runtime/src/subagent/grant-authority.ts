@@ -9,7 +9,6 @@ import type {
 import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite-ai/runtime-spi';
 
 const DEFAULT_TTL_MS = 5 * 60_000;
-const MAX_CONSUMED_GRANT_TOMBSTONES = 4_096;
 const DOMAIN = 'kite.subagent-provider-grant.v1\0';
 const HANDLE_DOMAIN = 'kite.subagent-provider-handle.v1\0';
 const CHILD_ID_DOMAIN = 'kite.subagent-provider-child-id.v1\0';
@@ -53,37 +52,21 @@ export class SubagentGrantAuthority {
   readonly #idSource: () => string;
   /** Wall clocks can move backwards; expiry decisions must not. */
   #clockHighWaterMs = -1;
-  /**
-   * A consumed grant only needs to remain a tombstone until the grant expires.
-   * Keep the expiry with the identity so a long-lived Runtime cannot retain
-   * every grant it has ever seen.  Tombstones are never evicted while valid:
-   * if the bounded ledger is exhausted, verification fails closed instead.
-   */
+  /** A consumed grant remains a tombstone until expiry so it cannot be replayed. */
   readonly #consumed = new Map<string, number>();
-  readonly #maxConsumedGrantTombstones: number;
 
   constructor(
     options: {
       now?: () => number;
       ttlMs?: number;
       idSource?: () => string;
-      maxConsumedGrantTombstones?: number;
     } = {},
   ) {
     this.#now = options.now ?? Date.now;
     this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.#idSource = options.idSource ?? randomUUID;
-    this.#maxConsumedGrantTombstones =
-      options.maxConsumedGrantTombstones ?? MAX_CONSUMED_GRANT_TOMBSTONES;
     if (!Number.isSafeInteger(this.#ttlMs) || this.#ttlMs <= 0 || this.#ttlMs > DEFAULT_TTL_MS) {
       throw new Error('Subagent grant TTL is invalid.');
-    }
-    if (
-      !Number.isSafeInteger(this.#maxConsumedGrantTombstones) ||
-      this.#maxConsumedGrantTombstones < 1 ||
-      this.#maxConsumedGrantTombstones > MAX_CONSUMED_GRANT_TOMBSTONES
-    ) {
-      throw new Error('Subagent consumed-grant tombstone capacity is invalid.');
     }
   }
 
@@ -310,14 +293,6 @@ export class SubagentGrantAuthority {
         required(resume.blockedToolCallId, 'blockedToolCallId');
         required(resume.blockedRuntimeToolCallId, 'blockedRuntimeToolCallId');
         positive(resume.resumeAttempt, 'resumeAttempt');
-      }
-      if (!historical && this.#consumed.size >= this.#maxConsumedGrantTombstones) {
-        // Dropping a still-valid tombstone would make a replayable grant look
-        // fresh.  Refuse the new lifecycle instead of weakening single-use.
-        throw new SubagentGrantError(
-          'invalid_grant',
-          'Subagent consumed-grant tombstone capacity is exhausted.',
-        );
       }
       if (consume) this.#consumed.set(copy.grantId, copy.expiresAtMs);
       return freeze(copy);

@@ -139,7 +139,7 @@ export interface CliRuntimeBridgeInput {
   readonly childSessionAcceptance?: RuntimeTurnInput['childSessionAcceptance'];
   readonly crossSessionQueueMail?: RuntimeTurnInput['crossSessionQueueMail'];
   /** Best-effort wake for durable Agent notices derived from a committed Run cancellation. */
-  readonly onCommittedCancel?: () => void;
+  readonly onCommittedCancel?: (runId: string) => void;
   readonly followupPolicyForPreparedTool?: (
     input: Parameters<NonNullable<RuntimeTurnInput['followupPolicyForPreparedTool']>>[0],
     activeRunConfig: Readonly<AgentConfig>,
@@ -1543,7 +1543,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
                   ? { runId: command.runId, turnId: command.turnId }
                   : {},
               );
-              if (command.type === 'cancel_turn') this.#input.onCommittedCancel?.();
+              if (command.type === 'cancel_turn') this.#input.onCommittedCancel?.(command.runId);
             },
           };
         },

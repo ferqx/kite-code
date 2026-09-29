@@ -198,7 +198,7 @@ test('a qualified older Store publishes after a busy wait and remains open after
     try {
       expect(current.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual(
         {
-          value: '14',
+          value: '15',
         },
       );
       expect(current.query("SELECT value FROM kite_meta WHERE key='format_epoch'").get()).toEqual({

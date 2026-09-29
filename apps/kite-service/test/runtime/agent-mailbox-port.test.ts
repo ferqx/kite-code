@@ -443,7 +443,7 @@ describe('root Agent mailbox port', () => {
     expect(f.commits).toBe(0);
   });
 
-  test('bounds capacity and refuses unproven controls', async () => {
+  test('accepts queued mail beyond old capacity and refuses unproven controls', async () => {
     const f = fixture();
     f.setUnreadCount(8);
     expect(
@@ -454,7 +454,7 @@ describe('root Agent mailbox port', () => {
         mode: 'queue_only',
         signal: f.abort.signal,
       }),
-    ).toEqual({ ok: false, code: 'capacity_exceeded' });
+    ).toEqual({ ok: true });
     expect(
       await f.port.submitMessage({
         scope: f.scope,
@@ -463,7 +463,7 @@ describe('root Agent mailbox port', () => {
         mode: 'queue_only',
         signal: f.abort.signal,
       }),
-    ).toEqual({ ok: false, code: 'capacity_exceeded' });
+    ).toEqual({ ok: true });
     expect(
       await f.port.submitMessage({
         scope: f.scope,
@@ -472,7 +472,7 @@ describe('root Agent mailbox port', () => {
         mode: 'trigger_turn',
         signal: f.abort.signal,
       }),
-    ).toEqual({ ok: false, code: 'capacity_exceeded' });
+    ).toEqual({ ok: false, code: 'admission_unavailable' });
     expect(
       await f.port.interruptAgent({
         scope: f.scope,
@@ -480,7 +480,7 @@ describe('root Agent mailbox port', () => {
         signal: f.abort.signal,
       }),
     ).toEqual({ ok: false, code: 'admission_unavailable' });
-    expect(f.commits).toBe(0);
+    expect(f.commits).toBe(2);
   });
 
   test('rejects child scope and stale Run before storage mutation', async () => {

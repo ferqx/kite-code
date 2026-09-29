@@ -150,6 +150,9 @@ test('task_wait wakes on a committed child model retry without exposing Provider
     status: 'running',
     retry: { attempt: 1 },
   });
+  expect(
+    await control.waitTasks(['task-1'], 0, undefined, { wakeOnModelRetry: false }),
+  ).toMatchObject({ status: 'timeout', ok: true });
 });
 
 test('retry progress clears on model response, interruption, and terminal settlement', async () => {

@@ -36,28 +36,32 @@ describe('ACORE-AGENT-01 delegation contract', () => {
     ).toEqual({ valid: true, reason: 'valid' });
   });
 
-  test('rejects only delegated tasks outside the shared structural length boundary', () => {
-    for (const delegatedTask of ['short', 'x'.repeat(8_001)]) {
+  test('rejects empty delegated tasks without a fixed length ceiling', () => {
+    for (const delegatedTask of ['', '   ']) {
       expect(validateDelegatedTask({ delegatedTask })).toEqual({
         valid: false,
         reason: 'task_not_bounded',
       });
     }
+    expect(validateDelegatedTask({ delegatedTask: 'x'.repeat(8_001) })).toEqual({
+      valid: true,
+      reason: 'valid',
+    });
   });
 
-  test('task schema and Runtime validation share the 8..8000 bounded task contract', () => {
+  test('task schema and Runtime validation accept any nonempty task length', () => {
     expect(
       BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
         name: 'Inspect code',
         subagent_type: 'explore',
-        task: '1234567',
+        task: '',
       }).success,
     ).toBe(false);
     expect(
       BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
         name: 'Inspect code',
         subagent_type: 'explore',
-        task: '       x',
+        task: '       ',
       }).success,
     ).toBe(false);
     expect(
@@ -66,7 +70,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
         subagent_type: 'explore',
         task: 'x'.repeat(8001),
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
         name: 'Inspect code',
@@ -75,6 +79,13 @@ describe('ACORE-AGENT-01 delegation contract', () => {
       }).success,
     ).toBe(true);
     expect(validateDelegatedTask({ delegatedTask: 'bounded!' }).valid).toBe(true);
+    expect(
+      BUILTIN_TASK_PUBLIC_SCHEMA_.safeParse({
+        name: `Review ${'x'.repeat(100)}`,
+        subagent_type: 'explore',
+        task: 'Inspect.',
+      }).success,
+    ).toBe(true);
   });
 
   test('keeps background execution separate from cross-turn result disposition', () => {

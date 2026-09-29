@@ -294,6 +294,53 @@ describe('App Builtin mechanism resolver', () => {
     expect(shellInputs).toHaveLength(callsBeforeAbort);
   });
 
+  test('uses the remaining child Run duration instead of the finite Shell default', async () => {
+    const shellInputs: AppBuiltinShellExecutorInput[] = [];
+    const shellExecutor = Object.freeze({
+      execute: async (input: Readonly<AppBuiltinShellExecutorInput>) => {
+        shellInputs.push(input);
+        return shellResult();
+      },
+    });
+    const resolve = createAppBuiltinMechanismResolver();
+    const deadlineAt = new Date(Date.now() + 25 * 60_000).toISOString();
+    const childShell = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'pwd' }),
+        durationOnlyChildRunDeadlineAt: deadlineAt,
+        shellExecutor,
+      }),
+    ).shell as { execute: (input: { command: string; timeoutMs: number }) => Promise<unknown> };
+    await childShell.execute({ command: 'pwd', timeoutMs: 600_000 });
+    expect(shellInputs[0]?.timeoutMs).toBeGreaterThan(20 * 60_000);
+    expect(shellInputs[0]?.timeoutMs).toBeLessThanOrEqual(25 * 60_000);
+
+    const explicitShell = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'pwd', timeout_ms: 321 }),
+        durationOnlyChildRunDeadlineAt: deadlineAt,
+        shellExecutor,
+      }),
+    ).shell as typeof childShell;
+    await explicitShell.execute({ command: 'pwd', timeoutMs: 321 });
+    expect(shellInputs[1]?.timeoutMs).toBe(321);
+
+    const expiredShell = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'pwd' }),
+        durationOnlyChildRunDeadlineAt: new Date(Date.now() - 1_000).toISOString(),
+        shellExecutor,
+      }),
+    ).shell as typeof childShell;
+    expect(() => expiredShell.execute({ command: 'pwd', timeoutMs: 600_000 })).toThrow(
+      AppBuiltinMechanismResolverError,
+    );
+    expect(shellInputs).toHaveLength(2);
+  });
+
   test('treats approve_once as a bound one-call grant without widening policy effects', async () => {
     const filesystemCalls: WorkspaceFilesystemOperation[] = [];
     const filesystemRuntime: BuiltinWorkspaceFilesystemInvocationDispatcher = Object.freeze({

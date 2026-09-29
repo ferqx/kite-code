@@ -22,7 +22,7 @@ type ChildIntent = Pick<
   | 'role'
 >;
 
-/** Recover a finite ceiling without relying on the lost receipt-time budget object. */
+/** Recover the exact persisted child authority without trusting a lost receipt-time object. */
 export function recoverChildDelegatedBudget(input: {
   readonly intent: ChildIntent;
   readonly parentState: Readonly<RuntimeState>;
@@ -40,6 +40,7 @@ export function recoverChildDelegatedBudget(input: {
   }
   const upper = reservation?.executableUpperBound;
   const independentTurnDeadline = upper?.independentChildTurnDeadline === true;
+  const durationOnlyChildRun = upper?.durationOnlyChildRun === true;
   const parentDeadlineMs = Date.parse(intent.deadlineAt);
   const maximumChildDeadlineMs = grantIssuedAtMs + (upper?.gauges.elapsedRunMs ?? NaN);
   const deadlineMs = independentTurnDeadline
@@ -73,6 +74,9 @@ export function recoverChildDelegatedBudget(input: {
         reservation.invocationId !== reservation.reservationId ||
         upper?.unboundedToolInvocations !== true ||
         upper.gauges.elapsedRunMs !== DEFAULT_SUBAGENT_TIMEOUT_MS)) ||
+    (durationOnlyChildRun &&
+      (!independentTurnDeadline ||
+        Object.values(upper?.counters ?? {}).some((value) => value !== 0))) ||
     !Number.isSafeInteger(duration) ||
     duration < 1
   )
@@ -81,29 +85,42 @@ export function recoverChildDelegatedBudget(input: {
   const childBudget: ResourceBudget = {
     version: 1,
     maxRunDurationMs: Math.min(upper.gauges.elapsedRunMs, duration),
-    maxTurns: Math.min(upper.counters.turns, ledger.budget.maxTurns),
-    maxModelRequests: Math.min(upper.counters.modelRequests, ledger.budget.maxModelRequests),
+    maxTurns: durationOnlyChildRun ? 0 : Math.min(upper.counters.turns, ledger.budget.maxTurns),
+    maxModelRequests: durationOnlyChildRun
+      ? 0
+      : Math.min(upper.counters.modelRequests, ledger.budget.maxModelRequests),
     maxToolInvocations: independentTurnDeadline
       ? 0
       : Math.min(upper.counters.toolInvocations, ledger.budget.maxToolInvocations),
     ...(independentTurnDeadline ? { unboundedToolInvocations: true as const } : {}),
-    maxRunInputTokens: Math.min(upper.counters.inputTokens, ledger.budget.maxRunInputTokens),
-    maxRunOutputTokens: Math.min(upper.counters.outputTokens, ledger.budget.maxRunOutputTokens),
-    maxArtifactBytes: Math.min(upper.counters.artifactBytes, ledger.budget.maxArtifactBytes),
+    ...(durationOnlyChildRun ? { durationOnlyChildRun: true as const } : {}),
+    maxRunInputTokens: durationOnlyChildRun
+      ? 0
+      : Math.min(upper.counters.inputTokens, ledger.budget.maxRunInputTokens),
+    maxRunOutputTokens: durationOnlyChildRun
+      ? 0
+      : Math.min(upper.counters.outputTokens, ledger.budget.maxRunOutputTokens),
+    maxArtifactBytes: durationOnlyChildRun
+      ? 0
+      : Math.min(upper.counters.artifactBytes, ledger.budget.maxArtifactBytes),
     // The Kernel budget schema requires positive concurrency values. The
-    // child Tool router forbids nested Task; only a code role may write.
+    // child Tool router forbids nested Task; role permissions govern writes.
     maxConcurrentSubagents: 1,
-    maxConcurrentWriters:
-      intent.role === 'code'
+    maxConcurrentWriters: durationOnlyChildRun
+      ? Number.MAX_SAFE_INTEGER
+      : intent.role === 'code'
         ? Math.min(upper.gauges.activeWriters, ledger.budget.maxConcurrentWriters)
         : 1,
-    // Independent child Tools do not consume a count gauge. Keep the schema's
-    // positive Tool field for its writer relationship, including on recovery.
-    maxConcurrentToolInvocations: independentTurnDeadline
-      ? 1
-      : Math.min(upper.gauges.activeToolInvocations, ledger.budget.maxConcurrentToolInvocations),
-    maxConcurrentShellInvocations: 0,
-    maxConcurrencyWaitMs: Math.min(ledger.budget.maxConcurrencyWaitMs, duration),
+    // A duration-only child has no local Tool or Shell concurrency ceiling.
+    maxConcurrentToolInvocations: durationOnlyChildRun
+      ? Number.MAX_SAFE_INTEGER
+      : independentTurnDeadline
+        ? 1
+        : Math.min(upper.gauges.activeToolInvocations, ledger.budget.maxConcurrentToolInvocations),
+    maxConcurrentShellInvocations: durationOnlyChildRun ? Number.MAX_SAFE_INTEGER : 0,
+    maxConcurrencyWaitMs: durationOnlyChildRun
+      ? duration
+      : Math.min(ledger.budget.maxConcurrencyWaitMs, duration),
   };
   assertResourceBudget(childBudget);
   const childDeadlineAt = new Date(deadlineMs).toISOString();

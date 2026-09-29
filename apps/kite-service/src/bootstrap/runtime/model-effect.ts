@@ -499,7 +499,7 @@ export async function projectPrimaryModelEffect(params: {
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
-  resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  resourceAdmission?: { inputTokens: number; maxOutputTokens?: number };
   firstAttemptTimeoutMs?: number;
   replaceReservationId?: string;
   /** App-owned coordinator bound to the one Gateway for every Model effect. */

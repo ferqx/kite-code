@@ -1400,9 +1400,7 @@ test('provider authentication failure is visible once during live delivery and a
     const notices = () =>
       f.client
         .getSnapshot()
-        .messages.filter(
-          (message) => message.role === 'system' && message.systemKind !== 'turn_timing',
-        );
+        .messages.filter((message) => message.role === 'system' && message.status === 'failed');
     await waitFor(() => notices().length === 1);
     const live = notices();
     expect(live).toHaveLength(1);
@@ -1467,7 +1465,12 @@ test('sends active input as steer and the same Run uses it at the next model bou
     expect(f.client.getSnapshot().messages.some((message) => message.text === 'Old answer.')).toBe(
       false,
     );
-    expect(f.client.getSnapshot().messages.at(-1)?.text).toContain('new constraint');
+    expect(
+      f.client
+        .getSnapshot()
+        .messages.filter((message) => message.role === 'assistant')
+        .at(-1)?.text,
+    ).toContain('new constraint');
   } finally {
     await f.close();
   }

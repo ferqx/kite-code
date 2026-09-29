@@ -68,6 +68,136 @@ function configured() {
 }
 
 describe('ResourceBudget', () => {
+  test('duration-only child records usage beyond legacy counters while rejecting forged authority', () => {
+    const childBudget = {
+      ...LIMITED_RESOURCE_BUDGET_,
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxToolInvocations: 0,
+      maxRunInputTokens: 0,
+      maxRunOutputTokens: 0,
+      maxArtifactBytes: 0,
+      durationOnlyChildRun: true as const,
+    };
+    const initial = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'duration-child',
+      userId: 'u',
+      workspace: '/',
+    });
+    let state = reduceResourceBudgetState(initial.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: '2026-07-30T00:00:00Z',
+      deadlineAt: '2026-07-30T00:30:00Z',
+      budget: childBudget,
+    });
+    const large = createZeroResourceUsage('versioned_upper_bound', 'large-model-v1');
+    large.counters.modelRequests = 1;
+    large.counters.inputTokens = LIMITED_RESOURCE_BUDGET_.maxRunInputTokens + 1;
+    large.counters.outputTokens = LIMITED_RESOURCE_BUDGET_.maxRunOutputTokens + 1;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reserved',
+      reservation: { ...reservation('large', 'large', large), resourceKind: 'model' },
+    });
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'large',
+    });
+    const measured = createZeroResourceUsage();
+    measured.counters.modelRequests = 1;
+    measured.counters.inputTokens = large.counters.inputTokens;
+    measured.counters.outputTokens = large.counters.outputTokens;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'large',
+      actual: measured,
+    });
+    expect(state.status === 'active' && state.reconciledUsage.counters.inputTokens).toBe(
+      large.counters.inputTokens,
+    );
+    const unboundedModel = createZeroResourceUsage('versioned_upper_bound', 'child-model-v1');
+    unboundedModel.counters.modelRequests = 1;
+    unboundedModel.unboundedModelTokens = true;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reserved',
+      reservation: {
+        ...reservation('later-model', 'later-model', unboundedModel),
+        resourceKind: 'model',
+      },
+    });
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'later-model',
+    });
+    const providerMeasured = createZeroResourceUsage();
+    providerMeasured.counters.modelRequests = 1;
+    providerMeasured.counters.inputTokens = 10_000_000;
+    providerMeasured.counters.outputTokens = 100_000;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'later-model',
+      actual: providerMeasured,
+    });
+    expect(state.status === 'active' && state.reconciledUsage.counters.inputTokens).toBe(
+      large.counters.inputTokens + providerMeasured.counters.inputTokens,
+    );
+    const writeUpper = createZeroResourceUsage('versioned_upper_bound', 'child-write-v1');
+    writeUpper.counters.toolInvocations = 1;
+    writeUpper.unboundedArtifactBytes = true;
+    for (const id of ['write-a', 'write-b'])
+      state = reduceResourceBudgetState(state, {
+        type: 'resource_budget.reserved',
+        reservation: reservation(id, id, writeUpper),
+      });
+    for (const [id, bytes] of [
+      ['write-a', 300_000_000],
+      ['write-b', 400_000_000],
+    ] as const) {
+      state = reduceResourceBudgetState(state, {
+        type: 'resource_budget.dispatch_started',
+        reservationId: id,
+      });
+      const toolActual = createZeroResourceUsage();
+      toolActual.counters.toolInvocations = 1;
+      toolActual.counters.artifactBytes = bytes;
+      state = reduceResourceBudgetState(state, {
+        type: 'resource_budget.reconciled',
+        reservationId: id,
+        actual: toolActual,
+      });
+    }
+    expect(state.status === 'active' && state.reconciledUsage.counters.artifactBytes).toBe(
+      700_000_000,
+    );
+    expect(() =>
+      reduceResourceBudgetState(configured(), {
+        type: 'resource_budget.reserved',
+        reservation: reservation('forged-artifact', 'forged-artifact', writeUpper),
+      }),
+    ).toThrow('duration-only child Run');
+    expect(() =>
+      reduceResourceBudgetState(configured(), {
+        type: 'resource_budget.reserved',
+        reservation: {
+          ...reservation('forged-model', 'forged-model', unboundedModel),
+          resourceKind: 'model',
+        },
+      }),
+    ).toThrow('duration-only child Run');
+    expect(() =>
+      reduceResourceBudgetState(configured(), {
+        type: 'resource_budget.reserved',
+        reservation: {
+          ...reservation('forged', 'forged'),
+          executableUpperBound: {
+            ...usage(),
+            durationOnlyChildRun: true,
+          },
+        },
+      }),
+    ).toThrow('Duration-only authority');
+  });
   test('persists required child wait as active-time deadline suspension', () => {
     const started = {
       type: 'resource_budget.required_child_wait_started' as const,

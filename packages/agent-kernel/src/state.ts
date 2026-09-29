@@ -175,6 +175,8 @@ export interface ResourceBudget {
   readonly maxToolInvocations: number;
   /** New grants may omit a cumulative Tool count ceiling; zero without this flag still denies Tools. */
   readonly unboundedToolInvocations?: true;
+  /** Exact independent child Run authority; cumulative fields are zero placeholders. */
+  readonly durationOnlyChildRun?: true;
   readonly maxRunInputTokens: number;
   readonly maxRunOutputTokens: number;
   readonly maxConcurrentSubagents: number;
@@ -205,10 +207,16 @@ export interface ResourceUsage {
   readonly estimatorVersion?: string;
   /** Only valid on an upper bound; actual Tool calls remain counted. */
   readonly unboundedToolInvocations?: true;
+  /** Child-only Tool reservation: actual Artifact bytes are recorded without a cumulative cap. */
+  readonly unboundedArtifactBytes?: true;
+  /** Child-only Model reservation: actual input/output tokens remain auditable without an estimate ceiling. */
+  readonly unboundedModelTokens?: true;
   /** Child allotment may give its own turn a fresh deadline after activation. */
   readonly independentChildTurnDeadline?: true;
   /** Source-held envelope for one independent followup child turn. */
   readonly independentFollowupTurn?: true;
+  /** Exact independent child funding authority; cumulative counters are zero. */
+  readonly durationOnlyChildRun?: true;
 }
 
 export type ResourceReservationState =
@@ -1348,7 +1356,10 @@ export interface AgentState {
     submissionId: string;
     targetRunId: string;
     taskId: string;
-    checkpointRef: AgentSubagentCheckpointArtifactRef;
+    checkpointRef?: AgentSubagentCheckpointArtifactRef;
+    /** Exact pre-start durable State snapshot for independent v2 followup without a checkpoint. */
+    sourceRevision?: number;
+    sourceStateDigest?: string;
     grantRef: AgentPrivateArtifactRef & { readonly kind: 'agent_followup_grant' };
     grantDigest: string;
   }>;

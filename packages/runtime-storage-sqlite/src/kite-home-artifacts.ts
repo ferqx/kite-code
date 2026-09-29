@@ -228,7 +228,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
   const store: KiteHomeArtifactStore = {
     writeModel: (input) => {
       assertPrivateReference(input.ref, ['model_surface', 'model_response', 'provider_options']);
-      assertPayload(input.canonicalJson, input.ref.byteLength, 16 * 1024 * 1024);
+      assertPayload(input.canonicalJson, input.ref.byteLength);
       insertExact(database, 'model_artifacts', {
         artifact_id: input.ref.artifactId,
         kind: input.ref.kind,
@@ -385,7 +385,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
 
     writeSubagentTask: (input) => {
       assertPrivateReference(input.ref, ['subagent_task_request', 'subagent_task']);
-      assertPayload(input.canonicalJson, input.ref.byteLength, 1024 * 1024);
+      assertPayload(input.canonicalJson, input.ref.byteLength);
       insertExact(database, 'subagent_task_artifacts', {
         artifact_id: input.ref.artifactId,
         kind: input.ref.kind,
@@ -437,7 +437,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
 
     writeSubagentLifecycle: (input) => {
       assertPrivateReference(input.ref, ['subagent_handle']);
-      assertPayload(input.canonicalJson, input.ref.byteLength, 64 * 1024);
+      assertPayload(input.canonicalJson, input.ref.byteLength);
       insertExact(database, 'subagent_lifecycle_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -461,7 +461,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
 
     writeSubagentContinuation: (input) => {
       assertPrivateReference(input.ref, ['subagent_continuation']);
-      assertPayload(input.canonicalJson, input.ref.byteLength, 4 * 1024 * 1024);
+      assertPayload(input.canonicalJson, input.ref.byteLength);
       insertExact(database, 'subagent_continuation_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -485,7 +485,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
 
     writeSubagentCheckpoint: (input) => {
       assertPrivateReference(input.ref, ['subagent_checkpoint']);
-      assertHashedPayload(input.canonicalJson, input.ref, 16 * 1024 * 1024);
+      assertHashedPayload(input.canonicalJson, input.ref);
       insertExact(database, 'subagent_checkpoint_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -499,7 +499,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
       assertPrivateReference(ref, ['subagent_checkpoint']);
       const row = readExact(database, 'subagent_checkpoint_artifacts', ref.artifactId);
       assertStoredReference(row, ref, 'subagent_checkpoint');
-      assertHashedPayload(storedString(row, 'canonical_json'), ref, 16 * 1024 * 1024);
+      assertHashedPayload(storedString(row, 'canonical_json'), ref);
       return Object.freeze({
         artifactFormatVersion: storedInteger(row, 'artifact_format_version'),
         canonicalJson: storedString(row, 'canonical_json'),
@@ -510,7 +510,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
 
     writeAgentFollowupAdmission: (input) => {
       assertPrivateReference(input.ref, ['agent_followup_admission']);
-      assertHashedPayload(input.canonicalJson, input.ref, 16 * 1024 * 1024);
+      assertHashedPayload(input.canonicalJson, input.ref);
       insertExact(database, 'agent_followup_admission_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -524,7 +524,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
       assertPrivateReference(ref, ['agent_followup_admission']);
       const row = readExact(database, 'agent_followup_admission_artifacts', ref.artifactId);
       assertStoredReference(row, ref, 'agent_followup_admission');
-      assertHashedPayload(storedString(row, 'canonical_json'), ref, 16 * 1024 * 1024);
+      assertHashedPayload(storedString(row, 'canonical_json'), ref);
       return Object.freeze({
         artifactFormatVersion: storedInteger(row, 'artifact_format_version'),
         canonicalJson: storedString(row, 'canonical_json'),
@@ -572,10 +572,10 @@ function assertPlanReference(ref: KiteHomePlanArtifactReference): void {
   }
 }
 
-function assertPayload(canonicalJson: string, byteLength: number, maxBytes: number): void {
+function assertPayload(canonicalJson: string, byteLength: number, maxBytes?: number): void {
   assertJson(canonicalJson);
   const actual = Buffer.byteLength(canonicalJson, 'utf8');
-  if (actual !== byteLength || actual < 1 || actual > maxBytes) {
+  if (actual !== byteLength || actual < 1 || (maxBytes !== undefined && actual > maxBytes)) {
     invalidReference('Private Artifact byte length is invalid.');
   }
 }
@@ -583,7 +583,7 @@ function assertPayload(canonicalJson: string, byteLength: number, maxBytes: numb
 function assertHashedPayload(
   canonicalJson: string,
   ref: KiteHomePrivateArtifactReference<string>,
-  maxBytes: number,
+  maxBytes?: number,
 ): void {
   assertPayload(canonicalJson, ref.byteLength, maxBytes);
   const digest = `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`;

@@ -179,7 +179,7 @@ test('default App Server preserves after-turn, retained service, stop, and recon
       baseURL: model.baseURL,
       modelName: 'mock-model',
       modelKwargs: { maxOutputTokens: 64 },
-      modelCapabilities: { contextWindowTokens: 4_096, maxOutputTokens: 64 },
+      modelCapabilities: { contextWindowTokens: 16_384, maxOutputTokens: 64 },
       features: { afterTurnContinuation: true, resourceBudget: true },
       sandbox: { enabled: true },
     },

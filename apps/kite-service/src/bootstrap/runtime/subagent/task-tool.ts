@@ -126,8 +126,7 @@ export function prepareBackgroundAgentTerminalReply(input: {
   )}`;
   const bodyText = `Agent task ${notification.taskId} ${notification.status}. Use task_read with this task_id for the full result.`;
   const byteLength = Buffer.byteLength(bodyText, 'utf8');
-  if (byteLength < 1 || byteLength > 4_096)
-    throw new Error('Background Agent reply body exceeds its private bound.');
+  if (byteLength < 1) throw new Error('Background Agent reply body is empty.');
   const bodyHex = hash(bodyText);
   const bodyDigest = `sha256:${bodyHex}`;
   const source = Object.freeze({

@@ -616,7 +616,7 @@ test('Desktop passes exact Run and Turn state to the shared process disclosure',
       ],
     }),
   );
-  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已处理');
+  expect(document.querySelector('.agent-turn-summary')?.textContent).toContain('已完成');
   expect(document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
     'false',
   );

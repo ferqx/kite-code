@@ -2,6 +2,7 @@ export {
   childThreadIdForToolAttempt,
   countPendingSteerInputs,
   createAgentMessageContextFrame,
+  encodeCurrentAgentStateJson,
   requiredBackgroundTaskIds,
   requiredManagedShellIds,
 } from '@kite-ai/agent-kernel';

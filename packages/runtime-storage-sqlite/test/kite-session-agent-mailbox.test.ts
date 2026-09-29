@@ -353,7 +353,7 @@ describe('Store11 Agent mailbox transaction rows', () => {
     const db = fixture();
     try {
       agents(db);
-      const first = mail(1);
+      const first = mail(1, 'x'.repeat(5_000));
       commit(db, [first.event], [first.mutation], first.receipt);
       const second = mail(2);
       commit(db, [second.event], [second.mutation], second.receipt);
@@ -405,7 +405,7 @@ describe('Store11 Agent mailbox transaction rows', () => {
     }
   });
 
-  test('rejects digest conflict, missing receipt, and ninth pending mail without partial rows', () => {
+  test('rejects digest conflict and missing receipt while preserving ninth pending mail order', () => {
     const db = fixture();
     try {
       agents(db);
@@ -421,12 +421,16 @@ describe('Store11 Agent mailbox transaction rows', () => {
         commit(db, [next.event], [next.mutation], next.receipt);
       }
       const ninth = mail(9);
-      expect(() => commit(db, [ninth.event], [ninth.mutation], ninth.receipt)).toThrow(
-        'eight pending',
-      );
+      commit(db, [ninth.event], [ninth.mutation], ninth.receipt);
       expect(
         db.query<{ count: number }, []>('SELECT count(*) AS count FROM agent_mail').get()?.count,
-      ).toBe(8);
+      ).toBe(9);
+      expect(
+        db
+          .query<{ sequence: number }, []>('SELECT sequence FROM agent_mail ORDER BY sequence')
+          .all()
+          .map((row) => row.sequence),
+      ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
       const changed = { ...first.mutation, requestDigest: 'f'.repeat(64) };
       expect(() =>
         commit(db, [first.event], [changed], {
@@ -434,6 +438,46 @@ describe('Store11 Agent mailbox transaction rows', () => {
           requestDigest: changed.requestDigest,
         }),
       ).toThrow('conflicts');
+      const messageIds = Array.from({ length: 9 }, (_, index) => `mail-${index + 1}`);
+      commit(
+        db,
+        [
+          {
+            type: 'model.invocation_prepared',
+            invocationId: 'model-9',
+            budget: { kind: 'no_budget' },
+          },
+          {
+            type: 'agent.mail_input_prepared',
+            targetAgentId: 'child-1',
+            invocationId: 'model-9',
+            modelAdmissionId: 'model-9',
+            fromSequence: 0,
+            throughSequence: 9,
+            messageIds,
+          },
+        ],
+        [
+          {
+            kind: 'prepare_input',
+            targetAgentId: 'child-1',
+            modelInvocationId: 'model-9',
+            modelAdmissionId: 'model-9',
+            fromSequence: 0,
+            throughSequence: 9,
+            messageIds,
+          },
+        ],
+        undefined,
+        { resourceBudget: { status: 'unconfigured', reservations: {} } },
+      );
+      expect(
+        db
+          .query<{ count: number }, []>(
+            "SELECT count(*) AS count FROM agent_mail WHERE status='prepared'",
+          )
+          .get()?.count,
+      ).toBe(9);
     } finally {
       db.close();
     }

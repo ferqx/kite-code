@@ -457,6 +457,20 @@ async function exerciseThreeChildren(recoverAccepted: boolean): Promise<void> {
       expect(accepted.get(label)).toBeDefined();
     }
     const childIds = labels.map((label) => accepted.get(label)!.childThreadId);
+    const assertChildAccounting = () => {
+      const parentBudget = owner.loadCurrentSnapshot(parentSessionId)?.resourceBudget;
+      if (parentBudget?.status !== 'active') throw new Error('Parent budget is unavailable.');
+      for (const childId of childIds) {
+        const reservationId = owner.readChildSessionIntent(childId)?.delegatedReservationId;
+        if (!reservationId) throw new Error('Child has no persisted delegation.');
+        const reservation = parentBudget.reservations[reservationId];
+        expect(reservation?.state).toBe('reconciled');
+        expect(Object.values(reservation!.actual!.counters)).toEqual(Array(6).fill(0));
+        const childBudget = owner.loadCurrentSnapshot(childId)?.resourceBudget;
+        if (childBudget?.status !== 'active') throw new Error('Child budget is unavailable.');
+        expect(childBudget.reconciledUsage.counters.modelRequests).toBeGreaterThan(0);
+      }
+    };
     expect(new Set(childIds).size).toBe(3);
     expect(owner.listCurrentSessions('', 10).map((entry) => entry.threadId)).toEqual([
       parentSessionId,
@@ -491,6 +505,7 @@ async function exerciseThreeChildren(recoverAccepted: boolean): Promise<void> {
         recoveryRequired: [],
       });
       expect(modelCalls).toHaveLength(3);
+      assertChildAccounting();
       for (const label of labels) {
         const childId = accepted.get(label)!.childThreadId;
         expect(owner.readChildSessionIntent(childId)?.parentClaimSettledEventId).toBeTruthy();
@@ -578,6 +593,7 @@ async function exerciseThreeChildren(recoverAccepted: boolean): Promise<void> {
     expect(modelCalls).toHaveLength(3);
     expect(new Set(modelCalls)).toEqual(new Set(labels));
     expect(imports()).toHaveLength(3);
+    assertChildAccounting();
     for (const label of labels) {
       const childId = accepted.get(label)!.childThreadId;
       expect(owner.loadCurrentSnapshot(childId)?.childSessionOrigin?.terminal?.status).toBe(

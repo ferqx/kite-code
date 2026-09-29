@@ -105,7 +105,7 @@ export async function exerciseChildOrchestration(
   duringAcknowledgedChild?: (fixture: CompletedChildOrchestrationFixture) => Promise<void>,
   zeroToolChild = false,
   childDeadlineMs = 120_000,
-  failChildModel = false,
+  retryChildModel = false,
   shellApprovalChild = false,
   shortInitialLease = false,
 ): Promise<void> {
@@ -156,8 +156,8 @@ export async function exerciseChildOrchestration(
         length:
           duringQueuedChild || duringAcknowledgedChild
             ? 0
-            : failChildModel
-              ? 5
+            : retryChildModel
+              ? 2
               : afterCompletedChild || duringActiveChild
                 ? 1
                 : 4,
@@ -168,7 +168,8 @@ export async function exerciseChildOrchestration(
           expect(JSON.stringify(messages)).toContain('ORCHESTRATED_CHILD_TASK');
           if (crashAfterAttempt || cancelAfterAttempt || cancelViaTaskControl || duringActiveChild)
             await childGate.promise;
-          if (failChildModel) return { error: 'PRIVATE_PROVIDER_FAILURE' };
+          if (retryChildModel && childModelRequests === 1)
+            return { error: 'PRIVATE_PROVIDER_FAILURE' };
           return { message: { content: 'ORCHESTRATED_CHILD_RESULT' } };
         },
       }),
@@ -576,7 +577,12 @@ export async function exerciseChildOrchestration(
         enqueueSessionWork: async (_sessionId, work) => {
           if (rejectQueue) throw new Error('Injected child work queue failure.');
           const workPromise = work();
-          childWork.push(workPromise.then(() => undefined));
+          childWork.push(
+            workPromise.then(
+              () => undefined,
+              () => undefined,
+            ),
+          );
           return await workPromise;
         },
       });
@@ -841,31 +847,23 @@ export async function exerciseChildOrchestration(
         childGate.resolve();
         await pending;
         await Promise.allSettled(childWork);
-        if (failChildModel) {
+        if (retryChildModel) {
           const events = owner.storage.sessions
             .loadEventsStrict(accepted[0]!.childThreadId)
             .map(({ event }) => event);
           expect(events.some((event) => event.type === 'model.retry')).toBe(true);
-          expect(events).toContainEqual(
-            expect.objectContaining({
-              type: 'run.error',
-              outcome: expect.objectContaining({ reasonCode: 'model_retry_exhausted' }),
-            }),
-          );
           const terminal = await orchestrator.taskControl!.readTask(childInvocationId);
           expect(terminal).toMatchObject({
-            ok: false,
-            status: 'interrupted',
-            result: { error: 'model_retry_exhausted' },
-            outcome: { reasonCode: 'model_retry_exhausted' },
+            ok: true,
+            status: 'completed',
           });
           expect(JSON.stringify(terminal)).not.toContain('PRIVATE_PROVIDER_FAILURE');
           expect(await orchestrator.taskControl!.waitTasks([childInvocationId], 0)).toMatchObject({
             ok: true,
-            status: 'interrupted',
-            tasks: [{ ok: false, status: 'interrupted' }],
+            status: 'completed',
+            tasks: [{ ok: true, status: 'completed' }],
           });
-          expect(childModelRequests).toBe(5);
+          expect(childModelRequests).toBe(2);
         }
         return;
       }

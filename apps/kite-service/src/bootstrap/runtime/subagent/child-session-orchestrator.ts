@@ -574,11 +574,17 @@ export function createChildSessionOrchestrator(input: {
         accepted.messageId,
       );
       if (!pending) return false;
-      const checkpoint = mail.readChildTerminalCheckpoint(targetSessionId);
-      if (!checkpoint) return false;
+      const storedCheckpoint = mail.readChildTerminalCheckpoint(targetSessionId);
       const runtime = input.modelRuntimeFactory(input.bridgeInput.workspace);
       const child = ensureChild(targetSessionId, runtime);
       const state = child.getState();
+      const checkpoint =
+        storedCheckpoint &&
+        state.terminalOutcome?.status === 'completed' &&
+        (JSON.parse(storedCheckpoint.canonicalJson) as { terminalRunId?: unknown })
+          .terminalRunId === state.turn.turnId
+          ? storedCheckpoint
+          : undefined;
       if (state.activeFollowupTurn?.submissionId === submissionId) return true;
       if (state.activeFollowupTurn) return false;
       const currentTarget = input.readCurrentTargetPolicyContext?.({
@@ -695,7 +701,7 @@ export function createChildSessionOrchestrator(input: {
         admission,
         sourceAdmissionRef: accepted.admission.ref,
         sourceAdmissionDigest: accepted.admission.digest,
-        checkpoint,
+        ...(checkpoint ? { checkpoint } : {}),
         nowMs: Date.now(),
         ...(allowedTools ? { allowedTools } : {}),
         targetPolicy: {
@@ -862,7 +868,7 @@ export function createChildSessionOrchestrator(input: {
     const currentModelCeiling = sourceConfig.modelCapabilities;
     if (
       currentModelCeiling?.contextWindowTokens !== policy.contextWindowTokens ||
-      currentModelCeiling.maxOutputTokens !== policy.maxOutputTokens
+      currentModelCeiling?.maxOutputTokens !== policy.maxOutputTokens
     )
       throw new Error('Current source Model context ceiling cannot be verified.');
     const currentPolicy: CrossSessionFollowupPolicy = {
@@ -1507,6 +1513,7 @@ export function createChildSessionOrchestrator(input: {
           denyTools?: boolean;
           allowedTools?: string[];
           firstAttemptTimeoutMs?: number;
+          priorOutcomeUnknown?: true;
         };
         if (grant.schema === 'kite.child-followup-grant.v2') {
           if (
@@ -1515,7 +1522,6 @@ export function createChildSessionOrchestrator(input: {
             !Array.isArray(grant.allowedTools) ||
             grant.allowedTools.length === 0 ||
             grant.allowedTools.some((name) => !name || name === 'task') ||
-            !Number.isSafeInteger(grant.firstAttemptTimeoutMs) ||
             !activateIndependentFollowup(targetSessionId, submissionId)
           )
             throw new Error('Independent followup has no activated role-bound grant.');
@@ -1560,13 +1566,15 @@ export function createChildSessionOrchestrator(input: {
                 role: state.childSessionOrigin!.role,
                 allowedTools: grant.allowedTools,
               },
-              firstAttemptTimeoutMs: grant.firstAttemptTimeoutMs,
               prepareAgentMail: async () => ({
                 frames: [
                   humanMessage({
                     id: frame.messageId,
                     name: 'agent_message',
-                    content: frame.content,
+                    content:
+                      grant.priorOutcomeUnknown === true
+                        ? `${frame.content}\n\n[Runtime recovery notice: The previous child Run ended with an unknown external-call result. Its attempted call may have taken effect. Check the durable transcript and current external state before deciding whether to repeat any action. This is a new Run; the uncertain call will not be replayed automatically.]`
+                        : frame.content,
                     response_metadata: { source: 'agent_message' },
                   }),
                 ],
@@ -1813,7 +1821,7 @@ export function createChildSessionOrchestrator(input: {
           ? mail.readFollowupGrantForTarget(targetSessionId, followup.grantRef.artifactId)
           : null;
         const grantPayload = grant
-          ? (JSON.parse(grant.canonicalJson) as { firstAttemptTimeoutMs?: number })
+          ? (JSON.parse(grant.canonicalJson) as { schema?: string; firstAttemptTimeoutMs?: number })
           : null;
         if (
           !followup ||
@@ -1822,8 +1830,9 @@ export function createChildSessionOrchestrator(input: {
           !prepared ||
           !grant ||
           grant.ref.integrityIdentifier !== followup.grantDigest ||
-          !Number.isSafeInteger(grantPayload?.firstAttemptTimeoutMs) ||
-          (grantPayload?.firstAttemptTimeoutMs ?? 0) < 1
+          (grantPayload?.schema !== 'kite.child-followup-grant.v2' &&
+            (!Number.isSafeInteger(grantPayload?.firstAttemptTimeoutMs) ||
+              (grantPayload?.firstAttemptTimeoutMs ?? 0) < 1))
         )
           return false;
         const persistence: ModelInvocationPersistence<RuntimeState, RuntimeEvent> = {
@@ -1854,7 +1863,9 @@ export function createChildSessionOrchestrator(input: {
             expectedRouteFingerprint: prepared.routeFingerprint,
             surfaceArtifact: proof.surfaceRef,
             surfaceIntegrityIdentifier: proof.surfaceDigest,
-            hardAttemptTimeoutMs: grantPayload!.firstAttemptTimeoutMs!,
+            ...(grantPayload?.schema === 'kite.child-followup-grant.v1'
+              ? { hardAttemptTimeoutMs: grantPayload.firstAttemptTimeoutMs }
+              : {}),
             beforeDispatch: async (identity) => {
               const current = mail.readPreparedFollowupRecoveryProof(
                 targetSessionId,
@@ -2074,15 +2085,25 @@ export function createChildSessionOrchestrator(input: {
         reservationId: backupId,
         actual: {
           ...target.resourceBudget.reconciledUsage,
-          counters: {
-            ...target.resourceBudget.reconciledUsage.counters,
-            turns: 1,
-          },
-          gauges: { ...target.resourceBudget.reconciledUsage.gauges, activeSubagents: 1 },
+          counters:
+            backup.executableUpperBound.durationOnlyChildRun === true
+              ? createZeroResourceUsage().counters
+              : {
+                  ...target.resourceBudget.reconciledUsage.counters,
+                  turns: 1,
+                },
+          gauges: { ...target.resourceBudget.reconciledUsage.gauges, activeSubagents: 0 },
         },
       });
     } else if (disposition === 'unknown') {
-      if (backup.state === 'dispatch_started')
+      if (backup.executableUpperBound.durationOnlyChildRun === true) {
+        if (backup.state !== 'dispatch_started' && backup.state !== 'unknown') return false;
+        events.push({
+          type: 'resource_budget.reconciled',
+          reservationId: backupId,
+          actual: createZeroResourceUsage(),
+        });
+      } else if (backup.state === 'dispatch_started')
         events.push({ type: 'resource_budget.unknown', reservationId: backupId });
       else if (backup.state !== 'unknown') return false;
     } else {
@@ -2776,19 +2797,13 @@ export function createChildSessionOrchestrator(input: {
             tool.name !== 'followup_task'
           )
             throw new Error('Accepted followup source Tool identity is unavailable.');
-          const funding = fundingBudgetForRun(state, row.fundingRunId);
-          const waitDeadline = outbox
-            ? outbox.acceptedAtMs + Math.max(60_000, funding?.budget.maxConcurrencyWaitMs ?? 0)
-            : NaN;
-          return { parent, revision: state.revision, invocation, tool, waitDeadline };
+          return { parent, revision: state.revision, invocation, tool };
         });
         if (facts.invocation.status === 'succeeded' && facts.tool.status === 'succeeded') return;
-        const deadline =
-          admitted.schema === 'kite.cross-session-followup-admission.v2'
-            ? facts.waitDeadline
-            : admitted.deadlineAt;
+        const independent = admitted.schema === 'kite.cross-session-followup-admission.v2';
+        const deadline = admitted.deadlineAt;
         const remainingMs = deadline - Date.now();
-        if (!Number.isSafeInteger(deadline) || remainingMs <= 0)
+        if (!independent && (!Number.isSafeInteger(deadline) || remainingMs <= 0))
           throw new Error('Accepted followup source Tool deadline expired.');
         if (
           !['recorded', 'running'].includes(facts.invocation.status) ||
@@ -2799,7 +2814,7 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Accepted followup source Tool has no revision waiter.');
         await facts.parent.session.waitForRevisionChange(
           facts.revision,
-          AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
+          independent ? signal : AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
         );
       }
     };
@@ -2945,22 +2960,24 @@ export function createChildSessionOrchestrator(input: {
       )
         return 'authorization_changed';
       const ledger = fundingBudgetForRun(parent, row.fundingRunId);
-      const waitMs = ledger?.budget.maxConcurrencyWaitMs;
-      if (
-        ledger &&
-        outbox &&
-        Number.isSafeInteger(waitMs) &&
-        Number.isSafeInteger(outbox.acceptedAtMs + waitMs!) &&
-        now >= outbox.acceptedAtMs + waitMs! &&
-        planCrossSessionFollowupSlotAcquisition({
-          sourceState: parent,
-          sourceSessionId: input.parentSessionId,
-          fundingRunId: row.fundingRunId,
-          submissionId: row.submissionId,
-          backupReservationId: row.backupReservationId,
-        }).status === 'waiting'
-      )
-        return 'capacity_timeout';
+      if (!independent) {
+        const waitMs = ledger?.budget.maxConcurrencyWaitMs;
+        if (
+          ledger &&
+          outbox &&
+          Number.isSafeInteger(waitMs) &&
+          Number.isSafeInteger(outbox.acceptedAtMs + waitMs!) &&
+          now >= outbox.acceptedAtMs + waitMs! &&
+          planCrossSessionFollowupSlotAcquisition({
+            sourceState: parent,
+            sourceSessionId: input.parentSessionId,
+            fundingRunId: row.fundingRunId,
+            submissionId: row.submissionId,
+            backupReservationId: row.backupReservationId,
+          }).status === 'waiting'
+        )
+          return 'capacity_timeout';
+      }
       return null;
     };
     const waitForFollowupSlot = async (
@@ -2999,7 +3016,7 @@ export function createChildSessionOrchestrator(input: {
             revision: state.revision,
             plan,
             waitUntil: independent
-              ? outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs
+              ? undefined
               : Math.min(
                   Date.parse(ledger.deadlineAt),
                   outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs,
@@ -3017,20 +3034,23 @@ export function createChildSessionOrchestrator(input: {
           }
           continue;
         }
-        if (!Number.isSafeInteger(source.waitUntil))
+        if (source.waitUntil !== undefined && !Number.isSafeInteger(source.waitUntil))
           throw new Error('Accepted followup slot wait has no finite deadline.');
-        const remainingMs = source.waitUntil - Date.now();
-        if (remainingMs <= 0) continue;
+        const remainingMs =
+          source.waitUntil === undefined ? undefined : source.waitUntil - Date.now();
+        if (remainingMs !== undefined && remainingMs <= 0) continue;
         if (!source.parent.session.waitForRevisionChange)
           throw new Error('Accepted followup slot has no source revision waiter.');
         try {
           await source.parent.session.waitForRevisionChange(
             source.revision,
-            AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
+            remainingMs === undefined
+              ? signal
+              : AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
           );
         } catch (error) {
           if (signal.aborted) throw error;
-          if (Date.now() < source.waitUntil) throw error;
+          if (source.waitUntil === undefined || Date.now() < source.waitUntil) throw error;
         }
       }
     };
@@ -5799,6 +5819,14 @@ export function createChildSessionOrchestrator(input: {
       releaseEffectLease: (sessionId, effectId, ownerId) =>
         input.effectLeases.release(sessionId, effectId, ownerId),
     },
+    cancelOriginRun: (runId: string) => {
+      const reason = createRuntimeAbortReason('user', 'Parent Run cancelled.');
+      for (const [childThreadId, controller] of [...queuedChildren, ...activeChildren]) {
+        const intent = input.owner.readChildSessionIntent(childThreadId);
+        if (intent?.originRunId !== runId || controller.signal.aborted) continue;
+        input.detachedScope.runInAsyncScope(() => controller.abort(reason));
+      }
+    },
     schedulePendingRecovery,
     approvalProxy,
     recoverPending,
@@ -5825,8 +5853,8 @@ export function createChildSessionOrchestrator(input: {
     },
     taskControl: {
       readTask: (taskId) => taskControl().readTask(taskId),
-      waitTasks: (taskIds, timeoutMs, signal) =>
-        taskControl().waitTasks(taskIds, timeoutMs, signal),
+      waitTasks: (taskIds, timeoutMs, signal, options) =>
+        taskControl().waitTasks(taskIds, timeoutMs, signal, options),
       cancelTask: async (taskId, options) => {
         const waitMs = options?.waitMs ?? 60_000;
         if (!Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 60_000)

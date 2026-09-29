@@ -8,11 +8,12 @@ import { createInitialAgentState } from '@kite-ai/agent-kernel';
 import { createRuntimeHostStateStorageBinding } from '@kite-ai/runtime-host';
 import {
   assertKiteSessionStore13Schema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore14Schema,
   KITE_SESSION_STORE13_DDL,
 } from '../src/kite-home-store';
 import { validateKiteSessionStoreContinuity } from '../src/kite-session-continuity-validation';
 import { convertKiteSessionStore13CandidateTo14 } from '../src/kite-session-store13-to14';
+import { convertKiteSessionStore14CandidateTo15 } from '../src/kite-session-store14-to15';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from '../src/log-query';
 import { checksum, SQLITE_RUNTIME_RUN_FORMAT_EPOCH } from '../src/preflight';
 
@@ -131,7 +132,7 @@ describe('private Store 13 to 14 candidate conversion', () => {
     const database = candidate();
     try {
       convertKiteSessionStore13CandidateTo14({ database });
-      assertKiteSessionStoreSchema(database);
+      assertKiteSessionStore14Schema(database);
       const reader = createSqliteRuntimeLogQueryPortFromDatabase_({
         database,
         currentEventTypes: ['one', 'two', 'three'],
@@ -255,6 +256,7 @@ describe('private Store 13 to 14 candidate conversion', () => {
       putAuthority(database, authorityRecord('parent', 'recovery_required', true));
       putAuthority(database, authorityRecord('child', 'active'));
       convertKiteSessionStore13CandidateTo14({ database });
+      convertKiteSessionStore14CandidateTo15({ database });
       expect(
         database
           .query<{ value: string }, []>(

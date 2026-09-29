@@ -1085,6 +1085,11 @@ export async function executeAppRuntimeTools(params: {
               : {}),
             mechanismResources: Object.freeze({
               workspace: liveState.session.workspace,
+              ...(cutoverExecutionMechanism === 'shell' &&
+              budget.status === 'active' &&
+              budget.budget.durationOnlyChildRun === true
+                ? { durationOnlyChildRunDeadlineAt: budget.deadlineAt }
+                : {}),
               ...(cutoverExecutionMechanism === 'shell'
                 ? {
                     onProgress: (chunk: string, stream: 'stdout' | 'stderr') =>

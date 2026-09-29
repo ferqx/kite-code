@@ -17,6 +17,65 @@ const startedAt = '2026-09-23T00:00:00.000Z';
 const deadlineAt = '2026-09-23T00:01:00.000Z';
 
 describe('independent child funding', () => {
+  test('duration-only budget requires an exact marked child allotment', () => {
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'child-duration-v1');
+    upper.durationOnlyChildRun = true;
+    upper.independentChildTurnDeadline = true;
+    upper.unboundedToolInvocations = true;
+    upper.gauges.elapsedRunMs = 30 * 60 * 1000;
+    upper.gauges.activeSubagents = 1;
+    const reservation = {
+      version: 1 as const,
+      reservationId: 'child-allotment:duration',
+      runId: 'parent-run',
+      invocationId: 'child-allotment:duration',
+      resourceKind: 'subagent' as const,
+      executableUpperBound: upper,
+      state: 'reserved' as const,
+    };
+    const budget = {
+      ...INTERNAL_RESOURCE_BUDGET_,
+      maxRunDurationMs: 30 * 60 * 1000,
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxToolInvocations: 0,
+      maxRunInputTokens: 0,
+      maxRunOutputTokens: 0,
+      maxArtifactBytes: 0,
+      unboundedToolInvocations: true as const,
+      durationOnlyChildRun: true as const,
+      maxConcurrentSubagents: 0,
+      maxConcurrentWriters: 0,
+    };
+    const input = {
+      reservation,
+      childBudget: budget,
+      childStartedAt: '2026-09-23T00:00:30.000Z',
+      childDeadlineAt: '2026-09-23T00:30:30.000Z',
+      fundingDeadlineAt: '2026-09-23T00:01:00.000Z',
+      childMaySpawn: false,
+      childMayWrite: false,
+    };
+    expect(() => assertChildBudgetWithinDelegation(input)).not.toThrow();
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        reservation: {
+          ...reservation,
+          executableUpperBound: { ...upper, durationOnlyChildRun: undefined },
+        },
+      }),
+    ).toThrow('exceeds its parent delegation');
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        reservation: {
+          ...reservation,
+          reservationId: 'forged',
+        },
+      }),
+    ).toThrow('exceeds its parent delegation');
+  });
   test('new child turn may have 30 minutes from activation while legacy deadlines stay inherited', () => {
     const upper = createZeroResourceUsage('versioned_upper_bound', 'child-turn-v1');
     upper.counters.turns = 1;

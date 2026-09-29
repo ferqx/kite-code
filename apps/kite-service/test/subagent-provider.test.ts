@@ -511,13 +511,12 @@ describe('SubagentProvider grant and Local Provider', () => {
     });
   });
 
-  test('bounds consumed-grant tombstones without replaying a still-valid grant', () => {
+  test('retains consumed grants until expiry without blocking another valid grant', () => {
     let now = 0;
     let ordinal = 0;
     const authority = new SubagentGrantAuthority({
       now: () => now,
       ttlMs: 10,
-      maxConsumedGrantTombstones: 2,
       idSource: () => `bounded-grant-${++ordinal}`,
     });
     const verifier = authority.verifier();
@@ -528,12 +527,10 @@ describe('SubagentProvider grant and Local Provider', () => {
     verifier.verifyAndConsumeStart(first);
     verifier.verifyAndConsumeStart(second);
     expect(() => verifier.verifyAndConsumeStart(first)).toThrow('already consumed');
-    expect(() => verifier.verifyAndConsumeStart(waiting)).toThrow(
-      'tombstone capacity is exhausted',
-    );
+    expect(verifier.verifyAndConsumeStart(waiting).grantId).toBe(waiting.grantId);
+    expect(() => verifier.verifyAndConsumeStart(first)).toThrow('already consumed');
 
-    // Valid tombstones are never evicted. Once their sealed grants expire,
-    // the bounded ledger can reclaim them and admit a fresh grant.
+    // Expired tombstones are reclaimed while the sealed grant stays expired.
     now = 10;
     const fresh = authority.issueStart({ ...binding(), childInvocationId: 'bounded-child-4' });
     expect(verifier.verifyAndConsumeStart(fresh).grantId).toBe(fresh.grantId);
@@ -591,7 +588,7 @@ describe('SubagentProvider grant and Local Provider', () => {
     expect(driver.pendingRegistrationCount()).toBe(0);
 
     let now = 0;
-    const bounded = new BuiltinChildRuntimeDriver({ now: () => now, maxPendingRegistrations: 1 });
+    const bounded = new BuiltinChildRuntimeDriver({ now: () => now });
     bounded.registerStart('expired-registration', {
       ...registration(startGrant),
       expiresAtMs: 1,
@@ -602,12 +599,11 @@ describe('SubagentProvider grant and Local Provider', () => {
       ...registration(startGrant),
       expiresAtMs: 10,
     });
-    expect(() =>
-      bounded.registerResume('over-capacity', {
-        ...registration(resumeGrant),
-        expiresAtMs: 10,
-      }),
-    ).toThrow('capacity is exhausted');
+    bounded.registerResume('another-registration', {
+      ...registration(resumeGrant),
+      expiresAtMs: 10,
+    });
+    expect(bounded.pendingRegistrationCount()).toBe(2);
 
     for (const expiresAtMs of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, 5 * 60_000 + 1]) {
       const strict = new BuiltinChildRuntimeDriver({ now: () => 0 });
@@ -713,8 +709,8 @@ describe('SubagentProvider grant and Local Provider', () => {
         ok: true,
       });
       expect(await largeProvider.observe({ handle: largeStart.value })).toMatchObject({
-        ok: false,
-        failure: { code: 'observation_too_large' },
+        ok: true,
+        value: { status: 'completed' },
       });
     }
   });
@@ -845,7 +841,7 @@ describe('SubagentProvider grant and Local Provider', () => {
       TEST_TASK_ARTIFACTS,
       () => `handle-unconfirmed-clock-${++handleOrdinal}`,
       1,
-      { now: () => now, tombstoneTtlMs: 10, maxProviderTombstones: 4 },
+      { now: () => now, tombstoneTtlMs: 10 },
     );
     const started = await provider.start({
       grant: authority.issueStart({ ...binding(), childInvocationId: 'unconfirmed-clock-child' }),
@@ -905,7 +901,7 @@ describe('SubagentProvider grant and Local Provider', () => {
     expect(() => overflowAuthority.issueStart(binding())).toThrow('expiry is invalid');
   });
 
-  test('bounds same-process Provider lifecycle tombstones and fails closed after eviction', async () => {
+  test('retains same-process Provider lifecycle tombstones until expiry', async () => {
     let now = 100;
     let grantOrdinal = 0;
     let handleOrdinal = 0;
@@ -923,7 +919,7 @@ describe('SubagentProvider grant and Local Provider', () => {
       TEST_TASK_ARTIFACTS,
       () => `handle-bounded-provider-${++handleOrdinal}`,
       10,
-      { now: () => now, tombstoneTtlMs: 10, maxProviderTombstones: 1 },
+      { now: () => now, tombstoneTtlMs: 10 },
     );
 
     const finish = async (childInvocationId: string) => {
@@ -940,8 +936,8 @@ describe('SubagentProvider grant and Local Provider', () => {
     const first = await finish('bounded-provider-child-1');
     const second = await finish('bounded-provider-child-2');
     expect(await provider.reconcile({ handle: first })).toMatchObject({
-      ok: false,
-      failure: { code: 'recovery_required' },
+      ok: true,
+      value: { status: 'stopped', cleanupConfirmed: true },
     });
     expect(await provider.reconcile({ handle: second })).toMatchObject({
       ok: true,

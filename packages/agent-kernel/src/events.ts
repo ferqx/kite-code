@@ -469,7 +469,6 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'submissionId',
     'targetRunId',
     'taskId',
-    'checkpointRef',
     'grantRef',
     'grantDigest',
   ],
@@ -1144,7 +1143,9 @@ type AgentEventMap = {
     submissionId: string;
     targetRunId: string;
     taskId: string;
-    checkpointRef: StateSubagentCheckpointArtifactRef;
+    checkpointRef?: StateSubagentCheckpointArtifactRef;
+    sourceRevision?: number;
+    sourceStateDigest?: string;
     grantRef: {
       artifactId: string;
       kind: 'agent_followup_grant';

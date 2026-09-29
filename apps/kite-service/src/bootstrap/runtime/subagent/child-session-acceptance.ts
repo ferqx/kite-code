@@ -17,10 +17,7 @@ import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#kite-service/config/index';
 import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 import { planAfterTurnContinuationReservation } from './after-turn-continuation';
-import {
-  canFundStagedChildCounterShares,
-  planChildDelegatedAllotment,
-} from './child-delegated-allotment';
+import { planChildDelegatedAllotment } from './child-delegated-allotment';
 import type { SubAgentResult } from './types';
 
 type ChildRole = 'explore' | 'plan' | 'code' | 'review';
@@ -108,50 +105,10 @@ export function createChildSessionAcceptanceStage(input: {
       ) {
         throw new Error('Child Session staging identity is invalid or expired.');
       }
-      if (
-        !canFundStagedChildCounterShares({
-          ledger: budget,
-          children: [
-            ...[...pending.values()].map((candidate) => ({
-              parentToolCallId: candidate.grant.parentToolCallId,
-              taskArtifactBytes: candidate.grant.taskArtifact.byteLength,
-            })),
-            {
-              parentToolCallId: grant.parentToolCallId,
-              taskArtifactBytes: grant.taskArtifact.byteLength,
-            },
-          ],
-        })
-      ) {
-        const reason =
-          'Sub-agent budget cannot provide a positive child allotment; the new child was not created.';
-        return {
-          ok: false,
-          summary: reason,
-          error: reason,
-          terminalStatus: 'failed',
-          toolCallCount: 0,
-          durationMs: 0,
-        };
-      }
       const committed = committedResourceUsage(budget);
       const occupied = committed.gauges.activeSubagents + pending.size;
       if (occupied >= budget.budget.maxConcurrentSubagents) {
         const reason = `Sub-agent concurrency limit (${budget.budget.maxConcurrentSubagents}) reached; the new child was not created.`;
-        return {
-          ok: false,
-          summary: reason,
-          error: reason,
-          terminalStatus: 'failed',
-          toolCallCount: 0,
-          durationMs: 0,
-        };
-      }
-      const writers =
-        committed.gauges.activeWriters +
-        [...pending.values()].filter((candidate) => candidate.role === 'code').length;
-      if (child.role === 'code' && writers >= budget.budget.maxConcurrentWriters) {
-        const reason = 'Code sub-agent writer capacity is full; the new child was not created.';
         return {
           ok: false,
           summary: reason,

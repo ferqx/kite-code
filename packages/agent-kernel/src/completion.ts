@@ -897,10 +897,18 @@ export function decidePlannedCompletion(state: AgentState): PlannedCompletionGua
     return block('unknown_external_invocation', 'reconcile_invocation');
   if (activeSkillFramesForCurrentWork(state)) return block('skill_active', 'complete_skill');
   if (
-    isToolRecoveryQualityBlocked(state.toolRecovery, {
-      taskId: state.activeTaskId,
-      turnId: state.turn.turnId,
-    }) ||
+    isToolRecoveryQualityBlocked(
+      state.toolRecovery,
+      {
+        taskId: state.activeTaskId,
+        turnId: state.turn.turnId,
+      },
+      {
+        ignoreNonSafetyCeilings:
+          state.resourceBudget.status === 'active' &&
+          state.resourceBudget.budget.durationOnlyChildRun === true,
+      },
+    ) ||
     hasActiveUnresolvedToolFailures(state.toolRecovery, {
       taskId: state.activeTaskId,
       turnId: state.turn.turnId,

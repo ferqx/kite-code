@@ -333,8 +333,10 @@ function fixture(path = ':memory:') {
 
 describe('Store13 cross-Session TriggerTurn source', () => {
   test.each([
-    0, 1,
-  ])('accepts a versioned independent-turn backup with Tool/Shell gauge %p', (heldGauge) => {
+    [0, false],
+    [1, false],
+    [0, true],
+  ] as const)('accepts a versioned independent-turn backup with Tool/Shell gauge %p and duration-only %p', (heldGauge, durationOnlyChildRun) => {
     const { db, input } = fixture();
     try {
       const sealed = sealChildGrantPayload({
@@ -369,13 +371,14 @@ describe('Store13 cross-Session TriggerTurn source', () => {
         estimatorVersion: 'cross-session-followup-backup-v2',
         independentFollowupTurn: true as const,
         unboundedToolInvocations: true as const,
+        ...(durationOnlyChildRun ? { durationOnlyChildRun: true as const } : {}),
         counters: {
-          turns: 1,
-          modelRequests: 3,
+          turns: durationOnlyChildRun ? 0 : 1,
+          modelRequests: durationOnlyChildRun ? 0 : 3,
           toolInvocations: 0,
-          inputTokens: 500,
-          outputTokens: 60,
-          artifactBytes: 4096,
+          inputTokens: durationOnlyChildRun ? 0 : 500,
+          outputTokens: durationOnlyChildRun ? 0 : 60,
+          artifactBytes: durationOnlyChildRun ? 0 : 4096,
         },
         gauges: {
           elapsedRunMs: 30 * 60_000,
@@ -498,13 +501,14 @@ describe('Store13 cross-Session TriggerTurn source', () => {
       const grantBudget = {
         version: 1,
         maxRunDurationMs: 30 * 60_000,
-        maxTurns: 1,
-        maxModelRequests: 3,
+        maxTurns: durationOnlyChildRun ? 0 : 1,
+        maxModelRequests: durationOnlyChildRun ? 0 : 3,
         maxToolInvocations: 0,
         unboundedToolInvocations: true,
-        maxRunInputTokens: 500,
-        maxRunOutputTokens: 60,
-        maxArtifactBytes: 4096,
+        ...(durationOnlyChildRun ? { durationOnlyChildRun: true as const } : {}),
+        maxRunInputTokens: durationOnlyChildRun ? 0 : 500,
+        maxRunOutputTokens: durationOnlyChildRun ? 0 : 60,
+        maxArtifactBytes: durationOnlyChildRun ? 0 : 4096,
         maxConcurrentSubagents: 0,
         maxConcurrentWriters: 0,
         maxConcurrentToolInvocations: 1,
@@ -1137,33 +1141,40 @@ describe('Store13 cross-Session TriggerTurn source', () => {
         fundingRunId: 'run-1',
         sequence: 1,
       };
-      db.transaction(() =>
-        routeCrossSessionFollowupInTransaction(db, {
-          sourceSessionId: 'parent',
-          targetSessionId: 'child',
-          messageId: 'mail-1',
-          submissionId: 'submission-1',
-          route: 'new_turn',
-          targetRunId: 'followup-run',
-          taskId: 'followup-task',
+      const routeIntent = {
+        sourceSessionId: 'parent',
+        targetSessionId: 'child',
+        messageId: 'mail-1',
+        submissionId: 'submission-1',
+        route: 'new_turn',
+        targetRunId: 'followup-run',
+        taskId: 'followup-task',
+        invocationId: 'v2-model-1',
+        modelAdmissionId: 'v2-model-1',
+        reservationId: 'v2-model-1',
+        routedRevision: 4,
+        createdAtMs: 34,
+        routedEvent: routeEvent,
+        preparedEvent: {
+          type: 'agent.mail_input_prepared',
+          targetAgentId: 'child',
           invocationId: 'v2-model-1',
           modelAdmissionId: 'v2-model-1',
-          reservationId: 'v2-model-1',
-          routedRevision: 4,
-          createdAtMs: 34,
-          routedEvent: routeEvent,
-          preparedEvent: {
-            type: 'agent.mail_input_prepared',
-            targetAgentId: 'child',
-            invocationId: 'v2-model-1',
-            modelAdmissionId: 'v2-model-1',
-            fromSequence: 0,
-            throughSequence: 1,
-            messageIds: ['mail-1'],
-          },
-          targetSnapshot: workingState,
-        }),
-      )();
+          fromSequence: 0,
+          throughSequence: 1,
+          messageIds: ['mail-1'],
+        },
+        targetSnapshot: workingState,
+      } as const;
+      db.run('SAVEPOINT v2_route_without_run_start');
+      db.run("DELETE FROM runtime_events WHERE session_id='child' AND event_id='v2-run-prepared'");
+      expect(() =>
+        db.transaction(() => routeCrossSessionFollowupInTransaction(db, routeIntent))(),
+      ).toThrow(KiteCrossSessionFollowupError);
+      expect(readCrossSessionFollowupRoute(db, 'child', 'submission-1')).toBeNull();
+      db.run('ROLLBACK TO v2_route_without_run_start');
+      db.run('RELEASE v2_route_without_run_start');
+      db.transaction(() => routeCrossSessionFollowupInTransaction(db, routeIntent))();
       expect(readCrossSessionFollowupRoute(db, 'child', 'submission-1')?.route).toBe('new_turn');
       db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
         VALUES ('child','v2-first-model-prepared',4,27,?,34)`).run(
@@ -1341,6 +1352,20 @@ describe('Store13 cross-Session TriggerTurn source', () => {
           activeShellInvocations: 0,
         },
       };
+      const sourceActual = durationOnlyChildRun
+        ? {
+            ...actual,
+            gauges: { ...actual.gauges, activeSubagents: 0 },
+            counters: {
+              turns: 0,
+              modelRequests: 0,
+              toolInvocations: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              artifactBytes: 0,
+            },
+          }
+        : actual;
       const finishedState = {
         ...nextState,
         activeTaskId: null,
@@ -1408,12 +1433,16 @@ describe('Store13 cross-Session TriggerTurn source', () => {
         }),
       );
       parentReservations[backupId]!.state = 'reconciled';
-      Object.assign(parentReservations[backupId]!, { actual });
+      Object.assign(parentReservations[backupId]!, { actual: sourceActual });
       db.run("UPDATE runtime_sessions SET revision=5 WHERE session_id='parent'");
       db.query(
         "UPDATE runtime_snapshots SET revision=5,state_json=? WHERE session_id='parent'",
       ).run(JSON.stringify(retainedState));
-      const reconciled = { type: 'resource_budget.reconciled', reservationId: backupId, actual };
+      const reconciled = {
+        type: 'resource_budget.reconciled',
+        reservationId: backupId,
+        actual: sourceActual,
+      };
       const audit = {
         type: 'agent.followup_independent_settled',
         submissionId: 'submission-1',

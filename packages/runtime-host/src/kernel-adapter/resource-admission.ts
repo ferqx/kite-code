@@ -5,10 +5,7 @@ import type {
   KernelEvent as RuntimeEvent,
   AgentState as RuntimeState,
 } from '@kite-ai/agent-kernel';
-import {
-  type ModelInvocationEnvelope,
-  SUBAGENT_TASK_ARTIFACT_MAX_BYTES,
-} from '@kite-ai/runtime-spi';
+import type { ModelInvocationEnvelope } from '@kite-ai/runtime-spi';
 import {
   type ActiveResourceBudgetRuntimeState,
   type BudgetReservation,
@@ -115,13 +112,21 @@ export function planModelInvocationResource(
     !budget.reservations[input.replaceReservationId]
   )
     throw new DescendantResourceAdmissionError('reconciliation_required');
+  const unresolvedAttempt = (reservation: BudgetReservation): boolean =>
+    reservation.state === 'unknown' &&
+    !(
+      reservation.resourceKind === 'subagent' &&
+      reservation.executableUpperBound.independentFollowupTurn === true &&
+      reservation.executableUpperBound.durationOnlyChildRun === true
+    );
+  // A prior independent child may have an unknown result. Its immutable
+  // reservation still consumes its concurrency slot, but does not authorize
+  // replay and does not prevent a distinct parent Model invocation.
   if (
-    Object.values(budget.reservations).some((reservation) => reservation.state === 'unknown') ||
+    Object.values(budget.reservations).some(unresolvedAttempt) ||
     (successorBudget !== undefined &&
       linkedBudget !== undefined &&
-      Object.values(linkedBudget.reservations).some(
-        (reservation) => reservation.state === 'unknown',
-      ))
+      Object.values(linkedBudget.reservations).some(unresolvedAttempt))
   ) {
     throw new DescendantResourceAdmissionError('reconciliation_required');
   }
@@ -160,24 +165,36 @@ export function planModelInvocationResource(
     preparationEvents.push(release);
   }
   const committed = committedResourceUsage(budget);
+  const durationOnly = budget.budget.durationOnlyChildRun === true;
   const remainingInput = Math.min(
-    budget.budget.maxRunInputTokens - committed.counters.inputTokens,
-    replacementCeiling?.executableUpperBound.counters.inputTokens ?? Number.MAX_SAFE_INTEGER,
+    durationOnly
+      ? Number.MAX_SAFE_INTEGER
+      : budget.budget.maxRunInputTokens - committed.counters.inputTokens,
+    durationOnly
+      ? Number.MAX_SAFE_INTEGER
+      : (replacementCeiling?.executableUpperBound.counters.inputTokens ?? Number.MAX_SAFE_INTEGER),
   );
   const remainingOutput = Math.min(
-    budget.budget.maxRunOutputTokens - committed.counters.outputTokens,
-    replacementCeiling?.executableUpperBound.counters.outputTokens ?? Number.MAX_SAFE_INTEGER,
+    durationOnly
+      ? Number.MAX_SAFE_INTEGER
+      : budget.budget.maxRunOutputTokens - committed.counters.outputTokens,
+    durationOnly
+      ? Number.MAX_SAFE_INTEGER
+      : (replacementCeiling?.executableUpperBound.counters.outputTokens ?? Number.MAX_SAFE_INTEGER),
   );
-  const maxOutputTokens = Math.min(
-    input.requestedMaxOutputTokens ?? remainingOutput,
-    remainingOutput,
-  );
-  if (maxOutputTokens <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
+  const maxOutputTokens = durationOnly
+    ? input.requestedMaxOutputTokens
+    : Math.min(input.requestedMaxOutputTokens ?? remainingOutput, remainingOutput);
+  if (maxOutputTokens !== undefined && maxOutputTokens <= 0)
+    throw new DescendantResourceAdmissionError('budget_exhausted');
   // The Provider may count more prompt tokens than the local tokenizer. If the
   // remaining Run budget cannot fund the full 2x envelope, stop before dispatch
   // instead of persisting a response that cannot be reconciled afterwards.
-  const inputTokenUpperBound = input.inputTokens * 2;
-  if (!Number.isSafeInteger(inputTokenUpperBound) || inputTokenUpperBound > remainingInput) {
+  const inputTokenUpperBound = durationOnly ? 0 : input.inputTokens * 2;
+  if (
+    !durationOnly &&
+    (!Number.isSafeInteger(inputTokenUpperBound) || inputTokenUpperBound > remainingInput)
+  ) {
     throw new DescendantResourceAdmissionError('budget_exhausted');
   }
   const usage = createZeroResourceUsage('versioned_upper_bound', 'model-surface-v2');
@@ -185,8 +202,12 @@ export function planModelInvocationResource(
   // Provider tokenizers and wire-level tool framing can exceed the local
   // cl100k frozen-surface estimate. Reserve a bounded 2x envelope while the
   // total Run input budget remains the hard ceiling.
-  usage.counters.inputTokens = inputTokenUpperBound;
-  usage.counters.outputTokens = maxOutputTokens;
+  if (durationOnly) {
+    usage.unboundedModelTokens = true;
+  } else {
+    usage.counters.inputTokens = inputTokenUpperBound;
+    usage.counters.outputTokens = maxOutputTokens!;
+  }
   const reservation: BudgetReservation = {
     version: 1,
     reservationId: crypto.randomUUID(),
@@ -212,7 +233,7 @@ export function planModelInvocationResource(
       parentReservationId: reservation.parentReservationId ?? null,
     },
     preparationEvents: [...preparationEvents, { type: 'resource_budget.reserved', reservation }],
-    maxOutputTokens,
+    ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
   };
 }
 
@@ -398,16 +419,20 @@ function workspacePath(state: RuntimeState, path: string): string | undefined {
 function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
   const call = state.tools.calls[toolCallId];
   if (!call || state.resourceBudget.status !== 'active') return 0;
+  if (state.resourceBudget.budget.durationOnlyChildRun === true && call.name !== 'task') return 0;
   const committed = committedResourceUsage(state.resourceBudget);
   const remaining = state.resourceBudget.budget.maxArtifactBytes - committed.counters.artifactBytes;
   if (call.name === 'task') {
-    // The Task Artifact backend enforces this byte ceiling. Charge the exact
-    // Store ref byte length at the parent receipt before child activation.
-    return SUBAGENT_TASK_ARTIFACT_MAX_BYTES;
+    // Private delegated task input is not a workspace output artifact.
+    return 0;
   }
   if (call.name === 'followup_task') {
     // The Tool writes no workspace Artifact. Its child turn has a separate
     // source-owned backup; charging the remaining bytes here would count them twice.
+    return 0;
+  }
+  if (['send_message', 'interrupt_agent', 'task_cancel'].includes(call.name)) {
+    // Agent control changes mailbox/task state, not a workspace Artifact.
     return 0;
   }
   if (!call.sideEffect) return 0;
@@ -444,6 +469,12 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
   // A Tool does not acquire a writer-count slot. A code Sub-agent acquires
   // its own allotment when its independent execution starts.
   usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
+  if (
+    state.resourceBudget.status === 'active' &&
+    state.resourceBudget.budget.durationOnlyChildRun === true &&
+    state.tools.calls[toolCallId]?.name !== 'task'
+  )
+    usage.unboundedArtifactBytes = true;
   return usage;
 }
 
@@ -544,9 +575,19 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
         toolCallId,
         resourceKind,
         requiredPermits:
-          call?.sideEffect && call.name !== 'task' && call.name !== 'followup_task'
-            ? ['artifact_capacity']
-            : [],
+          state.resourceBudget.status === 'active' &&
+          state.resourceBudget.budget.durationOnlyChildRun === true
+            ? []
+            : call?.sideEffect &&
+                ![
+                  'task',
+                  'followup_task',
+                  'send_message',
+                  'interrupt_agent',
+                  'task_cancel',
+                ].includes(call.name)
+              ? ['artifact_capacity']
+              : [],
         upperBound: upperBoundForTool(state, toolCallId),
       },
     ];
@@ -1002,12 +1043,15 @@ export function createDescendantResourceAdmission(input: {
     async reserveModel(request) {
       const budget = refreshProjected();
       const committed = committedResourceUsage(budget);
-      const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
-      const outputTokens = Math.min(
-        request.requestedMaxOutputTokens ?? remainingOutput,
-        remainingOutput,
-      );
-      if (outputTokens <= 0) {
+      const remainingOutput =
+        budget.budget.durationOnlyChildRun === true
+          ? Number.MAX_SAFE_INTEGER
+          : budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
+      const outputTokens =
+        budget.budget.durationOnlyChildRun === true
+          ? request.requestedMaxOutputTokens
+          : Math.min(request.requestedMaxOutputTokens ?? remainingOutput, remainingOutput);
+      if (outputTokens !== undefined && outputTokens <= 0) {
         throw new DescendantResourceAdmissionError(
           'budget_exhausted',
           'Sub-agent model output budget is exhausted.',
@@ -1015,8 +1059,12 @@ export function createDescendantResourceAdmission(input: {
       }
       const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.modelRequests = 1;
-      usage.counters.inputTokens = request.inputTokens;
-      usage.counters.outputTokens = outputTokens;
+      if (budget.budget.durationOnlyChildRun === true) {
+        usage.unboundedModelTokens = true;
+      } else {
+        usage.counters.inputTokens = request.inputTokens;
+        usage.counters.outputTokens = outputTokens!;
+      }
       return reserveDirect(request.invocationKey, 'model', usage);
     },
     async reconcileModel(request) {
@@ -1030,14 +1078,18 @@ export function createDescendantResourceAdmission(input: {
       const budget = refreshProjected();
       const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.toolInvocations = 1;
-      const committed = committedResourceUsage(budget);
-      const remainingArtifactBytes =
-        budget.budget.maxArtifactBytes - committed.counters.artifactBytes;
-      usage.counters.artifactBytes =
-        request.artifactBytes ??
-        (request.toolKind === 'write_file' || request.toolKind === 'edit_file'
-          ? remainingArtifactBytes
-          : 0);
+      if (budget.budget.durationOnlyChildRun === true) {
+        usage.unboundedArtifactBytes = true;
+      } else {
+        const committed = committedResourceUsage(budget);
+        const remainingArtifactBytes =
+          budget.budget.maxArtifactBytes - committed.counters.artifactBytes;
+        usage.counters.artifactBytes =
+          request.artifactBytes ??
+          (request.toolKind === 'write_file' || request.toolKind === 'edit_file'
+            ? remainingArtifactBytes
+            : 0);
+      }
       return reserveToolWithFifo(
         {
           invocationId: descendantInvocationId(request.invocationKey),

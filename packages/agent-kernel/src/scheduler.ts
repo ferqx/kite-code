@@ -592,10 +592,18 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
       failureKind: 'compaction_failed',
     };
   if (
-    isToolRecoveryQualityBlocked(state.toolRecovery, {
-      taskId: state.activeTaskId,
-      turnId: state.turn.turnId,
-    })
+    isToolRecoveryQualityBlocked(
+      state.toolRecovery,
+      {
+        taskId: state.activeTaskId,
+        turnId: state.turn.turnId,
+      },
+      {
+        ignoreNonSafetyCeilings:
+          state.resourceBudget.status === 'active' &&
+          state.resourceBudget.budget.durationOnlyChildRun === true,
+      },
+    )
   )
     return {
       type: 'recovery_blocked',
