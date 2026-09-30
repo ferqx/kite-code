@@ -60,6 +60,29 @@ describe('Runtime Protocol', () => {
       expect(safeDecodeRuntimeProtocolMessage(request(params)).success).toBeFalse();
     }
   });
+
+  test('accepts only the six explicit start_turn reasoning effort values', () => {
+    const request = (reasoningEffort: unknown) => ({
+      jsonrpc: '2.0',
+      id: 'effort-command',
+      method: 'runtime/command',
+      params: {
+        command: {
+          schema: 'kite.runtime-command.v1',
+          commandId: 'effort-1',
+          type: 'start_turn',
+          sessionId: 'session-1',
+          expectedRevision: 0,
+          input: 'Think.',
+          reasoningEffort,
+        },
+      },
+    });
+    for (const value of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      expect(RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse(request(value)).success).toBeTrue();
+    for (const value of ['ultra', '', null, 3])
+      expect(RUNTIME_PROTOCOL_MESSAGE_SCHEMA_.safeParse(request(value)).success).toBeFalse();
+  });
   test('requires exact Workspace removal phase and identity', () => {
     const identity = {
       workspace: '/trusted/workspace',
@@ -1438,7 +1461,7 @@ describe('Runtime Protocol', () => {
 
   test('keeps generated artifacts at the checked-in canonical digest', () => {
     const generated = generateRuntimeProtocolArtifacts();
-    const expectedDigest = '86189d1c:99f4ae51';
+    const expectedDigest = 'b69901aa:09b39601';
     expect(generated.schema).toBe('kite.runtime-protocol.v2');
     expect(generateRuntimeProtocolArtifactDigest()).toBe(expectedDigest);
     expect(generated.typeScript).toBe(generateRuntimeProtocolTypeScript());

@@ -113,6 +113,8 @@ const providerSnapshot: ProviderModelSnapshot = {
       provider: 'deepseek',
       type: 'deepseek',
       readiness: 'ready',
+      reasoningEffortSupported: false,
+      reasoningEffort: 'medium',
       selectedModel: 'deepseek-v4-flash',
       models: [
         {
@@ -431,6 +433,12 @@ describe('Kite App Contract', () => {
       providerModelSnapshotResponseCodec.decode({
         ...providerSnapshot,
         providers: [{ ...providerSnapshot.providers[0], apiKey: 'secret' }],
+      }),
+    ).toThrow();
+    expect(() =>
+      providerModelSnapshotResponseCodec.decode({
+        ...providerSnapshot,
+        providers: [{ ...providerSnapshot.providers[0], reasoningEffortSupported: 'yes' }],
       }),
     ).toThrow();
     expect(() =>

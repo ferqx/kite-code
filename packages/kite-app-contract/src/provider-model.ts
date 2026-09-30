@@ -47,6 +47,10 @@ export interface ProviderModelSummary {
   readonly provider: string;
   readonly type: AppModelProviderType;
   readonly readiness: ProviderReadiness;
+  /** Whether a per-Run reasoning effort can reach this Provider's primary request. */
+  readonly reasoningEffortSupported?: boolean;
+  /** The configured Provider-level effort, when present; not a per-model capability list. */
+  readonly reasoningEffort?: string;
   readonly models: readonly ProviderModelRoute[];
   readonly selectedModel?: string;
   readonly diagnosticCode?: string;
@@ -346,11 +350,22 @@ function encodeProviderModelSelectResponse(value: ProviderModelSelectResponse): 
 function decodeProviderModelSummary(input: unknown, label: string): ProviderModelSummary {
   const value = exactObject(
     input,
-    ['diagnosticCode', 'models', 'provider', 'readiness', 'selectedModel', 'type'],
+    [
+      'diagnosticCode',
+      'models',
+      'provider',
+      'readiness',
+      'reasoningEffort',
+      'reasoningEffortSupported',
+      'selectedModel',
+      'type',
+    ],
     label,
   );
   const diagnosticCode = optional(value, 'diagnosticCode');
   const selectedModel = optional(value, 'selectedModel');
+  const reasoningEffort = optional(value, 'reasoningEffort');
+  const reasoningEffortSupported = optional(value, 'reasoningEffortSupported');
   return {
     provider: safeIdentifier(required(value, 'provider', label), `${label}.provider`),
     type: enumValue(required(value, 'type', label), `${label}.type`, [
@@ -365,6 +380,17 @@ function decodeProviderModelSummary(input: unknown, label: string): ProviderMode
       'degraded',
       'unavailable',
     ] as const),
+    ...(reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: nonEmptyString(reasoningEffort, `${label}.reasoningEffort`, 256) }),
+    ...(reasoningEffortSupported === undefined
+      ? {}
+      : {
+          reasoningEffortSupported: booleanValue(
+            reasoningEffortSupported,
+            `${label}.reasoningEffortSupported`,
+          ),
+        }),
     models: arrayValue(
       required(value, 'models', label),
       `${label}.models`,
@@ -385,6 +411,10 @@ function encodeProviderModelSummary(value: ProviderModelSummary): JsonObject {
     provider: value.provider,
     type: value.type,
     readiness: value.readiness,
+    ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }),
+    ...(value.reasoningEffortSupported === undefined
+      ? {}
+      : { reasoningEffortSupported: value.reasoningEffortSupported }),
     models: value.models.map(encodeProviderModelRoute),
     ...(value.selectedModel === undefined ? {} : { selectedModel: value.selectedModel }),
     ...(value.diagnosticCode === undefined ? {} : { diagnosticCode: value.diagnosticCode }),

@@ -46,7 +46,10 @@ import {
   testWorkspaceFilesystemRuntime,
 } from '../../../../tests/helpers/runtime-model';
 import type { InstalledKiteRuntimeComposition } from '../../src/bootstrap/model-runtime-composition';
-import { createCliRuntimeBridge } from '../../src/bootstrap/runtime/CliRuntimeBridge';
+import {
+  createCliRuntimeBridge,
+  recoverActiveRunConfig,
+} from '../../src/bootstrap/runtime/CliRuntimeBridge';
 import {
   createRuntimeSessionCoordinatorBinding,
   type RuntimeSessionCoordinatorAccess,
@@ -65,6 +68,7 @@ import {
   assertPrecommittedStartTurn,
   planStartTurnCommand,
 } from '../../src/bootstrap/runtime/turn-command-decision';
+import type { AgentConfig } from '../../src/config';
 
 const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
@@ -516,6 +520,7 @@ function createFixtureBridge(
     readonly assertCurrent: () => boolean;
   },
   childSessionAcceptance?: Parameters<typeof createCliRuntimeBridge>[0]['childSessionAcceptance'],
+  initialConfig: AgentConfig = config(),
 ) {
   return createCliRuntimeBridge(
     {
@@ -528,7 +533,7 @@ function createFixtureBridge(
         projectId: 'project_retained_coordinator',
       },
       checkpointPath: join(fixture.root, 'runtime.db'),
-      config: config(),
+      config: initialConfig,
       interactionMode: 'accept_edits',
       shellExecutor: async ({ command }) => ({
         ok: true,
@@ -577,6 +582,135 @@ function dependencies(
 describe('retained TUI session coordinator', () => {
   afterAll(() => {
     rmSync(retainedWorkspaceRoot, { recursive: true, force: true });
+  });
+
+  test('pins an explicit effort to one Run and leaves the next Run on its configured effort', async () => {
+    const sessionId = 'retained-run-reasoning-effort';
+    const seen: Array<{ route: string; effort: unknown }> = [];
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      modelTransport: async ({ surface }) => {
+        seen.push({
+          route: `${surface.route.providerKind}/${surface.route.modelName}`,
+          effort: surface.request.providerOptions,
+        });
+        return {
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Finished.' }] },
+          finishReason: 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: `effort-${seen.length}` },
+        };
+      },
+    });
+    const access = fixture.binding.access();
+    const bridge = createFixtureBridge(
+      sessionId,
+      fixture,
+      access,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ...config(),
+        reasoningEffort: 'medium',
+      },
+    );
+    try {
+      await bridge.recoverSession(sessionId, () => undefined);
+      let revision = 0;
+      for (const [index, reasoningEffort] of (['high', undefined] as const).entries()) {
+        const commandId = `reasoning-run-${index}`;
+        const command = {
+          ...startCommand(sessionId, revision),
+          commandId,
+          ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+        };
+        const inspected = await bridge.inspectCommand(command, { targetSessionId: sessionId });
+        if (inspected.kind !== 'accepted') throw new Error('Start was not accepted');
+        const committed = await inspected.decision.commit(commandEvidence(sessionId, commandId));
+        if (committed.receipt.status !== 'applied') throw new Error('Start was not applied');
+        await committed.activation?.(() => undefined);
+        const controller = new AbortController();
+        await committed.preparedExecution?.execution?.run(controller.signal, (reason) =>
+          controller.abort(reason),
+        );
+        const projection = await bridge.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'get_session_projection',
+          sessionId,
+        });
+        if (projection.status !== 'ok' || !projection.session)
+          throw new Error('Finished Session projection unavailable');
+        revision = projection.session.revision;
+      }
+      expect(seen.map((entry) => entry.route)).toEqual([
+        'openai-compatible/test-model',
+        'openai-compatible/test-model',
+      ]);
+      expect(seen[0]?.effort).toMatchObject({
+        kind: 'inline',
+        value: { openaiCompatible: { reasoningEffort: 'high' } },
+      });
+      expect(seen[1]?.effort).toMatchObject({
+        kind: 'inline',
+        value: { openaiCompatible: { reasoningEffort: 'medium' } },
+      });
+      const starts = fixture.store.sessions
+        .loadEventsStrict(sessionId)
+        .map((entry) => entry.event)
+        .filter((event) => event.type === 'turn.started');
+      expect(starts[0]).toMatchObject({ reasoningEffort: 'high' });
+      expect(starts[1]).not.toHaveProperty('reasoningEffort');
+      const changedProviderSnapshot = { ...config(), reasoningEffort: 'low' };
+      const restored = recoverActiveRunConfig(changedProviderSnapshot, starts[0]!.turnId, starts);
+      expect(restored.reasoningEffort).toBe('high');
+      expect(changedProviderSnapshot.reasoningEffort).toBe('low');
+      expect(() =>
+        recoverActiveRunConfig(
+          { ...changedProviderSnapshot, providerType: 'ollama' },
+          starts[0]!.turnId,
+          starts,
+        ),
+      ).toThrow('no longer supported');
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an effort override before committing a Run when the Provider cannot send it', async () => {
+    const sessionId = 'retained-unsupported-reasoning-effort';
+    const fixture = createFixture(sessionId);
+    const access = fixture.binding.access();
+    const bridge = createFixtureBridge(
+      sessionId,
+      fixture,
+      access,
+      undefined,
+      undefined,
+      undefined,
+      {
+        ...config(),
+        providerType: 'ollama',
+      },
+    );
+    try {
+      await bridge.recoverSession(sessionId, () => undefined);
+      const inspected = await bridge.inspectCommand(
+        { ...startCommand(sessionId, 0), reasoningEffort: 'high' },
+        { targetSessionId: sessionId },
+      );
+      expect(inspected.kind).toBe('terminal');
+      if (inspected.kind === 'terminal')
+        expect(inspected.receipt).toMatchObject({ status: 'rejected', code: 'unsupported' });
+      expect(fixture.store.sessions.loadEventsStrict(sessionId)).toHaveLength(0);
+    } finally {
+      await bridge.close();
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 
   test('admits the durable Project identity resolved for one existing Workspace', async () => {

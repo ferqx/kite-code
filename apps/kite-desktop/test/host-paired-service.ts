@@ -130,6 +130,7 @@ export async function runElectronPairedServiceSmoke(
         expectedRevision: at(created, 'revision'),
         input: 'Reply with desktop smoke complete.',
         phase: 'building',
+        reasoningEffort: 'max',
       },
     });
     assertEqual(at(started, 'status'), 'applied', 'start turn');

@@ -3,7 +3,12 @@ import type { AppMcpServer } from '@kite-ai/kite-app-contract';
 import type { RuntimeSessionProjection } from '@kite-ai/runtime-contract';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { CommandResultUnknown, DesktopClient, type DesktopView } from '../../src/client';
+import {
+  CommandResultUnknown,
+  DesktopClient,
+  type DesktopModelSelection,
+  type DesktopView,
+} from '../../src/client';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' });
 class TestResizeObserver {
@@ -15,11 +20,22 @@ Object.defineProperty(dom.window, 'ResizeObserver', {
   configurable: true,
   value: TestResizeObserver,
 });
+Object.defineProperty(dom.window.HTMLCanvasElement.prototype, 'getContext', {
+  configurable: true,
+  value: () => null,
+});
+Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: () => {},
+});
+dom.window.requestAnimationFrame = (callback) => dom.window.setTimeout(() => callback(0), 0);
+dom.window.cancelAnimationFrame = (handle) => dom.window.clearTimeout(handle);
 const globals = {
   window: dom.window,
   document: dom.window.document,
   navigator: dom.window.navigator,
   HTMLElement: dom.window.HTMLElement,
+  HTMLFormElement: dom.window.HTMLFormElement,
   HTMLInputElement: dom.window.HTMLInputElement,
   HTMLSelectElement: dom.window.HTMLSelectElement,
   HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
@@ -104,7 +120,7 @@ class UiClient extends DesktopClient {
   selectedModels: string[] = [];
   modelEnabledChanges: string[] = [];
   createdModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
-  sentModels: Array<{ readonly provider: string; readonly name: string } | undefined> = [];
+  sentModels: Array<DesktopModelSelection | undefined> = [];
   selectedModes: Array<{ sessionId: string; mode: 'accept_edits' | 'auto' | 'full' }> = [];
   mcpActions: string[] = [];
   created = 0;
@@ -165,7 +181,7 @@ class UiClient extends DesktopClient {
   }
   override async newSession(model?: { readonly provider: string; readonly name: string }) {
     this.created++;
-    this.createdModels.push(model);
+    this.createdModels.push(model ? { provider: model.provider, name: model.name } : undefined);
     const created = session(`created-${this.created}`);
     this.update({
       sessions: [...this.view.sessions, created],
@@ -279,11 +295,7 @@ class UiClient extends DesktopClient {
       loadingSession: false,
     });
   }
-  override async send(
-    input: string,
-    targetSessionId?: string,
-    model?: { readonly provider: string; readonly name: string },
-  ) {
+  override async send(input: string, targetSessionId?: string, model?: DesktopModelSelection) {
     this.sent.push(input);
     this.sentTargets.push(targetSessionId);
     this.sentModels.push(model);
@@ -796,9 +808,10 @@ async function openUserSettings() {
 }
 
 async function chooseModel(name: string) {
-  await openDropdown(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  await click(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  await click(document.querySelector<HTMLElement>('.model-effort-switch')!);
   await click(
-    [...document.querySelectorAll<HTMLElement>('.model-menu [role="menuitemradio"]')].find(
+    [...document.querySelectorAll<HTMLElement>('.model-effort-columns [cmdk-item]')].find(
       (item) => item.textContent === name,
     )!,
   );
@@ -913,14 +926,15 @@ test('composer selects a configured model and changes the current session permis
   const client = new UiClient();
   await render(<App client={client} />);
 
-  await openDropdown(document.querySelector<HTMLElement>('[data-model-trigger]')!);
-  expect(document.querySelector('.model-provider-label')?.textContent).toBe('test');
+  await click(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  await click(document.querySelector<HTMLElement>('.model-effort-switch')!);
+  expect(document.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('test');
   expect(
-    [...document.querySelectorAll('.model-menu [role="menuitemradio"]')].map(
+    [...document.querySelectorAll('.model-effort-columns [cmdk-item]')].map(
       (item) => item.textContent,
     ),
   ).toEqual(['model', 'model-fast']);
-  await click(document.querySelectorAll<HTMLElement>('.model-menu [role="menuitemradio"]')[1]!);
+  await click(document.querySelectorAll<HTMLElement>('.model-effort-columns [cmdk-item]')[1]!);
   expect(document.querySelector('[data-model-trigger]')?.textContent).toBe('model-fast');
   expect(document.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toBe(
     '模型：model-fast',
@@ -949,6 +963,40 @@ test('composer selects a configured model and changes the current session permis
   );
   expect(client.selectedModes).toEqual([{ sessionId: 's0', mode: 'accept_edits' }]);
   expect(document.querySelector('[data-permission-trigger]')?.textContent).toBe('Ask');
+});
+
+test('thinking effort is scoped to the selected session and sent with its next Turn', async () => {
+  const client = new UiClient();
+  client.view.projection = {
+    ...client.view.projection!,
+    model: { provider: 'test', name: 'model' },
+  };
+  client.view.sessions = client.view.sessions.map((item) =>
+    item.sessionId === 's1' ? { ...item, model: { provider: 'test', name: 'model' } } : item,
+  );
+  client.view.models = {
+    ...client.view.models!,
+    providers: client.view.models!.providers.map((provider) => ({
+      ...provider,
+      reasoningEffortSupported: true,
+      reasoningEffort: 'low',
+    })),
+  };
+  await render(<App client={client} />);
+  await click(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+  expect(document.querySelector('.effort-value')?.textContent).toBe('低');
+  const slider = document.querySelector<HTMLElement>('[role="slider"]')!;
+  await key(slider, 'End');
+  expect(document.querySelector('.effort-value')?.textContent).toBe('最大');
+  await click(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+
+  await write(input(), '使用最高思考程度');
+  await key(input(), 'Enter');
+  expect(client.sentModels).toEqual([{ provider: 'test', name: 'model', reasoningEffort: 'max' }]);
+
+  await act(() => client.selectSession('s1'));
+  expect(document.querySelector('[data-model-trigger]')?.textContent).toContain('低');
+  expect(document.querySelector('[data-model-trigger]')?.textContent).not.toContain('最大');
 });
 
 test('composer shows the selected session cache hit rate without leaking it to another session', async () => {
@@ -1279,6 +1327,31 @@ test('new conversation applies its selected permission before sending the first 
   expect(client.selectedModes).toEqual([{ sessionId: 'created-1', mode: 'full' }]);
   expect(client.createdModels).toEqual([{ provider: 'test', name: 'model-fast' }]);
   expect(client.sent).toEqual(['使用所选权限']);
+});
+
+test('new conversation creates with the selected model and sends its chosen thinking effort', async () => {
+  const client = new UiClient();
+  client.view.models = {
+    ...client.view.models!,
+    providers: client.view.models!.providers.map((provider) => ({
+      ...provider,
+      reasoningEffortSupported: true,
+    })),
+  };
+  await render(<App client={client} />);
+  await click(button('新对话'));
+  await chooseModel('model-fast');
+  const slider = document.querySelector<HTMLElement>('[role="slider"]')!;
+  await key(slider, 'End');
+  expect(document.querySelector('.effort-value')?.textContent).toBe('最大');
+  await click(document.querySelector<HTMLElement>('[data-model-trigger]')!);
+
+  await write(input(), '带思考程度的新对话');
+  await key(input(), 'Enter');
+  expect(client.createdModels).toEqual([{ provider: 'test', name: 'model-fast' }]);
+  expect(client.sentModels).toEqual([
+    { provider: 'test', name: 'model-fast', reasoningEffort: 'max' },
+  ]);
 });
 
 test('new conversation does not send when its selected permission cannot be applied', async () => {

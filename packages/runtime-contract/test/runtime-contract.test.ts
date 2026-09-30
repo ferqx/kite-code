@@ -166,6 +166,17 @@ describe('runtime contract package boundary', () => {
         input: 'First line\nSecond line\twith indentation',
       }),
     ).toBe(true);
+    const turn = {
+      schema: RUNTIME_COMMAND_SCHEMA_,
+      commandId: 'command-effort',
+      type: 'start_turn',
+      sessionId: 'session-1',
+      expectedRevision: 0,
+      input: 'Think.',
+    };
+    expect(isRuntimeCommand({ ...turn, reasoningEffort: 'minimal' })).toBe(true);
+    expect(isRuntimeCommand({ ...turn, reasoningEffort: 'max' })).toBe(true);
+    expect(isRuntimeCommand({ ...turn, reasoningEffort: 'ultra' })).toBe(false);
     expect(isRuntimeCommand({ ...command, model: { provider: '', name: 'model' } })).toBe(false);
     expect(
       isRuntimeCommand({ ...command, model: { provider: 'openai', name: 'model', extra: true } }),

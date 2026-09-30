@@ -333,6 +333,7 @@ export const RUNTIME_PROTOCOL_COMMAND_SCHEMA_ = z.union([
       input: inputText,
       phase: z.enum(['planning', 'building']).optional(),
       model: z.object({ provider: identifier, name: inputText }).strict().optional(),
+      reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
       initialSkills: z
         .array(z.object({ skillId: identifier, input: jsonRecord }).strict())
         .max(64)

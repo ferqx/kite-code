@@ -249,6 +249,20 @@ describe('Provider/model App Control owner', () => {
             baseURL: 'https://secret-route.invalid/v1',
             model: 'one',
             models: ['one', 'two'],
+            effort: ' high ',
+          },
+          blocked: {
+            type: 'openai-compatible',
+            apiKey: 'must-not-project',
+            baseURL: 'https://secret-route.invalid/v1',
+            reasoning: false,
+            effort: '   ',
+            models: ['one'],
+          },
+          deepseek: {
+            type: 'deepseek',
+            apiKey: 'must-not-project',
+            models: ['deepseek-flash'],
           },
         },
         model: 'local:one',
@@ -263,6 +277,19 @@ describe('Provider/model App Control owner', () => {
       workspace: identity(workspace),
     });
     expect(before.selected).toEqual({ provider: 'local', name: 'one' });
+    expect(before.providers.find((provider) => provider.provider === 'local')).toMatchObject({
+      reasoningEffortSupported: true,
+      reasoningEffort: 'high',
+    });
+    expect(before.providers.find((provider) => provider.provider === 'blocked')).toMatchObject({
+      reasoningEffortSupported: false,
+    });
+    expect(before.providers.find((provider) => provider.provider === 'blocked')).not.toHaveProperty(
+      'reasoningEffort',
+    );
+    expect(before.providers.find((provider) => provider.provider === 'deepseek')).toMatchObject({
+      reasoningEffortSupported: false,
+    });
     expect(JSON.stringify(before)).not.toContain('must-not-project');
     expect(JSON.stringify(before)).not.toContain('secret-route');
 

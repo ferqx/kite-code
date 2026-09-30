@@ -1854,7 +1854,12 @@ type StateEventMap = ResourceBudgetEventMap &
       outcome?: ToolOutcome;
       createdAt?: string;
     };
-    'turn.started': { type: 'turn.started'; turnId: string };
+    'turn.started': {
+      type: 'turn.started';
+      turnId: string;
+      /** Frozen per-Run override, retained across process recovery. */
+      reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+    };
     'turn.completed': { type: 'turn.completed'; turnId: string };
     'turn.aborted': {
       type: 'turn.aborted';

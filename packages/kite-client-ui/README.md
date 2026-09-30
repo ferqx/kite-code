@@ -28,7 +28,7 @@ Agent 消息正文由 `react-markdown` 与 GFM 生成无排版 class 的语义 H
 
 ## 基础控件
 
-包入口导出已有的 [DropdownMenu](src/components/ui/dropdown-menu.tsx) 单选菜单组件，供桌面设置与输入区复用；模型可用性与选择回调仍由调用方提供。
+包入口导出已有的 [DropdownMenu](src/components/ui/dropdown-menu.tsx) 单选菜单组件，供桌面设置与权限菜单复用；模型与思考选择器使用 [ModelEffortSelector](src/ModelEffortSelector.tsx)，目录、支持状态与选择回调仍由调用方提供。
 
 Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client-ui` 已有的 shadcn 公共组件；共享包尚未提供但 shadcn registry 已有对应组件时，先按项目现有 Radix base、New York style、HugeIcons 和语义 token 接入共享包，再由两端复用。不得在 app 内用原生元素或局部样式重复实现 Button、Input、Textarea、Select、DropdownMenu、Dialog／AlertDialog、Tabs、Tooltip、ScrollArea、Resizable、Badge 等已有能力，也不得为单个页面复制一份公共组件。只有 shadcn 不提供相应语义、现有公共组件无法在不扭曲交互的情况下组合，或宿主原生能力不可替代时，才允许新增专用组件；实现处必须说明边界，并继续复用公共 primitive、变量和可访问性语义。纯业务内容结构不因本规则强行包装为无意义组件。
 
@@ -44,7 +44,7 @@ Desktop 与 Web 新增或修改界面时，必须先复用 `packages/kite-client
 
 ## 数据与权限
 
-会话正文提供按轮复制：每条已发送用户消息单独复制；Agent 仅在有精确 `turnId`、已落定且标记 `finalReply` 的正文上提供一次复制，只复制这段最终回复，不包含同轮阶段说明、思考、工具或子 Agent 输出。Web 缺少该标记时不推测复制目标。按钮在悬停或键盘聚焦时显示；复制成功后显示勾图标，两秒后恢复复制图标，剪贴板写入失败可重试。桌面首条消息的本地发送状态由入口传入，共享组件不负责提交或重试。Composer 的模型列表、权限选择及回调也由入口提供；模型和权限选择复用共享 `DropdownMenu`，模型按 Provider 分组，权限菜单以图标、主标题和简短说明呈现，并按系统语言显示中英文文案，不补造可用模型或执行授权。
+会话正文提供按轮复制：每条已发送用户消息单独复制；Agent 仅在有精确 `turnId`、已落定且标记 `finalReply` 的正文上提供一次复制，只复制这段最终回复，不包含同轮阶段说明、思考、工具或子 Agent 输出。Web 缺少该标记时不推测复制目标。按钮在悬停或键盘聚焦时显示；复制成功后显示勾图标，两秒后恢复复制图标，剪贴板写入失败可重试。桌面首条消息的本地发送状态由入口传入，共享组件不负责提交或重试。Composer 的模型目录、思考档位、支持状态和回调由入口提供；模型与思考选择器组合共享 shadcn Popover、Tabs、Command、ScrollArea 和 Slider，[GemSlider](src/GemSlider.tsx)只补充宝石星光和松手粒子装饰，步进、拖动与键盘语义由 Radix 提供。共享 UI 不导入 Runtime 契约，不保存模型配置或猜测提供商能力；权限菜单继续复用 `DropdownMenu`，按系统语言显示中英文文案，不补造执行授权。
 
 [展示类型](src/types.ts)只包含页面使用的数据，不导入 Runtime、Public API、Native 或 TUI 类型。端侧投影将真实数据转换为这些字段；缺失数据不能从名称或相邻消息补造。共享组件保留展开和阅读位置；服务状态、订阅与恢复由端侧现有 owner 管理。
 

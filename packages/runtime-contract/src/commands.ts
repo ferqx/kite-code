@@ -27,6 +27,8 @@ export interface RuntimeModelRoute {
   readonly name: string;
 }
 
+export type RuntimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 /** Create a session for the canonical Workspace resolved by the Runtime Host. */
 export interface CreateSessionCommand extends RuntimeCommandBase {
   readonly type: 'create_session';
@@ -53,6 +55,8 @@ export interface StartTurnCommand extends RuntimeSessionCommandBase {
   readonly phase?: 'planning' | 'building';
   /** Optional next-Run route; when applied it becomes this Session's persisted route. */
   readonly model?: RuntimeModelRoute;
+  /** Override this Run's reasoning effort without changing the Session's desired configuration. */
+  readonly reasoningEffort?: RuntimeReasoningEffort;
   readonly initialSkills?: readonly {
     readonly skillId: string;
     readonly input: Readonly<Record<string, unknown>>;
@@ -317,7 +321,13 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
       );
     case 'start_turn':
       return (
-        isSessionCommand(candidate, ['input', 'phase', 'model', 'initialSkills']) &&
+        isSessionCommand(candidate, [
+          'input',
+          'phase',
+          'model',
+          'reasoningEffort',
+          'initialSkills',
+        ]) &&
         isStartTurn(candidate) &&
         (!Object.hasOwn(candidate, 'model') || isRuntimeModelRoute(candidate.model))
       );
@@ -447,6 +457,9 @@ function isStartTurn(value: Record<string, unknown>): boolean {
   return (
     isBoundedUserText(value.input) &&
     (!Object.hasOwn(value, 'phase') || value.phase === 'planning' || value.phase === 'building') &&
+    (!Object.hasOwn(value, 'reasoningEffort') ||
+      (typeof value.reasoningEffort === 'string' &&
+        ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value.reasoningEffort))) &&
     (!Object.hasOwn(value, 'initialSkills') ||
       (Array.isArray(value.initialSkills) &&
         value.initialSkills.length <= 64 &&

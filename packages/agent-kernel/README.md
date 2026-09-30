@@ -27,6 +27,7 @@
 ## 关键不变量
 
 - 根 state/event union 和 Reducer 顺序均为编译期固定。
+- `turn.started` 可封闭保存本轮显式 `reasoningEffort` 六值覆盖；旧事件没有该字段时仍可读取，Kernel 不解析 Provider 配置。
 - 当前 writer 只产生 State 27/SAQ epoch；State 26 只在封闭兼容边界投影为 inert history。
 - 新 writer 为每个 Subagent step 固定写入 `stepId + toolCallId`，并为 approval/auto-review settlement 写入完整
   root/child owner；旧事件只由 persistence-order migration reader 合成 `legacy:<subagentId>:<ordinal>` identity。

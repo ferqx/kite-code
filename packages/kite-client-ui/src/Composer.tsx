@@ -32,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
 import { cn } from './lib/utils';
+import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { Button, Textarea } from './ui';
 
 const permissionModes = [
@@ -117,10 +118,9 @@ export interface ComposerProps {
   cancelDisabled?: boolean;
   disabled: boolean;
   model?: { readonly provider: string; readonly name: string };
-  models?: readonly {
-    readonly provider: string;
-    readonly name: string;
-  }[];
+  models?: readonly ModelOption[];
+  reasoningEffort?: string;
+  onReasoningEffortChange?: (effort: ThinkingEffort) => void;
   onModelChange?: (provider: string, name: string) => void;
   modelDisabled?: boolean;
   permission?: 'accept_edits' | 'auto' | 'full';
@@ -154,16 +154,6 @@ export function Composer(props: ComposerProps) {
   const canSend = !!props.onSend && !props.disabled && !props.sending && !!props.draft.trim();
   const showStop =
     !props.sending && props.active && !!props.onCancel && (!props.draft.trim() || props.stopping);
-  const selectedModel = props.model
-    ? props.models?.find(
-        (model) => model.provider === props.model?.provider && model.name === props.model?.name,
-      )
-    : undefined;
-  const modelValue = selectedModel
-    ? `${selectedModel.provider}\0${selectedModel.name}`
-    : props.model
-      ? `current\0${props.model.provider}\0${props.model.name}`
-      : '';
   if (props.promptHidden) {
     return null;
   }
@@ -178,7 +168,8 @@ export function Composer(props: ComposerProps) {
           const target = event.target;
           if (
             target instanceof Element &&
-            target.closest('button, textarea, input, a, [role="menuitem"]')
+            (!event.currentTarget.contains(target) ||
+              target.closest('button, textarea, input, a, [role="menuitem"]'))
           )
             return;
           event.preventDefault();
@@ -212,57 +203,14 @@ export function Composer(props: ComposerProps) {
         <div className="composer-bottom">
           <div className="composer-options">
             {props.onModelChange && props.models?.length ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    className="ghost model-trigger"
-                    data-model-trigger
-                    aria-label={`模型：${props.model?.name ?? '选择模型'}`}
-                    title={props.model?.name}
-                    disabled={props.modelDisabled}
-                  >
-                    <span>{props.model?.name ?? '选择模型'}</span>
-                    <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  className="model-menu"
-                  portalled={false}
-                  side="top"
-                  align="start"
-                  sideOffset={6}
-                  aria-label="模型"
-                >
-                  <DropdownMenuRadioGroup value={modelValue}>
-                    {props.model && !selectedModel && (
-                      <DropdownMenuGroup>
-                        <DropdownMenuRadioItem value={modelValue} disabled indicatorPosition="end">
-                          {props.model.name}
-                        </DropdownMenuRadioItem>
-                      </DropdownMenuGroup>
-                    )}
-                    {[...new Set(props.models.map((model) => model.provider))].map((provider) => (
-                      <DropdownMenuGroup key={provider}>
-                        <DropdownMenuLabel className="model-provider-label">
-                          {provider}
-                        </DropdownMenuLabel>
-                        {props
-                          .models!.filter((model) => model.provider === provider)
-                          .map((model) => (
-                            <DropdownMenuRadioItem
-                              key={`${model.provider}\0${model.name}`}
-                              value={`${model.provider}\0${model.name}`}
-                              indicatorPosition="end"
-                              onSelect={() => props.onModelChange?.(model.provider, model.name)}
-                            >
-                              {model.name}
-                            </DropdownMenuRadioItem>
-                          ))}
-                      </DropdownMenuGroup>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ModelEffortSelector
+                model={props.model}
+                models={props.models}
+                onModelChange={props.onModelChange}
+                reasoningEffort={props.reasoningEffort}
+                onReasoningEffortChange={props.onReasoningEffortChange}
+                disabled={props.modelDisabled}
+              />
             ) : props.onSettings ? (
               <Button className="ghost model-button" onClick={props.onSettings}>
                 {props.model?.name || '配置模型'}

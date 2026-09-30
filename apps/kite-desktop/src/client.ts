@@ -27,6 +27,7 @@ import type {
   RuntimeInteractionResponse,
   RuntimeLogSessionPage,
   RuntimePlanReviewInteraction,
+  RuntimeReasoningEffort,
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
 import type {
@@ -46,6 +47,12 @@ import { type ProviderInput, saveProvider } from './models';
 import { isActiveRun, type Message, projectEventWithIdentity } from './presentation';
 import { SessionHistoryCache } from './session-cache';
 import { type DesktopConnectionInfo, desktopTransport } from './transport';
+
+export interface DesktopModelSelection {
+  readonly provider: string;
+  readonly name: string;
+  readonly reasoningEffort?: RuntimeReasoningEffort;
+}
 
 export type { BranchSnapshot, DesktopProject } from './bridge';
 
@@ -1505,7 +1512,7 @@ export class DesktopClient {
     );
   }
 
-  async newSession(model?: { readonly provider: string; readonly name: string }): Promise<string> {
+  async newSession(model?: DesktopModelSelection): Promise<string> {
     if (this.#view.trust?.status !== 'trusted') throw new Error('请先确认工作区信任。');
     const connection = this.#requireConnection();
     const selection = this.#selection;
@@ -1518,7 +1525,7 @@ export class DesktopClient {
         type: 'create_session',
         workspace: this.#view.workspace,
         bootstrapSessionId: sessionId,
-        ...(model === undefined ? {} : { model }),
+        ...(model === undefined ? {} : { model: { provider: model.provider, name: model.name } }),
       });
     } catch (error) {
       if (error instanceof CommandResultUnknown) {
@@ -2392,11 +2399,7 @@ export class DesktopClient {
     }
   }
 
-  async send(
-    input: string,
-    targetSessionId?: string,
-    model?: { readonly provider: string; readonly name: string },
-  ) {
+  async send(input: string, targetSessionId?: string, model?: DesktopModelSelection) {
     const sessionId = targetSessionId ?? this.#view.selected;
     if (!sessionId || !input.trim()) return;
     // Explicit creation targets remain independent of the current reading selection.
@@ -2447,7 +2450,8 @@ export class DesktopClient {
         expectedRevision,
         input,
         phase: 'building',
-        ...(model === undefined ? {} : { model }),
+        ...(model?.reasoningEffort === undefined ? {} : { reasoningEffort: model.reasoningEffort }),
+        ...(model === undefined ? {} : { model: { provider: model.provider, name: model.name } }),
       });
     try {
       await startTurn(result.session.revision);

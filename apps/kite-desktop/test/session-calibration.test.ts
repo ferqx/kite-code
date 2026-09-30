@@ -83,7 +83,12 @@ async function fixture(
   let loseNextSteer = false;
   let staleNextSendProjection: 'idle' | 'active_on_refresh' | 'stale_on_refresh' | undefined;
   let refreshProjectionAfterConflict: 'active' | 'stale' | undefined;
-  const sendCommands: Array<{ type: string; commandId: string }> = [];
+  const sendCommands: Array<{
+    type: string;
+    commandId: string;
+    command: Record<string, unknown>;
+  }> = [];
+  const createCommands: Array<Record<string, unknown>> = [];
   const backgroundQueries: Array<{ sessionId: string; parentRunStatus: string | undefined }> = [];
   let childSubscriptionRequests = 0;
   let childHistoryRequests = 0;
@@ -260,7 +265,13 @@ async function fixture(
         sendCommands.push({
           type: message.params.command.type,
           commandId: message.params.command.commandId,
+          command: message.params.command,
         });
+      if (
+        message.method === 'runtime/command' &&
+        message.params?.command?.type === 'create_session'
+      )
+        createCommands.push(message.params.command);
       // This fixture keeps a lost creation genuinely unknown: its receipt read is unavailable too.
       if (
         message.method === 'runtime/query' &&
@@ -619,6 +630,9 @@ async function fixture(
     },
     get sendCommands() {
       return sendCommands;
+    },
+    get createCommands() {
+      return createCommands;
     },
     get backgroundQueries() {
       return backgroundQueries;
@@ -1471,6 +1485,81 @@ test('sends active input as steer and the same Run uses it at the next model bou
         .messages.filter((message) => message.role === 'assistant')
         .at(-1)?.text,
     ).toContain('new constraint');
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('a selected thinking effort belongs to one new Turn and reaches the model request', async () => {
+  const f = await fixture([
+    { message: { content: 'First answer.' } },
+    { message: { content: 'Second answer.' } },
+  ]);
+  try {
+    await f.client.selectSession(f.a);
+    await f.client.send('First question.', undefined, {
+      provider: 'test',
+      name: 'mock-model',
+      reasoningEffort: 'max',
+    });
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
+    const first = f.sendCommands.find((item) => item.type === 'start_turn')?.command;
+    expect(first).toMatchObject({
+      type: 'start_turn',
+      model: { provider: 'test', name: 'mock-model' },
+      reasoningEffort: 'max',
+    });
+    expect(first?.model).toEqual({ provider: 'test', name: 'mock-model' });
+    expect(f.model.getRequests()[0]?.body.reasoning_effort).toBe('max');
+
+    await f.client.selectSession(f.b);
+    await f.client.send('Second question.');
+    await waitFor(
+      () =>
+        f.client.getSnapshot().projection?.currentRun?.status === 'completed' &&
+        f.model.getRequestCount() >= 2,
+    );
+    const starts = f.sendCommands.filter((item) => item.type === 'start_turn');
+    expect(starts).toHaveLength(2);
+    expect(starts[1]?.command).not.toHaveProperty('reasoningEffort');
+    expect(f.model.getRequests()[1]?.body).not.toHaveProperty('reasoning_effort');
+  } finally {
+    await f.close();
+  }
+}, 20_000);
+
+test('new Session routing omits thinking effort and an active Run steer cannot change it', async () => {
+  const f = await fixture([
+    { delay: 250, message: { content: 'Original run answer.' } },
+    { message: { content: 'Steered answer.' } },
+  ]);
+  try {
+    const created = await f.client.newSession({
+      provider: 'test',
+      name: 'mock-model',
+      reasoningEffort: 'low',
+    });
+    const creation = f.createCommands.at(-1);
+    expect(creation?.model).toEqual({ provider: 'test', name: 'mock-model' });
+    expect(creation).not.toHaveProperty('reasoningEffort');
+
+    await f.client.selectSession(created);
+    await f.client.send('Start one run.', undefined, {
+      provider: 'test',
+      name: 'mock-model',
+      reasoningEffort: 'low',
+    });
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'running');
+    await f.client.send('New constraint.', undefined, {
+      provider: 'test',
+      name: 'mock-model',
+      reasoningEffort: 'max',
+    });
+    const steer = f.sendCommands.find((item) => item.type === 'steer_turn')?.command;
+    expect(steer).toMatchObject({ type: 'steer_turn', input: 'New constraint.' });
+    expect(steer).not.toHaveProperty('reasoningEffort');
+    expect(steer).not.toHaveProperty('model');
+    await waitFor(() => f.client.getSnapshot().projection?.currentRun?.status === 'completed');
   } finally {
     await f.close();
   }

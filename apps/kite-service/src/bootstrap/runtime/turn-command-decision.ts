@@ -135,7 +135,13 @@ export function planStartTurnCommand(
       messageId,
       content: command.input,
     },
-    { type: 'turn.started', turnId },
+    {
+      type: 'turn.started',
+      turnId,
+      ...(command.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: command.reasoningEffort }),
+    },
   );
 
   const plannedSkillActivations: PrecommittedSkillActivation[] = [];
