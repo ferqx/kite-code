@@ -810,6 +810,21 @@ export class McpConnectionManager {
       transportAdmission,
       governance: invocation.writeGovernance,
     });
+    // Both transport admission and the durable write guard can yield while a
+    // same-generation list_changed replaces the descriptor or removes a tool.
+    // Reject before the protocol request so stale approval/schema facts cannot
+    // dispatch, and this pre-dispatch failure is not recorded as external unknown.
+    this.assertCallable(state, server);
+    const currentDescriptor = this.findCapability(invocation.capabilityId);
+    if (
+      !this.isCurrent(server, client, state.generation) ||
+      currentDescriptor?.kind !== 'mcp_tool' ||
+      currentDescriptor.availability !== 'available' ||
+      currentDescriptor.revision !== invocation.expectedRevision ||
+      !state.tools.some((tool) => tool.name === toolName)
+    ) {
+      throw capabilityChangedProviderError(server);
+    }
     let result: CallToolResult;
     try {
       result = (await this.withTransportReceipt(transportAdmission, () =>

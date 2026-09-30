@@ -3,8 +3,10 @@ export {
   countPendingSteerInputs,
   createAgentMessageContextFrame,
   encodeCurrentAgentStateJson,
+  fundingDeadlineMatches,
   requiredBackgroundTaskIds,
   requiredManagedShellIds,
+  resourceDeadlineMs,
 } from '@kite-ai/agent-kernel';
 export type { RuntimeActionEmission } from './action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './action-emission';
@@ -147,6 +149,7 @@ export type {
   ResourceBudget,
   ResourceBudgetConfiguredEvent,
   ResourceBudgetCumulativeLimitsRemovedEvent,
+  ResourceBudgetDeadlineRemovedEvent,
   ResourceBudgetDispatchStartedEvent,
   ResourceBudgetEvent,
   ResourceBudgetReconciledEvent,
@@ -177,6 +180,7 @@ export {
   reduceResourceBudgetState,
   tightenResourceBudget,
   UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+  UNBOUNDED_PRIMARY_RESOURCE_BUDGET_,
 } from './resource-budget';
 export type {
   StateRuntimeCommandCommitResult,

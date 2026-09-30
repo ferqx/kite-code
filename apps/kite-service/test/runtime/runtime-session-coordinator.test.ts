@@ -1,10 +1,14 @@
+import { Database } from 'bun:sqlite';
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type ContextCompactionCheckpoint,
   isConcurrentAutoReviewEffectBatchCurrent,
+  RUNTIME_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEvent,
 } from '@kite-ai/agent-kernel';
 import {
@@ -31,8 +35,16 @@ import {
 import {
   createRuntimeHostStateInitialState,
   type RuntimeState,
+  reconciliationEventsForReservations,
+  type StateRuntimeSessionEffectLease,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { defineRuntimeModule, type VerificationSpec } from '@kite-ai/runtime-spi';
+import {
+  assertKiteSessionStoreSchema,
+  createKiteHomeRuntimeStorageForConnection,
+  initializeKiteSessionStoreIfNeeded,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
+} from '@kite-ai/runtime-storage-sqlite';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
 import { createRuntimeHostStateStorageBinding } from '#runtime-host';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
@@ -70,7 +82,7 @@ const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
 const builtinToolCatalog = createBuiltinToolCatalogProjection(snapshot);
 const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshot(snapshot);
-const retainedWorkspaceRoot = mkdtempSync(join(tmpdir(), 'kite-retained-workspace-'));
+const retainedWorkspaceRoot = realpathSync(mkdtempSync(join(tmpdir(), 'kite-retained-workspace-')));
 const retainedWorkspace = join(retainedWorkspaceRoot, 'workspace');
 mkdirSync(retainedWorkspace);
 
@@ -401,6 +413,7 @@ function createFixture(
     readonly storeRuns?: boolean;
     readonly modelTransport?: SingleAttemptTransport;
     readonly withToolPipelineComposition?: boolean;
+    readonly homeStore?: boolean;
   } = {},
 ) {
   const state =
@@ -416,22 +429,58 @@ function createFixture(
   const databasePath = join(root, 'runtime.db');
   const stateStorage = createRuntimeHostStateStorageBinding();
   const codec = stateStorage.codec as RuntimeSnapshotCodec<RuntimeEvent, RuntimeState>;
-  const storage = createStateStorageForTest<RuntimeEvent, RuntimeState>({
-    databasePath,
-    codec,
-    sessionId,
-    ...(options.storeRuns
-      ? {
-          workspaceBinding: {
-            layoutGeneration: 'retained-recovery-tests',
-            workerScopeId: 'retained-recovery-worker',
-            workspaceIdentityDigest:
-              projectIdentityForWorkspace(workspace).canonicalWorkspaceDigest,
-          },
-          targetStore: 'run' as const,
-        }
-      : {}),
-  });
+  const homeProject = resolveProjectIdentity(workspace);
+  if (options.homeStore) {
+    state.session.projectId = homeProject.projectId;
+    state.session.canonicalWorkspaceDigest = homeProject.workspaceDigest;
+  }
+  const homeOwner = options.homeStore
+    ? (() => {
+        const database = new Database(databasePath, { strict: true });
+        initializeKiteSessionStoreIfNeeded(database);
+        const owner = createKiteHomeRuntimeStorageForConnection<RuntimeEvent, RuntimeState>({
+          database,
+          assertStoreSchema: assertKiteSessionStoreSchema,
+          storeSchemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
+          codec,
+          stateSchemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+          formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
+          ownsDatabase: true,
+        });
+        const workspaceIdentityDigest = `sha256:${createHash('sha256')
+          .update(
+            `kite.workspace-identity.v1\0${JSON.stringify({ canonicalPath: workspace, projectId: homeProject.projectId, workspaceDigest: homeProject.workspaceDigest })}`,
+          )
+          .digest('hex')}`;
+        owner.admissions.admit({
+          workspaceId: `workspace_${workspaceIdentityDigest.slice('sha256:'.length)}`,
+          canonicalPath: workspace,
+          workspaceIdentityDigest,
+          projectId: homeProject.projectId,
+          workspaceDigest: homeProject.workspaceDigest,
+          displayName: workspace,
+        });
+        return owner;
+      })()
+    : undefined;
+  const storage =
+    homeOwner?.storage ??
+    createStateStorageForTest<RuntimeEvent, RuntimeState>({
+      databasePath,
+      codec,
+      sessionId,
+      ...(options.storeRuns
+        ? {
+            workspaceBinding: {
+              layoutGeneration: 'retained-recovery-tests',
+              workerScopeId: 'retained-recovery-worker',
+              workspaceIdentityDigest:
+                projectIdentityForWorkspace(workspace).canonicalWorkspaceDigest,
+            },
+            targetStore: 'run' as const,
+          }
+        : {}),
+    });
   const services = {
     sessions: storage.sessions,
     transactions: {
@@ -460,10 +509,12 @@ function createFixture(
       release: storage.effects.releaseEffectLease,
       hasClaim: () => false,
     },
-    checkpoints: options.storeRuns
-      ? storage.checkpoints
-      : ({} as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['checkpoints']),
+    checkpoints:
+      options.storeRuns || options.homeStore
+        ? storage.checkpoints
+        : ({} as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['checkpoints']),
     recoveryIdentities: storage.recoveryIdentities,
+    completedResourceReservations: storage.completedResourceReservations,
     ...(options.storeRuns ? { runs: storage.runs } : {}),
   } as unknown as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
   const store = runtimeStoreView(services);
@@ -575,6 +626,154 @@ function dependencies(
 }
 
 describe('retained TUI session coordinator', () => {
+  test('stale effect acknowledgement after externalized settlement preserves receipts and continues tools', async () => {
+    const sessionId = 'retained-stale-ack-after-settlement';
+    const fileName = 'stale-ack-read.txt';
+    writeFileSync(join(retainedWorkspace, fileName), 'Durable read input.\n');
+    let modelCalls = 0;
+    const fixture = createFixture(sessionId, undefined, retainedWorkspace, {
+      withToolPipelineComposition: true,
+      homeStore: true,
+      modelTransport: async () => {
+        modelCalls += 1;
+        return {
+          message: {
+            role: 'assistant',
+            content:
+              modelCalls <= 2
+                ? [
+                    {
+                      type: 'tool_call',
+                      toolCallId: `settlement-read-${modelCalls}`,
+                      toolName: 'read_file',
+                      input: { path: fileName },
+                    },
+                  ]
+                : [{ type: 'text', text: 'Both tools completed.' }],
+          },
+          finishReason: modelCalls <= 2 ? 'tool_calls' : 'stop',
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, cacheReadTokens: null },
+          providerMetadata: { responseId: `settlement-response-${modelCalls}` },
+        };
+      },
+    });
+    const access = fixture.binding.access();
+    const coordinator = access.ensure({
+      ...identity(sessionId),
+      projectId: resolveProjectIdentity(retainedWorkspace).projectId,
+      sandboxAvailable: false,
+      capabilityArtifactEvidence: fixture.runtime.capabilityArtifacts,
+    });
+    const originalFactory = coordinator.createRuntimeEffectPort;
+    const originalBeginEffect = coordinator.session.beginEffect;
+    let toolLease: StateRuntimeSessionEffectLease | undefined;
+    coordinator.session.beginEffect = function (effect) {
+      const lease = originalBeginEffect.call(this, effect);
+      if (effect.type === 'run_tools') toolLease = lease;
+      return lease;
+    };
+    const settledIds: string[] = [];
+    const rejectedAcknowledgements: boolean[] = [];
+    coordinator.createRuntimeEffectPort = function (dependencies) {
+      const executor = originalFactory.call(this, dependencies);
+      return async (effect, state, emit, context) => {
+        const result = await executor(effect, state, emit, context);
+        if (effect.type !== 'run_tools') return result;
+        if (!context?.getState || !context.persistAttemptStartEvents)
+          throw new Error('Tool persistence context unavailable');
+        const settlements = reconciliationEventsForReservations(
+          context.getState() as RuntimeState,
+          [...context.reservationIds],
+          result,
+          context.readCompletedReservation,
+        );
+        expect(settlements).toHaveLength(1);
+        const settlement = settlements[0]!;
+        expect(await context.persistEvent(settlement)).toBe(true);
+        settledIds.push(settlement.reservationId);
+        const beforeRejected = coordinator.getState();
+        expect(
+          beforeRejected.resourceBudget.status === 'active' &&
+            beforeRejected.resourceBudget.reservations[settlement.reservationId],
+        ).toBeUndefined();
+        expect(context.readCompletedReservation?.(settlement.reservationId)).toMatchObject({
+          state: 'reconciled',
+          actual: settlement.actual,
+        });
+        // A rejected acknowledgement commits nothing, leaving the preceding
+        // settlement as Session's last applied event. It must not be projected again.
+        if (!toolLease) throw new Error('Tool effect lease unavailable');
+        toolLease.expectedRevision = beforeRejected.revision - 1;
+        rejectedAcknowledgements.push(
+          await context.persistAttemptStartEvents([
+            { type: 'tool.started', toolCallId: effect.toolCallIds[0]! },
+          ]),
+        );
+        toolLease.expectedRevision = coordinator.getState().revision;
+        expect(coordinator.getState()).toBe(beforeRejected);
+        return result;
+      };
+    };
+    try {
+      if (fixture.runtime.status !== 'available') throw new Error('test model runtime unavailable');
+      const runtimeConfig = { ...config(), features: { resourceBudget: true } };
+      const events: RuntimeEvent[] = [];
+      for await (const event of coordinator.executeTurn(
+        {
+          task: 'Read the fixture twice.',
+          userId: 'tui-user',
+          threadId: sessionId,
+          workspace: retainedWorkspace,
+          recoveryIdentityKey: 'a'.repeat(64),
+          config: runtimeConfig,
+          model: createChatModel(runtimeConfig),
+          modelInvocationRuntime: { ...fixture.runtime, builtinToolCatalog },
+          capabilityExecution,
+          interactionMode: 'accept_edits',
+          phase: 'building',
+          sandboxBackend: 'none',
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      ))
+        events.push(event);
+      expect(events.filter((event) => event.type === 'run.error')).toEqual([]);
+      expect(rejectedAcknowledgements).toEqual([false, false]);
+      expect(modelCalls).toBe(3);
+      expect(coordinator.getState().turn.status).toBe('completed');
+      expect(events.filter((event) => event.type === 'run.error')).toEqual([]);
+      expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+      const stored = fixture.store.sessions.loadEventsStrict(sessionId);
+      for (const reservationId of settledIds) {
+        expect(
+          stored.filter(
+            ({ event }) =>
+              event.type === 'resource_budget.reconciled' && event.reservationId === reservationId,
+          ),
+        ).toHaveLength(1);
+        expect(
+          events.filter(
+            (event) =>
+              event.type === 'resource_budget.reconciled' && event.reservationId === reservationId,
+          ),
+        ).toHaveLength(1);
+      }
+      const budget = coordinator.getState().resourceBudget;
+      expect(budget.status === 'active' && budget.reconciledUsage.counters.toolInvocations).toBe(2);
+      const revisionForEvent = coordinator.revisionForEvent;
+      if (!revisionForEvent) throw new Error('Committed event revision lookup unavailable');
+      const revisions = events
+        .map((event) => revisionForEvent.call(coordinator, event))
+        .filter((revision) => revision !== undefined);
+      expect(new Set(revisions).size).toBe(revisions.length);
+    } finally {
+      coordinator.createRuntimeEffectPort = originalFactory;
+      coordinator.session.beginEffect = originalBeginEffect;
+      await access.close();
+      fixture.storage.close();
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   afterAll(() => {
     rmSync(retainedWorkspaceRoot, { recursive: true, force: true });
   });

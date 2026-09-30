@@ -368,7 +368,7 @@ phase 不改变 production builtin declaration：Planning 与 Building 使用相
 
 `ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
 
-Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只要求 trim 后非空，不设任务文字或单行名称的固定长度上限，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。独立子 Session 的新首轮委派在父 Run 仍有有效预算时受理，在子 Run 激活时才开始自身完整的 30 分钟期限；父 Run 自身预算继续约束发起委派的工具；新子 Run 只保留自身 30 分钟执行期限，不设模型请求、turn、token、工具调用或 Artifact 字节的累计额度。父 Run 的可配置子 Agent 并发上限继续在受理时核验；新委派的 code 子 Agent 不占独立写者槽位，旧委派沿用持久写者额度。旧委派缺少标记时保留原父 deadline 与有限计数上界。新委派的 required child 成为 CompletionGuard 唯一 blocker 时，父 Run 的等待时长在原 Run 恢复前补回，等待期间不得派发新的父资源；旧委派保留原期限规则。新标记的子 Run 不启用 Builtin child 的 12 轮含工具响应 soft ceiling，由自身执行期限约束；旧委派和未启用 `resourceBudget` 的 child 仍在 12 轮后执行一次无工具总结调用，总结仍返回工具调用时按现有失败终态闭合。旧路径的 soft ceiling 从 continuation 的 `modelInvocationOrdinal` 延续，不能经审批暂停/恢复重置。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、authorization、sandbox、protected path 和 execution surface；父 Run 自身预算及子 Agent 并发额度继续适用；旧委派仍按持久写者额度执行。interaction mode 通常继承 Parent；唯一特化是父级 `accept_edits` 下，同一模型响应内的多个结构化 Explore sibling 使用 Auto reviewer，父级 Full 不降级。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
+Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只要求 trim 后非空，不设任务文字或单行名称的固定长度上限，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。独立子 Session 的新首轮委派在父 Run 仍有有效预算时受理，在子 Run 激活时才开始自身完整的 30 分钟期限；发起 Run 的活动预算、并发和授权继续约束委派工具；主 Run 没有总期限，子 Run 作为发起方仍须在自身期限内；新子 Run 只保留自身 30 分钟执行期限，不设模型请求、turn、token、工具调用或 Artifact 字节的累计额度。父 Run 的可配置子 Agent 并发上限继续在受理时核验；新委派的 code 子 Agent 不占独立写者槽位，旧委派沿用持久写者额度。旧委派缺少标记时保留原父 deadline 与有限计数上界。新委派的 required child 成为 CompletionGuard 唯一 blocker 时，有期限的发起 Run 在恢复前补回实际等待时长；无期限主 Run 保持原身份，等待期间不得派发新的父资源；旧委派保留原期限规则。新标记的子 Run 不启用 Builtin child 的 12 轮含工具响应 soft ceiling，由自身执行期限约束；旧委派和未启用 `resourceBudget` 的 child 仍在 12 轮后执行一次无工具总结调用，总结仍返回工具调用时按现有失败终态闭合。旧路径的 soft ceiling 从 continuation 的 `modelInvocationOrdinal` 延续，不能经审批暂停/恢复重置。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、authorization、sandbox、protected path 和 execution surface；父 Run 自身预算及子 Agent 并发额度继续适用；旧委派仍按持久写者额度执行。interaction mode 通常继承 Parent；唯一特化是父级 `accept_edits` 下，同一模型响应内的多个结构化 Explore sibling 使用 Auto reviewer，父级 Full 不降级。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 审批只解决具体调用的 Runtime policy gate，不能扩大 Subagent role ceiling。explore/plan/review 的
 `followup_task` 新 `independent_turn_v2` 是独立 child 新 Run 的另一条预算入口：来源 Run 在受理时以准确 submission 核验自身预算与可配置并发上限，目标 Run 启动时独立获得最长 30 分钟，且不设其他累计资源上限。持久 `durationOnlyChildRun` 标记只改变子 Run 的累计额度，不能提升原角色 grant、phase、Policy、审批、sandbox 或工具目录交集。来源 Run 完成或到达原截止时间后，已受理且排队的新 v2 续轮不因此过期，取得并发位后才启动目标 Run 并开始自己的 30 分钟期限；来源 Run 的用户取消仍可按准确受理事实结算。目标新 Run 按自己的期限和来源受理事实继续；确定未派发的失败释放来源占用，外部调用已尝试而结果不明时保持 unknown，不重复派发。旧 v1 followup grant 按原 deadline、一次 Model 与零 Tool 回放。新 v2 无 checkpoint 时只在 Store 能证明目标先前 completed／unknown 终态、准确 State revision／digest 与 transcript 延续后启动；先前 unknown 外部调用由签名 grant 的 `priorOutcomeUnknown` 进入首次模型提示，不得作为可重放授权。初始 child 的新派发仍要求未过期、未消费的短期启动 grant；已激活并持久 ACK 的首轮恢复只把原 grant 作为历史身份与工具上界核验，不重新消费它。恢复须先隔离旧执行者，再核对 grant 在激活时有效、父资金已派发、子 Run 尚未到期且没有模型、工具或其他外部尝试记录；缺一则保持恢复诊断或 unknown，不按过期 grant 创建新子 Run。
 
@@ -418,6 +418,7 @@ lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 res
 interaction，不属于 dispatch 或 lifecycle attempt，因而不进入 resource admission；child tool/shell permit 使用
 durable FIFO waiter、原子 promotion + reservation 与有界 wait deadline；超时通过主 Runtime 的
 canonical failure terminal 收敛，不转换成普通 child tool error。
+Service 选择 Tool／Task 的预留及释放未派发预留时，只接受 `reserved`／`dispatch_started` 状态的准确 `tool:<toolCallId>`、当前获批回执的 `:approval:<receiptId>` 或当前 suspended attempt 的 `:resume:<parentAttempt>`。调用 ID 本身可以含冒号；若后缀身份同时是其他调用的原始 ID，拒绝将其关联到本调用。缺少本调用预留时在 Host acknowledgement 与机制调用之前拒绝；正常调用的 admission digest 不包含 sibling 的预留，局部失败也不能释放 sibling。验证见 [预留身份回归](../../apps/kite-service/test/runtime/tool-reservation-identity.test.ts)及[失败隔离](../../apps/kite-service/test/isolated/runtime/runtime-tool-effect-failure-isolation.test.ts)。
 本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分
 command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudget`
 开启但 `boundedCancellation` 关闭时，模型不披露 writer、Shell 或 child capability，
@@ -430,6 +431,8 @@ feature 关闭、决定无法持久化或 controller 不可用都 fail closed。
 host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resource/tool 与读取 Provider
 snapshot 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
 把这些路径提升为 unrestricted sealed scope。
+
+无 sealed boundary 的普通开发配置由 Service 为已获准的 `web_fetch` 显式注入公开主机机制策略，仍要求逐跳地址校验与持久决定；缺 production boundary 不能使用该策略，完整约束见[网络执行边界](execution-boundary.md#network-projection-and-durable-admission)。
 
 remote HTTP MCP 的最终参数在 SDK dispatch 前只经过一次 deep-frozen bounded
 JSON/schema/secret inspection，并绑定 exact endpoint 与已批准的 execution boundary。空或非空合法参数
@@ -449,7 +452,7 @@ handler。
 
 Builtin operation receipt/result projection 只产生模型内容、双流内容与 Runtime 结果元数据，不包含 display hint。Skill 与 Plan executor 输出可以携带领域 events；capability-backed `tool_search` 没有第二 concrete executor，Builtin prepared adapter 从 frozen search result 逐字段投影既有 `capability.search_completed` 与 stdout。App Tool Pipeline 只按顺序提交这些事实并形成 terminal，不重新计算搜索结果。App 根据持久 RuntimeEvent 与结果元数据决定展示。Skill activation 的 disclosure、approval 与 fork adapter 仍属于 App tool coordinator 的跨领域治理边界。
 
-`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 完整读取声明文件，不设旧的 128 KiB 字节额度，仍要求非 symlink 且位于 Skill 根目录内；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
+`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 完整读取声明文件，不设旧的 128 KiB 字节额度，仍要求非 symlink 且位于 Skill 根目录内。Workflow 编译绑定 canonical root 与目录对象身份并纳入 revision；已有 root alias 只有仍指向编译根目录时可读，后续换绑失败。引用读取通过 no-follow FD、下级目录身份、真实路径与读取前后文件身份校验，不能在 catalog snapshot 后经中间目录 symlink 越界；验证见 [引用边界回归](../../packages/builtin-runtime/test/skills/reference-boundary.test.ts)。completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
 
 `activate_skill` 也已迁入 Builtin catalog：Controller 保留 disclosure、approval 与 mode-policy 前置治理；entry parser 负责 activation validation、inline/fork 生命周期、fork 结构化输出校验、frame close 和 verification 投影。fork 子 Agent 仅作为受治理 provider adapter 注入。
 
@@ -468,7 +471,7 @@ App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 
 与 RM schema parity 测试棘轮守护：Builtin catalog 的 27/19/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
 模型参数包含 `command` 及可选 `description`、`timeout_ms`、`yield_ms`、`mode`、`result_disposition`；未提供
-`timeout_ms` 时，新建／已升级无累计额度 Run 的有限命令使用 Run 剩余期限，旧有限调用保留 600000ms
+`timeout_ms` 时，无期限主 Run 的有限命令没有默认总超时，有期限的新子 Run 使用自身剩余期限；旧有限调用保留 600000ms
 默认硬超时，显式正整数可以覆盖。显式 service 的跨轮生命周期仍需准确 Runtime 授权；副作用分类和审计 `action.intent` 可由命令形态
 派生，但审批 payload 不接受模型建议授权或 prefix rule。[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md) 的回归语料必须证明 `ls`、`pwd`、`rg`、
 direct `git status`/无patch `git log`在phase baseline内可direct，Workspace mutation与local Git扩scope进入既有

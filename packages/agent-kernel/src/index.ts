@@ -349,6 +349,7 @@ export {
   normalizeAgentEvent,
   reduceAgentState,
 } from './reducer';
+export { fundingDeadlineMatches, resourceDeadlineMs } from './resource-deadline';
 export type {
   StateDispatchedChildDelegationProof,
   StateLiveAfterTurnDelegationProof,

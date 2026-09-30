@@ -9,6 +9,7 @@ import {
   fundingBudgetForRun,
   planCrossSessionTriggerTurnBackup,
   reduceResourceBudgetState,
+  resourceDeadlineMs,
   runtimeHostStateActivePlanning,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type {
@@ -1399,12 +1400,16 @@ export function createRootAgentMailboxPort(
           )
             return { ok: false, code: 'budget_unconfigured' };
           const nowMs = Date.now();
-          const deadlineAt = Date.parse(budget.deadlineAt);
+          const deadlineAt =
+            budget.deadlineAt === null ? null : resourceDeadlineMs(budget.deadlineAt);
           const minimumWindow = Math.max(60_000, (policy.firstAttemptTimeoutMs ?? 0) + 5_000);
           if (
             !Number.isSafeInteger(minimumWindow) ||
-            !Number.isFinite(deadlineAt) ||
-            deadlineAt - nowMs < minimumWindow
+            (deadlineAt === null
+              ? state.childSessionOrigin !== undefined ||
+                budget.budget.unboundedRunDuration !== true
+              : !Number.isFinite(deadlineAt)) ||
+            (deadlineAt === null ? Infinity : deadlineAt) - nowMs < minimumWindow
           )
             return { ok: false, code: 'expired' };
           if (Object.values(budget.reservations).some((item) => item.state === 'unknown'))
@@ -1420,6 +1425,7 @@ export function createRootAgentMailboxPort(
           upper.counters.modelRequests = 1;
           upper.counters.inputTokens = inputTokens;
           upper.counters.outputTokens = policy.maxOutputTokens ?? 0;
+          if (deadlineAt === null) upper.gauges.elapsedRunMs = minimumWindow;
           upper.gauges.activeSubagents = 1;
           const submissionId = `submission_${sha256(JSON.stringify([messageId, 'trigger_turn']))}`;
           const backupReservationId = `backup_${sha256(JSON.stringify([submissionId, scope.runId]))}`;

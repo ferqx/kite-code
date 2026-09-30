@@ -27,6 +27,7 @@ export interface AppStateToolPipelinePersistence
   readonly createSandboxLifecycle: (input: {
     readonly prepared: Readonly<PreparedToolInvocation>;
     readonly artifacts: SandboxPreparationArtifactPort;
+    readonly onExecutionSupervisorStarted?: () => void;
   }) => SandboxPreparationLifecycle;
 }
 

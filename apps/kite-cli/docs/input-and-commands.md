@@ -10,7 +10,7 @@
 
 目标 Session 存在可引导的活动 Run 时，纯文本优先形成 `steer_turn`，由 Service 在同一 Run/Turn identity 下持久接纳；“等待后台结果”同样属于活动 Run。客户端不能用本地 Working 状态猜测归属。只有 Run 已结束、处于不可引导收尾或输入明确属于后继任务时，才进入按 Session 绑定的 FIFO 与 Footer queued 层。receipt 与 durable user.message 乱序都按稳定 submission identity 收敛为唯一用户块。runtime_busy 使用新 command identity 有界退避，revision_conflict 在同 command identity 等待 authoritative 状态后重试；不能清空队列或取消仍运行的 Subagent。
 
-活动 Run 引导不会创建后继 Run；处理后 required child 仍未终态时可再次进入同一受管等待。真正后继输入的 accepted revision 之前，旧 terminal 不能结束后继 Run。排队 chrome 不参与消息区高度预算，queue-only 更新不能重挂载状态行或改变展开。异步本地命令绑定 Session 与 turn count，不能把迟到结果写入新会话。
+已接纳主 Run 的完成等待没有客户端总期限，以准确 Run 终态、取消或连接错误收敛；命令受理与 rewind 的等待期限仍按各自操作执行。活动 Run 引导不会创建后继 Run；处理后 required child 仍未终态时可再次进入同一受管等待。真正后继输入的 accepted revision 之前，旧 terminal 不能结束后继 Run。排队 chrome 不参与消息区高度预算，queue-only 更新不能重挂载状态行或改变展开。异步本地命令绑定 Session 与 turn count，不能把迟到结果写入新会话。
 
 命令 metadata、解析与生产 callback 三者共同决定可用性。`/compact reset` 已接入 bootstrap 的 handleContextReset，先预检再清除 active checkpoint；失败保留旧 checkpoint。帮助中 Ctrl+E/`?` 与实际处理的差异记录在开发 backlog，不借文档修改产品代码。
 

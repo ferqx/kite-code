@@ -69,7 +69,7 @@ function runningShellState(status: 'running' | 'cancelled' = 'running'): AgentSt
 }
 
 function runningTaskControlState(
-  name: 'task_read' | 'task_wait' | 'task_cancel',
+  name: 'task_read' | 'task_wait' | 'task_cancel' | 'shell_stop',
   status: 'running' | 'succeeded' | 'cancelled' = 'running',
 ): AgentState {
   const initial = createInitialAgentState({
@@ -87,11 +87,11 @@ function runningTaskControlState(
           toolCallId: 'control',
           name,
           modelMessageId: 'message-1',
-          args: { task_ids: ['child-1'] },
+          args: name === 'shell_stop' ? { shell_id: 'shell-1' } : { task_ids: ['child-1'] },
           createdAtTurnId: 'turn-1',
           status,
-          effectClass: 'read_only',
-          sideEffect: false,
+          effectClass: name === 'shell_stop' ? 'external_side_effect' : 'read_only',
+          sideEffect: name === 'shell_stop',
         },
       },
       queue: [],
@@ -383,7 +383,7 @@ describe('State effect admission policy', () => {
     ).toBe(false);
   });
 
-  for (const name of ['task_read', 'task_wait', 'task_cancel'] as const) {
+  for (const name of ['task_read', 'task_wait', 'task_cancel', 'shell_stop'] as const) {
     test(`admits only the exact live ${name} terminal across child settlement revisions`, () => {
       const state = runningTaskControlState(name);
       const taskLease = {
@@ -437,102 +437,128 @@ describe('State effect admission policy', () => {
     });
   }
 
-  test('rejects cross-bound or settled task-control concurrent results', () => {
-    const state = runningTaskControlState('task_wait');
-    const taskLease = {
-      turnId: 'turn-1',
-      effect: { type: 'run_tools' as const, toolCallIds: ['control'] },
-    };
-    const terminal: KernelEvent = {
-      type: 'tool.finished',
-      toolCallId: 'control',
-      name: 'task_wait',
-      result: { ok: true, command: '', exitCode: 0, stdout: '{}', stderr: '' },
-    };
-
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        state,
-        {
-          ...taskLease,
-          effect: { type: 'run_tools', toolCallIds: ['other'] },
-        },
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        state,
-        { ...taskLease, turnId: 'other-turn' },
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        runningTaskControlState('task_wait', 'succeeded'),
-        taskLease,
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        runningTaskControlState('task_wait', 'cancelled'),
-        taskLease,
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+  for (const name of ['task_wait', 'shell_stop'] as const) {
+    test(`rejects cross-bound or settled ${name} concurrent results`, () => {
+      const state = runningTaskControlState(name);
+      const taskLease = {
+        turnId: 'turn-1',
+        effect: { type: 'run_tools' as const, toolCallIds: ['control'] },
+      };
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+          type: 'tool.started',
+          toolCallId: 'control',
+        }),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+          type: 'capability.execution_started',
+          invocationId: 'controlInvocation',
+          attempt: 2,
+          startedAt: '2026-08-20T00:00:02.000Z',
+        }),
+      ).toBe(false);
+      const terminal: KernelEvent = {
         type: 'tool.finished',
         toolCallId: 'control',
-        name: 'read_file',
-        result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
-      }),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        {
-          ...state,
-          capabilities: { ...state.capabilities, invocations: {} },
-        },
-        taskLease,
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(
-        {
-          ...state,
-          capabilities: {
-            ...state.capabilities,
-            invocations: {
-              controlInvocation: {
-                ...state.capabilities.invocations.controlInvocation!,
-                status: 'recorded',
+        name,
+        result: { ok: true, command: '', exitCode: 0, stdout: '{}', stderr: '' },
+      };
+
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          {
+            ...state,
+            turn: { ...state.turn, status: 'aborted' },
+          },
+          taskLease,
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          state,
+          {
+            ...taskLease,
+            effect: { type: 'run_tools', toolCallIds: ['other'] },
+          },
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          state,
+          { ...taskLease, turnId: 'other-turn' },
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          runningTaskControlState(name, 'succeeded'),
+          taskLease,
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          runningTaskControlState(name, 'cancelled'),
+          taskLease,
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+          type: 'tool.finished',
+          toolCallId: 'control',
+          name: 'read_file',
+          result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
+        }),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          {
+            ...state,
+            capabilities: { ...state.capabilities, invocations: {} },
+          },
+          taskLease,
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(
+          {
+            ...state,
+            capabilities: {
+              ...state.capabilities,
+              invocations: {
+                controlInvocation: {
+                  ...state.capabilities.invocations.controlInvocation!,
+                  status: 'recorded',
+                },
               },
             },
           },
-        },
-        taskLease,
-        terminal,
-      ),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
-        type: 'capability.execution_unknown',
-        invocationId: 'foreign-invocation',
-        reason: 'foreign',
-        finishedAt: '2026-08-20T00:00:02.000Z',
-      }),
-    ).toBe(false);
-    expect(
-      isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
-        type: 'user.message_appended',
-        messageId: 'foreign-event',
-        content: 'foreign',
-      }),
-    ).toBe(false);
-  });
+          taskLease,
+          terminal,
+        ),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+          type: 'capability.execution_unknown',
+          invocationId: 'foreign-invocation',
+          reason: 'foreign',
+          finishedAt: '2026-08-20T00:00:02.000Z',
+        }),
+      ).toBe(false);
+      expect(
+        isConcurrentTaskControlEffectEventCurrent(state, taskLease, {
+          type: 'user.message_appended',
+          messageId: 'foreign-event',
+          content: 'foreign',
+        }),
+      ).toBe(false);
+    });
+  }
 
   test('requires exact capability and Tool terminal pairs for every concurrent task-control call', () => {
     const first = runningTaskControlState('task_wait');

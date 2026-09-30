@@ -272,6 +272,67 @@ test('direct child tree reads only matching lineage and current-Run unread count
   expect(reads).toEqual(['owner:parent', 'child:run-1:child', 'owner:parent', 'inbox:run-1']);
 });
 
+test('direct child tree reads every page and preserves lineage checks on later pages', () => {
+  const session = {
+    threadId: 'parent',
+    projectId: 'project',
+    canonicalWorkspaceDigest: 'sha256:workspace',
+  };
+  const entries = Array.from({ length: 131 }, (_, index) => ({ sessionId: `child-${index}` }));
+  type Cursor = NonNullable<Parameters<KiteSessionAppServerStorageOwner['listChildSessions']>[2]>;
+  const cursors: (Cursor | undefined)[] = [];
+  const owner = {
+    runWithSessionExecution: (_id: string, operation: () => unknown) => operation(),
+    listChildSessions: (_id: string, limit: number, cursor?: Cursor) => {
+      cursors.push(cursor);
+      const offset = cursor?.updatedAt ?? 0;
+      return {
+        entries: entries.slice(offset, offset + limit),
+        ...(offset + limit < entries.length
+          ? { nextCursor: { updatedAt: offset + limit, sessionId: `child-${offset + limit}` } }
+          : {}),
+      };
+    },
+    readChildSession: (_parent: string, id: string) => ({
+      state: {
+        session: { ...session, threadId: id },
+        turn: { status: 'active' },
+        activeTaskId: `task-${id}`,
+        childSessionOrigin: { parentSessionId: id === 'child-130' ? 'foreign-parent' : 'parent' },
+      },
+    }),
+    storage: {
+      sessions: { loadSnapshot: () => ({ session }) },
+      crossSessionQueueMail: { readUnreadDirectChildMail: () => ({ count: 0 }) },
+    },
+  } as unknown as KiteSessionAppServerStorageOwner;
+  const mailbox = createCrossSessionAgentMailComposition({
+    owner,
+    committers: { receiveTarget: async () => {} },
+    runTargetDelivery,
+  }).mailbox;
+  const children = mailbox.listDirectChildren!('parent', 'run', 63);
+  expect(children).toHaveLength(130);
+  expect(children.at(-1)?.agentId).toBe('child-129');
+  expect(cursors).toEqual([
+    undefined,
+    { updatedAt: 63, sessionId: 'child-63' },
+    { updatedAt: 126, sessionId: 'child-126' },
+  ]);
+  const brokenOwner = {
+    ...owner,
+    listChildSessions: () => ({ entries: [], nextCursor: { updatedAt: 1, sessionId: 'same' } }),
+  } as unknown as KiteSessionAppServerStorageOwner;
+  const brokenMailbox = createCrossSessionAgentMailComposition({
+    owner: brokenOwner,
+    committers: { receiveTarget: async () => {} },
+    runTargetDelivery,
+  }).mailbox;
+  expect(() => brokenMailbox.listDirectChildren!('parent', 'run', 63)).toThrow(
+    'pagination did not advance',
+  );
+});
+
 test('target queue serializes concurrent source deliveries before sequence allocation', async () => {
   const receipts = new Map<string, number>();
   const sequences: number[] = [];

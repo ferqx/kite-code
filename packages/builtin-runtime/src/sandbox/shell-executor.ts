@@ -197,7 +197,7 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
 export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecutor {
   return async function executeBuiltinShell(input: ShellInput): Promise<ShellResult> {
     const timeoutMs =
-      input.mode === 'service' && input.timeoutMs === undefined
+      input.timeoutMs === null || (input.mode === 'service' && input.timeoutMs === undefined)
         ? undefined
         : resolveShellTimeoutMs(input.timeoutMs);
     let timedOut = false;

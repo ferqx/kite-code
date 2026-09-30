@@ -66,7 +66,7 @@ Runtime 明确提供的 `reasoning.activity` 仍按 request/segment identity 投
 
 切换已有会话的校准中间态保留上一条已确认权限作为禁用占位，并维持按钮不透明，不回退显示 `Auto`；目标历史返回后一次替换为该会话的真实权限，加载期间不会把占位值提交给目标会话。权限命令只有在连接发送或等待回执期间中断时才标记为结果未知；服务端明确拒绝保留原始原因。真正丢失回执后只读核对持久历史，目标权限已经生效时直接确认成功，不自动重放命令。
 
-[消息投影](../src/presentation.ts)将失败的 `run.terminal`／`turn.terminal` 转成对应 Turn 的一条 system 消息；使用稳定消息身份合并双终态和重复历史，明确认证失败可以更新先到的通用提示。Run 通知优先使用携带的 Turn identity，旧运行的迟到终态不结束其他 Turn 的思考状态。取消不新增失败消息，错误不伪装成助手成功回复。Service 只传递安全错误分类，不把 Provider 原始响应写入正文。[投影回归](../test/presentation.test.ts)覆盖身份、去重和取消，[真实 Service 回归](../test/session-calibration.test.ts)覆盖 HTTP 401 首次无回复、实时显示与历史重读一致且不重发。
+[消息投影](../src/presentation.ts)将失败的 `run.terminal`／`turn.terminal` 转成稳定 `failure:<turnId>`、`systemKind=turn_failure` 的一条 system 消息。简要原因和安全 outcome 保存在专属展示字段，详情保留已提供的 summary 或分类说明。双终态与重复历史按完整展示内容合并；同分类更丰富的说明／outcome 会更新详情，迟到的通用终态不会降级已有原因，不同未知分类也不沿用旧认证解释。Run 通知优先使用携带的 Turn identity，旧运行的迟到终态不结束其他 Turn 的思考状态。取消不新增失败消息，错误不伪装成助手成功回复。共享 [TurnFailure](../../../packages/kite-client-ui/src/TurnFailure.tsx)以工具行样式保持摘要可见、按需展开详情；按构建时的 `NODE_ENV` 区分展示：开发模式展开安全诊断字段，生产模式仅展示一段纯文本失败说明，不显示原因代码、执行结果、重试安全性或后续处理列表；失败行不随整轮过程折叠，不改变 Runtime 状态或派发重试。Service 只传递安全错误分类，不把 Provider 原始响应写入正文；缺少原始异常时客户端不补造。[投影回归](../test/presentation.test.ts)与[失败详情回归](../test/turn-failure-presentation.test.ts)覆盖身份、详情更新、去重、取消及历史／实时一致，[真实 Service 回归](../test/session-calibration.test.ts)覆盖 HTTP 401 首次无回复、实时显示与历史重读一致且不重发。
 
 ## HTML 预览优先的界面迭代
 

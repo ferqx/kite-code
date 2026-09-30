@@ -10,7 +10,7 @@ type Activation = Parameters<typeof activateAcceptedChildSession>[0];
 function fixture(persistAck: boolean, independentTurnDeadline = false) {
   const calls: string[] = [];
   let childRunOrigin: { originSessionId?: string; originRunId?: string } | undefined;
-  let configuredDeadlineAt: string | undefined;
+  let configuredDeadlineAt: string | null | undefined;
   const now = Date.now();
   const childThreadId = `child_${'a'.repeat(64)}`;
   const parentSessionId = 'parent';

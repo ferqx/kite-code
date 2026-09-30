@@ -268,12 +268,14 @@ export function createPreparedAppShellExecutor(input: {
   Object.defineProperty(executor, APP_PREPARED_SHELL_EXECUTION_, {
     enumerable: false,
     value: Object.freeze({
-      execute: async (preparedInput: Readonly<BuiltinPreparedShellExecutionInput>) => {
+      execute: async (preparedInput: Parameters<AppPreparedShellExecutionPort['execute']>[0]) => {
+        const { onHostShellSelected, ...builtinPreparedInput } = preparedInput;
         const decision = await prepare();
         if (decision.mode === 'sandbox' && preparedExecutionPort) {
-          return preparedExecutionPort.execute(preparedInput);
+          return preparedExecutionPort.execute(builtinPreparedInput);
         }
         if (decision.mode === 'host_shell' && rawHostExecutor) {
+          onHostShellSelected?.();
           return projectAppHostShellResult(
             await rawHostExecutor(shellInputFromPrepared(preparedInput)),
           );

@@ -693,7 +693,7 @@ function createShellExecutor(input: {
       shellInput: Readonly<{
         readonly workspace: string;
         readonly command: string;
-        readonly timeoutMs?: number;
+        readonly timeoutMs?: number | null;
         readonly mode?: 'finite' | 'service';
         readonly signal: AbortSignal;
         readonly readOnly: boolean;
@@ -712,9 +712,14 @@ function createShellExecutor(input: {
       ) {
         throw new Error('Prepared Shell invocation changed before execution.');
       }
+      let releaseInitialWait!: () => void;
+      const started = new Promise<void>((resolve) => {
+        releaseInitialWait = resolve;
+      });
       const lifecycle = input.persistence.createSandboxLifecycle({
         prepared: input.prepared,
         artifacts: composition!.artifacts,
+        onExecutionSupervisorStarted: releaseInitialWait,
       });
       const execute = async (
         signal: AbortSignal,
@@ -742,6 +747,7 @@ function createShellExecutor(input: {
           ...(shellInput.readOnly ? { executionTrust: 'policy_proven_read_only' as const } : {}),
           ...(onProgress ? { onProgress } : {}),
           lifecycle,
+          onHostShellSelected: releaseInitialWait,
         });
         if (result.status === 'running') {
           throw new Error('Prepared Shell Provider returned a nested running handle.');
@@ -752,6 +758,7 @@ function createShellExecutor(input: {
         ownerKey: input.ownerKey,
         mode: shellInput.mode ?? 'finite',
         yieldMs: shellInput.yieldMs ?? 0,
+        started,
         execute: (signal, onProgress) =>
           execute(AbortSignal.any([signal, shellInput.signal]), (chunk, stream) => {
             onProgress(chunk, stream);

@@ -66,7 +66,7 @@ export interface ShellInput {
   /** 中止信号，取消时 kill 子进程 / Abort signal to kill child process on cancellation */
   signal?: AbortSignal;
   /** 最大运行时间（毫秒）；超时后终止子进程 / Max runtime in milliseconds; kills child on timeout */
-  timeoutMs?: number;
+  timeoutMs?: number | null;
   /** Service executions have no total deadline unless timeoutMs is explicit. */
   mode?: 'finite' | 'service';
   /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */

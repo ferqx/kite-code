@@ -97,6 +97,8 @@ digest，使旧 release evidence 失效。
 
 ## Network projection and durable admission
 
+普通开发配置没有 sealed `ExecutionBoundary` 时，Service 在工具管线已授权的 `web_fetch` 调用中显式注入 `public` 机制策略，允许公开 DNS 主机及公开跨主机跳转。该策略继续复用下面的实际地址检查、连接 pinning 和 socket 前持久决定；缺配置、缺决定记录端口或 production 配置缺 sealed boundary 仍 fail closed。`public` 不属于 `ExecutionBoundary` schema，不用于 Shell／MCP 的封存权限，也不能替代已有 `off`／`allowlist`。组合与回归见 [Service owner](../../apps/kite-service/docs/composition-and-execution.md)和[开发期 Web 测试](../../apps/kite-service/test/runtime/web-development-boundary.test.ts)；取舍见 [开发期 Web 策略 Note](../../.agents/notes/implemented/bug-fix/2026-09-30-development-web-network-policy.md)。
+
 存在 sealed `ExecutionBoundary` 时，Runner 总是派生不可变 `NetworkBoundaryPolicy`。
 `networkBoundary=false` 只会把 policy 收紧为 `off`，不会回到开发期 `networkMode=allow_all`。开启后，当前
 唯一具备透明逐调用执行层的网络工具是进程内 `web_fetch`：每次 robots、正文和 redirect hop
@@ -249,6 +251,8 @@ cancellation；`cwd` 必须等于冻结的 canonical Workspace。backend discove
 负责 durable identity/plan 重验并把已批准 argv 交给 Host；只有 Host process supervisor 可以实际 spawn，
 并负责 timeout、bounded output drain 与 descendant cleanup。Builtin Provider 不能通过异常、不可用或 cleanup
 失败回退到第二个 process owner。
+
+启用沙箱的异步 Managed Shell 必须在准确 supervisor-started 持久确认之后才能返回运行句柄；该确认只证明交接，不证明命令已经成功完成。Preparation 与 dispatch 仍要求活动 attempt。原 Tool receipt 成功交接运行句柄后，仅准确 Shell invocation／attempt 和已确认 supervisor 可以继续记录该进程的收尾证据，不扩大新派发资格。已获准的显式 Host Shell 分支不制造沙箱 ACK。Service 接线与 Native 确认失败时零 GO 的回归见 [执行 owner](../../apps/kite-service/docs/composition-and-execution.md#准入到执行)。
 
 POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sandbox-writable `dataRoot`（TMP/cache）
 放入两个独立 private base；profile/bind 只能包含 data root。即使 full-access 已授权用户文件系统，macOS

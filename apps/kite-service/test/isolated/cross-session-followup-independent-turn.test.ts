@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { resourceDeadlineMs } from '@kite-ai/runtime-host/kernel-adapter';
 import { exerciseChildOrchestration } from './child-session-orchestrator-integration-fixture';
 import { submitRealParentFollowup } from './cross-session-followup-pipeline-fixture';
 
@@ -92,7 +93,8 @@ test('independent followup completes more than twelve role-authorized Tool round
       expect(target?.resourceBudget.status).toBe('active');
       if (target?.resourceBudget.status !== 'active') throw new Error('Missing child budget.');
       expect(
-        Date.parse(target.resourceBudget.deadlineAt) - Date.parse(target.resourceBudget.startedAt),
+        resourceDeadlineMs(target.resourceBudget.deadlineAt) -
+          Date.parse(target.resourceBudget.startedAt),
       ).toBe(30 * 60_000);
       expect(target.resourceBudget.budget.unboundedToolInvocations).toBe(true);
       expect(target.resourceBudget.budget.durationOnlyChildRun).toBe(true);

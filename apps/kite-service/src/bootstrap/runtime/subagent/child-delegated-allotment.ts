@@ -9,6 +9,7 @@ import {
   type ResourceBudgetReconciledEvent,
   type ResourceBudgetReservedEvent,
   reduceResourceBudgetState,
+  resourceDeadlineMs,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeEvent, RuntimeState } from '../state-runtime';
 
@@ -60,14 +61,14 @@ export function planChildDelegatedAllotment(input: {
     (transient.state !== 'dispatch_started' && transient.state !== 'unknown')
   )
     throw new Error('Child allotment transient reservation is not reconcilable.');
-  const originalDeadline = Date.parse(ledger.deadlineAt);
+  const originalDeadline = resourceDeadlineMs(ledger.deadlineAt);
   // The parent must still own a live funding Run when it accepts the Task.
   // Each child Run later starts its own 30-minute clock at activation.
   // Child creation is rejected at capacity;
   // no child Session or execution lease is created for an unadmitted request.
   const duration = DEFAULT_SUBAGENT_TIMEOUT_MS;
   if (
-    !Number.isSafeInteger(originalDeadline) ||
+    (ledger.deadlineAt !== null && !Number.isSafeInteger(originalDeadline)) ||
     originalDeadline <= now ||
     !Number.isSafeInteger(now + duration)
   )

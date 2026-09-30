@@ -18,7 +18,10 @@ export const APP_PREPARED_SHELL_EXECUTION_ = Symbol.for('kite.app.prepared-shell
 
 export interface AppPreparedShellExecutionPort {
   readonly execute: (
-    input: Readonly<BuiltinPreparedShellExecutionInput>,
+    input: Readonly<BuiltinPreparedShellExecutionInput> & {
+      /** Existing startup policy selected explicit Host Shell execution without a sandbox lifecycle. */
+      readonly onHostShellSelected?: () => void;
+    },
   ) => Promise<Readonly<BuiltinShellExecutionResult>>;
 }
 

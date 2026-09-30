@@ -288,10 +288,13 @@ for (const [key, value] of Object.entries(globals)) {
 // React DOM must observe a DOM when it initializes its input event support.
 const { createRoot } = await import('react-dom/client');
 let root: ReturnType<typeof createRoot> | undefined;
+const originalNodeEnv = process.env.NODE_ENV;
 afterEach(async () => {
   if (root) await act(() => root?.unmount());
   root = undefined;
   document.body.innerHTML = '';
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
 });
 afterAll(() => {
   dom.window.close();
@@ -3329,4 +3332,202 @@ test('history without exact Turn identities stays in order and hides raw thinkin
           : 'reply',
     ),
   ).toEqual(['progress', 'tool', 'reply']);
+});
+
+test('reply failure stays visible outside the folded process and reveals diagnostics in development', async () => {
+  process.env.NODE_ENV = 'development';
+  const failure: Message = {
+    id: 'failure:turn-1',
+    turnId: 'turn-1',
+    role: 'system',
+    systemKind: 'turn_failure',
+    title: '回复失败',
+    status: 'failed',
+    settled: true,
+    text: '模型服务认证失败。请检查当前提供商的凭据和账号权限后再发送。',
+    failure: {
+      summary: '模型服务认证失败',
+      reasonCode: 'provider_auth_required',
+      outcome: { status: 'blocked', safeRetry: false, recoveryEntry: 'operator_action' },
+    },
+  };
+  await render(
+    <Conversation
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'progress',
+          turnId: 'turn-1',
+          role: 'assistant',
+          text: '正在核对连接',
+          settled: true,
+        },
+        failure,
+      ]}
+      turnActivity={{ turnId: 'turn-1', status: 'failed' }}
+    />,
+  );
+  const trigger = document.querySelector<HTMLButtonElement>(
+    '.turn-failure .tool-activity-summary',
+  )!;
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  expect(trigger.textContent).toContain('模型服务认证失败');
+  expect(document.querySelector('.agent-turn-process-messages')).toBeNull();
+  expect(document.querySelector('.turn-failure-details')).toBeNull();
+  expect(document.querySelector('.agent-turn-failure .turn-failure')).not.toBeNull();
+  expect(document.querySelector('.agent-turn-final')).toBeNull();
+  await click(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain('凭据和账号权限');
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain(
+    'provider_auth_required',
+  );
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain('执行受阻');
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain(
+    '先处理相关配置或服务问题',
+  );
+  expect(document.querySelector('.agent-turn-process-messages')).toBeNull();
+  await click(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+});
+
+test('production reply failure expands to plain text without diagnostic fields', async () => {
+  process.env.NODE_ENV = 'production';
+  await render(
+    <Conversation
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+      initialReading={{ top: 0, follow: true, expanded: { 'failure:turn-1': true } }}
+      messages={[
+        {
+          id: 'failure:turn-1',
+          turnId: 'turn-1',
+          role: 'system',
+          systemKind: 'turn_failure',
+          text: '模型服务认证失败。\n请检查凭据后再发送。',
+          settled: true,
+          status: 'failed',
+          failure: {
+            summary: '模型服务认证失败',
+            reasonCode: 'provider_auth_required',
+            outcome: { status: 'blocked', safeRetry: false, recoveryEntry: 'operator_action' },
+          },
+        },
+      ]}
+    />,
+  );
+  const trigger = document.querySelector<HTMLButtonElement>('.turn-failure button')!;
+  const detail = document.querySelector('.turn-failure-details')!;
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(detail.textContent).toBe('模型服务认证失败。 请检查凭据后再发送。');
+  expect(detail.querySelectorAll('p')).toHaveLength(1);
+  expect(detail.querySelector('dl')).toBeNull();
+  expect(detail.querySelector('code')).toBeNull();
+  for (const diagnostic of [
+    '原因代码',
+    '执行结果',
+    '直接重试',
+    '后续处理',
+    'provider_auth_required',
+  ]) {
+    expect(document.body.textContent).not.toContain(diagnostic);
+  }
+  await click(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('false');
+  await click(trigger);
+  expect(document.querySelector('.turn-failure-details')?.textContent).toBe(
+    '模型服务认证失败。 请检查凭据后再发送。',
+  );
+});
+
+test('reply failure without assistant output retains disclosure through detail enrichment and restored reading', async () => {
+  let saved: ReadingState | undefined;
+  const failure: Message = {
+    id: 'failure:turn-1',
+    turnId: 'turn-1',
+    role: 'system',
+    systemKind: 'turn_failure',
+    text: '当前记录未提供具体异常信息。',
+    settled: true,
+    status: 'failed',
+    failure: { summary: '本轮运行异常' },
+  };
+  const props = {
+    selected: true,
+    connected: true,
+    loading: false,
+    saveReading: (reading: ReadingState) => {
+      saved = reading;
+    },
+  };
+  await render(<Conversation {...props} messages={[failure]} />);
+  const trigger = document.querySelector<HTMLButtonElement>(
+    '.turn-failure .tool-activity-summary',
+  )!;
+  trigger.focus();
+  await click(trigger);
+  const enriched = {
+    ...failure,
+    text: '存储暂不可用，稍后重试。',
+    failure: { summary: '会话存储不可用', reasonCode: 'persistence_unavailable' },
+  };
+  await act(() => root!.render(<Conversation {...props} messages={[enriched]} />));
+  expect(document.querySelector('.turn-failure .tool-activity-summary')).toBe(trigger);
+  expect(document.activeElement).toBe(trigger);
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain('存储暂不可用');
+  await act(() => root!.render(null));
+  expect(saved?.expanded['failure:turn-1']).toBe(true);
+  await act(() =>
+    root!.render(
+      <Conversation key="restored" {...props} initialReading={saved} messages={[enriched]} />,
+    ),
+  );
+  expect(
+    document.querySelector('.turn-failure .tool-activity-summary')?.getAttribute('aria-expanded'),
+  ).toBe('true');
+  expect(document.querySelector('.turn-failure')?.getAttribute('data-restored-expanded')).toBe(
+    'true',
+  );
+});
+
+test('legacy turn failure is expandable while unrelated system failures keep their own presentation', async () => {
+  await render(
+    <Conversation
+      selected
+      connected
+      loading={false}
+      saveReading={() => {}}
+      messages={[
+        {
+          id: 'failure:old',
+          turnId: 'old',
+          role: 'system',
+          text: '旧会话的失败说明',
+          settled: true,
+          status: 'failed',
+        },
+        {
+          id: 'system:other',
+          role: 'system',
+          title: '独立诊断',
+          text: '其他信息',
+          settled: true,
+          status: 'failed',
+        },
+      ]}
+    />,
+  );
+  expect(document.querySelectorAll('.turn-failure')).toHaveLength(1);
+  expect(document.querySelector('.message.system')?.textContent).toContain('其他信息');
+  await click(document.querySelector<HTMLButtonElement>('.turn-failure .tool-activity-summary')!);
+  expect(document.querySelector('.turn-failure-details')?.textContent).toContain(
+    '旧会话的失败说明',
+  );
+  expect(document.querySelector('.turn-failure-details dl')).toBeNull();
 });

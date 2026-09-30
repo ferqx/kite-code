@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { AgentState, KernelEvent } from '@kite-ai/agent-kernel';
+import { fundingDeadlineMatches, resourceDeadlineMs } from '@kite-ai/agent-kernel';
 import { getAgentPhase } from '@kite-ai/runtime-contract';
 import { getActivePlanning } from './initial';
 import {
@@ -80,7 +81,7 @@ export interface CrossSessionFollowupAdmission {
   readonly submissionId: string;
   readonly fundingRunId: string;
   readonly backupReservationId: string;
-  readonly deadlineAt: number;
+  readonly deadlineAt: number | null;
   readonly executableUpperBound: ResourceUsage;
   readonly policy: CrossSessionFollowupPolicy;
 }
@@ -318,16 +319,18 @@ export function planCrossSessionTriggerTurnBackup<Receipt>(input: {
   if (ledger.runId !== fundingRunId)
     fail('budget_unconfigured', 'The current source Run does not own the funding ledger.');
   if (input.policy.executionMode !== 'independent_turn_v2') assertNoUnknown(state, fundingRunId);
-  const deadlineAt = Date.parse(ledger.deadlineAt);
+  const deadlineAt = ledger.deadlineAt === null ? null : resourceDeadlineMs(ledger.deadlineAt);
   const independent = input.policy.executionMode === 'independent_turn_v2';
   const minimumWindow = independent
     ? 1
     : Math.max(60_000, (input.policy.firstAttemptTimeoutMs ?? 0) + 5_000);
   if (
     !Number.isSafeInteger(input.nowMs) ||
-    !Number.isFinite(deadlineAt) ||
+    (deadlineAt === null
+      ? state.childSessionOrigin !== undefined || ledger.budget.unboundedRunDuration !== true
+      : !Number.isFinite(deadlineAt)) ||
     !Number.isSafeInteger(minimumWindow) ||
-    deadlineAt - input.nowMs < minimumWindow
+    (deadlineAt === null ? Infinity : deadlineAt) - input.nowMs < minimumWindow
   )
     fail('budget_exhausted', 'Funding Run deadline leaves no bounded first attempt.');
   const inputTokens = independent
@@ -350,6 +353,8 @@ export function planCrossSessionTriggerTurnBackup<Receipt>(input: {
     upper.counters.inputTokens = inputTokens;
     upper.counters.outputTokens = input.policy.maxOutputTokens ?? 0;
   }
+  if (deadlineAt === null)
+    upper.gauges.elapsedRunMs = independent ? upper.gauges.elapsedRunMs : minimumWindow;
   upper.gauges.activeSubagents = 1;
   const backupReservationId = identity('backup', [input.submissionId, fundingRunId]);
   const owned = [
@@ -475,7 +480,7 @@ export function planCrossSessionIndependentTurnActivation(input: {
   const budget = targetBudget.budget;
   const durationOnlyChildRun = upper.durationOnlyChildRun === true;
   const started = Date.parse(targetBudget.startedAt);
-  const deadline = Date.parse(targetBudget.deadlineAt);
+  const deadline = resourceDeadlineMs(targetBudget.deadlineAt);
   if (
     !Number.isSafeInteger(input.nowMs) ||
     !Number.isSafeInteger(started) ||
@@ -603,10 +608,13 @@ export function planCrossSessionFirstModelReplacement<Receipt>(input: {
     fail('budget_unconfigured', 'Original funding Run ledger is unavailable.');
   assertNoUnknown(fundingState, admission.fundingRunId);
   if (
-    !Number.isSafeInteger(admission.deadlineAt) ||
+    (admission.deadlineAt !== null && !Number.isSafeInteger(admission.deadlineAt)) ||
     !Number.isSafeInteger(input.nowMs) ||
-    input.nowMs >= admission.deadlineAt ||
-    Date.parse(ledger.deadlineAt) !== admission.deadlineAt
+    (admission.deadlineAt !== null && input.nowMs >= admission.deadlineAt) ||
+    !fundingDeadlineMatches(
+      ledger,
+      admission.deadlineAt === null ? null : new Date(admission.deadlineAt).toISOString(),
+    )
   )
     fail('budget_exhausted', 'Original funding deadline is stale or elapsed.');
   const backup =

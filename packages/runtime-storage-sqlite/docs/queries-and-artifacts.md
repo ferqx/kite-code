@@ -16,6 +16,8 @@ Directory 的 `hasRootSession(sessionId)` 直接按 `runtime_sessions` 主键查
 
 内部恢复可在同一 Store read snapshot 中按 childThreadId 查询不可变父 Tool 意图，或按 parentSessionId／childThreadId cursor 有界列出尚未失败、尚未结算的意图。返回创建、预算激活、父 dispatch ACK 和结算 marker，不返回 Task Artifact 正文或 sealed grant JSON。后者仅由准确父 Session execution／recovery handle scope 的私有 getter 读取并复核字节 digest；普通 Session 列表和客户端已知 ID 日志不使用此读口。
 
+`readIndependentFollowupTaskForSource` 是来源 Session execution scope 内的私有续轮读取口。在同一只读快照中核对直接父子血缘与 Workspace 身份、唯一 prepared Task／Run／submission、完整 v2 grant 引用、来源 accepted policy proof、new-turn route、Run start command 及来源终态审计／receipt。已结算结果只读取 prepared revision 到准确 terminal revision 的事件；后来的子 Run 不进入旧报告。身份选择可只读取 `turn.started`／`task.started` 元数据及当前执行身份，不加载 Model 正文或完整 transcript。证明缺失或冲突返回不可用，不取得目标执行权，不向普通日志或客户端暴露该端口。实现见 [followup proof](../src/kite-cross-session-followup.ts)，真实两轮报告隔离、父权限和篡改拒绝验证见 [Service／Store 回归](../../../apps/kite-service/test/isolated/cross-session-followup-new-turn.test.ts)。
+
 Artifact 保存与执行有关的私有大内容、结果或恢复资料；Store15 对子任务与模型私有 Artifact 不再施加旧单件固定字节上限，具体表转换及完整性校验见[事务 owner](transactions-and-state.md)。引用、digest、可读权限与安装范围共同校验。读取引用失败不能从另一个 invocation 或 profile 补数据。文件 preimage 与模型输入证据各有 privacy owner，不混用同一公开下载接口。
 
 单会话树删除与空间批量删除共用数据删除路径；空间删除合并全部目标树，只收集一次候选 Artifact、扫描一次保留引用，在同一 Store 写事务内，先收集树内行中的 typed Artifact ref，删除会话及子线程，再检查候选 Artifact ID 是否仍出现在保留的 Store 行中。保留引用检查对各表文本只扫描一次，同时匹配本次全部候选 ID；候选正文之间的引用按原删除顺序处理，避免对每个附件反复扫描全库。自身记录不算外部引用，共享引用、原始文本中的子串引用及无法解析的 JSON 文本仍参与保留判断。只有可证明已无保留引用的候选私有正文才删除；共享正文及无法从树内 ref 证明归属的孤立 Artifact 保留。该窄范围删除不开放常规 Artifact GC，也不提供物理文件覆写保证。
@@ -23,6 +25,8 @@ Artifact 保存与执行有关的私有大内容、结果或恢复资料；Store
 checkpoint metadata 可展示，不代表任意客户端获准恢复。真正恢复仍经过对应命令、数据校验及 execution authority。
 
 修改查询需同时核对结果字段、排序、访问限制和实际消费者；不因新增 UI 字段返回 raw Store event。规范见[日志查询](../../../docs/active/sqlite-runtime-log-query.md)、[私有 Artifact](../../../docs/active/private-artifact-storage.md)。
+
+内容寻址的 private Artifact 通过 [insertImmutableExact](../src/kite-home-artifacts.ts)幂等发布：相同引用、正文与稳定元数据允许以不同请求时间重发，数据库保留首次 `created_at`。kind、integrity、字节长度、格式版本、invocation ownership、evidence 与 expiry 仍逐字段严格比较，冲突拒绝；不通过覆盖已有行解决重复发布。`plan_artifacts` 使用独立的 task／plan／version 身份，仍按完整 metadata 精确比较，包括创建时间。此规则无需改写已有 Artifact 或迁移 schema。[Service backend 回归](../../../apps/kite-service/test/kite-home-artifact-backends.test.ts)经真实 writer、backend 和 Builtin private storage 验证重复自动审批输入的发布。
 
 验证：[log query](../test/log-query.test.ts)、[checkpoint query](../test/workspace-checkpoint-query.test.ts)、[artifacts](../test/kite-home-artifacts.test.ts)。
 

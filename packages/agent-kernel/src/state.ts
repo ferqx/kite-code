@@ -170,6 +170,8 @@ export interface AgentTranscriptState {
 export interface ResourceBudget {
   readonly version: 1;
   readonly maxRunDurationMs: number;
+  /** Main Run only: no execution deadline; numeric duration is a zero placeholder. */
+  readonly unboundedRunDuration?: true;
   readonly maxTurns: number;
   readonly maxModelRequests: number;
   readonly maxToolInvocations: number;
@@ -698,7 +700,7 @@ export interface AgentChildSessionLinkState {
   readonly fundingRunId: string;
   readonly delegatedReservationId: string;
   readonly delegatedUpperBoundDigest: string;
-  readonly deadlineAt: string;
+  readonly deadlineAt: string | null;
   readonly recoveryDiagnostic?: {
     readonly diagnosticCode: 'recovery_blocked' | 'evidence_inconsistent';
     readonly observedAt: string;
@@ -733,7 +735,7 @@ export interface AgentChildSessionOriginState {
   readonly fundingRunId: string;
   readonly delegatedReservationId: string;
   readonly delegatedUpperBoundDigest: string;
-  readonly deadlineAt: string;
+  readonly deadlineAt: string | null;
   readonly terminal?: {
     readonly status:
       | 'completed'
@@ -1285,7 +1287,9 @@ export interface AgentResourceBudgetActiveState {
   readonly status: 'active';
   readonly runId: string;
   readonly startedAt: string;
-  readonly deadlineAt: string;
+  readonly deadlineAt: string | null;
+  /** Immutable pre-upgrade funding identity; only run_deadline_removed may populate this. */
+  readonly previousDeadlineAt?: string;
   /** Time spent awaiting required child turns is excluded from this Run's active-time deadline. */
   readonly totalRequiredChildWaitMs?: number;
   readonly requiredChildWait?: {

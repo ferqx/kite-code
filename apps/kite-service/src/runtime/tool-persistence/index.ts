@@ -625,13 +625,16 @@ export function createAppStateToolPipelinePersistence(
     createSandboxLifecycle: ({
       prepared,
       artifacts,
+      onExecutionSupervisorStarted,
     }: {
       readonly prepared: Readonly<PreparedToolInvocation>;
       readonly artifacts: SandboxPreparationArtifactPort;
+      readonly onExecutionSupervisorStarted?: () => void;
     }) =>
       createAppToolPipelineSandboxLifecycle({
         prepared,
         artifacts,
+        ...(onExecutionSupervisorStarted ? { onExecutionSupervisorStarted } : {}),
         getState: input.getState,
         persistEvents: input.persistReceiptEvents,
         now: input.now,

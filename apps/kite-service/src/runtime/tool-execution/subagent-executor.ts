@@ -70,6 +70,7 @@ import {
   buildToolApproval,
   commandIdentityForToolApproval,
 } from '#kite-service/bootstrap/runtime/tool-policy';
+import { resourceReservationBelongsToToolCall } from '#kite-service/bootstrap/runtime/tool-reservation-identity';
 import type { ToolExecutionResult } from '#kite-service/bootstrap/runtime/tool-result';
 import {
   type AppToolTurnContext,
@@ -1551,7 +1552,9 @@ export async function executeAppTaskToolPipeline(input: {
   let reservationIds = Object.freeze(
     budget.status === 'active'
       ? Object.values(budget.reservations)
-          .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
+          .filter((reservation) =>
+            resourceReservationBelongsToToolCall(state, toolCallId, reservation),
+          )
           .map((reservation) => reservation.reservationId)
       : [],
   );
@@ -1698,7 +1701,9 @@ export async function executeAppTaskToolPipeline(input: {
     reservationIds = Object.freeze(
       budget.status === 'active'
         ? Object.values(budget.reservations)
-            .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
+            .filter((reservation) =>
+              resourceReservationBelongsToToolCall(state, toolCallId, reservation),
+            )
             .map((reservation) => reservation.reservationId)
         : [],
     );

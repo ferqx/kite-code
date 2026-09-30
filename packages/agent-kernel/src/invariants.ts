@@ -1,6 +1,7 @@
 import { childThreadIdForToolAttempt, sameChildTaskArtifactRef } from './child-session';
 import { sha256Hex } from './hash';
 import { isToolOutcome } from './normalization';
+import { resourceDeadlineMs } from './resource-deadline';
 import {
   type AgentState,
   APPLIED_EVENT_ID_TAIL_LIMIT,
@@ -102,15 +103,26 @@ function assertResourceBudget(state: AgentState): void {
   assert(
     active.runId.length > 0 &&
       validTimestamp(active.startedAt) &&
-      validTimestamp(active.deadlineAt),
+      (active.budget.unboundedRunDuration === true
+        ? active.deadlineAt === null
+        : validTimestamp(active.deadlineAt)),
     'active resource budget identity/timestamps are invalid.',
+  );
+  assert(
+    active.previousDeadlineAt === undefined ||
+      (active.budget.unboundedRunDuration === true &&
+        active.deadlineAt === null &&
+        validTimestamp(active.previousDeadlineAt) &&
+        Date.parse(active.previousDeadlineAt) > Date.parse(active.startedAt)),
+    'previous funding deadline requires an exact primary Run upgrade.',
   );
   const totalWait = active.totalRequiredChildWaitMs ?? 0;
   assert(
     Number.isSafeInteger(totalWait) &&
       totalWait >= 0 &&
-      Date.parse(active.deadlineAt) - Date.parse(active.startedAt) <=
-        active.budget.maxRunDurationMs + totalWait,
+      (active.budget.unboundedRunDuration === true ||
+        resourceDeadlineMs(active.deadlineAt) - Date.parse(active.startedAt) <=
+          active.budget.maxRunDurationMs + totalWait),
     'required child wait exceeds the active Run duration.',
   );
   const validTaskIds = (ids: readonly string[]): boolean =>
@@ -153,6 +165,7 @@ function assertResourceBudget(state: AgentState): void {
     'maxArtifactBytes',
   ];
   const zeroAllowedBudgetFields = new Set([
+    ...(budget.unboundedRunDuration === true ? ['maxRunDurationMs'] : []),
     ...(budget.durationOnlyChildRun === true || budget.unboundedCumulativeUsage === true
       ? [
           'maxTurns',
@@ -186,6 +199,14 @@ function assertResourceBudget(state: AgentState): void {
   assert(
     budget.unboundedCumulativeUsage === undefined || budget.unboundedCumulativeUsage === true,
     'unbounded cumulative budget marker is invalid.',
+  );
+  assert(
+    budget.unboundedRunDuration === undefined ||
+      (budget.unboundedRunDuration === true &&
+        budget.unboundedCumulativeUsage === true &&
+        budget.durationOnlyChildRun !== true &&
+        budget.maxRunDurationMs === 0),
+    'unbounded Run duration requires primary cumulative authority and zero duration.',
   );
   assert(
     budget.durationOnlyChildRun === undefined ||
@@ -447,6 +468,15 @@ function assertRetainedResourceBudgets(state: AgentState): void {
     ...(state.resourceBudget.status === 'active' ? [state.resourceBudget] : []),
     ...Object.values(retained),
   ];
+  if (state.childSessionOrigin !== undefined)
+    assert(
+      ledgers.every(
+        (ledger) =>
+          ledger.budget.unboundedCumulativeUsage !== true &&
+          ledger.budget.unboundedRunDuration !== true,
+      ),
+      'child Session cannot retain primary unbounded authority.',
+    );
   for (const [runId, ledger] of Object.entries(retained)) {
     assert(
       runId.length > 0 && ledger?.status === 'active' && ledger.runId === runId,
@@ -687,7 +717,9 @@ function committedUsageWithinBudget(
           (numberValue(budget, limit) ?? -1),
     ) &&
     Object.entries(gaugeLimits).every(
-      ([field, limit]) => gaugeSums[field]! <= (numberValue(budget, limit) ?? -1),
+      ([field, limit]) =>
+        (field === 'elapsedRunMs' && budget.unboundedRunDuration === true) ||
+        gaugeSums[field]! <= (numberValue(budget, limit) ?? -1),
     )
   );
 }
@@ -2154,7 +2186,7 @@ export function assertAgentStateInvariants(state: AgentState): void {
         /^sha256:[a-f0-9]{64}$/u.test(origin.delegatedUpperBoundDigest) &&
         origin.delegatedReservationId.length > 0 &&
         origin.fundingRunId.length > 0 &&
-        Number.isFinite(Date.parse(origin.deadlineAt)),
+        (origin.deadlineAt === null || Number.isFinite(resourceDeadlineMs(origin.deadlineAt))),
       'child Session origin is invalid.',
     );
     if (origin.terminal)

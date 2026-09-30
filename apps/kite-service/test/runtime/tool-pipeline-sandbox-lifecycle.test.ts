@@ -333,6 +333,127 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
 }
 
 describe('App State sandbox lifecycle composition', () => {
+  test('continues exact disposal after a supervised running handle is handed off', async () => {
+    const harness = createHarness();
+    await harness.lifecycle.recordPreparationIntent(harness.source);
+    await harness.lifecycle.recordPreparationReady(harness.plan);
+    const dispatch = await harness.lifecycle.recordExecutionDispatchIntent(harness.plan, {
+      dispatchId: 'handoff-dispatch',
+      supervisorNonce: 'handoff-nonce',
+    });
+    await harness.lifecycle.recordExecutionSupervisorStarted(harness.plan, {
+      dispatchId: dispatch.dispatchId,
+      dispatchIntentDigest: dispatch.dispatchIntentDigest,
+      supervisorPid: 42,
+      processGroupId: 42,
+      processStartIdentity: 'handoff-process',
+    });
+    harness.session.processEvent({
+      type: 'capability.execution_succeeded',
+      invocationId: harness.ack.attempt.invocationId,
+      resultDigest: 'handoff-result',
+      evidenceDigest: 'handoff-evidence',
+      artifact: {
+        artifactId: 'handoff-artifact',
+        kind: 'capability_result',
+        integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+        byteLength: 1,
+      },
+      finishedAt: NOW,
+    });
+    harness.session.processEvent({
+      type: 'tool.finished',
+      toolCallId: harness.ack.attempt.toolCallId,
+      name: 'shell_execute',
+      createdAt: NOW,
+      result: {
+        ok: true,
+        command: 'printf hello',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        resultMeta: { shellId: 'sh-exact-handoff', shellStatus: 'running' },
+      },
+    });
+    harness.lease.expectedRevision = harness.session.getState().revision;
+    expect(
+      harness.session.getState().capabilities.invocations[harness.ack.attempt.invocationId]?.status,
+    ).toBe('succeeded');
+    const disposal = await harness.lifecycle.recordDisposalIntent(harness.plan);
+    expect(
+      await harness.lifecycle.recordDisposalReceipt({
+        prepared: harness.plan,
+        purpose: disposal.purpose,
+        lifecycleIntentDigest: disposal.lifecycleIntentDigest,
+        cleanupAttempt: disposal.cleanupAttempt,
+        disposed: true,
+      }),
+    ).toMatchObject({ acknowledged: true, disposed: true });
+  });
+  test('terminal handles without an exact supervised attempt cannot continue preparation or cleanup', async () => {
+    for (const boundary of ['no-supervisor', 'different-attempt', 'exited-handle'] as const) {
+      const harness = createHarness();
+      await harness.lifecycle.recordPreparationIntent(harness.source);
+      if (boundary !== 'no-supervisor') {
+        await harness.lifecycle.recordPreparationReady(harness.plan);
+        const dispatch = await harness.lifecycle.recordExecutionDispatchIntent(harness.plan, {
+          dispatchId: 'negative-dispatch',
+          supervisorNonce: 'negative-nonce',
+        });
+        await harness.lifecycle.recordExecutionSupervisorStarted(harness.plan, {
+          dispatchId: dispatch.dispatchId,
+          dispatchIntentDigest: dispatch.dispatchIntentDigest,
+          supervisorPid: 42,
+          processGroupId: 42,
+          processStartIdentity: 'negative-process',
+        });
+      }
+      harness.session.processEvent({
+        type: 'capability.execution_succeeded',
+        invocationId: harness.ack.attempt.invocationId,
+        resultDigest: 'handoff-result',
+        evidenceDigest: 'handoff-evidence',
+        artifact: {
+          artifactId: 'handoff-artifact',
+          kind: 'capability_result',
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+          byteLength: 1,
+        },
+        finishedAt: NOW,
+      });
+      harness.session.processEvent({
+        type: 'tool.finished',
+        toolCallId: harness.ack.attempt.toolCallId,
+        name: 'shell_execute',
+        createdAt: NOW,
+        result: {
+          ok: true,
+          command: 'printf hello',
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          resultMeta: {
+            shellId: 'sh-negative-handoff',
+            shellStatus: boundary === 'exited-handle' ? 'exited' : 'running',
+          },
+        },
+      });
+      harness.lease.expectedRevision = harness.session.getState().revision;
+      await expect(
+        harness.lifecycle.recordDisposalIntent(
+          boundary === 'no-supervisor'
+            ? null
+            : boundary === 'different-attempt'
+              ? deepFreeze({ ...harness.plan, attempt: 2 })
+              : harness.plan,
+        ),
+      ).rejects.toThrow();
+      if (boundary === 'no-supervisor')
+        await expect(harness.lifecycle.recordPreparationReady(harness.plan)).rejects.toThrow(
+          'State open attempt identity is invalid',
+        );
+    }
+  });
   test('accepts all six stages with exact State events and frozen acknowledgements', async () => {
     const harness = createHarness();
     const intent = await harness.lifecycle.recordPreparationIntent(harness.source);

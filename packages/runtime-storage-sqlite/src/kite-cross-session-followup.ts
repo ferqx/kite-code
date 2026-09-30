@@ -10,6 +10,7 @@ import {
   CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED,
   childDelegatedUpperBoundDigest,
 } from '@kite-ai/runtime-host/storage';
+import { storedAdmissionDeadlineMs, storedFundingDeadlineMs } from './funding-deadline';
 import { readChildSealedGrant, readChildSessionIntent } from './kite-child-session-intents';
 import {
   acceptCrossSessionQueueMailInTransaction,
@@ -23,6 +24,34 @@ import {
 } from './kite-cross-session-agent-mail';
 import { readProvenUnfundedExpiredFollowupRelease } from './kite-cross-session-followup-proof';
 import { createKiteHomeArtifactStore } from './kite-home-artifacts';
+
+function readAdmissionDeadlineMs(
+  database: Database,
+  sourceSessionId: string,
+  admission: RecordValue,
+): number {
+  // Legacy sealed admissions already carry their finite deadline identity.
+  if (
+    typeof admission.deadlineAt === 'number' &&
+    Number.isSafeInteger(admission.deadlineAt) &&
+    Number.isFinite(new Date(admission.deadlineAt).getTime())
+  )
+    return admission.deadlineAt;
+  const row = database
+    .query<{ state_json: string }, [string]>(
+      'SELECT state_json FROM runtime_snapshots WHERE session_id=?',
+    )
+    .get(sourceSessionId);
+  if (!row) return NaN;
+  const state = parse(row.state_json);
+  const active = record(state.resourceBudget);
+  const ledger =
+    active.runId === admission.fundingRunId
+      ? active
+      : record(record(state.retainedResourceBudgets)[String(admission.fundingRunId)]);
+  if (ledger.runId !== admission.fundingRunId || ledger.status !== 'active') return NaN;
+  return storedAdmissionDeadlineMs(ledger, admission.deadlineAt, state);
+}
 
 const DIGEST = /^sha256:[a-f0-9]{64}$/u;
 const ARTIFACT_ID = /^pa_[a-f0-9]{64}$/u;
@@ -440,6 +469,7 @@ function validIndependentFollowupGrant(
     admission.sourceRunId === admission.fundingRunId &&
     /^backup_[a-f0-9]{64}$/u.test(String(admission.backupReservationId)) &&
     funding.status === 'active' &&
+    !Number.isNaN(storedAdmissionDeadlineMs(funding, admission.deadlineAt, sourceState)) &&
     funding.runId === admission.fundingRunId &&
     backup.reservationId === admission.backupReservationId &&
     backup.runId === admission.fundingRunId &&
@@ -633,7 +663,8 @@ export function assertCrossSessionFollowupRunStartInTransaction(
       grantPayload.allowedTools.length === 0 &&
       boundedDelegatedBudget(grantBudget, record(admission.executableUpperBound)) &&
       Number.isFinite(Date.parse(String(grantBudget.deadlineAt))) &&
-      Date.parse(String(grantBudget.deadlineAt)) <= Number(admission.deadlineAt);
+      Date.parse(String(grantBudget.deadlineAt)) <=
+        readAdmissionDeadlineMs(database, mutation.sourceSessionId, admission);
   if (
     target?.parent_session_id !== mutation.sourceSessionId ||
     !intent ||
@@ -3310,7 +3341,7 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
     policy.workspaceAccess !== state.workspaceAccess ||
     policy.workspaceDigest !== session.canonicalWorkspaceDigest ||
     policy.capabilityDigest !== capabilities.catalogRevision;
-  const deadlineAt = Number(admission.deadlineAt);
+  const deadlineAt = readAdmissionDeadlineMs(database, input.sourceSessionId, admission);
   const reasonProven =
     (input.reason === 'tool_failed' && failed) ||
     (input.reason === 'expired' &&
@@ -4436,6 +4467,142 @@ export interface CrossSessionFollowupTerminalReceipt {
   readonly disposition: CrossSessionFollowupTerminalIntent['disposition'];
   readonly evidenceDigest: string;
   readonly createdAtMs: number;
+}
+
+/** Parent-scoped proof for one independent followup Task, including older settled Runs. */
+export interface IndependentFollowupTaskProof {
+  readonly sourceSessionId: string;
+  readonly targetSessionId: string;
+  readonly submissionId: string;
+  readonly targetRunId: string;
+  readonly taskId: string;
+  readonly preparedRevision: number;
+  readonly targetSnapshot: RecordValue;
+  readonly terminal: CrossSessionFollowupTerminalReceipt | null;
+  readonly events: readonly RecordValue[];
+}
+
+export function readIndependentFollowupTaskForSource(
+  database: Database,
+  sourceSessionId: string,
+  taskId: string,
+  includeEvents = true,
+): IndependentFollowupTaskProof | null {
+  const rows = database
+    .query<
+      { target_session_id: string; sequence: number; event_json: string; state_json: string },
+      [string, string, string]
+    >(`SELECT child.session_id AS target_session_id,e.sequence,e.event_json,
+       json_object('revision',p.revision,
+         'childSessionOrigin',json_extract(p.state_json,'$.childSessionOrigin'),
+         'turn',json_extract(p.state_json,'$.turn'),
+         'activeFollowupTurn',json_extract(p.state_json,'$.activeFollowupTurn')) AS state_json
+     FROM runtime_events e JOIN runtime_sessions child ON child.session_id=e.session_id
+     JOIN runtime_sessions source ON source.session_id=child.parent_session_id
+     JOIN runtime_snapshots p ON p.session_id=child.session_id
+     WHERE source.session_id=? AND child.workspace_id=source.workspace_id
+       AND child.project_id=source.project_id AND child.workspace_digest=source.workspace_digest
+       AND json_extract(e.event_json,'$.type')='agent.followup_turn_prepared'
+       AND json_extract(e.event_json,'$.sourceSessionId')=?
+       AND json_extract(e.event_json,'$.taskId')=?`)
+    .all(sourceSessionId, sourceSessionId, taskId);
+  if (rows.length !== 1) return null;
+  const row = rows[0]!;
+  const prepared = parse(row.event_json);
+  const targetSnapshot = parse(row.state_json);
+  const submissionId = String(prepared.submissionId ?? '');
+  const targetRunId = String(prepared.targetRunId ?? '');
+  const proof = readAcceptedIndependentFollowupSourcePolicyProof(
+    database,
+    row.target_session_id,
+    sourceSessionId,
+    submissionId,
+  );
+  const ref = record(prepared.grantRef);
+  const storedGrant = readCrossSessionFollowupGrant(database, String(ref.artifactId ?? ''));
+  if (!proof || !storedGrant) return null;
+  const grant = parse(storedGrant.canonicalJson);
+  const origin = record(targetSnapshot.childSessionOrigin);
+  if (
+    grant.schema !== 'kite.child-followup-grant.v2' ||
+    grant.sourceSessionId !== sourceSessionId ||
+    grant.targetSessionId !== row.target_session_id ||
+    grant.submissionId !== submissionId ||
+    grant.targetRunId !== targetRunId ||
+    grant.taskId !== taskId ||
+    storedGrant.ref.integrityIdentifier !== prepared.grantDigest ||
+    storedGrant.ref.integrityIdentifier !== ref.integrityIdentifier ||
+    storedGrant.ref.byteLength !== ref.byteLength ||
+    ref.kind !== 'agent_followup_grant' ||
+    origin.parentSessionId !== sourceSessionId ||
+    record(proof.admission.policy).targetGrantDigest !== origin.grantDigest
+  )
+    return null;
+  const route = readCrossSessionFollowupRoute(database, row.target_session_id, submissionId);
+  if (
+    route &&
+    (route.route !== 'new_turn' ||
+      route.sourceSessionId !== sourceSessionId ||
+      route.targetRunId !== targetRunId ||
+      route.taskId !== taskId)
+  )
+    return null;
+  const terminal = readCrossSessionFollowupTerminalReceipt(database, sourceSessionId, submissionId);
+  const audits = database
+    .query<{ sequence: number }, [string, string]>(
+      `SELECT sequence FROM runtime_events WHERE session_id=?
+     AND json_extract(event_json,'$.type')='agent.followup_independent_settled'
+     AND json_extract(event_json,'$.submissionId')=?`,
+    )
+    .all(sourceSessionId, submissionId);
+  if (audits.length > 1 || (audits.length === 1 && !terminal)) return null;
+  if (
+    terminal &&
+    (terminal.targetSessionId !== row.target_session_id ||
+      terminal.targetRunId !== targetRunId ||
+      terminal.targetRevision < row.sequence)
+  )
+    return null;
+  const run = database
+    .query<{ start_command_id: string; status: string }, [string, string]>(
+      'SELECT start_command_id,status FROM runtime_runs WHERE session_id=? AND run_id=?',
+    )
+    .get(row.target_session_id, targetRunId);
+  if (
+    !run ||
+    run.start_command_id !== `followup:${submissionId}` ||
+    (terminal?.disposition === 'completed' && run.status !== 'completed') ||
+    (terminal?.disposition === 'pre_dispatch_released' && run.status !== 'aborted')
+  )
+    return null;
+  const throughRevision = terminal?.targetRevision ?? Number(targetSnapshot.revision);
+  if (
+    !Number.isSafeInteger(throughRevision) ||
+    throughRevision < row.sequence ||
+    throughRevision > Number(targetSnapshot.revision)
+  )
+    return null;
+  const events = database
+    .query<{ event_json: string }, [string, number, number]>(
+      `SELECT event_json FROM runtime_events WHERE session_id=? AND sequence>? AND sequence<=?
+     ${includeEvents ? '' : "AND json_extract(event_json,'$.type') IN ('turn.started','task.started')"} ORDER BY sequence`,
+    )
+    .all(row.target_session_id, row.sequence, throughRevision)
+    .map((event) => parse(event.event_json));
+  if (events.some((event) => event.type === 'turn.started' && event.turnId !== targetRunId))
+    return null;
+  if (events.some((event) => event.type === 'task.started' && event.taskId !== taskId)) return null;
+  return Object.freeze({
+    sourceSessionId,
+    targetSessionId: row.target_session_id,
+    submissionId,
+    targetRunId,
+    taskId,
+    preparedRevision: row.sequence,
+    targetSnapshot,
+    terminal,
+    events: Object.freeze(events),
+  });
 }
 
 /** Hash the exact persisted snapshot bytes used by terminal settlement validation. */
@@ -5623,7 +5790,7 @@ export function replaceCrossSessionFollowupBackupInTransaction(
     Number(localCounters.outputTokens) > input.surfaceMaxOutputTokens ||
     policy.workspaceDigest !== record(targetState.session).canonicalWorkspaceDigest ||
     Number(policy.maxOutputTokens) < input.surfaceMaxOutputTokens ||
-    input.createdAtMs >= Number(admission.deadlineAt)
+    input.createdAtMs >= readAdmissionDeadlineMs(database, input.sourceSessionId, admission)
   )
     invalid();
   const persistedSurface = createKiteHomeArtifactStore(database).readModel(input.surfaceArtifact);
@@ -6074,8 +6241,12 @@ function routeCurrentTurnFollowupInTransaction(
     admission.submissionId !== input.submissionId ||
     admission.messageId !== input.messageId ||
     admission.fundingRunId !== outbox.source_run_id ||
-    !Number.isSafeInteger(admission.deadlineAt) ||
-    input.createdAtMs >= Number(admission.deadlineAt) ||
+    (!Number.isSafeInteger(admission.deadlineAt) &&
+      !(
+        admission.deadlineAt === null &&
+        readAdmissionDeadlineMs(database, input.sourceSessionId, admission) === Infinity
+      )) ||
+    input.createdAtMs >= readAdmissionDeadlineMs(database, input.sourceSessionId, admission) ||
     policy.workspaceDigest !== pair.target_workspace_digest ||
     !['planning', 'building'].includes(String(policy.phaseCeiling)) ||
     !['write', 'workspace_only'].includes(String(policy.workspaceAccess)) ||
@@ -6507,8 +6678,12 @@ export function routeCrossSessionFollowupInTransaction(
     payload.sourceSessionId !== input.sourceSessionId ||
     payload.targetSessionId !== input.targetSessionId ||
     payload.fundingRunId !== outbox.source_run_id ||
-    !Number.isSafeInteger(payload.deadlineAt) ||
-    Number(payload.deadlineAt) <= input.createdAtMs ||
+    (!Number.isSafeInteger(payload.deadlineAt) &&
+      !(
+        payload.deadlineAt === null &&
+        readAdmissionDeadlineMs(database, input.sourceSessionId, payload) === Infinity
+      )) ||
+    readAdmissionDeadlineMs(database, input.sourceSessionId, payload) <= input.createdAtMs ||
     policy.workspaceDigest !== target.workspace_digest ||
     policy.interactionMode !== snapshot.mode ||
     policy.workspaceAccess !== snapshot.workspaceAccess ||
@@ -6795,7 +6970,8 @@ export function acceptCrossSessionFollowupInTransaction(
   const upper = record(reservation.executableUpperBound);
   const counters = record(upper.counters);
   const gauges = record(upper.gauges);
-  const deadlineAt = Date.parse(String(budget.deadlineAt));
+  const deadlineMs = storedFundingDeadlineMs(budget, snapshot);
+  const deadlineAt = budget.deadlineAt === null ? null : deadlineMs;
   const isIndependentTurnProtocol = policy.executionMode === 'independent_turn_v2';
   const durationOnlyChildRun = isIndependentTurnProtocol && upper.durationOnlyChildRun === true;
   const minimumWindow = isIndependentTurnProtocol
@@ -6856,10 +7032,14 @@ export function acceptCrossSessionFollowupInTransaction(
     source.sourceTaskId !== input.sourceTaskId ||
     payload.bodyDigest !== bodyDigest ||
     payload.fundingRunId !== input.sourceRunId ||
-    !Number.isSafeInteger(payload.deadlineAt) ||
+    (!Number.isSafeInteger(payload.deadlineAt) &&
+      !(
+        payload.deadlineAt === null &&
+        storedAdmissionDeadlineMs(budget, payload.deadlineAt, snapshot) === Infinity
+      )) ||
     payload.deadlineAt !== deadlineAt ||
     !Number.isSafeInteger(minimumWindow) ||
-    deadlineAt - input.acceptedAtMs < minimumWindow ||
+    deadlineMs - input.acceptedAtMs < minimumWindow ||
     policy.boundedContext !== true ||
     policy.workspaceDigest !== session.canonicalWorkspaceDigest ||
     policy.capabilityDigest !== capabilities.catalogRevision ||
@@ -7099,7 +7279,9 @@ function reservationWithTerminalReceipt(
       event.type === 'resource_budget.bounded_replaced') &&
       row.state === 'released' &&
       event.reservationId === reservationId) ||
-    (event.type === 'resource_budget.cumulative_limits_removed' && event.runId === runId);
+    ((event.type === 'resource_budget.cumulative_limits_removed' ||
+      event.type === 'resource_budget.run_deadline_removed') &&
+      event.runId === runId);
   if (!matches) invalid();
   return reservation;
 }

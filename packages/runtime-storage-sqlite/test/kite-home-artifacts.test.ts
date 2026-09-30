@@ -27,6 +27,34 @@ function reference<Kind extends string>(
 }
 
 describe('Kite Home typed Artifact Store', () => {
+  test('content-addressed model publication retains its first time and rejects identity conflicts', () => {
+    const { database, store } = fixture();
+    try {
+      const canonicalJson = '{"value":"first"}';
+      const ref = reference('model_surface', 'a', canonicalJson);
+      const input = { ref, artifactFormatVersion: 1, canonicalJson, createdAt: 10 };
+      store.writeModel(input);
+      store.writeModel({ ...input, createdAt: 20 });
+      expect(
+        database.query<{ created_at: number }, []>('SELECT created_at FROM model_artifacts').get()
+          ?.created_at,
+      ).toBe(10);
+      for (const changed of [
+        { ...input, canonicalJson: '{"value":"other"}' },
+        { ...input, ref: { ...ref, kind: 'model_response' as const } },
+        { ...input, ref: { ...ref, integrityIdentifier: `sha256:${'b'.repeat(64)}` } },
+        { ...input, artifactFormatVersion: 2 },
+      ]) {
+        expect(() => store.writeModel({ ...changed, createdAt: 20 })).toThrow(
+          KiteHomeArtifactError,
+        );
+      }
+      expect(store.readModel(ref).canonicalJson).toBe(canonicalJson);
+    } finally {
+      database.close();
+    }
+  });
+
   test('roundtrips every dedicated Artifact domain without a generic table', () => {
     const { database, store } = fixture();
     try {
@@ -37,6 +65,12 @@ describe('Kite Home typed Artifact Store', () => {
         artifactFormatVersion: 1,
         canonicalJson: modelJson,
         createdAt: 1,
+      });
+      store.writeModel({
+        ref: model,
+        artifactFormatVersion: 1,
+        canonicalJson: modelJson,
+        createdAt: 20,
       });
       expect(store.readModel(model)).toEqual({
         artifactFormatVersion: 1,
@@ -59,6 +93,15 @@ describe('Kite Home typed Artifact Store', () => {
         markdown,
         createdAt: 1,
       });
+      expect(() =>
+        store.writePlan({
+          ref: plan,
+          artifactFormatVersion: 1,
+          planJson: '{"planId":"plan-1","version":1}',
+          markdown,
+          createdAt: 20,
+        }),
+      ).toThrow(KiteHomeArtifactError);
       expect(store.readPlan(plan)).toEqual({
         artifactFormatVersion: 1,
         planJson: '{"planId":"plan-1","version":1}',
@@ -75,6 +118,14 @@ describe('Kite Home typed Artifact Store', () => {
         canonicalJson: capabilityJson,
         createdAt: 1,
       });
+      store.writeCapability({
+        ref: capability,
+        invocationId: 'invocation-1',
+        evidenceDigest: 'evidence-digest',
+        artifactFormatVersion: 2,
+        canonicalJson: capabilityJson,
+        createdAt: 20,
+      });
       expect(store.readCapability(capability).invocationId).toBe('invocation-1');
 
       const preimageJson =
@@ -90,6 +141,15 @@ describe('Kite Home typed Artifact Store', () => {
         canonicalJson: preimageJson,
         createdAt: 1,
       });
+      store.writeFilesystemPreimage({
+        ref: preimage,
+        invocationId: 'invocation-1',
+        operationDigest: `sha256:${'1'.repeat(64)}`,
+        targetIdentityDigest: `sha256:${'2'.repeat(64)}`,
+        artifactFormatVersion: 1,
+        canonicalJson: preimageJson,
+        createdAt: 20,
+      });
       expect(store.readFilesystemPreimage(preimage).operationDigest).toBe(
         `sha256:${'1'.repeat(64)}`,
       );
@@ -104,6 +164,14 @@ describe('Kite Home typed Artifact Store', () => {
         expiresAtMs: 100,
         createdAt: 1,
       });
+      store.writeSandboxPreparation({
+        ref: sandbox,
+        preparationDigest: 'preparation-digest',
+        artifactFormatVersion: 1,
+        canonicalJson: sandboxJson,
+        expiresAtMs: 100,
+        createdAt: 20,
+      });
       expect(store.readSandboxPreparation(sandbox).preparationDigest).toBe('preparation-digest');
 
       const taskJson = '{"artifactFormatVersion":1,"task":"inspect"}';
@@ -113,6 +181,12 @@ describe('Kite Home typed Artifact Store', () => {
         artifactFormatVersion: 1,
         canonicalJson: taskJson,
         createdAt: 1,
+      });
+      store.writeSubagentTask({
+        ref: task,
+        artifactFormatVersion: 1,
+        canonicalJson: taskJson,
+        createdAt: 20,
       });
       expect(store.readSubagentTask(task).canonicalJson).toBe(taskJson);
 
@@ -124,6 +198,12 @@ describe('Kite Home typed Artifact Store', () => {
         artifactFormatVersion: 1,
         canonicalJson: resultJson,
         createdAt: 1,
+      });
+      store.writeSubagentTask({
+        ref: result,
+        artifactFormatVersion: 1,
+        canonicalJson: resultJson,
+        createdAt: 20,
       });
       expect(store.readSubagentTask(result).canonicalJson).toBe(resultJson);
       expect(store.findSubagentTaskResult('session-owner', 'child-1')).toEqual(result);
@@ -138,6 +218,12 @@ describe('Kite Home typed Artifact Store', () => {
         canonicalJson: lifecycleJson,
         createdAt: 1,
       });
+      store.writeSubagentLifecycle({
+        ref: lifecycle,
+        artifactFormatVersion: 1,
+        canonicalJson: lifecycleJson,
+        createdAt: 20,
+      });
       expect(store.readSubagentLifecycle(lifecycle).canonicalJson).toBe(lifecycleJson);
 
       const continuationJson = '{"artifactFormatVersion":1,"snapshot":{}}';
@@ -148,6 +234,12 @@ describe('Kite Home typed Artifact Store', () => {
         canonicalJson: continuationJson,
         createdAt: 1,
       });
+      store.writeSubagentContinuation({
+        ref: continuation,
+        artifactFormatVersion: 1,
+        canonicalJson: continuationJson,
+        createdAt: 20,
+      });
       expect(store.readSubagentContinuation(continuation).canonicalJson).toBe(continuationJson);
 
       const tables = database
@@ -157,6 +249,21 @@ describe('Kite Home typed Artifact Store', () => {
         .all()
         .map((row) => row.name);
       expect(tables).not.toContain('runtime_artifacts');
+      for (const table of [
+        'model_artifacts',
+        'capability_artifacts',
+        'filesystem_preimage_artifacts',
+        'sandbox_preparation_artifacts',
+        'subagent_task_artifacts',
+        'subagent_lifecycle_artifacts',
+        'subagent_continuation_artifacts',
+      ]) {
+        const rows = database
+          .query<{ created_at: number }, []>(`SELECT created_at FROM ${table}`)
+          .all();
+        expect(rows.length).toBeGreaterThan(0);
+        expect(rows.every((row) => row.created_at === 1)).toBe(true);
+      }
     } finally {
       database.close();
     }

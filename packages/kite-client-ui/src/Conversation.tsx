@@ -17,6 +17,7 @@ import { ScrollArea } from './components/ui/scroll-area';
 import { MessageContent } from './MessageContent';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
+import { TurnFailure } from './TurnFailure';
 import type { Message, TurnActivity } from './types';
 import { Button } from './ui';
 
@@ -24,6 +25,14 @@ export interface ReadingState {
   top: number;
   follow: boolean;
   expanded: Record<string, boolean>;
+}
+
+function isTurnFailure(message: Message): boolean {
+  return (
+    message.role === 'system' &&
+    (message.systemKind === 'turn_failure' ||
+      (message.status === 'failed' && message.id === `failure:${message.turnId}`))
+  );
 }
 
 function isVisibleTool(message: Message): boolean {
@@ -275,6 +284,15 @@ const MessageItem = memo(function MessageItem({
         restoredExpanded={restoredExpanded}
         onToggle={(open) => onToggle(message.id, open)}
         renderChildren={() => null}
+      />
+    );
+  if (isTurnFailure(message))
+    return (
+      <TurnFailure
+        message={message}
+        expanded={expanded}
+        onToggle={(open) => onToggle(message.id, open)}
+        restoredExpanded={restoredExpanded?.has(message.id)}
       />
     );
   if (message.role === 'system')
@@ -696,7 +714,10 @@ export function Conversation({
     const finalGroup = entry.groups.find(
       ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
     );
-    const processGroups = entry.groups.filter((group) => group !== finalGroup);
+    const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
+    const processGroups = entry.groups.filter(
+      (group) => group !== finalGroup && !failureGroups.includes(group),
+    );
     const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
     const timing = timingByTurn.get(entry.turnId);
     const terminalStatus = terminalByTurn.get(entry.turnId);
@@ -707,16 +728,7 @@ export function Conversation({
         : !turnActivity &&
           processGroups.some((group) => group.some((message) => !message.settled)));
     const failed =
-      activity?.status === 'failed' ||
-      terminalStatus === 'failed' ||
-      processGroups.some((group) =>
-        group.some(
-          (message) =>
-            message.role === 'system' &&
-            message.status === 'failed' &&
-            message.id === `failure:${entry.turnId}`,
-        ),
-      );
+      activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
     const cancelled =
       activity?.status === 'cancelled' ||
       terminalStatus === 'cancelled' ||
@@ -773,6 +785,7 @@ export function Conversation({
     const settled =
       !!terminalStatus ||
       !!finalGroup ||
+      failureGroups.length > 0 ||
       ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
     const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
     const open = expanded[turnKey] ?? !settled;
@@ -841,6 +854,9 @@ export function Conversation({
           </div>
         )}
         {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup)}</div>}
+        {failureGroups.length > 0 && (
+          <div className="agent-turn-failure">{failureGroups.map(renderGroup)}</div>
+        )}
       </section>
     );
   };

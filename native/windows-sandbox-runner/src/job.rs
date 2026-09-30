@@ -84,13 +84,16 @@ pub fn signal_cancel(event: HANDLE) {
 pub fn wait_for_process(
     process: HANDLE,
     cancel: HANDLE,
-    timeout_ms: u64,
+    timeout_ms: Option<u64>,
 ) -> Result<(bool, bool), JobError> {
     unsafe {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        let deadline = timeout_ms
+            .map(|timeout| std::time::Instant::now() + std::time::Duration::from_millis(timeout));
         loop {
-            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-            let wait_ms = remaining.as_millis().min(u32::MAX as u128) as u32;
+            let wait_ms = deadline.map_or(u32::MAX, |deadline| {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                remaining.as_millis().min((u32::MAX - 1) as u128) as u32
+            });
             let result = WaitForMultipleObjects(&[process, cancel], false, wait_ms);
             if result == WAIT_OBJECT_0 {
                 return Ok((false, false));
@@ -99,7 +102,7 @@ pub fn wait_for_process(
                 return Ok((false, true));
             }
             if result == WAIT_TIMEOUT {
-                if std::time::Instant::now() >= deadline {
+                if deadline.is_some_and(|deadline| std::time::Instant::now() >= deadline) {
                     return Ok((true, false));
                 }
                 continue;

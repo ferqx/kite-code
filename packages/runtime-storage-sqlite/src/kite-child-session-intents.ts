@@ -8,9 +8,25 @@ import {
   assertChildBudgetWithinDelegation,
   CHILD_SESSION_TASK_USER_GOAL,
   childDelegatedUpperBoundDigest,
+  resourceDeadlineMs,
   sealChildGrantPayload,
 } from '@kite-ai/runtime-host/storage';
+import { storedFundingDeadlineMatches } from './funding-deadline';
 import { verifyCompletedChildFollowupModelWork } from './kite-cross-session-followup';
+
+// Existing NOT NULL TEXT funding identity column encodes a missing deadline as JSON null.
+// Legacy ISO timestamp bytes remain unchanged; malformed values never become unlimited.
+function encodeFundingDeadline(value: string | null): string {
+  if (value === null) return 'null';
+  if (!Number.isFinite(Date.parse(value))) throw new Error('Invalid child funding deadline.');
+  return value;
+}
+function decodeFundingDeadline(value: unknown): string | null {
+  if (value === 'null') return null;
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))
+    throw new Error('Invalid persisted child funding deadline.');
+  return value;
+}
 
 export const KITE_CHILD_SESSION_INTENT_COLUMNS = [
   'child_thread_id',
@@ -419,7 +435,7 @@ export function persistChildSessionIntentInTransaction<Event, State>(
       : object(retained?.[intent.fundingRunId]);
   if (
     ledger?.status !== 'active' ||
-    ledger.deadlineAt !== intent.deadlineAt ||
+    !storedFundingDeadlineMatches(ledger, intent.deadlineAt, snapshot ?? {}) ||
     reservation?.runId !== ledger.runId ||
     (intent.disposition === 'after_turn' &&
       (JSON.stringify(object(object(ledger.reservations)?.[intent.delegatedReservationId])) !==
@@ -488,7 +504,7 @@ export function persistChildSessionIntentInTransaction<Event, State>(
       intent.delegatedReservationId,
       intent.delegatedUpperBoundDigest,
       JSON.stringify(reservation.executableUpperBound),
-      intent.deadlineAt,
+      encodeFundingDeadline(intent.deadlineAt),
     );
 }
 
@@ -703,7 +719,7 @@ const ACTIVATED_CHILD_ABANDONABLE_PREDICATE = `EXISTS (SELECT 1 FROM runtime_ses
       AND json_extract(e.event_json,'$.fundingRunId') = child_session_intents.funding_run_id
       AND json_extract(e.event_json,'$.delegatedReservationId') = child_session_intents.delegated_reservation_id
       AND json_extract(e.event_json,'$.delegatedUpperBoundDigest') = child_session_intents.delegated_upper_bound_digest
-      AND json_extract(e.event_json,'$.deadlineAt') = child_session_intents.deadline_at)
+      AND json_extract(e.event_json,'$.deadlineAt') IS CASE WHEN child_session_intents.deadline_at='null' THEN NULL ELSE child_session_intents.deadline_at END)
     AND EXISTS (SELECT 1 FROM runtime_events e WHERE e.session_id = c.session_id
       AND e.sequence = 2 AND json_extract(e.event_json,'$.type') = 'subagent.child_task_input_admitted'
       AND json_extract(e.event_json,'$.childInvocationId') = child_session_intents.child_invocation_id
@@ -882,13 +898,13 @@ export function recordChildDispatchAckInTransaction<Event, State>(
     reservation.runId !== row.fundingRunId ||
     (row.disposition === 'after_turn' &&
       (ledger?.status !== 'active' ||
-        ledger.deadlineAt !== row.deadlineAt ||
+        !storedFundingDeadlineMatches(ledger, row.deadlineAt, snapshot ?? {}) ||
         reportReservations.length !== 1 ||
         report?.resourceKind !== 'model' ||
         report.state !== 'reserved' ||
         report.runId !== row.fundingRunId ||
-        !Number.isFinite(Date.parse(row.deadlineAt)) ||
-        Date.parse(row.deadlineAt) <= Date.now()))
+        (row.deadlineAt !== null && !Number.isFinite(resourceDeadlineMs(row.deadlineAt))) ||
+        resourceDeadlineMs(row.deadlineAt) <= Date.now()))
   )
     throw new Error('Child dispatch ACK lacks exact delegated reservation evidence.');
   if (row.dispatchAckEventId) {
@@ -1184,7 +1200,7 @@ export function assertChildRuntimeActivationInTransaction<Event, State>(
           !(
             row.disposition === 'after_turn' &&
             parentRun?.status === 'completed' &&
-            Date.parse(row.deadlineAt) > Date.now()
+            resourceDeadlineMs(row.deadlineAt) > Date.now()
           ))
       )
         throw new Error('Child external work has no live parent dispatch ACK.');
@@ -1350,7 +1366,7 @@ export function assertChildRuntimeActivationInTransaction<Event, State>(
     childBudget: budget as never,
     childStartedAt: configuration.startedAt as string,
     childDeadlineAt: configuration.deadlineAt as string,
-    fundingDeadlineAt: row.deadlineAt as string,
+    fundingDeadlineAt: row.deadlineAt,
     childMaySpawn: activation.childMaySpawn,
     childMayWrite: activation.childMayWrite,
   });
@@ -1417,7 +1433,7 @@ export function readChildSessionIntent(
     delegatedReservationId: row.delegated_reservation_id as string,
     delegatedUpperBoundDigest: row.delegated_upper_bound_digest as string,
     delegatedUpperBoundJson: row.delegated_upper_bound_json as string,
-    deadlineAt: row.deadline_at as string,
+    deadlineAt: decodeFundingDeadline(row.deadline_at),
     childSessionCreated,
     failureReceiptDigest: row.failure_receipt_digest as string | null,
     failureMode: row.failure_mode as KiteChildSessionIntentRecord['failureMode'],

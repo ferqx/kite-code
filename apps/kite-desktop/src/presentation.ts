@@ -331,16 +331,68 @@ function projectEventCore(
       loop_exhausted: '本轮工具纠错次数已用尽。请检查失败的工具调用后继续。',
     };
     const specificReason = reason ? reasonText[reason] : undefined;
+    const shortReason: Partial<Record<string, string>> = {
+      provider_auth_required: '模型服务认证失败',
+      model_retry_exhausted: '模型请求重试次数已用尽',
+      provider_unavailable: '模型服务暂不可用',
+      persistence_unavailable: '会话存储不可用',
+      loop_exhausted: '工具纠错次数已用尽',
+      runtime_failed: '本轮运行异常',
+      budget_exhausted: '执行额度已用尽',
+      tool_concurrency_saturated: '工具并发资源暂不可用',
+      shell_concurrency_saturated: 'Shell 并发资源暂不可用',
+    };
+    const outcome = event.type === 'run.terminal' ? event.outcome : undefined;
+    // A later generic Turn terminal must not downgrade the classified Run notice.
+    const retainClassified = !outcome && !!previous?.failure?.outcome;
+    const summary = event.summary?.trim();
+    const sameReason = reason === previous?.failure?.reasonCode;
+    const failure: NonNullable<Message['failure']> = retainClassified
+      ? previous.failure!
+      : {
+          summary:
+            (reason && shortReason[reason]) ||
+            summary?.split('\n')[0] ||
+            (sameReason && previous?.failure?.summary) ||
+            '本轮回复未完成',
+          ...(reason
+            ? { reasonCode: reason }
+            : previous?.failure?.reasonCode
+              ? { reasonCode: previous.failure.reasonCode }
+              : {}),
+          ...(outcome
+            ? {
+                outcome: {
+                  status: outcome.status,
+                  safeRetry: outcome.safeRetry,
+                  recoveryEntry: outcome.recoveryEntry,
+                },
+              }
+            : {}),
+        };
     const notice: Message = {
       id,
       turnId,
       role: 'system',
-      title: '本轮回复失败',
-      text: specificReason ?? '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。',
+      systemKind: 'turn_failure',
+      title: '回复失败',
+      failure,
+      text: retainClassified
+        ? previous.text
+        : (summary ??
+          (sameReason ? previous?.text : undefined) ??
+          specificReason ??
+          '本轮回复未完成。请检查会话中的失败详情和任务状态后再决定是否继续。'),
       status: 'failed',
       settled: true,
     };
-    if (previous && (!specificReason || previous.text === notice.text)) return withTerminal;
+    if (
+      previous &&
+      previous.systemKind === notice.systemKind &&
+      previous.text === notice.text &&
+      JSON.stringify(previous.failure) === JSON.stringify(notice.failure)
+    )
+      return withTerminal;
     return builder
       ? replaceExact(id, notice)
       : previous

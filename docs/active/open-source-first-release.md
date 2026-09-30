@@ -48,6 +48,8 @@ build/verify/install/process/PTY/smoke 资格；证据边界见[完成记录](..
 
 ## 制品与安装
 
+原生 compiler 的 jsdom 适配与被动 Web HTML 提取边界由 [Builtin owner](../../packages/builtin-runtime/docs/extensions-and-verification.md#web)维护。[原生网页回归](../../tests/release/web-extraction-compiled.test.ts)使用正式 compiler 生成独立可执行文件并实际运行，不能只以源码模式通过证明安装产物可解析网页。本次验证环境为 macOS arm64、Bun 1.4.2，不替代其他平台资格。
+
 macOS 原生编译完成后，构建 owner 对可执行文件重新执行本地 ad-hoc 签名并严格校验，再读取字节生成候选摘要，避免编译载荷使嵌入签名失效而被系统直接终止。该签名仅满足本机执行校验，不提供开发者身份、notarization 或发布来源证明。
 
 `bun run release:build`为当前平台编译`kite` CLI、`kite-tui`与`kite-service`，并生成`payload/web`静态资产；其中固定

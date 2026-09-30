@@ -14,7 +14,7 @@ Kernel 负责从当前 State 和已确认 facts 决定下一状态，不执行 I
 
 `applied` 返回 events、envelopes、nextState 和 pendingEffects；`conflict` 指明当前 revision；拒绝和幂等重放都不能被调用者当成新的副作用执行许可。
 
-已确认派发的 effect 返回时若 State revision 已被无关事实推进，Kernel 默认拒绝旧 lease。例外必须按 effect 类型显式证明：`task_read`、`task_wait`、`task_cancel` 仅在同一活动 Turn、原 `run_tools` lease 内的精确 Tool 仍为 running、Capability attempt 已确认且结果批次只包含该调用的 Capability／Tool 终态时，允许跨 background settlement revision 接纳。dispatch 前的 attempt、错误 Tool identity、已取消或已终态调用及其他事件仍拒绝；该规则只保存已经执行的结果，不授权重放工具。
+已确认派发的 effect 返回时若 State revision 已被无关事实推进，Kernel 默认拒绝旧 lease。例外必须按 effect 类型显式证明：`shell_stop`、`task_read`、`task_wait`、`task_cancel` 仅在同一活动 Turn、原 `run_tools` lease 内的精确 Tool 仍为 running、Capability attempt 已确认且结果批次只包含该调用的 Capability／Tool 终态时，允许跨 sibling 或 background settlement revision 接纳。dispatch 前的 attempt、错误 Tool identity、已取消或已终态调用及其他事件仍拒绝；该规则只保存已经执行的结果，不授权重放工具。
 
 ## 转换过程
 
@@ -24,7 +24,7 @@ Host 分配时间和 ID，Kernel 只校验与使用。重放同一已提交事�
 
 `turn.aborted` 会由授权归约同时取消尚未结算的审批 Tool。若该 Tool 已开始执行，Host 在提交同一批次前为仍活动的 Capability 补入带 Host 时间的 `capability.execution_unknown`；外部执行结果未获确认时保持 unknown，避免 Tool 已终态而 Capability 仍在运行，也不把异常结束误记为用户主动取消。
 
-新主 Run 的持久预算使用 `unboundedCumulativeUsage`，旧活动主 Run 由 `resource_budget.cumulative_limits_removed` 事件幂等升级；Kernel 保留累计实际用量、执行期限和并发校验，并放宽当前 Run 尚未结算的直接模型／工具预留上界。已结束历史 Run 与旧子 grant 不因当前配置改写。资源等待记录仍接受历史 `['artifact_capacity']`，并继续读取旧 `['writer']`、`['tool']`、`['tool', 'shell_invocation']` 记录。Kernel 只验证持久事实、顺序和状态转移；等待重算、超时后的局部 Tool 失败以及 Run 级失败选择由 Service 和 Host 决定。
+新主 Run 的持久预算使用 `unboundedCumulativeUsage` 与 `unboundedRunDuration`，`deadlineAt: null` 明确表示无总期限；`maxRunDurationMs: 0` 仅为该模式的格式占位。旧活动主 Run 分别由 `resource_budget.cumulative_limits_removed` 与 `resource_budget.run_deadline_removed` 事件幂等升级，后者保留 `previousDeadlineAt` 供已有资金身份核对；Kernel 保留累计实际用量、并发校验和在途执行身份，并放宽当前 Run 尚未结算的直接模型／工具预留上界。无期限配置及升级不能用于 child Session；独立子 Run 继续验证有限 deadline。已结束历史 Run 与旧子 grant 不因当前配置改写。资源等待记录仍接受历史 `['artifact_capacity']`，并继续读取旧 `['writer']`、`['tool']`、`['tool', 'shell_invocation']` 记录。Kernel 只验证持久事实、顺序和状态转移；等待重算、超时后的局部 Tool 失败以及 Run 级失败选择由 Service 和 Host 决定。
 
 无累计额度的活动账本用 `externalizedClosedReservations` 标记，只在 State 保留尚未结算的 reservation。Kernel 结算时移出记录；Host 与 Store 在同一 State revision 事务写入完整终态 receipt。旧账本升级时迁出既有终态记录，旧有限账本仍沿原状态格式恢复。已归档身份的幂等重放与父 reservation 血缘由 Host 的 Store receipt 查证，Kernel 不读取数据库。
 

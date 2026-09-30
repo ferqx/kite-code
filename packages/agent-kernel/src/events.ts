@@ -450,6 +450,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   ],
   'resource_budget.configured': ['runId', 'startedAt', 'deadlineAt', 'budget'],
   'resource_budget.cumulative_limits_removed': ['runId'],
+  'resource_budget.run_deadline_removed': ['runId'],
   'resource_budget.required_child_wait_started': ['runId', 'at', 'taskIds'],
   'resource_budget.required_child_wait_ended': ['runId', 'at', 'taskIds'],
   'resource_budget.dispatch_started': ['reservationId'],
@@ -703,7 +704,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
 /** Count of current State event discriminants; read-only compatibility remains separate. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 169 as const;
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 170 as const;
 
 /**
  * State diagnostics/projection notifications intentionally left out of the
@@ -766,7 +767,7 @@ export const STATE_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State RuntimeEvent discriminant table must contain exactly 169 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 170 entries.');
 }
 
 /** Make the package-owned State DTOs structurally match the mutable root
@@ -1034,8 +1035,12 @@ type ResourceBudgetEventMap = {
     type: 'resource_budget.configured';
     runId: string;
     startedAt: string;
-    deadlineAt: string;
+    deadlineAt: string | null;
     budget: ResourceBudget;
+  };
+  'resource_budget.run_deadline_removed': {
+    type: 'resource_budget.run_deadline_removed';
+    runId: string;
   };
   'resource_budget.cumulative_limits_removed': {
     type: 'resource_budget.cumulative_limits_removed';
@@ -1579,6 +1584,7 @@ type StateEventMap = ResourceBudgetEventMap &
       type: 'tool.cancelled';
       toolCallId: string;
       reason: string;
+      failure?: ClassifiedFailure;
       createdAt?: string;
       outcome?: ToolOutcome;
       /** Preserved from the admitted Tool fact for terminal projection. */
@@ -2224,7 +2230,7 @@ type StateEventMap = ResourceBudgetEventMap &
       fundingRunId: string;
       delegatedReservationId: string;
       delegatedUpperBoundDigest: string;
-      deadlineAt: string;
+      deadlineAt: string | null;
     };
     'subagent.child_session_adopted': {
       type: 'subagent.child_session_adopted';
@@ -2237,7 +2243,7 @@ type StateEventMap = ResourceBudgetEventMap &
       fundingRunId: string;
       delegatedReservationId: string;
       delegatedUpperBoundDigest: string;
-      deadlineAt: string;
+      deadlineAt: string | null;
     };
     'subagent.child_approval_proxy_changed': {
       type: 'subagent.child_approval_proxy_changed';

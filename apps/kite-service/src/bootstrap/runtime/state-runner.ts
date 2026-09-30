@@ -926,6 +926,26 @@ function shellConcurrencyGroup(
   return group;
 }
 
+function userInputMessageIds(state: Readonly<RuntimeState>): ReadonlySet<string> {
+  // Child results use the model's user role, but their durable admission is
+  // separate from human input. Match the accepted identity, never a content
+  // marker or message ID prefix that a real user message could also contain.
+  const childResults = new Map(
+    Object.values(state.capabilities.invocations).flatMap((invocation) => {
+      const result = invocation.subagentProviderLifecycle?.backgroundResult;
+      return result ? [[result.notificationId, result.originTurnId] as const] : [];
+    }),
+  );
+  return new Set(
+    state.transcript.messages
+      .filter(
+        (message) =>
+          message.kind === 'user' && childResults.get(message.messageId) !== message.turnId,
+      )
+      .map((message) => message.messageId),
+  );
+}
+
 /**
  * Kernel-native execution loop.  It is deliberately free of LangGraph stream,
  * checkpoint concepts so application runners can adopt it as a
@@ -1677,7 +1697,7 @@ export async function* runStateRuntimeLoop(
       }
       count += 1;
       const modelInputBoundary =
-        effect.type === 'call_model' ? kernel.getState().transcript.messages.length : undefined;
+        effect.type === 'call_model' ? userInputMessageIds(kernel.getState()) : undefined;
       const lease = kernel.beginEffect(effect);
       let outcome: EffectExecutionOutcome;
       try {
@@ -1702,9 +1722,9 @@ export async function* runStateRuntimeLoop(
       if (!outcome.applied) continue;
       if (effect.type === 'call_model' && modelInputBoundary !== undefined) {
         const current = kernel.getState();
-        const inputArrivedDuringInvocation = current.transcript.messages
-          .slice(modelInputBoundary)
-          .some((message) => message.kind === 'user');
+        const inputArrivedDuringInvocation = [...userInputMessageIds(current)].some(
+          (messageId) => !modelInputBoundary.has(messageId),
+        );
         const response = current.transcript.messages.at(-1);
         if (inputArrivedDuringInvocation && response?.kind === 'assistant') {
           const invocationId = Object.values(current.modelInvocations)

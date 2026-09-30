@@ -46,7 +46,7 @@ export interface BuiltinPreparedShellExecutionInput {
   readonly workspace: string;
   readonly command: string;
   readonly signal?: AbortSignal;
-  readonly timeoutMs?: number;
+  readonly timeoutMs?: number | null;
   readonly executionMode?: 'finite' | 'service';
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   readonly filesystemMode?: ShellFilesystemMode;

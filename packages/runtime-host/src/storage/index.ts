@@ -13,6 +13,9 @@ import {
   type RuntimeStoredCommandResourceResult,
 } from './runtime-run';
 
+/** Pure funding deadline conversion exposed through the Store-owned Host boundary. */
+export { resourceDeadlineMs } from '@kite-ai/agent-kernel';
+
 /** Exact terminal marker shared by Host decisions and Store proof verification. */
 export const CROSS_SESSION_FOLLOWUP_PRE_DISPATCH_EXPIRED =
   'Child followup deadline expired before first Model dispatch.';
@@ -698,7 +701,7 @@ export interface RuntimeChildSessionIntentMutation {
   readonly fundingRunId: string;
   readonly delegatedReservationId: string;
   readonly delegatedUpperBoundDigest: string;
-  readonly deadlineAt: string;
+  readonly deadlineAt: string | null;
 }
 
 /** CAS proving no child Session was created before a permanent failure settles its Tool claim. */

@@ -1,6 +1,7 @@
 import { requiredBackgroundTaskIds } from '../../completion';
 import type { KernelEvent } from '../../events';
 import { eventRecord, stringField } from '../../reducer-utils';
+import { resourceDeadlineMs } from '../../resource-deadline';
 import type {
   AgentProviderReadinessState,
   AgentResourceBudgetActiveState,
@@ -117,6 +118,7 @@ function assertResourceBudget(value: ResourceBudget): void {
     throw new Error('Unsupported ResourceBudget version.');
   const candidate = value as unknown as Record<string, unknown>;
   const zeroAllowed = new Set<keyof ResourceBudget>([
+    ...(value.unboundedRunDuration === true ? (['maxRunDurationMs'] as const) : []),
     ...(value.durationOnlyChildRun === true || value.unboundedCumulativeUsage === true
       ? ([
           'maxTurns',
@@ -144,6 +146,16 @@ function assertResourceBudget(value: ResourceBudget): void {
     throw new Error('Unbounded Tool budget must use a zero numeric placeholder.');
   if (value.unboundedCumulativeUsage !== undefined && value.unboundedCumulativeUsage !== true)
     throw new Error('Unbounded cumulative budget marker is invalid.');
+  if (
+    value.unboundedRunDuration !== undefined &&
+    (value.unboundedRunDuration !== true ||
+      value.unboundedCumulativeUsage !== true ||
+      value.durationOnlyChildRun === true ||
+      value.maxRunDurationMs !== 0)
+  )
+    throw new Error(
+      'An unlimited Run duration requires primary cumulative authority and zero duration.',
+    );
   if (
     value.durationOnlyChildRun !== undefined &&
     (value.durationOnlyChildRun !== true ||
@@ -241,7 +253,8 @@ function withinBudget(
     (unbounded || usage.counters.inputTokens <= budget.maxRunInputTokens) &&
     (unbounded || usage.counters.outputTokens <= budget.maxRunOutputTokens) &&
     (unbounded || usage.counters.artifactBytes <= budget.maxArtifactBytes) &&
-    usage.gauges.elapsedRunMs <= budget.maxRunDurationMs &&
+    (budget.unboundedRunDuration === true ||
+      usage.gauges.elapsedRunMs <= budget.maxRunDurationMs) &&
     usage.gauges.activeSubagents <= budget.maxConcurrentSubagents &&
     usage.gauges.activeWriters <= budget.maxConcurrentWriters &&
     usage.gauges.activeToolInvocations <= budget.maxConcurrentToolInvocations &&
@@ -620,13 +633,22 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       if (state.childSessionOrigin !== undefined && budget.unboundedCumulativeUsage === true)
         throw new Error('A child Run cannot use primary unbounded cumulative authority.');
       nonEmpty(runId, 'runId');
-      if (typeof startedAt !== 'string' || typeof deadlineAt !== 'string')
+      if (
+        typeof startedAt !== 'string' ||
+        (budget.unboundedRunDuration === true
+          ? deadlineAt !== null
+          : typeof deadlineAt !== 'string')
+      )
         throw new Error('Resource budget timestamps are invalid.');
       const started = Date.parse(startedAt);
-      const deadline = Date.parse(deadlineAt);
-      if (!Number.isFinite(started) || !Number.isFinite(deadline) || deadline <= started)
+      const deadline = resourceDeadlineMs(deadlineAt as string | null);
+      if (
+        !Number.isFinite(started) ||
+        (budget.unboundedRunDuration !== true &&
+          (!Number.isFinite(deadline) || deadline <= started))
+      )
         throw new Error('Resource budget timestamps are invalid.');
-      if (deadline - started > budget.maxRunDurationMs)
+      if (budget.unboundedRunDuration !== true && deadline - started > budget.maxRunDurationMs)
         throw new Error('Resource budget deadline exceeds maxRunDurationMs.');
       if (state.resourceBudget.status === 'active') {
         if (
@@ -651,7 +673,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
           status: 'active',
           runId,
           startedAt,
-          deadlineAt,
+          deadlineAt: deadlineAt as string | null,
           budget,
           reconciledUsage: zeroUsage(),
           ...(budget.unboundedCumulativeUsage === true || budget.durationOnlyChildRun === true
@@ -664,6 +686,24 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       };
     }
 
+    if (event.type === 'resource_budget.run_deadline_removed') {
+      const active = activeState(state.resourceBudget);
+      if (
+        active.runId !== event.runId ||
+        state.turn.status !== 'active' ||
+        state.childSessionOrigin !== undefined ||
+        active.budget.unboundedCumulativeUsage !== true ||
+        active.budget.durationOnlyChildRun === true
+      )
+        throw new Error('Run deadline removal requires an active primary Run.');
+      if (active.budget.unboundedRunDuration === true) return state;
+      return withBudgetLedger(state, {
+        ...active,
+        deadlineAt: null,
+        previousDeadlineAt: active.deadlineAt ?? active.previousDeadlineAt,
+        budget: { ...active.budget, unboundedRunDuration: true, maxRunDurationMs: 0 },
+      });
+    }
     if (event.type === 'resource_budget.cumulative_limits_removed') {
       const active = activeState(state.resourceBudget);
       if (active.runId !== event.runId)
@@ -711,7 +751,7 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       if (
         !Number.isSafeInteger(started) ||
         started < Date.parse(active.startedAt) ||
-        started > Date.parse(active.deadlineAt)
+        started > resourceDeadlineMs(active.deadlineAt)
       )
         throw new Error('Required child wait start is outside the active Run deadline.');
       return withBudgetLedger(state, {
@@ -739,14 +779,15 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       const ended = Date.parse(event.at);
       const elapsed = ended - Date.parse(previous.startedAt);
       const total = (active.totalRequiredChildWaitMs ?? 0) + elapsed;
-      const deadline = Date.parse(active.deadlineAt) + elapsed;
-      const extendedDeadlineAt = epochMillisecondsToIsoUtc(deadline);
+      const deadline = resourceDeadlineMs(active.deadlineAt) + elapsed;
+      const extendedDeadlineAt =
+        active.deadlineAt === null ? null : epochMillisecondsToIsoUtc(deadline);
       if (
         !Number.isSafeInteger(ended) ||
         !Number.isSafeInteger(elapsed) ||
         elapsed < 0 ||
         !Number.isSafeInteger(total) ||
-        !extendedDeadlineAt
+        (active.deadlineAt !== null && !extendedDeadlineAt)
       )
         throw new Error('Required child wait duration is invalid.');
       return withBudgetLedger(state, {
@@ -772,9 +813,9 @@ export function reduceLeaseState(state: AgentState, event: KernelEvent): AgentSt
       if (waiter.runId !== active.runId) throw new Error('Concurrency waiter runId mismatch.');
       if (waiter.sequence !== active.nextWaiterSequence)
         throw new Error('Concurrency waiter sequence must be the next durable FIFO sequence.');
-      if (Date.parse(waiter.deadlineAt) <= Date.parse(waiter.enqueuedAt))
+      if (resourceDeadlineMs(waiter.deadlineAt) <= Date.parse(waiter.enqueuedAt))
         throw new Error('Concurrency waiter deadline must be after enqueue time.');
-      if (Date.parse(waiter.deadlineAt) > Date.parse(active.deadlineAt))
+      if (resourceDeadlineMs(waiter.deadlineAt) > resourceDeadlineMs(active.deadlineAt))
         throw new Error('Concurrency waiter deadline exceeds the persisted run deadline.');
       const existing = active.waiters[waiter.invocationId];
       if (

@@ -1,5 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
+import {
+  createRuntimeHostStateInitialState,
+  fundingDeadlineMatches,
+  resourceDeadlineMs,
+} from '@kite-ai/runtime-host/kernel-adapter';
 import {
   childDelegatedUpperBoundDigest,
   createRuntimeStoredCommandReceipt,
@@ -30,7 +34,7 @@ export function buildChildSessionCreation(input: {
       ? parentState.resourceBudget
       : parentState.retainedResourceBudgets[intent.fundingRunId];
   const reservation = ledger?.reservations[intent.delegatedReservationId];
-  const deadlineMs = Date.parse(intent.deadlineAt);
+  const deadlineMs = resourceDeadlineMs(intent.deadlineAt);
   const independentTurnDeadline =
     reservation?.executableUpperBound.independentChildTurnDeadline === true;
   if (
@@ -47,12 +51,13 @@ export function buildChildSessionCreation(input: {
     input.executionConnectionGeneration < 1 ||
     !Number.isSafeInteger(input.nowMs) ||
     input.nowMs < 0 ||
-    !Number.isSafeInteger(deadlineMs) ||
+    (intent.deadlineAt !== null && !Number.isSafeInteger(deadlineMs)) ||
     (!independentTurnDeadline && deadlineMs <= input.nowMs) ||
     (independentTurnDeadline &&
       (reservation?.reservationId !== `child-allotment:${intent.childThreadId}` ||
         reservation.executableUpperBound.unboundedToolInvocations !== true)) ||
-    ledger?.deadlineAt !== intent.deadlineAt ||
+    !ledger ||
+    !fundingDeadlineMatches(ledger, intent.deadlineAt) ||
     (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
     reservation.runId !== intent.fundingRunId ||
     reservation.invocationId !== `child-allotment:${intent.childThreadId}` ||

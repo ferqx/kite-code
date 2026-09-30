@@ -55,6 +55,8 @@ Provider readiness 前稳定拒绝，local stdio 也始终关闭。普通开发�
 
 Connection Manager health、discovery、list-changed 和 call circuit 变化均触发订阅。业务调用重试由 Runtime/Execution 负责，Manager 不重放 SDK Tool Call。Supervisor 将连接状态与 config catalog 投影为新的稳定 snapshot；snapshot revision 对规范化的可见字段计算，同一内容不会因 React render 产生伪 revision。
 
+`callCapability` 在 transport admission 与 write guard 的异步等待结束后、发送 SDK Tool 请求前重新核验当前 callable、generation、descriptor revision／availability 和工具存在性。相同 generation 的目录刷新不能让旧 schema 或审批继续派发；确定未发送的版本漂移不记录外部 unknown。验证见 [stale dispatch boundary](../../packages/builtin-runtime/test/mcp/stale-dispatch-boundary.test.ts)。
+
 ## Snapshot 与诊断
 
 Control snapshot 包含全部有效和被遮蔽的 Server，并提供 source/revision、enabled/required、shadow/fallback、transport、config/auth/health、generation、capability revision、Tools/Resources/Prompts 只读投影、计数、retry 时间和 typed diagnostic。每个 Tool 投影区分 discovered、enabled、available/unavailable/quarantined，并包含 declared/effective effects、annotation provenance、policy source、minimum approval、retry 和 schema diagnostic；配置引用但 discovery 未返回的名称以 `tool_not_discovered` 投影。`toolCount` 只统计真实 discovery，`availableToolCount` 只统计进入 Runtime catalog 的 enabled 且 schema-valid Tool。

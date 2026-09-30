@@ -1,13 +1,44 @@
+import { digestCapabilityValue } from '@kite-ai/builtin-runtime/capability';
 import type { NetworkBoundaryPolicy } from '@kite-ai/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryFetch,
   type NetworkDecisionRecorder,
+  networkBoundaryPolicyFromExecutionBoundary,
 } from '@kite-ai/builtin-runtime/sandbox';
 import type { SkillActivationContext } from '@kite-ai/builtin-runtime/skills';
 import type {
   BuiltinSkillExecutionMechanism,
   BuiltinWebExecutionMechanism,
 } from '#builtin-runtime';
+import { getFeatureFlags } from '#kite-service/config/features';
+import type { AgentConfig } from '#kite-service/config/index';
+
+/** Called only for an invocation already admitted by the ordinary tool pipeline. */
+export function resolveWebNetworkBoundaryPolicy(
+  config: AgentConfig | undefined,
+): NetworkBoundaryPolicy | undefined {
+  if (!config) return undefined;
+  if (config.executionBoundary) {
+    return networkBoundaryPolicyFromExecutionBoundary(
+      config.executionBoundary,
+      getFeatureFlags(config).networkBoundary === true,
+    );
+  }
+  if ('productionExecution' in config) return undefined;
+  const policy = {
+    version: 1 as const,
+    mode: 'public' as const,
+    allowedHosts: Object.freeze([] as string[]),
+    allowLocalAndPrivateNetwork: false as const,
+  };
+  return Object.freeze({
+    ...policy,
+    revision: digestCapabilityValue({
+      schema: 'kite.development-web-network-policy.v1',
+      ...policy,
+    }),
+  });
+}
 
 export function createSkillMechanismPort(
   runtime: SkillActivationContext | undefined,

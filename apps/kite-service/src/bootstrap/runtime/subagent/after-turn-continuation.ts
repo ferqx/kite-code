@@ -10,6 +10,7 @@ import {
   fundingBudgetForReservation,
   planModelInvocationResource,
   type RuntimeState,
+  resourceDeadlineMs,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#kite-service/config/index';
 import { runtimeStartTurnDerivedId } from '../turn-command-decision';
@@ -18,7 +19,7 @@ import type { BackgroundSubagentCompletionNotification } from './background-runt
 export interface AfterTurnContinuationReservation {
   readonly reservationId: string;
   readonly originRunId: string;
-  readonly deadlineAt: string;
+  readonly deadlineAt: string | null;
   readonly preparationEvents: Readonly<
     ReturnType<typeof planModelInvocationResource>['preparationEvents']
   >;
@@ -41,7 +42,7 @@ export function planAfterTurnContinuationReservation(input: {
     throw new DescendantResourceAdmissionError('budget_unconfigured');
   }
   const now = input.now ?? Date.now();
-  if (Date.parse(budget.deadlineAt) <= now) {
+  if (resourceDeadlineMs(budget.deadlineAt) <= now) {
     throw new DescendantResourceAdmissionError(
       'budget_exhausted',
       'The original Run deadline has elapsed.',
@@ -159,7 +160,7 @@ export class AfterTurnContinuationRuntime {
     if (
       input.notification.cancelRequested ||
       !['completed', 'failed', 'exhausted'].includes(input.notification.status) ||
-      Date.parse(input.reservation.deadlineAt) <= Date.now()
+      resourceDeadlineMs(input.reservation.deadlineAt) <= Date.now()
     ) {
       await releaseReservation(input);
       return Object.freeze({ status: 'suppressed', reason: 'after_turn_ineligible' });

@@ -15,7 +15,7 @@ import {
   runtimeHostStateVerifiedPreparedFollowupModelReservationIds as verifiedPreparedFollowupModelReservationIds,
   runtimeHostStateVerifiedSealedAfterTurnReportReservationIds as verifiedSealedAfterTurnReportReservationIds,
 } from '@kite-ai/runtime-host/kernel-adapter';
-import { classifyFailure } from './failures';
+import { type ClassifiedFailure, classifyFailure } from './failures';
 import { rootToolInteractionOwner, runtimeInteractionOwnerForPending } from './interaction-owner';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
@@ -374,6 +374,7 @@ export function eventsForRunCancellation(
   state: Readonly<RuntimeState>,
   reason = 'Cancelled by user.',
   cause: 'user' | 'error' = 'user',
+  toolFailure?: ClassifiedFailure,
 ): RuntimeEvent[] {
   // Keyboard cancellation on a visible Tool approval must retain the exact
   // approval identity even when the Runtime action waiter has not attached
@@ -388,7 +389,12 @@ export function eventsForRunCancellation(
     cause === 'user' && state.interactions.kind === 'awaiting_auto_review'
       ? 'user_cancelled'
       : reason;
-  const toolCancellations = unfinishedToolCancellationEvents(state, toolReason);
+  const toolCancellations = unfinishedToolCancellationEvents(
+    state,
+    toolReason,
+    undefined,
+    toolFailure,
+  );
   const userWaivers: RuntimeEvent[] =
     cause === 'user'
       ? Object.values(state.capabilities.invocations)
@@ -497,6 +503,7 @@ function unfinishedToolCancellationEvents(
   state: Readonly<RuntimeState>,
   reason: string,
   excludedToolCallId?: string,
+  failure?: ClassifiedFailure,
 ): Array<Extract<RuntimeEvent, { type: 'tool.cancelled' }>> {
   return Object.values(state.tools.calls)
     .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status))
@@ -505,6 +512,7 @@ function unfinishedToolCancellationEvents(
       type: 'tool.cancelled',
       toolCallId: call.toolCallId,
       reason,
+      ...(failure ? { failure } : {}),
     }));
 }
 

@@ -129,14 +129,27 @@ export function createCrossSessionAgentMailComposition(input: {
   };
   const mailbox: CrossSessionQueueMailPort = {
     listDirectChildren(parentSessionId, currentRunId, limit) {
-      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 63)
-        throw new Error('Direct child tree request is unbounded.');
+      if (!Number.isSafeInteger(limit) || limit < 1)
+        throw new Error('Direct child tree page size is invalid.');
       return under(parentSessionId, () => {
         const parent = owner.storage.sessions.loadSnapshot(parentSessionId);
         if (!parent || parent.session.threadId !== parentSessionId)
           throw new Error('Direct child tree has no source Session.');
-        const page = owner.listChildSessions(parentSessionId, limit);
-        return page.entries.flatMap((entry) => {
+        const entries: ReturnType<typeof owner.listChildSessions>['entries'][number][] = [];
+        const seenCursors = new Set<string>();
+        let cursor: Parameters<typeof owner.listChildSessions>[2];
+        do {
+          const page = owner.listChildSessions(parentSessionId, limit, cursor);
+          entries.push(...page.entries);
+          cursor = page.nextCursor;
+          if (cursor) {
+            const cursorKey = JSON.stringify(cursor);
+            if (seenCursors.has(cursorKey))
+              throw new Error('Direct child tree pagination did not advance.');
+            seenCursors.add(cursorKey);
+          }
+        } while (cursor);
+        return entries.flatMap((entry) => {
           const child = owner.readChildSession(parentSessionId, entry.sessionId);
           const state = child?.state;
           if (

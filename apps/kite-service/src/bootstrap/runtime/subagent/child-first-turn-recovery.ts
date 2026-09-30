@@ -1,3 +1,4 @@
+import { resourceDeadlineMs } from '@kite-ai/runtime-host/kernel-adapter';
 import { CHILD_SESSION_TASK_USER_GOAL, sealChildGrantPayload } from '@kite-ai/runtime-host/storage';
 import type { SubagentDelegationGrant } from '@kite-ai/runtime-spi';
 import type { KiteChildApprovalProxyRecord } from '@kite-ai/runtime-storage-sqlite';
@@ -177,8 +178,8 @@ export function classifyChildFirstTurnRecovery(input: {
     Date.parse(state.resourceBudget.startedAt) >= grant.expiresAtMs ||
     (input.independentTurnDeadline
       ? state.resourceBudget.budget.unboundedToolInvocations !== true ||
-        Date.parse(state.resourceBudget.deadlineAt) <= nowMs
-      : Date.parse(intent.deadlineAt) <= nowMs)
+        resourceDeadlineMs(state.resourceBudget.deadlineAt) <= nowMs
+      : resourceDeadlineMs(intent.deadlineAt) <= nowMs)
   )
     return stale('sealed_grant_expired_or_mismatch');
 

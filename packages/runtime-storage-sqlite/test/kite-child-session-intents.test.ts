@@ -5,6 +5,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  reduceResourceBudgetState,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+} from '@kite-ai/runtime-host/kernel-adapter';
+import {
   childDelegatedUpperBoundDigest,
   createRuntimeStoredCommandReceipt,
   sealChildGrantPayload,
@@ -1294,9 +1298,324 @@ test('abandonment rejection rolls back parent facts, and restart preserves one f
   }
 });
 
-test('child first-turn activation is bounded and Provider dispatch requires parent ACK', () => {
+test('unlimited primary funding persists null while its child activates with a finite thirty-minute deadline', () => {
+  using db = candidate();
+  const childUpper = {
+    ...upper,
+    counters: {
+      turns: 0,
+      modelRequests: 0,
+      toolInvocations: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      artifactBytes: 0,
+    },
+    gauges: { ...upper.gauges, elapsedRunMs: 1_800_000 },
+    independentChildTurnDeadline: true as const,
+    durationOnlyChildRun: true as const,
+  };
+  const nullIntent = {
+    ...intent,
+    delegatedReservationId: `child-allotment:${childThreadId}`,
+    delegatedUpperBoundDigest: childDelegatedUpperBoundDigest(childUpper),
+    deadlineAt: null,
+  };
+  const nullReservation = {
+    ...reservation,
+    reservationId: nullIntent.delegatedReservationId,
+    executableUpperBound: childUpper,
+  };
+  const nullEvents = events.map((event) =>
+    event.type === 'resource_budget.reserved'
+      ? { ...event, reservation: nullReservation }
+      : event.type === 'subagent.child_session_intended'
+        ? {
+            ...event,
+            delegatedReservationId: nullIntent.delegatedReservationId,
+            delegatedUpperBoundDigest: nullIntent.delegatedUpperBoundDigest,
+            deadlineAt: null,
+          }
+        : event,
+  );
+  const nullFunding = {
+    ...snapshot.resourceBudget,
+    deadlineAt: null,
+    budget: {
+      version: 1,
+      unboundedRunDuration: true,
+      unboundedCumulativeUsage: true,
+      maxRunDurationMs: 0,
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxToolInvocations: 0,
+      maxRunInputTokens: 0,
+      maxRunOutputTokens: 0,
+      maxArtifactBytes: 0,
+      maxConcurrentSubagents: 3,
+      maxConcurrentWriters: 0,
+      maxConcurrentToolInvocations: 4,
+      maxConcurrentShellInvocations: 4,
+      maxConcurrencyWaitMs: 1000,
+    },
+  };
+  const nullTransaction = {
+    ...transaction,
+    events: nullEvents,
+    childSessionIntent: nullIntent,
+    snapshot: { ...snapshot, resourceBudget: nullFunding },
+  };
+  for (const invalidSnapshot of [
+    {
+      ...nullTransaction.snapshot,
+      resourceBudget: {
+        ...nullFunding,
+        budget: { ...nullFunding.budget, unboundedRunDuration: false },
+      },
+    },
+    {
+      ...nullTransaction.snapshot,
+      resourceBudget: {
+        ...nullFunding,
+        budget: { ...nullFunding.budget, unboundedCumulativeUsage: false },
+      },
+    },
+    { ...nullTransaction.snapshot, childSessionOrigin: {} },
+    {
+      ...nullTransaction.snapshot,
+      resourceBudget: {
+        ...nullFunding,
+        budget: { ...nullFunding.budget, durationOnlyChildRun: true },
+      },
+    },
+  ]) {
+    expect(() =>
+      persistChildSessionIntentInTransaction(db, 'receipt_evidence', {
+        ...nullTransaction,
+        snapshot: invalidSnapshot,
+      }),
+    ).toThrow('funding ledger deadline');
+    expect(readChildSessionIntent(db, childThreadId)).toBeNull();
+  }
+  db.run('BEGIN IMMEDIATE');
+  persistChildSessionIntentInTransaction(db, 'receipt_evidence', nullTransaction);
+  db.run('COMMIT');
+  expect(readChildSessionIntent(db, childThreadId)).toMatchObject({
+    deadlineAt: null,
+    delegatedReservationId: nullIntent.delegatedReservationId,
+  });
+  expect(
+    db.query<{ deadline_at: string }, []>('SELECT deadline_at FROM child_session_intents').get()
+      ?.deadline_at,
+  ).toBe('null');
+  db.query(`INSERT INTO runtime_sessions(session_id,workspace_id,project_id,workspace_digest,state_schema,format_epoch,revision,updated_at,parent_session_id)
+    VALUES (?,?,?,?,27,'state',0,1,'root')`).run(
+    childThreadId,
+    workspaceId,
+    projectId,
+    workspaceDigest,
+  );
+  const startedAt = '2026-09-24T00:00:00.000Z';
+  const deadlineAt = '2026-09-24T00:30:00.000Z';
+  const budget = {
+    version: 1,
+    durationOnlyChildRun: true,
+    maxRunDurationMs: 1_800_000,
+    maxTurns: 0,
+    maxModelRequests: 0,
+    maxToolInvocations: 0,
+    maxRunInputTokens: 0,
+    maxRunOutputTokens: 0,
+    maxConcurrentSubagents: 0,
+    maxConcurrentWriters: 0,
+    maxConcurrentToolInvocations: 1,
+    maxConcurrentShellInvocations: 1,
+    maxConcurrencyWaitMs: 1000,
+    maxArtifactBytes: 0,
+  };
+  const origin = {
+    ...childState().childSessionOrigin,
+    delegatedReservationId: nullIntent.delegatedReservationId,
+    delegatedUpperBoundDigest: nullIntent.delegatedUpperBoundDigest,
+    deadlineAt: null,
+    taskInputAdmitted: true,
+  };
+  const adoption = { type: 'subagent.child_session_adopted', ...origin };
+  const activationEvents = [
+    adoption,
+    {
+      type: 'subagent.child_task_input_admitted',
+      childInvocationId: intent.childInvocationId,
+      taskArtifactRef,
+      taskDigest: intent.taskArtifactDigest,
+      taskTextDigest: intent.taskTextDigest,
+      grantDigest: intent.grantDigest,
+    },
+    { type: 'resource_budget.configured', runId: 'child-run', startedAt, deadlineAt, budget },
+    { type: 'turn.started', turnId: 'child-run' },
+    {
+      type: 'task.started',
+      taskId: intent.childInvocationId,
+      turnId: 'child-run',
+      userGoal: 'Complete the delegated task.',
+    },
+  ];
+  const activation = {
+    childThreadId,
+    parentSessionId: intent.parentSessionId,
+    parentInvocationId: intent.parentInvocationId,
+    childInvocationId: intent.childInvocationId,
+    grantDigest: intent.grantDigest,
+    taskArtifactRef,
+    taskArtifactDigest: intent.taskArtifactDigest,
+    taskTextDigest: intent.taskTextDigest,
+    fundingRunId: intent.fundingRunId,
+    delegatedReservationId: nullIntent.delegatedReservationId,
+    delegatedUpperBoundDigest: nullIntent.delegatedUpperBoundDigest,
+    childRunId: 'child-run',
+    childMaySpawn: false,
+    childMayWrite: false,
+  };
+  const activationTx = {
+    sessionId: childThreadId,
+    events: activationEvents,
+    metadata: activationEvents.map((_, index) => ({
+      eventId: `null-child-${index}`,
+      revision: index + 1,
+    })),
+    snapshot: {
+      ...childState(),
+      childSessionOrigin: origin,
+      activeTaskId: intent.childInvocationId,
+      tasks: {
+        [intent.childInvocationId]: {
+          taskId: intent.childInvocationId,
+          userGoal: 'Complete the delegated task.',
+          status: 'active',
+          startedAtTurnId: 'child-run',
+        },
+      },
+      resourceBudget: { status: 'active', runId: 'child-run', startedAt, deadlineAt, budget },
+    },
+    childBudgetActivation: activation,
+    runMutation: {
+      type: 'insert' as const,
+      run: {
+        sessionId: childThreadId,
+        runId: 'child-run',
+        originSessionId: intent.parentSessionId,
+        originRunId: intent.originRunId,
+        startCommandId: 'child-start',
+        phase: 'building' as const,
+        status: 'queued' as const,
+        createdRevision: 5,
+        lastRevision: 5,
+        createdAtMs: 1,
+      },
+    },
+  };
+  expect(() =>
+    assertChildRuntimeActivationInTransaction(db, 'decision', {
+      ...activationTx,
+      events: activationEvents.map((event) =>
+        event.type === 'resource_budget.configured' ? { ...event, deadlineAt: null } : event,
+      ),
+      snapshot: {
+        ...activationTx.snapshot,
+        resourceBudget: { ...activationTx.snapshot.resourceBudget, deadlineAt: null },
+      },
+    }),
+  ).toThrow();
+  assertChildRuntimeActivationInTransaction(db, 'decision', activationTx);
+  expect(readChildSessionIntent(db, childThreadId)?.childBudgetActivatedRunId).toBe('child-run');
+  expect(Date.parse(deadlineAt) - Date.parse(startedAt)).toBe(1_800_000);
+});
+
+test.each([
+  'original-funding',
+  'upgraded-primary-funding',
+] as const)('child first-turn activation is bounded and Provider dispatch requires parent ACK: %s', (fundingMode) => {
   using db = candidate();
   recordParentIntent(db);
+  if (fundingMode === 'upgraded-primary-funding') {
+    const oldIntent = readChildSessionIntent(db, childThreadId);
+    const legacyLedger = reduceResourceBudgetState(
+      { status: 'unconfigured', reservations: {} },
+      {
+        type: 'resource_budget.configured',
+        runId: intent.fundingRunId,
+        startedAt: '2026-09-23T23:30:10.000Z',
+        deadlineAt: intent.deadlineAt,
+        budget: UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+      },
+    );
+    const upgrade = {
+      type: 'resource_budget.run_deadline_removed',
+      runId: intent.fundingRunId,
+    } as const;
+    const upgradedLedger = reduceResourceBudgetState(legacyLedger, upgrade);
+    expect(upgradedLedger).toMatchObject({
+      deadlineAt: null,
+      previousDeadlineAt: intent.deadlineAt,
+    });
+    const { childSessionOrigin: _origin, ...parentIdentity } = childState();
+    const upgradedSnapshot = {
+      ...parentIdentity,
+      revision: 1,
+      resourceBudget: upgradedLedger,
+      retainedResourceBudgets: {},
+    };
+    const store = createKiteHomeRuntimeStorageForConnection({
+      database: db,
+      assertStoreSchema: assertKiteSessionStoreSchema,
+      codec,
+      stateSchemaVersion: 27,
+      formatEpoch: 'state',
+    });
+    store.storage.transactions.commitDecision({
+      sessionId: 'root',
+      events: [upgrade],
+      metadata: [{ eventId: 'primary-deadline-removed', revision: 1 }],
+      snapshot: upgradedSnapshot as never,
+    });
+    const persisted = JSON.parse(
+      db
+        .query<{ state_json: string }, []>(
+          "SELECT state_json FROM runtime_snapshots WHERE session_id='root'",
+        )
+        .get()!.state_json,
+    ) as typeof upgradedSnapshot;
+    expect(persisted.resourceBudget).toMatchObject({
+      deadlineAt: null,
+      previousDeadlineAt: intent.deadlineAt,
+    });
+    expect(
+      db
+        .query<{ event_json: string }, []>(
+          "SELECT event_json FROM runtime_events WHERE event_id='primary-deadline-removed'",
+        )
+        .get()?.event_json,
+    ).toBe(JSON.stringify(upgrade));
+    expect(() =>
+      persistChildSessionIntentInTransaction(db, 'receipt_evidence', {
+        ...transaction,
+        snapshot: {
+          ...persisted,
+          resourceBudget: {
+            ...persisted.resourceBudget,
+            previousDeadlineAt: '2026-09-24T00:00:11.000Z',
+          },
+        },
+      }),
+    ).toThrow('funding ledger deadline');
+    db.run('BEGIN IMMEDIATE');
+    persistChildSessionIntentInTransaction(db, 'receipt_evidence', {
+      ...transaction,
+      snapshot: persisted,
+    });
+    db.run('COMMIT');
+    expect(readChildSessionIntent(db, childThreadId)).toEqual(oldIntent);
+    expect(readChildSealedGrant(db, 'root', childThreadId)).toEqual(sealedGrant);
+  }
   db.query(`INSERT INTO runtime_sessions(session_id,workspace_id,project_id,workspace_digest,state_schema,format_epoch,revision,updated_at,parent_session_id)
     VALUES (?,?,?,?,27,'state',0,1,'root')`).run(
     childThreadId,

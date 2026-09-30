@@ -17,6 +17,9 @@ export interface ChildSessionTaskControlPort {
   readonly readChildEvents: (childThreadId: string) => readonly Readonly<{ event: RuntimeEvent }>[];
   readonly artifacts: Pick<SubagentResultArtifactAccess, 'lookup' | 'read'>;
   readonly parentArtifactOwnerKey: string;
+  /** Exact independent followup Task proof, including historical settled Runs. */
+  readonly readFollowupTask?: (taskId: string) => ChildSessionTaskRead | null;
+  readonly ownsFollowupTask?: (taskId: string) => boolean;
   /** Waits for a changed parent revision, resolving immediately if it already changed. */
   readonly waitForParentRevisionChange: (revision: number, signal?: AbortSignal) => Promise<void>;
   /** Returns null if the child has no live local coordinator. */
@@ -27,12 +30,13 @@ export interface ChildSessionTaskControlPort {
   ) => Promise<void> | null;
 }
 
-type TaskRead = Readonly<{
+export type ChildSessionTaskRead = Readonly<{
   snapshot: Snapshot;
   childThreadId?: string;
   childRevision?: number;
   leaseUntilMs?: number;
 }>;
+type TaskRead = ChildSessionTaskRead;
 
 function activeRetry(
   child: Readonly<RuntimeState>,
@@ -125,6 +129,7 @@ function waitResult(
 
 /** Read-only Task controls for one exact parent/child lineage. No Provider observation occurs. */
 export function createChildSessionTaskControl(input: ChildSessionTaskControlPort): Readonly<{
+  ownsTask(taskId: string): boolean;
   readTask(taskId: string): Promise<Snapshot>;
   waitTasks(
     taskIds: readonly string[],
@@ -141,7 +146,8 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
         invocation.subagentProviderLifecycle?.childInvocationId === taskId &&
         invocation.subagentProviderLifecycle.childSession,
     );
-    if (matches.length !== 1) return { snapshot: notFound(taskId) };
+    if (matches.length !== 1)
+      return input.readFollowupTask?.(taskId) ?? { snapshot: notFound(taskId) };
     const [parentInvocationId, invocation] = matches[0]!;
     const lifecycle = invocation.subagentProviderLifecycle!;
     const link = lifecycle.childSession!;
@@ -374,5 +380,21 @@ export function createChildSessionTaskControl(input: ChildSessionTaskControlPort
       }
     }
   };
-  return Object.freeze({ readTask, waitTasks });
+  return Object.freeze({
+    ownsTask: (taskId: string) => {
+      const parent = input.getParentState();
+      return (
+        !!taskId &&
+        parent.session.threadId === input.parentSessionId &&
+        (Object.values(parent.capabilities.invocations).some(
+          (invocation) =>
+            invocation.subagentProviderLifecycle?.childInvocationId === taskId &&
+            !!invocation.subagentProviderLifecycle.childSession,
+        ) ||
+          input.ownsFollowupTask?.(taskId) === true)
+      );
+    },
+    readTask,
+    waitTasks,
+  });
 }

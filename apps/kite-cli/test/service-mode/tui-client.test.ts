@@ -12,6 +12,50 @@ import type { RuntimeProtocolMessage } from '@kite-ai/runtime-protocol';
 import type { SessionPresentationAction } from '../../src/adapters/tui/session-adapter';
 import { createNativeTuiRuntimeClient } from '../../src/service-mode';
 
+test('accepted main Run waiting for input outlives the former client execution deadline', async () => {
+  const remote = new FakeRuntimeConnection();
+  remote.requestApprovalOnNextTurn();
+  const facade = facadeFor(remote);
+  const sessionId = facade.createSession('/tmp/tui-client-workspace');
+  await facade.waitForSessionReady(sessionId);
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((...args: Parameters<typeof setTimeout>) => {
+    const [callback, delay, ...rest] = args;
+    // Advance the former 30-minute execution timer without shortening RPC,
+    // presentation or cancellation deadlines.
+    return originalSetTimeout(callback, delay === 30 * 60_000 ? 1 : delay, ...rest);
+  }) as typeof setTimeout;
+  let settled = false;
+  const session = facade.getRuntime(sessionId)!;
+  const run = session.runTask('wait for a user decision', { dispatch: () => {} });
+  void run.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  try {
+    await Bun.sleep(20);
+    expect(remote.commands).toContain('start_turn');
+    expect(session.agentLoopActive).toBe(true);
+    expect(settled).toBe(false);
+    await facade.submitUserAction({
+      type: 'approve',
+      interactionId: 'approval-native-receipt',
+      generation: 0,
+      grant: 'approve_once',
+    });
+    await run;
+    expect(settled).toBe(true);
+    expect(session.agentLoopActive).toBe(false);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+    await facade.dispose();
+  }
+});
+
 test('detached admission rejection stays handled until the caller awaits readiness', async () => {
   const remote = new FakeRuntimeConnection();
   remote.rejectNextCreate();

@@ -1073,7 +1073,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
   });
 
   it('applies the default hard timeout when the model omits timeout_ms', async () => {
-    let capturedTimeout: number | undefined;
+    let capturedTimeout: number | null | undefined;
 
     const result = await invokeGovernedTool({
       workspace: '/ws',
@@ -1097,7 +1097,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
   });
 
   it('passes timeout_ms to the shell executor', async () => {
-    let capturedTimeout: number | undefined;
+    let capturedTimeout: number | null | undefined;
 
     const result = await invokeGovernedTool({
       workspace: '/ws',

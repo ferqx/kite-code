@@ -43,6 +43,7 @@ function makeHarness(
     readonly expired?: boolean;
     readonly mutablePrepared?: boolean;
     readonly service?: boolean;
+    readonly unlimited?: boolean;
   } = {},
 ) {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-builtin-prepared-shell-'));
@@ -87,7 +88,9 @@ function makeHarness(
     command: 'printf hello',
     executionBoundaryDigest: 'boundary-1',
     protectedPathRevision: 'protected-1',
-    ...(options.service ? { executionMode: 'service' as const } : { timeoutMs: 5_000 }),
+    ...(options.service
+      ? { executionMode: 'service' as const }
+      : { timeoutMs: options.unlimited ? null : 5_000 }),
   });
   preparation = preparationDraft.preparation;
   const intentDigest = sandboxPreparationIntentDigest({
@@ -298,6 +301,29 @@ function makeHarness(
 }
 
 describe('Builtin prepared shell execution consumer candidate', () => {
+  test('finite primary preparation preserves explicit null through qualified dispatch', async () => {
+    const harness = makeHarness({
+      unlimited: true,
+      intentAcknowledged: true,
+      readyAcknowledged: true,
+      dispatchAcknowledged: true,
+    });
+    try {
+      const result = await harness.consumer({
+        identity: harness.identity,
+        workspace: harness.workspace,
+        command: 'printf hello',
+        timeoutMs: null,
+        lifecycle: harness.lifecycle,
+      });
+      expect(result.kind).toBe('completed');
+      expect(harness.processTimeoutMs()).toBeUndefined();
+      expect(harness.counts().processCalls).toBe(1);
+    } finally {
+      harness.close();
+    }
+  });
+
   test('service preparation preserves an omitted total timeout through dispatch', async () => {
     const harness = makeHarness({
       service: true,

@@ -10,6 +10,8 @@
 
 工具声明由同一契约提供描述、schema、parser、effect 分类和可用性。模型传来的 JSON 不直接进入执行器：先解析成规范参数，再结合能力绑定和当前上下文编译策略 facts。描述不能宣称 schema 或执行器未支持的行为。
 
+[工具搜索](../src/tool-search.ts)仅将完整的目录查询重定向到 `list_mcp_tools`；带具体用途的中英文查询继续产生候选与 `searchResult`，不能因为包含“有哪些工具”或“which MCP tools”就拒绝能力发现。搜索结果仍不直接授予执行权限，验证见 [目录与用途查询回归](../test/tool-search-inventory.test.ts)。
+
 Host coordinator 维护 attempt 和提交身份，Builtin callback 提供实际机制；Service adapter 注入 filesystem、Shell、MCP 和子任务依赖。Kernel 决定授权与调度，Builtin 不能以“执行函数可调用”绕过这些决定。
 
 | 交接 | 必须保持 |

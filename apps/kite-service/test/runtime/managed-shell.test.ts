@@ -21,6 +21,91 @@ const terminal = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('ManagedShellRuntime', () => {
+  test('preparation consumes the initial yield interval without adding another full wait', async () => {
+    const runtime = new ManagedShellRuntime();
+    let started!: () => void;
+    let complete!: () => void;
+    const acknowledged = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    let published = false;
+    const launch = runtime
+      .start({
+        ownerKey: 'yield-deadline',
+        yieldMs: 10,
+        started: acknowledged,
+        execute: async () => {
+          await completion;
+          return terminal();
+        },
+      })
+      .then((snapshot) => {
+        published = true;
+        return snapshot;
+      });
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      expect(published).toBe(false);
+      started();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(published).toBe(true);
+      expect((await launch).status).toBe('running');
+    } finally {
+      started();
+      complete();
+      await runtime.dispose();
+    }
+  });
+  test('zero yield publishes only after supervisor acknowledgement, or terminal failure', async () => {
+    const runtime = new ManagedShellRuntime();
+    let started!: () => void;
+    let complete!: () => void;
+    const acknowledged = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    let published = false;
+    const launch = runtime
+      .start({
+        ownerKey: 'prepared-owner',
+        yieldMs: 0,
+        started: acknowledged,
+        execute: async () => {
+          await completion;
+          return terminal();
+        },
+      })
+      .then((snapshot) => {
+        published = true;
+        return snapshot;
+      });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(published).toBe(false);
+      started();
+      const running = await launch;
+      expect(running.status).toBe('running');
+      complete();
+      expect((await runtime.wait(running.shellId, 'prepared-owner')).status).toBe('exited');
+    } finally {
+      started();
+      complete();
+      await runtime.dispose();
+    }
+    const failed = await runtime.start({
+      ownerKey: 'prepared-owner',
+      yieldMs: 0,
+      started: new Promise<void>(() => {}),
+      execute: async () => terminal({ ok: false, exitCode: -1, stderr: 'preparation denied' }),
+    });
+    expect(failed).toMatchObject({ status: 'exited', result: { ok: false, exitCode: -1 } });
+    await runtime.dispose();
+  });
   test('spools terminal-only Host output and keeps streamed output single-copy', async () => {
     const runtime = new ManagedShellRuntime();
     const ownerKey = 'terminal-only\0workspace';

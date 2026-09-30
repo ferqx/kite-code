@@ -15,7 +15,29 @@ export interface Message {
   readonly finalReply?: boolean;
   /** Client-local delivery state used before the runtime projection owns the message. */
   readonly delivery?: 'sending' | 'failed' | 'unknown';
-  readonly systemKind?: 'compaction' | 'ask' | 'approval' | 'turn_timing' | 'turn_terminal';
+  readonly systemKind?:
+    | 'compaction'
+    | 'ask'
+    | 'approval'
+    | 'turn_timing'
+    | 'turn_terminal'
+    | 'turn_failure';
+  /** Safe terminal facts for a reply failure; never an executable retry instruction. */
+  readonly failure?: {
+    readonly summary: string;
+    readonly reasonCode?: string;
+    readonly outcome?: {
+      readonly status:
+        | 'completed'
+        | 'aborted'
+        | 'blocked'
+        | 'unknown'
+        | 'budget_exhausted'
+        | 'resource_saturated';
+      readonly safeRetry: boolean;
+      readonly recoveryEntry: 'none' | 'retry' | 'reconcile' | 'new_run' | 'operator_action';
+    };
+  };
   /** Exact terminal fact for a hidden Turn marker; independent of message status. */
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {

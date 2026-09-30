@@ -5,10 +5,10 @@
 //! an integrity boundary. Every request, cancellation, output chunk, and
 //! terminal receipt is bound to the directly inherited stdin/stdout pipes.
 
+use base64::Engine;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use base64::Engine;
 
 /// Matches `WINDOWS_SANDBOX_PROTOCOL_VERSION` on the TypeScript side.
 pub const PROTOCOL_VERSION: u32 = 6;
@@ -62,10 +62,23 @@ pub struct InvocationRequest {
     pub coreutils_digest: String,
     /// Hard active-process limit for the Job Object.
     pub max_processes: u32,
-    /// Execution timeout in milliseconds.
-    pub timeout_ms: u64,
+    /// Positive execution timeout in milliseconds; explicit null means no timer.
+    #[serde(deserialize_with = "deserialize_timeout")]
+    pub timeout_ms: Option<u64>,
     /// Per-invocation network authorization.
     pub network_mode: NetworkMode,
+}
+
+fn deserialize_timeout<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    let timeout = Option::<u64>::deserialize(deserializer)?;
+    if timeout == Some(0) {
+        return Err(serde::de::Error::custom(
+            "timeoutMs must be positive or null",
+        ));
+    }
+    Ok(timeout)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -312,7 +325,9 @@ pub fn decode_control_frame<T: DeserializeOwned>(
     let raw: ControlFrame = serde_json::from_slice(payload)?;
     let raw_value: Value = serde_json::from_slice(payload)?;
     if canonical_json(&raw_value)?.as_bytes() != payload {
-        return Err(ProtocolError::InvalidFrame("outer frame is not canonical".to_string()));
+        return Err(ProtocolError::InvalidFrame(
+            "outer frame is not canonical".to_string(),
+        ));
     }
     if raw.version != PROTOCOL_VERSION {
         return Err(ProtocolError::VersionMismatch {
@@ -331,26 +346,89 @@ pub fn decode_control_frame<T: DeserializeOwned>(
     }
     let payload_bytes = base64::engine::general_purpose::STANDARD
         .decode(&raw.payload_base64)
-        .map_err(|_| ProtocolError::InvalidFrame("control payload base64 is invalid".to_string()))?;
+        .map_err(|_| {
+            ProtocolError::InvalidFrame("control payload base64 is invalid".to_string())
+        })?;
     if base64::engine::general_purpose::STANDARD.encode(&payload_bytes) != raw.payload_base64 {
         return Err(ProtocolError::InvalidFrame(
             "control payload base64 is not canonical".to_string(),
         ));
     }
-    let payload_value: Value = serde_json::from_slice(&payload_bytes)
-        .map_err(|error| ProtocolError::InvalidFrame(format!("control payload json is invalid: {error}")))?;
+    let payload_value: Value = serde_json::from_slice(&payload_bytes).map_err(|error| {
+        ProtocolError::InvalidFrame(format!("control payload json is invalid: {error}"))
+    })?;
     if canonical_json(&payload_value)?.as_bytes() != payload_bytes {
-        return Err(ProtocolError::InvalidFrame("control payload is not canonical".to_string()));
+        return Err(ProtocolError::InvalidFrame(
+            "control payload is not canonical".to_string(),
+        ));
     }
     let typed: T = serde_json::from_slice(&payload_bytes).map_err(|error| {
         ProtocolError::InvalidFrame(format!("control payload shape is invalid: {error}"))
     })?;
-    Ok(VerifiedControlFrame { frame: raw, payload: typed })
+    Ok(VerifiedControlFrame {
+        frame: raw,
+        payload: typed,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invocation_timeout_requires_explicit_positive_or_null() {
+        let mut request = serde_json::json!({
+            "version": PROTOCOL_VERSION,
+            "directWorkspace": { "runtimeCapabilitySid": "S-1-15-3-1" },
+            "invocationName": "timeout-contract",
+            "commandLine": "sleep 30",
+            "cwd": "C:\\workspace",
+            "env": {},
+            "filesystemScope": "workspace_write",
+            "workspaceRoot": "C:\\workspace",
+            "runtimeRoot": "C:\\runtime",
+            "shellRuntimeRoot": "C:\\shell",
+            "shellRuntime": "busybox",
+            "shellRuntimeDigest": "digest",
+            "coreutilsDigest": "digest",
+            "maxProcesses": 31,
+            "timeoutMs": null,
+            "networkMode": "off"
+        });
+        let decoded: InvocationRequest = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(decoded.timeout_ms, None);
+        let frame =
+            encode_control_frame("request", "timeout-contract", HOST_PEER_ID, 0, &decoded).unwrap();
+        let bytes = decode_frame(&mut std::io::Cursor::new(frame)).unwrap();
+        assert_eq!(
+            decode_control_frame::<InvocationRequest>(
+                &bytes,
+                "request",
+                HOST_PEER_ID,
+                "timeout-contract",
+                0
+            )
+            .unwrap()
+            .payload
+            .timeout_ms,
+            None
+        );
+        assert!(serde_json::to_value(decoded).unwrap()["timeoutMs"].is_null());
+        request["timeoutMs"] = serde_json::json!(1234);
+        let decoded: InvocationRequest = serde_json::from_value(request.clone()).unwrap();
+        assert_eq!(decoded.timeout_ms, Some(1234));
+        for invalid in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("1234"),
+        ] {
+            request["timeoutMs"] = invalid;
+            assert!(serde_json::from_value::<InvocationRequest>(request.clone()).is_err());
+        }
+        request.as_object_mut().unwrap().remove("timeoutMs");
+        assert!(serde_json::from_value::<InvocationRequest>(request).is_err());
+    }
 
     #[test]
     fn control_frame_round_trips() {
@@ -492,7 +570,11 @@ mod tests {
         .unwrap();
         let payload = decode_frame(&mut std::io::Cursor::new(encoded)).unwrap();
         let outer = String::from_utf8(payload.clone()).unwrap();
-        let duplicate_outer = outer.replacen("\"type\":\"stdout\",", "\"type\":\"stdout\",\"type\":\"stdout\",", 1);
+        let duplicate_outer = outer.replacen(
+            "\"type\":\"stdout\",",
+            "\"type\":\"stdout\",\"type\":\"stdout\",",
+            1,
+        );
         assert!(decode_control_frame::<OutputPayload>(
             duplicate_outer.as_bytes(),
             "stdout",
@@ -515,7 +597,8 @@ mod tests {
         let duplicate_payload = br#"{"data":"aGVsbG8=","data":"aGVsbG8="}"#;
         frame.payload_base64 = base64::engine::general_purpose::STANDARD.encode(duplicate_payload);
         let duplicate_payload_frame = encode_frame(&frame).unwrap();
-        let duplicate_payload_bytes = decode_frame(&mut std::io::Cursor::new(duplicate_payload_frame)).unwrap();
+        let duplicate_payload_bytes =
+            decode_frame(&mut std::io::Cursor::new(duplicate_payload_frame)).unwrap();
         assert!(decode_control_frame::<OutputPayload>(
             &duplicate_payload_bytes,
             "stdout",

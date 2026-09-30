@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { parseDocument } from 'yaml';
 import type {
@@ -65,6 +65,8 @@ export interface SkillWorkflowContract {
 
 export interface CompiledSkillWorkflow {
   sourcePath: string;
+  /** Compilation-time root authority; preserves explicitly discovered root aliases. */
+  sourceBinding?: Readonly<{ canonicalRoot: string; device: number; inode: number }>;
   source: 'project' | 'user';
   origin: '.kite-code' | '.agents';
   contract?: SkillWorkflowContract;
@@ -414,12 +416,23 @@ function buildDescriptor(input: {
 /** Compile a complete, immutable Workflow Contract. Invalid skills are returned as diagnostics, never skipped. */
 export function compileSkillWorkflow(input: CompileSkillWorkflowInput): CompiledSkillWorkflow {
   const diagnostics: SkillDiagnostic[] = [];
-  const files = readSkillFiles(input.skillDir, diagnostics);
+  let sourceBinding: CompiledSkillWorkflow['sourceBinding'];
+  try {
+    const canonicalRoot = realpathSync(input.skillDir);
+    const root = lstatSync(canonicalRoot);
+    if (!root.isDirectory() || root.isSymbolicLink())
+      throw new Error('Skill root is not a directory.');
+    sourceBinding = Object.freeze({ canonicalRoot, device: root.dev, inode: root.ino });
+  } catch (error) {
+    diagnostic(diagnostics, 'invalid_path', `Unable to bind Skill source: ${String(error)}`);
+  }
+  const files = readSkillFiles(sourceBinding?.canonicalRoot ?? input.skillDir, diagnostics);
   const skillFile = files.find((file) => file.path === 'SKILL.md');
   if (!skillFile) {
     diagnostic(diagnostics, 'missing_skill_file', 'SKILL.md is required.', 'SKILL.md');
     return {
       sourcePath: resolve(input.skillDir),
+      ...(sourceBinding ? { sourceBinding } : {}),
       source: input.source,
       origin: input.origin,
       diagnostics,
@@ -713,7 +726,23 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         );
     }
   }
+  if (sourceBinding) {
+    try {
+      const canonicalRoot = realpathSync(input.skillDir);
+      const current = lstatSync(canonicalRoot);
+      if (
+        canonicalRoot !== sourceBinding.canonicalRoot ||
+        current.dev !== sourceBinding.device ||
+        current.ino !== sourceBinding.inode
+      ) {
+        throw new Error('Skill source changed during compilation.');
+      }
+    } catch (error) {
+      diagnostic(diagnostics, 'invalid_path', `Unable to verify Skill source: ${String(error)}`);
+    }
+  }
   const revision = digestCapability({
+    sourceBinding,
     files: fileSetDigest(files, input.skillDir),
     contract: contract
       ? { ...contract, dependencyRevisions: contract.dependencyRevisions }
@@ -721,6 +750,7 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
   });
   return {
     sourcePath: resolve(input.skillDir),
+    ...(sourceBinding ? { sourceBinding } : {}),
     source: input.source,
     origin: input.origin,
     contract,

@@ -127,6 +127,7 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'agent.task_settled',
   'resource_budget.configured',
   'resource_budget.cumulative_limits_removed',
+  'resource_budget.run_deadline_removed',
   'resource_budget.required_child_wait_started',
   'resource_budget.required_child_wait_ended',
   'resource_budget.bounded_replaced',

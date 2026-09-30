@@ -76,18 +76,18 @@ invocation，在同进程cleanup中只补Provider cleanup事实，不得被crash
 restore/crash路径仍保持unknown fail closed。cleanup完成后queued successor必须进入新的Turn与模型调度，不能显示Internal error。
 
 execution AbortSignal 会传播给普通模型、compaction、tool/MCP、Subagent 和 Verification；`boundedCancellation`
-控制的是 descendant/process-tree 有界清理资格，不负责创建或关闭运行截止时间。ResourceBudget 持久化本次运行的统一截止时间，App 的 Runtime coordinator 在进入恢复工作前安排计时器，命中后通过 Host-owned abort callback 触发同一根信号。
-新运行必须在向消费者交付 `resource_budget.configured` 之前先安装计时器，不能让暂停拉取事件的消费者延后截止时间生效。截止时间到达后不能另开第二套终止流程。取消首先在一个 transaction 中
+控制的是 descendant/process-tree 有界清理资格，不负责创建或关闭运行截止时间。ResourceBudget 的主 Run 显式使用 `unboundedRunDuration` 与 `deadlineAt: null`，不安装总期限计时器；独立子 Run 保留有限 deadline。App 的 Runtime coordinator 在进入有限 Run 的恢复工作前安排计时器，命中后通过 Host-owned abort callback 触发同一根信号。
+有限新 Run 必须在向消费者交付 `resource_budget.configured` 之前先安装计时器，不能让暂停拉取事件的消费者延后截止时间生效。截止时间到达后不能另开第二套终止流程。取消首先在一个 transaction 中
 取消未完成工具、将未 dispatch reservation release、将
 `dispatch_started` reservation 标记 `unknown`、取消所有 durable waiter，并写入
 `turn.aborted(cause=error)`，然后才 abort 执行。Abort 必须唤醒 FIFO permit wait，且之后不能
 产生新的 model/tool dispatch；同一信号也必须唤醒没有后台 effect 的 ask_user、Plan/工具审批、
 Verification 和 Provider action/admission 等交互等待。执行链退出后还必须追加唯一的结构化
-`run.error`：到期且清理已确认时使用 failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown reservation 时仍
+`run.error`：到期且清理已确认时使用 failure=`budget_exceeded`、terminal reason=`budget_exhausted`；同批工具取消也显式使用 `budget_exceeded/resource_exhausted`，不能记成用户取消。存在 unknown reservation 时仍
 保留 `knownExternalEffects=unknown` 和 reconciliation 入口。清理未确认时改为
 failure/reason=`cancel_incomplete`。
 
-普通Tool与Shell不按活动数量取得permit；一次模型响应中通过traits冲突检查的调用直接并行。新主 Run 的 `maxToolInvocations`、模型请求、token、turn 和 Artifact 累计字段只记录兼容占位，不构成终止条件；旧活动 Run 先持久提交 `resource_budget.cumulative_limits_removed`，以同一 Run 身份保留期限、并发和既有使用记录。Resource Budget仍限制Subagent与writer并发，并保留统一deadline、取消和unknown
+普通Tool与Shell不按活动数量取得permit；一次模型响应中通过traits冲突检查的调用直接并行。新主 Run 的 `maxToolInvocations`、模型请求、token、turn、Artifact 与运行时长字段只记录兼容占位，不构成终止条件；旧活动主 Run 先持久提交 `resource_budget.cumulative_limits_removed` 与 `resource_budget.run_deadline_removed`，以同一 Run 身份保留并发和既有使用记录，原 deadline 只供已签发资金身份的恢复核对。Resource Budget仍限制Subagent与writer并发，并保留有限子Run deadline、取消和unknown
 reconciliation。生产release restriction不得单独压低Tool/Shell活动并发；这避免少量模型siblings因permit
 排队、唤醒或超时路径永久停在`tool.queued`。整次运行已经到期时，子Agent不能再申请新的模型或工具资源；
 正在等待的Subagent/writer项目由统一取消负责清理。

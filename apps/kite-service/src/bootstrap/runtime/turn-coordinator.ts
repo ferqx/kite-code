@@ -31,7 +31,7 @@ import {
   requiredManagedShellIds,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
   type StateRuntimeEffectExecutor,
-  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+  UNBOUNDED_PRIMARY_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { CHILD_SESSION_TASK_USER_GOAL } from '@kite-ai/runtime-host/storage';
 import {
@@ -56,7 +56,7 @@ import {
   type SessionLoggingContentInspector,
 } from '#kite-service/session-logger';
 import type { CapabilityExecutionPort } from '#runtime-spi';
-import { recordRuntimeFailure } from './failures';
+import { classifyFailure, recordRuntimeFailure } from './failures';
 import { managedShellOwnerKey, managedShellRuntime } from './managed-shell';
 import { projectRuntimeSchedulerFacts } from './scheduler-facts';
 import {
@@ -465,11 +465,12 @@ export async function* executeRuntimeTurn(
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
+    toolFailure?: ReturnType<typeof classifyFailure>,
   ): RuntimeEvent[] => {
     if (runCancelled || kernel.getState().turn.status !== 'active') return [];
     runCancelled = true;
     exitStatus = 'aborted';
-    const events = eventsForRunCancellation(kernel.getState(), reason, cause);
+    const events = eventsForRunCancellation(kernel.getState(), reason, cause, toolFailure);
     try {
       kernel.processEventBatch(events);
       const canonicalEvents = [...kernel.getLastAppliedEvents()];
@@ -523,7 +524,11 @@ export async function* executeRuntimeTurn(
     abortExecution(reason, 'user');
   };
   const cancelForDeadline = (): RuntimeEvent[] => {
-    const cancellationEvents = cancelRun('Runtime deadline exceeded.', 'error');
+    const cancellationEvents = cancelRun(
+      'Runtime deadline exceeded.',
+      'error',
+      classifyFailure('budget_exceeded', 'Runtime deadline exceeded.'),
+    );
     if (cancellationEvents.length === 0) return [];
     const hasUnknownEffects =
       kernel.getState().resourceBudget.status === 'active' &&
@@ -585,7 +590,8 @@ export async function* executeRuntimeTurn(
       runCancelled ||
       current.turn.status !== 'active' ||
       budget.status !== 'active' ||
-      budget.requiredChildWait
+      budget.requiredChildWait ||
+      budget.deadlineAt === null
     )
       return;
     const remainingMs = Math.max(0, Date.parse(budget.deadlineAt) - Date.now());
@@ -593,7 +599,11 @@ export async function* executeRuntimeTurn(
       runDeadlineTimer = undefined;
       const latest = kernel.getState();
       if (runCancelled || latest.turn.status !== 'active') return;
-      if (latest.resourceBudget.status !== 'active' || latest.resourceBudget.requiredChildWait)
+      if (
+        latest.resourceBudget.status !== 'active' ||
+        latest.resourceBudget.requiredChildWait ||
+        latest.resourceBudget.deadlineAt === null
+      )
         return;
       if (Date.now() < Date.parse(latest.resourceBudget.deadlineAt)) {
         scheduleRunDeadline();
@@ -686,20 +696,35 @@ export async function* executeRuntimeTurn(
             yield accepted;
           }
         }
+        const latestBudget = kernel.getState().resourceBudget;
+        if (
+          !kernel.getState().childSessionOrigin &&
+          kernel.getState().turn.status === 'active' &&
+          latestBudget.status === 'active' &&
+          latestBudget.budget.durationOnlyChildRun !== true &&
+          latestBudget.budget.unboundedRunDuration !== true
+        ) {
+          const event: RuntimeEvent = {
+            type: 'resource_budget.run_deadline_removed',
+            runId: latestBudget.runId,
+          };
+          for (const accepted of kernel.processEventBatch([event])) {
+            collector.recordRuntime(accepted);
+            yield accepted;
+          }
+        }
       } else {
         const startedAt = new Date();
         const maxConcurrentSubagents =
           input.config.resources?.maxConcurrentSubagents ??
-          UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_.maxConcurrentSubagents;
+          UNBOUNDED_PRIMARY_RESOURCE_BUDGET_.maxConcurrentSubagents;
         const event: RuntimeEvent = {
           type: 'resource_budget.configured',
           runId: budgetRunId ?? randomUUID(),
           startedAt: startedAt.toISOString(),
-          deadlineAt: new Date(
-            startedAt.getTime() + UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_.maxRunDurationMs,
-          ).toISOString(),
+          deadlineAt: null,
           budget: {
-            ...UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+            ...UNBOUNDED_PRIMARY_RESOURCE_BUDGET_,
             maxConcurrentSubagents,
             maxConcurrentWriters: maxConcurrentSubagents,
           },

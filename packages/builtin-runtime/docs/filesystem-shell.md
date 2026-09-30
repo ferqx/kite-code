@@ -8,9 +8,11 @@
 
 [Local provider](../src/filesystem/local-provider.ts)不再为整文件观察／搜索施加默认 8 MiB 或 10,000 匹配数上限；[preimage store](../src/filesystem/preimage-artifacts.ts)与[写入 grant](../src/filesystem/grant-authority.ts)不再分别因 16 MiB／16 Mi 字符拒绝操作。`read_file` 的显式行范围仍执行，未指定 `limit` 时返回剩余全文；[Runtime module](../src/filesystem/runtime-module.ts)不再截断长行、搜索、写入或编辑结果。目标 stat、no-follow 打开、摘要、grant、替换检测和原子发布校验继续绑定准确对象。大文件实际存储和模型请求容量仍由对应 owner 裁决。
 
+`search_files.pattern` 与 `search_content.glob` 共用文件匹配器，完整目录段 `**/` 表示零层或多层目录，包含搜索根目录；普通 `*`、文件名 brace 与非目录段的 `**` 保持原语义。匹配规则不改变遍历、ignore、symlink、路径 scope 或持久授权，验证见 [递归 glob 回归](../test/filesystem-search-glob.test.ts)。
+
 逐页读文件每次重新打开并读取目标原始字节，保持 no-follow 与前后对象身份校验；相同路径且原始字节完全一致时，复用上次解码正文、行索引及正文摘要，任何同尺寸改写也会重新解码和计算摘要。完整 `rawContent` 和正文摘要仍随观察结果交给证据校验；此契约意味着每页仍需读取并核对整份原始字节。[独立观察证据校验](../src/filesystem/observation-authority.ts)仅保留最近一次完整验证的正文和摘要：同一不可变字符串且摘要相等时复用正文校验结果，新的正文必须重新哈希；目标、准备身份、持久意图及观察字段每次仍独立验证。搜索在遍历时直接投影匹配结果，不再先保留全部文件路径；遍历每 128 个目录项让出事件循环一次。`edit_file` 多次匹配的行号由单次前向扫描计算。
 
-Shell preparation 决定可执行环境与沙箱能力，实际 dispatch 后输出、退出码和 cleanup 归对应执行 port。执行前拒绝没有退出码；失败不保证没有副作用。Host 丢失或取消后的进程清理由 Host/platform port 承担。
+Shell preparation 决定可执行环境与沙箱能力，实际 dispatch 后输出、退出码和 cleanup 归对应执行 port。执行前拒绝没有退出码；失败不保证没有副作用。Host 丢失或取消后的进程清理由 Host/platform port 承担。主 Run 未设置显式 `timeout_ms` 时，内部准备与执行上下文传递 `timeoutMs: null`，不再回退为 10 分钟默认超时；有限子 Run 使用自身剩余期限，明确设置的正整数超时保持原值。空值不改变有限命令的完成义务，也不取消用户中止、沙箱权限或进程树清理。
 
 Builtin 对封印的 Shell 命令重新运行闭集只读分类，再选择固定解释器和最小环境；Full 模式下匹配的 Git 读取也使用中性 HOME、隔离 PATH 和禁用 Git 配置／helper 的环境投影。环境选择与 `executionTrust` 的只读沙箱能力证明分开：Full 仍保留已授权的 `full_access`/网络范围，不能把 `policy_proven_read_only` 与 `allow_all` 组合。未命中闭集的命令保持普通环境，调用方传入的只读信任若未通过 Builtin 分类会在准备阶段拒绝。
 

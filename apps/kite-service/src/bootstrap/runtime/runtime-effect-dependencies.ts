@@ -122,7 +122,7 @@ export interface RuntimeExecutorDependencies {
     ) => void | Promise<void>;
     /** Propagate a committed parent Run cancellation to locally owned child executions. */
     cancelOriginRun?: (runId: string) => void;
-    taskControl?: import('@kite-ai/builtin-runtime/subagent').BuiltinTaskControlExecutionMechanism;
+    taskControl?: import('../../runtime/tool-execution/router').AppIndependentChildTaskControl;
     backgroundSnapshot?: () => Readonly<{
       aggregateGeneration: string;
       watermark: number;

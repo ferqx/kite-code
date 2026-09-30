@@ -949,6 +949,11 @@ function corpusState(type: RuntimeEventType): AgentState {
   let state = base;
   if (type.startsWith('resource_budget.') && type !== 'resource_budget.configured') {
     state = reduceAgentState(base, minimalEvent('resource_budget.configured'));
+    if (type === 'resource_budget.run_deadline_removed')
+      state = reduceAgentState(state, {
+        type: 'resource_budget.cumulative_limits_removed',
+        runId: (state.resourceBudget as { runId: string }).runId,
+      });
     if (
       type === 'resource_budget.dispatch_started' ||
       type === 'resource_budget.reconciled' ||
@@ -1183,7 +1188,7 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(169);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(170);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
     expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(21);
   });
@@ -1415,10 +1420,10 @@ describe('agent kernel package boundary', () => {
 
   test('classifies all current events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(169);
-    expect(new Set(covered).size).toBe(169);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(148);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(169);
+    expect(covered).toHaveLength(170);
+    expect(new Set(covered).size).toBe(170);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(149);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(170);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>

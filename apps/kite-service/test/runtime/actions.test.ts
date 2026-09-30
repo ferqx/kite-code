@@ -7,6 +7,7 @@ import {
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
 } from '@kite-ai/runtime-host/kernel-adapter';
+import { classifyFailure } from '#kite-service/bootstrap/runtime/failures';
 import {
   eventsForRunCancellation,
   eventsForRuntimeAction,
@@ -560,6 +561,68 @@ test('Full mode is not represented as an approval grant', () => {
   });
   expect(state.mode).toBe('full');
   expect(state.sessionCommandGrants).toEqual(new Map());
+});
+
+test('deadline cancellation preserves budget classification and exact dispatch evidence', () => {
+  const state = createRuntimeHostStateInitialState({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId: 'deadline-tool-classification',
+    userId: 'u',
+    workspace: '/',
+  });
+  for (const status of ['queued', 'running'] as const) {
+    state.tools.calls[status] = {
+      toolCallId: status,
+      modelMessageId: 'model-1',
+      name: 'shell_execute',
+      args: { command: 'sleep 30' },
+      status,
+      createdAtTurnId: state.turn.turnId,
+    };
+  }
+  state.tools.queue = ['queued'];
+  state.tools.active = ['running'];
+  const reason = 'Runtime deadline exceeded.';
+  const deadlineEvents = eventsForRunCancellation(
+    state,
+    reason,
+    'error',
+    classifyFailure('budget_exceeded', reason),
+  );
+  const normalize = (events: ReturnType<typeof eventsForRunCancellation>) =>
+    events.map((event) => normalizeCurrentToolOutcomeEvent(event, state, '2026-09-30T00:00:00Z'));
+  const deadline = normalize(deadlineEvents);
+  const user = normalize(eventsForRunCancellation(state));
+  for (const [index, dispatchState, externalEffects] of [
+    [0, 'not_started', 'none'],
+    [1, 'started', 'unknown'],
+  ] as const) {
+    const terminal = deadline[index]!;
+    const userTerminal = user[index]!;
+    expect(terminal).toMatchObject({
+      type: 'tool.cancelled',
+      reason,
+      failure: { kind: 'budget_exceeded' },
+      outcome: {
+        status: 'cancelled',
+        failure: { kind: 'budget_exceeded', detailCode: 'resource_exhausted' },
+        dispatchState,
+        externalEffects,
+      },
+    });
+    expect(userTerminal).toMatchObject({
+      type: 'tool.cancelled',
+      outcome: {
+        failure: { kind: 'user_input_cancelled', detailCode: 'cancelled_by_user' },
+        dispatchState,
+        externalEffects,
+      },
+    });
+  }
+  const cancelled = deadline.reduce(reduceRuntimeState, state);
+  expect(cancelled.tools.calls.queued?.outcome?.failure?.kind).toBe('budget_exceeded');
+  expect(cancelled.tools.calls.running?.outcome?.failure?.kind).toBe('budget_exceeded');
+  expect(cancelled.turn).toMatchObject({ status: 'aborted', abortCause: 'error' });
 });
 
 test('bounded cancellation removes every durable waiter before aborting the turn', () => {

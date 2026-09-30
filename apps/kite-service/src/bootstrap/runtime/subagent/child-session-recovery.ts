@@ -1,4 +1,4 @@
-import { fundingBudgetForRun } from '@kite-ai/runtime-host/kernel-adapter';
+import { fundingBudgetForRun, fundingDeadlineMatches } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   childDelegatedUpperBoundDigest,
   sealChildGrantPayload,
@@ -137,7 +137,8 @@ export function planChildSessionRecovery(input: {
         reservation.state === 'dispatch_started') &&
       reservation.executableUpperBound.independentChildTurnDeadline === true &&
       reservation.executableUpperBound.unboundedToolInvocations === true &&
-      funding?.deadlineAt === intent.deadlineAt &&
+      funding !== undefined &&
+      fundingDeadlineMatches(funding, intent.deadlineAt) &&
       childDelegatedUpperBoundDigest(reservation.executableUpperBound) ===
         intent.delegatedUpperBoundDigest &&
       !(

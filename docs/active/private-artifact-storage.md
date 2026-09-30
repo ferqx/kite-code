@@ -41,6 +41,8 @@ Host `ArtifactPort` 只提供 type-erased namespace registry；它不统一 ref/
 
 ## Ref 与完整性
 
+内容寻址 private Artifact 的重复发布保留首次创建时间，其余身份、正文与稳定元数据必须完全相同；完整 Store 写入规则与真实 backend 回归见 [Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
+
 Artifact ref 只包含 path-free `artifactId`、封闭 `kind`、`sha256:` integrity identifier 与 UTF-8 byte length。ID 和 integrity identifier 都从 domain-separated canonical bytes 的 SHA-256 得到；它们用于内容寻址、损坏检测和 identity mixup 检测，不是密码学 authenticity，也不抵御能够改写文件并重算 digest 的同用户 attacker。
 
 Runtime 不创建或加载 `model-artifacts.key`、installation integrity key 或其他 Artifact secret。不存在 key loss 启动终态、wrong-key reader、替代 key 生成或无 Artifact dispatch fallback。真实 API credential/OAuth secret 不允许进入 Artifact ref 或正文。

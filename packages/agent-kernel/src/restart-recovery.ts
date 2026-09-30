@@ -1,5 +1,6 @@
 import { childThreadIdForToolAttempt } from './child-session';
 import type { KernelEvent } from './events';
+import { fundingDeadlineMatches } from './resource-deadline';
 import type { AgentState, ResourceReservation } from './state';
 
 export type StateModelEvidenceFailure = 'artifact_missing' | 'artifact_corrupt';
@@ -190,7 +191,7 @@ export function verifiedPendingAfterTurnReservationIds(
       args?.background !== true ||
       args.result_disposition !== 'after_turn' ||
       ledger.status !== 'active' ||
-      ledger.deadlineAt !== link.deadlineAt ||
+      !fundingDeadlineMatches(ledger, link.deadlineAt) ||
       (delegated?.state !== 'reserved' && delegated?.state !== 'queued') ||
       delegated.resourceKind !== 'subagent' ||
       delegated.runId !== proof.fundingRunId ||
@@ -272,7 +273,7 @@ export function verifiedSealedAfterTurnReportReservationIds(
       call.result?.resultMeta?.taskId !== proof.childInvocationId ||
       call.result.resultMeta.taskDisposition !== 'after_turn' ||
       ledger.status !== 'active' ||
-      ledger.deadlineAt !== link.deadlineAt ||
+      !fundingDeadlineMatches(ledger, link.deadlineAt) ||
       (delegated?.state !== 'dispatch_started' && delegated?.state !== 'unknown') ||
       delegated.resourceKind !== 'subagent' ||
       delegated.runId !== proof.fundingRunId ||
@@ -343,7 +344,7 @@ export function verifiedLiveAfterTurnReservationIds(
       call.result?.resultMeta?.taskId !== proof.childInvocationId ||
       call.result.resultMeta.taskDisposition !== 'after_turn' ||
       ledger.status !== 'active' ||
-      ledger.deadlineAt !== link.deadlineAt ||
+      !fundingDeadlineMatches(ledger, link.deadlineAt) ||
       child?.state !== 'dispatch_started' ||
       child.resourceKind !== 'subagent' ||
       child.runId !== proof.fundingRunId ||

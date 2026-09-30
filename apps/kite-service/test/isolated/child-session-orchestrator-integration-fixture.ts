@@ -29,6 +29,7 @@ import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
   INTERNAL_RESOURCE_BUDGET_,
+  resourceDeadlineMs,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import {
   createRuntimeRunStartResourceResult,
@@ -1140,7 +1141,7 @@ export async function exerciseChildOrchestration(
     expect(child.resourceBudget.budget.maxRunDurationMs).toBeLessThanOrEqual(
       accepted[0]!.childBudget.maxRunDurationMs,
     );
-    expect(Date.parse(child.resourceBudget.deadlineAt)).toBe(
+    expect(resourceDeadlineMs(child.resourceBudget.deadlineAt)).toBe(
       Date.parse(child.resourceBudget.startedAt) + child.resourceBudget.budget.maxRunDurationMs,
     );
     expect(

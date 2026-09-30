@@ -102,6 +102,7 @@ import {
   readDirectChildFollowupOutcomeWatermark,
   readDirectChildFollowupReleaseWatermark,
   readIndependentCrossSessionFollowupActivation,
+  readIndependentFollowupTaskForSource,
   readLastFollowupOutcomeForDirectChild,
   readLastReleasedFollowupForDirectChild,
   readPreparedCrossSessionFollowupRecoveryProof,
@@ -460,6 +461,11 @@ export interface KiteCrossSessionQueueMailPort {
     sourceSessionId: string,
     submissionId: string,
   ): CrossSessionFollowupTerminalReceipt | null;
+  readIndependentFollowupTaskForSource(
+    sourceSessionId: string,
+    taskId: string,
+    includeEvents?: boolean,
+  ): ReturnType<typeof readIndependentFollowupTaskForSource>;
   readFollowupGrantForTarget(
     targetSessionId: string,
     artifactId: string,
@@ -2113,6 +2119,20 @@ function openAdmittedKiteSessionRuntimeStorage<Event, State>(input: {
       readSnapshot(() => {
         assertCrossMailOwner(sourceSessionId);
         return readCrossSessionFollowupTerminalReceipt(database, sourceSessionId, submissionId);
+      }),
+    readIndependentFollowupTaskForSource: (
+      sourceSessionId: string,
+      taskId: string,
+      includeEvents = true,
+    ) =>
+      readSnapshot(() => {
+        assertCrossMailOwner(sourceSessionId);
+        return readIndependentFollowupTaskForSource(
+          database,
+          sourceSessionId,
+          taskId,
+          includeEvents,
+        );
       }),
     readFollowupGrantForTarget: (targetSessionId: string, artifactId: string) =>
       readSnapshot(() => {

@@ -7,11 +7,49 @@ import { PrivateImmutableArtifactStorage } from '@kite-ai/builtin-runtime/model'
 import { createBuiltinPlanDocument, PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
 import {
   createKiteHomeArtifactStore,
+  createKiteHomeWriteTransactionPort,
   initializeKiteHomeStoreSchema,
 } from '@kite-ai/runtime-storage-sqlite';
 import { createKiteHomeBuiltinArtifactBackends } from '../src/bootstrap/kite-home-artifact-backends';
 
 describe('Store 9 Builtin Artifact adapters', () => {
+  test('repeated immutable publication through the writer retains the first timestamp', () => {
+    const database = new Database(':memory:', { strict: true });
+    initializeKiteHomeStoreSchema(database);
+    const store = createKiteHomeArtifactStore(database);
+    const writer = createKiteHomeWriteTransactionPort(database);
+    let now = 10;
+    const backends = createKiteHomeBuiltinArtifactBackends(
+      {
+        ...store,
+        writeModel(input) {
+          writer.run(() => store.writeModel(input));
+        },
+      },
+      () => now,
+    );
+    const model = new PrivateImmutableArtifactStorage({
+      backend: backends.model,
+      namespace: 'model-artifacts',
+      partitions: [{ kind: 'model_surface', directory: 'surfaces', extension: '.json' }],
+      maxArtifactBytes: 16 * 1024 * 1024,
+    });
+    try {
+      const bytes = Buffer.from('{"purpose":"auto_review"}');
+      const first = model.write('model_surface', bytes);
+      now = 20;
+      expect(model.write('model_surface', bytes)).toEqual(first);
+      expect(model.read(first)).toEqual(bytes);
+      expect(
+        database.query<{ created_at: number }, []>('SELECT created_at FROM model_artifacts').get()
+          ?.created_at,
+      ).toBe(10);
+      expect(database.inTransaction).toBe(false);
+    } finally {
+      database.close();
+    }
+  });
+
   test('keeps model, Plan and filesystem preimage bodies in dedicated DB tables', () => {
     const database = new Database(':memory:', { strict: true });
     initializeKiteHomeStoreSchema(database);

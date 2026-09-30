@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-新主 Run 使用通用 `unboundedCumulativeUsage` 标记和零值累计占位字段。独立子 Run 继续使用有准确父子血缘的 `durationOnlyChildRun`。两种模式只用执行期限、并发、取消、权限、审批和准确外部结果来控制继续派发；累计计数仍记录用于观察，不作额度拒绝。模型与工具 reservation 分别使用 `unboundedModelTokens`、`unboundedArtifactBytes`；Provider 的单次能力和明确工具超时仍生效。
+新主 Run 使用通用 `unboundedCumulativeUsage` 标记和零值累计占位字段。独立子 Run 继续使用有准确父子血缘的 `durationOnlyChildRun`。本决定原先保留执行期限；[主 Run 期限移除决定](2026-09-30-primary-run-deadline-removed.md)已部分替代该范围，主 Run 无总期限，子 Run 保留自身期限。两种模式继续用并发、取消、权限、审批和准确外部结果来控制派发；累计计数仍记录用于观察，不作额度拒绝。模型与工具 reservation 分别使用 `unboundedModelTokens`、`unboundedArtifactBytes`；Provider 的单次能力和明确工具超时仍生效。
 
 活动旧主 Run 恢复时先提交可回放、幂等的 `resource_budget.cumulative_limits_removed` 事件，再规划新的外部派发。事件保留原 Run、已用量、截止时间和并发数字，只放宽当前 Run 尚未结算的直接模型／工具上界；旧 `artifact_capacity` 等待者在重算准入时取消。已完成历史 Run、保留的旧资金账本和旧 v1 子 grant 不改写。Runner 的 `maxEffects` 转为定期让出执行权，不能再作为整个 Run 的次数上限。
 
@@ -37,7 +37,7 @@ MCP 资源与动态结果、声明的 Skill reference 不再受旧的 128 KiB �
 
 ## Consequences
 
-新主 Run 不再因累计额度耗尽而进入 `artifact_capacity` 等待或拒绝后续模型／工具调用。无文件变更证据的 Shell 不再把旧 256 MiB 预留记为已知实际产物；有证据时记录观测字节。长期执行仍受当前 Run 截止时间、子 Agent 并发与安全准入约束。旧有限记录和新模式并存，恢复必须按持久标记分流，不能凭当前配置推断历史授权。
+新主 Run 不再因累计额度耗尽而进入 `artifact_capacity` 等待或拒绝后续模型／工具调用。无文件变更证据的 Shell 不再把旧 256 MiB 预留记为已知实际产物；有证据时记录观测字节。长期执行继续受子 Agent 并发与安全准入约束；有限子 Run 的截止时间仍生效，主 Run 总期限由上述后续决定移除。旧有限记录和新模式并存，恢复必须按持久标记分流，不能凭当前配置推断历史授权。
 
 验证覆盖 Kernel／Host 的额度升级、在途预留结算、截止时间及并发拒绝，Builtin 模型重试和恢复，Service 的 Shell 后停止／写入、旧容量等待者转换，以及正式 Runtime Server 的父子和 Shell 组合执行。对应入口见[执行手册](../../../../docs/handbook/features/execution.md)、[Host owner](../../../../packages/runtime-host/README.md)和[Service owner](../../../../apps/kite-service/docs/runtime-application.md)。
 

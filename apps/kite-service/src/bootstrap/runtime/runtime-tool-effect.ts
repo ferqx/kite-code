@@ -56,6 +56,7 @@ import {
   createAppToolPipelineAttemptScope,
 } from './tool-pipeline-ordinary-attempt';
 import { createAppTaskToolPipelineAttemptRuntime } from './tool-pipeline-task-attempt';
+import { resourceReservationBelongsToToolCall } from './tool-reservation-identity';
 
 function requireBuiltinToolCatalog(dependencies: RuntimeExecutorDependencies) {
   if (!dependencies.builtinToolCatalog) {
@@ -141,7 +142,6 @@ function undispatchedToolFailure(
   )
     return undefined;
   if (currentState.resourceBudget.status !== 'active') return undefined;
-  const invocationPrefix = `tool:${toolCallId}`;
   const matching =
     executionContext?.reservationIds.flatMap((reservationId) => {
       const reservation =
@@ -149,8 +149,7 @@ function undispatchedToolFailure(
           ? currentState.resourceBudget.reservations[reservationId]
           : undefined;
       return reservation &&
-        (reservation.invocationId === invocationPrefix ||
-          reservation.invocationId.startsWith(`${invocationPrefix}:`))
+        resourceReservationBelongsToToolCall(currentState, toolCallId, reservation)
         ? [reservation]
         : [];
     }) ?? [];
@@ -325,8 +324,7 @@ async function executeAppRuntimeToolsEffectUnchecked(
               budget.status === 'active' ? budget.reservations[reservationId] : undefined;
             return (
               reservation?.resourceKind === 'subagent' &&
-              (reservation.invocationId === `tool:${taskCallId}` ||
-                reservation.invocationId.startsWith(`tool:${taskCallId}:resume:`))
+              resourceReservationBelongsToToolCall(state, taskCallId, reservation)
             );
           })
         : undefined;

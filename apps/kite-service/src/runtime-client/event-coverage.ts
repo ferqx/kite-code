@@ -140,6 +140,7 @@ const INTERNAL_ONLY = [
   'provider.readiness_waiter_registered',
   'resource_budget.configured',
   'resource_budget.cumulative_limits_removed',
+  'resource_budget.run_deadline_removed',
   'resource_budget.bounded_replaced',
   'resource_budget.dispatch_started',
   'resource_budget.reconciled',

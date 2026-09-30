@@ -4,7 +4,6 @@ import {
   cleanupWindowsSandboxRuntimeDirNoSpawn,
   type RestrictedTokenInvocationRequest,
   resolveWindowsSandboxRunner,
-  timeoutMessage,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
   type WindowsRestrictedTokenPreparedTransport,
   type WindowsSandboxRunner,
@@ -144,15 +143,29 @@ export async function executeWindowsRestrictedTokenPrepared(
   let cancelled = false;
   let runnerKilled = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let watchdogId: ReturnType<typeof setTimeout> | undefined;
   let outputStop: AbortController | undefined;
   let outcome: ShellResult | undefined;
   let receiptSeen = false;
   let receiptCleanupConfirmed = false;
+  const armWatchdog = (delayMs: number): void => {
+    if (watchdogId) clearTimeout(watchdogId);
+    watchdogId = setTimeout(() => {
+      try {
+        proc.kill();
+        runnerKilled = true;
+      } catch {
+        // The runner already exited.
+      }
+    }, delayMs);
+    watchdogId.unref?.();
+  };
 
   const terminate = (reason: 'timeout' | 'cancelled') => {
     if (timedOut || cancelled) return;
     timedOut = reason === 'timeout';
     cancelled = reason === 'cancelled';
+    armWatchdog(WINDOWS_RESTRICTED_TOKEN_WATCHDOG_MS);
     outputStop?.abort();
     void sendCancelFrame(proc, control);
   };
@@ -167,10 +180,12 @@ export async function executeWindowsRestrictedTokenPrepared(
     } finally {
       requestFrame.fill(0);
     }
-    timeoutId = setTimeout(
-      () => terminate('timeout'),
-      timeoutMs + WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS,
-    );
+    if (timeoutMs !== null) {
+      timeoutId = setTimeout(
+        () => terminate('timeout'),
+        timeoutMs + WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS,
+      );
+    }
     input.signal?.addEventListener('abort', cancel, { once: true });
     if (input.signal?.aborted) cancel();
 
@@ -252,20 +267,12 @@ export async function executeWindowsRestrictedTokenPrepared(
       return receipt;
     })();
 
-    const watchdogId = setTimeout(
-      () => {
-        try {
-          proc.kill();
-          runnerKilled = true;
-        } catch {
-          // The runner already exited.
-        }
-      },
-      timeoutMs +
-        WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS +
-        WINDOWS_RESTRICTED_TOKEN_WATCHDOG_MS,
-    );
-    watchdogId.unref?.();
+    if (timeoutMs !== null && !cancelled && !timedOut)
+      armWatchdog(
+        timeoutMs +
+          WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS +
+          WINDOWS_RESTRICTED_TOKEN_WATCHDOG_MS,
+      );
     let receipt: ExecutionReceipt | undefined;
     let runnerDiag = '';
     try {
@@ -276,7 +283,7 @@ export async function executeWindowsRestrictedTokenPrepared(
       // unbounded control-plane wait.
       runnerDiag = (await runnerStderr).trim();
     } finally {
-      clearTimeout(watchdogId);
+      if (watchdogId) clearTimeout(watchdogId);
     }
     receiptSeen = receipt !== undefined;
     receiptCleanupConfirmed = receipt?.cleanupConfirmed === true && receipt.error === null;
@@ -294,7 +301,7 @@ export async function executeWindowsRestrictedTokenPrepared(
         exitCode: timedOut ? 124 : cancelled ? 130 : -1,
         stdout: stdoutAccumulator.value(),
         stderr: timedOut
-          ? appendTimeoutMessage(stderrAccumulator.value(), timeoutMs)
+          ? appendWindowsTimeoutMessage(stderrAccumulator.value(), timeoutMs)
           : cancelled
             ? appendTerminalMessage(
                 runnerDiag || stderrAccumulator.value(),
@@ -354,7 +361,7 @@ export async function executeWindowsRestrictedTokenPrepared(
       exitCode: timedOut ? 124 : cancelled ? 130 : receipt.exitCode,
       stdout,
       stderr: timedOut
-        ? appendTimeoutMessage(stderr, timeoutMs)
+        ? appendWindowsTimeoutMessage(stderr, timeoutMs)
         : cancelled
           ? appendTerminalMessage(stderr, 'Command cancelled by user.')
           : stderr,
@@ -373,7 +380,7 @@ export async function executeWindowsRestrictedTokenPrepared(
       exitCode: timedOut ? 124 : cancelled ? 130 : -1,
       stdout: '',
       stderr: timedOut
-        ? timeoutMessage(timeoutMs)
+        ? appendWindowsTimeoutMessage('', timeoutMs)
         : cancelled
           ? 'Command cancelled by user.'
           : baseError,
@@ -383,6 +390,7 @@ export async function executeWindowsRestrictedTokenPrepared(
     return outcome;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
+    if (watchdogId) clearTimeout(watchdogId);
     input.signal?.removeEventListener('abort', cancel);
     const recoveryRequired = runnerKilled || !receiptSeen || !receiptCleanupConfirmed;
     let recovered = !recoveryRequired;
@@ -443,6 +451,15 @@ export async function executeWindowsRestrictedTokenPrepared(
       );
     }
   }
+}
+
+function appendWindowsTimeoutMessage(stderr: string, timeoutMs: number | null): string {
+  return timeoutMs === null
+    ? appendTerminalMessage(
+        stderr,
+        'Sandbox runner reported a timeout without a configured deadline.',
+      )
+    : appendTimeoutMessage(stderr, timeoutMs);
 }
 
 function reject(input: ShellInput, stderr: string): ShellResult {

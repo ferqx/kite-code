@@ -429,34 +429,23 @@ function failedReceipt(
 }
 
 function inventoryRedirect(query: string): RuntimeJsonValue | null {
-  const normalized = query.trim().toLocaleLowerCase();
-  const containsMcp = /mcp/i.test(normalized);
-  const chineseInventory =
-    /(有哪些|有什么|列出|显示|查看|当前|可用).{0,10}(工具|服务|服务器|能力)/u.test(normalized) ||
-    /(工具|服务|服务器|能力).{0,10}(有哪些|有什么|列表|清单)/u.test(normalized);
-  if (!containsMcp && !chineseInventory) return null;
-  if (containsMcp) {
-    const queryTerms = terms(normalized);
-    const inventoryTerms = new Set([
-      'available',
-      'catalog',
-      'configured',
-      'list',
-      'mcp',
-      'server',
-      'servers',
-      'tool',
-      'tools',
-    ]);
-    if (
-      queryTerms.some((term) => inventoryTerms.has(term)) &&
-      (queryTerms.every((term) => inventoryTerms.has(term)) ||
-        /(?:what|which)\s+(?:mcp\s+)?tools?/u.test(normalized))
-    ) {
-      return inventoryRedirectValue();
-    }
-  }
-  return chineseInventory ? inventoryRedirectValue() : null;
+  const normalized = query
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[?？.!！。]+$/u, '')
+    .trim();
+  // Match whole directory requests. A specific purpose or action must reach
+  // capability search even when it starts with "which tools" or "有哪些工具".
+  const englishInventory =
+    /^(?:(?:what|which)\s+)?(?:(?:list|show)\s+)?(?:(?:available|configured|all|current)\s+)*mcp(?:\s+(?:tools?|servers?|catalog))?(?:\s+(?:list|catalog))?(?:\s+are\s+(?:available|configured))?$/u.test(
+      normalized,
+    );
+  const chineseSubject = '(?:(?:当前|可用|已配置|所有|全部))*的?(?:mcp)?(?:工具|服务|服务器|能力)';
+  const chineseInventory = new RegExp(
+    `^(?:请)?(?:(?:列出|显示|查看)${chineseSubject}(?:列表|清单)?|(?:有哪些|有什么)${chineseSubject}|${chineseSubject}(?:有哪些|有什么|列表|清单))$`,
+    'u',
+  ).test(normalized.replace(/\s+/gu, ''));
+  return englishInventory || chineseInventory ? inventoryRedirectValue() : null;
 }
 
 function inventoryRedirectValue(): RuntimeJsonValue {
@@ -466,13 +455,6 @@ function inventoryRedirectValue(): RuntimeJsonValue {
     message: 'Use list_mcp_tools to enumerate MCP providers and tools.',
     next_tool: 'list_mcp_tools',
   });
-}
-
-function terms(value: string): string[] {
-  return value
-    .toLocaleLowerCase()
-    .split(/[^\p{L}\p{N}_-]+/u)
-    .filter((term) => term.length > 1);
 }
 
 function asRecord(

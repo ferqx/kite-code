@@ -229,7 +229,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeModel: (input) => {
       assertPrivateReference(input.ref, ['model_surface', 'model_response', 'provider_options']);
       assertPayload(input.canonicalJson, input.ref.byteLength);
-      insertExact(database, 'model_artifacts', {
+      insertImmutableExact(database, 'model_artifacts', {
         artifact_id: input.ref.artifactId,
         kind: input.ref.kind,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -294,7 +294,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
       assertIdentifier(input.invocationId, 'Capability invocation ID');
       assertIdentifier(input.evidenceDigest, 'Capability evidence digest');
       assertPayload(input.canonicalJson, input.ref.byteLength, 16 * 1024 * 1024);
-      insertExact(database, 'capability_artifacts', {
+      insertImmutableExact(database, 'capability_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         invocation_id: input.invocationId,
@@ -327,7 +327,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
         'Filesystem preimage target identity digest',
       );
       assertPayload(input.canonicalJson, input.ref.byteLength, 16 * 1024 * 1024);
-      insertExact(database, 'filesystem_preimage_artifacts', {
+      insertImmutableExact(database, 'filesystem_preimage_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         invocation_id: input.invocationId,
@@ -358,7 +358,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
       assertPrivateReference(input.ref, ['sandbox_preparation']);
       assertIdentifier(input.preparationDigest, 'Sandbox preparation digest');
       assertPayload(input.canonicalJson, input.ref.byteLength, 2 * 1024 * 1024);
-      insertExact(database, 'sandbox_preparation_artifacts', {
+      insertImmutableExact(database, 'sandbox_preparation_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         preparation_digest: input.preparationDigest,
@@ -386,7 +386,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeSubagentTask: (input) => {
       assertPrivateReference(input.ref, ['subagent_task_request', 'subagent_task']);
       assertPayload(input.canonicalJson, input.ref.byteLength);
-      insertExact(database, 'subagent_task_artifacts', {
+      insertImmutableExact(database, 'subagent_task_artifacts', {
         artifact_id: input.ref.artifactId,
         kind: input.ref.kind,
         integrity_identifier: input.ref.integrityIdentifier,
@@ -438,7 +438,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeSubagentLifecycle: (input) => {
       assertPrivateReference(input.ref, ['subagent_handle']);
       assertPayload(input.canonicalJson, input.ref.byteLength);
-      insertExact(database, 'subagent_lifecycle_artifacts', {
+      insertImmutableExact(database, 'subagent_lifecycle_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         artifact_format_version: positiveInteger(input.artifactFormatVersion),
@@ -462,7 +462,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeSubagentContinuation: (input) => {
       assertPrivateReference(input.ref, ['subagent_continuation']);
       assertPayload(input.canonicalJson, input.ref.byteLength);
-      insertExact(database, 'subagent_continuation_artifacts', {
+      insertImmutableExact(database, 'subagent_continuation_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         artifact_format_version: positiveInteger(input.artifactFormatVersion),
@@ -486,7 +486,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeSubagentCheckpoint: (input) => {
       assertPrivateReference(input.ref, ['subagent_checkpoint']);
       assertHashedPayload(input.canonicalJson, input.ref);
-      insertExact(database, 'subagent_checkpoint_artifacts', {
+      insertImmutableExact(database, 'subagent_checkpoint_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         artifact_format_version: positiveInteger(input.artifactFormatVersion),
@@ -511,7 +511,7 @@ export function createKiteHomeArtifactStore(database: Database): KiteHomeArtifac
     writeAgentFollowupAdmission: (input) => {
       assertPrivateReference(input.ref, ['agent_followup_admission']);
       assertHashedPayload(input.canonicalJson, input.ref);
-      insertExact(database, 'agent_followup_admission_artifacts', {
+      insertImmutableExact(database, 'agent_followup_admission_artifacts', {
         artifact_id: input.ref.artifactId,
         integrity_identifier: input.ref.integrityIdentifier,
         artifact_format_version: positiveInteger(input.artifactFormatVersion),
@@ -604,10 +604,21 @@ function assertJson(value: string): void {
   }
 }
 
+// Content-addressed private artifacts retain their first publication time. All
+// other metadata, including invocation ownership and expiry, remains immutable.
+function insertImmutableExact(
+  database: Database,
+  table: Exclude<ArtifactTable, 'plan_artifacts'>,
+  record: Readonly<Record<string, Binding>>,
+): void {
+  insertExact(database, table, record, 'first_publication');
+}
+
 function insertExact(
   database: Database,
   table: ArtifactTable,
   record: Readonly<Record<string, Binding>>,
+  creationTime: 'exact' | 'first_publication' = 'exact',
 ): void {
   const columns = Object.keys(record);
   const values = columns.map((column) => record[column] ?? null);
@@ -626,6 +637,7 @@ function insertExact(
     );
   }
   for (const column of columns) {
+    if (column === 'created_at' && creationTime === 'first_publication') continue;
     if (stored[column] !== record[column]) {
       throw new KiteHomeArtifactError(
         'artifact_conflict',

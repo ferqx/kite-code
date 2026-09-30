@@ -362,12 +362,17 @@ export function isConcurrentShellEffectBatchCurrent(
   return true;
 }
 
-const CONCURRENT_TASK_CONTROL_TOOL_NAMES = new Set(['task_read', 'task_wait', 'task_cancel']);
+const CONCURRENT_CONTROL_TOOL_NAMES = new Set([
+  'task_read',
+  'task_wait',
+  'task_cancel',
+  'shell_stop',
+]);
 
 /**
- * Admit an acknowledged task-control result after child settlement advanced the
+ * Admit an acknowledged task-control or Shell-stop result after a sibling advanced the
  * Session revision. This is deliberately narrower than ordinary read-only Tool
- * admission: only the exact still-running task-control call and its capability
+ * admission: only the exact still-running control call and its capability
  * terminal may cross the stale revision boundary.
  */
 export function isConcurrentTaskControlEffectEventCurrent(
@@ -395,7 +400,7 @@ export function isConcurrentTaskControlEffectEventCurrent(
     const call = state.tools.calls[invocation.toolCallId];
     return Boolean(
       call &&
-        CONCURRENT_TASK_CONTROL_TOOL_NAMES.has(call.name) &&
+        CONCURRENT_CONTROL_TOOL_NAMES.has(call.name) &&
         call.status === 'running' &&
         state.tools.active.includes(call.toolCallId),
     );
@@ -406,7 +411,7 @@ export function isConcurrentTaskControlEffectEventCurrent(
   const call = state.tools.calls[event.toolCallId];
   if (
     !call ||
-    !CONCURRENT_TASK_CONTROL_TOOL_NAMES.has(call.name) ||
+    !CONCURRENT_CONTROL_TOOL_NAMES.has(call.name) ||
     call.status !== 'running' ||
     !state.tools.active.includes(call.toolCallId)
   ) {
@@ -419,7 +424,7 @@ export function isConcurrentTaskControlEffectEventCurrent(
   return event.type !== 'tool.finished' || event.name === call.name;
 }
 
-/** Validate a concurrent task-control terminal batch after every projected event. */
+/** Validate a concurrent control terminal batch after every projected event. */
 export function isConcurrentTaskControlEffectBatchCurrent(
   state: Readonly<AgentState>,
   lease: AgentEffectLeaseIdentity,

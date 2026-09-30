@@ -18,7 +18,7 @@ import {
 export interface SandboxShellPreparationInput {
   readonly workspace: string;
   readonly command: string;
-  readonly timeoutMs?: number;
+  readonly timeoutMs?: number | null;
   readonly networkMode?: ShellNetworkMode;
   readonly filesystemMode?: ShellFilesystemMode;
   readonly executionTrust?: 'policy_proven_read_only';
@@ -43,7 +43,7 @@ export interface RestrictedTokenInvocationRequest {
   shellRuntimeDigest: string;
   coreutilsDigest: string;
   maxProcesses: number;
-  timeoutMs: number;
+  timeoutMs: number | null;
   networkMode: 'off' | 'allow_all';
 }
 
@@ -151,8 +151,8 @@ export function decodeWindowsRestrictedTokenPreparedTransport(
     !['off', 'allow_all'].includes(String(request.networkMode)) ||
     !Number.isSafeInteger(request.maxProcesses) ||
     Number(request.maxProcesses) < 1 ||
-    !Number.isSafeInteger(request.timeoutMs) ||
-    Number(request.timeoutMs) < 1
+    (request.timeoutMs !== null &&
+      (!Number.isSafeInteger(request.timeoutMs) || Number(request.timeoutMs) < 1))
   ) {
     throw new Error('Windows restricted-token prepared transport identity mismatch.');
   }
@@ -226,9 +226,11 @@ export function prepareWindowsRestrictedTokenTransport(
       coreutilsDigest: resolvedRunner.coreutilsDigest,
       maxProcesses: options.maxProcessTreeTasks ?? DEFAULT_WINDOWS_RESTRICTED_TOKEN_MAX_PROCESSES,
       timeoutMs:
-        input.timeoutMs != null && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
-          ? input.timeoutMs
-          : DEFAULT_SHELL_TIMEOUT_MS,
+        input.timeoutMs === null
+          ? null
+          : input.timeoutMs !== undefined && Number.isFinite(input.timeoutMs) && input.timeoutMs > 0
+            ? input.timeoutMs
+            : DEFAULT_SHELL_TIMEOUT_MS,
       networkMode,
     };
     return {

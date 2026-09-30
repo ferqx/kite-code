@@ -11,6 +11,7 @@ import {
   digestAgentEvent,
   encodeCurrentAgentStateJson,
   finalizeAgentEvent,
+  fundingDeadlineMatches,
   getActivePlanning,
   getEffectiveInteractionMode,
   hasLateTerminalEventForCancelledTool,
@@ -28,6 +29,7 @@ import {
   reduce,
   reduceAgentState,
   requiredBackgroundTaskIds,
+  resourceDeadlineMs,
   type SchedulerFacts,
   sameChildTaskArtifactRef,
   selectPendingEffects,
@@ -505,7 +507,11 @@ function assertAgentMailboxFunding(
     !fundingRunId ||
     typeof backupReservationId !== 'string' ||
     !backupReservationId ||
-    !Number.isSafeInteger(deadlineAt) ||
+    (deadlineAt === null
+      ? !ledger ||
+        ledger.budget.unboundedRunDuration !== true ||
+        state.childSessionOrigin !== undefined
+      : !Number.isSafeInteger(deadlineAt)) ||
     !sameCanonicalValue(fields.source, event.source) ||
     fields.senderAgentId !== event.senderAgentId ||
     fields.targetAgentId !== event.targetAgentId ||
@@ -541,8 +547,11 @@ function assertAgentMailboxFunding(
     reservation.reservationId !== backupReservationId ||
     !sameCanonicalValue(fields.executableUpperBound, reservation.executableUpperBound) ||
     !ledger ||
-    Date.parse(ledger.deadlineAt) !== deadlineAt ||
-    (deadlineAt as number) - nowMs < minimumWindow ||
+    !fundingDeadlineMatches(
+      ledger,
+      deadlineAt === null ? null : new Date(deadlineAt as number).toISOString(),
+    ) ||
+    (deadlineAt === null ? Infinity : (deadlineAt as number)) - nowMs < minimumWindow ||
     Object.values(ledger.reservations).some((item) => item.state === 'unknown')
   )
     throw new Error('TriggerTurn backup does not match its funding ledger and admission.');
@@ -2128,7 +2137,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const hasRequiredClaim = requiredBackgroundTaskIds(this.#state).includes(
       lifecycle.childInvocationId,
     );
-    const deadlineMs = Date.parse(link.deadlineAt);
+    const deadlineMs = resourceDeadlineMs(link.deadlineAt);
     if (
       link.terminalImport ||
       (link.disposition === 'required'
@@ -2136,12 +2145,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         : link.disposition !== 'after_turn' ||
           (!liveRequiredRun && run?.status !== 'completed') ||
           hasRequiredClaim ||
-          funding?.deadlineAt !== link.deadlineAt ||
+          !funding ||
+          !fundingDeadlineMatches(funding, link.deadlineAt) ||
           reportReservations.length !== 1 ||
           report?.resourceKind !== 'model' ||
           report.state !== 'reserved' ||
           report.runId !== link.fundingRunId ||
-          !Number.isFinite(deadlineMs) ||
+          (link.deadlineAt !== null && !Number.isFinite(deadlineMs)) ||
           deadlineMs <= this.#clockMilliseconds()) ||
       reservation?.state !== 'reserved'
     )
@@ -3253,7 +3263,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       transient?.state !== 'dispatch_started' ||
       transientSettlement[0]?.actual.counters.toolInvocations !== 1 ||
       transientSettlement[0]?.actual.gauges.activeSubagents !== 0 ||
-      funding.deadlineAt !== intent.deadlineAt ||
+      !fundingDeadlineMatches(funding, intent.deadlineAt) ||
       allotment.runId !== intent.fundingRunId ||
       allotment.resourceKind !== 'subagent' ||
       (allotment.state !== 'reserved' && allotment.state !== 'queued') ||

@@ -131,7 +131,7 @@ export function planChildFollowupTurn(input: {
     throw new Error('Child followup lacks a current settled checkpoint and restricted policy.');
   const sourceRevision = checkpoint ? undefined : state.revision;
   const sourceStateDigest = checkpoint ? undefined : sha256(encodeCurrentAgentStateJson(state));
-  const remaining = admission.deadlineAt - input.nowMs;
+  const remaining = (admission.deadlineAt === null ? Infinity : admission.deadlineAt) - input.nowMs;
   if (!independent && remaining < (admission.policy.firstAttemptTimeoutMs ?? 0) + 5_000)
     throw new Error('Child followup funding deadline cannot cover its first Model attempt.');
   const upper = admission.executableUpperBound;

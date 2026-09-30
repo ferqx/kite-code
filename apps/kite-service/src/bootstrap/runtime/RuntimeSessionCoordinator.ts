@@ -1696,11 +1696,15 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   }
 
   #recordLastAppliedEventRevisions(before: Readonly<RuntimeState>): void {
+    const finalRevision = this.session.getState().revision;
+    // A stale or empty effect acknowledgement can leave the previous commit
+    // in getLastAppliedEvents(). Only project facts committed by this call;
+    // replaying an archived reservation against the latest State is invalid.
+    if (finalRevision === before.revision) return;
     const events = this.session.getLastAppliedEvents();
     const metadata = this.session.getLastAppliedEventMetadata();
     if (metadata.length !== events.length)
       throw new Error('Committed Runtime event metadata does not match events.');
-    const finalRevision = this.session.getState().revision;
     const firstRevision = finalRevision - events.length + 1;
     let projectedState = before;
     for (const [index, event] of events.entries()) {

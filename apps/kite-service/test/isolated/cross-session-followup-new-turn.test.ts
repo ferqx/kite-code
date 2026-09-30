@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -71,6 +72,242 @@ test('independent followup completes a Tool loop after both Model reservations a
       ).toMatchObject({ disposition: 'completed' });
       expect((await orchestrator.recoverPendingFollowups()).recoveryRequired).toEqual([]);
       expect(model.getRequestCount()).toBe(before + 2);
+      const prepared = owner.storage.sessions
+        .loadEventsStrict(childSessionId)
+        .map(({ event }) => event)
+        .find(
+          (event) =>
+            event.type === 'agent.followup_turn_prepared' &&
+            event.submissionId === accepted.submissionId,
+        );
+      if (prepared?.type !== 'agent.followup_turn_prepared')
+        throw new Error('Followup Task preparation unavailable');
+      expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+        task_id: prepared.taskId,
+        status: 'completed',
+        result: { summary: 'FOLLOWUP_TOOL_LOOP_COMPLETED' },
+      });
+      expect(await orchestrator.taskControl.waitTasks([prepared.taskId], 0)).toMatchObject({
+        status: 'completed',
+      });
+      expect(await orchestrator.taskControl.cancelTask(prepared.taskId)).toMatchObject({
+        status: 'completed',
+      });
+      expect(() =>
+        raw.readIndependentFollowupTaskForSource(parentSessionId, prepared.taskId),
+      ).toThrow();
+      expect(
+        owner.runWithSessionExecution(parentSessionId, () =>
+          raw.readIndependentFollowupTaskForSource(parentSessionId, prepared.taskId),
+        ),
+      ).toMatchObject({
+        sourceSessionId: parentSessionId,
+        targetSessionId: childSessionId,
+        taskId: prepared.taskId,
+        submissionId: accepted.submissionId,
+        targetRunId: state.turn.turnId,
+      });
+      expect(
+        owner.runWithSessionExecution(parentSessionId, () =>
+          raw.readIndependentFollowupTaskForSource(parentSessionId, 'foreign-task'),
+        ),
+      ).toBeNull();
+      const identityProof = owner.runWithSessionExecution(parentSessionId, () =>
+        raw.readIndependentFollowupTaskForSource(parentSessionId, prepared.taskId, false),
+      );
+      expect(identityProof?.events.some((event) => event.type === 'model.responded')).toBe(false);
+      expect(identityProof?.targetSnapshot.transcript).toBeUndefined();
+      expect(orchestrator.taskControl.ownsTask(prepared.taskId)).toBe(true);
+      const db = new Database(fixture.bridgeInput.checkpointPath, { strict: true });
+      const original = db
+        .query<{ event_json: string }, [string, string]>(
+          "SELECT event_json FROM runtime_events WHERE session_id=? AND json_extract(event_json,'$.type')='agent.followup_turn_prepared' AND json_extract(event_json,'$.taskId')=?",
+        )
+        .get(childSessionId, prepared.taskId)!;
+      const change = db.query(
+        "UPDATE runtime_events SET event_json=? WHERE session_id=? AND json_extract(event_json,'$.type')='agent.followup_turn_prepared' AND json_extract(event_json,'$.taskId')=?",
+      );
+      try {
+        for (const field of ['grantDigest', 'targetRunId', 'submissionId'] as const) {
+          change.run(
+            JSON.stringify({ ...JSON.parse(original.event_json), [field]: 'changed' }),
+            childSessionId,
+            prepared.taskId,
+          );
+          expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+            status: 'not_found',
+          });
+          change.run(original.event_json, childSessionId, prepared.taskId);
+        }
+        const audit = db
+          .query<{ sequence: number; event_json: string }, [string, string]>(
+            "SELECT sequence,event_json FROM runtime_events WHERE session_id=? AND json_extract(event_json,'$.type')='agent.followup_independent_settled' AND json_extract(event_json,'$.submissionId')=?",
+          )
+          .get(parentSessionId, accepted.submissionId)!;
+        for (const field of ['targetRunId', 'evidenceDigest', 'targetAgentId'] as const) {
+          db.query('UPDATE runtime_events SET event_json=? WHERE session_id=? AND sequence=?').run(
+            JSON.stringify({ ...JSON.parse(audit.event_json), [field]: 'changed' }),
+            parentSessionId,
+            audit.sequence,
+          );
+          try {
+            const inaccessible = await orchestrator.taskControl.readTask(prepared.taskId);
+            expect(inaccessible.status).toBe('not_found');
+            expect(inaccessible.result).toBeUndefined();
+          } finally {
+            db.query(
+              'UPDATE runtime_events SET event_json=? WHERE session_id=? AND sequence=?',
+            ).run(audit.event_json, parentSessionId, audit.sequence);
+          }
+        }
+        const outbox = db
+          .query<{ followup_admission_digest: string }, [string, string]>(
+            'SELECT followup_admission_digest FROM agent_mail_outbox WHERE source_session_id=? AND submission_id=?',
+          )
+          .get(parentSessionId, accepted.submissionId)!;
+        db.query(
+          'UPDATE agent_mail_outbox SET followup_admission_digest=? WHERE source_session_id=? AND submission_id=?',
+        ).run(`sha256:${'0'.repeat(64)}`, parentSessionId, accepted.submissionId);
+        try {
+          expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+            status: 'not_found',
+          });
+        } finally {
+          db.query(
+            'UPDATE agent_mail_outbox SET followup_admission_digest=? WHERE source_session_id=? AND submission_id=?',
+          ).run(outbox.followup_admission_digest, parentSessionId, accepted.submissionId);
+        }
+        db.query('UPDATE runtime_sessions SET parent_session_id=? WHERE session_id=?').run(
+          childSessionId,
+          childSessionId,
+        );
+        expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+          status: 'not_found',
+        });
+      } finally {
+        change.run(original.event_json, childSessionId, prepared.taskId);
+        db.query('UPDATE runtime_sessions SET parent_session_id=? WHERE session_id=?').run(
+          parentSessionId,
+          childSessionId,
+        );
+        db.close();
+      }
+      const next = await submitRealParentFollowup(
+        fixture,
+        'A distinct subsequent followup.',
+        false,
+        'followup-next-tool',
+      );
+      expect(
+        await orchestrator.receiveAcceptedFollowup(childSessionId, next.accepted.submissionId),
+      ).toBe(true);
+      expect(orchestrator.startAcceptedFollowup(childSessionId, next.accepted.submissionId)).toBe(
+        true,
+      );
+      const nextState = owner.loadCurrentSnapshot(childSessionId)!;
+      expect(nextState.activeTaskId).not.toBe(prepared.taskId);
+      expect(await orchestrator.taskControl.cancelTask(prepared.taskId)).toMatchObject({
+        status: 'completed',
+      });
+      expect(owner.loadCurrentSnapshot(childSessionId)?.turn).toEqual(nextState.turn);
+      expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+        status: 'completed',
+        result: { summary: 'FOLLOWUP_TOOL_LOOP_COMPLETED' },
+      });
+      model.setResponses([
+        {
+          response: async () => ({
+            message: { content: 'SECOND_FOLLOWUP_RESULT' },
+            usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 },
+          }),
+        },
+      ]);
+      expect(
+        await orchestrator.executeAcceptedFollowupFirstModel(
+          childSessionId,
+          next.accepted.submissionId,
+        ),
+      ).toBe(true);
+      expect(await orchestrator.taskControl.readTask(nextState.activeTaskId!)).toMatchObject({
+        status: 'completed',
+        result: { summary: 'SECOND_FOLLOWUP_RESULT' },
+      });
+      expect(await orchestrator.taskControl.readTask(prepared.taskId)).toMatchObject({
+        status: 'completed',
+        result: { summary: 'FOLLOWUP_TOOL_LOOP_COMPLETED' },
+      });
+    },
+  );
+}, 30_000);
+
+test('followup Task cancellation addresses only its active submission controller', async () => {
+  await exerciseChildOrchestration(
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    async (fixture) => {
+      const { owner, orchestrator, model, childSessionId } = fixture;
+      const { accepted } = await submitRealParentFollowup(fixture, 'Wait for cancellation.');
+      expect(
+        await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
+      ).toBe(true);
+      let markEntered!: () => void;
+      let release!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        markEntered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      model.setResponses([
+        {
+          response: async () => {
+            markEntered();
+            await gate;
+            return {
+              message: { content: 'CANCELLED_RESPONSE_MUST_NOT_COMMIT' },
+              usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 },
+            };
+          },
+        },
+      ]);
+      const scheduled = orchestrator.schedulePendingFollowupRecovery();
+      try {
+        expect(scheduled.scheduled).toBe(1);
+        await Promise.race([
+          entered,
+          scheduled.completion.then((result) => {
+            throw new Error(JSON.stringify(result));
+          }),
+        ]);
+        const state = owner.loadCurrentSnapshot(childSessionId)!;
+        const taskId = state.activeTaskId!;
+        expect(await orchestrator.taskControl.readTask(taskId)).toMatchObject({
+          task_id: taskId,
+          status: 'running',
+        });
+        expect(await orchestrator.taskControl.waitTasks([taskId], 0)).toMatchObject({
+          status: 'timeout',
+        });
+        const cancelled = await orchestrator.taskControl.cancelTask(taskId, { waitMs: 1000 });
+        expect(cancelled).toMatchObject({ status: 'unknown', cleanup_confirmed: false });
+        expect(cancelled.result).toBeUndefined();
+        expect(owner.loadCurrentSnapshot(childSessionId)?.turn.turnId).toBe(state.turn.turnId);
+        expect(owner.loadCurrentSnapshot(childSessionId)?.transcript.final).not.toBe(
+          'CANCELLED_RESPONSE_MUST_NOT_COMMIT',
+        );
+        expect(await orchestrator.taskControl.readTask(taskId)).toMatchObject({
+          status: cancelled.status,
+        });
+      } finally {
+        release();
+        await scheduled.completion;
+      }
     },
   );
 }, 30_000);

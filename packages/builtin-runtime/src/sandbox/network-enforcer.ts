@@ -164,7 +164,7 @@ async function admitNetworkEndpoint(
       `Network host '${host}' is a reserved metadata endpoint.`,
     );
   }
-  if (!allowedHosts.has(host)) {
+  if (policy.mode !== 'public' && !allowedHosts.has(host)) {
     throw new NetworkBoundaryError(
       'host_not_allowlisted',
       `Network host '${host}' is not in the execution allowlist.`,

@@ -10,10 +10,7 @@ import {
 import type { SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import type { PlanArtifactStore } from '@kite-ai/builtin-runtime/planning';
 import type { NetworkDecisionRecorder, ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
-import {
-  createProtectedPathEvaluator,
-  networkBoundaryPolicyFromExecutionBoundary,
-} from '@kite-ai/builtin-runtime/sandbox';
+import { createProtectedPathEvaluator } from '@kite-ai/builtin-runtime/sandbox';
 import type {
   SkillCatalogSnapshot,
   SkillManifest,
@@ -80,7 +77,9 @@ import {
 import {
   createSkillMechanismPort,
   createWebMechanismPort,
+  resolveWebNetworkBoundaryPolicy,
 } from '#kite-service/bootstrap/runtime/tool-provider-services';
+import { resourceReservationBelongsToToolCall } from '#kite-service/bootstrap/runtime/tool-reservation-identity';
 import type { ToolExecutionResult } from '#kite-service/bootstrap/runtime/tool-result';
 import { createAppToolTurnContext } from '#kite-service/bootstrap/runtime/tool-turn-context';
 import { getFeatureFlags } from '#kite-service/config/features';
@@ -115,6 +114,11 @@ import {
   recoveryActionForFailure,
   toRuntimeSubagentEvent,
 } from './terminal-projection';
+
+/** App-private source proof lookup; Builtin receives only ordinary Task control methods. */
+export type AppIndependentChildTaskControl = BuiltinTaskControlExecutionMechanism & {
+  readonly ownsTask?: (taskId: string) => boolean;
+};
 
 export async function executeAppRuntimeTools(params: {
   state: RuntimeState;
@@ -200,7 +204,7 @@ export async function executeAppRuntimeTools(params: {
   subagentRuntimeFactory?: import('#kite-service/bootstrap/runtime/subagent/pipeline-runtime').AppSubagentRuntimeFactory;
   backgroundSubagentRuntime?: BackgroundSubagentControlRuntime;
   /** Parent-scoped Store/Host read-only Task control for independent child Sessions. */
-  independentChildTaskControl?: import('@kite-ai/builtin-runtime/subagent').BuiltinTaskControlExecutionMechanism;
+  independentChildTaskControl?: AppIndependentChildTaskControl;
   /** Task Start staging is available only with an independent child receipt owner. */
   stageIndependentChild?: NonNullable<TaskToolDeps['stageIndependentChild']>;
   /** Verified sealed grant ceiling for an independently persisted child Session. */
@@ -876,7 +880,9 @@ export async function executeAppRuntimeTools(params: {
       const reservationIds =
         budget.status === 'active'
           ? Object.values(budget.reservations)
-              .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
+              .filter((reservation) =>
+                resourceReservationBelongsToToolCall(liveState, toolCallId, reservation),
+              )
               .map((reservation) => reservation.reservationId)
           : [];
       const prepareChildReservation = params.beforeAdmissionByToolCallId?.[toolCallId];
@@ -1149,14 +1155,7 @@ export async function executeAppRuntimeTools(params: {
                     preassembledMechanism: Object.freeze({
                       web: createWebMechanismPort({
                         toolCallId,
-                        ...(params.taskConfig?.executionBoundary
-                          ? {
-                              networkBoundaryPolicy: networkBoundaryPolicyFromExecutionBoundary(
-                                params.taskConfig.executionBoundary,
-                                productionFlags?.networkBoundary === true,
-                              ),
-                            }
-                          : {}),
+                        networkBoundaryPolicy: resolveWebNetworkBoundaryPolicy(params.taskConfig),
                         ...(params.recordNetworkDecision
                           ? { recordNetworkDecision: params.recordNetworkDecision }
                           : {}),
@@ -1687,7 +1686,7 @@ export async function executeAppRuntimeTools(params: {
 export function createCombinedTaskControl(input: {
   readonly state: Readonly<RuntimeState>;
   readonly legacy?: BackgroundSubagentControlRuntime;
-  readonly independent?: BuiltinTaskControlExecutionMechanism;
+  readonly independent?: AppIndependentChildTaskControl;
   readonly signal?: AbortSignal;
   readonly getState?: () => Readonly<RuntimeState>;
   readonly waitForStateRevisionChange?: (revision: number, signal?: AbortSignal) => Promise<void>;
@@ -1701,6 +1700,8 @@ export function createCombinedTaskControl(input: {
       .filter((invocation) => invocation.subagentProviderLifecycle?.childSession)
       .map((invocation) => invocation.subagentProviderLifecycle!.childInvocationId),
   );
+  const isIndependentTask = (taskId: string): boolean =>
+    independentIds.has(taskId) || input.independent?.ownsTask?.(taskId) === true;
   const unavailable = (taskId: string): Readonly<Record<string, unknown>> => ({
     ok: false,
     task_id: taskId,
@@ -1709,19 +1710,20 @@ export function createCombinedTaskControl(input: {
     error: 'Background sub-agent task is unavailable for this Runtime owner.',
   });
   const readTask = (taskId: string): Promise<Readonly<Record<string, unknown>>> =>
-    independentIds.has(taskId)
+    isIndependentTask(taskId)
       ? (input.independent?.readTask(taskId) ?? Promise.resolve(unavailable(taskId)))
       : (input.legacy?.readTask(ownerKey, taskId) ?? Promise.resolve(unavailable(taskId)));
   return Object.freeze({
     readTask,
     cancelTask: (taskId: string) =>
-      independentIds.has(taskId)
+      isIndependentTask(taskId)
         ? (input.independent?.cancelTask(taskId) ?? Promise.resolve(unavailable(taskId)))
         : (input.legacy?.cancelTask(ownerKey, taskId) ?? Promise.resolve(unavailable(taskId))),
     waitTasks: async (taskIds: readonly string[], timeoutMs: number, signal?: AbortSignal) => {
       const combinedSignal = signal ?? input.signal;
-      const childIds = taskIds.filter((taskId) => independentIds.has(taskId));
-      const legacyIds = taskIds.filter((taskId) => !independentIds.has(taskId));
+      const childIds = taskIds.filter(isIndependentTask);
+      const childIdSet = new Set(childIds);
+      const legacyIds = taskIds.filter((taskId) => !childIdSet.has(taskId));
       if (childIds.length === 0 && input.legacy)
         return waitForBackgroundTasks({
           runtime: input.legacy,

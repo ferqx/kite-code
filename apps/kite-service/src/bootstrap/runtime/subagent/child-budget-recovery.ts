@@ -3,7 +3,9 @@ import {
   assertChildBudgetWithinDelegation,
   assertResourceBudget,
   fundingBudgetForRun,
+  fundingDeadlineMatches,
   type ResourceBudget,
+  resourceDeadlineMs,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { childDelegatedUpperBoundDigest } from '@kite-ai/runtime-host/storage';
 import type { KiteSessionAppServerStorageOwner } from '../../kite-session-app-server-storage';
@@ -41,7 +43,7 @@ export function recoverChildDelegatedBudget(input: {
   const upper = reservation?.executableUpperBound;
   const independentTurnDeadline = upper?.independentChildTurnDeadline === true;
   const durationOnlyChildRun = upper?.durationOnlyChildRun === true;
-  const parentDeadlineMs = Date.parse(intent.deadlineAt);
+  const parentDeadlineMs = resourceDeadlineMs(intent.deadlineAt);
   const maximumChildDeadlineMs = grantIssuedAtMs + (upper?.gauges.elapsedRunMs ?? NaN);
   const deadlineMs = independentTurnDeadline
     ? nowMs + (upper?.gauges.elapsedRunMs ?? NaN)
@@ -51,7 +53,7 @@ export function recoverChildDelegatedBudget(input: {
     (intent.disposition !== 'required' && intent.disposition !== 'after_turn') ||
     parentState.session.threadId !== intent.parentSessionId ||
     !ledger ||
-    ledger.deadlineAt !== intent.deadlineAt ||
+    !fundingDeadlineMatches(ledger, intent.deadlineAt) ||
     (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
     reservation.runId !== intent.fundingRunId ||
     reservation.invocationId !== `child-allotment:${intent.childThreadId}` ||
@@ -65,7 +67,7 @@ export function recoverChildDelegatedBudget(input: {
     !Number.isSafeInteger(nowMs) ||
     grantIssuedAtMs < 0 ||
     nowMs < grantIssuedAtMs ||
-    !Number.isSafeInteger(parentDeadlineMs) ||
+    (intent.deadlineAt !== null && !Number.isSafeInteger(parentDeadlineMs)) ||
     !Number.isSafeInteger(maximumChildDeadlineMs) ||
     // The parent ledger remains finite. Only its exact, digest-bound child-allotment
     // reservation may delegate an uncapped child Tool counter (Host/Kernel enforce this).

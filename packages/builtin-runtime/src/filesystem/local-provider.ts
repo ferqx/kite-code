@@ -1406,8 +1406,13 @@ function filePatternRegex(pattern: string): RegExp {
     const next = pattern[index + 1];
     if (character === '*') {
       if (next === '*') {
-        body += '.*';
-        index++;
+        if ((index === 0 || pattern[index - 1] === '/') && pattern[index + 2] === '/') {
+          body += '(?:.*/)?';
+          index += 2;
+        } else {
+          body += '.*';
+          index++;
+        }
       } else body += '[^/]*';
     } else if (character === '?') body += '[^/]';
     else if (character === '{') {

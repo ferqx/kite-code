@@ -46,7 +46,7 @@ import { createTuiHistoryFacade } from '../runtime-client/tui-history-facade';
 import type { KiteRuntimeModeConnection } from './adapter';
 
 const CANCEL_RETRY_LIMIT = 8;
-const RUN_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
+const COMMAND_WAIT_DEADLINE_MS = 30 * 60 * 1_000;
 const PRESENTATION_FLUSH_DEADLINE_MS = 1_000;
 const RUN_IDLE_QUERY_INITIAL_DELAY_MS = 2_000;
 const RUN_IDLE_QUERY_MAX_DELAY_MS = 2_000;
@@ -865,7 +865,7 @@ class NativeTuiRuntimeClient {
       }
       let expectedRevision = this.#revision(record);
       let receipt: RuntimeCommandReceipt | undefined;
-      const admissionDeadline = Date.now() + RUN_WAIT_DEADLINE_MS;
+      const admissionDeadline = Date.now() + COMMAND_WAIT_DEADLINE_MS;
       let busyRetryDelayMs = 100;
       while (!receipt) {
         const commandId = this.#nextCommandId(record.threadId, 'turn');
@@ -1004,7 +1004,7 @@ class NativeTuiRuntimeClient {
             ? receipt.originalRevision
             : expectedRevision + 1;
       this.#syncSnapshot(record);
-      await withDeadline(completion, RUN_WAIT_DEADLINE_MS, 'Runtime turn');
+      await completion;
       await this.#flushPresentationBounded();
     } catch (error) {
       const commandId =
@@ -1049,10 +1049,7 @@ class NativeTuiRuntimeClient {
     if (record.agentLoopActive) await this.#waitForRemoteIdle(record);
   }
 
-  async #waitForRemoteIdle(
-    record: NativeSessionRecord,
-    deadline = Date.now() + RUN_WAIT_DEADLINE_MS,
-  ): Promise<void> {
+  async #waitForRemoteIdle(record: NativeSessionRecord, deadline = Infinity): Promise<void> {
     while (!this.#closed && Date.now() < deadline) {
       if (await this.#queryRemoteIdle(record)) return;
       if (record.projection?.currentRun?.status === 'recovery_required') {
@@ -1617,7 +1614,7 @@ class NativeTuiRuntimeClient {
       record.rewindWaiters.delete(commandId);
       throw error;
     }
-    const outcome = await withDeadline(terminal, RUN_WAIT_DEADLINE_MS, 'Runtime rewind');
+    const outcome = await withDeadline(terminal, COMMAND_WAIT_DEADLINE_MS, 'Runtime rewind');
     if (outcome.status === 'failed') {
       throw new Error(`Runtime rewind failed: ${outcome.failureCode ?? 'execution_failed'}`);
     }

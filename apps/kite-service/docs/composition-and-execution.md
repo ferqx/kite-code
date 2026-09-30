@@ -12,6 +12,12 @@ Native 先通过 prepareAppControl 初始化协议连接，再进行 App Control
 
 [工具 pipeline composition](../src/bootstrap/runtime/tool-pipeline-composition.ts) 注入真实机制和 Host coordinator；[tool execution router](../src/runtime/tool-execution/router.ts) 将已接受的能力交给相应 executor。Service 不能用独立 Promise 收尾覆盖 Runtime terminal。
 
+[普通 Shell attempt](../src/bootstrap/runtime/tool-pipeline-ordinary-attempt.ts)通过 persistence 将已验证的 supervisor-started ACK 交给 [Managed Shell](../src/bootstrap/runtime/managed-shell.ts)。沙箱异步调用先等待该 ACK 或真实执行终态，再按从调用开始计算的 `yield_ms` 剩余窗口返回；因此 preparation-ready 与 dispatch-intent 仍在 `running` invocation 上提交。已获准的 Host Shell 只在既有 composition 选择 `host_shell` 时释放该等待，不伪造沙箱 ACK，也不改变原授权与降级规则。返回运行句柄后，仅同一成功 Shell receipt、同一 attempt、已确认 supervisor 和运行句柄可继续提交沙箱进程的收尾证据；缺失 supervisor、不同 attempt 或失败／已退出结果不能借用这一交接，新的 preparation 与 dispatch 不接受 terminal invocation。验证见 [Native 启动回归](../test/isolated/managed-shell-preparation.test.ts)及 [lifecycle 单元测试](../test/runtime/tool-pipeline-sandbox-lifecycle.test.ts)。
+
+Tool／Task admission、父 Task 预留和未派发失败释放共用[准确身份选择](../src/bootstrap/runtime/tool-reservation-identity.ts)：只接受活动预留的原调用 ID、当前获批回执或 suspended attempt。合法调用 ID 可以含冒号；与其他调用原始 ID 重合的后缀身份拒绝关联。相似名称 sibling 不能补足本调用缺失的预留、混入 admission digest 或被错误释放。验证见 [reservation identity](../test/runtime/tool-reservation-identity.test.ts)及[失败隔离](../test/isolated/runtime/runtime-tool-effect-failure-isolation.test.ts)。
+
+获准的 `web_fetch` 通过 [Web mechanism composition](../src/bootstrap/runtime/tool-provider-services.ts) 的 `resolveWebNetworkBoundaryPolicy` 取得显式策略：无封存边界的普通开发配置使用公开 DNS 主机策略，已有 `ExecutionBoundary` 优先派生原 `off`／`allowlist`。缺配置或 production 配置缺封存边界仍拒绝；所有请求和跳转复用 Builtin 的地址校验、连接 pinning 与 socket 前的持久决定。主会话与子会话共用该路由，验证见 [开发期 Web 回归](../test/runtime/web-development-boundary.test.ts)。
+
 [Session services](../src/runtime/session/) 组织规划、压缩和恢复入口；它们仍通过当前 authority/事务边界，不建立第二 writer。配置保存锁与 Session execution fencing 是不同机制，不能使用进程 lock 代替业务状态版本。
 
 ## 输出到客户端

@@ -5,6 +5,7 @@ import type {
   KernelEvent as RuntimeEvent,
   AgentState as RuntimeState,
 } from '@kite-ai/agent-kernel';
+import { fundingDeadlineMatches, resourceDeadlineMs } from '@kite-ai/agent-kernel';
 import type { ModelInvocationEnvelope } from '@kite-ai/runtime-spi';
 import {
   type ActiveResourceBudgetRuntimeState,
@@ -264,7 +265,7 @@ export function planBoundedFollowupModelResource(
   state: RuntimeState,
   input: {
     fundingRunId: string;
-    fundingDeadlineAt: string;
+    fundingDeadlineAt: string | null;
     backupReservationId: string;
     turnReservationId: string;
     replacementReservationId: string;
@@ -278,10 +279,13 @@ export function planBoundedFollowupModelResource(
 ): BoundedFollowupModelResourcePlan {
   const budget = fundingBudgetForRun(state, input.fundingRunId);
   if (!budget) throw new DescendantResourceAdmissionError('budget_unconfigured');
-  if (budget.deadlineAt !== input.fundingDeadlineAt)
+  if (!fundingDeadlineMatches(budget, input.fundingDeadlineAt))
     throw new DescendantResourceAdmissionError('reconciliation_required');
   const now = input.now ?? new Date();
-  if (!Number.isFinite(now.getTime()) || now.getTime() >= Date.parse(budget.deadlineAt))
+  if (
+    !Number.isFinite(now.getTime()) ||
+    now.getTime() >= resourceDeadlineMs(input.fundingDeadlineAt)
+  )
     throw new DescendantResourceAdmissionError('budget_exhausted', 'Funding run deadline elapsed.');
   if (Object.values(budget.reservations).some((item) => item.state === 'unknown'))
     throw new DescendantResourceAdmissionError('reconciliation_required');
@@ -827,7 +831,7 @@ export function createDescendantResourceAdmission(input: {
     budget: ActiveResourceBudgetRuntimeState,
     observedAt: Date,
   ): void => {
-    if (observedAt.getTime() < Date.parse(budget.deadlineAt)) return;
+    if (observedAt.getTime() < resourceDeadlineMs(budget.deadlineAt)) return;
     throw new DescendantResourceAdmissionError(
       'budget_exhausted',
       'The shared run deadline elapsed before descendant dispatch.',
@@ -1299,7 +1303,7 @@ function waiterFor(
 ): ConcurrencyWaiter {
   const deadline = Math.min(
     now.getTime() + budget.budget.maxConcurrencyWaitMs,
-    Date.parse(budget.deadlineAt),
+    resourceDeadlineMs(budget.deadlineAt),
   );
   return {
     version: 1,
@@ -1370,7 +1374,7 @@ export function planRuntimeBudgetAdmission(
         reservation.invocationId === invocation.invocationId && reservation.state !== 'released',
     );
     if (previous?.state === 'reserved' && previous.resourceKind === invocation.resourceKind) {
-      if (Date.parse(projected.deadlineAt) <= now.getTime()) {
+      if (resourceDeadlineMs(projected.deadlineAt) <= now.getTime()) {
         blocked = { reason: 'budget_exhausted' };
         break;
       }

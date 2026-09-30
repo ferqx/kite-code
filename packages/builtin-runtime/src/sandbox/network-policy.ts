@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { ExecutionBoundary, ExecutionNetworkMode } from './types';
 
-/** Immutable, release-derived network ceiling consumed by each invocation. */
+/** Immutable network ceiling consumed by each invocation. */
 export interface NetworkBoundaryPolicy {
   version: 1;
-  mode: ExecutionNetworkMode;
+  /** public is an App-injected development web policy, never a sealed release mode. */
+  mode: ExecutionNetworkMode | 'public';
   allowedHosts: readonly string[];
   allowLocalAndPrivateNetwork: false;
   revision: string;
@@ -13,7 +14,7 @@ export interface NetworkBoundaryPolicy {
 export function networkBoundaryPolicyFromExecutionBoundary(
   boundary: ExecutionBoundary,
   enabled: boolean,
-): NetworkBoundaryPolicy {
+): NetworkBoundaryPolicy & { readonly mode: ExecutionNetworkMode } {
   const mode = enabled ? boundary.networkMode : 'off';
   const allowedHosts = mode === 'allowlist' ? [...boundary.networkAllowlist] : [];
   const canonical = {

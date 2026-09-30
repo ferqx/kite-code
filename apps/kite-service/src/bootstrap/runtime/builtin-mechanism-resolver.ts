@@ -18,7 +18,7 @@ export type AppBuiltinMechanismGrantUsed = 'none' | 'approve_once' | 'same_comma
 export interface AppBuiltinShellExecutorInput {
   readonly workspace: string;
   readonly command: string;
-  readonly timeoutMs?: number;
+  readonly timeoutMs?: number | null;
   readonly mode?: 'finite' | 'service';
   readonly signal: AbortSignal;
   readonly readOnly: boolean;
@@ -60,7 +60,7 @@ export interface AppBuiltinPreassembledMechanismResolverInput {
   readonly filesystemRuntime?: Readonly<BuiltinWorkspaceFilesystemInvocationDispatcher>;
   readonly shellExecutor?: Readonly<AppBuiltinShellExecutor>;
   /** Runtime-owned deadline for a duration-only child Run, never model supplied. */
-  readonly durationOnlyChildRunDeadlineAt?: string;
+  readonly durationOnlyChildRunDeadlineAt?: string | null;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** One exact wrapper for web, MCP, Skill, or planning. */
   readonly preassembledMechanism?: BuiltinMechanismRecord;
@@ -245,13 +245,19 @@ function shellMechanism(
       // Builtin's finite Shell wrapper supplies its legacy 10-minute default.
       // The canonical request distinguishes that default from a user timeout.
       const timeoutMs =
-        input.durationOnlyChildRunDeadlineAt && shellInput.mode !== 'service' && !timeoutWasExplicit
-          ? remainingChildRunMs
+        input.durationOnlyChildRunDeadlineAt !== undefined &&
+        shellInput.mode !== 'service' &&
+        !timeoutWasExplicit
+          ? input.durationOnlyChildRunDeadlineAt === null
+            ? null
+            : remainingChildRunMs
           : shellInput.timeoutMs;
       if (
         typeof shellInput.command !== 'string' ||
         shellInput.command !== command ||
-        (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) ||
+        (timeoutMs !== undefined &&
+          timeoutMs !== null &&
+          (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) ||
         (timeoutMs === undefined && shellInput.mode !== 'service')
       ) {
         fail('invalid_facts');

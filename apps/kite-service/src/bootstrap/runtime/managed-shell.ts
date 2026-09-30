@@ -78,6 +78,8 @@ export class ManagedShellRuntime {
     readonly ownerKey: string;
     readonly mode?: 'finite' | 'service';
     readonly yieldMs: number;
+    /** Required launch boundary: sandbox supervisor acknowledgement or explicit Host selection. */
+    readonly started?: Promise<void>;
     readonly execute: (
       signal: AbortSignal,
       onProgress: (chunk: string, stream: 'stdout' | 'stderr') => void,
@@ -110,6 +112,7 @@ export class ManagedShellRuntime {
       stopRequested: false,
       completion: Promise.resolve(undefined as never),
     };
+    const yieldDeadlineMs = performance.now() + input.yieldMs;
     try {
       entry.completion = input.execute(controller.signal, (chunk, stream) => {
         try {
@@ -178,13 +181,15 @@ export class ManagedShellRuntime {
       });
     this.#entries.set(shellId, entry);
     this.#ownerRevisions.set(input.ownerKey, entry.revision);
-    if (input.yieldMs > 0) {
+    if (input.started) await Promise.race([input.started, entry.completion.then(() => undefined)]);
+    const remainingYieldMs = Math.max(0, yieldDeadlineMs - performance.now());
+    if (remainingYieldMs > 0) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           entry.completion.then(() => undefined),
           new Promise<void>((resolve) => {
-            timer = setTimeout(resolve, input.yieldMs);
+            timer = setTimeout(resolve, remainingYieldMs);
           }),
         ]);
       } finally {

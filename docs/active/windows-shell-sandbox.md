@@ -32,6 +32,8 @@ Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称
 control stream 接受一次合法 bootstrap；同一 stream 的第二份 bootstrap 位于 request frame 位置，必须由
 frame decoder 拒绝，不能把“single-use”误写成跨独立 stream 拒绝相同测试向量。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
+
+主 Run 无期限的源码协议现允许显式 `timeoutMs: null`，Rust request 使用 `Option<u64>`，Job 等待继续同时监听 process 与 cancel；有限正整数仍保留计时器。Service 的空期限不装生命周期 timer，但取消后仍装有限 cleanup watchdog。缺字段、零值及非法数字不能当作无限期限。本次只取得 TypeScript codec／受控 adapter 与真实 Rust protocol 源码的测试证据；macOS 不能完成 Windows native binary 构建或 Job 实机验证，现有 runner pin 未重建。因此此扩展尚未取得绑定当前源码的 Windows 平台资格，上述 canonical build、binary pin 与 native conformance 门禁继续适用。
 当前 GitHub-hosted E2E 不执行 Node/npm/Bun/cmd/PowerShell runtime smoke 或受管网络 Schannel smoke；
 runner native 实现与可复现构建覆盖由独立 Cargo/protocol evidence 提供，不能绕过 Local Provider admission。
 若未来 Provider 获得新 accepted authority，runtime smoke 必须拆为独立调用并给 Defender 冷启动各自有界预算，

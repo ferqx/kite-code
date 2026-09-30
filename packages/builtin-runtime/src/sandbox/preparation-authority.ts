@@ -44,7 +44,7 @@ export interface BuiltinSandboxPreparationInput {
   readonly executionTrust?: ShellInput['executionTrust'];
   readonly maxProcessTreeTasks?: number;
   readonly resourceLimits?: Partial<ResourceLimits>;
-  readonly timeoutMs?: number;
+  readonly timeoutMs?: number | null;
   readonly executionMode?: 'finite' | 'service';
 }
 
@@ -124,7 +124,8 @@ export function createBuiltinSandboxPreparation(
     },
     executionMode: input.executionMode ?? 'finite',
     timeoutMs:
-      input.executionMode === 'service' && input.timeoutMs === undefined
+      input.timeoutMs === null ||
+      (input.executionMode === 'service' && input.timeoutMs === undefined)
         ? null
         : resolveShellTimeoutMs(input.timeoutMs),
     cancellationCorrelation: input.identity.cancellationCorrelation,

@@ -652,7 +652,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         'delegatedReservationId',
         'deadlineAt',
       ])
-        requireNonEmptyString(value, field);
+        if (field !== 'deadlineAt' || value[field] !== null) requireNonEmptyString(value, field);
       assertPositiveAttempt(value);
       if (
         !validAgentDigest(value.grantDigest) ||
@@ -685,7 +685,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         'delegatedReservationId',
         'deadlineAt',
       ])
-        requireNonEmptyString(value, field);
+        if (field !== 'deadlineAt' || value[field] !== null) requireNonEmptyString(value, field);
       assertPositiveAttempt(value);
       if (
         !validAgentDigest(value.grantDigest) ||
@@ -710,7 +710,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         'originToolCallId',
         'observedAt',
       ])
-        requireNonEmptyString(value, field);
+        if (field !== 'deadlineAt' || value[field] !== null) requireNonEmptyString(value, field);
       assertPositiveAttempt(value);
       if (
         !validAgentDigest(value.grantDigest) ||

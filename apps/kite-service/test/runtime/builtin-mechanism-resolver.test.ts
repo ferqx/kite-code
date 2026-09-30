@@ -321,6 +321,32 @@ describe('App Builtin mechanism resolver', () => {
     expect(shellInputs).toHaveLength(callsBeforeAbort);
   });
 
+  test('primary null Run deadline suppresses default but preserves explicit Shell timeout', async () => {
+    const shellInputs: AppBuiltinShellExecutorInput[] = [];
+    const shellExecutor = Object.freeze({
+      execute: async (input: Readonly<AppBuiltinShellExecutorInput>) => {
+        shellInputs.push(input);
+        return shellResult();
+      },
+    });
+    const resolve = createAppBuiltinMechanismResolver();
+    const execute = (canonicalArguments: ReturnType<typeof frozenJson>) =>
+      resolve(
+        baseInput({
+          executionMechanism: 'shell',
+          canonicalArguments,
+          durationOnlyChildRunDeadlineAt: null,
+          shellExecutor,
+        }),
+      ).shell as { execute: (input: { command: string; timeoutMs: number }) => Promise<unknown> };
+    await execute(frozenJson({ command: 'pwd' })).execute({ command: 'pwd', timeoutMs: 600_000 });
+    await execute(frozenJson({ command: 'pwd', timeout_ms: 321 })).execute({
+      command: 'pwd',
+      timeoutMs: 321,
+    });
+    expect(shellInputs.map((input) => input.timeoutMs)).toEqual([null, 321]);
+  });
+
   test('uses the remaining child Run duration instead of the finite Shell default', async () => {
     const shellInputs: AppBuiltinShellExecutorInput[] = [];
     const shellExecutor = Object.freeze({

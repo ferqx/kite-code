@@ -35,6 +35,7 @@ import {
   planCrossSessionFirstModelReplacement,
   planCrossSessionFollowupSlotAcquisition,
   planCrossSessionIndependentTurnActivation,
+  resourceDeadlineMs,
   runtimeHostStateActivePlanning,
   runtimeHostStateDecideCompletion,
 } from '@kite-ai/runtime-host/kernel-adapter';
@@ -80,7 +81,10 @@ import { projectIndependentChildExecutions } from './child-session-background-pr
 import { buildChildSessionCreation } from './child-session-creation';
 import { planChildSessionRecovery } from './child-session-recovery';
 import { createChildApprovalActionProvider, runAcceptedChildSession } from './child-session-runner';
-import { createChildSessionTaskControl } from './child-session-task-control';
+import {
+  type ChildSessionTaskRead,
+  createChildSessionTaskControl,
+} from './child-session-task-control';
 import {
   type ChildCancellationExecutionFacts,
   importChildTerminalResult,
@@ -258,6 +262,11 @@ export function createChildSessionOrchestrator(input: {
     skillCatalog: CurrentSourceFollowupPolicyInput['skillCatalog'];
   }> | null;
 }): NonNullable<RuntimeTurnInput['childSessionAcceptance']> & {
+  readonly taskControl: NonNullable<
+    NonNullable<RuntimeTurnInput['childSessionAcceptance']>['taskControl']
+  > & {
+    ownsTask(taskId: string): boolean;
+  };
   schedulePendingRecovery(cursor?: string): Promise<ScheduledChildRecovery>;
   recoverPending(cursor?: string): Promise<ChildRecoveryResult>;
   stopPendingRecovery(): Promise<void>;
@@ -610,7 +619,7 @@ export function createChildSessionOrchestrator(input: {
         typeof payload.sourceRunId !== 'string' ||
         typeof payload.backupReservationId !== 'string' ||
         typeof payload.fundingRunId !== 'string' ||
-        typeof payload.deadlineAt !== 'number' ||
+        (payload.deadlineAt !== null && typeof payload.deadlineAt !== 'number') ||
         typeof payload.policy !== 'object' ||
         payload.policy === null ||
         typeof payload.preparedTool !== 'object' ||
@@ -2827,7 +2836,10 @@ export function createChildSessionOrchestrator(input: {
         schema?: string;
         deadlineAt?: unknown;
       };
-      if (typeof admitted.deadlineAt !== 'number' || !Number.isSafeInteger(admitted.deadlineAt))
+      if (
+        admitted.deadlineAt !== null &&
+        (typeof admitted.deadlineAt !== 'number' || !Number.isSafeInteger(admitted.deadlineAt))
+      )
         throw new Error('Accepted followup deadline is invalid.');
       for (;;) {
         if (signal.aborted) throw new Error('Followup source Tool wait was aborted.');
@@ -2858,8 +2870,11 @@ export function createChildSessionOrchestrator(input: {
         if (facts.invocation.status === 'succeeded' && facts.tool.status === 'succeeded') return;
         const independent = admitted.schema === 'kite.cross-session-followup-admission.v2';
         const deadline = admitted.deadlineAt;
-        const remainingMs = deadline - Date.now();
-        if (!independent && (!Number.isSafeInteger(deadline) || remainingMs <= 0))
+        const remainingMs = deadline === null ? Infinity : deadline - Date.now();
+        if (
+          !independent &&
+          ((deadline !== null && !Number.isSafeInteger(deadline)) || remainingMs <= 0)
+        )
           throw new Error('Accepted followup source Tool deadline expired.');
         if (
           !['recorded', 'running'].includes(facts.invocation.status) ||
@@ -2870,7 +2885,9 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Accepted followup source Tool has no revision waiter.');
         await facts.parent.session.waitForRevisionChange(
           facts.revision,
-          independent ? signal : AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
+          independent || deadline === null
+            ? signal
+            : AbortSignal.any([signal, AbortSignal.timeout(remainingMs)]),
         );
       }
     };
@@ -3074,7 +3091,7 @@ export function createChildSessionOrchestrator(input: {
             waitUntil: independent
               ? undefined
               : Math.min(
-                  Date.parse(ledger.deadlineAt),
+                  resourceDeadlineMs(ledger.deadlineAt),
                   outbox.acceptedAtMs + ledger.budget.maxConcurrencyWaitMs,
                 ),
           };
@@ -4362,7 +4379,7 @@ export function createChildSessionOrchestrator(input: {
         intent.delegatedUpperBoundDigest;
     const queuedDeadlineAt = independentTurn
       ? (JSON.parse(sealed.sealedGrantJson) as { expiresAtMs?: number }).expiresAtMs
-      : Date.parse(intent.deadlineAt);
+      : resourceDeadlineMs(intent.deadlineAt);
     if (typeof queuedDeadlineAt !== 'number' || !Number.isSafeInteger(queuedDeadlineAt))
       throw new Error('Accepted child has no finite signed queue deadline.');
     if (intent.failureReceiptDigest || intent.parentClaimSettledEventId)
@@ -4404,7 +4421,10 @@ export function createChildSessionOrchestrator(input: {
           Date.now() >=
             (independentTurn
               ? queuedDeadlineAt
-              : Math.min(Date.parse(intent.deadlineAt), Date.parse(funding.deadlineAt)))
+              : Math.min(
+                  resourceDeadlineMs(intent.deadlineAt),
+                  resourceDeadlineMs(funding.deadlineAt),
+                ))
         )
           throw new Error('Queued child was stopped or its deadline elapsed.');
         const committed = committedResourceUsage(funding);
@@ -5143,7 +5163,7 @@ export function createChildSessionOrchestrator(input: {
         activatedAt < grant.issuedAtMs ||
         activatedAt >= grant.expiresAtMs ||
         budget.status !== 'active' ||
-        Date.parse(budget.deadlineAt) <= Date.now()
+        resourceDeadlineMs(budget.deadlineAt) <= Date.now()
       )
         throw new Error('Recovered child approval has no live, authorized child Run.');
       const tool = child.getState().tools.calls[proxy.childToolCallId];
@@ -5587,6 +5607,121 @@ export function createChildSessionOrchestrator(input: {
     });
   const recoverPending = async (cursor?: string): Promise<ChildRecoveryResult> =>
     (await schedulePendingRecovery(cursor)).completion;
+  const followupTaskProof = (taskId: string, includeEvents = true) => {
+    try {
+      return input.detachedScope.runInAsyncScope(() =>
+        input.owner.runWithSessionExecution(
+          input.parentSessionId,
+          () =>
+            input.owner.storage.crossSessionQueueMail?.readIndependentFollowupTaskForSource(
+              input.parentSessionId,
+              taskId,
+              includeEvents,
+            ) ?? null,
+        ),
+      );
+    } catch {
+      return null;
+    }
+  };
+  const readFollowupTask = (taskId: string): ChildSessionTaskRead | null => {
+    const proof = followupTaskProof(taskId);
+    if (!proof) return null;
+    const child = proof.targetSnapshot as unknown as RuntimeState;
+    const unknown = (message: string): ChildSessionTaskRead => ({
+      snapshot: {
+        ok: false,
+        task_id: taskId,
+        status: 'unknown',
+        cleanup_confirmed: false,
+        error: message,
+      },
+    });
+    const parent = input.coordinators.get(input.parentSessionId)?.getState();
+    if (!parent || (proof.terminal && proof.terminal.sourceRevision > parent.revision))
+      return unknown('Followup Task settlement requires recovery.');
+    if (proof.terminal) {
+      if (proof.terminal.disposition === 'unknown')
+        return unknown('Followup Task settlement requires recovery.');
+      const events = proof.events as unknown as readonly RuntimeEvent[];
+      const terminal = events
+        .filter((event) => event.type === 'turn.completed' || event.type === 'turn.aborted')
+        .at(-1);
+      const completed = proof.terminal.disposition === 'completed';
+      if (
+        !terminal ||
+        terminal.turnId !== proof.targetRunId ||
+        (completed && terminal.type !== 'turn.completed')
+      )
+        return unknown('Followup Task terminal proof conflicts.');
+      const status = completed
+        ? 'completed'
+        : terminal.type === 'turn.aborted' && terminal.cause === 'user'
+          ? 'cancelled'
+          : 'failed';
+      const summary = events
+        .filter(
+          (event): event is Extract<RuntimeEvent, { type: 'model.responded' }> =>
+            event.type === 'model.responded' && !event.toolCalls?.length,
+        )
+        .map((event) => event.text ?? '')
+        .filter(Boolean)
+        .join('\n');
+      return {
+        snapshot: Object.freeze({
+          ok: completed,
+          task_id: taskId,
+          status,
+          cancel_requested: status === 'cancelled',
+          cleanup_confirmed: true,
+          result: Object.freeze({ ok: completed, terminalStatus: status, summary }),
+        }),
+      };
+    }
+    if (!child.turn || typeof child.turn.turnId !== 'string')
+      return unknown('Followup Task execution identity requires recovery.');
+    if (
+      child.turn.turnId !== proof.targetRunId ||
+      (child.turn.status === 'active' &&
+        (child.activeFollowupTurn?.taskId !== taskId ||
+          child.activeFollowupTurn.submissionId !== proof.submissionId))
+    )
+      return unknown('Followup Task execution identity requires recovery.');
+    if (child.turn.status !== 'active')
+      return {
+        snapshot: Object.freeze({
+          ok: true,
+          task_id: taskId,
+          status: 'running',
+          cancel_requested: false,
+          cleanup_confirmed: false,
+        }),
+        childThreadId: proof.targetSessionId,
+        childRevision: child.revision,
+      };
+    const authority = input.owner.readChildExecutionAuthority(
+      input.parentSessionId,
+      proof.targetSessionId,
+    );
+    if (
+      !authority ||
+      authority.status === 'recovery_required' ||
+      (authority.leaseUntilMs !== null && authority.leaseUntilMs <= Date.now())
+    )
+      return unknown('Followup Task execution authority requires recovery.');
+    return {
+      snapshot: Object.freeze({
+        ok: true,
+        task_id: taskId,
+        status: 'running',
+        cancel_requested: false,
+        cleanup_confirmed: false,
+      }),
+      childThreadId: proof.targetSessionId,
+      childRevision: child.revision,
+      ...(authority.leaseUntilMs !== null ? { leaseUntilMs: authority.leaseUntilMs } : {}),
+    };
+  };
   const taskControl = () => {
     const parent = input.coordinators.get(input.parentSessionId);
     if (!parent) throw new Error('Independent child Task control has no parent coordinator.');
@@ -5603,6 +5738,8 @@ export function createChildSessionOrchestrator(input: {
         input.parentSessionId,
         parent.getState().toolRecovery.identityKey,
       ),
+      readFollowupTask,
+      ownsFollowupTask: (taskId) => followupTaskProof(taskId, false) !== null,
       waitForParentRevisionChange: (revision, signal) => {
         if (!parent.session.waitForRevisionChange)
           throw new Error('Independent child Task wait has no parent revision port.');
@@ -5919,6 +6056,7 @@ export function createChildSessionOrchestrator(input: {
       ]);
     },
     taskControl: {
+      ownsTask: (taskId: string) => taskControl().ownsTask(taskId),
       readTask: (taskId) => taskControl().readTask(taskId),
       waitTasks: (taskIds, timeoutMs, signal, options) =>
         taskControl().waitTasks(taskIds, timeoutMs, signal, options),
@@ -5928,6 +6066,44 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Child Task cancellation wait must be within 0–60000 ms.');
         const current = await taskControl().readTask(taskId);
         if (current.status !== 'running') return current;
+        const followup = followupTaskProof(taskId);
+        if (followup) {
+          const child = input.coordinators.get(followup.targetSessionId)?.getState();
+          if (
+            followup.terminal ||
+            child?.turn.turnId !== followup.targetRunId ||
+            child.activeTaskId !== taskId ||
+            child.activeFollowupTurn?.submissionId !== followup.submissionId
+          )
+            return taskControl().readTask(taskId);
+          const controller = activeFollowupControllers.get(followup.submissionId);
+          if (!controller)
+            return {
+              ...current,
+              ok: false,
+              status: 'unknown',
+              cleanup_confirmed: false,
+              error: 'Followup Task has no local cancellation owner.',
+            };
+          controller.abort(
+            createRuntimeAbortReason(
+              options?.abortCause ?? 'user',
+              'Independent followup Task cancelled.',
+            ),
+          );
+          const waited = await taskControl().waitTasks([taskId], waitMs);
+          const tasks = Array.isArray(waited.tasks) ? waited.tasks : [];
+          const observed = tasks[0] as Readonly<Record<string, unknown>> | undefined;
+          return observed?.status !== 'running' && observed?.status !== 'cancelling'
+            ? (observed ?? (await taskControl().readTask(taskId)))
+            : {
+                ...observed,
+                ok: false,
+                status: 'unknown',
+                cleanup_confirmed: false,
+                error: 'Followup Task cancellation cleanup is unconfirmed.',
+              };
+        }
         const parent = input.coordinators.get(input.parentSessionId);
         const matches = Object.values(parent?.getState().capabilities.invocations ?? {}).filter(
           (invocation) =>

@@ -49,6 +49,8 @@ export interface CreateAppToolPipelineSandboxLifecycleInput
   ) => Readonly<ToolPipelineAttemptAcknowledgement> | null | undefined;
   /** Existing Builtin-owned durable Artifact store; App only wraps identity. */
   readonly artifacts: Pick<SandboxPreparationArtifactStore, 'write' | 'read'>;
+  /** Signals only after the persisted supervisor record has passed exact evidence verification. */
+  readonly onExecutionSupervisorStarted?: () => void;
 }
 
 export type AppToolPipelineSandboxLifecycleErrorCode =
@@ -620,7 +622,7 @@ function createEvidencePort(
         if (!binding || binding.stage !== evidence.stage)
           return { valid: false, code: 'identity_mismatch' as const };
         assertOpenAcknowledgement(prepared, openAcknowledgement);
-        assertCurrentInvocationIdentity(input, openAcknowledgement, 'evidence');
+        assertCurrentInvocationIdentity(input, openAcknowledgement, evidence.stage);
         switch (evidence.stage) {
           case 'preparation_intent':
             if (
@@ -714,6 +716,7 @@ function createEvidencePort(
                 attempt: openAcknowledgement.attempt.attempt,
               },
             );
+            input.onExecutionSupervisorStarted?.();
             return { valid: true as const };
           case 'disposal_intent':
             if (
@@ -983,11 +986,35 @@ function currentInvocation(
   acknowledgement: Readonly<ToolPipelineAttemptAcknowledgement>,
   stage: string,
 ): InvocationState {
-  const invocation =
-    input.getState().capabilities.invocations[acknowledgement.attempt.invocationId];
+  const state = input.getState();
+  const invocation = state.capabilities.invocations[acknowledgement.attempt.invocationId];
   if (!invocation) fail('attempt_not_acknowledged', `State has no open attempt for ${stage}.`);
+  const call = state.tools.calls[acknowledgement.attempt.toolCallId];
+  // A successful Tool receipt may hand off a supervised process which still
+  // owns cleanup. Preparation and dispatch never use this terminal exception.
+  const handedOff =
+    invocation.status === 'succeeded' &&
+    invocation.capabilityId === 'builtin:shell_execute' &&
+    invocation.sandboxExecutionDispatch?.status === 'supervisor_started' &&
+    invocation.sandboxExecutionDispatch.attempt === acknowledgement.attempt.attempt &&
+    call?.name === 'shell_execute' &&
+    call.status === 'succeeded' &&
+    call.result?.ok === true &&
+    call.result.resultMeta?.shellStatus === 'running' &&
+    typeof call.result.resultMeta.shellId === 'string' &&
+    call.result.resultMeta.shellId.length > 0 &&
+    [
+      'supervisor start',
+      'execution_supervisor_started',
+      'disposal intent',
+      'disposal receipt',
+      'disposal_intent',
+      'disposal_receipt',
+      'disposal evidence',
+      'disposal receipt evidence',
+    ].includes(stage);
   if (
-    invocation.status !== 'running' ||
+    (invocation.status !== 'running' && !handedOff) ||
     invocation.toolCallId !== acknowledgement.attempt.toolCallId ||
     invocation.capabilityId !== acknowledgement.attempt.capabilityId ||
     invocation.capabilityRevision !== acknowledgement.attempt.capabilityRevision ||

@@ -559,6 +559,40 @@ export async function compileOssReleaseExecutable(
       {
         name: 'standalone-release-bindings',
         setup(builder) {
+          builder.onLoad(
+            {
+              filter:
+                /[/\\]jsdom[/\\]lib[/\\]jsdom[/\\]living[/\\]xhr[/\\]XMLHttpRequest-impl\.js$/,
+            },
+            (args) => {
+              // Passive HTML extraction never executes page scripts or XHR. jsdom
+              // nevertheless resolves its Node subprocess worker during import;
+              // that runtime-relative file cannot exist in a native Bun payload.
+              // Keep DOM parsing intact and explicitly reject the unsupported
+              // synchronous subprocess branch instead of spawning this binary.
+              const source = readFileSync(args.path, 'utf8');
+              const workerResolution =
+                'const syncWorkerFile = require.resolve ? require.resolve("./xhr-sync-worker.js") : null;';
+              const synchronousBranch = 'if (flag.synchronous) {\n      const flagStr =';
+              if (
+                source.split(workerResolution).length !== 2 ||
+                source.split(synchronousBranch).length !== 2
+              ) {
+                throw new Error(
+                  'Unsupported jsdom synchronous XHR implementation in native release.',
+                );
+              }
+              return {
+                contents: source
+                  .replace(workerResolution, 'const syncWorkerFile = null;')
+                  .replace(
+                    synchronousBranch,
+                    'if (flag.synchronous) {\nthrow new Error("Synchronous XMLHttpRequest is unavailable in the native release HTML parser.");\n      const flagStr =',
+                  ),
+                loader: 'js',
+              };
+            },
+          );
           const resolveSource = (base: string): string | undefined => {
             for (const candidate of [
               base,

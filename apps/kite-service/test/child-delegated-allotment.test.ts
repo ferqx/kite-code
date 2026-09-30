@@ -9,6 +9,7 @@ import {
   LIMITED_RESOURCE_BUDGET_,
   type ResourceBudget,
   reduceResourceBudgetState,
+  UNBOUNDED_PRIMARY_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeEvent, RuntimeState } from '../src/bootstrap/runtime/state-runtime';
 import {
@@ -390,4 +391,38 @@ test('delayed child activation starts its own 30-minute clock without changing p
       startedAt: Date.parse(plan.deadlineAt),
     }),
   ).toThrow('deadline has expired');
+});
+
+test('unlimited primary grants every new child its own finite 30-minute duration', () => {
+  const base = initialState();
+  if (base.resourceBudget.status !== 'active') throw new Error('missing ledger');
+  const primary = {
+    ...base,
+    resourceBudget: {
+      ...base.resourceBudget,
+      budget: UNBOUNDED_PRIMARY_RESOURCE_BUDGET_,
+      deadlineAt: null,
+    },
+  };
+  const late = NOW + 24 * 60 * 60_000;
+  const plan = planChildDelegatedAllotment({
+    state: withTransient(primary, 1),
+    transientReservationId: transientId(1),
+    toolFinished: finished(1),
+    childThreadId: childId(1),
+    role: 'review',
+    taskArtifactBytes: 1,
+    now: late,
+  });
+  expect(plan.childBudget.maxRunDurationMs).toBe(30 * 60_000);
+  expect(plan.childBudget.unboundedRunDuration).toBeUndefined();
+  expect(plan.childBudget.unboundedCumulativeUsage).toBeUndefined();
+  expect(Date.parse(plan.deadlineAt) - late).toBe(30 * 60_000);
+  const active = childBudgetAtActivation({
+    childBudget: plan.childBudget,
+    deadlineAt: plan.deadlineAt,
+    startedAt: late + 5_000,
+    independentTurnDeadline: true,
+  });
+  expect(active.maxRunDurationMs).toBe(30 * 60_000);
 });
