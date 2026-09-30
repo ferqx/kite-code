@@ -71,6 +71,7 @@ export const STATE_EVENT_REDUCER_COVERAGE: Readonly<
     'provider.readiness_succeeded',
     'provider.readiness_waiter_registered',
     'resource_budget.configured',
+    'resource_budget.cumulative_limits_removed',
     'resource_budget.required_child_wait_started',
     'resource_budget.required_child_wait_ended',
     'resource_budget.bounded_replaced',

@@ -8,6 +8,7 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite-ai/builtin-runtime/skills';
+import { readSkillReference } from '../../src/skills/lifecycle';
 
 let root: string;
 
@@ -112,9 +113,61 @@ describe('compileSkillWorkflow', () => {
     const reference = join(directory, 'references', 'release.md');
     writeFileSync(reference, 'first revision');
     const first = compile(directory);
-    writeFileSync(reference, 'second revision');
+    writeFileSync(reference, 'first revisioN');
     const second = compile(directory);
     expect(second.descriptor.revision).not.toBe(first.descriptor.revision);
+  });
+
+  it('reads a declared reference larger than the former direct-read limit', () => {
+    const directory = writeWorkflow('publish-docs', VALID_MANIFEST);
+    mkdirSync(join(directory, 'references'));
+    const content = 'reference content\n'.repeat(10_000);
+    writeFileSync(join(directory, 'references', 'large.md'), content);
+    const entry = compile(directory);
+    expect(entry.contract?.files).toContain('references/large.md');
+    const runtime = {
+      state: {
+        activeTaskId: 'task-1',
+        session: { workspace: root },
+        skills: {
+          catalogRevision: 'catalog-1',
+          frames: {
+            activation: {
+              activationId: 'activation',
+              skillId: entry.descriptor.capabilityId,
+              skillRevision: entry.descriptor.revision,
+              taskId: 'task-1',
+              input: {},
+              contextMode: 'inline' as const,
+              agent: 'code',
+              capabilityCeiling: [],
+              verificationMode: 'not_required' as const,
+              requestedBy: 'model' as const,
+              activatedAt: '2026-09-30T00:00:00.000Z',
+              status: 'active' as const,
+            },
+          },
+        },
+      },
+      catalog: {
+        revision: 'catalog-1',
+        capabilities: { revision: 'catalog-1', descriptors: [entry.descriptor] },
+        entries: [entry],
+      },
+      verificationEnabled: false,
+    };
+    const result = readSkillReference(runtime, {
+      activation_id: 'activation',
+      path: 'references/large.md',
+    });
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(result.stdout)).toMatchObject({ encoding: 'utf8', content });
+    expect(
+      readSkillReference(runtime, {
+        activation_id: 'activation',
+        path: 'references/undeclared.md',
+      }).ok,
+    ).toBe(false);
   });
 
   it('resolves capability revisions and rejects missing dependencies', () => {
@@ -220,18 +273,30 @@ describe('compileSkillWorkflow', () => {
     expect(resolver('mcp:docs/search')?.revision).toBe('mcp-revision');
   });
 
-  it('fails closed when scan budgets are exceeded and ignores build directories', () => {
+  it('includes large, deep, and numerous files in the revision while ignoring build directories', () => {
     const directory = writeWorkflow('publish-docs', VALID_MANIFEST);
-    writeFileSync(join(directory, 'oversized.bin'), Buffer.alloc(1024 * 1024 + 1));
-    const oversized = compile(directory);
-    expect(oversized.descriptor.availability).toBe('unavailable');
-    expect(oversized.diagnostics.some((item) => item.message.includes('exceeds'))).toBe(true);
+    writeFileSync(join(directory, 'oversized.bin'), Buffer.alloc(8 * 1024 * 1024 + 1));
+    let deep = directory;
+    for (let index = 0; index < 9; index += 1) deep = join(deep, `level-${index}`);
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, 'deep.md'), 'deep reference');
+    const many = join(directory, 'references');
+    mkdirSync(many);
+    for (let index = 0; index < 257; index += 1)
+      writeFileSync(join(many, `reference-${index}.md`), String(index));
+    const expanded = compile(directory);
+    expect(expanded.descriptor.availability).toBe('available');
+    expect(expanded.contract?.files).toHaveLength(260);
+    expect(expanded.contract?.files).toContain('oversized.bin');
+    expect(expanded.contract?.files).toContain(
+      join(...Array.from({ length: 9 }, (_, index) => `level-${index}`), 'deep.md'),
+    );
 
-    rmSync(join(directory, 'oversized.bin'));
     mkdirSync(join(directory, 'node_modules'), { recursive: true });
     writeFileSync(join(directory, 'node_modules', 'ignored.bin'), Buffer.alloc(1024 * 1024 + 1));
     const ignored = compile(directory);
     expect(ignored.descriptor.availability).toBe('available');
+    expect(ignored.descriptor.revision).toBe(expanded.descriptor.revision);
   });
 
   it('rejects executable paths inside ignored directories', () => {

@@ -3,6 +3,7 @@
 在所选会话的 Runtime logs 中展开可用的 `model.invocation_prepared`，打开 Model Context Inspector。检查目标绑定到这一次调用，不是当前全局模型设置的估算。
 
 可用分区包括 Overview、System prompt、Messages、Tools 和 Request settings。它帮助解释“这次模型看到了什么”，不能证明模型一定正确理解或遵守这些内容。
+内容较多时检查器会继续读取后续片段，再显示完整结果；System prompt、消息正文、工具描述和Schema不会因为累计大小或超过200项而静默截断。关闭检查器或切换会话会取消当前读取。
 
 ## 范围与敏感性
 

@@ -8,7 +8,9 @@ import {
   type BuiltinPrimaryModelCompletion,
   type BuiltinPrimaryModelContextMetrics,
   type BuiltinPrimaryModelState,
+  buildContextProjection,
   createChatModel,
+  estimateContextTokens,
   humanMessage,
   type ModelArtifactWriter,
   ModelInvocationGateway,
@@ -300,6 +302,40 @@ describe('Builtin primary Model effect execution', () => {
     expect(admissions).toBe(1);
     expect(fixture.counts().sourceCalls).toBe(1);
     expect(JSON.stringify(fixture.surfaceMessages())).toContain('mail marker');
+  });
+  test('admits Agent mail within the real model window above the heuristic threshold', async () => {
+    const fixture = createGatewayFixture();
+    const state = stateWithHistory();
+    const frame = humanMessage({
+      id: 'mail-near-window',
+      name: 'agent_message',
+      content: '<agent_message>new evidence</agent_message>',
+      response_metadata: { source: 'agent_message' },
+    });
+    const base = buildContextProjection({
+      role: 'agent',
+      state,
+      ...projectionEnvironment(),
+    }).estimate.totalInputTokens;
+    const added = estimateContextTokens({
+      systemMessages: [],
+      transcriptMessages: [frame],
+      dynamicRuntimeMessages: [],
+    }).totalInputTokens;
+    const window = base + added + 64 + 1_024;
+    const result = await new BuiltinModelEffectCoordinator(
+      fixture.gateway,
+    ).executePrimaryModelEffect({
+      ...baseInput(state),
+      config: {
+        ...CONFIG,
+        modelCapabilities: { contextWindowTokens: window, maxOutputTokens: 64 },
+      },
+      persistence: persistence(state),
+      prepareAgentMail: async () => ({ frames: [frame] }),
+    });
+    expect(result.kind).toBe('completed');
+    expect(fixture.counts().sourceCalls).toBe(1);
   });
   test('returns automatic compaction before Gateway, operation, or source dispatch', async () => {
     const fixture = createGatewayFixture();

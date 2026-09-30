@@ -276,7 +276,14 @@ function mergedSessionPage(
 function findCurrentSession(
   source: RuntimeLogQuerySource,
   sessionId: string,
-): { entry: RuntimeLogSessionEntry; historyGeneration?: number } | undefined {
+):
+  | {
+      entry: RuntimeLogSessionEntry;
+      historyGeneration?: number;
+      historyRewriteGeneration?: number;
+      historyInstanceId?: string;
+    }
+  | undefined {
   const indexed = withLogs(source, (reader) =>
     reader.getSession ? { entry: reader.getSession(sessionId) } : undefined,
   );
@@ -287,10 +294,46 @@ function findCurrentSession(
           ...(indexed.entry.historyGeneration === undefined
             ? {}
             : { historyGeneration: indexed.entry.historyGeneration }),
+          ...(indexed.entry.historyRewriteGeneration === undefined
+            ? {}
+            : {
+                historyRewriteGeneration: indexed.entry.historyRewriteGeneration,
+                historyInstanceId: indexed.entry.historyInstanceId,
+              }),
         }
       : undefined;
   const entry = allCurrentSessions(source).find((candidate) => candidate.sessionId === sessionId);
   return entry ? { entry } : undefined;
+}
+
+/** Resolve the current scoped metadata before reusing a worker projection. */
+export function resolveKiteHistorySession(
+  source: RuntimeLogQuerySource,
+  sessionId: string,
+  throughSequence?: number,
+): {
+  entry: RuntimeLogSessionEntry;
+  historyGeneration?: number;
+  historyRewriteGeneration?: number;
+  historyInstanceId?: string;
+} {
+  const current = findCurrentSession(source, sessionId);
+  if (!current)
+    throw Object.assign(new Error('Runtime Session was not found.'), { code: 'session_not_found' });
+  if (
+    throughSequence !== undefined &&
+    (!Number.isSafeInteger(throughSequence) ||
+      throughSequence < 0 ||
+      throughSequence > current.entry.lastSequence)
+  )
+    throw new Error('Runtime history snapshot sequence is invalid.');
+  return {
+    ...current,
+    entry:
+      throughSequence === undefined
+        ? current.entry
+        : { ...current.entry, lastSequence: throughSequence },
+  };
 }
 
 function stableReasoningSegmentId(
@@ -333,6 +376,7 @@ const HISTORY_CACHE_TTL_MS = 30_000;
 type CachedHistory = Readonly<{
   transcript: RuntimeHistorySessionTranscript;
   historyGeneration?: number;
+  appendProof?: { rewriteGeneration: number; instanceId: string };
   rawPrefixDigest?: string;
   bytes: number;
   expiresAt: number;
@@ -357,6 +401,7 @@ class HistoryTranscriptCache {
     key: string,
     historyGeneration?: number,
     fingerprintPrefix?: () => string | null,
+    appendProof?: { rewriteGeneration: number; instanceId: string },
   ): RuntimeHistorySessionTranscript | undefined {
     const entry = this.#entries.get(key);
     if (!entry) return undefined;
@@ -374,7 +419,15 @@ class HistoryTranscriptCache {
       return undefined;
     }
     let retainedEntry = entry;
-    if (entry.historyGeneration !== historyGeneration) {
+    const unchangedPrefix =
+      !!appendProof &&
+      !!entry.appendProof &&
+      appendProof.instanceId === entry.appendProof.instanceId &&
+      Number.isSafeInteger(appendProof.rewriteGeneration) &&
+      appendProof.rewriteGeneration >= 0 &&
+      appendProof.rewriteGeneration === entry.appendProof.rewriteGeneration &&
+      historyGeneration! >= entry.historyGeneration!;
+    if (entry.historyGeneration !== historyGeneration && !unchangedPrefix) {
       if (!fingerprintPrefix || !entry.rawPrefixDigest) {
         this.#delete(key);
         return undefined;
@@ -391,6 +444,7 @@ class HistoryTranscriptCache {
       }
       retainedEntry = { ...entry, historyGeneration };
     }
+    retainedEntry = { ...retainedEntry, historyGeneration };
     this.#entries.delete(key);
     this.#entries.set(key, retainedEntry);
     return entry.transcript;
@@ -402,6 +456,7 @@ class HistoryTranscriptCache {
     retain: boolean,
     historyGeneration?: number,
     rawPrefixDigest?: string,
+    appendProof?: { rewriteGeneration: number; instanceId: string },
   ): RuntimeHistorySessionTranscript {
     // The JSON byte count bounds retained payload size, not actual JS heap use.
     // Replace the old snapshot even when the new one is too large to retain.
@@ -420,6 +475,7 @@ class HistoryTranscriptCache {
     this.#entries.set(key, {
       transcript: withDigest,
       historyGeneration,
+      appendProof,
       rawPrefixDigest,
       bytes,
       expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
@@ -619,9 +675,9 @@ function createKiteRuntimeHistoryClientWithCache(
   cache: HistoryTranscriptCache,
   parentScope?: string,
   limits?: Readonly<{
-    maxSourceBytes: number;
-    maxProjectedBytes: number;
-    maxRecords: number;
+    maxSourceBytes?: number;
+    maxProjectedBytes?: number;
+    maxRecords?: number;
     maxCacheBytes?: number;
     fingerprintEventRows?: HistoryPrefixFingerprinter;
   }>,
@@ -686,7 +742,19 @@ function createKiteRuntimeHistoryClientWithCache(
       // A Store-owned event generation allows a fresh navigation to reuse the
       // projection only when no event row has changed, including same-sequence
       // repair. Readers without that generation still rescan the first page.
-      const cacheKey = JSON.stringify([parentScope ?? null, sessionId, session.lastSequence]);
+      const cacheKey = JSON.stringify([
+        parentScope ?? null,
+        sessionId,
+        current?.historyInstanceId ?? null,
+        session.lastSequence,
+      ]);
+      const appendProof =
+        current?.historyRewriteGeneration !== undefined && current.historyInstanceId
+          ? {
+              rewriteGeneration: current.historyRewriteGeneration,
+              instanceId: current.historyInstanceId,
+            }
+          : undefined;
       if (throughSequence !== undefined && !compatibility) {
         // A pinned load can also be a new request, not only a page continuation.
         // Check the durable generation so same-sequence rewrites are visible.
@@ -696,6 +764,7 @@ function createKiteRuntimeHistoryClientWithCache(
           limits?.fingerprintEventRows
             ? () => limits.fingerprintEventRows!(sessionId, session.lastSequence, parentScope)
             : undefined,
+          appendProof,
         );
         if (cached) return { ...cached, session };
       } else if (
@@ -709,6 +778,7 @@ function createKiteRuntimeHistoryClientWithCache(
           limits?.fingerprintEventRows
             ? () => limits.fingerprintEventRows!(sessionId, session.lastSequence, parentScope)
             : undefined,
+          appendProof,
         );
         if (cached) return { ...cached, session };
       }
@@ -716,8 +786,6 @@ function createKiteRuntimeHistoryClientWithCache(
         const all: HistoricalRecord[] = [];
         const sources: HistoricalSource[] = [];
         const pendingIdentityRecords: number[] = [];
-        let sourceBytes = 0;
-        let projectedBytes = 0;
         let afterSequence: number | undefined;
         let stableRunId: string | undefined;
         let activeTaskId: string | undefined;
@@ -733,17 +801,6 @@ function createKiteRuntimeHistoryClientWithCache(
             limit: 200,
           });
           for (const record of page.entries) {
-            if (limits) {
-              sourceBytes += Buffer.byteLength(JSON.stringify(record.event), 'utf8');
-              if (all.length >= limits.maxRecords || sourceBytes > limits.maxSourceBytes) {
-                throw Object.assign(
-                  new Error('Runtime History transcript exceeds the read budget.'),
-                  {
-                    code: 'history_too_large',
-                  },
-                );
-              }
-            }
             if (afterSequence !== undefined && record.sequence <= afterSequence) {
               throw new Error('Runtime history pagination did not advance.');
             }
@@ -803,17 +860,6 @@ function createKiteRuntimeHistoryClientWithCache(
               ...(Object.keys(identity).length === 0 ? {} : { identity }),
               ...(canonicalOccurredAt(record.occurredAt) ? { occurredAt: record.occurredAt } : {}),
             });
-            if (limits) {
-              projectedBytes += Buffer.byteLength(JSON.stringify(all.at(-1)), 'utf8');
-              if (projectedBytes > limits.maxProjectedBytes) {
-                throw Object.assign(
-                  new Error('Runtime History transcript exceeds the read budget.'),
-                  {
-                    code: 'history_too_large',
-                  },
-                );
-              }
-            }
             if (events.some((event) => !isRuntimeClientEventIdentitySatisfied(event, identity))) {
               pendingIdentityRecords.push(all.length - 1);
             }
@@ -873,6 +919,7 @@ function createKiteRuntimeHistoryClientWithCache(
       let rawPrefixDigest: string | undefined;
       if (
         !compatibility &&
+        !appendProof &&
         limits?.fingerprintEventRows &&
         Number.isSafeInteger(current?.historyGeneration) &&
         current!.historyGeneration! >= 0
@@ -887,9 +934,11 @@ function createKiteRuntimeHistoryClientWithCache(
       return cache.set(
         cacheKey,
         transcript,
-        !compatibility && (!limits?.fingerprintEventRows || rawPrefixDigest !== undefined),
+        !compatibility &&
+          (!!appendProof || !limits?.fingerprintEventRows || rawPrefixDigest !== undefined),
         current?.historyGeneration,
         rawPrefixDigest,
+        appendProof,
       );
     },
     ...(openChildLogs
@@ -986,9 +1035,9 @@ export function createKiteRuntimeObserverHistoryClient(
   logs: RuntimeLogQuerySource,
   openChildLogs?: KiteChildHistoryLogOpener,
   limits?: Readonly<{
-    maxSourceBytes: number;
-    maxProjectedBytes: number;
-    maxRecords: number;
+    maxSourceBytes?: number;
+    maxProjectedBytes?: number;
+    maxRecords?: number;
     maxCacheBytes?: number;
     fingerprintEventRows?: HistoryPrefixFingerprinter;
   }>,

@@ -60,7 +60,6 @@ function isPlanStep(value: unknown): value is PlanStep {
     typeof value.title === 'string' &&
     value.title === value.title.trim() &&
     value.title.length >= 1 &&
-    value.title.length <= 160 &&
     !/[\r\n]/u.test(value.title) &&
     planStatus(value.status) !== undefined &&
     (value.note === undefined || typeof value.note === 'string')
@@ -212,15 +211,12 @@ function isPlanDocument(value: unknown): value is PlanDocument {
     typeof value.title !== 'string' ||
     value.title !== value.title.trim() ||
     value.title.length < 1 ||
-    value.title.length > 120 ||
     /[\r\n]/u.test(value.title) ||
     typeof value.bodyMarkdown !== 'string' ||
     value.bodyMarkdown !== value.bodyMarkdown.trim() ||
-    value.bodyMarkdown.length < 20 ||
-    value.bodyMarkdown.length > 30_000 ||
+    value.bodyMarkdown.length < 1 ||
     !Array.isArray(value.steps) ||
     value.steps.length < 1 ||
-    value.steps.length > 12 ||
     !value.steps.every(isPlanStep) ||
     new Set(value.steps.map((step) => (step as PlanStep).id)).size !== value.steps.length ||
     typeof value.structuralDigest !== 'string' ||
@@ -233,8 +229,7 @@ function isPlanDocument(value: unknown): value is PlanDocument {
     (value.supersedesPlanVersion !== undefined &&
       (!Number.isInteger(value.supersedesPlanVersion) ||
         (value.supersedesPlanVersion as number) < 1)) ||
-    (value.replanReason !== undefined &&
-      (typeof value.replanReason !== 'string' || value.replanReason.length > 500))
+    (value.replanReason !== undefined && typeof value.replanReason !== 'string')
   )
     return false;
   const plan = value as unknown as PlanDocument;

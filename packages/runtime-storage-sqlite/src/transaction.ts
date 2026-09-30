@@ -30,6 +30,7 @@ import {
   SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSessionBinding,
 } from './preflight';
+import type { createSqliteCompletedResourceReservationStore } from './resource-reservation-receipts';
 
 interface SnapshotBoundaryRow {
   readonly event_position: number;
@@ -128,6 +129,7 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
   readonly receiptWriter?: SqliteRuntimeCommandReceiptWriter;
   /** Same-connection Store 8 port. Omit for Store 6/7. */
   readonly runStore?: RuntimeRunStorePort;
+  readonly completedReservations?: ReturnType<typeof createSqliteCompletedResourceReservationStore>;
   readonly beforeWrite?: () => void;
   readonly afterPersistInTransaction?: (
     channel:
@@ -209,12 +211,16 @@ export function createSqliteRuntimeTransactionPort<Event, State>(input: {
       }
     }
     input.ensureSession(transaction.sessionId, transaction.snapshot);
+    if (transaction.completedResourceReservations?.length && !input.completedReservations)
+      throw new Error('Terminal reservation receipt Store is unavailable.');
+    input.completedReservations?.assertAdmissionInTransaction(transaction);
     if (transaction.sessionModelRoute) {
       if (!input.setSessionModelRoute)
         throw new Error('Runtime Store cannot persist a Session model route.');
       input.setSessionModelRoute(transaction.sessionId, transaction.sessionModelRoute);
     }
     input.insertEvents(transaction.sessionId, transaction.events, transaction.metadata);
+    input.completedReservations?.archiveInTransaction(transaction);
     const encoded = input.encodeSnapshot(transaction.snapshot, transaction.snapshotMetadata);
     const position =
       transaction.snapshotMetadata?.eventPosition ?? input.lastEventPosition(transaction.sessionId);

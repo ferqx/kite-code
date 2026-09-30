@@ -351,9 +351,11 @@ export function persistChildSessionIntentInTransaction<Event, State>(
         reportUpper?.source !== 'versioned_upper_bound' ||
         reportCounters?.modelRequests !== 1 ||
         !Number.isSafeInteger(reportCounters.inputTokens) ||
-        (reportCounters.inputTokens as number) < 1 ||
+        (reportCounters.inputTokens as number) <
+          (reportUpper?.unboundedModelTokens === true ? 0 : 1) ||
         !Number.isSafeInteger(reportCounters.outputTokens) ||
-        (reportCounters.outputTokens as number) < 1 ||
+        (reportCounters.outputTokens as number) <
+          (reportUpper?.unboundedModelTokens === true ? 0 : 1) ||
         reportGauges?.activeSubagents !== 0 ||
         reportGauges?.activeWriters !== 0 ||
         !(allotments[0]!.index < reports[0]!.index && reports[0]!.index < intended.index))) ||
@@ -566,6 +568,16 @@ export function settleChildCreationFailureInTransaction<Event, State>(
         ? activeBudget
         : object(retained?.[intent.fundingRunId]);
     const reservation = object(object(funding?.reservations)?.[intent.delegatedReservationId]);
+    const completedRow = reservation
+      ? null
+      : database
+          .query<{ reservation_json: string }, [string, string]>(
+            `SELECT reservation_json FROM runtime_resource_reservation_receipts
+         WHERE session_id = ? AND reservation_id = ? LIMIT 1`,
+          )
+          .get(intent.parentSessionId, intent.delegatedReservationId);
+    const completed = completedRow ? object(JSON.parse(completedRow.reservation_json)) : null;
+    const releasedReservation = reservation ?? completed;
     const released = database
       .query<{ count: number }, [string, string]>(
         `SELECT count(*) AS count FROM runtime_events
@@ -585,7 +597,13 @@ export function settleChildCreationFailureInTransaction<Event, State>(
       intent.disposition !== 'required' ||
       intent.fundingRunId !== intent.originRunId ||
       run?.status !== 'cancelled' ||
-      reservation?.state !== 'released' ||
+      releasedReservation?.state !== 'released' ||
+      releasedReservation.reservationId !== intent.delegatedReservationId ||
+      releasedReservation.runId !== intent.fundingRunId ||
+      releasedReservation.invocationId !== `child-allotment:${intent.childThreadId}` ||
+      releasedReservation.resourceKind !== 'subagent' ||
+      childDelegatedUpperBoundDigest(releasedReservation.executableUpperBound as never) !==
+        intent.delegatedUpperBoundDigest ||
       released?.count !== 1 ||
       aborted?.count !== 1 ||
       intent.childBudgetActivatedRunId ||

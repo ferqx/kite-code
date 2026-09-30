@@ -102,7 +102,6 @@ export function isPlanStep(value: unknown): value is PlanStep {
     SAFE_STEP_ID.test(value.id) &&
     value.title === value.title.trim() &&
     value.title.length >= 1 &&
-    value.title.length <= 160 &&
     !/[\r\n]/.test(value.title)
   );
 }
@@ -210,15 +209,12 @@ export function isPlanDocument(value: unknown): value is PlanDocument & {
     typeof value.title !== 'string' ||
     value.title !== value.title.trim() ||
     value.title.length < 1 ||
-    value.title.length > 120 ||
     /[\r\n]/.test(value.title) ||
     typeof value.bodyMarkdown !== 'string' ||
     value.bodyMarkdown !== value.bodyMarkdown.trim() ||
-    value.bodyMarkdown.length < 20 ||
-    value.bodyMarkdown.length > 30_000 ||
+    value.bodyMarkdown.length < 1 ||
     !Array.isArray(value.steps) ||
     value.steps.length < 1 ||
-    value.steps.length > 12 ||
     !value.steps.every(isPlanStep) ||
     new Set(value.steps.map((step) => step.id)).size !== value.steps.length ||
     typeof value.structuralDigest !== 'string' ||
@@ -248,7 +244,6 @@ export function hasValidPlanRevisionMetadata(value: {
     (value.supersedesPlanVersion === undefined ||
       (Number.isInteger(value.supersedesPlanVersion) &&
         (value.supersedesPlanVersion as number) >= 1)) &&
-    (value.replanReason === undefined ||
-      (typeof value.replanReason === 'string' && value.replanReason.length <= 500))
+    (value.replanReason === undefined || typeof value.replanReason === 'string')
   );
 }

@@ -59,24 +59,21 @@ describe('shell live output', () => {
   const shell = createSandboxExecutor({ enabled: false, workspace });
 
   test('emits stderr progress before later stdout', async () => {
-    const events: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];
+    const output = { stdout: '', stderr: '' };
+    const streams: Array<'stdout' | 'stderr'> = [];
 
     const result = await shell({
       workspace,
       command: "printf 'err-first\\n' >&2; sleep 0.2; printf 'out-late\\n'",
       onProgress: (chunk, stream) => {
-        events.push({ chunk, stream });
+        output[stream] += chunk;
+        if (output[stream].includes('\n') && !streams.includes(stream)) streams.push(stream);
       },
     });
 
     expect(result.ok).toBe(true);
-    const commandEvents = events.filter(
-      (event) => event.chunk === 'err-first' || event.chunk === 'out-late',
-    );
-    expect(commandEvents).toEqual([
-      { chunk: 'err-first', stream: 'stderr' },
-      { chunk: 'out-late', stream: 'stdout' },
-    ]);
+    expect(output).toEqual({ stdout: 'out-late\n', stderr: 'err-first\n' });
+    expect(streams).toEqual(['stderr', 'stdout']);
   });
 
   test('kills descendant processes before returning a timeout result', async () => {
@@ -197,6 +194,7 @@ describe('shell live output', () => {
     const scriptPath = join(workspace, 'cancel-descendant.cjs');
     let descendantPid: number | undefined;
     let cancelledAt: number | undefined;
+    let stdoutProgress = '';
     const controller = new AbortController();
     writeFileSync(
       scriptPath,
@@ -209,8 +207,10 @@ describe('shell live output', () => {
         command: 'node cancel-descendant.cjs',
         timeoutMs: 8_000,
         signal: controller.signal,
-        onProgress: (line, stream) => {
-          const match = stream === 'stdout' ? line.match(/^child-ready:(\d+)$/u) : null;
+        onProgress: (chunk, stream) => {
+          if (stream !== 'stdout' || descendantPid !== undefined) return;
+          stdoutProgress += chunk;
+          const match = stdoutProgress.match(/(?:^|\n)child-ready:(\d+)\r?\n/u);
           if (!match) return;
           descendantPid = Number(match[1]);
           cancelledAt = Date.now();
@@ -247,14 +247,17 @@ describe('shell live output', () => {
     if (process.platform === 'win32') return;
     const controller = new AbortController();
     const startedAt = Date.now();
+    let stdoutProgress = '';
     const result = await shell({
       workspace,
       command:
         "node -e \"process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)\"",
       timeoutMs: 8_000,
       signal: controller.signal,
-      onProgress: (line) => {
-        if (line === 'ready') controller.abort();
+      onProgress: (chunk, stream) => {
+        if (stream !== 'stdout') return;
+        stdoutProgress += chunk;
+        if (stdoutProgress.includes('ready\n')) controller.abort();
       },
     });
 

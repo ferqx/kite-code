@@ -175,6 +175,8 @@ export interface ResourceBudget {
   readonly maxToolInvocations: number;
   /** New grants may omit a cumulative Tool count ceiling; zero without this flag still denies Tools. */
   readonly unboundedToolInvocations?: true;
+  /** Run-level cumulative counters are diagnostic only; deadline and concurrency remain bounded. */
+  readonly unboundedCumulativeUsage?: true;
   /** Exact independent child Run authority; cumulative fields are zero placeholders. */
   readonly durationOnlyChildRun?: true;
   readonly maxRunInputTokens: number;
@@ -1297,6 +1299,8 @@ export interface AgentResourceBudgetActiveState {
   };
   readonly budget: ResourceBudget;
   readonly reconciledUsage: ResourceUsage;
+  /** Terminal reservation receipts are stored atomically beside this snapshot. */
+  readonly externalizedClosedReservations?: true;
   readonly reservations: Readonly<Record<string, ResourceReservation>>;
   readonly waiters: Readonly<Record<string, ResourceWaiter>>;
   readonly nextWaiterSequence: number;

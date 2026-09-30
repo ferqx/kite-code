@@ -25,6 +25,7 @@ export type AgentApiBackgroundExecutionPage = {
     readonly "schema": "kite.agent-api.background-execution.v1";
     readonly "status": "running" | "stopping" | "completed" | "failed" | "cancelled" | "unavailable";
   })[];
+  readonly "next_cursor"?: string;
   readonly "schema": "kite.agent-api.background-execution-page.v1";
   readonly "session_id": string;
   readonly "session_revision": number;
@@ -658,6 +659,19 @@ export type AgentApiModelContext = {
     readonly "truncated": boolean;
   })[];
   readonly "tools_truncated": boolean;
+};
+
+export type AgentApiModelContextPage = {
+  readonly "invocation_id": string;
+  readonly "next_cursor"?: string;
+  readonly "offset": number;
+  readonly "payload_base64": string;
+  readonly "schema": "kite.agent-api.model-context-page.v1";
+  readonly "sequence": number;
+  readonly "session_id": string;
+  readonly "sha256": string;
+  readonly "snapshot_id": string;
+  readonly "total_bytes": number;
 };
 
 export type AgentApiMutationHeaders = {

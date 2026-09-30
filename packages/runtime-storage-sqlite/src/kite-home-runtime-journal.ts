@@ -38,6 +38,7 @@ import {
   type SqliteRuntimeSessionBinding,
   type SqliteRuntimeSnapshotCodec,
 } from './preflight';
+import { createSqliteCompletedResourceReservationStore } from './resource-reservation-receipts';
 import { hasSessionLineage } from './session-lineage';
 import { createSqliteSnapshotStore } from './snapshot-store';
 import type {
@@ -53,6 +54,9 @@ export interface KiteHomeWorkspaceRuntimeJournal<Event, State> {
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   readonly commandReceipts: RuntimeCommandReceiptPort;
   readonly runs: NonNullable<RuntimeStorage<Event, State>['runs']>;
+  readonly completedResourceReservations?: NonNullable<
+    RuntimeStorage<Event, State>['completedResourceReservations']
+  >;
   readonly checkpoints: CheckpointPort<State>;
   readonly workspaceSessionCreation: SqliteWorkspaceSessionCreationPort<Event, State>;
 }
@@ -150,6 +154,15 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     formatEpoch: input.formatEpoch,
     isClosed,
   });
+  const hasCompletedResourceReservations =
+    input.database
+      .query<{ present: number }, []>(
+        "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='runtime_resource_reservation_receipts'",
+      )
+      .get() !== null;
+  const completedResourceReservations = hasCompletedResourceReservations
+    ? createSqliteCompletedResourceReservationStore(input.database)
+    : undefined;
   const checkpoints = createKiteHomeCheckpointStore({
     database: input.database,
     writer: input.writer,
@@ -409,6 +422,9 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
       put: (sessionId, value) => recoveryIdentities.putInTransaction(sessionId, value),
     },
     runStore: runs,
+    ...(completedResourceReservations
+      ? { completedReservations: completedResourceReservations }
+      : {}),
     runWriteTransaction: (write) => input.writer.run(write),
     ...(input.runCreateTransaction ? { runCreateTransaction: input.runCreateTransaction } : {}),
     ...(input.afterPersistInTransaction
@@ -457,6 +473,7 @@ export function createKiteHomeWorkspaceRuntimeJournal<Event, State>(input: {
     recoveryIdentities: recoveryIdentities.port,
     commandReceipts: receipts.port,
     runs,
+    ...(completedResourceReservations ? { completedResourceReservations } : {}),
     checkpoints,
     workspaceSessionCreation,
   });

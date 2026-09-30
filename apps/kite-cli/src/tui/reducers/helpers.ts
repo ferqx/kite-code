@@ -1,15 +1,6 @@
 import type { OutputBlock, OutputBlockVariant, TuiState, Turn } from '../types';
 import { deriveToolSummaryResult } from './tool-summary-result';
 
-/** Soft cap on turns to prevent unbounded memory growth in long sessions */
-const MAX_TURNS = 500;
-
-function trimTurns(state: TuiState): TuiState {
-  if (state.turns.length <= MAX_TURNS) return state;
-  const trimmed = state.turns.slice(state.turns.length - MAX_TURNS);
-  return { ...state, turns: trimmed };
-}
-
 /** Find the first block matching the predicate across all turns (backward scan). */
 export function findBlock(
   state: TuiState,
@@ -43,16 +34,16 @@ export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
         }
       : block;
   if (state.turns.length === 0) {
-    return trimTurns({
+    return {
       ...state,
       turns: [{ blocks: [normalized] }],
       nextBlockId: state.nextBlockId + 1,
-    });
+    };
   }
   const turns = state.turns.slice();
   const last = turns.at(-1)!;
   turns[turns.length - 1] = { blocks: [...last.blocks, normalized] };
-  return trimTurns({ ...state, turns, nextBlockId: state.nextBlockId + 1 });
+  return { ...state, turns, nextBlockId: state.nextBlockId + 1 };
 }
 
 /**
@@ -101,7 +92,7 @@ export function appendUserMessage(state: TuiState, block: OutputBlock): TuiState
     return appendBlock(state, block);
   }
 
-  return trimTurns({
+  return {
     ...state,
     turns: [
       ...state.turns,
@@ -112,7 +103,7 @@ export function appendUserMessage(state: TuiState, block: OutputBlock): TuiState
       },
     ],
     nextBlockId: state.nextBlockId + 1,
-  });
+  };
 }
 
 /** 按 id 查找 block（跨所有 turns） */

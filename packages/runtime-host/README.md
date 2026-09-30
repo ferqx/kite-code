@@ -53,12 +53,12 @@
 - NotificationProjector 对同 revision 的合法 metadata enrichment 向已有 subscriber 发布 event-free snapshot，短期 replay 保留该 revision 已确认的原 event。同一有界 retained revision 的 event 内容漂移在更新 registry 前拒绝，不能使 live 与 replay 看到不同事实；真正 projection 冲突仍拒绝。允许的字段变化由 Runtime Contract 唯一定义，完整消息仍由 History 恢复。
 
 - Provider work 前必须完成 durable attempt acknowledgement。
-- Model 派发前必须能预留完整的本地输入 token 估算 2 倍上界；剩余额度不足时直接返回 `budget_exhausted`，不截短 reservation 后发送可能无法 reconcile 的 Provider 响应。
+- 新主 Run 使用 `unboundedCumulativeUsage` 与零值累计占位字段；活动旧 Run 用 `resource_budget.cumulative_limits_removed` 事件升级，保留截止时间、并发上限及旧实际用量。升级会放宽当前 Run 尚未结算的直接 Model／Tool reservation，已完成历史 Run 不重写；旧子 grant 和保留的历史资金账本继续按原身份回放。新模式的 Model／Tool 预留分别使用 `unboundedModelTokens`／`unboundedArtifactBytes`，实际用量仍记录。旧有限预算执行在 Model 派发前仍须预留完整的本地输入 token 估算 2 倍上界，剩余额度不足时返回 `budget_exhausted`。
 - 子 Session 已激活但父 dispatch ACK 尚未落盘时，Host 只接受 cleanup confirmed 的 idle 执行权和精确 revision 5 作为失败结算预检；Store 在父 receipt transaction 内复核完整激活足迹。激活批次第五条必须是绑定子 invocation/Run 的 `task.started`，其 `userGoal` 为固定通用标签；预检不能替代 Store CAS。
 - Effect lease的global revision fence在dispatch前保持严格：stale Model preparation/attempt-start不得执行。精确Model invocation已经dispatch后，同一active Turn内无关的user control revision可以与其stream/retry/terminal evidence并发；Host只接受匹配live invocation的封闭Model/Tool/resource批次，Turn终止、invocation替换或identity漂移后仍拒绝迟到结果。
 - 任何不确定外部结果收敛为 unknown，不重放、不 fallback。
-- Tool/Shell 活动数量和单个写 Tool 均不占用 Resource Budget 的数量 permit；`maxToolInvocations`仍限制整轮累计调用，Subagent、deadline 与取消继续走原有账本。`activeWriters` 只用于独立 code Subagent 的额度。
-- 未结算的 Artifact 上界可暂时占额度，Host 使用持久 `artifact_capacity` waiter 待结算后重新准入；已知上界可放入预算的写 Tool 不受写者数量限制。旧的 Tool/Shell/writer waiter 可读取，重入时按现行准入类型取消或替换。自动审批未派发时的 Tool 调用次数与 Artifact 实际用量为零；已派发 Shell 缺少可靠文件变更事实时仍按预留上界保守结算。
+- Tool/Shell 活动数量和单个写 Tool 均不占用 Resource Budget 的数量 permit；新主 Run 不按 `maxToolInvocations` 累计数拒绝后续调用。Subagent 并发、deadline 与取消继续走原有账本，`activeWriters` 只用于独立 code Subagent 的额度。
+- `artifact_capacity` waiter 仅用于尚未升级的旧有限预算 Run；升级后重算准入并取消旧容量等待。旧有限预算的 Shell 缺少可靠文件变更事实时仍按预留上界保守结算。新模式的 Shell 上界为无累计 Artifact 标记，缺少文件变更事实时不虚报旧的 256 MiB 预留为实际产物；有可靠文件变更事实时仍记录可观测字节。未知外部结果继续按恢复边界处理。
 - 同一 Tool invocation 已有 `reserved` 账目且 Run 未到期时，恢复使用原 reservation 完成派发；已有 `dispatch_started`、`unknown` 或已结算账目时，新的准入计划要求结果核对，不能把重复 reservation 错误当作本地预算拒绝或重派工具。
 - Session lifecycle、mailbox、effect lease、cleanup、recovery 与 persistent scoped receipt decision 只有一个 Host owner；Server 仅通过 `RuntimeAccess` 调用它。
 - Host从同一`SessionLifecycleSupervisor`投影`hasActiveSessionOperations()`聚合只读事实，供Service在关闭mutation admission后判断普通stop是否

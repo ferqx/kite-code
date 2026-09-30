@@ -481,6 +481,80 @@ describe('pure cross-Session TriggerTurn budget admission', () => {
     expect(budget.reservations[planned.admission.backupReservationId]?.state).toBe('reserved');
     expect(budget.reservations.unrelated?.state).toBe('unknown');
   });
+  test('v2 waits for known capacity but reports when unknown executions occupy every slot', () => {
+    const base = source();
+    const upper = createZeroResourceUsage('versioned_upper_bound', 'occupied-slot-v1');
+    upper.gauges.activeSubagents = 1;
+    let budget = base.resourceBudget;
+    for (const id of ['unknown-1', 'unknown-2', 'live']) {
+      budget = reduceResourceBudgetState(budget, {
+        type: 'resource_budget.reserved',
+        reservation: {
+          version: 1,
+          reservationId: id,
+          runId: 'funding-run',
+          invocationId: id,
+          resourceKind: 'subagent',
+          executableUpperBound: upper,
+          state: 'reserved',
+        },
+      });
+      if (id !== 'live')
+        budget = reduceResourceBudgetState(budget, {
+          type: 'resource_budget.unknown',
+          reservationId: id,
+        });
+    }
+    const sourceState = { ...base, resourceBudget: budget };
+    const planned = planCrossSessionTriggerTurnBackup({
+      ...backupInput(),
+      sourceState,
+      policy: {
+        ...policy(sourceState),
+        executionMode: 'independent_turn_v2',
+        targetRole: 'explore',
+        targetGrantDigest: `sha256:${'e'.repeat(64)}`,
+      },
+    });
+    if (planned.status !== 'planned') throw new Error('V2 backup was not planned.');
+    budget = reduceResourceBudgetState(budget, planned.reservationEvent);
+    const slotInput = {
+      sourceSessionId: 'source',
+      fundingRunId: 'funding-run',
+      submissionId: 'submission',
+      backupReservationId: planned.admission.backupReservationId,
+    };
+    expect(
+      planCrossSessionFollowupSlotAcquisition({
+        ...slotInput,
+        sourceState: { ...base, resourceBudget: budget },
+      }),
+    ).toEqual({ status: 'waiting' });
+    budget = reduceResourceBudgetState(budget, {
+      type: 'resource_budget.unknown',
+      reservationId: 'live',
+    });
+    expect(() =>
+      planCrossSessionFollowupSlotAcquisition({
+        ...slotInput,
+        sourceState: { ...base, resourceBudget: budget },
+      }),
+    ).toThrow('capacity is occupied by unknown executions');
+    expect(budget.reservations[planned.admission.backupReservationId]?.state).toBe('queued');
+    if (budget.status !== 'active') throw new Error('Funding ledger became unavailable.');
+    expect(
+      planCrossSessionFollowupSlotAcquisition({
+        ...slotInput,
+        sourceState: {
+          ...base,
+          resourceBudget: {
+            ...budget,
+            budget: { ...budget.budget, maxConcurrentSubagents: 4 },
+          },
+        },
+      }),
+    ).toMatchObject({ status: 'ready' });
+  });
   test('plans one deterministic source-funded backup after receipt preflight', () => {
     const input = backupInput();
     const first = planCrossSessionTriggerTurnBackup(input);

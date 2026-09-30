@@ -19,6 +19,10 @@
 后台执行列表的`aggregateGeneration`属于组合目录；每项`ownerGeneration`和`revision`属于其原生执行owner。
 列表和单项同时携带读取时的`sessionRevision`，它才是`stop_background_execution.expectedRevision`的来源。
 组合目录generation、执行owner generation、执行revision都不能充当Session CAS。
+`list_background_executions` 的可选 `cursor` 是稳定执行 ID 排序中的零基偏移，`limit` 只约束单次读取页；
+`nextBackgroundCursor` 表示仍有历史项。跨页汇总必须核对 `aggregateGeneration`、`watermark` 和
+`sessionRevision` 均未变化，否则从第一页重读，不能拼出混合版本的目录。`get_background_execution`
+按执行 ID 返回单项，旧 Shell 句柄的输出仍由 `shell_read` 独立分页读取。
 
 活动 Run 可投影 `waitingReason={ kind: required_background, taskIds }`。它说明当前 Run 因哪些 required task 等待，
 不复制 task 的 running／terminal 生命周期，也不成为完成 authority；客户端仍从后台执行投影读取每个 task 的真实状态。

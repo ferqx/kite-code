@@ -53,16 +53,6 @@ export interface CompiledCapabilitySchema {
 
 const ajv = new Ajv({ allErrors: true, strict: true });
 const identityAjv = new Ajv({ allErrors: true, strict: true, useDefaults: true });
-const MAX_SCHEMA_BYTES = 256 * 1024;
-const MAX_SCHEMA_DEPTH = 32;
-const MAX_OBJECT_NODES = 4096;
-const MAX_PROPERTIES = 1024;
-
-interface SchemaBudget {
-  nodes: number;
-  props: number;
-  depthOk: boolean;
-}
 
 export function digestCapabilityValue(value: unknown): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -100,7 +90,6 @@ export function compileCapabilitySchema(
       diagnostic: 'P0 supports only object-root JSON Schema Draft-07 inputSchema.',
     };
   }
-  let serialized: string;
   try {
     const candidate = JSON.stringify(schema);
     if (candidate === undefined) {
@@ -109,36 +98,10 @@ export function compileCapabilitySchema(
         diagnostic: 'Unsupported MCP inputSchema: schema must be JSON-serializable.',
       };
     }
-    serialized = candidate;
   } catch {
     return {
       ok: false,
       diagnostic: 'Unsupported MCP inputSchema: schema must be JSON-serializable.',
-    };
-  }
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_SCHEMA_BYTES) {
-    return {
-      ok: false,
-      diagnostic: `MCP inputSchema exceeds the ${MAX_SCHEMA_BYTES / 1024} KiB serialized size limit.`,
-    };
-  }
-  const budget = measureSchemaBudget(schema);
-  if (!budget.depthOk) {
-    return {
-      ok: false,
-      diagnostic: `MCP inputSchema exceeds the maximum nesting depth of ${MAX_SCHEMA_DEPTH}.`,
-    };
-  }
-  if (budget.nodes > MAX_OBJECT_NODES) {
-    return {
-      ok: false,
-      diagnostic: `MCP inputSchema has ${budget.nodes} object nodes, exceeding the limit of ${MAX_OBJECT_NODES}.`,
-    };
-  }
-  if (budget.props > MAX_PROPERTIES) {
-    return {
-      ok: false,
-      diagnostic: `MCP inputSchema has ${budget.props} properties, exceeding the limit of ${MAX_PROPERTIES}.`,
     };
   }
   try {
@@ -203,28 +166,4 @@ function stableStringify(value: unknown): string {
       .join(',')}}`;
   }
   return JSON.stringify(value);
-}
-
-function measureSchemaBudget(value: unknown, depth = 0): SchemaBudget {
-  if (depth > MAX_SCHEMA_DEPTH) return { nodes: 0, props: 0, depthOk: false };
-  if (!value || typeof value !== 'object') return { nodes: 0, props: 0, depthOk: true };
-  if (Array.isArray(value)) {
-    return value.reduce<SchemaBudget>(
-      (acc, item) => mergeBudget(acc, measureSchemaBudget(item, depth + 1)),
-      { nodes: 0, props: 0, depthOk: true },
-    );
-  }
-  const record = value as Record<string, unknown>;
-  return Object.values(record).reduce<SchemaBudget>(
-    (acc, item) => mergeBudget(acc, measureSchemaBudget(item, depth + 1)),
-    { nodes: 1, props: Object.keys(record).length, depthOk: true },
-  );
-}
-
-function mergeBudget(left: SchemaBudget, right: SchemaBudget): SchemaBudget {
-  return {
-    nodes: left.nodes + right.nodes,
-    props: left.props + right.props,
-    depthOk: left.depthOk && right.depthOk,
-  };
 }

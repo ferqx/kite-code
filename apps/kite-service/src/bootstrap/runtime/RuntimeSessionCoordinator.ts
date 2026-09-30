@@ -77,11 +77,7 @@ import type {
   RuntimeState,
   StateRuntimeStorage,
 } from './state-runtime';
-import {
-  type CommittedSteerTurnCommand,
-  commitSteerTurnCommand,
-  steerQueueHasCapacity,
-} from './steer-command-decision';
+import { type CommittedSteerTurnCommand, commitSteerTurnCommand } from './steer-command-decision';
 import { prepareBackgroundAgentTerminalReply } from './subagent/task-tool';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import {
@@ -939,22 +935,16 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   ): CommittedSteerTurnCommand {
     this.#assertOpen();
     const before = this.session.getState();
-    const committed = commitSteerTurnCommand(
-      this.session,
-      command,
-      evidence,
-      this.#store.sessions.loadEventsStrict(this.sessionId),
-    );
+    const committed = commitSteerTurnCommand(this.session, command, evidence);
     this.#recordLastAppliedEventRevisions(before);
     return committed;
   }
 
   canAcceptSteerInput(): boolean {
     this.#assertOpen();
-    return steerQueueHasCapacity(
-      this.getState(),
-      this.#store.sessions.loadEventsStrict(this.sessionId),
-    );
+    // The bridge checks the current Run and Turn; the commit rechecks the
+    // Turn and the Store's revision CAS is the persisted authority.
+    return true;
   }
 
   activateStartTurnRun(runId: string): void {
@@ -1280,6 +1270,10 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     } = {
       runtimeStore: this.#store,
       getState: () => this.session.getState(),
+      readCompletedReservation: (reservationId) =>
+        this.session.readCompletedReservation(reservationId),
+      findCompletedReservationForInvocation: (runId, invocationId) =>
+        this.session.findCompletedReservationForInvocation(runId, invocationId),
       currentRunId: () => this.session.getLifecycleProjection().currentRun?.runId ?? null,
       waitForRevisionChange: (revision, signal) =>
         this.session.waitForRevisionChange!(revision, signal),

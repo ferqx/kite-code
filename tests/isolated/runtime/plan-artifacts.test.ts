@@ -317,12 +317,15 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(() => store.read(ref)).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
   });
 
-  test('enforces PlanDocument V2 title, body, step, count, and identity schema limits', () => {
+  test('validates plan structure and identity without fixed body or step-count budgets', () => {
     expect(
       BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ ...validWrite, title: 'bad\ntitle' }).success,
     ).toBe(false);
     expect(
       BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ ...validWrite, body_markdown: 'too short' }).success,
+    ).toBe(true);
+    expect(
+      BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({ ...validWrite, body_markdown: '   ' }).success,
     ).toBe(false);
     expect(
       BUILTIN_WRITE_PLAN_SCHEMA_.safeParse({
@@ -347,7 +350,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
           title: `Step ${index}`,
         })),
       }).success,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   test('rejects structurally invalid step metadata before write or read', () => {

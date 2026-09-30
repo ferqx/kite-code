@@ -131,3 +131,37 @@ test('a changed authority generation is lost immediately even with lease time re
     f.owner.close();
   }
 });
+
+test('execution-loss cleanup failure is reported by the drain and never confirms cleanup', async () => {
+  const f = fixture();
+  const failure = new Error('Controlled cleanup failure.');
+  try {
+    f.owner.setExecutionLossHandler(async () => {
+      throw failure;
+    });
+    f.controllerGeneration = 2;
+    await until(() => !f.owner.ownsSessionExecution(sessionId));
+    const error = await f.owner.drainExecutionLossCleanup().catch((cause) => cause);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.errors).toEqual([failure]);
+    expect(f.authority.cleanupConfirmed).toBe(false);
+  } finally {
+    f.owner.close();
+  }
+});
+
+test('execution loss after Host disposal starts does not call the closed Host', async () => {
+  const f = fixture();
+  try {
+    f.owner.beginHostDisposal();
+    f.controllerGeneration = 2;
+    await until(() => !f.owner.ownsSessionExecution(sessionId));
+    expect(f.losses).toBe(0);
+    await expect(f.owner.drainExecutionLossCleanup()).rejects.toThrow(
+      'Session execution loss cleanup failed.',
+    );
+    expect(f.authority.cleanupConfirmed).toBe(false);
+  } finally {
+    f.owner.close();
+  }
+});

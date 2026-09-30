@@ -85,10 +85,6 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const EFFECTS = new Set(['none', 'read', 'write', 'destructive', 'unknown']);
 const EFFECT_ORDER = ['none', 'read', 'write', 'destructive', 'unknown'] as const;
 const APPROVAL_ORDER = ['none', 'auto_review', 'user'] as const;
-const SKILL_SCAN_MAX_DEPTH = 8;
-const SKILL_SCAN_MAX_FILES = 256;
-const SKILL_SCAN_MAX_FILE_BYTES = 1024 * 1024;
-const SKILL_SCAN_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
 const SKILL_SCAN_IGNORED_DIRECTORIES = new Set([
   '.cache',
   '.git',
@@ -195,20 +191,9 @@ function readSkillFiles(
 ): Array<{ path: string; content: Buffer }> {
   const files: Array<{ path: string; content: Buffer }> = [];
   const root = resolve(skillDir);
-  let totalBytes = 0;
-  let budgetExceeded = false;
-  const exceed = (message: string, path: string): void => {
-    if (!budgetExceeded) diagnostic(diagnostics, 'invalid_path', message, path);
-    budgetExceeded = true;
-  };
-  const walk = (directory: string, depth: number): void => {
-    if (depth > SKILL_SCAN_MAX_DEPTH) {
-      exceed(`Skill directory depth exceeds ${SKILL_SCAN_MAX_DEPTH}.`, relative(root, directory));
-      return;
-    }
-    let entries: string[];
+  const entriesFor = (directory: string): string[] => {
     try {
-      entries = readdirSync(directory).sort((left, right) => left.localeCompare(right));
+      return readdirSync(directory).sort((left, right) => left.localeCompare(right));
     } catch (error) {
       diagnostic(
         diagnostics,
@@ -216,55 +201,69 @@ function readSkillFiles(
         `Unable to read ${directory}: ${String(error)}`,
         directory,
       );
-      return;
-    }
-    for (const entry of entries) {
-      if (budgetExceeded) return;
-      if (SKILL_SCAN_IGNORED_DIRECTORIES.has(entry)) continue;
-      const absolute = join(directory, entry);
-      const rel = relative(root, absolute);
-      try {
-        const stat = lstatSync(absolute);
-        if (stat.isSymbolicLink()) {
-          diagnostic(
-            diagnostics,
-            'invalid_path',
-            `Skill files may not be symbolic links: ${rel}`,
-            rel,
-          );
-        } else if (stat.isDirectory()) {
-          walk(absolute, depth + 1);
-        } else if (stat.isFile()) {
-          if (files.length >= SKILL_SCAN_MAX_FILES) {
-            exceed(`Skill contains more than ${SKILL_SCAN_MAX_FILES} files.`, rel);
-            return;
-          }
-          if (stat.size > SKILL_SCAN_MAX_FILE_BYTES) {
-            exceed(`Skill file exceeds ${SKILL_SCAN_MAX_FILE_BYTES} bytes.`, rel);
-            return;
-          }
-          if (totalBytes + stat.size > SKILL_SCAN_MAX_TOTAL_BYTES) {
-            exceed(`Skill content exceeds ${SKILL_SCAN_MAX_TOTAL_BYTES} total bytes.`, rel);
-            return;
-          }
-          const content = readFileSync(absolute);
-          totalBytes += content.length;
-          files.push({ path: rel, content });
-        }
-      } catch (error) {
-        diagnostic(diagnostics, 'missing_path', `Unable to read ${rel}: ${String(error)}`, rel);
-      }
+      return [];
     }
   };
   if (!existsSync(root) || !statSync(root).isDirectory()) {
     diagnostic(diagnostics, 'missing_path', `Skill directory does not exist: ${root}`, root);
     return files;
   }
-  walk(root, 0);
-  return budgetExceeded ? [] : files;
+  const stack = [{ directory: root, entries: entriesFor(root), index: 0 }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (frame.index >= frame.entries.length) {
+      stack.pop();
+      continue;
+    }
+    const entry = frame.entries[frame.index++]!;
+    if (SKILL_SCAN_IGNORED_DIRECTORIES.has(entry)) continue;
+    const absolute = join(frame.directory, entry);
+    const rel = relative(root, absolute);
+    try {
+      const stat = lstatSync(absolute);
+      if (stat.isSymbolicLink()) {
+        diagnostic(
+          diagnostics,
+          'invalid_path',
+          `Skill files may not be symbolic links: ${rel}`,
+          rel,
+        );
+      } else if (stat.isDirectory()) {
+        stack.push({ directory: absolute, entries: entriesFor(absolute), index: 0 });
+      } else if (stat.isFile()) {
+        files.push({ path: rel, content: readFileSync(absolute) });
+      }
+    } catch (error) {
+      diagnostic(diagnostics, 'missing_path', `Unable to read ${rel}: ${String(error)}`, rel);
+    }
+  }
+  return files;
 }
 
-function fileSetDigest(files: Array<{ path: string; content: Buffer }>): string {
+const skillFileDigestCache = new Map<
+  string,
+  {
+    files: Array<{ path: string; content: Buffer }>;
+    digest: string;
+  }
+>();
+
+function fileSetDigest(files: Array<{ path: string; content: Buffer }>, skillDir: string): string {
+  const key = resolve(skillDir);
+  const cached = skillFileDigestCache.get(key);
+  if (
+    cached &&
+    cached.files.length === files.length &&
+    files.every(
+      (file, index) =>
+        file.path === cached.files[index]?.path &&
+        file.content.equals(cached.files[index]!.content),
+    )
+  ) {
+    skillFileDigestCache.delete(key);
+    skillFileDigestCache.set(key, cached);
+    return cached.digest;
+  }
   const hash = createHash('sha256');
   for (const file of files) {
     hash.update(file.path);
@@ -274,7 +273,12 @@ function fileSetDigest(files: Array<{ path: string; content: Buffer }>): string 
     hash.update(file.content);
     hash.update('\0');
   }
-  return hash.digest('hex');
+  const digest = hash.digest('hex');
+  skillFileDigestCache.set(key, { files, digest });
+  // Cache eviction changes cost only; all files are read and compared on every refresh.
+  if (skillFileDigestCache.size > 16)
+    skillFileDigestCache.delete(skillFileDigestCache.keys().next().value!);
+  return digest;
 }
 
 function conservativeEffects(
@@ -424,7 +428,7 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
         source: input.source,
         origin: input.origin,
         diagnostics,
-        revision: fileSetDigest(files),
+        revision: fileSetDigest(files, input.skillDir),
       }),
     };
   }
@@ -710,7 +714,7 @@ export function compileSkillWorkflow(input: CompileSkillWorkflowInput): Compiled
     }
   }
   const revision = digestCapability({
-    files: fileSetDigest(files),
+    files: fileSetDigest(files, input.skillDir),
     contract: contract
       ? { ...contract, dependencyRevisions: contract.dependencyRevisions }
       : undefined,

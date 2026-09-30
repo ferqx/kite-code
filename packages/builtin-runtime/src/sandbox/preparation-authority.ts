@@ -1,6 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SandboxPreparation } from '@kite-ai/runtime-spi';
+import { isReadOnlyShellCommand } from '../catalog-contract';
 import { sandboxCommandDigest } from './execution/grant-authority';
 import type { SandboxInvocationIdentity, ShellInput } from './shell-contract';
 import {
@@ -78,10 +79,16 @@ export function createBuiltinSandboxPreparation(
     );
   }
 
-  const candidates =
-    input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION
-      ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
-      : buildHostShellInvocations(input.command);
+  const provenReadOnlyCommand = isReadOnlyShellCommand(input.command);
+  if (input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION && !provenReadOnlyCommand) {
+    throw new BuiltinSandboxPreparationError(
+      'shell_unavailable',
+      'Read-only execution trust requires a command proven by the Builtin classifier.',
+    );
+  }
+  const candidates = provenReadOnlyCommand
+    ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
+    : buildHostShellInvocations(input.command);
   const argv = candidates[0]?.argv;
   if (!argv) {
     throw new BuiltinSandboxPreparationError(

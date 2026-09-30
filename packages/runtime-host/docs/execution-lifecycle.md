@@ -14,6 +14,14 @@ Tool coordinator 在 preparation、dispatch、receipt 和结果提交之间维�
 
 预派发子 Session 的失败结算通常在父事务中提交预算释放、失败与结果三个事件。父 Run 已由用户取消且准确子预留先前已释放时，Host 仅对 revision 0 的未激活子 Session 接受显式 `alreadyReleasedAfterParentCancel` 变体，凭原 Run 的持久取消证明提交取消与结果两个事件；Store 再核对原 Run 的取消状态、用户取消事件、原释放及子线程未派发证明。当前 turn 可以属于后来的 Run，不能替代或否定原 Run 的证据。其他路径不能省去预算释放或重放外部操作。
 
+无累计额度的活动 Run 在 State 只保存未结算 reservation。结算事件、完整终态 receipt 与新 State 在同一 Store CAS 事务提交；已归档 ID 的重放必须由 Store 证明同一终态及实际用量。子级后续引用已结算的父 reservation 时，Host 先读取同 Session、同 Run receipt，Store 再在写入事务中复核。旧 State 的已结算记录由移除累计额度事件同批迁移，有限旧 Run 保留原回放语义。
+
+followup 的恢复判断组合目标准确 Run 的活动及归档模型预约。Store port 可按 Run、resource kind 和快照 revision 一次读取；释放记录证明已有准备意图，不能被当作未准备或已完成。多模型独立续轮沿普通工具循环完成，首模型的完成快捷路径不构成模型数量上限。
+
+前一 Turn 已结束后，后继用户输入配置新的 Run 和完整期限；旧 Run 中仍未结算或未知的 reservation 保留在 retained ledger，继续按原执行身份恢复和结算。同一活动 Turn 的恢复继续使用原 Run；已预提交的子 Run 激活继续使用其原预算身份。已归档的模型或审批尝试通过准确 invocation 的持久回执查重，不因 State 缩小而重用 reservation ID。
+
+Tool 在派发前等待审批时，准备预约可先按零外部调用结算。审批通过后的续执行使用包含准确 approval receipt ID 的独立 invocation 身份；Host 核对前一准备预约的同一 Run、原 invocation 和 resource kind，普通 Tool、MCP、Skill 与 Task 均使用这一规则。Store 继续拒绝复用已结算的 invocation，不能将审批续执行扩展为重跑许可。验证见 [资源准入](../../../apps/kite-service/test/runtime/resource-budget-admission.test.ts)及 [独立子 Session 审批](../../../apps/kite-service/test/isolated/runtime-server-independent-child-session.test.ts)。
+
 ## 并发与失效
 
 dispatch 前严格检查 fence；已 dispatch 的同一模型 invocation 可按当前规则接受与无关用户控制 revision 并发的流和终态，但 Turn 终止、invocation 替换或 identity 漂移后拒绝迟到结果。后台 child 结算可能在 `task_read`、`task_wait` 或 `task_cancel` 已派发后先推进 revision；Host 只在原 Turn 仍活动、精确 Tool／Capability identity 仍 live 且返回批次仅关闭该调用时接纳其旧 lease 终态。该例外不适用于 attempt start、其他工具或已结束调用，也不把接纳已执行结果扩展为重试许可。
@@ -26,6 +34,10 @@ Host 关闭时并发请求各 Session 的持久取消，单个 Session 的取消
 ## 进程与恢复
 
 POSIX 使用 process group/watchdog 边界处理正常取消与 Host 意外退出；Windows 使用相应 Job/process-tree guard。Host 关闭先关闭 bridge，再按 module 生命周期释放，不创建额外业务 daemon。
+
+MCP stdio 的公开 JSON-RPC 数据行不设旧的 1 MiB 单行或 16 MiB 累计传输额度；分段解析保留跨 chunk 行并先拆分合并到一个 chunk 的完整帧，consumer 和 child stdin 写入沿原流背压等待。私有 ready／terminal control frame 的格式、身份、序号与单帧解析边界继续校验；错误身份、截断控制帧或清理未知仍失败关闭。单个 JSON 值的解析仍需要相应实际内存，背压约束在途工作，不承诺任意 JSON 对象具有固定占用。验证见 [MCP process 回归](../test/mcp-stdio-process.test.ts)。
+
+[Process output consumer](../src/process/output.ts)将每段完整解码文本交给调用者的进度端口，返回值仅是有界终态预览；正常 Shell 调用的 Service owner 负责完整磁盘 spool 和分页读取。缓冲大小不能成为累计输出上限，也不能静默吞掉进度回调的写入错误。已取消的读取在入口立即取消 stream，不等下一段数据；运行中取消后停止读取及进程树清理仍由原执行 owner 管理。大输出回归见 [process execution](../test/process-execution-port.test.ts)与 [Managed Shell](../../../apps/kite-service/test/runtime/managed-shell.test.ts)。
 
 未知外部结果保持 unknown，不通过重复运行“试试看”恢复。持久恢复事实由 Storage 检查，业务恢复选择由 Kernel 决定，Host 组织执行。流程见[取消恢复链路](../../../docs/development/flows/cancellation-recovery.md)。
 
@@ -54,7 +66,9 @@ CompletionGuard 的 `wait_for_background` 保持原 Run、Turn、deadline、预�
 
 [后台 Agent 与 Shell 会话协调方案](../../../docs/plans/background-agent-shell-conversation-coordination.md)的等待修复保留主 Agent `steer_turn` 和原 task 结果权威；Kernel 为有限 Shell 等待保存准确 Shell ID 与模型已回复标记，Host 只将 `required_background` 的初始 task ID 集合投影为 Run 等待原因，各执行卡反映实时状态。阶段 D 的独立 Agent 身份、持久邮箱、QueueOnly／TriggerTurn 路由、模型输入水位及来源后备 reservation 已接入生产事务。旧 v1 `new_turn` 在准确 checkpoint 和新 grant 下将未派发后备原子替换为新 child turn 与首模型 Surface reservation；旧 v1 `current_turn` 仅用已准入旧 Run 的本地模型预算，在准确 call_model lease 内提交目标路由和邮件水位，再由来源事务释放后备，派发前复核来源 ACK。两条旧路由均不改写原 task 结果，跨 Run 邮件仍是低权限输入；不完整或已尝试的外部效果保持 unknown，不能重派。
 
-独立子 Session 的新首轮委派在父 Run 有效时核验父 Run 自身预算及子 Agent 并发额度；新委派的 `code` 子 Agent 不再占用独立写者槽位，旧委派仍按持久写者额度核验；其子 Run 在预算激活时独立开始完整的 30 分钟期限，父 Run 先前耗时和排队时长不扣减它。新委派的持久事实带 `independentChildTurnDeadline`、`unboundedToolInvocations` 与 `durationOnlyChildRun` 标记，允许该子 Run 依角色、策略、审批和并发约束调用工具，而无累计工具次数上限。Host 的 [resource budget adapter](../src/kernel-adapter/resource-budget.ts) 以该标记验证子 Run 的激活期限，并使模型请求、turn、token、工具调用和 Artifact 字节不受子 Run 累计计数限制；该子 Run 的普通 Tool/Shell 活动数量不再有独立本地并发上界，旧委派无标记时仍验证原父资金期限与有限工具上界。Host 对新子 Run 的 Tool／MCP／Skill 预留持久写入 `unboundedArtifactBytes: true` 和 `artifactBytes: 0`；该标记只在 `durationOnlyChildRun` 的子预算下准入，只解除单次工具的累计 Artifact 上界预留，实际产物字节仍在结算时记录。新子 Run 的模型请求也不因本地输入估算的 2 倍预留上界被拒绝；Host 保留实际输入／输出用量，Provider 的上下文和输出能力仍独立生效。父 Run 和历史有限预算执行不能借此标记绕过额度，也不能由未知外部效果推断零产物。仅当原父 Run 等待的 required child 均有新标记，Kernel 才记录 `required_child_wait_started`／`ended`，暂停并补回父 Run 实际等待时长；等待中禁止新的父资源派发，原 required 结果仍须准确接纳。
+独立子 Session 的新首轮委派在父 Run 有效时核验父 Run 的执行期限及子 Agent 并发额度；新委派的 `code` 子 Agent 不再占用独立写者槽位，旧委派仍按持久写者额度核验；其子 Run 在预算激活时独立开始完整的 30 分钟期限，父 Run 先前耗时和排队时长不扣减它。新委派的持久事实带 `independentChildTurnDeadline`、`unboundedToolInvocations` 与 `durationOnlyChildRun` 标记，允许该子 Run 依角色、策略、审批和并发约束调用工具，而无累计工具次数上限。Host 的 [resource budget adapter](../src/kernel-adapter/resource-budget.ts) 以该标记验证子 Run 的激活期限，并使模型请求、turn、token、工具调用和 Artifact 字节不受子 Run 累计计数限制；该子 Run 的普通 Tool/Shell 活动数量不再有独立本地并发上界，旧委派无标记时仍验证原父资金期限与有限工具上界。Host 对新子 Run 的 Tool／MCP／Skill 预留持久写入 `unboundedArtifactBytes: true` 和 `artifactBytes: 0`；该标记在 `durationOnlyChildRun` 或 `unboundedCumulativeUsage` 的 Run 中准入，实际可观测产物字节仍在结算时记录。新子 Run 的模型请求也不因本地输入估算的 2 倍预留上界被拒绝；Host 保留实际输入／输出用量，Provider 的上下文和输出能力仍独立生效。历史未升级的有限预算执行仍按旧上界处理，不能由未知外部效果推断零产物。仅当原父 Run 等待的 required child 均有新标记，Kernel 才记录 `required_child_wait_started`／`ended`，暂停并补回父 Run 实际等待时长；等待中禁止新的父资源派发，原 required 结果仍须准确接纳。
+
+新主 Run 在 `resource_budget.configured` 中写入 `unboundedCumulativeUsage` 和零值累计占位字段。旧活动主 Run 恢复时先持久提交一次 `resource_budget.cumulative_limits_removed`，随后重新规划尚未派发的模型和工具；事件还将当前 Run 尚未结算的直接 Model／Tool 预留改成无累计 token／Artifact 上界，以便原外部调用按同一身份结算。旧 `artifact_capacity` waiter 在重新准入时取消；并发等待、原截止时间、取消和未知效果的恢复路径不变。已结束的历史 Run 和历史子 grant 不补写事件或改变来源身份。
 
 `followup_task` 的新 `independent_turn_v2` 在来源 Run 受理时核验自身预算与子 Agent 并发额度，目标 child 新 Run 从启动时独立计时 30 分钟。`followup_task` 工具本身不写工作区 Artifact，其工具 reservation 仍按来源 Run 自身预算结算。Host 依来源受理事实中的 `independentFollowupTurn`／`durationOnlyChildRun` 标记和目标原角色 grant 验证期限、可见 Tool Surface 与执行权限；目标子 Run 没有模型请求、turn、token、工具调用或 Artifact 字节累计上限，不继承来源 Run 后续完成或原截止时间作为已受理排队意图及目标 Run 的截止时间；排队取得并发位后才激活目标 Run 并开始自身期限，来源用户取消仍按准确受理事实处理。目标派发后，来源受理事实与目标结果按同一 submission 身份结算；确定未派发则释放来源占用，外部尝试不明则保持 unknown。缺少 v2 标记的旧 followup 仍走原期限、一次模型请求与零 Tool 的 v1 恢复路径。新 v2 若没有 terminal checkpoint，Host／Store 只在准确旧 State 快照 revision、digest、终态及 transcript 可核时准入新 grant／Run；旧 Run 的 unknown 外部效果以签名 `priorOutcomeUnknown` 明示给新 Run 的首模型，原 attempt 不自动重放。初始子 Run 已持久激活并收到父派发 ACK 后，短期启动 grant 过期不截断无模型／工具尝试的首轮恢复；Service 必须先以 Store 执行权隔离旧 owner，核对激活时授权有效、父预留已派发、子 Run 未到期和原工具上界。未激活的 child 仍要求有效启动 grant，结果不明的外部尝试不能重派。
 

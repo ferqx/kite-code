@@ -735,4 +735,38 @@ describe('after-turn continuation', () => {
       }),
     ).toThrow(DescendantResourceAdmissionError);
   });
+
+  test('allows report reservation with less than one minute left before the Run deadline', () => {
+    const now = Date.now();
+    const state = configuredState({
+      sessionId: 'near-deadline-after-turn',
+      activeTurnId: 'active-turn',
+      deadlineAt: new Date(now + 30_000).toISOString(),
+    });
+    const { model } = afterTurnModel();
+    const planned = planAfterTurnContinuationReservation({
+      state,
+      config: CONFIG,
+      model,
+      childInvocationId: 'near-deadline-child',
+      originRunId: 'origin-run',
+      now,
+    });
+    expect(
+      planned.preparationEvents.some((event) => event.type === 'resource_budget.reserved'),
+    ).toBe(true);
+    expect(planned.deadlineAt).toBe(
+      state.resourceBudget.status === 'active' ? state.resourceBudget.deadlineAt : '',
+    );
+    expect(() =>
+      planAfterTurnContinuationReservation({
+        state,
+        config: CONFIG,
+        model,
+        childInvocationId: 'expired-child',
+        originRunId: 'origin-run',
+        now: now + 30_000,
+      }),
+    ).toThrow('The original Run deadline has elapsed.');
+  });
 });

@@ -134,7 +134,6 @@ export function evaluateAutoReviewCircuitBreaker(
 }
 
 const MAX_IDENTITY_LENGTH = 256;
-const MAX_REASON_LENGTH = 4096;
 const INVALID_FACTS_REASON = 'Auto-review facts are malformed; user approval is required.';
 const REVIEWER_FAILURE_REASON = 'Auto-review could not produce a valid reviewer decision.';
 const REVIEWER_REJECTION_REASON = 'Auto-review did not approve this operation.';
@@ -184,7 +183,7 @@ function validFacts(value: unknown): value is AutoReviewFacts {
     (value.requiresUserApproval === undefined || value.requiresUserApproval === true) &&
     !(value.approved && value.requiresUserApproval === true) &&
     (value.grant === undefined || value.grant === 'approve_once') &&
-    (value.reason === undefined || boundedString(value.reason, MAX_REASON_LENGTH)) &&
+    (value.reason === undefined || (typeof value.reason === 'string' && value.reason.length > 0)) &&
     (value.failureType === undefined ||
       value.failureType === 'technical' ||
       value.failureType === 'invalid_response')

@@ -6,11 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite-ai/agent-kernel';
-import {
-  MAX_MODEL_READ_FILE_CHARS_,
-  type PendingToolRequest,
-  toolRequestFromCall,
-} from '@kite-ai/builtin-runtime';
+import { type PendingToolRequest, toolRequestFromCall } from '@kite-ai/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import type { RuntimeHostToolExecutionResult } from '@kite-ai/runtime-host/kernel-adapter';
 import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite-ai/runtime-host/storage';
@@ -24,6 +20,7 @@ import {
   testWorkspaceFilesystemRuntime,
 } from '../../../tests/helpers/runtime-model';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../../../tests/helpers/shell-executor';
+import { managedShellOwnerKey, managedShellRuntime } from '../src/bootstrap/runtime/managed-shell';
 
 // ── Helpers ──
 
@@ -420,7 +417,7 @@ describe('invokeGovernedTool — list_mcp_resources', () => {
     expect(JSON.stringify(output)).not.toContain('description');
   });
 
-  it('filters by provider, caps output at 100, and reports truncation', async () => {
+  it('filters by provider and returns every matching resource', async () => {
     const resources = Array.from({ length: 101 }, (_, index) => ({
       providerId: 'docs',
       uri: `docs://${String(index).padStart(3, '0')}`,
@@ -437,8 +434,8 @@ describe('invokeGovernedTool — list_mcp_resources', () => {
 
     const result = await invokeGovernedTool({ workspace: '/ws', request, mcpManager: manager });
     const output = JSON.parse(result.stdout);
-    expect(output.resource_count).toBe(100);
-    expect(output.truncated).toBe(true);
+    expect(output.resource_count).toBe(101);
+    expect(output.truncated).toBe(false);
   });
 
   it('distinguishes unknown providers from providers with no static resources', async () => {
@@ -542,7 +539,7 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
     expect(result.resultMeta).not.toHaveProperty('truncated');
   });
 
-  it('bounds oversized resource content without silently truncating it', async () => {
+  it('returns complete governed MCP resource content beyond the former output limit', async () => {
     const manager = mockMcpManager(async () => 'x'.repeat(128 * 1024 + 20));
     const result = await invokeGovernedTool({
       workspace: '/ws',
@@ -550,13 +547,9 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
       mcpManager: manager,
       approvedGrant: 'approve_once',
     });
-    const output = JSON.parse(result.stdout);
-
-    expect(output.status).toBe('partial');
-    expect(output.truncated).toBe(true);
-    expect(output.original_characters).toBe(128 * 1024 + 20);
+    expect(result.stdout).toBe('x'.repeat(128 * 1024 + 20));
     expect(result.resultMeta).toMatchObject({
-      truncated: true,
+      truncated: false,
       rawResultDigest: expect.any(String),
     });
   });
@@ -714,6 +707,145 @@ describe('invokeGovernedTool — search_files', () => {
 });
 
 describe('invokeGovernedTool — shell_execute timeout', () => {
+  it('replays complete Shell output through shell_read Tool pages', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-shell-tool-pages-'));
+    const threadId = `shell-tool-pages-${Date.now()}`;
+    const output = '0123456789abcdef\n'.repeat(20_000);
+    try {
+      const execution = await invokeGovernedTool({
+        workspace,
+        threadId,
+        request: {
+          source: 'builtin',
+          id: 'call-shell-paged-output',
+          name: 'shell_execute',
+          args: { command: 'printf output' },
+          reason: 'Inspect command output',
+          protectedCommand: 'printf output',
+        } as PendingToolRequest,
+        interactionMode: 'accept_edits',
+        approvedGrant: 'approve_once',
+        shellExecutor: async (input) => {
+          input.onProgress?.(output, 'stdout');
+          return {
+            ok: true,
+            command: 'provider-command'.repeat(8_000),
+            exitCode: 0,
+            stdout: 'terminal preview',
+            stderr: '',
+          };
+        },
+      });
+      expect(execution.ok, execution.stderr).toBe(true);
+      const shellId = execution.resultMeta?.shellId;
+      expect(typeof shellId).toBe('string');
+      let reconstructed = '';
+      let cursor = 0;
+      let pages = 0;
+      for (;;) {
+        const read = await invokeGovernedTool({
+          workspace,
+          threadId,
+          request: {
+            source: 'builtin',
+            id: `call-shell-page-${pages}`,
+            name: 'shell_read',
+            args: { shell_id: shellId, cursor },
+            reason: 'Continue reading command output',
+            protectedCommand: 'shell_read',
+          } as PendingToolRequest,
+        });
+        expect(read.ok, read.stderr).toBe(true);
+        expect(read.stdout.length).toBeLessThanOrEqual(65_536);
+        expect(read.stdout).not.toContain('provider-command');
+        const page = JSON.parse(read.stdout) as {
+          stdout: string;
+          cursor: number;
+          moreOutput: boolean;
+        };
+        reconstructed += page.stdout;
+        expect(page.cursor).toBeGreaterThan(cursor);
+        cursor = page.cursor;
+        pages += 1;
+        if (!page.moreOutput) break;
+      }
+      expect(pages).toBeGreaterThan(8);
+      expect(reconstructed).toBe(output);
+    } finally {
+      await managedShellRuntime.disposeOwner(managedShellOwnerKey(threadId, workspace));
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('replays control-character Shell output through Tool pages', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-shell-control-pages-'));
+    const threadId = `shell-control-pages-${Date.now()}`;
+    const output = '\0'.repeat(80_000);
+    try {
+      const execution = await invokeGovernedTool({
+        workspace,
+        threadId,
+        request: {
+          source: 'builtin',
+          id: 'call-shell-control-output',
+          name: 'shell_execute',
+          args: { command: 'printf control-output' },
+          reason: 'Inspect command output',
+          protectedCommand: 'printf control-output',
+        } as PendingToolRequest,
+        interactionMode: 'accept_edits',
+        approvedGrant: 'approve_once',
+        shellExecutor: async (input) => {
+          input.onProgress?.(output, 'stdout');
+          return {
+            ok: true,
+            command: input.command,
+            exitCode: 0,
+            stdout: 'terminal preview',
+            stderr: '',
+          };
+        },
+      });
+      expect(execution.ok, execution.stderr).toBe(true);
+      const shellId = execution.resultMeta?.shellId;
+      expect(typeof shellId).toBe('string');
+      let reconstructed = '';
+      let cursor = 0;
+      let pages = 0;
+      for (;;) {
+        const read = await invokeGovernedTool({
+          workspace,
+          threadId,
+          request: {
+            source: 'builtin',
+            id: `call-shell-control-page-${pages}`,
+            name: 'shell_read',
+            args: { shell_id: shellId, cursor },
+            reason: 'Continue reading command output',
+            protectedCommand: 'shell_read',
+          } as PendingToolRequest,
+        });
+        expect(read.ok, read.stderr).toBe(true);
+        expect(read.stdout.length).toBeLessThanOrEqual(65_536);
+        const page = JSON.parse(read.stdout) as {
+          stdout: string;
+          cursor: number;
+          moreOutput: boolean;
+        };
+        reconstructed += page.stdout;
+        expect(page.cursor).toBeGreaterThan(cursor);
+        cursor = page.cursor;
+        pages += 1;
+        if (!page.moreOutput) break;
+      }
+      expect(pages).toBeGreaterThan(1);
+      expect(reconstructed).toBe(output);
+    } finally {
+      await managedShellRuntime.disposeOwner(managedShellOwnerKey(threadId, workspace));
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('runs workspace-local shell commands directly in the baseline sandbox', async () => {
     let capturedNetworkMode: string | undefined;
 
@@ -1019,6 +1151,24 @@ describe('invokeGovernedTool — approved external file paths', () => {
 });
 
 describe('invokeGovernedTool 鈥?search_content', () => {
+  it('searches with valid ignore metadata beyond the former one MiB limit', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-large-ignore-search-'));
+    try {
+      writeFileSync(join(workspace, '.gitignore'), `${'# comment\n'.repeat(120_000)}ignored.txt\n`);
+      writeFileSync(join(workspace, 'visible.txt'), 'needle\n');
+      writeFileSync(join(workspace, 'ignored.txt'), 'needle\n');
+      const result = await invokeGovernedTool({
+        workspace,
+        request: makeSearchContentRequest('needle'),
+      });
+      expect(result.ok, result.stderr).toBe(true);
+      expect(result.stdout).toContain('visible.txt:1:needle');
+      expect(result.stdout).not.toContain('ignored.txt:1:needle');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('searches file contents without invoking shell', async () => {
     const workspace = join(tmpdir(), 'kite-code-search-content-native');
     rmSync(workspace, { recursive: true, force: true });
@@ -1267,7 +1417,7 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
     expect(continuedParent.ok).toBe(true);
   });
 
-  it('keeps the Runner result bounded while recording freshness from the complete file', async () => {
+  it('returns the complete requested file while recording freshness', async () => {
     const lines = [
       'export const first = 1;',
       ...Array.from({ length: 2_500 }, (_, index) => `export const value${index} = ${index};`),
@@ -1276,12 +1426,12 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
 
     const read = await runFileTool('read_file', { path: 'large.ts', limit: 2_501 });
     expect(read.ok).toBe(true);
-    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS_);
-    expect(read.stdout).toContain('continue with offset=');
+    expect(read.stdout).toContain('export const value2499 = 2499;');
+    expect(read.stdout).not.toContain('continue with offset=');
     expect(read.resultMeta).toMatchObject({
       path: 'large.ts',
       totalLines: 2_501,
-      truncated: true,
+      truncated: false,
       rawResultDigest: expect.any(String),
     });
 
@@ -1291,5 +1441,41 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
       new_string: 'export const first = 2;',
     });
     expect(edit.ok).toBe(true);
+  });
+
+  it('reads and edits an existing file larger than the former observation ceiling', async () => {
+    const line = `target ${'x'.repeat(900)}\n`;
+    const content = `start\n${line.repeat(10_000)}`;
+    writeFileSync(join(workspace, 'very-large.txt'), content, 'utf8');
+    const first = await runFileTool('read_file', { path: 'very-large.txt', offset: 1, limit: 1 });
+    expect(first.ok).toBe(true);
+    expect(first.stdout).toContain('continue with offset=2');
+    const edited = await runFileTool('edit_file', {
+      path: 'very-large.txt',
+      old_string: 'start',
+      new_string: 'changed',
+    });
+    expect(edited.ok).toBe(true);
+  });
+
+  it('returns a long single line and more than ten thousand search matches', async () => {
+    const longLine = 'z'.repeat(70 * 1024);
+    writeFileSync(join(workspace, 'one-line.txt'), longLine, 'utf8');
+    const read = await runFileTool('read_file', { path: 'one-line.txt' });
+    expect(read.ok).toBe(true);
+    expect(read.stdout).toContain(longLine);
+    expect(read.resultMeta?.truncated).toBe(false);
+
+    writeFileSync(join(workspace, 'many-matches.txt'), 'needle\n'.repeat(10_001), 'utf8');
+    const search = await runFileTool('search_content', { path: '.', pattern: 'needle' });
+    expect(search.ok).toBe(true);
+    expect(search.stdout).toContain('many-matches.txt:10001:needle');
+  });
+
+  it('accepts a new write larger than the former operation string ceiling', async () => {
+    const content = 'w'.repeat(16 * 1024 * 1024 + 1);
+    const write = await runFileTool('write_file', { path: 'large-write.txt', content });
+    expect(write.ok).toBe(true);
+    expect(write.resultMeta?.truncated).toBe(false);
   });
 });

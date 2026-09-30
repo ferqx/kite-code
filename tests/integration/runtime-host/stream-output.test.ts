@@ -3,7 +3,6 @@ import {
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,
   SHELL_CAPTURE_MAX_CHARS,
-  SHELL_PROGRESS_LINE_MAX_CHARS,
 } from '@kite-ai/runtime-host';
 import { readWithProgress } from '../../helpers/shell-executor';
 
@@ -63,7 +62,7 @@ describe('bounded shell output', () => {
     expect(lines[0]!.length).toBeLessThan(80);
   });
 
-  test('readWithProgress drains large output with bounded capture and progress', async () => {
+  test('readWithProgress retains a bounded preview and emits the complete UTF-8 output', async () => {
     const encoder = new TextEncoder();
     const longLine = `HEAD${'界'.repeat(SHELL_CAPTURE_MAX_CHARS)}TAIL`;
     const bytes = encoder.encode(`${longLine}\nlast`);
@@ -75,17 +74,32 @@ describe('bounded shell output', () => {
         controller.close();
       },
     });
-    const lines: string[] = [];
+    const chunks: string[] = [];
 
-    const captured = await readWithProgress(stream, (line) => lines.push(line));
+    const captured = await readWithProgress(stream, (chunk) => chunks.push(chunk));
 
     expect(captured).toStartWith('HEAD');
     expect(captured).toEndWith('\nlast');
     expect(captured).toContain('omitted during shell capture');
     expect(captured.length).toBeLessThanOrEqual(SHELL_CAPTURE_MAX_CHARS + 100);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toEndWith('TAIL');
-    expect(lines[0]!.length).toBeLessThanOrEqual(SHELL_PROGRESS_LINE_MAX_CHARS + 100);
-    expect(lines[1]).toBe('last');
+    expect(chunks.join('')).toBe(`${longLine}\nlast`);
+    expect(chunks.join('')).not.toContain('\ufffd');
+  });
+
+  test('a pre-aborted output read cancels the stream without waiting for data', async () => {
+    let cancellations = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancellations++;
+      },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const chunks: string[] = [];
+    expect(await readWithProgress(stream, (chunk) => chunks.push(chunk), controller.signal)).toBe(
+      '',
+    );
+    expect(cancellations).toBe(1);
+    expect(chunks).toEqual([]);
   });
 });

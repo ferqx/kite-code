@@ -9,7 +9,9 @@ import { McpConnectionManager } from '@kite-ai/builtin-runtime/mcp';
 import { verificationRequestForSkill } from '@kite-ai/builtin-runtime/skills';
 import {
   createRuntimeHostStateInitialState,
+  LIMITED_RESOURCE_BUDGET_,
   type RuntimeState,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import type { VerificationSpec } from '@kite-ai/runtime-spi';
 import { eventsForRuntimeAction } from '#kite-service/bootstrap/runtime/state-actions';
@@ -76,7 +78,142 @@ function reduceAll(state: RuntimeState, events: RuntimeEvent[]): RuntimeState {
   return events.reduce(reduceRuntimeState, state);
 }
 
+function configuredRun(state: RuntimeState, unbounded = true): RuntimeState {
+  return reduceRuntimeState(state, {
+    type: 'resource_budget.configured',
+    runId: 'verification-run',
+    startedAt: '2026-09-30T00:00:00Z',
+    deadlineAt: '2026-09-30T00:30:00Z',
+    budget: unbounded ? UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_ : LIMITED_RESOURCE_BUDGET_,
+  });
+}
+
 describe('verification policy and scheduler', () => {
+  test('current Runs continue repairs beyond the old quota and still require a passing check', async () => {
+    let state = reduceRuntimeState(
+      configuredRun(activeState()),
+      request(
+        'required',
+        spec(
+          [{ checkId: 'tests', type: 'command', description: 'run tests', command: 'bun test' }],
+          2,
+        ),
+      ),
+    );
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      expect(decideNextEffect(state).type).toBe('run_verification');
+      state = reduceAll(
+        state,
+        await executeVerificationEffect(
+          { type: 'run_verification', verificationId: 'verification-1' },
+          state,
+          {
+            shellExecutor: async ({ command }) => ({
+              ok: false,
+              command,
+              exitCode: 1,
+              stdout: '',
+              stderr: 'failed',
+            }),
+          },
+        ),
+      );
+      expect(state.verification.records['verification-1']?.status).toBe('failed');
+      expect(decideNextEffect(state).type).toBe('repair_verification');
+      state = reduceAll(
+        state,
+        await executeVerificationEffect(
+          { type: 'repair_verification', verificationId: 'verification-1' },
+          state,
+        ),
+      );
+      expect(state.verification.records['verification-1']?.repairAttempts).toBe(attempt);
+      expect(state.transcript.final).toBeUndefined();
+      state = reduceRuntimeState(state, {
+        type: 'model.responded',
+        messageId: `repair-${attempt}`,
+        text: 'repaired',
+      });
+    }
+    state = reduceAll(
+      state,
+      await executeVerificationEffect(
+        { type: 'run_verification', verificationId: 'verification-1' },
+        state,
+        {
+          shellExecutor: async ({ command }) => ({
+            ok: true,
+            command,
+            exitCode: 0,
+            stdout: 'ok',
+            stderr: '',
+          }),
+        },
+      ),
+    );
+    expect(state.verification.records['verification-1']?.status).toBe('passed');
+    expect(decideNextEffect(state).type).toBe('emit_final');
+  });
+
+  test('migration resumes old quota exhaustion without waiving verification', async () => {
+    let state = reduceRuntimeState(
+      configuredRun(activeState(), false),
+      request(
+        'required',
+        spec(
+          [{ checkId: 'tests', type: 'command', description: 'run tests', command: 'bun test' }],
+          0,
+        ),
+      ),
+    );
+    state = reduceAll(
+      state,
+      await executeVerificationEffect(
+        { type: 'run_verification', verificationId: 'verification-1' },
+        state,
+        {
+          shellExecutor: async ({ command }) => ({
+            ok: false,
+            command,
+            exitCode: 1,
+            stdout: '',
+            stderr: 'failed',
+          }),
+        },
+      ),
+    );
+    expect(state.verification.records['verification-1']?.status).toBe('budget_exhausted');
+    expect(decideNextEffect(state).type).toBe('request_verification_decision');
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.cumulative_limits_removed',
+      runId: 'verification-run',
+    });
+    expect(decideNextEffect(state).type).toBe('repair_verification');
+    state = reduceAll(
+      state,
+      await executeVerificationEffect(
+        { type: 'repair_verification', verificationId: 'verification-1' },
+        state,
+      ),
+    );
+    expect(state.verification.records['verification-1']).toMatchObject({
+      status: 'repair_pending',
+      repairAttempts: 1,
+    });
+    expect(state.transcript.final).toBeUndefined();
+  });
+
+  test('current Runs keep invalid required specifications blocked', () => {
+    const state = reduceRuntimeState(
+      configuredRun(activeState()),
+      request('required', spec([], 0)),
+    );
+    expect(state.verification.records['verification-1']?.diagnostics).toContain(
+      'At least one verification check is required.',
+    );
+    expect(decideNextEffect(state).type).toBe('request_verification_decision');
+  });
+
   test('verification sources can raise but never lower the effective mode', () => {
     expect(resolveVerificationMode({ baseline: 'best_effort', skillMode: 'not_required' })).toBe(
       'best_effort',

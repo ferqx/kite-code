@@ -22,4 +22,5 @@ export {
   type RuntimeServerLogicalMessageConnection,
   type RuntimeServerOpenOptions,
   type RuntimeServerOptions,
+  type RuntimeServerOutboundSpool,
 } from './server';

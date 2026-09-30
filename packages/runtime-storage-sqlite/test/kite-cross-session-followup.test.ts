@@ -1883,6 +1883,7 @@ describe('Store13 cross-Session TriggerTurn source', () => {
       db.transaction(() => acceptCrossSessionFollowupInTransaction(db, input))();
       const failedSnapshot = {
         ...input.sourceSnapshot,
+        revision: 2,
         tools: {
           calls: {
             'tool-1': {
@@ -1903,18 +1904,26 @@ describe('Store13 cross-Session TriggerTurn source', () => {
         },
         resourceBudget: {
           ...input.sourceSnapshot.resourceBudget,
-          reservations: {
-            'backup-1': {
-              ...input.sourceSnapshot.resourceBudget.reservations['backup-1'],
-              state: 'released',
-            },
-          },
+          externalizedClosedReservations: true,
+          reservations: {},
         },
       };
       db.query(`INSERT INTO runtime_snapshots(session_id,schema_version,format_epoch,revision,
         state_json,event_position,state_checksum,created_at)
         VALUES ('parent',27,'test',2,?,0,'checksum',2)`).run(JSON.stringify(failedSnapshot));
       db.run("UPDATE runtime_sessions SET revision=2 WHERE session_id='parent'");
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','release-backup',2,27,?,2)`).run(
+        JSON.stringify({ type: 'resource_budget.released', reservationId: 'backup-1' }),
+      );
+      db.query(`INSERT INTO runtime_resource_reservation_receipts(
+        session_id,run_id,reservation_id,invocation_id,state,reservation_json,terminal_revision)
+        VALUES ('parent','run-1','backup-1','submission-1','released',?,2)`).run(
+        JSON.stringify({
+          ...input.sourceSnapshot.resourceBudget.reservations['backup-1'],
+          state: 'released',
+        }),
+      );
       const intent = {
         sourceSessionId: 'parent',
         targetSessionId: 'child',
@@ -2074,6 +2083,81 @@ describe('Store13 cross-Session TriggerTurn source', () => {
       expect(
         readCrossSessionFollowupDeliveryForTarget(db, 'child', 'parent', 'submission-1'),
       ).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+  test('reads a replaced backup from its exact terminal receipt during restart recovery', () => {
+    const { db, input } = fixture();
+    try {
+      db.transaction(() => acceptCrossSessionFollowupInTransaction(db, input))();
+      const backup = input.reservationEvent.reservation;
+      const turn = {
+        version: 1,
+        reservationId: 'turn-1',
+        runId: 'run-1',
+        invocationId: 'followup-turn:model-next',
+        resourceKind: 'subagent',
+        replacesReservationId: 'backup-1',
+        executableUpperBound: usage(1, 0, 0, 0, 1),
+        state: 'reserved',
+      };
+      const model = {
+        version: 1,
+        reservationId: 'model-2',
+        runId: 'run-1',
+        invocationId: 'model-invocation:model-next',
+        resourceKind: 'model',
+        parentReservationId: 'turn-1',
+        replacesReservationId: 'backup-1',
+        executableUpperBound: usage(0, 1, 80, 10, 0),
+        state: 'reserved',
+      };
+      const state = {
+        ...input.sourceSnapshot,
+        revision: 2,
+        resourceBudget: {
+          ...input.sourceSnapshot.resourceBudget,
+          externalizedClosedReservations: true,
+          reservations: { 'turn-1': turn, 'model-2': model },
+        },
+      };
+      db.query(`INSERT INTO runtime_snapshots(session_id,schema_version,format_epoch,revision,
+        state_json,event_position,state_checksum,created_at)
+        VALUES ('parent',27,'test',2,?,2,'checksum',2)`).run(JSON.stringify(state));
+      db.query(`INSERT INTO agent_followup_funding_receipts(
+        source_session_id,submission_id,target_session_id,message_id,funding_run_id,
+        backup_reservation_id,turn_reservation_id,model_reservation_id,target_model_reservation_id,
+        target_budget_digest,target_run_id,model_invocation_id,surface_artifact_id,surface_digest,
+        surface_input_tokens,surface_max_output_tokens,target_revision,source_revision,created_at_ms)
+        VALUES ('parent','submission-1','child','mail-1','run-1',
+          'backup-1','turn-1','model-2','local-model','sha256:abc','followup-run',
+          'model-next','surface','sha256:def',40,10,1,2,20)`).run();
+      expect(() => listPendingCrossSessionFollowupFunding(db, 'parent', 10)).toThrow();
+      db.query(`INSERT INTO runtime_events(session_id,event_id,sequence,schema_version,event_json,created_at)
+        VALUES ('parent','replace-2',2,27,?,2)`).run(
+        JSON.stringify({
+          type: 'resource_budget.bounded_replaced',
+          reservationId: 'backup-1',
+          turnReservation: turn,
+          replacement: model,
+        }),
+      );
+      db.query(`INSERT INTO runtime_resource_reservation_receipts(
+        session_id,run_id,reservation_id,invocation_id,state,reservation_json,terminal_revision)
+        VALUES ('parent','run-1','backup-1','submission-1','released',?,2)`).run(
+        JSON.stringify({ ...backup, state: 'released' }),
+      );
+      expect(listPendingCrossSessionFollowupFunding(db, 'parent', 10)[0]).toMatchObject({
+        stage: 'replaced',
+        releasedBackupReservation: { reservationId: 'backup-1', state: 'released' },
+      });
+      db.run(`UPDATE runtime_resource_reservation_receipts SET terminal_revision=1
+        WHERE session_id='parent' AND reservation_id='backup-1'`);
+      expect(() => listPendingCrossSessionFollowupFunding(db, 'parent', 10)).toThrow();
+      db.run(`UPDATE runtime_resource_reservation_receipts SET terminal_revision=2,run_id='other-run'
+        WHERE session_id='parent' AND reservation_id='backup-1'`);
+      expect(() => listPendingCrossSessionFollowupFunding(db, 'parent', 10)).toThrow();
     } finally {
       db.close();
     }

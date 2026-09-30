@@ -82,6 +82,100 @@ function dispatchIntent(invocationId: string, childInvocationId: string): Runtim
 }
 
 describe('Kite Runtime History Client adapter', () => {
+  test('legacy per-transcript limits no longer reject a valid observer history', async () => {
+    const history = createKiteRuntimeObserverHistoryClient(
+      () =>
+        historyLogs([
+          { type: 'user.message_appended', messageId: 'one', content: 'first message' },
+          { type: 'user.message_appended', messageId: 'two', content: 'second message' },
+        ]),
+      undefined,
+      { maxSourceBytes: 1, maxProjectedBytes: 1, maxRecords: 1 },
+    );
+    const transcript = await history.loadSession('ownership-history');
+    expect(transcript.records).toHaveLength(2);
+    expect(transcript.events).toHaveLength(2);
+  });
+
+  test('Store rewrite and instance proofs reuse live prefixes without rescanning or hashing', async () => {
+    const events = new Map([[1, 'first']]);
+    let generation = 1;
+    let rewriteGeneration = 0;
+    let instanceId = 'a'.repeat(32);
+    let reads = 0;
+    let hashes = 0;
+    const history = createKiteRuntimeObserverHistoryClient(
+      () => ({
+        getSession: () => ({
+          sessionId: 'live-proof',
+          name: 'Live proof',
+          updatedAt: 1,
+          lastSequence: Math.max(...events.keys()),
+          historyGeneration: generation,
+          historyRewriteGeneration: rewriteGeneration,
+          historyInstanceId: instanceId,
+        }),
+        listSessions: () => ({ entries: [], hasMore: false }),
+        listEvents: (request) => {
+          reads++;
+          return {
+            entries: [...events]
+              .filter(
+                ([sequence]) =>
+                  sequence > (request.afterSequence ?? 0) &&
+                  sequence < (request.beforeSequence ?? Infinity),
+              )
+              .map(([sequence, content]) => ({
+                sessionId: 'live-proof',
+                sequence,
+                eventId: `event-${sequence}`,
+                createdAt: sequence,
+                event: {
+                  type: 'user.message_appended' as const,
+                  messageId: `message-${sequence}`,
+                  content,
+                },
+              })),
+            hasMore: false,
+            observedLastSequence: Math.max(...events.keys()),
+          };
+        },
+        close: () => undefined,
+      }),
+      undefined,
+      {
+        fingerprintEventRows: () => {
+          hashes++;
+          throw new Error('proof should avoid hashing');
+        },
+      },
+    );
+    const first = await history.loadSession('live-proof');
+    for (let sequence = 2; sequence <= 24; sequence++) {
+      events.set(sequence, 'tail');
+      generation++;
+      expect((await history.loadSession('live-proof', 1)).snapshotDigest).toBe(
+        first.snapshotDigest,
+      );
+    }
+    expect(reads).toBe(1);
+    expect(hashes).toBe(0);
+    events.set(1, 'rewritten');
+    generation++;
+    rewriteGeneration++;
+    expect((await history.loadSession('live-proof', 1)).snapshotDigest).not.toBe(
+      first.snapshotDigest,
+    );
+    expect(reads).toBe(2);
+    events.set(1, 'new instance');
+    instanceId = 'b'.repeat(32);
+    expect((await history.loadSession('live-proof', 1)).events[0]).toMatchObject({
+      text: 'new instance',
+    });
+    expect(reads).toBe(3);
+    expect(hashes).toBe(0);
+  });
+
   test('reuses an append-only fixed prefix and rescans rewrites or inserts inside it', async () => {
     const events = new Map<number, string>([[1, 'original']]);
     let generation = 1;

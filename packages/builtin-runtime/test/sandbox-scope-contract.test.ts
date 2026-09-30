@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { realpathSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   PreparedSandboxExecution,
   SandboxExecutionBackend,
@@ -10,10 +12,12 @@ import type {
 import {
   createBuiltinPreparedShellExecutionConsumer,
   createBuiltinSandboxPreparation,
+  LocalSandboxExecutionProvider,
   SandboxExecutionGrantAuthority,
   type SandboxInvocationIdentity,
   sandboxBackendCapabilities,
   sandboxPreparationDigest,
+  sandboxPreparationIntentDigest,
 } from '../src/sandbox';
 
 const WORKSPACE = realpathSync.native(process.cwd());
@@ -223,6 +227,97 @@ function consumerFor(input: {
 }
 
 describe('SAQ sandbox scope/backend contract', () => {
+  test.skipIf(process.platform === 'win32')(
+    'Full Git reads retain full scope while Builtin derives a hardened environment',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-full-git-env-'));
+      const grants = new SandboxExecutionGrantAuthority();
+      const provider = new LocalSandboxExecutionProvider(grants.verifier(), {
+        backend: 'seatbelt',
+        canonicalWorkspace: workspace,
+      });
+      try {
+        for (const [command, hardened] of [
+          ['git status --short', true],
+          ['git log --oneline -10', true],
+          ['git config --list', false],
+        ] as const) {
+          const candidate = createBuiltinSandboxPreparation({
+            identity: IDENTITY,
+            canonicalWorkspace: workspace,
+            workspace,
+            command,
+            executionBoundaryDigest: 'boundary-full-git',
+            protectedPathRevision: 'protected-full-git',
+            filesystemMode: 'allow_all',
+            networkMode: 'allow_all',
+          }).preparation;
+          expect(candidate.filesystemMode).toBe('allow_all');
+          expect(candidate.executionTrust).toBeNull();
+          if (hardened) expect(candidate.argv[0]).toBe('/bin/sh');
+          const result = await provider.prepare({
+            grant: grants.issue({
+              preparation: candidate,
+              resourceSemantics: 'allocating',
+              preparationIntentDigest: sandboxPreparationIntentDigest({
+                attempt: candidate.attempt,
+                toolCallId: candidate.toolCallId,
+                capabilityId: candidate.capabilityId,
+                capabilityRevision: candidate.capabilityRevision,
+                canonicalWorkspace: candidate.canonicalWorkspace,
+                effectiveEffectsDigest: candidate.effectiveEffectsDigest,
+                admissionDigest: candidate.admissionDigest,
+                preparationDigest: sandboxPreparationDigest(candidate),
+                commandDigest: candidate.commandDigest,
+                executionBoundaryDigest: candidate.executionBoundaryDigest,
+                resourceSemantics: 'allocating',
+              }),
+            }),
+          });
+          expect(result.ok).toBe(true);
+          if (!result.ok) throw new Error(result.failure.message);
+          const profile = result.observation.argv[2] ?? '';
+          const script = result.observation.argv.at(-1) ?? '';
+          expect(profile).toContain(
+            '(allow file-write* file-write-create file-write-unlink file-ioctl)',
+          );
+          expect(script.includes("export HOME='/nonexistent'")).toBe(hardened);
+          expect(script.includes("export GIT_CONFIG_NOSYSTEM='1'")).toBe(hardened);
+          expect(script.includes("export GIT_CONFIG_KEY_0='core.fsmonitor'")).toBe(hardened);
+          expect(
+            (
+              await provider.dispose({
+                grant: grants.issueCleanup({
+                  purpose: 'dispose',
+                  prepared: result.observation,
+                  lifecycleIntentDigest: `full-git-${command}`,
+                  cleanupAttempt: 1,
+                  cleanupConfirmed: true,
+                }),
+                prepared: result.observation,
+              })
+            ).ok,
+          ).toBe(true);
+        }
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('caller read-only trust cannot harden a command outside the Builtin grammar', () => {
+    expect(() =>
+      createBuiltinSandboxPreparation({
+        identity: IDENTITY,
+        canonicalWorkspace: WORKSPACE,
+        workspace: WORKSPACE,
+        command: 'git config --list',
+        executionBoundaryDigest: 'boundary-unproven-git',
+        protectedPathRevision: 'protected-unproven-git',
+        executionTrust: 'policy_proven_read_only',
+      }),
+    ).toThrow('Read-only execution trust requires a command proven by the Builtin classifier.');
+  });
   test('published backend evidence is the UI scope contract', () => {
     expect(sandboxBackendCapabilities('bubblewrap')).toMatchObject({
       filesystem: {
@@ -390,7 +485,7 @@ describe('SAQ sandbox scope/backend contract', () => {
     const candidate = preparation(
       'allow_all',
       'allow_all',
-      'printf saq-scope',
+      'git status --short',
       'policy_proven_read_only',
     );
     const plan = preparedPlan(candidate, backend);
@@ -407,7 +502,7 @@ describe('SAQ sandbox scope/backend contract', () => {
     const result = await consumer({
       identity: IDENTITY,
       workspace: WORKSPACE,
-      command: 'printf saq-scope',
+      command: 'git status --short',
       filesystemMode: 'allow_all',
       networkMode: 'allow_all',
       executionTrust: 'policy_proven_read_only',

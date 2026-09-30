@@ -31,7 +31,7 @@ HTTP Tool dispatch 对最终 arguments 只执行一次深冻结 JSON-safe bounde
 
 Builtin Manager 不导入 `StdioClientTransport`、`cross-spawn`，也不展开 `process.env`。它只把 exact server/revision/command/args/cwd 与显式 safe env 交给 `McpStdioProcessPort`；Host-owned wrapper 是唯一 spawn owner。Production composition 未提供合格 process port 时 local stdio fail closed，spawn=0。
 
-Host wrapper 先验证 strict `RuntimeControlFrame`，再启动 exact MCP child；ready/terminal control frame 绑定 domain、peer、invocation 与 monotonic sequence。control channel 不包含 secret/HMAC/bootstrap key，也不传给实际 child。JSON-RPC line/read/write/backpressure 都有固定 bounds；wrong peer/invocation、replay、unknown/truncated/oversized、child pre-ready exit 或 cleanup unknown 都 fail closed。
+Host wrapper 先验证 strict `RuntimeControlFrame`，再启动 exact MCP child；ready/terminal control frame 绑定 domain、peer、invocation 与 monotonic sequence。control channel 不包含 secret/HMAC/bootstrap key，也不传给实际 child。公开 JSON-RPC 数据不设固定单行或累计字节额度，分段解析先拆帧再处理，连续传输通过 consumer／stdin 背压等待。私有 control frame 仍有单帧格式／解析边界；wrong peer/invocation、replay、unknown/truncated/oversized control frame、child pre-ready exit 或 cleanup unknown 都 fail closed。背压不删除或裁短已接受的 MCP 内容。
 
 command、path-like argv 与 cwd 在 Host port 前经过 protected-path/effective Workspace 检查。canonical Workspace
 member 无论名称是否为 `.git`、`.env` 或 Agent/MCP 配置都允许进入后续 process/surface gate；Workspace 外

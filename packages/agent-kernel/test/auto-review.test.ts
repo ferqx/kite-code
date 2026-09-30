@@ -13,6 +13,15 @@ function facts(overrides: Partial<AutoReviewFacts> = {}): AutoReviewFacts {
 }
 
 describe('State auto-review completion authority', () => {
+  test('accepts a complete approval reason beyond the old explanation length quota', () => {
+    const reason = 'The operation is safe and scoped. '.repeat(200);
+    expect(isValidAutoReviewFacts(facts({ reason }))).toBe(true);
+    expect(decideAutoReview(facts({ reason }))).toMatchObject({
+      kind: 'accepted_approval',
+      grant: 'approve_once',
+    });
+  });
+
   test('accepts only the operation-bound approve_once grant', () => {
     expect(decideAutoReview(facts())).toEqual({
       kind: 'accepted_approval',

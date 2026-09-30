@@ -1,6 +1,6 @@
 import { childThreadIdForToolAttempt } from './child-session';
 import type { KernelEvent } from './events';
-import type { AgentState } from './state';
+import type { AgentState, ResourceReservation } from './state';
 
 export type StateModelEvidenceFailure = 'artifact_missing' | 'artifact_corrupt';
 
@@ -12,6 +12,10 @@ export interface StatePendingFollowupFundingProof {
   readonly turnReservationId: string | null;
   readonly modelReservationId: string | null;
   readonly modelInvocationId: string | null;
+  /** Exact Store receipt for a v1 released backup removed from the active State working set. */
+  readonly releasedBackupReservation?:
+    | Readonly<ResourceReservation>
+    | Readonly<Record<string, unknown>>;
   /** Store target-owner no-attempt proof, present only for a routed activated first Model. */
   readonly targetPreparedNoAttempt?: StatePreparedFollowupModelProof;
 }
@@ -199,8 +203,8 @@ export function verifiedPendingAfterTurnReservationIds(
       report.parentReservationId !== undefined ||
       reportUpper?.source !== 'versioned_upper_bound' ||
       reportUpper.counters.modelRequests !== 1 ||
-      reportUpper.counters.inputTokens < 1 ||
-      reportUpper.counters.outputTokens < 1
+      reportUpper.counters.inputTokens < (reportUpper.unboundedModelTokens === true ? 0 : 1) ||
+      reportUpper.counters.outputTokens < (reportUpper.unboundedModelTokens === true ? 0 : 1)
     )
       throw new Error('Pending after_turn recovery proof conflicts with the source ledger.');
     childThreads.add(proof.childThreadId);
@@ -280,8 +284,8 @@ export function verifiedSealedAfterTurnReportReservationIds(
       report.parentReservationId !== undefined ||
       upper?.source !== 'versioned_upper_bound' ||
       upper.counters.modelRequests !== 1 ||
-      upper.counters.inputTokens < 1 ||
-      upper.counters.outputTokens < 1
+      upper.counters.inputTokens < (upper.unboundedModelTokens === true ? 0 : 1) ||
+      upper.counters.outputTokens < (upper.unboundedModelTokens === true ? 0 : 1)
     )
       throw new Error('Sealed after_turn report recovery proof conflicts with the source ledger.');
     children.add(proof.childThreadId);
@@ -529,14 +533,28 @@ export function verifiedPendingFollowupReservationIds(
       state.resourceBudget.status === 'active' && state.resourceBudget.runId === proof.fundingRunId
         ? state.resourceBudget
         : state.retainedResourceBudgets[proof.fundingRunId];
-    const backup = ledger?.reservations[proof.backupReservationId];
+    const inStateBackup = ledger?.reservations[proof.backupReservationId];
+    const backup =
+      inStateBackup ??
+      (ledger?.externalizedClosedReservations === true
+        ? (proof.releasedBackupReservation as ResourceReservation | undefined)
+        : undefined);
     if (
       !ledger ||
       !/^backup_[a-f0-9]{64}$/u.test(proof.backupReservationId) ||
+      (proof.releasedBackupReservation !== undefined &&
+        (inStateBackup !== undefined ||
+          ledger.externalizedClosedReservations !== true ||
+          proof.releasedBackupReservation.state !== 'released')) ||
+      backup?.reservationId !== proof.backupReservationId ||
+      backup.version !== 1 ||
       backup?.runId !== proof.fundingRunId ||
       backup.resourceKind !== 'subagent' ||
       backup.invocationId !== proof.submissionId ||
-      backup.parentReservationId !== undefined
+      backup.parentReservationId !== undefined ||
+      !backup.executableUpperBound ||
+      !backup.executableUpperBound.counters ||
+      !backup.executableUpperBound.gauges
     )
       throw new Error('TriggerTurn backup recovery proof conflicts with State.');
     if (backup.executableUpperBound.independentFollowupTurn === true) {

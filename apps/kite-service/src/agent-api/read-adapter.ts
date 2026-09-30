@@ -5,11 +5,12 @@ import {
   type AgentApiCheckpoint,
   type AgentApiCheckpointPage,
   type AgentApiCheckpointPreview,
+  type AgentApiCompleteModelContext,
   type AgentApiHistoryItem,
   type AgentApiHistoryPage,
   type AgentApiLogItem,
   type AgentApiLogPage,
-  type AgentApiModelContext,
+  type AgentApiModelContextPage,
   type AgentApiProblem,
   type AgentApiSession,
   type AgentApiSessionPage,
@@ -17,10 +18,11 @@ import {
   agentApiBackgroundExecutionPageSchema,
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
+  agentApiCompleteModelContextSchema,
   agentApiHistoryPageSchema,
   agentApiIdentifierSchema,
   agentApiLogPageSchema,
-  agentApiModelContextSchema,
+  agentApiModelContextPageSchema,
   agentApiSessionPageSchema,
   agentApiSessionSchema,
   agentApiTimestampSchema,
@@ -37,10 +39,19 @@ import type {
   RuntimeSessionProjection,
 } from '@kite-ai/runtime-contract';
 import { projectRuntimeSessionTitle } from '../runtime-client/safe-text';
+import {
+  ModelContextPageSnapshots,
+  ModelContextSnapshotCursorError,
+} from './model-context-page-snapshots';
 
 const DEFAULT_PAGE_LIMIT = 50;
 const SESSION_JOIN_CONCURRENCY = 8;
 const CURSOR_CHECKSUM_PATTERN = /^[a-f0-9]{64}$/u;
+const modelContextSnapshots = new ModelContextPageSnapshots();
+
+export function disposeModelContextPageSnapshots(owner: AgentApiModelContextReadPort): void {
+  modelContextSnapshots.dispose(owner);
+}
 
 export interface AgentApiCheckpointPageCursor {
   readonly revision: number;
@@ -208,6 +219,16 @@ interface CheckpointCursorPayload {
   readonly checkpoint_id: string;
 }
 
+interface BackgroundCursorPayload {
+  readonly schema: 'kite.agent-api.cursor.background-executions.v1';
+  readonly collection: 'background_executions';
+  readonly session_id: string;
+  readonly aggregate_generation: string;
+  readonly watermark: number;
+  readonly session_revision: number;
+  readonly offset: number;
+}
+
 interface WorkspaceCursorPayload {
   readonly schema: 'kite.agent-api.cursor.workspaces.v1';
   readonly collection: 'workspaces';
@@ -264,13 +285,13 @@ export async function dispatchAgentApiReadRequest(input: {
       case 'logs':
         return matched(await listLogs(input.context, input.url, route.sessionId));
       case 'model_context':
-        requireNoQuery(input.url);
-        return matched(await getModelContext(input.context, route.sessionId, route.invocationId));
+        return matched(
+          await getModelContext(input.context, input.url, route.sessionId, route.invocationId),
+        );
       case 'checkpoints':
         return matched(await listCheckpoints(input.context, input.url, route.sessionId));
       case 'background_executions':
-        requireNoQuery(input.url);
-        return matched(await listBackgroundExecutions(input.context, route.sessionId));
+        return matched(await listBackgroundExecutions(input.context, input.url, route.sessionId));
       case 'checkpoint_preview':
         requireNoQuery(input.url);
         return matched(await previewCheckpoint(input.context, route.sessionId, route.checkpointId));
@@ -747,12 +768,37 @@ async function listLogs(
 
 async function getModelContext(
   context: AgentApiReadContext,
+  url: URL,
   sessionId: string,
   invocationId: string,
-): Promise<{ readonly ok: true; readonly body: AgentApiModelContext }> {
+): Promise<{ readonly ok: true; readonly body: AgentApiModelContextPage }> {
   requireVisibleSession(context, sessionId);
   if (!context.directory) throw new ReadFailure(404, 'not_found', false);
   if (!context.modelContexts) throw new ReadFailure(503, 'temporarily_unavailable');
+  const query = exactQuery(url, ['cursor']);
+  const cursor = query.get('cursor');
+  if (cursor !== null) {
+    if (!cursor || cursor.length > AGENT_API_LIMITS.maxCursorBytes) {
+      throw new ReadFailure(400, 'invalid_cursor', false);
+    }
+    try {
+      return {
+        ok: true,
+        body: modelContextPageBody(
+          modelContextSnapshots.read(context.modelContexts, sessionId, invocationId, cursor),
+        ),
+      };
+    } catch (error) {
+      if (error instanceof ModelContextSnapshotCursorError) {
+        throw new ReadFailure(
+          error.reason === 'invalid' ? 400 : 409,
+          error.reason === 'invalid' ? 'invalid_cursor' : 'cursor_invalidated',
+          false,
+        );
+      }
+      throw new ReadFailure(409, 'cursor_invalidated', false);
+    }
+  }
   let source: AgentApiModelContextSource | undefined;
   try {
     source = context.modelContexts.get(sessionId, invocationId);
@@ -760,11 +806,40 @@ async function getModelContext(
     throw new ReadFailure(503, 'temporarily_unavailable');
   }
   if (!source) throw new ReadFailure(404, 'not_found', false);
-  const body = projectModelContext(source);
-  if (utf8ByteLength(JSON.stringify(body)) > AGENT_API_LIMITS.maxMessageBytes) {
+  const full = agentApiCompleteModelContextSchema.parse(projectModelContext(source));
+  try {
+    return {
+      ok: true,
+      body: modelContextPageBody(
+        modelContextSnapshots.create({
+          owner: context.modelContexts,
+          sessionId,
+          invocationId,
+          sequence: source.sequence,
+          json: JSON.stringify(full),
+        }),
+      ),
+    };
+  } catch {
     throw new ReadFailure(503, 'temporarily_unavailable');
   }
-  return { ok: true, body: encodeAgentApiResponse(agentApiModelContextSchema, body) };
+}
+
+function modelContextPageBody(
+  page: ReturnType<ModelContextPageSnapshots['create']>,
+): AgentApiModelContextPage {
+  return encodeAgentApiResponse(agentApiModelContextPageSchema, {
+    schema: 'kite.agent-api.model-context-page.v1',
+    session_id: page.sessionId,
+    invocation_id: page.invocationId,
+    sequence: page.sequence,
+    snapshot_id: page.snapshotId,
+    sha256: page.sha256,
+    offset: page.offset,
+    total_bytes: page.totalBytes,
+    payload_base64: page.payloadBase64,
+    ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
+  });
 }
 
 async function listCheckpoints(
@@ -809,18 +884,44 @@ async function listCheckpoints(
 
 async function listBackgroundExecutions(
   context: AgentApiReadContext,
+  url: URL,
   sessionId: string,
 ): Promise<{ readonly ok: true; readonly body: AgentApiBackgroundExecutionPage }> {
   requireVisibleSession(context, sessionId);
+  const query = exactQuery(url, ['cursor', 'limit']);
+  const limit = pageLimit(query.get('limit'));
+  const encodedCursor = query.get('cursor');
+  const cursor = encodedCursor ? decodeBackgroundCursor(encodedCursor, sessionId) : undefined;
   const result = await context.query({
     schema: 'kite.runtime-query.v1',
     type: 'list_background_executions',
     sessionId,
+    limit,
+    ...(cursor ? { cursor: cursor.offset } : {}),
   });
   if (result.status !== 'ok' || !result.backgroundSnapshot) {
     throw new ReadFailure(503, 'temporarily_unavailable', true);
   }
   const snapshot = result.backgroundSnapshot;
+  if (
+    cursor &&
+    (cursor.aggregate_generation !== snapshot.aggregateGeneration ||
+      cursor.watermark !== snapshot.watermark ||
+      cursor.session_revision !== snapshot.sessionRevision)
+  )
+    throw new ReadFailure(409, 'cursor_invalidated', true);
+  const nextCursor =
+    result.nextBackgroundCursor === undefined
+      ? undefined
+      : encodeCursor({
+          schema: 'kite.agent-api.cursor.background-executions.v1',
+          collection: 'background_executions',
+          session_id: sessionId,
+          aggregate_generation: snapshot.aggregateGeneration,
+          watermark: snapshot.watermark,
+          session_revision: snapshot.sessionRevision,
+          offset: result.nextBackgroundCursor,
+        } satisfies BackgroundCursorPayload);
   return {
     ok: true,
     body: encodeAgentApiResponse(agentApiBackgroundExecutionPageSchema, {
@@ -840,6 +941,7 @@ async function listBackgroundExecutions(
         cleanup_confirmed: execution.cleanupConfirmed,
         ...(execution.cursor === undefined ? {} : { cursor: execution.cursor }),
       })),
+      ...(nextCursor ? { next_cursor: nextCursor } : {}),
     }),
   };
 }
@@ -1131,8 +1233,7 @@ function projectLogEntry(entry: RuntimeLogEventEntry): AgentApiLogItem {
   };
 }
 
-function projectModelContext(source: AgentApiModelContextSource): AgentApiModelContext {
-  const systemPrompt = boundedUtf8Result(source.systemPrompt, AGENT_API_LIMITS.maxRunInputBytes);
+function projectModelContext(source: AgentApiModelContextSource): AgentApiCompleteModelContext {
   const messages = projectModelContextMessages(source.messages);
   const tools = projectModelContextTools(source.tools);
   return {
@@ -1145,11 +1246,11 @@ function projectModelContext(source: AgentApiModelContextSource): AgentApiModelC
       provider: shortText(source.provider),
       name: shortText(source.model),
     },
-    system_prompt: { text: systemPrompt.value, truncated: systemPrompt.truncated },
-    messages: messages.items,
-    messages_truncated: messages.truncated,
-    tools: tools.items,
-    tools_truncated: tools.truncated,
+    system_prompt: { text: source.systemPrompt, truncated: false },
+    messages,
+    messages_truncated: false,
+    tools,
+    tools_truncated: false,
     request_settings: {
       transport: source.settings.transport,
       temperature: source.settings.temperature,
@@ -1164,116 +1265,52 @@ function projectModelContext(source: AgentApiModelContextSource): AgentApiModelC
   };
 }
 
-function projectModelContextMessages(source: AgentApiModelContextSource['messages']): {
-  readonly items: AgentApiModelContext['messages'];
-  readonly truncated: boolean;
-} {
-  const items: AgentApiModelContext['messages'][number][] = [];
-  let remaining = 262_144;
-  let truncated = source.length > AGENT_API_LIMITS.maxPageLimit;
-  for (const [index, message] of source.slice(0, AGENT_API_LIMITS.maxPageLimit).entries()) {
-    if (remaining < 1_024) {
-      truncated = true;
-      break;
-    }
-    const parts: AgentApiModelContext['messages'][number]['parts'][number][] = [];
-    if (message.parts.length > AGENT_API_LIMITS.maxArrayLength) truncated = true;
-    for (const part of message.parts.slice(0, AGENT_API_LIMITS.maxArrayLength)) {
-      const available = Math.min(65_536, Math.max(0, remaining - 1_024));
-      if (available === 0) {
-        truncated = true;
-        break;
-      }
-      const projected = projectModelContextPart(part, available);
-      const cost = utf8ByteLength(JSON.stringify(projected)) + 32;
-      if (cost > remaining) {
-        truncated = true;
-        break;
-      }
-      remaining -= cost;
-      if (projected.truncated) truncated = true;
-      parts.push(projected);
-    }
-    if (parts.length === 0 && message.parts.length > 0) {
-      truncated = true;
-      break;
-    }
-    items.push({ index, role: message.role, parts });
-  }
-  return { items, truncated };
+function projectModelContextMessages(
+  source: AgentApiModelContextSource['messages'],
+): AgentApiCompleteModelContext['messages'] {
+  return source.map((message, index) => ({
+    index,
+    role: message.role,
+    parts: message.parts.map(projectModelContextPart),
+  }));
 }
 
 function projectModelContextPart(
   part: AgentApiModelContextSourcePart,
-  available: number,
-): AgentApiModelContext['messages'][number]['parts'][number] {
+): AgentApiCompleteModelContext['messages'][number]['parts'][number] {
   if (part.type === 'text' || part.type === 'reasoning') {
-    const text = boundedUtf8Result(part.text, available);
-    return { type: part.type, text: text.value, truncated: text.truncated };
+    return { type: part.type, text: part.text, truncated: false };
   }
   if (part.type === 'tool_call') {
-    const input = boundedUtf8Result(part.inputJson, Math.min(32_768, available));
     return {
       type: 'tool_call',
       tool_call_id: part.toolCallId,
       tool_name: shortText(part.toolName),
-      input_json: input.value,
-      truncated: input.truncated,
+      input_json: part.inputJson,
+      truncated: false,
     };
   }
-  const output = boundedUtf8Result(part.output, available);
   return {
     type: 'tool_result',
     tool_call_id: part.toolCallId,
     tool_name: shortText(part.toolName),
-    output: output.value,
-    truncated: output.truncated,
+    output: part.output,
+    truncated: false,
   };
 }
 
-function projectModelContextTools(source: AgentApiModelContextSource['tools']): {
-  readonly items: AgentApiModelContext['tools'];
-  readonly truncated: boolean;
-} {
-  const items: AgentApiModelContext['tools'][number][] = [];
-  let remaining = 196_608;
-  let truncated = source.length > AGENT_API_LIMITS.maxPageLimit;
-  for (const tool of source.slice(0, AGENT_API_LIMITS.maxPageLimit)) {
-    if (remaining < 1_024) {
-      truncated = true;
-      break;
-    }
-    const description = tool.description
-      ? boundedUtf8Result(tool.description, Math.min(4_096, remaining - 512))
-      : undefined;
-    const schema = boundedUtf8Result(
-      tool.inputSchemaJson,
-      Math.min(32_768, Math.max(0, remaining - 4_608)),
-    );
-    const projected: AgentApiModelContext['tools'][number] = {
+function projectModelContextTools(
+  source: AgentApiModelContextSource['tools'],
+): AgentApiCompleteModelContext['tools'] {
+  return source.map((tool) => {
+    const projected: AgentApiCompleteModelContext['tools'][number] = {
       name: shortText(tool.name),
-      ...(description ? { description: description.value } : {}),
-      input_schema_json: schema.value,
-      truncated: Boolean(description?.truncated || schema.truncated),
+      ...(tool.description ? { description: tool.description } : {}),
+      input_schema_json: tool.inputSchemaJson,
+      truncated: false,
     };
-    const cost = utf8ByteLength(JSON.stringify(projected)) + 32;
-    if (cost > remaining) {
-      truncated = true;
-      break;
-    }
-    remaining -= cost;
-    if (projected.truncated) truncated = true;
-    items.push(projected);
-  }
-  return { items, truncated };
-}
-
-function boundedUtf8Result(
-  value: string,
-  maximum: number,
-): { readonly value: string; readonly truncated: boolean } {
-  const bounded = boundedUtf8(value, Math.max(0, maximum));
-  return { value: bounded, truncated: bounded.length !== value.length };
+    return projected;
+  });
 }
 
 async function verifyHistoryBoundary(
@@ -1392,6 +1429,7 @@ function encodeCursor(
     | HistoryCursorPayload
     | LogCursorPayload
     | CheckpointCursorPayload
+    | BackgroundCursorPayload
     | WorkspaceCursorPayload
     | WorkspaceSessionCursorPayload,
 ): string {
@@ -1557,6 +1595,32 @@ function decodeCheckpointCursor(value: string, sessionId: string): CheckpointCur
   return payload;
 }
 
+function decodeBackgroundCursor(value: string, sessionId: string): BackgroundCursorPayload {
+  const record = cursorRecord(value);
+  exactKeys(record, [
+    'aggregate_generation',
+    'checksum',
+    'collection',
+    'offset',
+    'schema',
+    'session_id',
+    'session_revision',
+    'watermark',
+  ]);
+  const payload: BackgroundCursorPayload = {
+    schema: literal(record.schema, 'kite.agent-api.cursor.background-executions.v1'),
+    collection: literal(record.collection, 'background_executions'),
+    session_id: identifier(record.session_id),
+    aggregate_generation: identifier(record.aggregate_generation),
+    watermark: safeRevision(record.watermark),
+    session_revision: safeRevision(record.session_revision),
+    offset: safeRevision(record.offset),
+  };
+  verifyCursor(record.checksum, payload);
+  if (payload.session_id !== sessionId) throw new ReadFailure(400, 'invalid_cursor', false);
+  return payload;
+}
+
 function cursorRecord(value: string): Record<string, unknown> {
   if (!/^[A-Za-z0-9_-]+$/u.test(value) || value.length > AGENT_API_LIMITS.maxCursorBytes) {
     throw new ReadFailure(400, 'invalid_cursor', false);
@@ -1579,6 +1643,7 @@ function verifyCursor(
     | HistoryCursorPayload
     | LogCursorPayload
     | CheckpointCursorPayload
+    | BackgroundCursorPayload
     | WorkspaceCursorPayload
     | WorkspaceSessionCursorPayload,
 ): void {

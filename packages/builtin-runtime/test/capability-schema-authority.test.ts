@@ -71,13 +71,7 @@ describe('Builtin capability schema authority cutover', () => {
       },
       { ok: true },
     ],
-    [
-      nestedObjectSchema(34),
-      {
-        ok: false,
-        diagnostic: 'MCP inputSchema exceeds the maximum nesting depth of 32.',
-      },
-    ],
+    [nestedObjectSchema(34), { ok: true }],
     [
       {
         type: 'object',
@@ -85,10 +79,7 @@ describe('Builtin capability schema authority cutover', () => {
           Array.from({ length: 1_025 }, (_, index) => [`field_${index}`, { type: 'string' }]),
         ),
       },
-      {
-        ok: false,
-        diagnostic: 'MCP inputSchema has 2052 properties, exceeding the limit of 1024.',
-      },
+      { ok: true },
     ],
   ] as const;
 
@@ -120,21 +111,15 @@ describe('Builtin capability schema authority cutover', () => {
     expect(first).toEqual(second);
   });
 
-  test('enforces UTF-8 byte and object-node boundaries', () => {
+  test('accepts serializable schemas beyond former byte and node limits', () => {
     const utf8AtOrBelowLimit = utf8DescriptionSchema(256 * 1024, 0);
     const utf8OverLimit = utf8DescriptionSchema(256 * 1024, 1);
     expect(Buffer.byteLength(JSON.stringify(utf8AtOrBelowLimit), 'utf8')).toBe(256 * 1024);
     expect(compileOutcome(compileCapabilitySchema, utf8AtOrBelowLimit)).toEqual({ ok: true });
-    expect(compileOutcome(compileCapabilitySchema, utf8OverLimit)).toEqual({
-      ok: false,
-      diagnostic: 'MCP inputSchema exceeds the 256 KiB serialized size limit.',
-    });
+    expect(compileOutcome(compileCapabilitySchema, utf8OverLimit)).toEqual({ ok: true });
 
     expect(compileOutcome(compileCapabilitySchema, objectNodeSchema(4096))).toEqual({ ok: true });
-    expect(compileOutcome(compileCapabilitySchema, objectNodeSchema(4097))).toEqual({
-      ok: false,
-      diagnostic: 'MCP inputSchema has 4097 object nodes, exceeding the limit of 4096.',
-    });
+    expect(compileOutcome(compileCapabilitySchema, objectNodeSchema(4097))).toEqual({ ok: true });
   });
 
   test('keeps Draft-07 references, keyword validation, and unsupported references deterministic', () => {

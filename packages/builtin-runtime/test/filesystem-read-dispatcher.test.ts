@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type BuiltinOperationExecutionValue,
@@ -31,6 +32,8 @@ import type {
   WorkspaceFilesystemProvider,
 } from '@kite-ai/runtime-spi';
 import { createRuntimeModuleRegistry } from '@kite-ai/runtime-spi';
+import { workspaceFilesystemStringDigest } from '../src/filesystem/grant-authority';
+import { issueBuiltinWorkspaceFilesystemReadObservation } from '../src/filesystem/observation-authority';
 
 const FIXED_NOW = new Date('2026-08-22T00:00:00.000Z');
 const DYNAMIC_REVISION = 'd'.repeat(64);
@@ -48,8 +51,12 @@ function freezeDeep<Value>(value: Value, seen = new WeakSet<object>()): Value {
   return Object.freeze(value);
 }
 
-function preparedFixture(name: 'read_file' | 'search_files' | 'search_content', args: object) {
-  const workspace = realpathSync(process.cwd());
+function preparedFixture(
+  name: 'read_file' | 'search_files' | 'search_content',
+  args: object,
+  workspaceInput = process.cwd(),
+) {
+  const workspace = realpathSync(workspaceInput);
   const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
   const projection = createBuiltinToolCatalogProjection(registry.snapshot(), {
     turnContext: { workspace },
@@ -319,6 +326,112 @@ function receipt(
 }
 
 describe('Builtin Workspace filesystem read dispatcher', () => {
+  test('reads all pages of a large file with current Provider and observation evidence', async () => {
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'kite-observation-pages-')));
+    try {
+      writeFileSync(join(workspace, 'sample.txt'), `${'x'.repeat(1023)}\n`.repeat(4096));
+      const runtime = runtimeFixture(workspace).runtime;
+      const fixtures = Array.from({ length: 64 }, (_, page) => {
+        const offset = page * 64 + 1;
+        return {
+          fixture: preparedFixture(
+            'read_file',
+            { path: 'sample.txt', offset, limit: 64 },
+            workspace,
+          ),
+          operation: {
+            kind: 'read_file' as const,
+            path: 'sample.txt',
+            pathScope: 'workspace_only' as const,
+            offset,
+            limit: 64,
+          },
+        };
+      });
+      let digest: string | undefined;
+      for (const { fixture, operation } of fixtures) {
+        const result = await createDispatcher(fixture, runtime, durableEvidence()).dispatch(
+          operation,
+        );
+        if (
+          !result.ok ||
+          result.observation.kind !== 'read_file' ||
+          !result.filesystemObservation
+        ) {
+          throw new Error('page missing');
+        }
+        digest ??= result.observation.contentDigest;
+        expect(result.observation.contentDigest).toBe(digest);
+        expect(result.filesystemObservation.contentDigest).toBe(digest);
+        expect(result.observation.content).toContain(`${operation.offset}|`);
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('reused read digest still rejects forged claims and target drift, and accepts changed bytes', async () => {
+    const fixture = preparedFixture('read_file', { path: 'README.md' });
+    const durable = durableEvidence();
+    const read = await createDispatcher(
+      fixture,
+      runtimeFixture(fixture.workspace).runtime,
+      durable,
+    ).dispatch({
+      kind: 'read_file',
+      path: 'README.md',
+      pathScope: 'workspace_only',
+    });
+    if (!read.ok || read.observation.kind !== 'read_file' || !read.filesystemObservation) {
+      throw new Error('authentic read missing');
+    }
+    const original = read.observation;
+    const base = {
+      prepared: fixture.prepared,
+      persisted: durable.last!,
+      providerObservation: original,
+      observation: read.filesystemObservation,
+    };
+    expect(issueBuiltinWorkspaceFilesystemReadObservation(base)).toBe(read.filesystemObservation);
+
+    const changedRaw = `${original.rawContent.slice(0, -1)}${original.rawContent.endsWith('X') ? 'Y' : 'X'}`;
+    const changedDigest = workspaceFilesystemStringDigest(changedRaw);
+    const changedProvider = freezeDeep({
+      ...original,
+      rawContent: changedRaw,
+      contentDigest: changedDigest,
+    });
+    const changedObservation = freezeDeep({
+      ...read.filesystemObservation,
+      contentDigest: changedDigest,
+    });
+    expect(
+      issueBuiltinWorkspaceFilesystemReadObservation({
+        ...base,
+        providerObservation: changedProvider,
+        observation: changedObservation,
+      }),
+    ).toBe(changedObservation);
+    expect(() =>
+      issueBuiltinWorkspaceFilesystemReadObservation({
+        ...base,
+        providerObservation: freezeDeep({
+          ...changedProvider,
+          contentDigest: original.contentDigest,
+        }),
+      }),
+    ).toThrow(/provider_evidence_mismatch/u);
+    expect(() =>
+      issueBuiltinWorkspaceFilesystemReadObservation({
+        ...base,
+        providerObservation: freezeDeep({
+          ...original,
+          target: { ...original.target, lexicalPath: 'another-file.md' },
+        }),
+      }),
+    ).toThrow(/provider_evidence_mismatch/u);
+  });
+
   test('persists exact raw-path intent before Provider and binds the cloned terminal', async () => {
     const fixture = preparedFixture('read_file', { path: './README.md' });
     const runtime = runtimeFixture(fixture.workspace);

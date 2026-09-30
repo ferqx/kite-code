@@ -19,6 +19,7 @@ import { initializeKiteHomeStoreSchema } from '../../src/kite-home-store';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
 import { createKiteSessionRecoveryBackup } from '../../src/kite-session-recovery-backup';
 import { openKiteSessionStoreDatabase } from '../../src/kite-session-runtime-file';
+import { KITE_SESSION_STORE_SCHEMA_VERSION } from '../../src/kite-session-store-format';
 import { KITE_SESSION_STORE11_DDL } from '../../src/kite-session-store11-conversion';
 
 describe('known-format recovery backup', () => {
@@ -131,7 +132,7 @@ describe('known-format recovery backup', () => {
 
       const result = createKiteSessionRecoveryBackup(sourcePath, recoveryParent);
       expect(existsSync(result.manifestPath)).toBe(true);
-      expect(result.manifest.capture.schemaVersion).toBe(15);
+      expect(result.manifest.capture.schemaVersion).toBe(KITE_SESSION_STORE_SCHEMA_VERSION);
       expect(result.manifest.source.mainSha256).toMatch(/^[a-f0-9]{64}$/u);
       expect(lstatSync(result.directory).mode & 0o077).toBe(0);
       expect(lstatSync(result.databasePath).mode & 0o077).toBe(0);

@@ -282,15 +282,12 @@ async function executeToolSearch(
   if (!input || typeof input.query !== 'string' || !facts) {
     return failedReceipt(request.invocationId, context, 'tool_search_invalid_input');
   }
-  const query = input.query.trim().slice(0, 512);
+  const query = input.query.trim();
   const limitValue = input.limit;
   if (
     query.length < 2 ||
     (limitValue !== undefined &&
-      (typeof limitValue !== 'number' ||
-        !Number.isSafeInteger(limitValue) ||
-        limitValue < 1 ||
-        limitValue > 12))
+      (typeof limitValue !== 'number' || !Number.isSafeInteger(limitValue) || limitValue < 1))
   ) {
     return failedReceipt(request.invocationId, context, 'tool_search_invalid_input');
   }
@@ -432,7 +429,7 @@ function failedReceipt(
 }
 
 function inventoryRedirect(query: string): RuntimeJsonValue | null {
-  const normalized = query.trim().slice(0, 512).toLocaleLowerCase();
+  const normalized = query.trim().toLocaleLowerCase();
   const containsMcp = /mcp/i.test(normalized);
   const chineseInventory =
     /(有哪些|有什么|列出|显示|查看|当前|可用).{0,10}(工具|服务|服务器|能力)/u.test(normalized) ||
@@ -475,8 +472,7 @@ function terms(value: string): string[] {
   return value
     .toLocaleLowerCase()
     .split(/[^\p{L}\p{N}_-]+/u)
-    .filter((term) => term.length > 1)
-    .slice(0, 32);
+    .filter((term) => term.length > 1);
 }
 
 function asRecord(

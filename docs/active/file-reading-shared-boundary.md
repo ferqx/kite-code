@@ -117,7 +117,7 @@ Local Provider 的所有文本观察共享同一 `decodeText` 核心（编码检
 
 | 入口                                | I/O            | 使用场景                                                              |
 | ----------------------------------- | -------------- | --------------------------------------------------------------------- |
-| `observe(read_file/search_content)` | Local Provider | 只在 observe grant 验证后读取并返回有界 observation                   |
+| `observe(read_file/search_content)` | Local Provider | 只在 observe grant 验证后读取完整 observation，或返回显式请求的行区间 |
 | `prepareMutation`                   | Local Provider | 零写入捕获目标 identity 与完整 preimage                               |
 | `commitMutation`                    | Local Provider | 重验 prepare identity/preimage 后使用同目录临时文件和 rename 原子发布 |
 
@@ -127,13 +127,13 @@ Local Provider 的所有文本观察共享同一 `decodeText` 核心（编码检
 Provider descriptor 读取字节 → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无BOM时) → normalizeEOL → 返回
 ```
 
-Local Provider 的搜索遍历使用同一 no-symlink-follow 目录身份规则，并设置 observation byte/match 上限；
+Local Provider 的搜索遍历使用同一 no-symlink-follow 目录身份规则，不设置文件观察字节数或匹配总数的默认额度；
 遍历目录、entry 与 content file 之间协作式让出 event loop，避免大型生产搜索独占 TUI/Runtime loop。
 `.gitignore` 语义过滤后，`search_files` 结果稳定排序；`.git` 不再被文件 Provider 硬跳过，模型传入的 search glob 保留既有 brace
 alternatives（例如 `*.{log,txt}`）。旧 async search 实现只保留为测试 oracle，生产 nonblocking 保证由
 Local Provider 自身提供。ancestor 与 local `.gitignore` 都在 sealed boundary 判定后以 `O_NOFOLLOW` 打开，
-绑定 regular-file identity，并采用 1 MiB 上限读取；symlink、identity 漂移、越界 canonical target 或超限
-metadata 都使搜索 fail closed。
+绑定 regular-file identity，并分块解码、逐行解析完整内容，不以旧 1 MiB 大小限制拒绝有效规则；
+symlink、identity 漂移或越界 canonical target 仍使搜索 fail closed。
 
 文件 path evaluator 仍复用 `canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，并保留
 lexical Workspace identity，但其授权语义按 operation 分开：read path evaluator 对有效路径 allow，Policy 对
@@ -207,21 +207,23 @@ repository hostile 检查与 capability routing，但不再依赖 Workspace `.gi
 `old_string` 未找到；多命中且未设置 `replace_all=true` 时返回模糊匹配错误；显式
 `replace_all=true` 才替换全部精确命中。宽松匹配不是 production fallback。
 
-### 工具输出截断（`packages/builtin-runtime/src/filesystem/projection.ts`）
+### 完整文件结果与 Shell 输出续读
 
-Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。
+`read_file` 省略 `limit` 时返回从 `offset` 起的全部剩余源行；显式 `limit` 只选择调用者请求的行区间。
+文件结果不再受默认 2000 行、64 KiB 字符或单行前缀裁剪约束，`search_content`、`search_files` 和
+mutation 结果也不再套用 Shell 的短预览投影。显式分页仍返回准确行号与下一行 offset，带尾随换行的文件
+不得把终止空字符串计为额外源行。
 
-`read_file` 同时应用源行分页与模型结果硬上限。模型省略 `limit` 时，`readFile()` 默认只选择
-2000 个源行；显式 `limit` 仍可请求更小或更大的行区间，但 `readFileSpec.projectResult()` 产生的
-完整模型可见字符串（包括截断 marker）不得超过 64 KiB 字符。投影优先保留完整行，并返回
-`continue with offset=N`，其中 `N` 必须是最后一个完整可见源行的下一行；模型可用该 offset
-继续读取。若单个源行本身超过 64 KiB，该行只暴露有界前缀，marker 必须明确 `line N clipped`
-以及现有 line offset 无法在行内无损续读，不能虚构 continuation offset。
+Provider observation 的 `rawContent` 保留换行正规化后的完整文件文本，供 Pipeline 生成 digest-only
+observation；这份 raw 副本不单独进入 RuntimeState 或 transcript。模型历史只接纳本次已经投影的工具结果，
+`rawResultDigest` 对本次行号化结果取摘要，不能用已选行区间推断整文件 freshness。
 
-截断只改变模型投影：Provider observation 的 `rawContent` 保留换行正规化后的完整文件文本，供
-Pipeline 生成 digest-only observation，但正文不得进入 RuntimeState 或 transcript。`resultMeta.truncated` 区分完整与部分投影，
-`rawResultDigest` 对截断前的本次行号化结果取摘要。带尾随换行的文件不得把终止空字符串计为
-额外源行，保证 `toLine` 与 continuation offset 不超过 `totalLines`。
+正常 Shell 的完整 stdout/stderr 由 Managed Shell owner 持续写入私有磁盘 spool，内存中的 head+tail
+capture 和 `shell_execute` 的 4000 字符投影仅作为终态预览。普通终态也返回准确 Shell 句柄，模型通过
+`shell_read` 的 cursor 分页读完完整输出；每页保留完整 UTF-8 字符，并按实际 JSON 编码长度适配通信边界，
+`moreOutput` 指示后续内容。只返回终态正文的 executor 按路补写，已收到流式输出的路不重复追加预览。
+分页与预览不限制累计输出量，也不把省略的中间内容伪装为完整结果。写入失败必须使执行失败，不能发布
+完整捕获承诺；临时 spool 与句柄由当前 Runtime 生命周期管理，宿主重启后不接管旧输出。
 
 ### rg exit code 1 ≠ error（`packages/builtin-runtime/src/catalog-contract.ts`、`packages/builtin-runtime/src/model/prompts/system-prompt-current.txt`）
 

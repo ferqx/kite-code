@@ -54,6 +54,7 @@ export const AGENT_API_CHECKPOINT_PREVIEW_SCHEMA = 'kite.agent-api.checkpoint-pr
 export const AGENT_API_HISTORY_ITEM_SCHEMA = 'kite.agent-api.history-item.v1' as const;
 export const AGENT_API_LOG_ITEM_SCHEMA = 'kite.agent-api.log-item.v1' as const;
 export const AGENT_API_MODEL_CONTEXT_SCHEMA = 'kite.agent-api.model-context.v1' as const;
+export const AGENT_API_MODEL_CONTEXT_PAGE_SCHEMA = 'kite.agent-api.model-context-page.v1' as const;
 export const AGENT_API_BACKGROUND_EXECUTION_SCHEMA =
   'kite.agent-api.background-execution.v1' as const;
 export const AGENT_API_EVENT_SCHEMA = 'kite.agent-api.event.v1' as const;
@@ -462,26 +463,26 @@ export type AgentApiLogItem = z.infer<typeof agentApiLogItemSchema>;
 const agentApiModelContextPartSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('text'),
-    text: boundedText(65_536),
+    text: z.string(),
     truncated: z.boolean(),
   }),
   z.object({
     type: z.literal('reasoning'),
-    text: boundedText(65_536),
+    text: z.string(),
     truncated: z.boolean(),
   }),
   z.object({
     type: z.literal('tool_call'),
     tool_call_id: agentApiIdentifierSchema,
     tool_name: agentApiShortTextSchema,
-    input_json: boundedText(32_768),
+    input_json: z.string(),
     truncated: z.boolean(),
   }),
   z.object({
     type: z.literal('tool_result'),
     tool_call_id: agentApiIdentifierSchema,
     tool_name: agentApiShortTextSchema,
-    output: boundedText(65_536),
+    output: z.string(),
     truncated: z.boolean(),
   }),
 ]);
@@ -489,13 +490,13 @@ const agentApiModelContextPartSchema = z.discriminatedUnion('type', [
 const agentApiModelContextMessageSchema = z.object({
   index: agentApiRevisionSchema,
   role: z.enum(['user', 'assistant', 'tool']),
-  parts: z.array(agentApiModelContextPartSchema).max(AGENT_API_LIMITS.maxArrayLength),
+  parts: z.array(agentApiModelContextPartSchema),
 });
 
 const agentApiModelContextToolSchema = z.object({
   name: agentApiShortTextSchema,
-  description: boundedText(4_096).optional(),
-  input_schema_json: boundedText(32_768),
+  description: z.string().optional(),
+  input_schema_json: z.string(),
   truncated: z.boolean(),
 });
 
@@ -510,12 +511,12 @@ export const agentApiModelContextSchema = z.object({
     name: agentApiShortTextSchema,
   }),
   system_prompt: z.object({
-    text: boundedText(AGENT_API_LIMITS.maxRunInputBytes),
+    text: z.string(),
     truncated: z.boolean(),
   }),
-  messages: z.array(agentApiModelContextMessageSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  messages: z.array(agentApiModelContextMessageSchema),
   messages_truncated: z.boolean(),
-  tools: z.array(agentApiModelContextToolSchema).max(AGENT_API_LIMITS.maxPageLimit),
+  tools: z.array(agentApiModelContextToolSchema),
   tools_truncated: z.boolean(),
   request_settings: z.object({
     transport: z.enum(['stream', 'generate']),
@@ -530,6 +531,65 @@ export const agentApiModelContextSchema = z.object({
   }),
 });
 export type AgentApiModelContext = z.infer<typeof agentApiModelContextSchema>;
+
+const completeModelContextPartSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string(), truncated: z.literal(false) }),
+  z.object({ type: z.literal('reasoning'), text: z.string(), truncated: z.literal(false) }),
+  z.object({
+    type: z.literal('tool_call'),
+    tool_call_id: agentApiIdentifierSchema,
+    tool_name: agentApiShortTextSchema,
+    input_json: z.string(),
+    truncated: z.literal(false),
+  }),
+  z.object({
+    type: z.literal('tool_result'),
+    tool_call_id: agentApiIdentifierSchema,
+    tool_name: agentApiShortTextSchema,
+    output: z.string(),
+    truncated: z.literal(false),
+  }),
+]);
+
+/** Complete safe projection assembled from bounded transport pages. */
+export const agentApiCompleteModelContextSchema = agentApiModelContextSchema.extend({
+  system_prompt: z.object({ text: z.string(), truncated: z.literal(false) }),
+  messages: z.array(
+    z.object({
+      index: agentApiRevisionSchema,
+      role: z.enum(['user', 'assistant', 'tool']),
+      parts: z.array(completeModelContextPartSchema),
+    }),
+  ),
+  messages_truncated: z.literal(false),
+  tools: z.array(
+    z.object({
+      name: agentApiShortTextSchema,
+      description: z.string().optional(),
+      input_schema_json: z.string(),
+      truncated: z.literal(false),
+    }),
+  ),
+  tools_truncated: z.literal(false),
+});
+export type AgentApiCompleteModelContext = z.infer<typeof agentApiCompleteModelContextSchema>;
+
+export const agentApiModelContextPageSchema = z.object({
+  schema: z.literal(AGENT_API_MODEL_CONTEXT_PAGE_SCHEMA),
+  session_id: agentApiIdentifierSchema,
+  invocation_id: agentApiIdentifierSchema,
+  sequence: agentApiPositiveRevisionSchema,
+  snapshot_id: agentApiIdentifierSchema,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  offset: agentApiRevisionSchema,
+  total_bytes: agentApiRevisionSchema,
+  payload_base64: z
+    .string()
+    .regex(/^[A-Za-z0-9+/]*={0,2}$/u)
+    .max(262_144),
+  next_cursor: agentApiOpaqueTokenSchema.optional(),
+});
+export type AgentApiModelContextPage = z.infer<typeof agentApiModelContextPageSchema>;
 
 export const agentApiBackgroundExecutionSchema = z.object({
   schema: z.literal(AGENT_API_BACKGROUND_EXECUTION_SCHEMA),
@@ -707,6 +767,7 @@ export const agentApiBackgroundExecutionPageSchema = z
     watermark: agentApiRevisionSchema,
     stale: z.boolean(),
     items: z.array(agentApiBackgroundExecutionSchema).max(AGENT_API_LIMITS.maxPageLimit),
+    next_cursor: agentApiOpaqueTokenSchema.optional(),
   })
   .superRefine((value, context) => {
     const identities = value.items.map((item) => item.execution_id);

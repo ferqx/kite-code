@@ -19,7 +19,10 @@ import {
   StateHostSessionHarness as AgentKernel,
   restoreStateHostSessionHarness as restoreStateKernelCoordinator,
 } from '../../../../scripts/support/runtime-host-state';
-import { openStateStoreForTest } from '../../../../scripts/support/runtime-storage';
+import {
+  openHomeStateStoreForTest,
+  openStateStoreForTest,
+} from '../../../../scripts/support/runtime-storage';
 import { createMockModel } from '../../../../tests/helpers/mock-model';
 import {
   runTestRuntimeAgent,
@@ -103,7 +106,7 @@ describe('bounded Runtime cancellation', () => {
 
   test('starts a successor with a fresh deadline after an expired cancelled run', async () => {
     const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-expired-deadline-'));
-    const storePath = join(workspace, 'runtime.db');
+    const storePath = join(workspace, 'kite.sqlite');
     const threadId = 'expired-run-deadline';
     try {
       const state = createRuntimeHostStateInitialState({
@@ -113,7 +116,7 @@ describe('bounded Runtime cancellation', () => {
         workspace,
       });
       const seed = new AgentKernel({
-        store: openStateStoreForTest(storePath),
+        store: openHomeStateStoreForTest(storePath, workspace),
         initialState: state,
         interactionMode: 'accept_edits',
       });
@@ -140,7 +143,7 @@ describe('bounded Runtime cancellation', () => {
           threadId,
           userId: 'test',
           workspace,
-          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openHomeStateStoreForTest(storePath, workspace),
           model: model as unknown as SupportedChatModel,
           config: {
             providerName: 'test',

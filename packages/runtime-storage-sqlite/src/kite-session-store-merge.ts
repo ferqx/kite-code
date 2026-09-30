@@ -1,8 +1,8 @@
 import type { Database } from 'bun:sqlite';
 import { inspectSqliteWorkspaceAuthorityMetadataKey } from './authority';
 import {
-  KITE_HISTORY_GENERATION_TRIGGER_NAMES,
-  KITE_HISTORY_GENERATION_TRIGGERS,
+  KITE_HISTORY_REVISION_TRIGGER_NAMES,
+  KITE_HISTORY_REVISION_TRIGGERS,
 } from './kite-history-generation';
 import {
   assertKiteSessionStoreSchema,
@@ -16,7 +16,7 @@ import {
 } from './kite-session-execution-authority';
 import { isCanonicalRecoveryIdentity, recoveryIdentityMetaKey } from './preflight';
 
-/** Explicit parent-first copy order for the complete Store 13 table set. */
+/** Explicit parent-first copy order for the complete Store 16 table set. */
 const TABLE_ORDER = [
   'kite_meta',
   'workspaces',
@@ -28,6 +28,7 @@ const TABLE_ORDER = [
   'runtime_file_preimages',
   'runtime_command_receipts',
   'runtime_runs',
+  'runtime_resource_reservation_receipts',
   'runtime_effect_leases',
   'model_artifacts',
   'plan_artifacts',
@@ -91,8 +92,8 @@ export function mergeKiteSessionStores10(input: {
       assertNoIdentityContradictions(target);
 
       // Bulk copy preserves the source's committed generation values. Suspend
-      // only the three verified built-in triggers inside this transaction.
-      for (const name of KITE_HISTORY_GENERATION_TRIGGER_NAMES) target.run(`DROP TRIGGER ${name}`);
+      // the verified built-in History triggers inside this transaction.
+      for (const name of KITE_HISTORY_REVISION_TRIGGER_NAMES) target.run(`DROP TRIGGER ${name}`);
 
       const insertedRows: Record<string, number> = {};
       let sharedWorkspaces = 0;
@@ -160,20 +161,34 @@ export function mergeKiteSessionStores10(input: {
             // A content rewrite followed by a revert leaves the same durable
             // rows with a higher cache invalidation generation. The generation
             // is not itself a Session fact; preserve the higher watermark.
-            const facts = columns.filter((column) => column !== 'history_generation');
+            const facts = columns.filter(
+              (column) =>
+                ![
+                  'history_generation',
+                  'history_rewrite_generation',
+                  'history_append_sequence',
+                  'history_instance_id',
+                ].includes(column),
+            );
             if (!sameRow(row, current, facts)) conflict();
             const generation = maxInteger(row.history_generation, current.history_generation);
-            if (generation !== current.history_generation)
-              target
-                .query('UPDATE runtime_sessions SET history_generation = ? WHERE session_id = ?')
-                .run(generation, row.session_id as string);
+            target
+              .query(
+                'UPDATE runtime_sessions SET history_generation = ?, history_rewrite_generation = ?, history_append_sequence = ? WHERE session_id = ?',
+              )
+              .run(
+                generation,
+                maxInteger(row.history_rewrite_generation, current.history_rewrite_generation),
+                maxInteger(row.history_append_sequence, current.history_append_sequence),
+                row.session_id as string,
+              );
           } else if (!sameRow(row, current, columns)) {
             conflict();
           }
         }
         insertedRows[table] = inserted;
       }
-      for (const sql of KITE_HISTORY_GENERATION_TRIGGERS) target.run(sql);
+      for (const sql of KITE_HISTORY_REVISION_TRIGGERS) target.run(sql);
       assertKiteSessionStoreSchema(target);
       assertKiteStoreIntegrity(target);
       assertNoLiveAuthority(target);
@@ -283,12 +298,12 @@ function rejectExtensions(database: Database): void {
     )
     .all();
   if (
-    persistent.length !== KITE_HISTORY_GENERATION_TRIGGER_NAMES.length ||
+    persistent.length !== KITE_HISTORY_REVISION_TRIGGER_NAMES.length ||
     persistent.some(
       (row) =>
         row.type !== 'trigger' ||
-        !KITE_HISTORY_GENERATION_TRIGGER_NAMES.includes(
-          row.name as (typeof KITE_HISTORY_GENERATION_TRIGGER_NAMES)[number],
+        !KITE_HISTORY_REVISION_TRIGGER_NAMES.includes(
+          row.name as (typeof KITE_HISTORY_REVISION_TRIGGER_NAMES)[number],
         ),
     )
   )

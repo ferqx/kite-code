@@ -479,7 +479,7 @@ describe('tool safety', () => {
     expect(result.totalLines).toBe(3);
   });
 
-  test('read_file defaults to a 2000-line page and continues from an explicit offset', async () => {
+  test('read_file reads the complete file by default and supports explicit line pages', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-default-page-'));
     try {
       const lines = Array.from({ length: DEFAULT_READ_FILE_LINE_LIMIT + 2 }, (_, index) => {
@@ -488,11 +488,22 @@ describe('tool safety', () => {
       writeFileSync(join(workspace, 'large.txt'), `${lines.join('\n')}\n`, 'utf8');
 
       const filesystem = builtinFilesystemFixture(workspace);
+      const complete = readObservation(
+        await filesystem.observe({
+          kind: 'read_file',
+          path: 'large.txt',
+          pathScope: 'workspace_only',
+        }),
+      );
+      expect(complete.fromLine).toBe(1);
+      expect(complete.toLine).toBe(lines.length);
+      expect(complete.content).toContain(`${lines.length}|line-${lines.length}`);
       const first = readObservation(
         await filesystem.observe({
           kind: 'read_file',
           path: 'large.txt',
           pathScope: 'workspace_only',
+          limit: DEFAULT_READ_FILE_LINE_LIMIT,
         }),
       );
       expect(first.fromLine).toBe(1);

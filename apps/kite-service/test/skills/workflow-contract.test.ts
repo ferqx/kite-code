@@ -313,7 +313,7 @@ describe('Skill Workflow Contract conformance', () => {
     });
   });
 
-  test('reference symlinks and scan budgets fail closed', () => {
+  test('reference symlinks fail closed while large skill files remain available', () => {
     if (process.platform !== 'win32') {
       const symlinkRoot = join(root, 'symlink-project');
       const symlinkSkill = writeSkill(symlinkRoot);
@@ -337,7 +337,18 @@ describe('Skill Workflow Contract conformance', () => {
       source: 'project',
       origin: '.kite-code',
     });
-    expect(oversizedResult.descriptor.availability).toBe('unavailable');
+    expect(oversizedResult.descriptor.availability).toBe('available');
+    expect(oversizedResult.diagnostics).toEqual([]);
+    const changed = Buffer.alloc(1024 * 1024 + 1);
+    changed[changed.length - 1] = 1;
+    writeFileSync(join(oversizedSkill, 'oversized.bin'), changed);
+    const changedResult = compileSkillWorkflow({
+      skillDir: oversizedSkill,
+      source: 'project',
+      origin: '.kite-code',
+    });
+    expect(changedResult.descriptor.availability).toBe('available');
+    expect(changedResult.descriptor.revision).not.toBe(oversizedResult.descriptor.revision);
   });
 
   test('instructions never expand the declared capability ceiling or retry budget', () => {

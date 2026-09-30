@@ -427,7 +427,8 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         turnId: state.turn.turnId,
         ignoreNonSafetyCeilings:
           state.resourceBudget.status === 'active' &&
-          state.resourceBudget.budget.durationOnlyChildRun === true,
+          (state.resourceBudget.budget.durationOnlyChildRun === true ||
+            state.resourceBudget.budget.unboundedCumulativeUsage === true),
       });
       const effect = suppliedEffect(payload, name, args);
       const presentation =

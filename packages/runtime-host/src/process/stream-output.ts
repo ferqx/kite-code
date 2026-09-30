@@ -1,12 +1,12 @@
-/** Maximum captured stdout/stderr retained while a shell process is running. */
+/** In-memory terminal preview; the managed Shell owner spools full progress. */
 export const SHELL_CAPTURE_MAX_CHARS = 256 * 1024;
 
 /** Maximum tail retained for one unterminated progress line. */
 export const SHELL_PROGRESS_LINE_MAX_CHARS = 16 * 1024;
 
 /**
- * Fixed-memory head+tail accumulator. The producer must still drain its input;
- * only the retained diagnostic projection is bounded.
+ * Fixed-memory head+tail terminal preview. The producer drains every chunk to
+ * the managed Shell output spool through its progress callback.
  */
 export class BoundedOutputBuffer {
   private readonly maxChars: number;

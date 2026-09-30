@@ -57,4 +57,4 @@ Runtime 需要持久 reservation/waiter、迁移、replay、fault 和 soak tests
 
 关联：D-11、Phase 1C
 
-2026-09-29 的[独立子 Run 执行时限决定](2026-09-29-independent-child-run-duration-only.md)已部分替代第 1–3 条对新独立子 Run 累计模型、token、turn、工具和 Artifact 份额的适用范围。本记录对父 Run 自身、其他有限执行、持久 reservation、并发许可、未知结果与准确终态仍适用；旧有限子 Run 仍按原持久上界恢复。
+2026-09-29 的[独立子 Run 执行时限决定](2026-09-29-independent-child-run-duration-only.md)已部分替代第 1–3 条对新独立子 Run 累计模型、token、turn、工具和 Artifact 份额的适用范围。2026-09-30 的[主 Run 累计额度移除决定](2026-09-30-run-cumulative-limits-removed.md)又替代了新主 Run 的固定累计额度和 `maxEffects` 终止上限。本记录对旧有限预算记录、持久 reservation、并发许可、未知结果与准确终态仍适用；活动旧主 Run 以显式事件升级，已完成历史 Run 和旧有限子 grant 按原证据回放。

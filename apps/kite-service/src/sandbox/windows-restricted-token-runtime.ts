@@ -11,7 +11,6 @@ import {
 } from '@kite-ai/builtin-runtime/sandbox';
 import {
   BoundedOutputBuffer,
-  BoundedProgressLineBuffer,
   readRuntimeHostProcessOutput as readWithProgress,
   spawnRuntimeHostProcess,
 } from '@kite-ai/runtime-host';
@@ -180,8 +179,6 @@ export async function executeWindowsRestrictedTokenPrepared(
     const stderrAccumulator = new BoundedOutputBuffer();
     const stdoutDecoder = new TextDecoder();
     const stderrDecoder = new TextDecoder();
-    const stdoutProgress = new BoundedProgressLineBuffer();
-    const stderrProgress = new BoundedProgressLineBuffer();
     const runnerStderr = readWithProgress(
       proc.stderr as ReadableStream<Uint8Array>,
       undefined,
@@ -233,7 +230,6 @@ export async function executeWindowsRestrictedTokenPrepared(
               'stdout',
               stdoutDecoder,
               stdoutAccumulator,
-              stdoutProgress,
             );
           } else if (frame.type === 'stderr') {
             onOutputFrame(
@@ -242,7 +238,6 @@ export async function executeWindowsRestrictedTokenPrepared(
               'stderr',
               stderrDecoder,
               stderrAccumulator,
-              stderrProgress,
             );
           } else if (frame.type === 'exit') {
             receipt = frame.receipt;
@@ -251,8 +246,8 @@ export async function executeWindowsRestrictedTokenPrepared(
           }
         }
       } finally {
-        flushOutputFrames(input, 'stdout', stdoutDecoder, stdoutAccumulator, stdoutProgress);
-        flushOutputFrames(input, 'stderr', stderrDecoder, stderrAccumulator, stderrProgress);
+        flushOutputFrames(input, 'stdout', stdoutDecoder, stdoutAccumulator);
+        flushOutputFrames(input, 'stderr', stderrDecoder, stderrAccumulator);
       }
       return receipt;
     })();
@@ -573,11 +568,10 @@ function onOutputFrame(
   stream: 'stdout' | 'stderr',
   decoder: TextDecoder,
   accumulator: BoundedOutputBuffer,
-  progress: BoundedProgressLineBuffer,
 ): void {
   const text = decoder.decode(bytes, { stream: true });
   accumulator.append(text);
-  if (input.onProgress) progress.push(text, (line) => input.onProgress?.(line, stream));
+  if (input.onProgress) input.onProgress(text, stream);
 }
 
 function flushOutputFrames(
@@ -585,14 +579,12 @@ function flushOutputFrames(
   stream: 'stdout' | 'stderr',
   decoder: TextDecoder,
   accumulator: BoundedOutputBuffer,
-  progress: BoundedProgressLineBuffer,
 ): void {
   const text = decoder.decode();
   if (text) {
     accumulator.append(text);
-    if (input.onProgress) progress.push(text, (line) => input.onProgress?.(line, stream));
+    if (input.onProgress) input.onProgress(text, stream);
   }
-  if (input.onProgress) progress.flush((line) => input.onProgress?.(line, stream));
 }
 
 async function sendCancelFrame(

@@ -498,6 +498,8 @@ export const RUNTIME_PROTOCOL_QUERY_SCHEMA_ = z.discriminatedUnion('type', [
       schema: z.literal('kite.runtime-query.v1'),
       type: z.literal('list_background_executions'),
       sessionId: identifier,
+      cursor: safeRevision.optional(),
+      limit: safeRevision.min(1).max(10_000).optional(),
     })
     .strict(),
   z
@@ -1325,6 +1327,7 @@ export const RUNTIME_QUERY_RESULT_SCHEMA_ = z.union([
     .object({
       status: z.literal('ok'),
       queryType: z.literal('list_background_executions'),
+      nextBackgroundCursor: safeRevision.optional(),
       backgroundSnapshot: z
         .object({
           sessionId: identifier,

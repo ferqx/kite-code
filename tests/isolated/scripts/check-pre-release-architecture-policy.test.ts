@@ -10,7 +10,7 @@ import {
 const storageSource = 'packages/runtime-storage-sqlite/src/';
 
 describe('pre-release architecture historical format policy', () => {
-  test('admits only exact Store 9–15 maintenance owners', () => {
+  test('admits only exact Store 9–16 maintenance owners', () => {
     for (const name of [
       'kite-session-store9-conversion.ts',
       'kite-session-store10-to11.ts',
@@ -19,6 +19,7 @@ describe('pre-release architecture historical format policy', () => {
       'kite-session-store12-to13.ts',
       'kite-session-store13-to14.ts',
       'kite-session-store14-to15.ts',
+      'kite-session-store15-to16.ts',
     ]) {
       const path = `${storageSource}${name}`;
       expect(ownsHistoricalStoreFormat(path)).toBe(true);
@@ -60,7 +61,7 @@ describe('pre-release architecture historical format policy', () => {
     expect(violatesVersionedProductionPath('apps/kite-service/src/runtime/store13-reader.ts')).toBe(
       true,
     );
-    expect(violatesVersionedProductionPath(`${storageSource}kite-session-store15-to16.ts`)).toBe(
+    expect(violatesVersionedProductionPath(`${storageSource}kite-session-store16-to17.ts`)).toBe(
       true,
     );
     expect(

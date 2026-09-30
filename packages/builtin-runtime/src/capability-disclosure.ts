@@ -20,7 +20,7 @@ export interface CapabilityDisclosureDecision {
   readonly mode: CapabilityDisclosureMode;
   readonly skillMode?: CapabilityDisclosureMode;
   readonly estimatedTokens: number;
-  readonly budgetTokens: number;
+  readonly budgetTokens?: number;
   readonly reason: string;
 }
 
@@ -54,7 +54,6 @@ const MODEL_HIDDEN_SCHEMA_ANNOTATIONS = new Set([
   'examples',
   'default',
 ]);
-const MAX_DIRECT_BIND_TOOL_COUNT = 20;
 
 export function modelVisibleCapabilitySchema(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(modelVisibleCapabilitySchema);
@@ -111,11 +110,10 @@ export function chooseCapabilityDisclosure(input: {
   const estimatedMcpTokens = estimateCapabilityCatalogTokens(mcpDescriptors);
   const estimatedSkillTokens = estimateCapabilityCatalogTokens(skillDescriptors);
   const estimatedTokens = estimatedMcpTokens + estimatedSkillTokens;
-  const budgetTokens =
-    input.budgetTokens ??
-    (input.contextWindowTokens
-      ? Math.min(8_192, Math.max(1_024, Math.floor(input.contextWindowTokens * 0.01)))
-      : 1_024);
+  // The catalog is only hidden when it cannot fit the known model window.
+  // Historical disclosure budgets remain accepted as input but do not narrow
+  // the capability surface of a new request.
+  const budgetTokens = input.contextWindowTokens;
   if (!input.featureEnabled) {
     return {
       mode: 'all',
@@ -133,12 +131,8 @@ export function chooseCapabilityDisclosure(input: {
     };
   }
   const mcpToolCount = mcpDescriptors.length;
-  if (
-    mcpToolCount > 0 &&
-    mcpToolCount <= MAX_DIRECT_BIND_TOOL_COUNT &&
-    estimatedMcpTokens <= budgetTokens
-  ) {
-    const remainingBudget = Math.max(0, budgetTokens - estimatedMcpTokens);
+  if (mcpToolCount > 0 && budgetTokens !== undefined && estimatedMcpTokens <= budgetTokens) {
+    const remainingBudget = budgetTokens - estimatedMcpTokens;
     const skillBehindSearch = skillDescriptors.length > 0 && estimatedSkillTokens > remainingBudget;
     return {
       mode: 'all',
@@ -146,23 +140,26 @@ export function chooseCapabilityDisclosure(input: {
       estimatedTokens,
       budgetTokens,
       reason: skillBehindSearch
-        ? `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; remaining budget ${remainingBudget} insufficient for ${skillDescriptors.length} Skill(s) — use tool_search for skills.`
-        : `${mcpToolCount} MCP tool(s) ≤ ${MAX_DIRECT_BIND_TOOL_COUNT} within token budget; direct binding avoids search latency.`,
+        ? `${mcpToolCount} MCP tool(s) fit the model context window; ${skillDescriptors.length} Skill(s) require tool_search.`
+        : `${mcpToolCount} MCP tool(s) fit the model context window.`,
     };
   }
-  if (estimatedTokens <= budgetTokens) {
+  if (budgetTokens === undefined || estimatedTokens <= budgetTokens) {
     return {
       mode: 'all',
       estimatedTokens,
       budgetTokens,
-      reason: 'The governed catalog fits inside the configured disclosure budget.',
+      reason:
+        budgetTokens === undefined
+          ? 'The model context window is unknown; expose the governed catalog.'
+          : 'The governed catalog fits inside the model context window.',
     };
   }
   return {
     mode: 'search',
     estimatedTokens,
     budgetTokens,
-    reason: 'The catalog exceeds the disclosure budget; expose metadata search only.',
+    reason: 'The catalog exceeds the known model context window; expose metadata search only.',
   };
 }
 
@@ -199,10 +196,10 @@ export function projectCapabilitySearchCandidates(input: {
   readonly query: string;
   readonly limit?: number;
 }): readonly BuiltinCapabilitySearchCandidate[] {
-  const query = input.query.trim().slice(0, 512);
+  const query = input.query.trim();
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
-  const limit = Math.max(1, Math.min(12, Math.floor(input.limit ?? 8)));
+  const limit = input.limit === undefined ? undefined : Math.max(0, Math.floor(input.limit));
   return Object.freeze(
     input.descriptors
       .map((descriptor) => {
@@ -264,10 +261,10 @@ export function projectUnavailableProviderSearch(input: {
   readonly query: string;
   readonly limit?: number;
 }): readonly BuiltinCapabilitySearchProviderDiagnostic[] {
-  const query = input.query.trim().slice(0, 512);
+  const query = input.query.trim();
   const queryTerms = terms(query);
   const phrase = query.toLocaleLowerCase();
-  const limit = Math.max(1, Math.min(4, Math.floor(input.limit ?? 4)));
+  const limit = input.limit === undefined ? undefined : Math.max(0, Math.floor(input.limit));
   return Object.freeze(
     input.entries
       .filter(
@@ -309,6 +306,5 @@ function terms(value: string): string[] {
   return value
     .toLocaleLowerCase()
     .split(/[^\p{L}\p{N}_-]+/u)
-    .filter((term) => term.length > 1)
-    .slice(0, 32);
+    .filter((term) => term.length > 1);
 }

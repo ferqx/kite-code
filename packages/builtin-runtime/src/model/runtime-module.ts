@@ -537,20 +537,16 @@ async function executeWebFetch(
         .filter(Boolean)
         .join('\n')
     : `Failed to fetch ${url}: ${output.error ?? 'unknown error'}`;
-  const modelContent = truncateProjectedOutput(
-    rawContent,
-    Math.max(8000, (maxChars ?? 8000) + 500),
-  );
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: output.ok,
-    stdout: output.ok ? modelContent : '',
-    stderr: output.ok ? '' : modelContent,
+    stdout: output.ok ? rawContent : '',
+    stderr: output.ok ? '' : rawContent,
     resultMeta: Object.freeze({
       ...(output.ok && !output.truncated
         ? { rawResultDigest: projectionDigest(rawContent, '', 0) }
         : {}),
-      truncated: modelContent !== rawContent || (output.ok && output.truncated),
+      truncated: output.ok && output.truncated,
       ...(boundary
         ? {
             networkPolicyRevision: boundary.policyRevision,
@@ -599,7 +595,7 @@ function executeListMcpResources(
         : `Unknown MCP server: ${server}`,
     );
   }
-  const projected = matching.slice(0, 100).map((resource) => ({
+  const projected = matching.map((resource) => ({
     server: stringValue(resource.providerId),
     uri: stringValue(resource.uri),
     name: stringValue(resource.name),
@@ -681,23 +677,10 @@ async function executeReadMcpResource(
     }
     return operationFailure(error instanceof Error ? error.message : String(error));
   }
-  const limit = 128 * 1024;
-  if (content.length <= limit) {
-    return operationSuccess(content, {
-      rawResultDigest: projectionDigest(content, '', 0),
-      truncated: false,
-    });
-  }
-  return operationSuccess(
-    JSON.stringify({
-      status: 'partial',
-      content: content.slice(0, limit),
-      truncated: true,
-      original_characters: content.length,
-      message: 'The MCP resource exceeded the model-facing output limit.',
-    }),
-    { rawResultDigest: projectionDigest(content, '', 0), truncated: true },
-  );
+  return operationSuccess(content, {
+    rawResultDigest: projectionDigest(content, '', 0),
+    truncated: false,
+  });
 }
 
 async function executeDynamicMcpTool(
@@ -778,19 +761,7 @@ async function executeDynamicMcpTool(
       };
     }
   }
-  const serialized = JSON.stringify(normalized);
-  const limit = 128 * 1024;
-  const output =
-    serialized.length <= limit
-      ? serialized
-      : JSON.stringify({
-          status: 'partial',
-          content: [{ type: 'text', text: serialized.slice(0, limit) }],
-          truncated: true,
-          original_characters: serialized.length,
-          message:
-            'The MCP result exceeded the model-facing output limit. The complete governed result remains available to Runtime execution records when applicable.',
-        });
+  const output = JSON.stringify(normalized);
   return Object.freeze({
     schema: 'kite.builtin-operation-result.v1',
     ok: raw.isError !== true,
@@ -798,7 +769,7 @@ async function executeDynamicMcpTool(
     stderr: '',
     resultMeta: Object.freeze({
       rawResultDigest: projectionDigest(JSON.stringify(raw), '', 0),
-      truncated: serialized.length > limit,
+      truncated: false,
     }),
     capabilityResult: normalized,
   }) as BuiltinOperationExecutionValue;
@@ -819,11 +790,11 @@ function buildMcpInventory(
   const requestedLimit = typeof query.limit === 'number' ? query.limit : undefined;
   if (
     requestedLimit !== undefined &&
-    (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100)
+    (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1)
   ) {
-    return { ok: false, code: 'invalid_limit', message: 'limit must be between 1 and 100.' };
+    return { ok: false, code: 'invalid_limit', message: 'limit must be a positive safe integer.' };
   }
-  const limit = requestedLimit ?? 50;
+  const limit = requestedLimit ?? descriptors.length;
   let offset = 0;
   if (typeof query.cursor === 'string') {
     const cursor = decodeInventoryCursor(query.cursor);
@@ -963,7 +934,6 @@ function decodeInventoryCursor(raw: string):
     }>
   | undefined {
   try {
-    if (raw.length > 2048) return undefined;
     const parsed = asRecord(JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')));
     if (
       !parsed ||
@@ -1117,7 +1087,7 @@ function skillEmissionValue(emission: SkillLifecycleEmission): BuiltinOperationE
   }) as BuiltinOperationExecutionValue;
 }
 
-function safeMetadata(value: string, maximum = 96): string {
+function safeMetadata(value: string, maximum?: number): string {
   return Array.from(
     Array.from(value, (character) => {
       const codePoint = character.codePointAt(0) ?? 0;
@@ -1129,7 +1099,7 @@ function safeMetadata(value: string, maximum = 96): string {
       .replace(/\s+/gu, ' ')
       .trim(),
   )
-    .slice(0, Math.max(0, maximum))
+    .slice(0, maximum === undefined ? undefined : Math.max(0, maximum))
     .join('');
 }
 
@@ -1154,15 +1124,6 @@ function stringValue(value: unknown): string {
 
 function optionalIntegerValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
-}
-
-function truncateProjectedOutput(output: string, maxLength: number): string {
-  if (output.length <= maxLength) return output;
-  const keep = Math.floor(maxLength / 2);
-  const head = output.slice(0, keep);
-  const tail = output.slice(-keep);
-  const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
-  return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
 }
 
 function networkFailureCode(error: unknown): string | undefined {

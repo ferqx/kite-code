@@ -17,9 +17,9 @@ Browser cookie两种只读principal；default stdio App Server不开放HTTP。Ru
 | `GET /v1/sessions` | 仅Agent bearer的Workspace-scoped Session page；Browser固定404 |
 | `GET /v1/sessions/{session_id}` | closed Session projection与ETag；Browser先验证Directory membership |
 | `GET /v1/sessions/{session_id}/history` | 固定through boundary的safe History；可用互斥的`after_sequence`做增量读取 |
-| `GET /v1/sessions/{session_id}/background-executions` | 当前Session的closed后台执行快照；不暴露private Runtime DTO |
+| `GET /v1/sessions/{session_id}/background-executions` | 当前Session的closed后台执行分页快照；支持`limit`和`cursor`，不暴露private Runtime DTO |
 | `GET /v1/sessions/{session_id}/logs` | 固定through boundary的safe durable diagnostic Log；只投影closed event type/category/status/summary/detail fields |
-| `GET /v1/sessions/{session_id}/model-invocations/{invocation_id}/context` | Browser-only、bounded Model Context；返回exact provider-neutral system/messages/tools与safe settings |
+| `GET /v1/sessions/{session_id}/model-invocations/{invocation_id}/context` | Browser-only Model Context分块页；`cursor`读取同一安全快照的后续片段，由canonical Client校验并组装完整system/messages/tools与safe settings |
 | `GET /v1/sessions/{session_id}/checkpoints` | safe Checkpoint metadata page |
 | `GET /v1/sessions/{session_id}/checkpoints/{checkpoint_id}/preview` | 只返回变更/冲突/行数计数，不返回path |
 | 其他`/v1/**` | 固定404 Problem；不存在隐藏mutation、SSE或501 partial route |
@@ -61,12 +61,14 @@ detail只允许Runtime log projector的固定kind、标量fields与artifact avai
 Checkpoint cursor按revision/id续页，preview不投影path。
 
 后台执行快照通过Public Agent API codec编码；字段限制为execution identity、Session CAS、aggregate/owner generation、execution revision、kind、status、cleanup、可选cursor及watermark。Service不手写旁路wire，Web也不持有私有decoder。
+默认每页50项，`limit`最多200项；响应的`next_cursor`绑定Session ID、组合目录generation、watermark、
+Session revision和下一页偏移。目录在两页间变化时续页返回409 `cursor_invalidated`，调用者从第一页重读；
+不会把不同版本拼成一次完整快照。Public响应和内部Runtime Protocol响应各自保留1 MiB单帧安全上限，
+历史终态可继续分页读取，旧执行ID仍可经内部详情查询定位。
 
 `model.invocation_prepared` Log只公开opaque invocation identity与purpose。Model Context route先要求Browser Directory membership，再从同一Session的
 prepared event取得private Surface ref，通过Builtin `ModelArtifactStore`完成schema/integrity readback，并交叉验证ref integrity、route fingerprint与purpose。
-响应只投影system prompt、canonical messages、tool declarations和transport/token settings；messages/tools/system各自限界并报告truncated，且整个响应
-继续受1 MiB上限。Artifact ID/integrity、Provider options/response、endpoint与Credential固定不进入Public DTO。Agent bearer调用该Browser-only route
-统一404。
+响应只投影system prompt、canonical messages、tool declarations和transport/token settings。完整投影一次写入懒创建的0700私有目录和0600临时快照；单页96 KiB原始字节以base64编码，继续受1 MiB响应安全上限。后续页只读快照片段，cursor绑定只读facade owner、Session、invocation、快照身份和偏移；每页先核对当前Directory可见性，客户端核对页身份、offset、总长度和完整SHA-256。Agent API handler关闭时只清自己的快照，闲置快照自动回收；文件回收失败不会阻止重新读取源数据。Artifact ID/integrity、私有路径、Provider options/response、endpoint与Credential不进入Public DTO。Agent bearer调用该Browser-only route统一404。
 
 ## 验证
 

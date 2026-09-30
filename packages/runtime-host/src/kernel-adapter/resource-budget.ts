@@ -21,6 +21,11 @@ export type ConcurrencyWaiter = ResourceWaiter;
 export type ActiveResourceBudgetRuntimeState = AgentResourceBudgetActiveState;
 export type ResourceBudgetRuntimeState = AgentResourceBudgetState;
 
+/** Cumulative usage is observational for current Runs; legacy bounded Runs retain their limits. */
+export function hasUnboundedCumulativeUsage(budget: ResourceBudget): boolean {
+  return budget.unboundedCumulativeUsage === true || budget.durationOnlyChildRun === true;
+}
+
 /** Resolve a funding ledger from persisted Kernel State, never from the current Run by assumption. */
 export function fundingBudgetForRun(
   state: AgentState,
@@ -71,6 +76,7 @@ export function assertChildBudgetWithinDelegation(input: {
   const durationOnly = upper.durationOnlyChildRun === true;
   if (
     reservation.resourceKind !== 'subagent' ||
+    childBudget.unboundedCumulativeUsage === true ||
     (independentTurn &&
       (!reservation.reservationId.startsWith('child-allotment:') ||
         reservation.invocationId !== reservation.reservationId)) ||
@@ -117,6 +123,8 @@ type MutableResourceUsage = {
 
 type ResourceBudgetEventOf<T extends KernelEvent['type']> = Extract<KernelEvent, { type: T }>;
 export type ResourceBudgetConfiguredEvent = ResourceBudgetEventOf<'resource_budget.configured'>;
+export type ResourceBudgetCumulativeLimitsRemovedEvent =
+  ResourceBudgetEventOf<'resource_budget.cumulative_limits_removed'>;
 export type ResourceBudgetRequiredChildWaitStartedEvent =
   ResourceBudgetEventOf<'resource_budget.required_child_wait_started'>;
 export type ResourceBudgetRequiredChildWaitEndedEvent =
@@ -141,6 +149,7 @@ export type ResourceBudgetWaiterTimedOutEvent =
   ResourceBudgetEventOf<'resource_budget.waiter_timed_out'>;
 export type ResourceBudgetEvent =
   | ResourceBudgetConfiguredEvent
+  | ResourceBudgetCumulativeLimitsRemovedEvent
   | ResourceBudgetRequiredChildWaitStartedEvent
   | ResourceBudgetRequiredChildWaitEndedEvent
   | ResourceBudgetReservedEvent
@@ -169,6 +178,18 @@ export const LIMITED_RESOURCE_BUDGET_: Readonly<ResourceBudget> = Object.freeze(
   maxConcurrentShellInvocations: 250,
   maxConcurrencyWaitMs: 15_000,
   maxArtifactBytes: 256 * 1024 * 1024,
+});
+
+/** New primary Runs keep only execution time and concurrency admission ceilings. */
+export const UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_: Readonly<ResourceBudget> = Object.freeze({
+  ...LIMITED_RESOURCE_BUDGET_,
+  unboundedCumulativeUsage: true,
+  maxTurns: 0,
+  maxModelRequests: 0,
+  maxToolInvocations: 0,
+  maxRunInputTokens: 0,
+  maxRunOutputTokens: 0,
+  maxArtifactBytes: 0,
 });
 
 export const INTERNAL_RESOURCE_BUDGET_: Readonly<ResourceBudget> = Object.freeze({
@@ -244,7 +265,7 @@ function exactTaskIds(value: readonly string[], expected?: readonly string[]): b
 export function assertResourceBudget(value: ResourceBudget): void {
   if (value.version !== 1) throw new Error(`Unsupported ResourceBudget version.`);
   const zeroAllowed = new Set<keyof ResourceBudget>([
-    ...(value.durationOnlyChildRun === true
+    ...(hasUnboundedCumulativeUsage(value)
       ? ([
           'maxTurns',
           'maxModelRequests',
@@ -282,6 +303,8 @@ export function assertResourceBudget(value: ResourceBudget): void {
       ].some((field) => (value as unknown as Record<string, number>)[field] !== 0))
   )
     throw new Error('Duration-only child budget requires zero cumulative placeholders.');
+  if (value.unboundedCumulativeUsage !== undefined && value.unboundedCumulativeUsage !== true)
+    throw new Error('Unbounded cumulative budget marker must be true.');
   if (value.maxConcurrentShellInvocations > value.maxConcurrentToolInvocations)
     throw new Error('Shell concurrency must not exceed tool concurrency.');
   if (value.maxConcurrentWriters > value.maxConcurrentToolInvocations)
@@ -362,6 +385,8 @@ export function tightenResourceBudget(
   }
   if (tightening.unboundedToolInvocations === true && base.unboundedToolInvocations !== true)
     throw new Error('Unbounded Tool authority cannot be added by tightening.');
+  if (tightening.unboundedCumulativeUsage === true && base.unboundedCumulativeUsage !== true)
+    throw new Error('Unbounded cumulative authority cannot be added by tightening.');
   const result = { ...base, ...tightening, version: 1 as const };
   assertResourceBudget(result);
   return result;
@@ -424,17 +449,17 @@ function withinBudget(
     Number.isSafeInteger(delegatedToolInvocations) &&
     delegatedToolInvocations >= 0 &&
     delegatedToolInvocations <= usage.counters.toolInvocations &&
-    (budget.durationOnlyChildRun === true || usage.counters.turns <= budget.maxTurns) &&
-    (budget.durationOnlyChildRun === true ||
+    (hasUnboundedCumulativeUsage(budget) || usage.counters.turns <= budget.maxTurns) &&
+    (hasUnboundedCumulativeUsage(budget) ||
       usage.counters.modelRequests <= budget.maxModelRequests) &&
-    (budget.durationOnlyChildRun === true ||
+    (hasUnboundedCumulativeUsage(budget) ||
       budget.unboundedToolInvocations === true ||
       usage.counters.toolInvocations - delegatedToolInvocations <= budget.maxToolInvocations) &&
-    (budget.durationOnlyChildRun === true ||
+    (hasUnboundedCumulativeUsage(budget) ||
       usage.counters.inputTokens <= budget.maxRunInputTokens) &&
-    (budget.durationOnlyChildRun === true ||
+    (hasUnboundedCumulativeUsage(budget) ||
       usage.counters.outputTokens <= budget.maxRunOutputTokens) &&
-    (budget.durationOnlyChildRun === true ||
+    (hasUnboundedCumulativeUsage(budget) ||
       usage.counters.artifactBytes <= budget.maxArtifactBytes) &&
     usage.gauges.elapsedRunMs <= budget.maxRunDurationMs &&
     usage.gauges.activeSubagents <= budget.maxConcurrentSubagents &&
@@ -574,6 +599,66 @@ function replaceReservation(
   };
 }
 
+function settleReservation(
+  state: ActiveResourceBudgetRuntimeState,
+  reservation: BudgetReservation,
+): ActiveResourceBudgetRuntimeState {
+  if (state.externalizedClosedReservations !== true) return replaceReservation(state, reservation);
+  const { [reservation.reservationId]: _settled, ...reservations } = state.reservations;
+  return { ...state, reservations };
+}
+
+function activeReservationsAfterExternalization(
+  reservations: Readonly<Record<string, BudgetReservation>>,
+): Readonly<Record<string, BudgetReservation>> {
+  return Object.fromEntries(
+    Object.entries(reservations).filter(
+      ([, reservation]) => reservation.state !== 'reconciled' && reservation.state !== 'released',
+    ),
+  );
+}
+
+/** Lift only this Run's direct, unsettled cumulative reservations during upgrade. */
+function removeCumulativeReservationUpperBounds(
+  reservations: Readonly<Record<string, BudgetReservation>>,
+): Readonly<Record<string, BudgetReservation>> {
+  return Object.fromEntries(
+    Object.entries(reservations).map(([id, reservation]) => {
+      if (
+        reservation.parentReservationId !== undefined ||
+        !['reserved', 'dispatch_started', 'unknown'].includes(reservation.state)
+      )
+        return [id, reservation];
+      const upper = reservation.executableUpperBound;
+      if (['tool', 'mcp', 'skill'].includes(reservation.resourceKind))
+        return [
+          id,
+          {
+            ...reservation,
+            executableUpperBound: {
+              ...upper,
+              counters: { ...upper.counters, artifactBytes: 0 },
+              unboundedArtifactBytes: true as const,
+            },
+          },
+        ];
+      if (['model', 'compaction', 'verification'].includes(reservation.resourceKind))
+        return [
+          id,
+          {
+            ...reservation,
+            executableUpperBound: {
+              ...upper,
+              counters: { ...upper.counters, inputTokens: 0, outputTokens: 0 },
+              unboundedModelTokens: true as const,
+            },
+          },
+        ];
+      return [id, reservation];
+    }),
+  );
+}
+
 export function reduceResourceBudgetState(
   state: ResourceBudgetRuntimeState,
   event: ResourceBudgetEvent,
@@ -604,6 +689,9 @@ export function reduceResourceBudgetState(
       deadlineAt: event.deadlineAt,
       budget: event.budget,
       reconciledUsage: createZeroResourceUsage(),
+      ...(hasUnboundedCumulativeUsage(event.budget)
+        ? { externalizedClosedReservations: true as const }
+        : {}),
       reservations: {},
       waiters: {},
       nextWaiterSequence: 0,
@@ -611,6 +699,19 @@ export function reduceResourceBudgetState(
   }
 
   const active = activeState(state);
+  if (event.type === 'resource_budget.cumulative_limits_removed') {
+    if (event.runId !== active.runId)
+      throw new Error('Cumulative limit removal Run identity mismatch.');
+    if (active.budget.unboundedCumulativeUsage === true) return active;
+    return {
+      ...active,
+      budget: { ...active.budget, unboundedCumulativeUsage: true },
+      externalizedClosedReservations: true,
+      reservations: activeReservationsAfterExternalization(
+        removeCumulativeReservationUpperBounds(active.reservations),
+      ),
+    };
+  }
   if (event.type === 'resource_budget.required_child_wait_started') {
     if (event.runId !== active.runId || !exactTaskIds(event.taskIds))
       throw new Error('Required child wait identity is invalid.');
@@ -722,20 +823,24 @@ export function reduceResourceBudgetState(
     assertReservation(candidate);
     if (
       candidate.executableUpperBound.unboundedArtifactBytes === true &&
-      active.budget.durationOnlyChildRun !== true
+      !hasUnboundedCumulativeUsage(active.budget)
     )
-      throw new Error('Unbounded Artifact authority requires a duration-only child Run.');
+      throw new Error('Unbounded Artifact authority requires an unbounded cumulative Run.');
     if (
       candidate.executableUpperBound.unboundedModelTokens === true &&
-      active.budget.durationOnlyChildRun !== true
+      !hasUnboundedCumulativeUsage(active.budget)
     )
-      throw new Error('Unbounded model tokens require a duration-only child Run.');
+      throw new Error('Unbounded model tokens require an unbounded cumulative Run.');
     if (candidate.replacesReservationId)
       throw new Error('Bounded replacements require the atomic replacement event.');
     if (candidate.state !== 'reserved' && candidate.state !== 'queued')
       throw new Error('A new reservation must be reserved or queued.');
     if (candidate.runId !== active.runId) throw new Error('Reservation runId mismatch.');
-    if (candidate.parentReservationId && !active.reservations[candidate.parentReservationId])
+    if (
+      candidate.parentReservationId &&
+      !active.reservations[candidate.parentReservationId] &&
+      !active.externalizedClosedReservations
+    )
       throw new Error('Parent reservation must exist in the shared ledger.');
     const existing = active.reservations[candidate.reservationId];
     if (existing) {
@@ -851,11 +956,14 @@ export function reduceResourceBudgetState(
       )
     )
       throw new Error('Bounded replacement exceeds the held upper bound.');
+    const { [event.reservationId]: _archivedHeld, ...otherReservations } = active.reservations;
     const next = {
       ...active,
       reservations: {
-        ...active.reservations,
-        [event.reservationId]: { ...held, state: 'released' as const },
+        ...(active.externalizedClosedReservations ? otherReservations : active.reservations),
+        ...(active.externalizedClosedReservations
+          ? {}
+          : { [event.reservationId]: { ...held, state: 'released' as const } }),
         [turnReservation.reservationId]: turnReservation,
         [replacement.reservationId]: replacement,
       },
@@ -896,7 +1004,7 @@ export function reduceResourceBudgetState(
       if (reservation.state !== 'dispatch_started' && reservation.state !== 'unknown')
         throw new Error(`Cannot reconcile a ${reservation.state} reservation.`);
       const next = {
-        ...replaceReservation(active, {
+        ...settleReservation(active, {
           ...reservation,
           actual: event.actual,
           state: 'reconciled',
@@ -916,7 +1024,7 @@ export function reduceResourceBudgetState(
       ) {
         throw new Error('Only a proven undispatched reservation can be released.');
       }
-      return replaceReservation(active, { ...reservation, state: 'released' });
+      return settleReservation(active, { ...reservation, state: 'released' });
     case 'resource_budget.unknown':
       if (reservation.state === 'unknown') return active;
       if (reservation.state !== 'dispatch_started' && reservation.state !== 'reserved')
@@ -928,6 +1036,11 @@ export function reduceResourceBudgetState(
 export function assertResourceBudgetRuntimeState(state: ResourceBudgetRuntimeState): void {
   if (state.status === 'unconfigured') return;
   assertResourceBudget(state.budget);
+  if (
+    state.externalizedClosedReservations !== undefined &&
+    (state.externalizedClosedReservations !== true || !hasUnboundedCumulativeUsage(state.budget))
+  )
+    throw new Error('Externalized reservation receipts require an unbounded Run.');
   nonEmpty(state.runId, 'runId');
   const totalWait = state.totalRequiredChildWaitMs ?? 0;
   if (
@@ -952,8 +1065,17 @@ export function assertResourceBudgetRuntimeState(state: ResourceBudgetRuntimeSta
   let delegatedToolInvocations = 0;
   for (const reservation of Object.values(state.reservations)) {
     assertReservation(reservation);
+    if (
+      state.externalizedClosedReservations === true &&
+      (reservation.state === 'reconciled' || reservation.state === 'released')
+    )
+      throw new Error('Externalized reservation ledger retains a terminal receipt.');
     if (reservation.runId !== state.runId) throw new Error('Reservation belongs to another run.');
-    if (reservation.parentReservationId && !state.reservations[reservation.parentReservationId])
+    if (
+      reservation.parentReservationId &&
+      !state.reservations[reservation.parentReservationId] &&
+      state.externalizedClosedReservations !== true
+    )
       throw new Error('Reservation parent is absent from the shared ledger.');
     if (
       reservation.state === 'reconciled' &&

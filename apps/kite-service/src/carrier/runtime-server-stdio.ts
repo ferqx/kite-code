@@ -1,3 +1,15 @@
+import { randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  ftruncateSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   type ExactJsonCodec,
   executionStatusRequestCodec,
@@ -55,20 +67,13 @@ import type {
 } from '@kite-ai/runtime-server';
 import { WorkspaceRemovalError } from '../app-control/workspace-removal-error';
 import type { KiteHistoryPageClient } from '../runtime-client/history-page-pool';
+import { createRuntimeOutboundSpool } from './runtime-outbound-spool';
 
 const DEFAULT_DRAIN_DEADLINE_MS = 5_000;
-const MAX_PENDING_HISTORY_READS = 256;
-const MAX_PENDING_APP_READS = 64;
-const MAX_QUEUED_HISTORY_READ_BYTES = 3 * 1024 * 1024;
-const MAX_QUEUED_APP_READ_BYTES = 1024 * 1024;
 const MAX_ACTIVE_HISTORY_READS = 48;
 const MAX_ACTIVE_APP_READS = 16;
 const MAX_GLOBAL_HISTORY_READS = 8;
-const MAX_GLOBAL_HISTORY_PENDING = 1024;
-const MAX_GLOBAL_HISTORY_PENDING_BYTES = 12 * 1024 * 1024;
 const MAX_GLOBAL_APP_READS = 16;
-const MAX_GLOBAL_APP_PENDING = 256;
-const MAX_GLOBAL_APP_PENDING_BYTES = 4 * 1024 * 1024;
 const MAX_HISTORY_READ_MS = 10_000;
 const MAX_QUEUED_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_QUEUED_OUTPUT_FRAMES = 2048;
@@ -78,15 +83,111 @@ const MAX_GLOBAL_QUEUED_OUTPUT_FRAMES = 8192;
 type CarrierReadKind = 'history' | 'app';
 
 type QueuedCarrierRead = Readonly<{
-  bytes: number;
-  kind: CarrierReadKind;
   run: () => Promise<unknown>;
   cancel: () => void;
   expire: () => void;
 }>;
 
-// A daemon shares one History client among its socket carriers. Keep the
-// aggregate queue bounded and choose one request per connection per turn.
+/** Queue payloads on disk so parsed read arguments do not accumulate in RAM. */
+class ReadRequestSpool {
+  readonly #directory: string;
+  readonly #segments = new Map<string, { fd?: number; size: number; refs: number }>();
+  #current: string | undefined;
+
+  constructor() {
+    this.#directory = mkdtempSync(join(tmpdir(), 'kite-carrier-reads-'));
+  }
+
+  append(frame: Uint8Array): { path: string; offset: number; length: number } {
+    let path = this.#current;
+    let segment = path ? this.#segments.get(path) : undefined;
+    if (!path || !segment || segment.size + frame.byteLength > 16 * 1024 * 1024) {
+      if (segment?.fd !== undefined) {
+        closeSync(segment.fd);
+        segment.fd = undefined;
+        if (segment.refs === 0) {
+          this.#segments.delete(path!);
+          rmSync(path!, { force: true });
+        }
+      }
+      path = join(this.#directory, randomUUID());
+      segment = { fd: openSync(path, 'wx+', 0o600), size: 0, refs: 0 };
+      this.#segments.set(path, segment);
+      this.#current = path;
+    }
+    const offset = segment.size;
+    let written = 0;
+    while (written < frame.byteLength) {
+      const count = writeSync(
+        segment.fd!,
+        frame,
+        written,
+        frame.byteLength - written,
+        offset + written,
+      );
+      if (count <= 0) throw new Error('Carrier read spool write failed.');
+      written += count;
+    }
+    segment.size += written;
+    segment.refs++;
+    return { path, offset, length: written };
+  }
+
+  readBytes(location: { path: string; offset: number; length: number }): Buffer {
+    const segment = this.#segments.get(location.path);
+    if (!segment) throw new Error('Carrier read spool segment is unavailable.');
+    const frame = Buffer.allocUnsafe(location.length);
+    const borrowed = segment.fd !== undefined;
+    const fd = segment.fd ?? openSync(location.path, 'r');
+    try {
+      let received = 0;
+      while (received < frame.byteLength) {
+        const count = readSync(
+          fd,
+          frame,
+          received,
+          frame.byteLength - received,
+          location.offset + received,
+        );
+        if (count <= 0) throw new Error('Carrier read spool is incomplete.');
+        received += count;
+      }
+    } finally {
+      if (!borrowed) closeSync(fd);
+      this.remove(location);
+    }
+    return frame;
+  }
+
+  read(location: { path: string; offset: number; length: number }): unknown {
+    return JSON.parse(this.readBytes(location).toString('utf8')) as unknown;
+  }
+
+  remove(location: { path: string }): void {
+    const segment = this.#segments.get(location.path);
+    if (!segment) return;
+    segment.refs--;
+    if (segment.refs > 0) return;
+    if (location.path === this.#current) {
+      ftruncateSync(segment.fd!, 0);
+      segment.size = 0;
+      return;
+    }
+    this.#segments.delete(location.path);
+    rmSync(location.path, { force: true });
+  }
+
+  close(): void {
+    for (const segment of this.#segments.values()) {
+      if (segment.fd !== undefined) closeSync(segment.fd);
+    }
+    this.#segments.clear();
+    rmSync(this.#directory, { recursive: true, force: true });
+  }
+}
+
+// A daemon shares one History client among its socket carriers. Choose one
+// queued request per connection per turn; pending reads expire after 10 s.
 const HISTORY_READ_SCHEDULERS = new WeakMap<RuntimeHistoryClient, FairReadScheduler>();
 const APP_READ_SCHEDULERS = new WeakMap<RuntimeServer, FairReadScheduler>();
 const OUTPUT_BUDGETS = new WeakMap<RuntimeServer, OutputBudget>();
@@ -94,13 +195,17 @@ const OUTPUT_BUDGETS = new WeakMap<RuntimeServer, OutputBudget>();
 class OutputBudget {
   #bytes = 0;
   #frames = 0;
+  readonly #waiters = new Set<() => void>();
+
+  canReserve(bytes: number): boolean {
+    return (
+      this.#bytes + bytes <= MAX_GLOBAL_QUEUED_OUTPUT_BYTES &&
+      this.#frames < MAX_GLOBAL_QUEUED_OUTPUT_FRAMES
+    );
+  }
 
   reserve(bytes: number): boolean {
-    if (
-      this.#bytes + bytes > MAX_GLOBAL_QUEUED_OUTPUT_BYTES ||
-      this.#frames >= MAX_GLOBAL_QUEUED_OUTPUT_FRAMES
-    )
-      return false;
+    if (!this.canReserve(bytes)) return false;
     this.#bytes += bytes;
     this.#frames++;
     return true;
@@ -109,6 +214,17 @@ class OutputBudget {
   release(bytes: number): void {
     this.#bytes -= bytes;
     this.#frames--;
+    for (const wake of this.#waiters) wake();
+    this.#waiters.clear();
+  }
+
+  wait(): { promise: Promise<void>; cancel: () => void } {
+    let wake!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    this.#waiters.add(wake);
+    return { promise, cancel: () => this.#waiters.delete(wake) };
   }
 }
 
@@ -124,12 +240,7 @@ function outputBudget(server: RuntimeServer): OutputBudget {
 function historyReadScheduler(history: RuntimeHistoryClient): FairReadScheduler {
   let scheduler = HISTORY_READ_SCHEDULERS.get(history);
   if (!scheduler) {
-    scheduler = new FairReadScheduler(
-      MAX_GLOBAL_HISTORY_READS,
-      MAX_GLOBAL_HISTORY_PENDING,
-      MAX_GLOBAL_HISTORY_PENDING_BYTES,
-      true,
-    );
+    scheduler = new FairReadScheduler(MAX_GLOBAL_HISTORY_READS, true);
     HISTORY_READ_SCHEDULERS.set(history, scheduler);
   }
   return scheduler;
@@ -138,12 +249,7 @@ function historyReadScheduler(history: RuntimeHistoryClient): FairReadScheduler 
 function appReadScheduler(server: RuntimeServer): FairReadScheduler {
   let scheduler = APP_READ_SCHEDULERS.get(server);
   if (!scheduler) {
-    scheduler = new FairReadScheduler(
-      MAX_GLOBAL_APP_READS,
-      MAX_GLOBAL_APP_PENDING,
-      MAX_GLOBAL_APP_PENDING_BYTES,
-      false,
-    );
+    scheduler = new FairReadScheduler(MAX_GLOBAL_APP_READS, false);
     APP_READ_SCHEDULERS.set(server, scheduler);
   }
   return scheduler;
@@ -151,44 +257,26 @@ function appReadScheduler(server: RuntimeServer): FairReadScheduler {
 
 class FairReadScheduler {
   readonly maxActive: number;
-  readonly maxPending: number;
-  readonly maxPendingBytes: number;
   readonly releaseRunningOnCancel: boolean;
-  readonly #queues = new Map<object, QueuedCarrierRead[]>();
+  readonly #queues = new Map<object, { items: QueuedCarrierRead[]; head: number }>();
   readonly #owners: object[] = [];
   readonly #running = new Map<QueuedCarrierRead, { owner: object; finish: () => void }>();
   readonly #waitTimers = new Map<QueuedCarrierRead, ReturnType<typeof setTimeout>>();
-  #pending = 0;
-  #pendingBytes = 0;
   #active = 0;
   #scheduled = false;
 
-  constructor(
-    maxActive: number,
-    maxPending: number,
-    maxPendingBytes: number,
-    releaseRunningOnCancel: boolean,
-  ) {
+  constructor(maxActive: number, releaseRunningOnCancel: boolean) {
     this.maxActive = maxActive;
-    this.maxPending = maxPending;
-    this.maxPendingBytes = maxPendingBytes;
     this.releaseRunningOnCancel = releaseRunningOnCancel;
   }
 
-  canAdmit(bytes: number): boolean {
-    return this.#pending < this.maxPending && this.#pendingBytes + bytes <= this.maxPendingBytes;
-  }
-
-  enqueue(owner: object, read: QueuedCarrierRead): boolean {
-    if (!this.canAdmit(read.bytes)) return false;
+  enqueue(owner: object, read: QueuedCarrierRead): void {
     const queue = this.#queues.get(owner);
-    if (queue) queue.push(read);
+    if (queue) queue.items.push(read);
     else {
-      this.#queues.set(owner, [read]);
+      this.#queues.set(owner, { items: [read], head: 0 });
       this.#owners.push(owner);
     }
-    this.#pending++;
-    this.#pendingBytes += read.bytes;
     this.#waitTimers.set(
       read,
       setTimeout(() => {
@@ -198,7 +286,6 @@ class FairReadScheduler {
       }, MAX_HISTORY_READ_MS),
     );
     this.#schedule();
-    return true;
   }
 
   cancel(owner: object): void {
@@ -207,10 +294,8 @@ class FairReadScheduler {
       this.#queues.delete(owner);
       const index = this.#owners.indexOf(owner);
       if (index >= 0) this.#owners.splice(index, 1);
-      for (const read of queue) {
+      for (const read of queue.items.slice(queue.head)) {
         this.#clearWaitTimer(read);
-        this.#pending--;
-        this.#pendingBytes -= read.bytes;
         read.cancel();
       }
     }
@@ -223,13 +308,11 @@ class FairReadScheduler {
 
   remove(owner: object, read: QueuedCarrierRead): boolean {
     const queue = this.#queues.get(owner);
-    const index = queue?.indexOf(read) ?? -1;
+    const index = queue?.items.indexOf(read, queue.head) ?? -1;
     if (!queue || index < 0) return false;
-    queue.splice(index, 1);
+    queue.items.splice(index, 1);
     this.#clearWaitTimer(read);
-    this.#pending--;
-    this.#pendingBytes -= read.bytes;
-    if (queue.length === 0) {
+    if (queue.head === queue.items.length) {
       this.#queues.delete(owner);
       const ownerIndex = this.#owners.indexOf(owner);
       if (ownerIndex >= 0) this.#owners.splice(ownerIndex, 1);
@@ -256,9 +339,13 @@ class FairReadScheduler {
       if (this.#active >= this.maxActive || !this.#owners.length) return;
       const owner = this.#owners.shift()!;
       const queue = this.#queues.get(owner)!;
-      const read = queue.shift()!;
+      const read = queue.items[queue.head++]!;
+      if (queue.head > 256 && queue.head * 2 >= queue.items.length) {
+        queue.items = queue.items.slice(queue.head);
+        queue.head = 0;
+      }
       this.#clearWaitTimer(read);
-      if (queue.length) this.#owners.push(owner);
+      if (queue.head < queue.items.length) this.#owners.push(owner);
       else this.#queues.delete(owner);
       this.#active++;
       let completed = false;
@@ -268,8 +355,6 @@ class FairReadScheduler {
         clearTimeout(timeout);
         this.#running.delete(read);
         this.#active--;
-        this.#pending--;
-        this.#pendingBytes -= read.bytes;
         this.#schedule();
       };
       const timeout = setTimeout(() => {
@@ -322,7 +407,7 @@ export type RuntimeStdioInput = AsyncIterable<Uint8Array> | ReadableStream<Uint8
 /** Minimal writable seam: this App carrier owns the concrete Node/Bun stream. */
 export interface RuntimeStdioOutput {
   write(chunk: Uint8Array): boolean | Promise<boolean>;
-  waitForDrain?(): Promise<void>;
+  waitForDrain?(signal?: AbortSignal): Promise<void>;
   flush?(): Promise<void>;
 }
 
@@ -410,13 +495,21 @@ export function createNodeRuntimeStdioOutput(stream: NodeStyleWritable): Runtime
       }
       return accepted;
     },
-    waitForDrain: () =>
+    waitForDrain: (signal?: AbortSignal) =>
       new Promise<void>((resolve) => {
-        const listener = () => {
+        const finish = () => {
           stream.off?.('drain', listener);
+          signal?.removeEventListener('abort', finish);
           resolve();
         };
+        const listener = () => finish();
+        if (signal?.aborted) {
+          resolve();
+          return;
+        }
         stream.once('drain', listener);
+        signal?.addEventListener('abort', finish, { once: true });
+        if (signal?.aborted) finish();
       }),
     flush: () => flushTail,
   });
@@ -443,6 +536,7 @@ export function createRuntimeStdioCarrier(
 ): RuntimeStdioCarrier {
   const session = new RuntimeStdioSession(options);
   const connection = options.server.open(session, {
+    outboundSpool: createRuntimeOutboundSpool(),
     historyCancellation: options.history !== undefined,
     ...(options.admission === undefined ? {} : { admission: options.admission }),
     ...(options.onClose === undefined ? {} : { onClose: options.onClose }),
@@ -473,13 +567,15 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   #resolveDone!: () => void;
   #unsubscribeSignals: (() => void)[] = [];
   #pendingReads = new Set<Promise<unknown>>();
+  #readSpool: ReadRequestSpool | undefined;
+  #outputSpool: ReadRequestSpool | undefined;
   #historyReadsById = new Map<string, QueuedCarrierRead>();
   #queuedReads: Record<CarrierReadKind, QueuedCarrierRead[]> = { history: [], app: [] };
-  #queuedReadBytes: Record<CarrierReadKind, number> = { history: 0, app: 0 };
-  #pendingReadCount: Record<CarrierReadKind, number> = { history: 0, app: 0 };
   #activeReads: Record<CarrierReadKind, number> = { history: 0, app: 0 };
   #queuedOutputBytes = 0;
   #queuedOutputFrames = 0;
+  readonly #outputWaiters = new Set<() => void>();
+  readonly #drainControllers = new Set<AbortController>();
 
   constructor(options: RuntimeStdioCarrierOptions) {
     this.#options = options;
@@ -525,9 +621,16 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    for (const controller of this.#drainControllers) controller.abort();
+    for (const wake of this.#outputWaiters) wake();
+    this.#outputWaiters.clear();
     this.#historyScheduler?.cancel(this);
     this.#appScheduler.cancel(this);
     this.#drainQueuedReads();
+    this.#readSpool?.close();
+    this.#readSpool = undefined;
+    this.#outputSpool?.close();
+    this.#outputSpool = undefined;
     if (!this.#readingComplete) {
       try {
         await this.#source?.return?.();
@@ -590,7 +693,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
             length = 0;
             if (parsed === undefined) continue;
             if (this.#handleHistoryCancellation(parsed)) continue;
-            if (await this.#dispatchRead(parsed, payloadLength)) continue;
+            if (this.#dispatchRead(parsed, line.subarray(0, payloadLength))) continue;
             if (await this.#handleHistory(parsed)) continue;
             if (await this.#handleAppControl(parsed)) continue;
             if (await this.#handleServerControl(parsed)) continue;
@@ -614,7 +717,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
         if (
           parsed !== undefined &&
           !this.#handleHistoryCancellation(parsed) &&
-          !(await this.#dispatchRead(parsed, payloadLength)) &&
+          !this.#dispatchRead(parsed, line.subarray(0, payloadLength)) &&
           !(await this.#handleHistory(parsed)) &&
           !(await this.#handleAppControl(parsed)) &&
           !(await this.#handleServerControl(parsed))
@@ -671,7 +774,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     }
   }
 
-  #dispatchRead(value: unknown, frameBytes: number): boolean {
+  #dispatchRead(value: unknown, frame: Uint8Array): boolean {
     const candidate = value as { readonly method?: unknown; readonly id?: unknown };
     const method = candidate?.method;
     if (
@@ -703,32 +806,20 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       );
       return true;
     }
-    const maxPending = kind === 'history' ? MAX_PENDING_HISTORY_READS : MAX_PENDING_APP_READS;
-    const maxQueuedBytes =
-      kind === 'history' ? MAX_QUEUED_HISTORY_READ_BYTES : MAX_QUEUED_APP_READ_BYTES;
+    const requestId = typeof candidate.id === 'string' ? candidate.id : null;
     const scheduler = kind === 'history' ? this.#historyScheduler : this.#appScheduler;
-    if (
-      this.#pendingReadCount[kind] >= maxPending ||
-      this.#queuedReadBytes[kind] + frameBytes > maxQueuedBytes ||
-      (scheduler !== undefined && !scheduler.canAdmit(frameBytes))
-    ) {
-      void this.#writeError(
-        typeof candidate.id === 'string' ? candidate.id : null,
-        'overloaded',
-      ).catch(() => this.#diagnose('stdout_failure'));
-      return true;
-    }
+    if (!this.#readSpool) this.#readSpool = new ReadRequestSpool();
+    const spool = this.#readSpool;
+    const location = spool.append(frame);
     let resolvePending!: () => void;
     const pending = new Promise<void>((resolve) => {
       resolvePending = resolve;
     });
     const complete = () => {
       if (!this.#pendingReads.delete(pending)) return;
-      this.#pendingReadCount[kind]--;
       resolvePending();
     };
     this.#pendingReads.add(pending);
-    this.#pendingReadCount[kind]++;
     let started = false;
     let cancelled = false;
     let settled = false;
@@ -737,27 +828,32 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     const settle = () => {
       if (settled) return;
       settled = true;
+      if (!started) spool.remove(location);
       if (started) this.#activeReads[kind]--;
       if (
         kind === 'history' &&
-        typeof candidate.id === 'string' &&
-        this.#historyReadsById.get(candidate.id) === queued
+        requestId !== null &&
+        this.#historyReadsById.get(requestId) === queued
       )
-        this.#historyReadsById.delete(candidate.id);
+        this.#historyReadsById.delete(requestId);
       complete();
       this.#drainQueuedReads();
     };
     const queued: QueuedCarrierRead = {
-      bytes: frameBytes,
-      kind,
       run: () => {
         started = true;
-        this.#queuedReadBytes[kind] -= frameBytes;
         this.#activeReads[kind]++;
+        let request: unknown;
+        try {
+          request = spool.read(location);
+        } catch (error) {
+          settle();
+          return Promise.reject(error);
+        }
         return (
           kind === 'history'
             ? this.#handleHistory(
-                value,
+                request,
                 () => cancelled,
                 abort?.signal,
                 () => {
@@ -765,7 +861,7 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
                 },
               )
             : this.#handleAppControl(
-                value,
+                request,
                 () => cancelled,
                 () => {
                   responseQueued = true;
@@ -778,32 +874,22 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
       cancel: () => {
         cancelled = true;
         abort?.abort();
-        if (!started) this.#queuedReadBytes[kind] -= frameBytes;
         settle();
       },
       expire: () => {
         cancelled = true;
         abort?.abort();
-        if (!started) this.#queuedReadBytes[kind] -= frameBytes;
         settle();
-        if (typeof candidate.id === 'string' && !responseQueued)
-          void this.#writeError(candidate.id, 'internal_error', {
+        if (requestId !== null && !responseQueued)
+          void this.#writeError(requestId, 'internal_error', {
             detailCode: 'temporarily_unavailable',
             retryable: true,
           }).catch(() => this.#diagnose('stdout_failure'));
       },
     };
-    this.#queuedReadBytes[kind] += frameBytes;
-    if (kind === 'history' && typeof candidate.id === 'string')
-      this.#historyReadsById.set(candidate.id, queued);
+    if (kind === 'history' && requestId !== null) this.#historyReadsById.set(requestId, queued);
     if (scheduler) {
-      if (!scheduler.enqueue(this, queued)) {
-        queued.cancel();
-        void this.#writeError(
-          typeof candidate.id === 'string' ? candidate.id : null,
-          'overloaded',
-        ).catch(() => this.#diagnose('stdout_failure'));
-      }
+      scheduler.enqueue(this, queued);
     } else {
       this.#queuedReads[kind].push(queued);
       this.#drainQueuedReads();
@@ -1132,38 +1218,99 @@ class RuntimeStdioSession implements RuntimeServerLogicalMessageConnection {
     await this.close();
   }
 
-  #writeProtocol(message: RuntimeProtocolMessage): Promise<void> {
+  async #writeProtocol(message: RuntimeProtocolMessage): Promise<void> {
     if (this.#closed) return Promise.resolve();
-    const encoded = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
-    if (
-      this.#queuedOutputFrames >= MAX_QUEUED_OUTPUT_FRAMES ||
-      this.#queuedOutputBytes + encoded.byteLength > MAX_QUEUED_OUTPUT_BYTES ||
-      !this.#outputBudget.reserve(encoded.byteLength)
-    ) {
-      void this.#failClosed('stdout_overloaded');
-      return Promise.reject(new Error('runtime stdio output queue is full'));
+    let encoded: Uint8Array | undefined = new TextEncoder().encode(`${JSON.stringify(message)}\n`);
+    message = undefined as never;
+    const frameBytes = encoded.byteLength;
+    if (frameBytes > RUNTIME_PROTOCOL_LIMITS.maxMessageBytes + 1) {
+      await this.#failClosed('stdout_frame_invalid');
+      throw new Error('runtime stdio output frame is too large');
+    }
+    const deadline = Date.now() + this.#drainDeadlineMs;
+    let stored: { path: string; offset: number; length: number } | undefined;
+    try {
+      for (;;) {
+        if (this.#closed) throw new Error('runtime stdio connection is closed');
+        const localRoom =
+          this.#queuedOutputFrames < MAX_QUEUED_OUTPUT_FRAMES &&
+          this.#queuedOutputBytes + frameBytes <= MAX_QUEUED_OUTPUT_BYTES;
+        if (localRoom && this.#outputBudget.reserve(frameBytes)) {
+          try {
+            if (stored) {
+              encoded = this.#outputSpool!.readBytes(stored);
+              stored = undefined;
+            }
+          } catch (error) {
+            this.#outputBudget.release(frameBytes);
+            throw error;
+          }
+          break;
+        }
+        if (!stored) {
+          if (!this.#outputSpool) this.#outputSpool = new ReadRequestSpool();
+          stored = this.#outputSpool.append(encoded!);
+          encoded = undefined;
+        }
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          await this.#failClosed('stdout_drain_timeout');
+          throw new Error('runtime stdio output drain timed out');
+        }
+        const globalWait = this.#outputBudget.wait();
+        let localWake!: () => void;
+        const localWait = new Promise<void>((resolve) => {
+          localWake = resolve;
+        });
+        this.#outputWaiters.add(localWake);
+        try {
+          await withDeadline(Promise.race([globalWait.promise, localWait]), remaining);
+        } catch {
+          await this.#failClosed('stdout_drain_timeout');
+          throw new Error('runtime stdio output drain timed out');
+        } finally {
+          globalWait.cancel();
+          this.#outputWaiters.delete(localWake);
+        }
+      }
+    } finally {
+      if (stored) this.#outputSpool?.remove(stored);
     }
     this.#queuedOutputFrames++;
-    this.#queuedOutputBytes += encoded.byteLength;
+    this.#queuedOutputBytes += frameBytes;
     const operation = this.#outputTail
       .then(async () => {
-        const accepted = await this.#options.stdout.write(encoded);
+        if (this.#closed) return;
+        const accepted = await this.#options.stdout.write(encoded!);
         if (!accepted) await this.#waitForDrain();
       })
       .finally(() => {
         this.#queuedOutputFrames--;
-        this.#queuedOutputBytes -= encoded.byteLength;
-        this.#outputBudget.release(encoded.byteLength);
+        this.#queuedOutputBytes -= frameBytes;
+        this.#outputBudget.release(frameBytes);
+        for (const wake of this.#outputWaiters) wake();
+        this.#outputWaiters.clear();
       });
     this.#outputTail = operation.catch(() => undefined);
-    return operation;
+    await operation;
   }
 
   async #waitForDrain(): Promise<void> {
+    if (this.#closed) return;
     if (!this.#options.stdout.waitForDrain) {
       throw new Error('stdout does not provide a drain waiter.');
     }
-    await withDeadline(this.#options.stdout.waitForDrain(), this.#drainDeadlineMs);
+    const controller = new AbortController();
+    this.#drainControllers.add(controller);
+    try {
+      await withDeadline(
+        this.#options.stdout.waitForDrain(controller.signal),
+        this.#drainDeadlineMs,
+      );
+    } finally {
+      controller.abort();
+      this.#drainControllers.delete(controller);
+    }
   }
 
   async #flushOutput(): Promise<void> {

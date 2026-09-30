@@ -7,15 +7,35 @@ import type {
   RuntimeJsonValue,
 } from '@kite-ai/runtime-spi';
 import type { BuiltinRuntimeStateView } from './runtime-view';
-import { countTokens } from './token-counter';
 
-const MAX_FILE_BYTES = 16 * 1024;
-const MAX_TOTAL_BYTES = 64 * 1024;
-export const MAX_PROJECT_INSTRUCTION_TOKENS = 16 * 1024;
 const INSTRUCTION_FILES = [
   { kind: 'claude' as const, name: 'CLAUDE.md' },
   { kind: 'agents' as const, name: 'AGENTS.md' },
 ];
+const instructionDecodeCache = new Map<
+  string,
+  { bytes: Buffer; content: string; digest: string }
+>();
+
+function decodeInstruction(
+  path: string,
+  bytes: Buffer,
+): { content: string; digest: string } | null {
+  const cached = instructionDecodeCache.get(path);
+  if (cached?.bytes.equals(bytes)) {
+    instructionDecodeCache.delete(path);
+    instructionDecodeCache.set(path, cached);
+    return cached;
+  }
+  const content = bytes.toString('utf8');
+  if (content.includes('\uFFFD')) return null;
+  const entry = { bytes, content, digest: createHash('sha256').update(bytes).digest('hex') };
+  instructionDecodeCache.set(path, entry);
+  // Retention only: every lookup still reads and compares the actual file bytes.
+  if (instructionDecodeCache.size > 16)
+    instructionDecodeCache.delete(instructionDecodeCache.keys().next().value!);
+  return entry;
+}
 
 export interface ProjectInstructionDocument {
   kind: 'agents' | 'claude';
@@ -93,12 +113,23 @@ export function checkProjectInstructionSnapshotFreshness(input: {
   const changed = current.documents.find(
     (document) => visibleDigests.get(document.path) !== document.digest,
   );
-  if (!changed) return Object.freeze({ status: 'accepted' as const });
+  const relevantScopes = new Set(
+    scopeDirectories(current.workspaceRoot, [input.target.targetPath]).map(
+      (root) => relative(current.workspaceRoot, root).split(sep).join('/') || '.',
+    ),
+  );
+  const removed = input.visibleSnapshot.documents.find(
+    (document) =>
+      relevantScopes.has(document.scopeRoot) &&
+      !current.documents.some((candidate) => candidate.path === document.path),
+  );
+  const stale = changed ?? removed;
+  if (!stale) return Object.freeze({ status: 'accepted' as const });
   return Object.freeze({
     status: 'changed' as const,
     code: 'project_instructions_changed' as const,
-    path: changed.path,
-    message: `project_instructions_changed: read ${changed.path} in the refreshed model context before retrying this side effect.`,
+    path: stale.path,
+    message: `project_instructions_changed: read ${stale.path} in the refreshed model context before retrying this side effect.`,
   });
 }
 
@@ -201,8 +232,6 @@ export function resolveProjectInstructionSnapshot(input: {
 
   const warnings: string[] = [];
   const documents: ProjectInstructionDocument[] = [];
-  let totalBytes = 0;
-  let totalTokens = 0;
   const targets = input.targetPaths ?? targetPaths(input.state, input.excludeModelMessageId);
   for (const scopeRoot of scopeDirectories(workspaceRoot, targets)) {
     for (const instruction of INSTRUCTION_FILES) {
@@ -221,41 +250,22 @@ export function resolveProjectInstructionSnapshot(input: {
           warnings.push(`Skipped ${relative(workspaceRoot, path)}: resolves outside workspace.`);
           continue;
         }
-        if (entry.size > MAX_FILE_BYTES) {
-          warnings.push(`Skipped ${relative(workspaceRoot, path)}: exceeds 16 KiB.`);
-          continue;
-        }
-        if (totalBytes + entry.size > MAX_TOTAL_BYTES) {
-          warnings.push(
-            `Skipped ${relative(workspaceRoot, path)}: project instruction budget exceeds 64 KiB.`,
-          );
-          continue;
-        }
         const bytes = readFileSync(canonical);
         if (bytes.includes(0)) {
           warnings.push(`Skipped ${relative(workspaceRoot, path)}: file is not text.`);
           continue;
         }
-        const content = bytes.toString('utf8');
-        if (content.includes('\uFFFD')) {
+        const decoded = decodeInstruction(canonical, bytes);
+        if (!decoded) {
           warnings.push(`Skipped ${relative(workspaceRoot, path)}: file is not valid UTF-8.`);
           continue;
         }
-        const contentTokens = countTokens(content);
-        if (totalTokens + contentTokens > MAX_PROJECT_INSTRUCTION_TOKENS) {
-          warnings.push(
-            `Skipped ${relative(workspaceRoot, path)}: project instruction token budget exceeds ${MAX_PROJECT_INSTRUCTION_TOKENS}.`,
-          );
-          continue;
-        }
-        totalBytes += bytes.byteLength;
-        totalTokens += contentTokens;
         documents.push({
           kind: instruction.kind,
           path: relative(workspaceRoot, canonical).split(sep).join('/') || instruction.name,
           scopeRoot: relative(workspaceRoot, scopeRoot).split(sep).join('/') || '.',
-          digest: createHash('sha256').update(bytes).digest('hex'),
-          content,
+          digest: decoded.digest,
+          content: decoded.content,
         });
       } catch {
         warnings.push(`Skipped ${relative(workspaceRoot, path)}: file could not be read.`);

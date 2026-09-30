@@ -1,8 +1,19 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { analyzeRuntimePackages } from '../../../../scripts/runtime-packages/check-runtime-packages';
+import { dirname, join, relative, sep } from 'node:path';
+import {
+  analyzeRuntimePackages,
+  RUNTIME_WORKSPACE_PACKAGES,
+} from '../../../../scripts/runtime-packages/check-runtime-packages';
 
 const fixtureRoots: string[] = [];
 
@@ -13,13 +24,40 @@ afterAll(() => {
 function createFixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'kite-runtime-packages-'));
   fixtureRoots.push(root);
-  cpSync(join(process.cwd(), 'package.json'), join(root, 'package.json'));
-  cpSync(join(process.cwd(), 'packages'), join(root, 'packages'), { recursive: true });
-  cpSync(join(process.cwd(), 'apps'), join(root, 'apps'), {
-    recursive: true,
-    filter: (source) =>
-      !/(?:^|[\\/])(?:node_modules|dist|dist-electron|service|out)(?:[\\/]|$)/u.test(source),
-  });
+  const sourceRoot = process.cwd();
+  cpSync(join(sourceRoot, 'package.json'), join(root, 'package.json'));
+  // The gate reads workspace manifests, source modules, and test consumers. Copying
+  // build products, assets, fixtures, and unrelated app trees adds no coverage.
+  for (const [, workspace] of RUNTIME_WORKSPACE_PACKAGES) {
+    const workspaceRoot = join(sourceRoot, workspace);
+    cpSync(workspaceRoot, join(root, workspace), {
+      recursive: true,
+      filter: (source) => {
+        const path = relative(workspaceRoot, source);
+        if (path === '') return true;
+        const [section] = path.split(sep);
+        if (
+          section === 'src' ||
+          section === 'test' ||
+          section === 'electron' ||
+          section === 'generated'
+        ) {
+          if (lstatSync(source).isDirectory()) return true;
+          return section === 'test'
+            ? /\.(?:test|spec)\.[cm]?[jt]sx?$/u.test(source)
+            : section === 'generated'
+              ? /\.[cm]?[jt]sx?$/u.test(source)
+              : true;
+        }
+        return (
+          path === 'package.json' ||
+          path === 'README.md' ||
+          path === 'tsconfig.json' ||
+          path === 'app-icon.svg'
+        );
+      },
+    });
+  }
   cpSync(join(process.cwd(), 'scripts'), join(root, 'scripts'), { recursive: true });
   cpSync(join(process.cwd(), 'tests'), join(root, 'tests'), { recursive: true });
   return root;
@@ -54,19 +92,30 @@ describe('runtime workspace package gate', () => {
     expect(analysis.compositionRoots).toEqual(['apps/kite-service/src/bootstrap.ts']);
   });
 
-  test('keeps renderer code behind the Electron preload boundary', () => {
+  test('starts every isolated fixture from the same valid package graph', () => {
+    expect(analyzeRuntimePackages(createFixture()).violations).toEqual([]);
+  });
+
+  test.each([
+    [
+      "import { ipcRenderer } from 'electron';\nvoid ipcRenderer;\n",
+      'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+    ],
+    ["import '../electron/host';\n", 'FORBIDDEN_NATIVE_RENDERER_IMPORT'],
+    [
+      "import '@kite-ai/kite-local-runtime/startup-diagnostic';\n",
+      'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+    ],
+    [
+      "import '@kite-ai/kite-local-runtime/desktop-manifest';\n",
+      'FORBIDDEN_NATIVE_RENDERER_IMPORT',
+    ],
+    ["import 'node:fs';\n", 'FORBIDDEN_NODE_IMPORT'],
+  ])('keeps renderer code behind the Electron preload boundary: %s', (source, code) => {
     const root = createFixture();
     const renderer = join(root, 'apps/kite-desktop/src/electron-boundary-probe.ts');
-    writeFileSync(renderer, "import { ipcRenderer } from 'electron';\nvoid ipcRenderer;\n");
-    expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
-    writeFileSync(renderer, "import '../electron/host';\n");
-    expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
-    for (const entry of ['startup-diagnostic', 'desktop-manifest']) {
-      writeFileSync(renderer, `import '@kite-ai/kite-local-runtime/${entry}';\n`);
-      expectViolation(root, 'FORBIDDEN_NATIVE_RENDERER_IMPORT');
-    }
-    writeFileSync(renderer, "import 'node:fs';\n");
-    expectViolation(root, 'FORBIDDEN_NODE_IMPORT');
+    writeFileSync(renderer, source);
+    expectViolation(root, code);
   });
 
   test('rejects package cycles even when the new edge is declared', () => {

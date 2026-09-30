@@ -6,7 +6,6 @@ import {
   buildContextProjection,
   countTokens,
   formatProjectInstructionSnapshot,
-  MAX_PROJECT_INSTRUCTION_TOKENS,
   resolveProjectInstructionSnapshot,
 } from '@kite-ai/builtin-runtime/model';
 import { createRuntimeHostStateInitialState } from '@kite-ai/runtime-host/kernel-adapter';
@@ -53,7 +52,7 @@ describe('project instruction snapshot', () => {
     expect(formatted).toContain('cannot weaken system or runtime safety policy');
   });
 
-  test('skips oversized and linked instruction files', () => {
+  test('loads large instruction files and skips linked files', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'x'.repeat(16 * 1024 + 1));
     const outside = workspace();
@@ -65,8 +64,8 @@ describe('project instruction snapshot', () => {
     }
 
     const snapshot = resolveProjectInstructionSnapshot({ workspace: root });
-    expect(snapshot.documents).toHaveLength(0);
-    expect(snapshot.warnings.some((warning) => warning.includes('exceeds 16 KiB'))).toBe(true);
+    expect(snapshot.documents).toHaveLength(1);
+    expect(snapshot.documents[0]?.content).toBe('x'.repeat(16 * 1024 + 1));
     if (snapshot.warnings.some((warning) => warning.includes('CLAUDE.md'))) {
       expect(snapshot.warnings.some((warning) => warning.includes('not a regular'))).toBe(true);
     }
@@ -82,7 +81,7 @@ describe('project instruction snapshot', () => {
     expect(snapshot.documents.map((document) => document.path)).toEqual(['AGENTS.md']);
   });
 
-  test('reports and skips content beyond the project instruction token budget', () => {
+  test('loads all scoped instructions even when their total token count is large', () => {
     const root = workspace();
     let scope = root;
     for (const name of ['a', 'b', 'c', 'd']) {
@@ -94,10 +93,16 @@ describe('project instruction snapshot', () => {
       workspace: root,
       targetPaths: ['a/b/c/d/file.ts'],
     });
-    expect(snapshot.warnings.some((warning) => warning.includes('token budget'))).toBe(true);
+    expect(snapshot.documents.map((document) => document.path)).toEqual([
+      'AGENTS.md',
+      'a/AGENTS.md',
+      'a/b/AGENTS.md',
+      'a/b/c/AGENTS.md',
+    ]);
+    expect(snapshot.warnings).toEqual([]);
     expect(
       countTokens(snapshot.documents.map((document) => document.content).join('\n')),
-    ).toBeLessThanOrEqual(MAX_PROJECT_INSTRUCTION_TOKENS);
+    ).toBeGreaterThan(16 * 1024);
   });
 
   test('projects refreshed instructions after the durable transcript and before runtime state', () => {

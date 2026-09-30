@@ -975,7 +975,7 @@ describe('SandboxExecutionProvider', () => {
         }),
       })({
         workspace,
-        command: 'printf must-not-run',
+        command: 'git status --short',
         filesystemMode: 'allow_all',
         executionTrust: 'policy_proven_read_only',
         sandboxInvocationIdentity: invocationIdentity(),

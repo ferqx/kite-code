@@ -68,6 +68,35 @@ describe('Runtime Host MCP stdio process port', () => {
     });
   });
 
+  test('streams JSON-RPC requests and responses larger than the former 1 MiB line and 16 MiB process limits', async () => {
+    const handle = await createPort().spawn({
+      command: process.execPath,
+      args: [join(import.meta.dir, 'fixtures/mcp-large-jsonrpc-server.ts')],
+      cwd: workspace,
+    });
+    const reader = handle.stdout.getReader();
+    const text = 'x'.repeat(17 * 1024 * 1024);
+    try {
+      await handle.write(
+        new TextEncoder().encode(
+          `${JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'large', params: { text } })}\n`,
+        ),
+      );
+      const output = await reader.read();
+      expect(output.done).toBe(false);
+      expect(output.value?.byteLength).toBeGreaterThan(16 * 1024 * 1024);
+      const parsed = parseMcpStdioJsonLine(output.value!.subarray(0, -1)) as {
+        result: { text: string };
+      };
+      expect(parsed.result.text).toBe(text);
+      await handle.closeInput();
+      await expect(handle.terminal).resolves.toMatchObject({ cleanup: 'confirmed', exitCode: 0 });
+    } finally {
+      reader.releaseLock();
+      await handle.cleanup();
+    }
+  });
+
   test('fails closed when the wrapper uses the wrong peer', async () => {
     for (const name of ['mcp-stdio-wrong-peer-wrapper.ts']) {
       const wrapperPath = join(import.meta.dir, 'fixtures', name);

@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import type {
   FilesystemCommitGrant,
   FilesystemObserveGrant,
@@ -52,11 +53,6 @@ import {
   workspaceFilesystemTargetIdentityDigest,
 } from './grant-authority';
 
-const DEFAULT_MAX_OBSERVATION_BYTES = 8 * 1024 * 1024;
-const DEFAULT_MAX_SEARCH_MATCHES = 10_000;
-const DEFAULT_READ_LINE_LIMIT = 2_000;
-const MAXIMUM_IGNORE_FILE_BYTES = 1024 * 1024;
-
 function msys2ToWindowsPath(filePath: string): string {
   if (process.platform !== 'win32') return filePath;
   const match = filePath.match(/^\/([a-zA-Z])(?:\/|$)(.*)$/u);
@@ -72,22 +68,29 @@ export interface LocalWorkspaceFilesystemProviderOptions {
 /** The sole Node-fs owner for governed workspace capability execution. */
 export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProvider {
   readonly #verifier: WorkspaceFilesystemGrantVerifier;
-  readonly #maximumObservationBytes: number;
-  readonly #maximumSearchMatches: number;
+  readonly #maximumObservationBytes?: number;
+  readonly #maximumSearchMatches?: number;
+  #readPageCache?: {
+    path: string;
+    raw: Buffer;
+    decoded: string;
+    starts: readonly number[];
+    contentDigest: string;
+  };
 
   constructor(
     verifier: WorkspaceFilesystemGrantVerifier,
     options: LocalWorkspaceFilesystemProviderOptions = {},
   ) {
     this.#verifier = verifier;
-    this.#maximumObservationBytes = positiveInteger(
-      options.maximumObservationBytes ?? DEFAULT_MAX_OBSERVATION_BYTES,
-      'maximumObservationBytes',
-    );
-    this.#maximumSearchMatches = positiveInteger(
-      options.maximumSearchMatches ?? DEFAULT_MAX_SEARCH_MATCHES,
-      'maximumSearchMatches',
-    );
+    this.#maximumObservationBytes =
+      options.maximumObservationBytes === undefined
+        ? undefined
+        : positiveInteger(options.maximumObservationBytes, 'maximumObservationBytes');
+    this.#maximumSearchMatches =
+      options.maximumSearchMatches === undefined
+        ? undefined
+        : positiveInteger(options.maximumSearchMatches, 'maximumSearchMatches');
   }
 
   async observe(input: {
@@ -255,26 +258,40 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
     limit?: number,
   ): WorkspaceFilesystemObserveObservation {
     assertRegularFile(target);
-    const decoded = this.#readText(target.canonicalPath, target.canonicalPath, target.followed);
-    const lines = sourceLines(decoded);
+    const decoded = this.#readText(
+      target.canonicalPath,
+      target.canonicalPath,
+      target.followed,
+      true,
+    );
+    const starts = this.#readPageCache!.starts;
+    const totalLines = starts.length;
     const fromLine = Math.max(1, offset ?? 1);
-    const pageLimit = limit ?? DEFAULT_READ_LINE_LIMIT;
-    const toLine = Math.min(lines.length, fromLine + pageLimit - 1);
-    const content = lines
-      .slice(fromLine - 1, toLine)
-      .map((line, index) => {
-        const lineNumber = String(fromLine + index).padStart(String(toLine).length, ' ');
-        return `${lineNumber}|${line}`;
-      })
-      .join('\n');
+    const pageLimit = limit ?? totalLines;
+    const toLine = Math.min(totalLines, fromLine + pageLimit - 1);
+    const selected: string[] = [];
+    for (let currentLine = fromLine; currentLine <= toLine; currentLine++) {
+      const start = starts[currentLine - 1]!;
+      const next = starts[currentLine];
+      const end =
+        next === undefined
+          ? decoded.endsWith('\n')
+            ? decoded.length - 1
+            : decoded.length
+          : next - 1;
+      selected.push(
+        `${String(currentLine).padStart(String(toLine).length, ' ')}|${decoded.slice(start, end)}`,
+      );
+    }
+    const content = selected.join('\n');
     return deepFreeze({
       kind: 'read_file',
       target,
       targetEvidence: workspaceFilesystemTargetEvidence(target),
       content,
       rawContent: decoded,
-      contentDigest: workspaceFilesystemStringDigest(decoded),
-      totalLines: lines.length,
+      contentDigest: this.#readPageCache!.contentDigest,
+      totalLines,
       fromLine,
       toLine,
     });
@@ -287,15 +304,17 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
     boundary: WorkspaceFilesystemProtectedBoundary,
     signal?: AbortSignal,
   ): Promise<WorkspaceFilesystemObserveObservation> {
-    const files = await this.#walk(workspace, target, boundary, signal);
-    const matches = files
-      .map((file) => toPosix(relative(workspace, file)))
-      .filter((path) => matchesFilePattern(path, pattern))
-      .sort();
-    if (matches.length > this.#maximumSearchMatches) {
+    const matches: string[] = [];
+    await this.#walk(workspace, target, boundary, signal, (file) => {
+      const path = toPosix(relative(workspace, file));
+      if (matchesFilePattern(path, pattern)) matches.push(path);
+    });
+    matches.sort();
+    if (this.#maximumSearchMatches !== undefined && matches.length > this.#maximumSearchMatches) {
       throw providerError('observation_too_large', 'Filesystem search result exceeded its bound.');
     }
-    assertBound(matches.join('\n'), this.#maximumObservationBytes);
+    if (this.#maximumObservationBytes !== undefined)
+      assertBound(matches.join('\n'), this.#maximumObservationBytes);
     return deepFreeze({
       kind: 'search_files',
       target,
@@ -321,16 +340,15 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
     }
     const matches: Array<{ path: string; line: number; text: string }> = [];
     let observedBytes = 0;
-    for (const file of await this.#walk(workspace, target, boundary, signal)) {
-      await yieldToEventLoop();
+    await this.#walk(workspace, target, boundary, signal, (file) => {
       throwIfAborted(signal);
       const path = toPosix(relative(workspace, file));
-      if (glob && !matchesFilePattern(path, glob)) continue;
+      if (glob && !matchesFilePattern(path, glob)) return;
       let content: string;
       try {
         content = this.#readText(file, target.canonicalPath);
       } catch (error) {
-        if (isProviderError(error, 'binary_file')) continue;
+        if (isProviderError(error, 'binary_file')) return;
         throw error;
       }
       const lines = content.split('\n');
@@ -340,8 +358,10 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
         if (!regex.test(text)) continue;
         observedBytes += Buffer.byteLength(path) + Buffer.byteLength(text) + 32;
         if (
-          matches.length >= this.#maximumSearchMatches ||
-          observedBytes > this.#maximumObservationBytes
+          (this.#maximumSearchMatches !== undefined &&
+            matches.length >= this.#maximumSearchMatches) ||
+          (this.#maximumObservationBytes !== undefined &&
+            observedBytes > this.#maximumObservationBytes)
         ) {
           throw providerError(
             'observation_too_large',
@@ -350,7 +370,7 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
         }
         matches.push({ path, line: index + 1, text });
       }
-    }
+    });
     return deepFreeze({
       kind: 'search_content',
       target,
@@ -365,14 +385,17 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
     target: WorkspaceFilesystemTargetIdentity,
     boundary: WorkspaceFilesystemProtectedBoundary,
     signal?: AbortSignal,
-  ): Promise<string[]> {
+    visit?: (file: string) => void | Promise<void>,
+  ): Promise<void> {
     if (!target.exists) throw providerError('not_found', 'Filesystem search target was not found.');
-    if (!searchTargetMayBeObserved(workspace, target, boundary)) return [];
-    if (target.followed?.type === 'file') return [target.canonicalPath];
+    if (!searchTargetMayBeObserved(workspace, target, boundary)) return;
+    if (target.followed?.type === 'file') {
+      await visit?.(target.canonicalPath);
+      return;
+    }
     if (target.followed?.type !== 'directory') {
       throw providerError('not_a_directory', 'Filesystem search target is not a directory.');
     }
-    const output: string[] = [];
     const walk = async (directory: string, rules: readonly IgnoreRule[]): Promise<void> => {
       await yieldToEventLoop();
       throwIfAborted(signal);
@@ -395,9 +418,10 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
           'Filesystem search directory changed during traversal.',
         );
       }
-      for (const entry of entries) {
-        await yieldToEventLoop();
+      for (let index = 0; index < entries.length; index++) {
+        if ((index & 127) === 0) await yieldToEventLoop();
         throwIfAborted(signal);
+        const entry = entries[index]!;
         const path = join(directory, entry.name);
         const rel = toPosix(relative(workspace, path));
         if (searchPathExcluded(workspace, path, rel, boundary)) continue;
@@ -412,7 +436,7 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
           searchFileMayBeObserved(workspace, path, rel, boundary) &&
           stableRegularFilePath(path, target.canonicalPath)
         )
-          output.push(path);
+          await visit?.(path);
         // Directory-entry symlinks are deliberately not followed.
       }
     };
@@ -420,7 +444,6 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
       target.canonicalPath,
       ancestorIgnoreRules(workspace, target.canonicalPath, boundary),
     );
-    return output;
   }
 
   #preimage(target: WorkspaceFilesystemTargetIdentity): WorkspaceFilesystemPreimageObservation {
@@ -444,6 +467,7 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
     path: string,
     admittedRoot: string,
     expectedIdentity?: WorkspaceFilesystemStatIdentity | null,
+    reusePageDecode = false,
   ): string {
     let descriptor: number | undefined;
     try {
@@ -469,8 +493,25 @@ export class LocalWorkspaceFilesystemProvider implements WorkspaceFilesystemProv
       if (!sameStatIdentity(before, after)) {
         throw providerError('path_invalid', 'Filesystem target changed during read.');
       }
-      if (raw.byteLength > this.#maximumObservationBytes) {
+      if (
+        this.#maximumObservationBytes !== undefined &&
+        raw.byteLength > this.#maximumObservationBytes
+      ) {
         throw providerError('observation_too_large', 'Filesystem observation exceeded its bound.');
+      }
+      if (reusePageDecode) {
+        const cached = this.#readPageCache;
+        if (cached?.path === canonical && raw.equals(cached.raw)) return cached.decoded;
+        const decoded = decodeText(raw);
+        const starts = sourceLineStarts(decoded);
+        this.#readPageCache = {
+          path: canonical,
+          raw,
+          decoded,
+          starts,
+          contentDigest: workspaceFilesystemStringDigest(decoded),
+        };
+        return decoded;
       }
       return decodeText(raw);
     } finally {
@@ -521,15 +562,22 @@ function buildMutation(
   }
   const first = content.indexOf(oldString);
   if (first < 0) throw providerError('edit_not_found', 'Filesystem edit text was not found.');
-  const count = content.split(oldString).length - 1;
-  if (count > 1 && operation.replaceAll !== true) {
-    throw providerError('edit_ambiguous', 'Filesystem edit text matched more than once.');
-  }
+  let count = 0;
   const matchLines: number[] = [];
   let cursor = first;
+  let line = 1;
+  let scanned = 0;
   while (cursor >= 0) {
-    matchLines.push(content.slice(0, cursor).split('\n').length);
+    for (let index = scanned; index < cursor; index++) {
+      if (content.charCodeAt(index) === 10) line++;
+    }
+    matchLines.push(line);
+    count++;
+    scanned = cursor;
     cursor = content.indexOf(oldString, cursor + oldString.length);
+  }
+  if (count > 1 && operation.replaceAll !== true) {
+    throw providerError('edit_ambiguous', 'Filesystem edit text matched more than once.');
   }
   const next = operation.replaceAll
     ? content.split(oldString).join(newString)
@@ -1196,35 +1244,38 @@ function loadIgnoreRules(
         'Filesystem ignore metadata escaped its admitted boundary.',
       );
     }
-    if (before.size > MAXIMUM_IGNORE_FILE_BYTES) {
-      throw providerError(
-        'observation_too_large',
-        'Filesystem ignore metadata exceeded its bound.',
-      );
-    }
-    const buffer = Buffer.alloc(MAXIMUM_IGNORE_FILE_BYTES + 1);
-    let offset = 0;
-    while (offset < buffer.byteLength) {
-      const read = readSync(descriptor, buffer, offset, buffer.byteLength - offset, null);
+    const decoder = new StringDecoder('utf8');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const rules: IgnoreRule[] = [];
+    let pending = '';
+    let firstChunk = true;
+    const append = (decoded: string) => {
+      if (firstChunk) {
+        if (decoded.length === 0) return;
+        firstChunk = false;
+        if (decoded.charCodeAt(0) === 0xfeff) decoded = decoded.slice(1);
+      }
+      const lines = decoded.split('\n');
+      lines[0] = pending + lines[0];
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        const rule = parseIgnoreRule(line.endsWith('\r') ? line.slice(0, -1) : line, base);
+        if (rule) rules.push(rule);
+      }
+    };
+    for (;;) {
+      const read = readSync(descriptor, buffer, 0, buffer.byteLength, null);
       if (read === 0) break;
-      offset += read;
+      append(decoder.write(buffer.subarray(0, read)));
     }
-    if (offset > MAXIMUM_IGNORE_FILE_BYTES) {
-      throw providerError(
-        'observation_too_large',
-        'Filesystem ignore metadata exceeded its bound.',
-      );
-    }
+    append(decoder.end());
     const after = statIdentity(fstatSync(descriptor));
     if (!sameStatIdentity(before, after)) {
       throw providerError('path_invalid', 'Filesystem ignore metadata changed during read.');
     }
-    let content = buffer.subarray(0, offset).toString('utf8');
-    if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
-    return content.split(/\r?\n/u).flatMap((line): IgnoreRule[] => {
-      const rule = parseIgnoreRule(line, base);
-      return rule ? [rule] : [];
-    });
+    const lastRule = parseIgnoreRule(pending, base);
+    if (lastRule) rules.push(lastRule);
+    return rules;
   } catch (error) {
     if (isProviderError(error)) throw error;
     throw providerError('path_invalid', 'Filesystem ignore metadata could not be read safely.');
@@ -1380,18 +1431,21 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
 
-function sourceLines(content: string): string[] {
-  const lines = content.split('\n');
-  if (lines.at(-1) === '') lines.pop();
-  return lines;
-}
-
 function normalizeEol(content: string): string {
   return content.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
 }
 
 function lineCount(content: string): number {
   return content.split('\n').length - (content.endsWith('\n') ? 1 : 0);
+}
+
+function sourceLineStarts(content: string): number[] {
+  if (content.length === 0) return [];
+  const starts = [0];
+  for (let index = 0; index < content.length; index++) {
+    if (content.charCodeAt(index) === 10 && index + 1 < content.length) starts.push(index + 1);
+  }
+  return starts;
 }
 
 function inside(workspace: string, target: string): boolean {

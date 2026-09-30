@@ -119,6 +119,8 @@ Full 直接执行并保持 Plan lifecycle。空命令、关键系统递归删除
 deny，任何 mode 都不能覆盖。`isReadOnlyShellCommand`同时拥有可证明只读的免审事实、hardened environment、只读
 Subagent role ceiling与scheduler metadata；未命中只能生成`uncertainEffects`并按模式审批，不能生成destructive deny。
 `git_inspect` 已从 Runtime capability registry 退役，所有模型 Git/脚本命令统一通过 `shell_execute`。
+
+命令环境硬化与沙箱文件范围分别核验：Builtin preparation 和实际 Provider 对原命令／封印 argv 重新执行闭集分类，再选择可信解释器和 Git 中性环境。Full 的 `full_access` 不能通过 `policy_proven_read_only` 标记收窄，但 Full 中匹配闭集的 Git 读取仍使用硬化环境。反向也不成立：Planning 的 `read_only` 文件范围本身不证明任意命令只读，不签发该信任标记；已授权命令继续在原 scope 中执行。伪造只读标记而命令未通过分类时 preparation 拒绝，模型参数不能取得这个环境或授权事实。
 主Agent的当前Prompt同时约束常规Workspace检查：优先使用file/search能力；Shell已经运行在当前Workspace，因此不生成冗余`cd`或当前Workspace的`git -C`，Git读取优先拆成单条简单命令，也不只为拼接、分组或裁剪输出引入`&&`、pipe和loop。该约束只降低无谓的unknown/审批与展示碎片，不能替代Builtin只读grammar，也不能让未证明命令取得read-only授权。
 
 只读证明收敛到 Builtin-owned、冻结的 v1 Shell semantics registry；registry digest 必须进入

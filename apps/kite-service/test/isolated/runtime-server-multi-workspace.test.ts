@@ -1301,6 +1301,77 @@ test('continuous Session writes renew a valid lease without waiting for the time
   }
 });
 
+test('Server disposal joins a delayed execution-loss cleanup before closing its Host', async () => {
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-loss-cleanup-drain-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const previousHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = root;
+  const model = createMockModelServer();
+  let clock = Date.now();
+  const storageOwner = await createKiteSessionAppServerStorageComposition({
+    databasePath: join(root, 'kite-session.sqlite'),
+    hostInstanceId: 'loss-cleanup-owner',
+    executionLeaseMs: 60,
+    renewIntervalMs: 20,
+    now: () => clock,
+  });
+  const owner = createKiteMultiWorkspaceRuntimeServer({
+    checkpointPath: join(root, 'kite-session.sqlite'),
+    storageOwner,
+    workspaces: [runtimeInput(workspace, model.baseURL, 'model')],
+  });
+  const runtime = client(owner, admission(workspace), 'loss-cleanup-client');
+  let releaseCleanup!: () => void;
+  const cleanupGate = new Promise<void>((resolve) => {
+    releaseCleanup = resolve;
+  });
+  let cleanupStarted = false;
+  let cleanupFinished = false;
+  let disposed = false;
+  try {
+    await createSession(runtime, 'loss-cleanup-session', workspace);
+    storageOwner.runWithSessionExecution('loss-cleanup-session', () => undefined);
+    storageOwner.setExecutionLossHandler(async () => {
+      cleanupStarted = true;
+      await cleanupGate;
+      expect(
+        await owner.host.query({
+          schema: RUNTIME_QUERY_SCHEMA_,
+          type: 'get_session_projection',
+          sessionId: 'loss-cleanup-session',
+        }),
+      ).toMatchObject({ status: 'ok' });
+      cleanupFinished = true;
+    });
+    clock += 61;
+    expect(() =>
+      storageOwner.runWithSessionExecution('loss-cleanup-session', () => undefined),
+    ).toThrow('expired');
+    expect(storageOwner.recovery.inspect('loss-cleanup-session').authority.cleanupConfirmed).toBe(
+      false,
+    );
+    const disposal = Promise.resolve(owner[Symbol.asyncDispose]()).finally(() => {
+      disposed = true;
+    });
+    await Bun.sleep(25);
+    expect(cleanupStarted).toBe(true);
+    expect(cleanupFinished).toBe(false);
+    expect(disposed).toBe(false);
+    releaseCleanup();
+    await disposal;
+    expect(cleanupFinished).toBe(true);
+  } finally {
+    releaseCleanup();
+    await runtime.close();
+    await owner[Symbol.asyncDispose]();
+    model.stop();
+    if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('execution lease loss aborts all three real subagent model connections and preserves recovery facts', async () => {
   const root = mkdtempSync(join(realpathSync(tmpdir()), 'kite-lease-model-'));
   const workspace = join(root, 'workspace');

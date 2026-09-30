@@ -21,7 +21,7 @@ export const BUILTIN_READ_FILE_SCHEMA_ = z.object({
     .int()
     .min(1)
     .optional()
-    .describe('Maximum number of lines to read (default 2000)'),
+    .describe('Maximum number of lines to read (default: all remaining lines)'),
 });
 
 export const BUILTIN_SEARCH_CONTENT_SCHEMA_ = z.object({
@@ -71,19 +71,19 @@ export const BUILTIN_EDIT_FILE_SCHEMA_ = z.object({
 });
 
 export const BUILTIN_WEB_FETCH_SCHEMA_ = z.object({
-  url: z.string().min(1).max(8192).describe('Public http/https URL to fetch (max 8192 chars)'),
+  url: z.string().min(1).describe('Public http/https URL to fetch'),
   max_chars: z
     .number()
     .int()
-    .min(1000)
-    .max(16000)
+    .positive()
     .optional()
-    .describe('Max characters of extracted content (default 8000)'),
+    .describe(
+      'Optional character limit selected by the caller; omitted returns full extracted content',
+    ),
   timeout_ms: z
     .number()
     .int()
-    .min(3000)
-    .max(30000)
+    .positive()
     .optional()
     .describe(
       'Timeout in milliseconds (default 15000). Increase for large pages like Wikipedia or GitHub.',
@@ -95,9 +95,9 @@ export const BUILTIN_LIST_MCP_RESOURCES_SCHEMA_ = z.object({
 });
 
 export const BUILTIN_LIST_MCP_TOOLS_SCHEMA_ = z.object({
-  provider: z.string().trim().min(1).max(128).optional(),
-  limit: z.number().int().min(1).max(100).optional(),
-  cursor: z.string().max(2048).optional(),
+  provider: z.string().trim().min(1).optional(),
+  limit: z.number().int().min(1).optional(),
+  cursor: z.string().optional(),
 });
 
 export const BUILTIN_READ_MCP_RESOURCE_SCHEMA_ = z.object({
@@ -170,7 +170,6 @@ const planStepSchema = z
       .string()
       .trim()
       .min(1)
-      .max(160)
       .regex(/^[^\r\n]+$/),
   })
   .strict();
@@ -180,13 +179,11 @@ const writePlanDocumentFields = {
     .string()
     .trim()
     .min(1)
-    .max(120)
     .regex(/^[^\r\n]+$/),
-  body_markdown: z.string().trim().min(20).max(30_000),
+  body_markdown: z.string().trim().min(1),
   steps: z
     .array(planStepSchema)
     .min(1)
-    .max(12)
     .superRefine((steps, context) => {
       const ids = new Set<string>();
       for (const [index, step] of steps.entries()) {
@@ -264,7 +261,6 @@ export const BUILTIN_UPDATE_PLAN_SCHEMA_ = z
           .strict(),
       )
       .min(1)
-      .max(12)
       .superRefine((updates, context) => {
         const ids = new Set<string>();
         for (const [index, update] of updates.entries()) {
@@ -427,7 +423,7 @@ export const BUILTIN_SHELL_EXECUTE_SCHEMA_ = z.object({
     .positive()
     .optional()
     .describe(
-      'Maximum runtime in milliseconds. In an independent sub-agent Run, an omitted value uses the remaining Run time. Other finite commands default to 600000ms; set an explicit limit when needed.',
+      'Maximum runtime in milliseconds. In a Run with cumulative quotas removed, an omitted value uses the remaining Run time. Legacy finite commands default to 600000ms; set an explicit limit when needed.',
     ),
   yield_ms: z
     .number()
@@ -473,8 +469,8 @@ export const BUILTIN_SHELL_STOP_SCHEMA_ = z.object({
 });
 
 export const BUILTIN_TOOL_SEARCH_SCHEMA_ = z.object({
-  query: z.string().trim().min(2).max(512).describe('Capability intent to search for'),
-  limit: z.number().int().min(1).max(12).optional().describe('Maximum candidates'),
+  query: z.string().trim().min(2).describe('Capability intent to search for'),
+  limit: z.number().int().min(1).optional().describe('Maximum candidates'),
 });
 
 const internalSchema = z.object({}).passthrough();

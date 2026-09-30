@@ -569,21 +569,22 @@ describe('BackgroundSubagentRuntime', () => {
       },
     });
     startReceiptReturned = true;
-    completion.resolve(terminal({ summary: 'short persisted report' }));
+    const report = `${'persisted report '.repeat(159)}persisted report`;
+    completion.resolve(terminal({ summary: report }));
     await Bun.sleep(5);
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({
       source: 'subagent',
       modelRole: 'user',
       taskId: 'subagent-notify',
-      shortReport: 'short persisted report',
+      shortReport: report,
     });
     expect((notifications[0] as { notificationId: string }).notificationId).toMatch(
       /^subagent:subagent-notify:sha256:/,
     );
     expect(await owner.readTask(ownerKey, 'subagent-notify')).toMatchObject({
       status: 'completed',
-      result: { summary: 'short persisted report' },
+      result: { summary: report },
     });
   });
 

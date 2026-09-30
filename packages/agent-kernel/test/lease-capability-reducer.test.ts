@@ -95,6 +95,187 @@ function reservation(
 }
 
 describe('State lease reducer', () => {
+  test('terminal reservations leave the active working set while audit usage remains', () => {
+    const primaryBudget = {
+      ...budget(0),
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxRunInputTokens: 0,
+      maxRunOutputTokens: 0,
+      maxArtifactBytes: 0,
+      unboundedCumulativeUsage: true as const,
+    };
+    let state = reduceLeaseState(initialState(), {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: STARTED_AT,
+      deadlineAt: DEADLINE_AT,
+      budget: primaryBudget,
+    });
+    for (let i = 0; i < 2_000; i++) {
+      state = reduceLeaseState(state, reservation(`reservation-${i}`, `invocation-${i}`));
+      state = reduceLeaseState(state, {
+        type: 'resource_budget.released',
+        reservationId: `reservation-${i}`,
+      });
+    }
+    expect(state.resourceBudget.status).toBe('active');
+    if (state.resourceBudget.status !== 'active') return;
+    expect(state.resourceBudget.externalizedClosedReservations).toBe(true);
+    expect(Object.keys(state.resourceBudget.reservations)).toHaveLength(0);
+    expect(JSON.stringify(state).length).toBeLessThan(5_000);
+    assertAgentStateInvariants(state);
+  });
+
+  test('legacy upgrade externalizes settled entries without recounting usage', () => {
+    let state = configure(initialState(), 1);
+    state = reduceLeaseState(state, reservation('legacy', 'legacy-invocation'));
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'legacy',
+    });
+    state = reduceLeaseState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'legacy',
+      actual: usage('actual', 1) as never,
+    });
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    const priorUsage = state.resourceBudget.reconciledUsage;
+    expect(state.resourceBudget.reservations.legacy?.state).toBe('reconciled');
+    const upgraded = reduceLeaseState(state, {
+      type: 'resource_budget.cumulative_limits_removed',
+      runId: 'run-1',
+    });
+    if (upgraded.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(upgraded.resourceBudget.reservations.legacy).toBeUndefined();
+    expect(upgraded.resourceBudget.reconciledUsage).toEqual(priorUsage);
+    assertAgentStateInvariants(upgraded);
+  });
+
+  test('new primary Run records usage beyond zero cumulative placeholders while retaining time and concurrency', () => {
+    const initial = initialState();
+    const primaryBudget = {
+      ...budget(0),
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxRunInputTokens: 0,
+      maxRunOutputTokens: 0,
+      maxArtifactBytes: 0,
+      unboundedCumulativeUsage: true as const,
+    };
+    const configured = reduceLeaseState(initial, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: STARTED_AT,
+      deadlineAt: DEADLINE_AT,
+      budget: primaryBudget,
+    });
+    expect(() =>
+      reduceLeaseState(
+        {
+          ...initial,
+          childSessionOrigin: {} as NonNullable<AgentState['childSessionOrigin']>,
+        },
+        {
+          type: 'resource_budget.configured',
+          runId: 'run-1',
+          startedAt: STARTED_AT,
+          deadlineAt: DEADLINE_AT,
+          budget: primaryBudget,
+        },
+      ),
+    ).toThrow('child Run cannot use primary unbounded cumulative authority');
+    const reserved = reduceLeaseState(configured, reservation('tool-1', 'invocation-1', 1));
+    if (reserved.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(reserved.resourceBudget.reservations['tool-1']).toBeDefined();
+    assertAgentStateInvariants(reserved);
+    const second = reduceLeaseState(reserved, reservation('tool-2', 'invocation-2', 1));
+    expect(() => reduceLeaseState(second, reservation('tool-3', 'invocation-3', 1))).toThrow(
+      'Resource budget exhausted before dispatch.',
+    );
+    const lateReservation = reservation('tool-2', 'invocation-2', 1);
+    if (lateReservation.type !== 'resource_budget.reserved')
+      throw new Error('Expected reservation fixture.');
+    expect(() =>
+      reduceLeaseState(reserved, {
+        ...lateReservation,
+        reservation: {
+          ...lateReservation.reservation,
+          executableUpperBound: {
+            ...lateReservation.reservation.executableUpperBound,
+            gauges: {
+              ...lateReservation.reservation.executableUpperBound.gauges,
+              elapsedRunMs: 60_001,
+            },
+          },
+        },
+      }),
+    ).toThrow('Resource budget exhausted before dispatch.');
+  });
+
+  test('legacy active Run upgrades durably without changing prior counters or old limited replay', () => {
+    const limited = configure(initialState(), 1);
+    const firstReservation = reservation('tool-1', 'invocation-1');
+    if (firstReservation.type !== 'resource_budget.reserved')
+      throw new Error('Expected reservation fixture.');
+    const first = reduceLeaseState(limited, {
+      ...firstReservation,
+      reservation: {
+        ...firstReservation.reservation,
+        executableUpperBound: {
+          ...firstReservation.reservation.executableUpperBound,
+          counters: {
+            ...firstReservation.reservation.executableUpperBound.counters,
+            artifactBytes: 10_000,
+          },
+        },
+      },
+    });
+    expect(() => reduceLeaseState(first, reservation('tool-2', 'invocation-2'))).toThrow(
+      'Resource budget exhausted before dispatch.',
+    );
+    const upgrade: KernelEvent = {
+      type: 'resource_budget.cumulative_limits_removed',
+      runId: 'run-1',
+    };
+    const upgraded = reduceLeaseState(first, upgrade);
+    expect(reduceLeaseState(upgraded, upgrade)).toBe(upgraded);
+    const second = reduceLeaseState(upgraded, reservation('tool-2', 'invocation-2'));
+    if (second.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(second.resourceBudget.budget.maxToolInvocations).toBe(1);
+    expect(second.resourceBudget.budget.unboundedCumulativeUsage).toBe(true);
+    if (first.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(second.resourceBudget.reservations['tool-1']?.executableUpperBound).toMatchObject({
+      unboundedArtifactBytes: true,
+      counters: { artifactBytes: 0 },
+    });
+    const started = reduceLeaseState(second, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'tool-1',
+    });
+    const measured = usage('actual', 1);
+    (measured.counters as Record<string, number>).artifactBytes = 20_000;
+    const reconciled = reduceLeaseState(started, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'tool-1',
+      actual: measured,
+    } as KernelEvent);
+    if (reconciled.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    expect(reconciled.resourceBudget.reconciledUsage.counters.artifactBytes).toBe(20_000);
+    expect(first.resourceBudget.reservations['tool-1']).toBeDefined();
+    assertAgentStateInvariants(second);
+    assertAgentStateInvariants(reconciled);
+    expect(() => reduceLeaseState(second, { ...upgrade, runId: 'other-run' })).toThrow(
+      'Cumulative limit removal Run identity mismatch.',
+    );
+    expect(() =>
+      reduceLeaseState(
+        { ...first, childSessionOrigin: {} as NonNullable<AgentState['childSessionOrigin']> },
+        upgrade,
+      ),
+    ).toThrow('only valid for a primary Run');
+  });
+
   test('duration-only child persists concurrent write usage with bounded marker provenance', () => {
     const lineage = {
       parentSessionId: 'parent-session',

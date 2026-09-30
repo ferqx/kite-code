@@ -42,6 +42,9 @@ export function settleAcceptedChildCreationFailure(input: {
   /** Parent user cancellation already released this exact, never-dispatched child allotment. */
   readonly alreadyReleasedAfterParentCancel?: boolean;
   readonly hasCancelledParentRunProof?: (runId: string) => boolean;
+  readonly readCompletedReservation?: (
+    reservationId: string,
+  ) => Readonly<Record<string, unknown>> | null;
   readonly afterTurnPhase?: 'planning' | 'building';
 }): readonly RuntimeEvent[] {
   const { parentState, childThreadId } = input;
@@ -66,6 +69,9 @@ export function settleAcceptedChildCreationFailure(input: {
     parentState.resourceBudget.runId === intent.fundingRunId
       ? parentState.resourceBudget
       : parentState.retainedResourceBudgets[intent.fundingRunId];
+  const released =
+    ledger?.reservations[intent.delegatedReservationId] ??
+    input.readCompletedReservation?.(intent.delegatedReservationId);
   if (
     !link ||
     link.childThreadId !== childThreadId ||
@@ -83,7 +89,9 @@ export function settleAcceptedChildCreationFailure(input: {
         intent.disposition !== 'required' ||
         intent.fundingRunId !== intent.originRunId ||
         input.hasCancelledParentRunProof?.(intent.originRunId) !== true ||
-        ledger?.reservations[intent.delegatedReservationId]?.state !== 'released'
+        released?.state !== 'released' ||
+        released.runId !== intent.fundingRunId ||
+        released.reservationId !== intent.delegatedReservationId
       : ledger?.reservations[intent.delegatedReservationId]?.state !== 'reserved' &&
         ledger?.reservations[intent.delegatedReservationId]?.state !== 'queued')
   )
@@ -215,6 +223,7 @@ export function settleAcceptedChildCreationFailure(input: {
       ? {
           alreadyReleasedAfterParentCancel: true as const,
           hasCancelledParentRunProof: input.hasCancelledParentRunProof!,
+          readCompletedReservation: input.readCompletedReservation!,
         }
       : {
           releaseEvent: {

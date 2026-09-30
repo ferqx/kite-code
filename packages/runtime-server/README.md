@@ -15,7 +15,7 @@ logical message 路由到注入的 `RuntimeAccess` 与 App admission port；它�
   不宣告此能力。通知的解析和资源释放属于 carrier，Server core 不接受或路由该通知。
 - 显式daemon可用独立开关声明`server/status|server/shutdown`；parent-owned stdio、legacy Service和Worker不声明。方法正文仍由
   App carrier在logical message进入Server前处理，Server只拥有capability事实。
-- 管理 subscription pump、ack-before-notification、iterator cleanup、同 subscription FIFO 与 connection/global bounded outbound queue。
+- 管理 subscription pump、ack-before-notification、iterator cleanup、同 subscription FIFO 与 connection/global outbound 背压队列。
 - 将 App admission 返回的 opaque `bindingReference` 与 connection/request/client identity 组合成 strict、frozen 的进程内
   `RuntimeCommandContext`，仅传给 `RuntimeAccess.command()`；该 context 不进入 Protocol frame、request body、History 或 Browser。
 - 提供不包含 socket/stream/process 的 InProcess logical-message endpoint。
@@ -59,9 +59,10 @@ App 可同时提供 `onClose(connectionId)` 清理自身 connection-to-interacti
   unsubscribe 可用已返回的 subscription ID，或用原始 subscribe request ID 脱离仍在准入/初始边界阶段的订阅；两者只释放通知 iterator，不取消 Runtime 执行。
   `afterRevision` 超过 Host watermark 时，ack 后立即发送 authoritative current snapshot/reset 与 ready，不能等待
   一个无法到达的旧边界。慢 consumer 只关闭所属 connection，并 return 所有 iterator；不会取消 Runtime work。
-- outbound 同时受 count 和 encoded-byte 上限；已经从队列取出但尚未 settle 的 send 仍占 connection/global
-  byte reservation，只有 send resolve/reject 后释放。drain 时发出 `server/draining` 并清理连接资源。没有
-  sidecar、dual write 或 old-path fallback。
+- 可靠 outbound 按连接 FIFO 等待全局 resident byte 容量；Service 注入的 per-connection spool 将等待帧写入权限为 0700/0600 的临时目录/文件，Server 只持有中立 port，
+  不因累计消息数或字节数直接拒绝。正在发送的帧占用全局 resident byte reservation，send 完成或连接关闭后释放；
+  从入队到发送完成受同一个 drain 时限约束。ephemeral 通知仍可在连接队列达到 count/byte 目标时丢弃旧项。
+  drain 时发出 `server/draining` 并清理连接资源。没有 sidecar、dual write 或 old-path fallback。
 - KLSV1-06不改变本package的transport-neutral边界或Protocol/Store schema；clean cutover只改变注入backend的App owner。
 
 ## 测试

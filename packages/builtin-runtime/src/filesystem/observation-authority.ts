@@ -77,6 +77,9 @@ interface BoundTerminal extends IssuedObservation {
 const issuedObservations = new WeakMap<object, IssuedObservation>();
 const cloneAuthorizations = new WeakMap<object, IssuedObservation>();
 const boundTerminals = new WeakMap<object, BoundTerminal>();
+// One immutable string/digest pair only. Every invocation still validates its
+// target, prepared identity, and evidence independently before this is updated.
+let lastVerifiedReadContent: { rawContent: string; digest: string } | undefined;
 
 /** Package-internal issuer called only after durable intent and Provider evidence checks. */
 export function issueBuiltinWorkspaceFilesystemReadObservation(input: {
@@ -365,15 +368,25 @@ function assertProviderReadEvidence(
     provider.targetEvidence.lexicalTargetDigest !== targetEvidence.lexicalTargetDigest ||
     provider.targetEvidence.canonicalTargetDigest !== targetEvidence.canonicalTargetDigest ||
     provider.targetEvidence.targetIdentityDigest !== targetEvidence.targetIdentityDigest ||
-    provider.contentDigest !== workspaceFilesystemStringDigest(provider.rawContent) ||
     persisted.record.lexicalTargetDigest !== provider.targetEvidence.lexicalTargetDigest ||
     observation.lexicalTargetDigest !== provider.targetEvidence.lexicalTargetDigest ||
     observation.canonicalTargetDigest !== provider.targetEvidence.canonicalTargetDigest ||
     observation.targetIdentityDigest !== provider.targetEvidence.targetIdentityDigest ||
-    observation.contentDigest !== provider.contentDigest
+    observation.contentDigest !== provider.contentDigest ||
+    typeof provider.rawContent !== 'string' ||
+    typeof provider.contentDigest !== 'string'
   ) {
     throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
   }
+  const contentDigestMatches =
+    lastVerifiedReadContent?.rawContent === provider.rawContent &&
+    lastVerifiedReadContent.digest === provider.contentDigest
+      ? true
+      : workspaceFilesystemStringDigest(provider.rawContent) === provider.contentDigest;
+  if (!contentDigestMatches) {
+    throw new BuiltinWorkspaceFilesystemObservationAuthorityError('provider_evidence_mismatch');
+  }
+  lastVerifiedReadContent = { rawContent: provider.rawContent, digest: provider.contentDigest };
 }
 
 function acknowledgementMatchesPrepared(

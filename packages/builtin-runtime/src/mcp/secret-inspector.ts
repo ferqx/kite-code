@@ -12,13 +12,20 @@ export function inspectRuntimeSecret(input: {
   text: string;
   knownSecrets?: Iterable<string | undefined>;
   maxInspectionChars: number;
+  preparedSecrets?: ReadonlySet<string>;
 }): 'clear' | 'secret' | 'unknown' {
   if (input.text.length > input.maxInspectionChars) return 'unknown';
+  const knownSecrets = input.preparedSecrets ?? collectRuntimeSecrets(input.knownSecrets);
+  for (const secret of knownSecrets) if (input.text.includes(secret)) return 'secret';
+  return SECRET_SHAPE_PATTERNS.some((pattern) => pattern.test(input.text)) ? 'secret' : 'clear';
+}
+
+/** Take one fresh environment snapshot for one synchronous argument inspection. */
+export function collectRuntimeSecrets(known?: Iterable<string | undefined>): ReadonlySet<string> {
   const knownSecrets = new Set<string>();
-  for (const value of input.knownSecrets ?? []) if (value) knownSecrets.add(value);
+  for (const value of known ?? []) if (value) knownSecrets.add(value);
   for (const [name, value] of Object.entries(process.env)) {
     if (value && CREDENTIAL_ENV_NAME.test(name)) knownSecrets.add(value);
   }
-  for (const secret of knownSecrets) if (input.text.includes(secret)) return 'secret';
-  return SECRET_SHAPE_PATTERNS.some((pattern) => pattern.test(input.text)) ? 'secret' : 'clear';
+  return knownSecrets;
 }

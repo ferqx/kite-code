@@ -18,6 +18,7 @@ import {
   createKiteAppControlService,
   type KiteAppControlHandlerPorts,
 } from '../app-control';
+import { createRuntimeOutboundSpool } from '../carrier/runtime-outbound-spool';
 import { createKiteRuntimeApplication, type KiteRuntimeApplication } from './application';
 import { createRuntimeOperationGate, type RuntimeOperationGate } from './operation-gate';
 
@@ -61,7 +62,7 @@ export function createInProcessKiteRuntimeApplication(
   });
   const hub = createRuntimeServerInProcessHub(
     { runtime, admission: input.defaultAdmission },
-    input.server,
+    { ...input.server, outboundSpool: input.server.outboundSpool ?? createRuntimeOutboundSpool },
   );
   if (!input.appControl && !input.createAppControlHandlers) {
     throw new Error('Runtime Application requires an App Control owner.');

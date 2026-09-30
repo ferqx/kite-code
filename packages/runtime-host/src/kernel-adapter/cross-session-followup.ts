@@ -161,8 +161,19 @@ export function planCrossSessionFollowupSlotAcquisition(input: {
     if (
       committedResourceUsage(ledger).gauges.activeSubagents + 1 >
       ledger.budget.maxConcurrentSubagents
-    )
+    ) {
+      const unknownSlots = Object.values(ledger.reservations).reduce(
+        (total, reservation) =>
+          total +
+          (reservation.state === 'unknown'
+            ? reservation.executableUpperBound.gauges.activeSubagents
+            : 0),
+        0,
+      );
+      if (unknownSlots + 1 > ledger.budget.maxConcurrentSubagents)
+        fail('reconciliation_required', 'TriggerTurn capacity is occupied by unknown executions.');
       return { status: 'waiting' };
+    }
     fail('budget_exhausted', error instanceof Error ? error.message : String(error));
   }
   return { status: 'ready', event };

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   acquireKiteSessionStoreMaintenance,
   KITE_SESSION_STORE_FORMAT_EPOCH,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
   type KiteSessionMaintenanceLock,
   KiteSessionStoreOpenError,
 } from '@kite-ai/runtime-storage-sqlite';
@@ -198,7 +199,7 @@ test('a qualified older Store publishes after a busy wait and remains open after
     try {
       expect(current.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual(
         {
-          value: '15',
+          value: String(KITE_SESSION_STORE_SCHEMA_VERSION),
         },
       );
       expect(current.query("SELECT value FROM kite_meta WHERE key='format_epoch'").get()).toEqual({

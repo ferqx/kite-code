@@ -6,8 +6,6 @@ import {
   type MessageExtraInfo,
 } from '@modelcontextprotocol/sdk/types.js';
 
-const MCP_STDIO_MAX_LINE_BYTES_ = 1024 * 1024;
-
 /**
  * SDK-compatible MCP Transport backed by the Host-authenticated process port.
  * The SDK remains responsible only for JSON-RPC semantics; no process spawn,
@@ -86,20 +84,24 @@ class HostMcpStdioTransport implements Transport {
     const handle = this.#handle;
     if (!handle || !this.#started || this.#closed)
       throw new Error('MCP stdio transport is not connected.');
-    const json = JSON.stringify(message);
-    if (!json || json.includes('\n') || json.includes('\r')) {
-      throw new Error('MCP JSON-RPC message is not a bounded single line.');
-    }
-    const bytes = new TextEncoder().encode(`${json}\n`);
-    if (bytes.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
-      throw new Error('MCP JSON-RPC message exceeds the bounded line limit.');
-    }
-    const write = this.#writeChain.then(() => handle.write(bytes));
-    this.#writeChain = write.catch(() => undefined);
+    const prior = this.#writeChain;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#writeChain = prior.then(() => gate);
+    await prior;
+    let bytes: Uint8Array | undefined;
     try {
-      await write;
+      const json = JSON.stringify(message);
+      if (!json || json.includes('\n') || json.includes('\r')) {
+        throw new Error('MCP JSON-RPC message is not a single line.');
+      }
+      bytes = new TextEncoder().encode(`${json}\n`);
+      await handle.write(bytes);
     } finally {
-      bytes.fill(0);
+      bytes?.fill(0);
+      release();
     }
   }
 
@@ -132,29 +134,47 @@ class HostMcpStdioTransport implements Transport {
     const reader = this.#reader;
     const handle = this.#handle;
     if (!reader || !handle) throw new Error('MCP stdio transport reader is unavailable.');
-    let buffer = new Uint8Array(0) as Uint8Array<ArrayBufferLike>;
+    const parts: Uint8Array[] = [];
+    let pendingBytes = 0;
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         if (!(value instanceof Uint8Array)) throw new Error('MCP stdio output bytes are invalid.');
-        buffer = appendBuffer(buffer, value);
-        while (true) {
-          const newline = buffer.indexOf(0x0a);
-          if (newline < 0) break;
-          if (newline === 0 || newline > MCP_STDIO_MAX_LINE_BYTES_) {
-            throw new Error('MCP stdio output line is empty or oversized.');
+        let offset = 0;
+        while (offset < value.byteLength) {
+          const newline = value.indexOf(0x0a, offset);
+          if (newline < 0) {
+            const tail = value.slice(offset);
+            parts.push(tail);
+            pendingBytes += tail.byteLength;
+            break;
           }
-          const lineBytes = buffer.slice(0, newline);
-          buffer = buffer.slice(newline + 1);
-          const line = new TextDecoder('utf-8', { fatal: true }).decode(lineBytes);
-          if (line.trim() !== line) throw new Error('MCP stdio output line is not exact.');
-          const message = JSONRPCMessageSchema.parse(JSON.parse(line)) as JSONRPCMessage;
-          this.onmessage?.(message);
-          lineBytes.fill(0);
+          const segment = value.slice(offset, newline);
+          parts.push(segment);
+          pendingBytes += segment.byteLength;
+          if (pendingBytes === 0) throw new Error('MCP stdio output line is empty.');
+          const lineBytes = new Uint8Array(pendingBytes);
+          let copied = 0;
+          for (const part of parts) {
+            lineBytes.set(part, copied);
+            copied += part.byteLength;
+            part.fill(0);
+          }
+          parts.length = 0;
+          pendingBytes = 0;
+          try {
+            const line = new TextDecoder('utf-8', { fatal: true }).decode(lineBytes);
+            if (line.trim() !== line) throw new Error('MCP stdio output line is not exact.');
+            const message = JSONRPCMessageSchema.parse(JSON.parse(line)) as JSONRPCMessage;
+            this.onmessage?.(message);
+          } finally {
+            lineBytes.fill(0);
+          }
+          offset = newline + 1;
         }
       }
-      if (buffer.byteLength !== 0) throw new Error('MCP stdio output ended with a truncated line.');
+      if (pendingBytes !== 0) throw new Error('MCP stdio output ended with a truncated line.');
       const terminal = await handle.terminal;
       if (typeof terminal.exitCode === 'number' && terminal.exitCode !== 0) {
         throw new Error(`MCP stdio child exited with code ${terminal.exitCode}.`);
@@ -163,7 +183,7 @@ class HostMcpStdioTransport implements Transport {
       if (!this.#closed) this.#notifyError(error);
       throw error;
     } finally {
-      buffer.fill(0);
+      for (const part of parts) part.fill(0);
       reader.releaseLock();
       this.#notifyClose();
     }
@@ -192,20 +212,4 @@ class HostMcpStdioTransport implements Transport {
     this.#closeNotified = true;
     this.onclose?.();
   }
-}
-
-function appendBuffer(
-  buffer: Uint8Array<ArrayBufferLike>,
-  chunk: Uint8Array,
-): Uint8Array<ArrayBufferLike> {
-  if (buffer.byteLength + chunk.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
-    throw new Error('MCP stdio output exceeds the bounded line limit.');
-  }
-  const result = new Uint8Array(
-    buffer.byteLength + chunk.byteLength,
-  ) as Uint8Array<ArrayBufferLike>;
-  result.set(buffer, 0);
-  result.set(chunk, buffer.byteLength);
-  buffer.fill(0);
-  return result;
 }

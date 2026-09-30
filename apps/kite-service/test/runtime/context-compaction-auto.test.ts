@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { decodeCurrentAgentStateJson, encodeCurrentAgentStateJson } from '@kite-ai/agent-kernel';
 import type { ContextPreflight, ContextTokenEstimate } from '@kite-ai/builtin-runtime/model';
 import {
   aiMessage,
   decideAutomaticContextCompaction,
+  expectedCompactionSourceDigest,
   manualContextCompactionEvent,
 } from '@kite-ai/builtin-runtime/model';
 import {
@@ -83,7 +85,7 @@ function config(): AgentConfig {
 }
 
 describe('automatic context compaction', () => {
-  test('requests auto compaction only when eligibility and cooldown allow it', () => {
+  test('requests auto compaction when eligible even after a recent compaction', () => {
     const state = historicalState();
     expect(
       decideAutomaticContextCompaction({
@@ -107,10 +109,10 @@ describe('automatic context compaction', () => {
         preflight: preflight('hard_limit'),
         mode: 'live',
       }),
-    ).toEqual({ action: 'invoke' });
+    ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
 
-  test('hard-limit diagnostics never bypass cooldown or block without a safe boundary', () => {
+  test('hard-limit diagnostics do not bypass a safe boundary', () => {
     const state = historicalState();
     state.interactions = {
       kind: 'awaiting_user_input',
@@ -244,7 +246,7 @@ describe('automatic context compaction', () => {
     ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
 
-  test('consumes the single new-turn recovery and does not retry forever', () => {
+  test('retries a failure only after its exact transcript source changes', () => {
     let state = historicalState();
     state.context.lastFailure = {
       compactionId: 'first-failure',
@@ -275,10 +277,21 @@ describe('automatic context compaction', () => {
       type: 'context.compaction_failed',
       compactionId: retry.compactionId,
       sourceRevision: state.revision,
+      sourceDigest: expectedCompactionSourceDigest(
+        state.context.activeCheckpoint?.sourceDigest,
+        state.transcript.messages,
+      ),
       errorKind: 'summary_model_failed',
       message: 'provider failed again',
       retryable: true,
     });
+    state = decodeCurrentAgentStateJson(encodeCurrentAgentStateJson(state));
+    expect(state.context.lastFailure?.sourceDigest).toBe(
+      expectedCompactionSourceDigest(
+        state.context.activeCheckpoint?.sourceDigest,
+        state.transcript.messages,
+      ),
+    );
     state = reduceRuntimeState(state, { type: 'turn.started', turnId: 'later-turn' });
     expect(
       decideAutomaticContextCompaction({
@@ -287,6 +300,18 @@ describe('automatic context compaction', () => {
         mode: 'live',
       }),
     ).toEqual({ action: 'invoke' });
+    state = reduceRuntimeState(state, {
+      type: 'user.message_appended',
+      messageId: 'additional-context',
+      content: 'A new requirement changes the compaction source.',
+    });
+    expect(
+      decideAutomaticContextCompaction({
+        state,
+        preflight: preflight('compact_due'),
+        mode: 'live',
+      }),
+    ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
 
   test('does not infer compaction or hard block from a provider 400-style failure', async () => {

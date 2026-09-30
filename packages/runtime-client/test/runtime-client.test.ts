@@ -22,6 +22,190 @@ describe('Runtime Client boundary', () => {
 });
 
 describe('RuntimeClient protocol state machine', () => {
+  test.each([
+    false,
+    true,
+  ])('rejects a background page from another session: %s', async (wrongFirstPage) => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('background-session-boundary', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (
+        message.method !== 'runtime/query' ||
+        message.params.query.type !== 'list_background_executions'
+      )
+        return;
+      const offset = message.params.query.cursor ?? 0;
+      target.push(
+        result(message.id, {
+          status: 'ok',
+          queryType: 'list_background_executions',
+          backgroundSnapshot: {
+            sessionId: wrongFirstPage || offset > 0 ? 'session-2' : 'session-1',
+            sessionRevision: 1,
+            aggregateGeneration: 'generation-1',
+            watermark: 1,
+            executions: [],
+          },
+          ...(offset === 0 ? { nextBackgroundCursor: 1 } : {}),
+        }),
+      );
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      await client.connect();
+      await expect(
+        client.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'list_background_executions',
+          sessionId: 'session-1',
+        }),
+      ).rejects.toMatchObject({ code: 'protocol_error' });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('uses one request deadline across the first background page and continuation', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('background-page-deadline', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (
+        message.method !== 'runtime/query' ||
+        message.params.query.type !== 'list_background_executions'
+      )
+        return;
+      const offset = message.params.query.cursor ?? 0;
+      setTimeout(
+        () =>
+          target.push(
+            result(message.id, {
+              status: 'ok',
+              queryType: 'list_background_executions',
+              backgroundSnapshot: {
+                sessionId: 'session-1',
+                sessionRevision: 1,
+                aggregateGeneration: 'generation-1',
+                watermark: 1,
+                executions: [],
+              },
+              ...(offset === 0 ? { nextBackgroundCursor: 1 } : {}),
+            }),
+          ),
+        60,
+      );
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      requestTimeoutMs: 100,
+    });
+    try {
+      await client.connect();
+      await expect(
+        client.query({
+          schema: 'kite.runtime-query.v1',
+          type: 'list_background_executions',
+          sessionId: 'session-1',
+        }),
+      ).rejects.toMatchObject({ code: 'request_timeout' });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('restarts a changed background directory and returns only a complete generation', async () => {
+    let backgroundReads = 0;
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(
+          result(
+            message.id,
+            initializeResult('background-pages', {
+              steer: false,
+              backgroundQuery: true,
+              backgroundControl: false,
+            }),
+          ),
+        );
+      if (
+        message.method !== 'runtime/query' ||
+        message.params.query.type !== 'list_background_executions'
+      )
+        return;
+      backgroundReads += 1;
+      const generation = backgroundReads === 1 ? 1 : 2;
+      const offset = message.params.query.cursor ?? 0;
+      target.push(
+        result(message.id, {
+          status: 'ok',
+          queryType: 'list_background_executions',
+          backgroundSnapshot: {
+            sessionId: 'session-1',
+            sessionRevision: generation,
+            aggregateGeneration: `generation-${generation}`,
+            watermark: generation,
+            executions: [
+              {
+                executionId: `shell-${offset}`,
+                sessionId: 'session-1',
+                sessionRevision: generation,
+                kind: 'shell',
+                status: 'completed',
+                ownerGeneration: 'owner-1',
+                revision: 1,
+                cleanupConfirmed: true,
+              },
+            ],
+          },
+          ...(offset === 0 ? { nextBackgroundCursor: 1 } : {}),
+        }),
+      );
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+    });
+    try {
+      await client.connect();
+      const response = await client.query({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId: 'session-1',
+      });
+      expect(response).toMatchObject({
+        status: 'ok',
+        backgroundSnapshot: {
+          aggregateGeneration: 'generation-2',
+          executions: [{ executionId: 'shell-0' }, { executionId: 'shell-1' }],
+        },
+      });
+      expect(backgroundReads).toBe(4);
+    } finally {
+      await client.close();
+    }
+  });
+
   test('accepts a late turn event from explicit admission identity after the snapshot settles', () => {
     const envelope = toAcceptedPresentationEnvelope(
       {
@@ -153,15 +337,33 @@ describe('RuntimeClient protocol state machine', () => {
     await client.close();
   });
 
-  test('bounds a thousand concurrent History loads before transport send', async () => {
+  test('queues more than a thousand History loads and advances them under the active limit', async () => {
+    let release = false;
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize')
         target.push(result(message.id, initializeResult('history-bounded')));
+      else if (message.method === 'history/load_session' && release)
+        target.push(
+          result(message.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: message.params.sessionId,
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
     });
     const client = new RuntimeClient({
       transport: transport(connection),
       clientInfo: clientInfo(),
       history: 'protocol',
+      requestTimeoutMs: 10_000,
     });
     await client.connect();
     const loads = Array.from({ length: 1041 }, (_, index) =>
@@ -171,10 +373,28 @@ describe('RuntimeClient protocol state machine', () => {
     try {
       await until(() => connection.requests('history/load_session').length === 4);
       expect(connection.requests('history/load_session')).toHaveLength(4);
-      expect(await loads[1040]!.catch((error: unknown) => error)).toMatchObject({
-        code: 'request_overloaded',
+      release = true;
+      for (const request of connection.requests('history/load_session')) {
+        connection.push(
+          result(request.id, {
+            type: 'history_session_page',
+            session: {
+              sessionId: (request.params as { sessionId: string }).sessionId,
+              displayName: 'History',
+              needsSmartName: false,
+              updatedAt: 1,
+              lastSequence: 0,
+            },
+            records: [],
+            interactionMode: 'auto',
+            recovery: 'normal',
+          }),
+        );
+      }
+      await expect(loads[1040]).resolves.toMatchObject({
+        session: { sessionId: 'session-1040' },
       });
-
+      expect(connection.requests('history/load_session')).toHaveLength(1041);
       expect(connection.requests('history/load_child_session')).toHaveLength(0);
     } finally {
       await client.close();
@@ -182,10 +402,96 @@ describe('RuntimeClient protocol state machine', () => {
     }
   });
 
-  test('preserves a server overload as a typed client error', async () => {
+  test('waits for a retryable History overload and resends the same pinned page', async () => {
+    let overloaded = false;
+    const digest = 'a'.repeat(64);
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize')
         target.push(result(message.id, initializeResult('history-overload')));
+      else if (message.method === 'history/load_session') {
+        if (message.params.page?.afterSequence === 1 && !overloaded) {
+          overloaded = true;
+          target.push({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code: -32001, message: 'Overloaded', data: { code: 'overloaded' } },
+          });
+        } else {
+          const first = message.params.page?.afterSequence === undefined;
+          target.push(
+            result(message.id, {
+              type: 'history_session_page',
+              session: {
+                sessionId: 'session-overloaded',
+                displayName: 'History',
+                needsSmartName: false,
+                updatedAt: 1,
+                lastSequence: 2,
+              },
+              records: [{ sequence: first ? 1 : 2, events: [] }],
+              ...(first ? { nextCursor: 1 } : {}),
+              snapshotDigest: digest,
+              interactionMode: 'auto',
+              recovery: 'normal',
+            }),
+          );
+        }
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+    });
+    try {
+      await expect(client.history!.loadSession('session-overloaded')).resolves.toMatchObject({
+        records: [{ sequence: 1 }, { sequence: 2 }],
+      });
+      const requests = connection.requests('history/load_session');
+      expect(requests).toHaveLength(3);
+      expect(requests[2]?.params).toEqual(requests[1]?.params);
+      expect((requests[1]?.params as { page: unknown }).page).toMatchObject({
+        afterSequence: 1,
+        throughSequence: 2,
+        snapshotDigest: digest,
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('stops retrying an overloaded History read at the original deadline', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-overload-timeout')));
+      else if (message.method === 'history/load_session')
+        target.push({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: { code: -32001, message: 'Overloaded', data: { code: 'overloaded' } },
+        });
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+      requestTimeoutMs: 65,
+    });
+    try {
+      await client.connect();
+      await expect(client.history!.loadSession('session-overloaded')).rejects.toMatchObject({
+        code: 'request_timeout',
+      });
+      expect(connection.requests('history/load_session').length).toBeGreaterThan(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('cancels an overloaded History retry before another transport send', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize')
+        target.push(result(message.id, initializeResult('history-overload-cancel')));
       else if (message.method === 'history/load_session')
         target.push({
           jsonrpc: '2.0',
@@ -198,11 +504,17 @@ describe('RuntimeClient protocol state machine', () => {
       clientInfo: clientInfo(),
       history: 'protocol',
     });
+    const controller = new AbortController();
     try {
-      await expect(client.history!.loadSession('session-overloaded')).rejects.toMatchObject({
-        code: 'request_overloaded',
-        protocol: { data: { code: 'overloaded' } },
+      await client.connect();
+      const load = client.history!.loadSession('session-overloaded', undefined, {
+        signal: controller.signal,
       });
+      await until(() => connection.requests('history/load_session').length === 1);
+      controller.abort(new Error('selection changed'));
+      await expect(load).rejects.toThrow('selection changed');
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(connection.requests('history/load_session')).toHaveLength(1);
     } finally {
       await client.close();
     }
@@ -238,7 +550,7 @@ describe('RuntimeClient protocol state machine', () => {
     }
   });
 
-  test('stops assembling a History transcript beyond 50,000 records', async () => {
+  test('loads a History transcript beyond 50,000 records', async () => {
     const lastSequence = 50_001;
     const connection = new FakeConnection((message, target) => {
       if (message.method === 'initialize') {
@@ -273,16 +585,16 @@ describe('RuntimeClient protocol state machine', () => {
       history: 'protocol',
     });
     try {
-      await expect(client.history!.loadSession('history-record-limit')).rejects.toMatchObject({
-        code: 'history_too_large',
-      });
+      const transcript = await client.history!.loadSession('history-record-limit');
+      expect(transcript.records).toHaveLength(lastSequence);
+      expect(transcript.records.at(-1)?.sequence).toBe(lastSequence);
       expect(connection.requests('history/load_session')).toHaveLength(6);
     } finally {
       await client.close();
     }
   });
 
-  test('stops assembling a History transcript beyond 40 MiB of encoded records', async () => {
+  test('loads a History transcript beyond 40 MiB of encoded records', async () => {
     const lastSequence = 660;
     const text = 'x'.repeat(64_000);
     const connection = new FakeConnection((message, target) => {
@@ -325,10 +637,55 @@ describe('RuntimeClient protocol state machine', () => {
       history: 'protocol',
     });
     try {
-      await expect(client.history!.loadSession('history-byte-limit')).rejects.toMatchObject({
-        code: 'history_too_large',
+      const transcript = await client.history!.loadSession('history-byte-limit');
+      expect(transcript.records).toHaveLength(lastSequence);
+      expect(transcript.records.at(-1)?.events[0]).toMatchObject({ text });
+      expect(connection.requests('history/load_session')).toHaveLength(66);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test('loads a History whose total duration exceeds the per-page deadline', async () => {
+    const connection = new FakeConnection((message, target) => {
+      if (message.method === 'initialize') {
+        target.push(result(message.id, initializeResult('history-total-deadline')));
+      } else if (message.method === 'history/load_session') {
+        const after = message.params.page?.afterSequence ?? 0;
+        setTimeout(
+          () =>
+            target.push(
+              result(message.id, {
+                type: 'history_session_page',
+                session: {
+                  sessionId: 'history-total-deadline',
+                  displayName: 'History',
+                  needsSmartName: false,
+                  updatedAt: 1,
+                  lastSequence: 3,
+                },
+                records: [{ sequence: after + 1, events: [] }],
+                ...(after < 2 ? { nextCursor: after + 1 } : {}),
+                interactionMode: 'auto',
+                recovery: 'normal',
+              }),
+            ),
+          20,
+        );
+      }
+    });
+    const client = new RuntimeClient({
+      transport: transport(connection),
+      clientInfo: clientInfo(),
+      history: 'protocol',
+      requestTimeoutMs: 55,
+    });
+    try {
+      await client.connect();
+      await expect(client.history!.loadSession('history-total-deadline')).resolves.toMatchObject({
+        records: [{ sequence: 1 }, { sequence: 2 }, { sequence: 3 }],
       });
-      expect(connection.requests('history/load_session').length).toBeGreaterThan(60);
+      expect(connection.requests('history/load_session')).toHaveLength(3);
     } finally {
       await client.close();
     }

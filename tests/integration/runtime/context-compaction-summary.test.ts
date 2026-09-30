@@ -242,20 +242,29 @@ describe('narrative context compaction', () => {
     expect(calls).toBe(0);
   });
 
-  test('an explicit summary input limit fails instead of silently compacting a prefix', async () => {
+  test('legacy summary input budgets do not block or crop the source history', async () => {
     const state = stateWithHistory();
     let calls = 0;
+    let request = '';
     const compact = createNarrativeContextCompactor({
       maxSummaryInputTokens: 100,
-      generate: async () => {
+      generate: async (value) => {
         calls++;
-        return 'unreachable';
+        request = value.input;
+        return 'Continue the implementation using all six settled goals.';
       },
     });
-    await expect(
-      compact({ state, pending: pending(state), sourceRevision: state.revision }),
-    ).rejects.toMatchObject({ kind: 'oversized_turn' });
-    expect(calls).toBe(0);
+    const checkpoint = await compact({
+      state,
+      pending: pending(state),
+      sourceRevision: state.revision,
+    });
+    expect(calls).toBe(1);
+    for (const message of state.transcript.messages) {
+      if (typeof message.content !== 'string') throw new Error('Fixture must contain text.');
+      expect(request).toContain(message.content);
+    }
+    expect(checkpoint.coveredThroughMessageId).toBe('message-5');
   });
 
   test('protects the current active manual turn and compacts only settled history', async () => {

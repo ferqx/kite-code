@@ -27,6 +27,10 @@
 后台执行query结果把`sessionRevision`、列表`aggregateGeneration`、item `ownerGeneration`与item `revision`
 编码为四个独立必填字段。前者是Session mutation CAS；其余字段分别限定组合目录、原生执行owner和单项状态水位，
 不得互相代用。`stop_background_execution.expectedRevision`只来自同次读取的`sessionRevision`。
+`list_background_executions`保留无分页字段的旧请求形状，并可选携带零基`cursor`与单页`limit`；响应可带
+`nextBackgroundCursor`。Service按稳定execution ID顺序，在1 MiB消息与10,000项数组的wire边界内结束每页，
+不以这两个单帧安全界限拒绝完整历史。跨页读取须保持`aggregateGeneration`、`watermark`、`sessionRevision`
+一致；`get_background_execution`仍按单项ID读取，不要求先传输整个目录。每帧的strict codec、大小和身份校验保持有效。
 
 Session 当前 Run 的可选 `waitingReason` 经过严格 codec 编码为
 `{ kind: "required_background", taskIds: string[] }`，且只允许与 `status="waiting"` 同时出现；task ID 非空、唯一并受数量限制。

@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
+import { getEventListeners } from 'node:events';
 import type { BuiltinShellTerminalExecutionResult } from '@kite-ai/builtin-runtime';
+import type { RuntimeBackgroundExecutionSnapshot } from '@kite-ai/runtime-contract';
+import {
+  assertProtocolJsonValue,
+  RUNTIME_PROTOCOL_RESULT_SCHEMA_,
+} from '@kite-ai/runtime-protocol';
+import { pageBackgroundExecutionSnapshot } from '../../src/bootstrap/runtime/CliRuntimeBridge';
 import { resolveLocalDeletionCleanupContext } from '../../src/bootstrap/runtime/deletion-cleanup-context';
 import { ManagedShellRuntime } from '../../src/bootstrap/runtime/managed-shell';
 
@@ -14,6 +21,166 @@ const terminal = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('ManagedShellRuntime', () => {
+  test('spools terminal-only Host output and keeps streamed output single-copy', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'terminal-only\0workspace';
+    const terminalOnly = 'terminal-only-output'.repeat(3_000);
+    const started = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async () => terminal({ stdout: terminalOnly, stderr: 'terminal-error' }),
+    });
+    const complete = await runtime.wait(started.shellId, ownerKey);
+    let stdout = '';
+    let stderr = '';
+    let cursor = 0;
+    for (;;) {
+      const page = runtime.read(started.shellId, ownerKey, cursor);
+      stdout += page.stdout;
+      stderr += page.stderr;
+      cursor = page.cursor;
+      if (!page.moreOutput) break;
+    }
+    expect(stdout).toBe(terminalOnly);
+    expect(stderr).toBe('terminal-error');
+    expect(complete.result?.stdout.length).toBeLessThan(terminalOnly.length);
+
+    const streamed = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async (_signal, progress) => {
+        progress('streamed', 'stdout');
+        return terminal({ stdout: 'streamed', stderr: 'terminal-only-stderr' });
+      },
+    });
+    const mixed = await runtime.wait(streamed.shellId, ownerKey);
+    const mixedPage = runtime.read(streamed.shellId, ownerKey, 0);
+    expect(mixedPage.stdout).toBe('streamed');
+    expect(mixedPage.stderr).toBe('terminal-only-stderr');
+    expect(mixed.result?.stdout).toBe('streamed');
+    await runtime.dispose();
+  });
+
+  test('retains a failed execution reason beyond the old 1024-character cut', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'long-failure\0workspace';
+    const reason = 'failure detail '.repeat(3_000);
+    const started = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async () => {
+        throw new Error(reason);
+      },
+    });
+    const completed = await runtime.wait(started.shellId, ownerKey);
+    let stderr = '';
+    let cursor = 0;
+    for (;;) {
+      const page = runtime.read(started.shellId, ownerKey, cursor);
+      stderr += page.stderr;
+      cursor = page.cursor;
+      if (!page.moreOutput) break;
+    }
+    expect(stderr).toBe(reason);
+    expect(completed.result?.stderr.length).toBeLessThan(reason.length);
+    await runtime.dispose();
+  });
+
+  test('pages a directory beyond one protocol frame without losing terminal identities', () => {
+    const snapshot: RuntimeBackgroundExecutionSnapshot = {
+      sessionId: 'session-1',
+      sessionRevision: 1,
+      aggregateGeneration: 'generation-1',
+      watermark: 11_000,
+      executions: Array.from({ length: 11_000 }, (_, index) => ({
+        executionId: `sh_${String(index).padStart(5, '0')}`,
+        displayName: 'completed shell '.repeat(12),
+        sessionId: 'session-1',
+        sessionRevision: 1,
+        kind: 'shell' as const,
+        status: 'completed' as const,
+        ownerGeneration: 'owner-1',
+        revision: index + 1,
+        cleanupConfirmed: true,
+      })),
+    };
+    const ids: string[] = [];
+    let cursor = 0;
+    let pages = 0;
+    for (;;) {
+      const page = pageBackgroundExecutionSnapshot(snapshot, cursor);
+      const response = { status: 'ok', queryType: 'list_background_executions', ...page };
+      assertProtocolJsonValue(response);
+      expect(RUNTIME_PROTOCOL_RESULT_SCHEMA_.safeParse(response).success).toBe(true);
+      ids.push(...page.backgroundSnapshot.executions.map((entry) => entry.executionId));
+      pages += 1;
+      if (page.nextBackgroundCursor === undefined) break;
+      expect(page.nextBackgroundCursor).toBeGreaterThan(cursor);
+      cursor = page.nextBackgroundCursor;
+    }
+    expect(pages).toBeGreaterThan(1);
+    expect(ids).toEqual(snapshot.executions.map((entry) => entry.executionId));
+  });
+
+  test('spools output beyond the old capture size and delivers every page by cursor', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'large-output\0workspace';
+    const output = 'x'.repeat(1024 * 1024 + 260 * 1024);
+    const first = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async (_signal, progress) => {
+        progress(output, 'stdout');
+        return terminal({ stdout: 'preview' });
+      },
+    });
+    expect(first.moreOutput).toBe(true);
+    expect(first.stdout.length).toBeLessThanOrEqual(32 * 1024);
+    // Reading remains available while the Session owner exists. Disposal is
+    // the final ownership boundary and reclaims even unread completed output.
+    await Promise.resolve();
+    let reconstructed = first.stdout;
+    let cursor = first.cursor;
+    let pages = 1;
+    const terminalCursor = runtime.listSnapshot('large-output', ownerKey).executions[0]?.cursor;
+    if (terminalCursor === undefined) throw new Error('Missing terminal output cursor.');
+    while (cursor < terminalCursor) {
+      const page = runtime.read(first.shellId, ownerKey, cursor);
+      reconstructed += page.stdout;
+      cursor = page.cursor;
+      pages += 1;
+    }
+    expect(pages).toBeGreaterThan(8);
+    expect(reconstructed).toBe(output);
+    expect(runtime.read(first.shellId, ownerKey, 0).stdout).toBe(first.stdout);
+    await runtime.disposeOwner(ownerKey);
+    expect(() => runtime.read(first.shellId, ownerKey, 0)).toThrow('unavailable');
+  });
+
+  test('preserves multibyte characters across spool frames and output pages', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'unicode-output\0workspace';
+    const output = `${'a'.repeat(16 * 1024 - 1)}😀`.repeat(5);
+    const first = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async (_signal, progress) => {
+        progress(output, 'stdout');
+        return terminal();
+      },
+    });
+    let reconstructed = '';
+    let cursor = 0;
+    for (;;) {
+      const page = runtime.read(first.shellId, ownerKey, cursor);
+      reconstructed += page.stdout;
+      cursor = page.cursor;
+      if (!page.moreOutput) break;
+    }
+    expect(reconstructed).toBe(output);
+    await runtime.disposeOwner(ownerKey);
+  });
+
   test('finds a live Shell for deletion while its coordinator is closing', async () => {
     const runtime = new ManagedShellRuntime();
     const ownerKey = 'closing-session\0workspace';
@@ -82,7 +249,7 @@ describe('ManagedShellRuntime', () => {
     });
   });
 
-  test('bounds consumed terminal retention without evicting live or unread handles', async () => {
+  test('keeps serial terminal handles readable beyond the former owner capacity', async () => {
     const runtime = new ManagedShellRuntime();
     const ownerKey = 'retention\0workspace';
     const live = await runtime.start({
@@ -94,7 +261,7 @@ describe('ManagedShellRuntime', () => {
         ),
     });
     const unread: string[] = [];
-    for (let index = 0; index < 70; index += 1) {
+    for (let index = 0; index < 1_100; index += 1) {
       const completed = await runtime.start({
         ownerKey,
         yieldMs: 0,
@@ -105,7 +272,11 @@ describe('ManagedShellRuntime', () => {
     }
     expect(runtime.read(live.shellId, ownerKey).status).toBe('running');
     for (const shellId of unread) expect(runtime.read(shellId, ownerKey).status).toBe('exited');
-    expect(runtime.listSnapshot('retention', ownerKey).executions.length).toBeLessThanOrEqual(68);
+    expect(runtime.getProjection('retention', ownerKey, unread[0]!)).toMatchObject({
+      executionId: unread[0],
+      status: 'completed',
+    });
+    expect(runtime.listSnapshot('retention', ownerKey).executions.length).toBe(1_101);
     await runtime.disposeOwner(ownerKey);
   });
   test('precise stop exposes stopping before terminal cleanup', async () => {
@@ -186,7 +357,7 @@ describe('ManagedShellRuntime', () => {
     expect(started.gap).toBe(false);
     expect(started.shellId).toMatch(/^sh_/);
     expect(runtime.read(started.shellId, 'thread\0workspace', 0).stdout).toBe('first');
-    expect(runtime.read(started.shellId, 'thread\0workspace', 1).stdout).toBe('');
+    expect(runtime.read(started.shellId, 'thread\0workspace', started.cursor).stdout).toBe('');
     expect(() => runtime.read(started.shellId, 'other\0workspace', 0)).toThrow(
       'Managed Shell handle is unavailable.',
     );
@@ -241,6 +412,91 @@ describe('ManagedShellRuntime', () => {
     expect((await pending).stdout).toBe('arrived');
     finish();
     await runtime.wait(started.shellId, 'thread\0workspace');
+  });
+
+  test('completed long polls remove cancellation listeners and cancelled reads return immediately', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerKey = 'poll-cleanup\0workspace';
+    let progress!: (chunk: string, stream: 'stdout' | 'stderr') => void;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const started = await runtime.start({
+      ownerKey,
+      yieldMs: 0,
+      execute: async (_signal, onProgress) => {
+        progress = onProgress;
+        await gate;
+        return terminal();
+      },
+    });
+    const controller = new AbortController();
+    let cursor = started.cursor;
+    for (let index = 0; index < 24; index++) {
+      const pending = runtime.readWaiting({
+        shellId: started.shellId,
+        ownerKey,
+        cursor,
+        waitMs: 30_000,
+        signal: controller.signal,
+      });
+      expect(getEventListeners(controller.signal, 'abort')).toHaveLength(1);
+      progress(`output-${index}`, 'stdout');
+      const page = await pending;
+      expect(page.returnReason).toBe('output');
+      cursor = page.cursor;
+      expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+    }
+    controller.abort();
+    const before = performance.now();
+    expect(
+      await runtime.readWaiting({
+        shellId: started.shellId,
+        ownerKey,
+        cursor,
+        waitMs: 30_000,
+        signal: controller.signal,
+      }),
+    ).toMatchObject({ status: 'running', returnReason: 'cancelled' });
+    expect(performance.now() - before).toBeLessThan(1_000);
+    const terminalController = new AbortController();
+    const pendingTerminal = runtime.wait(started.shellId, ownerKey, terminalController.signal);
+    expect(getEventListeners(terminalController.signal, 'abort')).toHaveLength(1);
+    finish();
+    expect((await pendingTerminal).status).toBe('exited');
+    expect(getEventListeners(terminalController.signal, 'abort')).toHaveLength(0);
+    await runtime.dispose();
+  });
+
+  test('other owners cannot change the directory watermark and unread output is reclaimed on disposal', async () => {
+    const runtime = new ManagedShellRuntime();
+    const ownerA = 'owner-a\0workspace';
+    const ownerB = 'owner-b\0workspace';
+    let progressB!: (chunk: string, stream: 'stdout' | 'stderr') => void;
+    let finishB!: () => void;
+    const gate = new Promise<void>((resolve) => (finishB = resolve));
+    const shellA = await runtime.start({
+      ownerKey: ownerA,
+      yieldMs: 0,
+      execute: async () => terminal({ stdout: 'unread'.repeat(20_000) }),
+    });
+    await Promise.resolve();
+    const watermarkA = runtime.listSnapshot('owner-a', ownerA).watermark;
+    const shellB = await runtime.start({
+      ownerKey: ownerB,
+      yieldMs: 0,
+      execute: async (_signal, progress) => {
+        progressB = progress;
+        await gate;
+        return terminal();
+      },
+    });
+    progressB('other-owner-output', 'stdout');
+    expect(runtime.listSnapshot('owner-a', ownerA).watermark).toBe(watermarkA);
+    await runtime.disposeOwner(ownerA);
+    expect(() => runtime.read(shellA.shellId, ownerA)).toThrow('unavailable');
+    expect(runtime.read(shellB.shellId, ownerB).status).toBe('running');
+    finishB();
+    await runtime.dispose();
   });
 
   test('new input yields a terminal wait without stopping the managed execution', async () => {
@@ -355,6 +611,7 @@ describe('ManagedShellRuntime', () => {
                   terminal({
                     ok: false,
                     exitCode: 130,
+                    stdout: '',
                     terminationReason: 'cancelled',
                   }),
                 ),

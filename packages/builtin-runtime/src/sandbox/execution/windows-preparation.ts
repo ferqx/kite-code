@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { win32 } from 'node:path';
+import { isReadOnlyShellCommand } from '../../catalog-contract';
 import { normalizeMsys2DrivePathsInShellCommand } from '../path-utils';
 import {
   buildWorkspaceExcludedPath,
   isCanonicalPathOutsideWorkspace,
-  POLICY_PROVEN_READ_ONLY_EXECUTION,
   policyProvenReadOnlyGitEnvironment,
 } from '../trusted-readonly-environment';
 import type { FilesystemScope, ShellFilesystemMode, ShellNetworkMode } from '../types';
@@ -211,7 +211,11 @@ export function prepareWindowsRestrictedTokenTransport(
         runtimeRoot,
         resolvedRunner,
         workspaceRoot,
-        input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION,
+        isReadOnlyShellCommand(
+          input.command.startsWith('export PATH="/usr/bin:$PATH" && ')
+            ? input.command.slice('export PATH="/usr/bin:$PATH" && '.length)
+            : input.command,
+        ),
       ),
       filesystemScope,
       workspaceRoot,

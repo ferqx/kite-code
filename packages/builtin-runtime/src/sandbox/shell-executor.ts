@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isReadOnlyShellCommand } from '../catalog-contract';
 import { normalizeMsys2PathsInText } from './path-utils';
 import { findBashBinary, findSystemBash } from './shell-bash-path';
 import type {
@@ -11,7 +12,6 @@ import type {
 import {
   buildPolicyProvenReadOnlyEnv,
   isCanonicalPathOutsideWorkspace,
-  POLICY_PROVEN_READ_ONLY_EXECUTION,
 } from './trusted-readonly-environment';
 
 type BuiltinShellProcessHandle = ReturnType<ShellProcessPort['spawn']>;
@@ -221,7 +221,7 @@ export function createBuiltinShellExecutor(port: ShellProcessPort): ShellExecuto
     try {
       let proc: ReturnType<ShellProcessPort['spawn']> | undefined;
       let lastSpawnError: unknown;
-      const policyProvenReadOnly = input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION;
+      const policyProvenReadOnly = isReadOnlyShellCommand(input.command);
       const candidates = policyProvenReadOnly
         ? buildPolicyProvenReadOnlyHostShellInvocations(input.command, input.workspace)
         : buildHostShellInvocations(input.command);

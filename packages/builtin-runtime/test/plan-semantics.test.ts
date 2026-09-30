@@ -92,4 +92,33 @@ describe('Builtin plan document semantics', () => {
     ).toThrow('PlanDocument V2 schema validation failed.');
     expect(initialPlanId(input.taskId)).toBe('plan-4ad62e8d9a7ab27b18abe5deba5fddcf');
   });
+
+  test('accepts a detailed plan beyond former body, step, and replan-reason ceilings', () => {
+    const detailed = createBuiltinPlanDocument({
+      ...input,
+      title: 'Detailed planning title '.repeat(7).trim(),
+      bodyMarkdown: `${'Detailed plan. '.repeat(2_099)}Detailed plan.`,
+      steps: Array.from({ length: 13 }, (_, index) => ({
+        id: `step-${index + 1}`,
+        title: `Perform step ${index + 1} ${'with detailed reasoning '.repeat(8)}`.trim(),
+      })),
+    });
+    expect(detailed.title.length).toBeGreaterThan(120);
+    expect(detailed.bodyMarkdown.length).toBeGreaterThan(30_000);
+    expect(detailed.steps).toHaveLength(13);
+    expect(detailed.steps[0]?.title.length).toBeGreaterThan(160);
+    expect(isPlanDocument(detailed)).toBe(true);
+    expect(isPlanDocument(createBuiltinPlanDocument({ ...input, bodyMarkdown: 'x' }))).toBe(true);
+    const revised = createBuiltinPlanDocument({
+      ...input,
+      turnId: 'turn-2',
+      previous: detailed,
+      revision: {
+        supersedesPlanVersion: detailed.version,
+        replanReason: 'More evidence. '.repeat(40),
+      },
+    });
+    expect(revised.replanReason?.length).toBeGreaterThan(500);
+    expect(isPlanDocument(revised)).toBe(true);
+  });
 });

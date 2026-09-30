@@ -1,7 +1,13 @@
 /** Root-only composition of the current Host State codec and SQLite Store. */
 
+import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import type { AgentState, RuntimeEvent } from '@kite-ai/agent-kernel';
+import {
+  type AgentState,
+  RUNTIME_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeEvent,
+} from '@kite-ai/agent-kernel';
 import {
   createRuntimeHostStateStorageBinding,
   type RuntimeHostLeasePort,
@@ -24,7 +30,11 @@ import type {
   SessionStore,
 } from '@kite-ai/runtime-host/storage';
 import {
+  assertKiteSessionStoreSchema,
+  createKiteHomeRuntimeStorageForConnection,
   createSqliteRuntimeStorage,
+  initializeKiteSessionStoreIfNeeded,
+  KITE_SESSION_STORE_SCHEMA_VERSION,
   type SqliteRuntimeStorageOptions,
   sqliteRuntimeStorePath,
 } from '@kite-ai/runtime-storage-sqlite';
@@ -69,7 +79,7 @@ export function testStateProjectIdentityForWorkspace(workspace: string): {
 } {
   const digest = createHash('sha256').update(workspace).digest('hex');
   return Object.freeze({
-    projectId: 'project_test_runtime_agent',
+    projectId: `project_${digest}`,
     canonicalWorkspaceDigest: `sha256:${digest}`,
   });
 }
@@ -104,6 +114,10 @@ export interface TestRuntimeStore<Event = unknown, State = unknown>
   readonly checkpoints: CheckpointPort<State>;
   readonly artifacts: ArtifactPort;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  readonly completedResourceReservations?: RuntimeStorage<
+    Event,
+    State
+  >['completedResourceReservations'];
   appendEventsAndSnapshot(
     sessionId: string,
     events: readonly Event[],
@@ -167,6 +181,44 @@ export function openStateStoreForTest(
     ...(input.options ? { options: input.options } : {}),
   });
   return createTestRuntimeStore(storage, input.bootstrapMissingSessions ?? false);
+}
+
+/** Exercise current durable receipt semantics with the production Home Store. */
+export function openHomeStateStoreForTest(
+  databasePath: string,
+  workspace: string,
+): TestRuntimeStore<RuntimeEvent, AgentState> {
+  const identity = testStateProjectIdentityForWorkspace(workspace);
+  const workspaceIdentityDigest = `sha256:${createHash('sha256')
+    .update(
+      `kite.workspace-identity.v1\0${JSON.stringify({
+        canonicalPath: workspace,
+        projectId: identity.projectId,
+        workspaceDigest: identity.canonicalWorkspaceDigest,
+      })}`,
+    )
+    .digest('hex')}`;
+  const database = new Database(databasePath, { strict: true });
+  initializeKiteSessionStoreIfNeeded(database);
+  const owner = createKiteHomeRuntimeStorageForConnection<RuntimeEvent, AgentState>({
+    database,
+    assertStoreSchema: assertKiteSessionStoreSchema,
+    storeSchemaVersion: KITE_SESSION_STORE_SCHEMA_VERSION,
+    codec: CURRENT_STORAGE_BINDING_.codec,
+    stateSchemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
+    ownsDatabase: true,
+  });
+  owner.admissions.admit({
+    workspaceId: `workspace_${workspaceIdentityDigest.slice('sha256:'.length)}`,
+    canonicalPath: workspace,
+    workspaceIdentityDigest,
+    projectId: identity.projectId,
+    workspaceDigest: identity.canonicalWorkspaceDigest,
+    displayName: workspace,
+  });
+  const store = createTestRuntimeStore(owner.storage, false);
+  return { ...store, close: () => owner.close() };
 }
 
 function createTestRuntimeStore<State>(
@@ -270,6 +322,9 @@ function createTestRuntimeStore<State>(
     checkpoints: storage.checkpoints,
     artifacts: storage.artifacts,
     recoveryIdentities: storage.recoveryIdentities,
+    ...(storage.completedResourceReservations
+      ? { completedResourceReservations: storage.completedResourceReservations }
+      : {}),
     appendEvents: (threadId, events, metadata) => {
       if (events.length > 0) ensureTestSession(threadId);
       storage.sessions.appendEvents(threadId, events, metadata);

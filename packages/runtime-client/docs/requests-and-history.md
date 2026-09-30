@@ -18,6 +18,11 @@ Durable notification 的 `occurredAt` 原样进入 accepted presentation envelop
 `ownerGeneration + revision`作为原生执行fence；item `revision`同时表示执行状态水位。Store合并detail时保留完整列表及其
 `aggregateGeneration`，但允许权威detail用新的item owner generation替换同ID旧实例，不能因组合generation与item
 generation天然不同而丢弃刷新。
+缺省 `query({type: 'list_background_executions'})` 会逐页读取按执行ID排序的完整目录，在同一
+`aggregateGeneration`、`watermark`、`sessionRevision` 下合并，再向调用者返回并更新Store；显式给出
+`cursor`或`limit`则只读单页且不以该页替换Store。页间版本变化时短暂异步让出并从第一页重试，
+持续变化超过配置的请求期限返回`request_timeout`，不展示不完整快照。`query`的可选`AbortSignal`
+可停止后续分页与在途请求；每帧仍受Protocol容量校验，已结束执行的历史总数不受单帧容量限制。
 
 交接见[会话历史链路](../../../docs/development/flows/session-history.md)。验证：[client](../test/runtime-client.test.ts)、[store](../test/store.test.ts)。
 
@@ -29,6 +34,6 @@ Store11 App Server 可选提供 `loadChildSession(parentSessionId, childSessionI
 
 `loadSession(sessionId, throughSequence?, { signal }?)` 的第三个参数可取消调用方的分页读取。protocol adapter 在每次请求前和响应后检查 AbortSignal；取消后丢弃在途响应且不再发出下一页。服务端在初始化时宣告 `history/cancel` 能力且单页请求已经发出时，客户端在调用方取消或响应超时后向同一连接发送携带原 RPC id 的取消通知；旧服务端未宣告此能力时，已发出的读取仍可能完成。原有两个参数调用保持兼容；注入的自定义 history adapter 按自身实现处理该可选参数。
 
-同一 RuntimeClient 最多同时执行 4 个完整的协议 History 分页加载，另有最多 1024 个等待项。每次组装最多保留 50,000 条记录及约 40 MiB 的编码记录，超过任一界限返回 `history_too_large`；服务端返回同名 detailCode 时映射为同一客户端错误。超出等待容量立即返回 `request_overloaded`；等待超过配置的请求期限返回 `request_timeout`。等待中的取消会移除队列项，不向 transport 发送请求；断线、重连与关闭会取消旧队列及在途加载。这些限制按客户端连接分配，不限制 Store 中可保留的 Session 总数。
+同一 RuntimeClient 最多同时执行 4 个完整的协议 History 分页加载，其余调用按序等待，不设累计等待项、记录数或编码字节额度。等待入场受配置的请求期限约束；执行后每页分别使用这一响应期限，完整历史总耗时可超过单页期限。调用方取消会移除等待项或中断在途页，不再发送后续页。服务端明确返回 `overloaded` 时，仅完整 History 的当前只读页在该页期限内短暂异步等待并原样重发，已固定的 source sequence、cursor 与 digest 不变；其他错误和写命令不走此重试。断线、重连与关闭会取消旧队列及在途加载。客户端仍须按接口返回完整 transcript 的 records 与 events，单份历史的实际内存占用随内容增长；限制同时组装的份数只降低并发峰值。服务端若返回 `history_too_large` detailCode，仍映射为同名客户端错误。
 
 `recoverSessionIfSafe` 仅供用户继续时处理明确的恢复拒绝：先读摘要，安全时提交独立恢复命令；不自动重跑任务或未知副作用。恢复丢回执和客户端命令结果未知时，`readCommandReceipt` 查询原命令身份，查不到则保留未知。原始发送重试只发生在服务明确拒绝且安全恢复成功之后，使用同一命令身份。

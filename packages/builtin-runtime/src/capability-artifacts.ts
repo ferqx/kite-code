@@ -15,7 +15,6 @@ import {
 } from './model';
 import { userKiteCodeDir } from './model/artifact-paths';
 
-const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const CAPABILITY_ARTIFACT_PARTITIONS = Object.freeze([
   { kind: 'capability_result', directory: 'results', extension: '.json' },
@@ -101,8 +100,8 @@ export function capabilityResultEvidenceDigest(result: Readonly<CapabilityResult
  * Schema-aware private store for canonical capability receipts.
  *
  * The public reference is content-addressed and path-free. The optional numeric
- * constructor is retained as a source-compatible byte-limit shorthand for
- * existing callers.
+ * constructor and maxArtifactBytes option remain source-compatible inputs;
+ * they no longer impose a local size ceiling.
  */
 export class CapabilityArtifactStore {
   private readonly options: CapabilityArtifactStoreOptions;
@@ -171,7 +170,6 @@ export class CapabilityArtifactStore {
           : { root: this.options.root ?? capabilityArtifactRoot() }),
         namespace: 'capability-artifacts',
         partitions: CAPABILITY_ARTIFACT_PARTITIONS,
-        maxArtifactBytes: this.options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
         ...(this.options.platform ? { platform: this.options.platform } : {}),
         ...(this.options.secureWindowsPath
           ? { secureWindowsPath: this.options.secureWindowsPath }

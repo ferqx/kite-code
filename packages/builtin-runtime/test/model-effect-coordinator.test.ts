@@ -15,6 +15,7 @@ import {
 import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_,
   type ModelAttemptOutcome,
+  type ModelSurface,
   type PrivateArtifactRef,
 } from '@kite-ai/runtime-spi';
 import type {
@@ -86,12 +87,14 @@ function createGatewayFixture(input?: {
   let sourceInvocations = 0;
   let invocationOrdinal = 0;
   let purpose: BuiltinModelOperationAttempt['purpose'] | undefined;
+  const surfaces: ModelSurface[] = [];
   const artifacts: ModelArtifactWriter = {
     writeSurface: () => artifactRef('model_surface'),
     writeResponse: () => artifactRef('model_response'),
   };
   const source: ModelResponseSource = Object.freeze({
-    attempt: async () => {
+    attempt: async (attemptInput: Parameters<ModelResponseSource['attempt']>[0]) => {
+      surfaces.push(attemptInput.surface);
       sourceInvocations += 1;
       const text =
         purpose === 'auto_review'
@@ -127,6 +130,7 @@ function createGatewayFixture(input?: {
   return {
     gateway,
     counts: () => ({ gatewayInvocations, sourceInvocations }),
+    surfaces: () => surfaces,
   };
 }
 
@@ -187,6 +191,45 @@ function pendingCompaction(state: BuiltinRuntimeStateView) {
 }
 
 describe('BuiltinModelEffectCoordinator', () => {
+  test('reviews the complete task, plan, and rejection reasons without a repetition denial', async () => {
+    const fixture = createGatewayFixture({
+      autoReviewResponse: '{"decision":"approve_once","reason":"scoped and safe"}',
+    });
+    const userTask = `${'User task detail. '.repeat(400)}USER_TASK_END`;
+    const planSummary = `${'Approved plan detail. '.repeat(400)}PLAN_SUMMARY_END`;
+    const previousReason = `${'Previous decision evidence. '.repeat(300)}REJECTION_REASON_END`;
+    const result = await new BuiltinModelEffectCoordinator(fixture.gateway).reviewToolApproval({
+      config: CONFIG,
+      model: MODEL,
+      persistence: createPersistence(),
+      payload: {
+        risk: 'read',
+        expectedEffects: ['Read a project file'],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+        summary: 'Read project file',
+        reason: 'The user requested an inspection of project sources.',
+      },
+      request: { id: 'review-full-context', name: 'read_file', args: { path: 'src/main.ts' } },
+      context: {
+        userTask,
+        planSummary,
+        recentRejections: [{ toolName: 'read_file', reason: previousReason, timestamp: 1 }],
+        doomLoopInfo: { fingerprint: 'same-request', count: 100 },
+        workspaceRoot: '/workspace',
+      },
+    });
+    expect(result).toMatchObject({ ok: true, suggestion: { approved: true } });
+    const surface = fixture.surfaces()[0];
+    expect(surface?.purpose).toBe('auto_review');
+    const prompt = JSON.stringify(surface?.request.messages);
+    expect(prompt).toContain(userTask);
+    expect(prompt).toContain(planSummary);
+    expect(prompt).toContain(previousReason);
+    expect(surface?.request.system).toContain('Repetition alone is not a reason to deny.');
+    expect(fixture.counts()).toEqual({ gatewayInvocations: 1, sourceInvocations: 1 });
+  });
+
   test.each([
     [
       'approve_once',

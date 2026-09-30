@@ -14,7 +14,9 @@ import {
 } from '@kite-ai/agent-api-contract';
 import {
   type AgentApiReadContext,
+  type AgentApiReadDispatchResult,
   dispatchAgentApiReadRequest,
+  disposeModelContextPageSnapshots,
   isAgentApiReadRequest,
 } from './read-adapter';
 
@@ -123,6 +125,7 @@ export function createAgentApiRouteHandler(
   const pendingDigests = new Set<string>();
   const pendingReadContexts = new Set<Promise<void>>();
   const pendingRequests = new Set<Promise<void>>();
+  const pendingBrowserReads = new Set<Promise<void>>();
   let pendingContexts = 0;
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -299,7 +302,11 @@ export function createAgentApiRouteHandler(
         for (const [digest, record] of records) void revoke(digest, record);
         await Promise.allSettled([...pendingReadContexts]);
         await Promise.allSettled([...pendingRequests]);
+        await Promise.allSettled([...pendingBrowserReads]);
         await Promise.allSettled(records.map(([, record]) => closeReadContext(record)));
+        if (options.browserReadContext?.modelContexts) {
+          disposeModelContextPageSnapshots(options.browserReadContext.modelContexts);
+        }
       })();
       return closePromise;
     },
@@ -503,11 +510,22 @@ export function createAgentApiRouteHandler(
     if (!isAgentApiReadRequest(request, url)) {
       return problemResponse(404, 'not_found', requestId, false);
     }
-    const read = await dispatchAgentApiReadRequest({
-      request,
-      url,
-      context: options.browserReadContext,
+    let finishBrowserRead!: () => void;
+    const pendingBrowserRead = new Promise<void>((resolve) => {
+      finishBrowserRead = resolve;
     });
+    pendingBrowserReads.add(pendingBrowserRead);
+    let read: AgentApiReadDispatchResult;
+    try {
+      read = await dispatchAgentApiReadRequest({
+        request,
+        url,
+        context: options.browserReadContext,
+      });
+    } finally {
+      finishBrowserRead();
+      pendingBrowserReads.delete(pendingBrowserRead);
+    }
     if (!read.matched) return problemResponse(404, 'not_found', requestId, false);
     if (!read.result.ok) {
       return problemResponse(

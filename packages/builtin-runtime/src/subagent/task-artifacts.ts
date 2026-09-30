@@ -122,7 +122,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
       | SubagentResultArtifactRef
       | undefined;
     if (!ref) return undefined;
-    const payload = this.#readPayload(ref, taskId);
+    const payload = this.#readPayload(ref, taskId, ownerKey);
     return Object.freeze({
       ref,
       ...(payload.displayName ? { displayName: payload.displayName } : {}),
@@ -131,10 +131,9 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
   }
   list(ownerKey: string) {
     return this.#storage.listByOwner(ownerKey).map((ref) => {
-      const taskId = JSON.parse(new TextDecoder().decode(this.#storage.read(ref))).taskId as string;
-      const payload = this.#readPayload(ref as SubagentResultArtifactRef, taskId);
+      const payload = this.#readPayload(ref as SubagentResultArtifactRef, undefined, ownerKey);
       return Object.freeze({
-        taskId,
+        taskId: payload.taskId,
         ref: ref as SubagentResultArtifactRef,
         ...(payload.displayName ? { displayName: payload.displayName } : {}),
         result: payload.result,
@@ -146,8 +145,10 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
   }
   #readPayload(
     ref: SubagentResultArtifactRef,
-    taskId: string,
+    taskId?: string,
+    ownerKey?: string,
   ): Readonly<{
+    taskId: string;
     displayName?: string;
     result: Readonly<Record<string, unknown>>;
   }> {
@@ -155,6 +156,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
       const text = new TextDecoder('utf-8', { fatal: true }).decode(this.#storage.read(ref));
       const value = JSON.parse(text) as {
         artifactFormatVersion?: unknown;
+        ownerKey?: unknown;
         taskId?: unknown;
         displayName?: unknown;
         result?: unknown;
@@ -162,7 +164,12 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
       if (
         canonicalModelJson(value) !== text ||
         value.artifactFormatVersion !== 1 ||
-        value.taskId !== taskId ||
+        typeof value.ownerKey !== 'string' ||
+        value.ownerKey.length === 0 ||
+        (ownerKey !== undefined && value.ownerKey !== ownerKey) ||
+        typeof value.taskId !== 'string' ||
+        !SAFE_ID.test(value.taskId) ||
+        (taskId !== undefined && value.taskId !== taskId) ||
         (value.displayName !== undefined &&
           (typeof value.displayName !== 'string' || value.displayName.length === 0)) ||
         !value.result ||
@@ -171,6 +178,7 @@ export class SubagentResultArtifactStore implements SubagentResultArtifactAccess
       )
         corrupt();
       return Object.freeze({
+        taskId: value.taskId,
         ...(typeof value.displayName === 'string' ? { displayName: value.displayName } : {}),
         result: Object.freeze(value.result as Record<string, unknown>),
       });

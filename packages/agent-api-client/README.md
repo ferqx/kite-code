@@ -12,7 +12,7 @@
 - Workspace、Workspace Session、Session、History、后台执行快照、诊断Log、Browser-only Model Context、Checkpoint list/preview request；
 - identifier、page cursor、filter与非负`after_sequence`编码；
 - success/Problem Public codec及API version、artifact digest、content type、`no-store`响应校验；
-- `AbortSignal`透传。
+- `AbortSignal`透传；Model Context组装最多4个同时进行，其余按FIFO等待，可取消排队与网络读取，不以累计字节数拒绝。
 
 ## 不拥有职责
 
@@ -35,6 +35,7 @@
 - Browser凭据只由HttpOnly cookie自动携带，源码不读取或保存cookie；
 - History与Log的`afterSequence`必须是非负safe integer；分页续页只发送cursor，不与`after_sequence`混用；
 - response contract header或codec漂移立即失败，不silent fallback。
+- Model Context每页沿同一个快照cursor顺序读取，核对Session、invocation、sequence、快照ID、offset、总字节数与SHA-256后才返回完整诊断投影。
 
 ## 测试
 

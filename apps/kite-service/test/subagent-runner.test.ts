@@ -1057,6 +1057,72 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
+  test('large tool results keep complete model input while display events retain only a preview', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-result-preview-'));
+    const tail = 'COMPLETE_TOOL_BODY_TAIL';
+    writeFileSync(join(workspace, 'large.txt'), `${'evidence '.repeat(4_000)}${tail}\n`);
+    const { events, sink } = mockEventSink();
+    let calls = 0;
+    let nextPrompt: unknown;
+    const model = {
+      capabilityMetadata: { streaming: false },
+      model: {
+        specificationVersion: 'v4',
+        provider: 'fixture',
+        modelId: 'fixture-model',
+        supportedUrls: {},
+        async doGenerate(options: { prompt?: unknown }) {
+          calls += 1;
+          const first = calls === 1;
+          if (!first) nextPrompt = options.prompt;
+          return {
+            content: first
+              ? [
+                  {
+                    type: 'tool-call',
+                    toolCallId: 'large-read',
+                    toolName: 'read_file',
+                    input: { path: 'large.txt' },
+                  },
+                ]
+              : [{ type: 'text', text: 'complete body inspected' }],
+            finishReason: {
+              unified: first ? 'tool-calls' : 'stop',
+              raw: first ? 'tool_calls' : 'stop',
+            },
+            usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+          };
+        },
+        async doStream(): Promise<never> {
+          throw new Error('streaming disabled');
+        },
+      },
+    } as unknown as SupportedChatModel;
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture-model' } as unknown as AgentConfig,
+        workspace,
+        role: getRoleConfig('code'),
+        task: 'inspect the complete fixture',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+      expect(result.ok).toBe(true);
+      expect(calls).toBe(2);
+      expect(JSON.stringify(nextPrompt)).toContain(tail);
+      const event = events.find(
+        (entry) => entry.type === 'tool_result' && entry.data.toolName === 'read_file',
+      );
+      expect(event).toBeDefined();
+      expect(String(event!.data.summary).length).toBeLessThanOrEqual(8_192);
+      expect(String(event!.data.summary)).not.toContain(tail);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('parent read state does not authorize a child edit in the same thread', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-read-scope-'));
     writeFileSync(join(ws, 'owned.ts'), 'export const owner = "parent";\n', 'utf8');

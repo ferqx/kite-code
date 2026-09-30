@@ -15,6 +15,14 @@ afterEach(() => {
 });
 
 describe('FilesystemPreimageArtifactStore', () => {
+  test('persists a preimage larger than the former default artifact ceiling', () => {
+    const store = new FilesystemPreimageArtifactStore({ root: root() });
+    const content = 'x'.repeat(16 * 1024 * 1024 + 1);
+    const ref = store.write(artifactInput(content));
+    expect(ref.byteLength).toBeGreaterThan(16 * 1024 * 1024);
+    expect(store.read(ref).preimage.content).toBe(content);
+  });
+
   test('publishes owner-only immutable evidence under path-free content references', () => {
     const storageRoot = root();
     const store = new FilesystemPreimageArtifactStore({

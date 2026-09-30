@@ -58,6 +58,7 @@ export function App(props: AppProps = {}) {
   const initialSessionRoute = useRef(routeSessionId);
   const logLifecycle = useRef(0);
   const modelContextLifecycle = useRef(0);
+  const modelContextAbort = useRef<AbortController | null>(null);
   const diagnosticScope = useRef<{
     readonly generation: number;
     readonly sessionId: string | null;
@@ -73,6 +74,8 @@ export function App(props: AppProps = {}) {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => () => modelContextAbort.current?.abort(), []);
 
   useEffect(() => {
     dispatch({ type: 'select_session', sessionId: routeSessionId });
@@ -91,6 +94,8 @@ export function App(props: AppProps = {}) {
     };
     logLifecycle.current += 1;
     modelContextLifecycle.current += 1;
+    modelContextAbort.current?.abort();
+    modelContextAbort.current = null;
     setModelContextView(null);
     setActiveSessionView('history');
     setLogState('idle');
@@ -286,9 +291,16 @@ export function App(props: AppProps = {}) {
       const generation = state.generation;
       if (!sessionId || generation === 0) return;
       const requestId = ++modelContextLifecycle.current;
+      modelContextAbort.current?.abort();
+      const controller = new AbortController();
+      modelContextAbort.current = controller;
       setModelContextView({ invocationId, status: 'loading', reason: null });
       try {
-        const context = await transport.loadModelContext(sessionId, invocationId);
+        const context = await transport.loadModelContext(
+          sessionId,
+          invocationId,
+          controller.signal,
+        );
         if (
           requestId !== modelContextLifecycle.current ||
           currentDiagnosticScope.current.generation !== generation ||
@@ -317,6 +329,8 @@ export function App(props: AppProps = {}) {
 
   const closeModelContext = useCallback(() => {
     modelContextLifecycle.current += 1;
+    modelContextAbort.current?.abort();
+    modelContextAbort.current = null;
     setModelContextView(null);
   }, []);
 

@@ -123,6 +123,11 @@ export interface RuntimeCrossSessionQueueMailModelInput {
  */
 export interface RuntimeStateSessionPort {
   getState(): Readonly<RuntimeState>;
+  readCompletedReservation?(reservationId: string): Readonly<Record<string, unknown>> | null;
+  findCompletedReservationForInvocation?(
+    runId: string,
+    invocationId: string,
+  ): Readonly<Record<string, unknown>> | null;
   currentRunId?(): string | null;
   waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string };
@@ -461,6 +466,9 @@ async function* executeEffectWithStreaming(
     {
       reservationIds,
       getState: () => kernel.getState(),
+      ...(kernel.readCompletedReservation
+        ? { readCompletedReservation: (id: string) => kernel.readCompletedReservation!(id) }
+        : {}),
       ...(kernel.currentRunId ? { currentRunId: () => kernel.currentRunId!() } : {}),
       ...(kernel.waitForRevisionChange
         ? {
@@ -859,6 +867,7 @@ async function* executeEffectWithStreaming(
       kernel.getState(),
       reservationIds,
       result,
+      (reservationId) => kernel.readCompletedReservation?.(reservationId) ?? null,
     );
     const terminalResult = [...result, ...reconciled];
     if (terminalResult.length > 0) {
@@ -1088,7 +1097,13 @@ export async function* runStateRuntimeLoop(
 
   try {
     let count = 0;
-    while (count < maxEffects) {
+    while (true) {
+      // Bound one synchronous runner batch, not the number of effects in a Run.
+      // Yielding here lets deadline and cancellation callbacks run on long turns.
+      if (count >= maxEffects) {
+        count = 0;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
       while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
       if (backgroundFailure) throw backgroundFailure;
       if (consumeSettledBackgroundNoProgress()) return;
@@ -1357,7 +1372,15 @@ export async function* runStateRuntimeLoop(
       }
       let reservationIds: string[] = [];
       if (kernel.getState().resourceBudget.status === 'active') {
-        const admission = planRuntimeBudgetAdmission(kernel.getState(), effect);
+        const admission = planRuntimeBudgetAdmission(
+          kernel.getState(),
+          effect,
+          new Date(),
+          kernel.findCompletedReservationForInvocation
+            ? (runId, invocationId) =>
+                kernel.findCompletedReservationForInvocation!(runId, invocationId)
+            : undefined,
+        );
         if (admission.timedOutToolCallId || admission.budgetDeniedToolCallId) {
           const toolCallId = admission.timedOutToolCallId ?? admission.budgetDeniedToolCallId!;
           const timedOut = admission.preparationEvents.some(
@@ -1506,7 +1529,12 @@ export async function* runStateRuntimeLoop(
                 effectType: effect.type,
                 reservationReconciliationEvents:
                   effect.type === 'request_provider_action'
-                    ? reconciliationEventsForReservations(commitState, reservationIds)
+                    ? reconciliationEventsForReservations(
+                        commitState,
+                        reservationIds,
+                        [],
+                        (reservationId) => kernel.readCompletedReservation?.(reservationId) ?? null,
+                      )
                     : [],
                 sandboxAvailable: kernel.getSandboxAvailable(),
                 evidence,
@@ -1576,7 +1604,12 @@ export async function* runStateRuntimeLoop(
           const actionResult = kernel.applyAction(
             action,
             effect.type === 'request_provider_action'
-              ? reconciliationEventsForReservations(kernel.getState(), reservationIds)
+              ? reconciliationEventsForReservations(
+                  kernel.getState(),
+                  reservationIds,
+                  [],
+                  (reservationId) => kernel.readCompletedReservation?.(reservationId) ?? null,
+                )
               : [],
           );
           if (actionResult.status !== 'applied') {
@@ -1701,7 +1734,6 @@ export async function* runStateRuntimeLoop(
         }
       }
     }
-    throw new Error(`Runtime effect limit (${maxEffects}) exceeded`);
   } catch (error) {
     // Failure during next() must stop siblings before this iterator can finish
     // unwinding. The caller cannot observe the rejection until finally settles.

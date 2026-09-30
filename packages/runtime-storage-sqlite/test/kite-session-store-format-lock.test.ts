@@ -7,6 +7,7 @@ import {
   assertKiteSessionStore12Schema,
   assertKiteSessionStore13Schema,
   assertKiteSessionStore14Schema,
+  assertKiteSessionStore15Schema,
   assertKiteSessionStoreSchema,
   assertKiteSessionStore11Schema as assertLineageStore11Schema,
   KITE_HOME_STORE_DDL,
@@ -16,6 +17,7 @@ import {
   KITE_SESSION_STORE12_DDL,
   KITE_SESSION_STORE13_DDL,
   KITE_SESSION_STORE14_DDL,
+  KITE_SESSION_STORE15_DDL,
 } from '../src/kite-home-store';
 import {
   KITE_SESSION_STORE_FORMAT_EPOCH,
@@ -83,8 +85,15 @@ const formats = [
   {
     version: 15,
     epoch: 'kite-session-unbounded-child-artifacts-2026-09-29',
-    ddl: KITE_SESSION_STORE_DDL,
+    ddl: KITE_SESSION_STORE15_DDL,
     digest: 'b6b70f9d4e58b6046c09fda15529ac0eed85dece2e6c4c241a6f01dcc0dc8fbb',
+    assertSchema: assertKiteSessionStore15Schema,
+  },
+  {
+    version: 16,
+    epoch: 'kite-session-active-resource-receipts-2026-09-30',
+    ddl: KITE_SESSION_STORE_DDL,
+    digest: '929e7482b22c23cae67fe5871aea07d158cde93f8313656cd726dd68f9ab8515',
     assertSchema: assertKiteSessionStoreSchema,
   },
 ] as const;

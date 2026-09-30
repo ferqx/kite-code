@@ -233,14 +233,6 @@ export function readSkillReference(
         stderr: 'Skill reference must be a regular non-symlink file.',
       };
     }
-    if (stat.size > 128 * 1024) {
-      return {
-        ok: false,
-        stdout: '',
-        stderr:
-          'Skill reference exceeds the 128 KiB direct-read limit; expose it through an Artifact in a later workflow step.',
-      };
-    }
     const content = readFileSync(target);
     const utf8 = content.toString('utf8');
     const encoding = Buffer.from(utf8, 'utf8').equals(content) ? 'utf8' : 'base64';

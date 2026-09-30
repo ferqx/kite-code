@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { fundingBudgetForRun } from '@kite-ai/runtime-host/kernel-adapter';
+import type { RuntimeState } from '../../src/bootstrap/runtime/state-runtime';
 import { exerciseChildOrchestration } from './child-session-orchestrator-integration-fixture';
 import { submitRealParentFollowup } from './cross-session-followup-pipeline-fixture';
 
@@ -73,8 +74,32 @@ test('followup deadline after first Model preparation prevents Provider dispatch
           .executeAcceptedFollowupFirstModel(childSessionId, accepted.submissionId)
           .catch(() => false);
         expect(prepared).toBe(true);
+        const preparedState = owner.storage.sessions.loadSnapshot<RuntimeState>(childSessionId);
+        if (!preparedState) throw new Error('Prepared followup snapshot is unavailable.');
+        const priorReceipts = Object.values(preparedState.modelInvocations).flatMap(
+          (invocation) => {
+            if (invocation.budget.kind !== 'reservation') return [];
+            const receipt = owner.storage.completedResourceReservations?.lookup(
+              childSessionId,
+              invocation.budget.reservationId,
+            );
+            return receipt?.runId !== preparedState.turn.turnId && receipt ? [receipt] : [];
+          },
+        );
+        expect(priorReceipts.length).toBeGreaterThan(0);
+        expect(priorReceipts.every((receipt) => receipt.state === 'reconciled')).toBe(true);
         const recovery = await orchestrator.recoverPendingFollowups();
         expect(recovery.recoveryRequired).toEqual([]);
+        for (const receipt of priorReceipts) {
+          if (typeof receipt.reservationId !== 'string')
+            throw new Error('Prior Model receipt identity is unavailable.');
+          expect(
+            owner.storage.completedResourceReservations?.lookup(
+              childSessionId,
+              receipt.reservationId,
+            ),
+          ).toEqual(receipt);
+        }
       } finally {
         transactions.commit = originalCommit;
         Date.now = originalNow;

@@ -43,6 +43,8 @@ export type StateRuntimeEffectEventSink<Event = RuntimeEvent> = (event: Event) =
 export interface StateRuntimeEffectExecutionContext<State = RuntimeState, Event = RuntimeEvent> {
   readonly reservationIds: readonly string[];
   getState?(): Readonly<State>;
+  /** Exact durable terminal reservation receipt under this Session's execution authority. */
+  readCompletedReservation?(reservationId: string): Readonly<Record<string, unknown>> | null;
   /** Persisted Run identity, when a Run still owns this Session execution. */
   currentRunId?(): string | null;
   waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;

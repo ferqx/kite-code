@@ -15,6 +15,7 @@ import {
   type RuntimeState,
   reconciliationEventsForReservations,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { classifyFailure } from '#kite-service/bootstrap/runtime/failures';
 import {
@@ -62,6 +63,79 @@ function apply(
 }
 
 describe('runtime resource budget admission', () => {
+  test('primary Run admits Shell completion followed by stop and write without Artifact capacity wait', () => {
+    let state = configuredState(UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_);
+    for (const [toolCallId, name, args] of [
+      ['shell', 'shell_execute', { command: 'sleep 2; echo done' }],
+      ['stop', 'shell_stop', { shell_id: 'managed-shell' }],
+      ['write', 'write_file', { path: 'result.txt', content: 'done' }],
+    ] as const) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-shell-and-write',
+        name,
+        args,
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const shell = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(shell.status).toBe('admitted');
+    expect(shell.preparationEvents).toContainEqual({
+      type: 'resource_budget.reserved',
+      reservation: expect.objectContaining({
+        executableUpperBound: expect.objectContaining({
+          unboundedArtifactBytes: true,
+          counters: expect.objectContaining({ artifactBytes: 0 }),
+        }),
+      }),
+    });
+    state = apply(state, [...shell.preparationEvents, ...shell.dispatchEvents]);
+    state = apply(state, reconciliationEventsForReservations(state, shell.reservationIds));
+    expect(
+      state.resourceBudget.status === 'active' &&
+        state.resourceBudget.reconciledUsage.counters.artifactBytes,
+    ).toBe(0);
+    for (const toolCallId of ['stop', 'write']) {
+      const next = planRuntimeBudgetAdmission(
+        state,
+        { type: 'run_tools', toolCallIds: [toolCallId] },
+        new Date('2026-07-30T00:00:02Z'),
+      );
+      expect(next.status).toBe('admitted');
+      expect(
+        next.preparationEvents.some((event) => event.type === 'resource_budget.waiter_enqueued'),
+      ).toBe(false);
+      state = apply(state, [...next.preparationEvents, ...next.dispatchEvents]);
+      state = apply(state, reconciliationEventsForReservations(state, next.reservationIds));
+    }
+  });
+
+  test('primary Run uses the provider output limit after cumulative ceilings are removed', () => {
+    const state = configuredState(UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_);
+    const config = {
+      apiKey: 'test-key',
+      baseURL: 'https://example.invalid',
+      modelName: 'unbounded-primary-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      modelKwargs: { maxOutputTokens: 64 },
+      sandbox: { enabled: false },
+    } as AgentConfig;
+    const effect = prepareRuntimeEffectForBudget({ type: 'call_model' }, state, {
+      config,
+      model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
+      builtinToolCatalog: testBuiltinToolCatalog(),
+    });
+    expect(effect.type === 'call_model' && effect.resourceEstimate?.maxOutputTokens).toBe(64);
+  });
+
   test('Agent control tools do not require workspace Artifact capacity', () => {
     const state = configuredState({ maxArtifactBytes: 0 });
     for (const name of ['send_message', 'interrupt_agent', 'task_cancel']) {
@@ -682,9 +756,12 @@ describe('runtime resource budget admission', () => {
       new Date('2026-07-30T00:00:01Z'),
     );
     state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    let archivedParent: Readonly<Record<string, unknown>> | null = null;
     const admission = createDescendantResourceAdmission({
       state,
       parentReservationId: parentPlan.reservationIds[0]!,
+      readCompletedReservation: (id) =>
+        id === parentPlan.reservationIds[0] ? archivedParent : null,
       now: () => new Date('2026-07-30T00:00:02Z'),
       getState: () => state,
       persistEvent: async (event) => {
@@ -726,6 +803,45 @@ describe('runtime resource budget admission', () => {
       },
     });
     expect(nextModel.preparationEvents).toHaveLength(1);
+    if (state.resourceBudget.status !== 'active') throw new Error('Missing active funding Run.');
+    archivedParent = { ...state.resourceBudget.reservations[parentPlan.reservationIds[0]!]! };
+    const { [parentPlan.reservationIds[0]!]: _closed, ...activeReservations } =
+      state.resourceBudget.reservations;
+    state = {
+      ...state,
+      resourceBudget: {
+        ...state.resourceBudget,
+        externalizedClosedReservations: true,
+        reservations: activeReservations,
+      },
+    };
+    expect(
+      planModelInvocationResource(state, {
+        invocationId: 'background-model-after-compaction',
+        inputTokens: 20,
+        requestedMaxOutputTokens: 5,
+        resourceKind: 'model',
+        parentReservationId: parentPlan.reservationIds[0],
+        readCompletedReservation: (id) =>
+          id === parentPlan.reservationIds[0] ? archivedParent : null,
+      }).preparationEvents,
+    ).toHaveLength(1);
+    expect(() =>
+      planModelInvocationResource(state, {
+        invocationId: 'background-model-forged-parent',
+        inputTokens: 20,
+        requestedMaxOutputTokens: 5,
+        resourceKind: 'model',
+        parentReservationId: parentPlan.reservationIds[0],
+        readCompletedReservation: () => ({ ...archivedParent, runId: 'other-run' }),
+      }),
+    ).toThrow('reconciliation_required');
+    const afterCompaction = await admission.reserveModel({
+      invocationKey: 'model:after-parent-compaction',
+      inputTokens: 20,
+      requestedMaxOutputTokens: 5,
+    });
+    expect(afterCompaction.reservationId).toBeTruthy();
   });
 
   test('rejects descendant dispatch when its parent reservation becomes unknown', async () => {
@@ -1286,6 +1402,53 @@ describe('runtime resource budget admission', () => {
     ]);
   });
 
+  test('legacy Artifact waiter is released on active Run upgrade while its Shell is running', () => {
+    let state = configuredState({ maxConcurrentWriters: 1, maxConcurrencyWaitMs: 5_000 });
+    for (const toolCallId of ['shell-running', 'write-waiting']) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-legacy-upgrade',
+        name: toolCallId === 'shell-running' ? 'shell_execute' : 'write_file',
+        args:
+          toolCallId === 'shell-running'
+            ? { command: 'sleep 2' }
+            : { path: 'fixture.txt', content: 'hello' },
+        status: 'approved',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue = [...state.tools.queue, toolCallId];
+    }
+    const shell = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['shell-running'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...shell.preparationEvents, ...shell.dispatchEvents]);
+    const waiting = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-waiting'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(waiting.status).toBe('waiting');
+    state = apply(state, waiting.preparationEvents);
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      waiters: { 'tool:write-waiting': { requiredPermits: ['artifact_capacity'] } },
+    });
+    state = apply(state, [{ type: 'resource_budget.cumulative_limits_removed', runId: 'run-1' }]);
+    const resumed = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['write-waiting'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(resumed.status).toBe('admitted');
+    expect(resumed.preparationEvents.map((event) => event.type)).toEqual([
+      'resource_budget.waiter_cancelled',
+      'resource_budget.reserved',
+    ]);
+  });
+
   test('denies a second writer when the durable Tool invocation budget is exhausted', () => {
     let state = configuredState({ maxToolInvocations: 1, maxConcurrentWriters: 1 });
     for (const toolCallId of ['writer-one', 'writer-two']) {
@@ -1604,6 +1767,12 @@ describe('runtime resource budget admission', () => {
         toolName: 'shell_execute',
       },
     };
+    state.capabilities.invocations['parent-task-1'] = {
+      invocationId: 'parent-task-1',
+      toolCallId: 'task-1',
+      attemptsStarted: 1,
+      subagentProviderLifecycle: { attempt: 1 },
+    } as never;
 
     const resumed = planRuntimeBudgetAdmission(
       state,
@@ -1621,6 +1790,21 @@ describe('runtime resource budget admission', () => {
         invocationId: 'tool:task-1:resume:1',
         resourceKind: 'subagent',
       },
+    });
+    if (state.resourceBudget.status !== 'active') throw new Error('Missing active funding Run.');
+    state.resourceBudget = {
+      ...state.resourceBudget,
+      externalizedClosedReservations: true,
+      reservations: {},
+    };
+    const afterCompaction = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-1'] },
+      new Date('2026-07-30T00:00:03Z'),
+    );
+    expect(afterCompaction.preparationEvents[0]).toMatchObject({
+      type: 'resource_budget.reserved',
+      reservation: { invocationId: 'tool:task-1:resume:1' },
     });
   });
 
@@ -1667,6 +1851,61 @@ describe('runtime resource budget admission', () => {
       preparationEvents: [],
       dispatchEvents: [],
       reservationIds: [],
+    });
+  });
+
+  test.each([
+    ['task', 'subagent'],
+    ['shell_execute', 'tool'],
+    ['mcp__fixture__read', 'mcp'],
+    ['read_skill_reference', 'skill'],
+  ] as const)('uses the exact archived approval attempt before reserving authorized %s', (name, resourceKind) => {
+    const state = configuredState();
+    state.tools.calls['task-approval'] = {
+      toolCallId: 'task-approval',
+      modelMessageId: 'model-approval',
+      name,
+      args: { subagent_type: 'code', task: 'continue' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'task-approval'];
+    (state.pendingApprovals as Map<string, unknown>).set('approval-task', {
+      toolCallId: 'task-approval',
+      status: 'authorized_queued',
+      dispatchState: 'before_dispatch',
+      receiptId: 'approved-receipt',
+    });
+    if (state.resourceBudget.status !== 'active') throw new Error('Missing active funding Run.');
+    state.resourceBudget = {
+      ...state.resourceBudget,
+      externalizedClosedReservations: true,
+    };
+    const proof = {
+      reservationId: 'old-approved-task',
+      runId: state.resourceBudget.runId,
+      invocationId: 'tool:task-approval',
+      resourceKind,
+      state: 'reconciled',
+    };
+    const admitted = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-approval'] },
+      new Date('2026-07-30T00:00:02Z'),
+      () => proof,
+    );
+    expect(admitted.preparationEvents[0]).toMatchObject({
+      type: 'resource_budget.reserved',
+      reservation: { invocationId: 'tool:task-approval:approval:approved-receipt' },
+    });
+    const wrongRun = planRuntimeBudgetAdmission(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-approval'] },
+      new Date('2026-07-30T00:00:02Z'),
+      () => ({ ...proof, runId: 'other-run' }),
+    );
+    expect(wrongRun.preparationEvents[0]).toMatchObject({
+      reservation: { invocationId: 'tool:task-approval' },
     });
   });
 

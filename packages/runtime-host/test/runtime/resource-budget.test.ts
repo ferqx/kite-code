@@ -8,6 +8,7 @@ import {
   type ResourceUsage,
   reduceResourceBudgetState,
   tightenResourceBudget,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 
 function usage(input?: {
@@ -68,6 +69,96 @@ function configured() {
 }
 
 describe('ResourceBudget', () => {
+  test('upgrading an active legacy Run lifts in-flight artifact and model upper bounds', () => {
+    let state = configured();
+    const shellUpper = createZeroResourceUsage('versioned_upper_bound', 'legacy-shell-v1');
+    shellUpper.counters.toolInvocations = 1;
+    shellUpper.gauges.activeToolInvocations = 1;
+    shellUpper.counters.artifactBytes = LIMITED_RESOURCE_BUDGET_.maxArtifactBytes;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reserved',
+      reservation: reservation('shell', 'shell', shellUpper),
+    });
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'shell',
+    });
+    const modelUpper = createZeroResourceUsage('versioned_upper_bound', 'legacy-model-v1');
+    modelUpper.counters.modelRequests = 1;
+    modelUpper.counters.inputTokens = 1;
+    modelUpper.counters.outputTokens = 1;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reserved',
+      reservation: { ...reservation('model', 'model', modelUpper), resourceKind: 'model' },
+    });
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.dispatch_started',
+      reservationId: 'model',
+    });
+    const upgraded = reduceResourceBudgetState(state, {
+      type: 'resource_budget.cumulative_limits_removed',
+      runId: 'run-1',
+    });
+    expect(
+      upgraded.status === 'active' && upgraded.reservations.shell?.executableUpperBound,
+    ).toMatchObject({ unboundedArtifactBytes: true, counters: { artifactBytes: 0 } });
+    expect(
+      upgraded.status === 'active' && upgraded.reservations.model?.executableUpperBound,
+    ).toMatchObject({ unboundedModelTokens: true, counters: { inputTokens: 0, outputTokens: 0 } });
+    expect(
+      reduceResourceBudgetState(upgraded, {
+        type: 'resource_budget.cumulative_limits_removed',
+        runId: 'run-1',
+      }),
+    ).toBe(upgraded);
+    const shellActual = createZeroResourceUsage();
+    shellActual.counters.toolInvocations = 1;
+    shellActual.counters.artifactBytes = LIMITED_RESOURCE_BUDGET_.maxArtifactBytes + 1;
+    state = reduceResourceBudgetState(upgraded, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'shell',
+      actual: shellActual,
+    });
+    expect(state.status === 'active' && state.reconciledUsage.counters.artifactBytes).toBe(
+      shellActual.counters.artifactBytes,
+    );
+
+    const modelActual = createZeroResourceUsage();
+    modelActual.counters.modelRequests = 1;
+    modelActual.counters.inputTokens = LIMITED_RESOURCE_BUDGET_.maxRunInputTokens + 1;
+    modelActual.counters.outputTokens = LIMITED_RESOURCE_BUDGET_.maxRunOutputTokens + 1;
+    state = reduceResourceBudgetState(state, {
+      type: 'resource_budget.reconciled',
+      reservationId: 'model',
+      actual: modelActual,
+    });
+    expect(state.status === 'active' && state.reconciledUsage.counters.inputTokens).toBe(
+      modelActual.counters.inputTokens,
+    );
+  });
+
+  test('new primary Run uses zero cumulative placeholders with time and concurrency ceilings', () => {
+    const initial = createRuntimeHostStateInitialState({
+      recoveryIdentityKey: '0'.repeat(64),
+      threadId: 'primary-unbounded',
+      userId: 'u',
+      workspace: '/',
+    });
+    const active = reduceResourceBudgetState(initial.resourceBudget, {
+      type: 'resource_budget.configured',
+      runId: 'run-1',
+      startedAt: '2026-07-30T00:00:00Z',
+      deadlineAt: '2026-07-30T00:30:00Z',
+      budget: UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
+    });
+    expect(active.status === 'active' && active.budget).toMatchObject({
+      unboundedCumulativeUsage: true,
+      maxToolInvocations: 0,
+      maxArtifactBytes: 0,
+      maxConcurrentSubagents: 3,
+    });
+  });
+
   test('duration-only child records usage beyond legacy counters while rejecting forged authority', () => {
     const childBudget = {
       ...LIMITED_RESOURCE_BUDGET_,
@@ -175,7 +266,7 @@ describe('ResourceBudget', () => {
         type: 'resource_budget.reserved',
         reservation: reservation('forged-artifact', 'forged-artifact', writeUpper),
       }),
-    ).toThrow('duration-only child Run');
+    ).toThrow('unbounded cumulative Run');
     expect(() =>
       reduceResourceBudgetState(configured(), {
         type: 'resource_budget.reserved',
@@ -184,7 +275,7 @@ describe('ResourceBudget', () => {
           resourceKind: 'model',
         },
       }),
-    ).toThrow('duration-only child Run');
+    ).toThrow('unbounded cumulative Run');
     expect(() =>
       reduceResourceBudgetState(configured(), {
         type: 'resource_budget.reserved',

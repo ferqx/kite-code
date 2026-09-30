@@ -87,15 +87,21 @@ export function findSafeCompactionBoundary(
       };
     }
   }
+  const resultCounts = new Map<string, number>();
+  const calledIds = new Set<string>();
+  for (const message of coveredMessages) {
+    if (message.kind === 'tool') {
+      resultCounts.set(message.toolCallId, (resultCounts.get(message.toolCallId) ?? 0) + 1);
+    } else if (message.kind === 'assistant') {
+      for (const call of message.toolCalls) calledIds.add(call.id);
+    }
+  }
   for (const assistant of coveredMessages.filter(
     (message): message is Extract<BuiltinTranscriptMessage, { kind: 'assistant' }> =>
       message.kind === 'assistant',
   )) {
     for (const call of assistant.toolCalls) {
-      const pairedResults = coveredMessages.filter(
-        (message) => message.kind === 'tool' && message.toolCallId === call.id,
-      );
-      if (pairedResults.length !== 1) {
+      if (resultCounts.get(call.id) !== 1) {
         return {
           eligible: false,
           reason: `Tool call ${call.id} must have exactly one paired result inside the boundary.`,
@@ -111,13 +117,7 @@ export function findSafeCompactionBoundary(
     (message): message is Extract<BuiltinTranscriptMessage, { kind: 'tool' }> =>
       message.kind === 'tool',
   )) {
-    if (
-      !coveredMessages.some(
-        (message) =>
-          message.kind === 'assistant' &&
-          message.toolCalls.some((call) => call.id === tool.toolCallId),
-      )
-    ) {
+    if (!calledIds.has(tool.toolCallId)) {
       return {
         eligible: false,
         reason: `Tool result ${tool.toolCallId} has no paired assistant call inside the boundary.`,

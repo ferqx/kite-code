@@ -9,19 +9,20 @@ import type {
   RuntimeSubscription,
 } from '@kite-ai/runtime-contract';
 import {
+  mapRuntimeNotificationToSubscriptionMessage,
   RUNTIME_PROTOCOL_LIMITS,
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeProtocolMessage,
 } from '@kite-ai/runtime-protocol';
 import {
   createRuntimeServerInProcessHub,
-  type DEFAULT_RUNTIME_SERVER_LIMITS,
+  DEFAULT_RUNTIME_SERVER_LIMITS,
   RuntimeServer,
   type RuntimeServerAdmissionInput,
   type RuntimeServerAdmissionPort,
   type RuntimeServerLogicalMessageConnection,
 } from '../src/index';
-import { Subscription } from '../src/server';
+import { OutboundQueue, Subscription } from '../src/server';
 
 const initialize = {
   jsonrpc: '2.0',
@@ -856,11 +857,18 @@ describe('Runtime Server', () => {
       method: 'runtime/query',
       params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
     });
-    await eventually(() => secondTransport.closed);
+    await eventually(() => runtime.queries.length >= 2);
+    expect(secondTransport.closed).toBeFalse();
+    expect(
+      secondTransport.sent.some((message) => 'id' in message && message.id === 'query-over-budget'),
+    ).toBeFalse();
 
     gate.resolve();
     await eventually(() =>
       slowTransport.sent.some((message) => 'id' in message && message.id === 'query-held'),
+    );
+    await eventually(() =>
+      secondTransport.sent.some((message) => 'id' in message && message.id === 'query-over-budget'),
     );
 
     const recoveredTransport = new TestConnection();
@@ -909,6 +917,179 @@ describe('Runtime Server', () => {
     await slowConnection.close();
     await recoveredConnection.close();
     await finalConnection.close();
+  });
+
+  test('queues reliable responses past the former per-connection message cap', async () => {
+    const runtime = new FakeRuntime();
+    const transport = new TestConnection();
+    const server = new RuntimeServer(
+      { runtime, admission: allowAdmission },
+      { ...serverOptions(), limits: { maxOutboundMessages: 2, maxOutboundBytes: 128 } },
+    );
+    const connection = server.open(transport);
+    await initializeTransport(transport);
+    const gate = deferred<void>();
+    transport.sendGate = gate.promise;
+    for (let index = 0; index < 12; index += 1) {
+      transport.push({ jsonrpc: '2.0', id: `burst-${index}`, method: 'server/ping', params: {} });
+    }
+    await eventually(() => transport.sendCalls === 2);
+    expect(transport.closed).toBeFalse();
+    gate.resolve();
+    await eventually(() => transport.sent.length === 13);
+    expect(transport.sent.slice(1).map((message) => 'id' in message && message.id)).toEqual(
+      Array.from({ length: 12 }, (_, index) => `burst-${index}`),
+    );
+    await connection.close();
+  });
+
+  test('drains thousands of reliable frames in FIFO order after a slow send', async () => {
+    const transport = new TestConnection();
+    const gate = deferred<void>();
+    transport.sendGate = gate.promise;
+    let reservedBytes = 0;
+    let overflows = 0;
+    const queue = new OutboundQueue(
+      { ...DEFAULT_RUNTIME_SERVER_LIMITS, maxOutboundMessages: 2, maxOutboundBytes: 128 },
+      transport,
+      (delta) => {
+        reservedBytes += delta;
+        return true;
+      },
+      () => () => undefined,
+      10_000,
+      undefined,
+      () => {
+        overflows++;
+      },
+    );
+    const writes = Array.from({ length: 2_000 }, (_, index) =>
+      queue.enqueue({ jsonrpc: '2.0', id: `bulk-${index}`, result: { status: 'ok' } }, 'response'),
+    );
+    expect(transport.sendCalls).toBe(0);
+    gate.resolve();
+    expect((await Promise.all(writes)).every(Boolean)).toBeTrue();
+    await queue.whenIdle();
+    expect(transport.sent.map((message) => 'id' in message && message.id)).toEqual(
+      Array.from({ length: 2_000 }, (_, index) => `bulk-${index}`),
+    );
+    expect(reservedBytes).toBe(0);
+    expect(overflows).toBe(0);
+    queue.close();
+  });
+
+  test('drops queued ephemeral frames without disturbing interleaved reliable FIFO', async () => {
+    const transport = new TestConnection();
+    const gate = deferred<void>();
+    transport.sendGate = gate.promise;
+    const queue = new OutboundQueue(
+      { ...DEFAULT_RUNTIME_SERVER_LIMITS, maxOutboundMessages: 3, maxOutboundBytes: 4_096 },
+      transport,
+      () => true,
+      () => () => undefined,
+      10_000,
+      undefined,
+      () => {
+        throw new Error('Unexpected output overflow.');
+      },
+    );
+    const response = (id: string): RuntimeProtocolMessage => ({
+      jsonrpc: '2.0',
+      id,
+      result: { status: 'ok' },
+    });
+    const ephemeral = (sequence: number): RuntimeProtocolMessage => ({
+      jsonrpc: '2.0',
+      method: 'runtime/subscription',
+      params: {
+        subscriptionId: 'subscription-1',
+        generation: 1,
+        message: mapRuntimeNotificationToSubscriptionMessage({
+          schema: 'kite.runtime-notification.v2',
+          durability: 'ephemeral',
+          sessionId: 'session-1',
+          workId: 'work-1',
+          turnId: 'turn-1',
+          actorId: 'actor-1',
+          attemptId: 'attempt-1',
+          compositionRevision: 'composition-1',
+          streamId: 'stream-1',
+          sequence,
+          event: { type: 'model.text_delta', requestId: 'request-1', text: 'hello' },
+        }),
+      },
+    });
+    const writes = [
+      queue.enqueue(response('first'), 'response'),
+      queue.enqueue(ephemeral(1), 'ephemeral'),
+      queue.enqueue(ephemeral(2), 'ephemeral'),
+      queue.enqueue(response('second'), 'response'),
+      queue.enqueue(ephemeral(3), 'ephemeral'),
+    ];
+    gate.resolve();
+    expect((await Promise.all(writes)).every(Boolean)).toBeTrue();
+    await queue.whenIdle();
+    expect(
+      transport.sent.map((message) =>
+        'id' in message
+          ? message.id
+          : (message.params as { message: { sequence: number } }).message.sequence,
+      ),
+    ).toEqual(['first', 1, 'second', 3]);
+    queue.close();
+  });
+
+  test('releases global output capacity when a stalled connection closes', async () => {
+    const runtime = new FakeRuntime();
+    const server = new RuntimeServer(
+      { runtime, admission: allowAdmission },
+      { ...serverOptions(), globalLimits: { maxQueuedBytes: 1 } },
+    );
+    const slow = new TestConnection();
+    const waiting = new TestConnection();
+    const slowConnection = server.open(slow);
+    const waitingConnection = server.open(waiting);
+    await initializeTransport(slow);
+    await initializeTransport(waiting);
+    const gate = deferred<void>();
+    slow.sendGate = gate.promise;
+    slow.push({ jsonrpc: '2.0', id: 'held', method: 'server/ping', params: {} });
+    await eventually(() => slow.sendCalls === 2);
+    waiting.push({
+      jsonrpc: '2.0',
+      id: 'waiting',
+      method: 'runtime/query',
+      params: { query: { schema: 'kite.runtime-query.v1', type: 'list_sessions' } },
+    });
+    await eventually(() => runtime.queries.length === 1);
+    expect(waiting.sent).toHaveLength(1);
+    await slowConnection.close();
+    await eventually(() => waiting.sent.length === 2);
+    expect(waiting.sent[1]).toMatchObject({ id: 'waiting' });
+    gate.resolve();
+    await waitingConnection.close();
+  });
+
+  test('closes a logical connection whose send never settles and releases its byte reservation', async () => {
+    const runtime = new FakeRuntime();
+    const server = new RuntimeServer(
+      { runtime, admission: allowAdmission },
+      { ...serverOptions(), globalLimits: { maxQueuedBytes: 1, drainTimeoutMs: 10 } },
+    );
+    const stalled = new TestConnection();
+    const survivor = new TestConnection();
+    server.open(stalled);
+    server.open(survivor);
+    await initializeTransport(stalled);
+    await initializeTransport(survivor);
+    stalled.sendGate = deferred<void>().promise;
+    stalled.push({ jsonrpc: '2.0', id: 'never', method: 'server/ping', params: {} });
+    await eventually(() => stalled.sendCalls === 2);
+    await Bun.sleep(25);
+    expect(stalled.closed).toBeTrue();
+    survivor.push({ jsonrpc: '2.0', id: 'after', method: 'server/ping', params: {} });
+    await eventually(() => survivor.sent.length === 2);
+    expect(survivor.sent[1]).toMatchObject({ id: 'after' });
   });
 
   test('preserves session-index reset boundaries without synthesizing a session notification', async () => {
@@ -1352,7 +1533,7 @@ describe('Runtime Server', () => {
     await server.beginDraining();
   });
 
-  test('closes only a slow logical connection and returns its iterator', async () => {
+  test('sends a valid frame even when the configured resident byte target is smaller', async () => {
     const runtime = new FakeRuntime();
     runtime.notifications = [durableNotification(1)];
     const transport = new TestConnection();
@@ -1365,9 +1546,9 @@ describe('Runtime Server', () => {
     );
     server.open(transport);
     transport.push(initialize);
-    await eventually(() => transport.closed);
+    await eventually(() => transport.sent.length === 1);
     expect(runtime.commands).toHaveLength(0);
-    expect(transport.closed).toBeTrue();
+    expect(transport.closed).toBeFalse();
   });
 
   test('draining is bounded, releases subscription resources, and never cancels Runtime work', async () => {

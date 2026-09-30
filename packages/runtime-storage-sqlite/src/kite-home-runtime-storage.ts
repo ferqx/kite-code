@@ -5,6 +5,7 @@ import type {
   EffectLeasePort,
   RuntimeCommandReceiptLookupInput,
   RuntimeCommandReceiptPort,
+  RuntimeCompletedResourceReservationRunQuery,
   RuntimeEventMetadata,
   RuntimeRecoveryIdentityPort,
   RuntimeSessionDeletionInput,
@@ -451,6 +452,42 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
   };
   Object.freeze(runs);
 
+  const completedResourceReservations: NonNullable<
+    RuntimeStorage<Event, State>['completedResourceReservations']
+  > = Object.freeze({
+    lookup(sessionId: string, reservationId: string) {
+      return (
+        journalForSession(sessionId)?.completedResourceReservations?.lookup(
+          sessionId,
+          reservationId,
+        ) ?? null
+      );
+    },
+    listForRun(request: RuntimeCompletedResourceReservationRunQuery) {
+      const journal = journalForSession(request.sessionId);
+      if (!journal) return [];
+      const port = journal.completedResourceReservations;
+      if (!port?.listForRun)
+        throw new Error('Runtime Store cannot enumerate exact Run reservation receipts.');
+      return port.listForRun(request);
+    },
+    findNonReleasedInvocation(sessionId: string, runId: string, invocationId: string) {
+      return (
+        journalForSession(sessionId)?.completedResourceReservations?.findNonReleasedInvocation(
+          sessionId,
+          runId,
+          invocationId,
+        ) ?? null
+      );
+    },
+  });
+  const supportsCompletedResourceReservations =
+    input.database
+      .query<{ present: number }, []>(
+        "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='runtime_resource_reservation_receipts'",
+      )
+      .get() !== null;
+
   const storage: KiteHomeRuntimeStorageOwner<Event, State>['storage'] = Object.freeze({
     adapterId: 'kite-home-sqlite',
     stateSchemaVersion: input.stateSchemaVersion,
@@ -464,6 +501,7 @@ export function createKiteHomeRuntimeStorageForConnection<Event, State>(input: {
     recoveryIdentities,
     commandReceipts,
     runs,
+    ...(supportsCompletedResourceReservations ? { completedResourceReservations } : {}),
     close,
   });
 

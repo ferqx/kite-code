@@ -149,7 +149,7 @@ describe('MCP tool runner', () => {
     expect(observedSignal).toBe(controller.signal);
   });
 
-  test('bounds oversized MCP output before it enters the model transcript', async () => {
+  test('preserves MCP output beyond the former size limit in the model transcript', async () => {
     const manager = provider(async () => ({
       content: [{ type: 'text', text: 'x'.repeat(256 * 1024) }],
     }));
@@ -157,14 +157,13 @@ describe('MCP tool runner', () => {
     const result = await invokeCapability(capability);
 
     expect(result.ok).toBe(true);
-    expect(result.stdout.length).toBeLessThan(140 * 1024);
+    expect(result.stdout.length).toBeGreaterThan(256 * 1024);
     expect(JSON.parse(result.stdout)).toMatchObject({
-      status: 'partial',
-      truncated: true,
+      status: 'success',
     });
     expect(result.capabilityResult?.content[0]).toMatchObject({
       type: 'text',
-      text: expect.stringMatching(/^x+$/),
+      text: 'x'.repeat(256 * 1024),
     });
   });
 

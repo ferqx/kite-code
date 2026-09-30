@@ -21,7 +21,13 @@ import type {
   WebSessionStatus,
 } from '../presentation/types';
 
-const MAX_PAGES = 32;
+function advanceCursor(seen: Set<string>, cursor: string | undefined): string | undefined {
+  if (cursor !== undefined) {
+    if (seen.has(cursor)) throw new WebRestTransportError('protocol_error');
+    seen.add(cursor);
+  }
+  return cursor;
+}
 
 export type WebRestTransportFailure =
   | 'service_unavailable'
@@ -59,7 +65,11 @@ export interface WebRestTransport {
   getSession(sessionId: string): Promise<ReturnType<typeof projectSession>>;
   loadHistory(sessionId: string, afterSequence?: number): Promise<WebHistorySnapshot>;
   loadLogs(sessionId: string, afterSequence?: number): Promise<WebSessionLogSnapshot>;
-  loadModelContext(sessionId: string, invocationId: string): Promise<WebModelContextSnapshot>;
+  loadModelContext(
+    sessionId: string,
+    invocationId: string,
+    signal?: AbortSignal,
+  ): Promise<WebModelContextSnapshot>;
   loadCheckpoints(sessionId: string): Promise<WebCheckpointSnapshot>;
   loadBackgroundExecutions?(sessionId: string): Promise<WebBackgroundSnapshot>;
   disconnect(): Promise<void>;
@@ -123,7 +133,8 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       try {
         const workspaces: WebDirectorySnapshot['workspaces'][number][] = [];
         let cursor: string | undefined;
-        for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+        const cursors = new Set<string>();
+        for (;;) {
           const page = await readWithBrowserSessionRecovery(() =>
             client.listWorkspaces({ cursor, limit: 100 }),
           );
@@ -151,9 +162,8 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
               ],
             };
           }
-          cursor = page.next_cursor;
+          cursor = advanceCursor(cursors, page.next_cursor);
         }
-        throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error);
       }
@@ -181,8 +191,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       try {
         const messages: WebPresentationMessage[] = [];
         let cursor: string | undefined;
+        const cursors = new Set<string>();
         let observedLastSequence = 0;
-        for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+        for (;;) {
           const page = await readWithBrowserSessionRecovery(() =>
             client.listHistory(sessionId, {
               cursor,
@@ -191,6 +202,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
             }),
           );
           if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+          if (cursor !== undefined && observedLastSequence !== page.through_sequence) {
+            throw new WebRestTransportError('protocol_error');
+          }
           observedLastSequence = page.through_sequence;
           messages.push(...page.items.map(projectHistoryItem));
           if (!page.next_cursor) {
@@ -200,9 +214,8 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
               observedLastSequence,
             };
           }
-          cursor = page.next_cursor;
+          cursor = advanceCursor(cursors, page.next_cursor);
         }
-        throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error, 'history_unavailable');
       }
@@ -212,8 +225,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       try {
         const entries: WebSessionLogSnapshot['entries'][number][] = [];
         let cursor: string | undefined;
+        const cursors = new Set<string>();
         let observedLastSequence = 0;
-        for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+        for (;;) {
           const page = await readWithBrowserSessionRecovery(() =>
             client.listLogs(sessionId, {
               cursor,
@@ -222,6 +236,9 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
             }),
           );
           if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+          if (cursor !== undefined && observedLastSequence !== page.through_sequence) {
+            throw new WebRestTransportError('protocol_error');
+          }
           observedLastSequence = page.through_sequence;
           entries.push(...page.items.map(projectLogItem));
           if (!page.next_cursor) {
@@ -231,19 +248,30 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
               observedLastSequence,
             };
           }
-          cursor = page.next_cursor;
+          cursor = advanceCursor(cursors, page.next_cursor);
         }
-        throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error, 'logs_unavailable');
       }
     },
-    async loadModelContext(sessionId: string, invocationId: string) {
+    async loadModelContext(sessionId: string, invocationId: string, signal?: AbortSignal) {
       requireConnected(connected);
       try {
-        const context = await readWithBrowserSessionRecovery(() =>
-          client.getModelContext(sessionId, invocationId),
-        );
+        const read = () =>
+          readWithBrowserSessionRecovery(() =>
+            client.getModelContext(sessionId, invocationId, signal),
+          );
+        let context: AgentApiModelContext;
+        try {
+          context = await read();
+        } catch (error) {
+          if (!(error instanceof AgentApiClientError) || error.status !== 409 || signal?.aborted) {
+            throw error;
+          }
+          // A private page snapshot may have expired while the Inspector was
+          // reading. Restart once from the verified source and a fresh cursor.
+          context = await read();
+        }
         if (context.session_id !== sessionId || context.invocation_id !== invocationId) {
           throw new WebRestTransportError('protocol_error');
         }
@@ -257,7 +285,8 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
       try {
         const checkpoints: WebCheckpointSnapshot['checkpoints'][number][] = [];
         let cursor: string | undefined;
-        for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+        const cursors = new Set<string>();
+        for (;;) {
           const page = await readWithBrowserSessionRecovery(() =>
             client.listCheckpoints(sessionId, { cursor, limit: 100 }),
           );
@@ -272,9 +301,8 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
             })),
           );
           if (!page.next_cursor) return { sessionId, checkpoints };
-          cursor = page.next_cursor;
+          cursor = advanceCursor(cursors, page.next_cursor);
         }
-        throw new WebRestTransportError('protocol_error');
       } catch (error) {
         throw normalizeError(error, 'history_unavailable');
       }
@@ -282,20 +310,48 @@ export function createWebRestTransport(options: WebRestTransportOptions = {}): W
     async loadBackgroundExecutions(sessionId: string) {
       requireConnected(connected);
       try {
-        const page = await readWithBrowserSessionRecovery(() =>
-          client.listBackgroundExecutions(sessionId),
-        );
-        if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+        const executions: WebBackgroundSnapshot['executions'][number][] = [];
+        const cursors = new Set<string>();
+        let cursor: string | undefined;
+        let version:
+          | { sessionRevision: number; aggregateGeneration: string; watermark: number }
+          | undefined;
+        let stale = false;
+        for (;;) {
+          const page = await readWithBrowserSessionRecovery(() =>
+            client.listBackgroundExecutions(sessionId, { cursor, limit: 100 }),
+          );
+          if (page.session_id !== sessionId) throw new WebRestTransportError('protocol_error');
+          if (
+            version &&
+            (version.sessionRevision !== page.session_revision ||
+              version.aggregateGeneration !== page.aggregate_generation ||
+              version.watermark !== page.watermark)
+          ) {
+            throw new WebRestTransportError('protocol_error');
+          }
+          version ??= {
+            sessionRevision: page.session_revision,
+            aggregateGeneration: page.aggregate_generation,
+            watermark: page.watermark,
+          };
+          stale ||= page.stale;
+          executions.push(
+            ...page.items.map((entry) => ({
+              executionId: entry.execution_id,
+              kind: entry.kind,
+              status: entry.status,
+              cleanupConfirmed: entry.cleanup_confirmed,
+              ...(entry.cursor === undefined ? {} : { cursor: entry.cursor }),
+            })),
+          );
+          if (!page.next_cursor) break;
+          cursor = advanceCursor(cursors, page.next_cursor);
+        }
         return {
           sessionId,
-          stale: page.stale,
-          executions: page.items.map((entry) => ({
-            executionId: entry.execution_id,
-            kind: entry.kind,
-            status: entry.status,
-            cleanupConfirmed: entry.cleanup_confirmed,
-            ...(entry.cursor === undefined ? {} : { cursor: entry.cursor }),
-          })),
+          stale,
+          executions,
         };
       } catch (error) {
         throw normalizeError(error, 'session_unavailable');
@@ -317,7 +373,8 @@ async function listAllSessions(
 ) {
   const sessions: ReturnType<typeof projectSession>[] = [];
   let cursor: string | undefined;
-  for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
+  const cursors = new Set<string>();
+  for (;;) {
     const page = await read(() =>
       client.listWorkspaceSessions(workspaceId, { cursor, limit: 100 }),
     );
@@ -326,9 +383,8 @@ async function listAllSessions(
     if (!page.next_cursor) {
       return sessions;
     }
-    cursor = page.next_cursor;
+    cursor = advanceCursor(cursors, page.next_cursor);
   }
-  throw new WebRestTransportError('protocol_error');
 }
 
 function projectSession(session: AgentApiSession) {

@@ -267,7 +267,11 @@ function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | u
   if (state && input.modelInvocationParentReservationId && !budget)
     throw new DescendantResourceAdmissionError('reconciliation_required');
   if (budget?.status !== 'active') return configured;
-  if (budget.budget.durationOnlyChildRun === true) return configured;
+  if (
+    budget.budget.durationOnlyChildRun === true ||
+    budget.budget.unboundedCumulativeUsage === true
+  )
+    return configured;
   const remaining =
     budget.budget.maxRunOutputTokens - committedResourceUsage(budget).counters.outputTokens;
   if (remaining <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
@@ -362,7 +366,7 @@ export async function executeSubagentResumeWithCoreToolAdapter(
       toolCallId: resumedStep.toolCallId,
       toolName: toolResult.toolName,
       status: resultStatus,
-      summary: toolOutput.slice(0, 200),
+      summary: toolOutput.slice(0, 8_192),
       durationMs: 0,
       ...(typeof toolResult.result.totalLines === 'number'
         ? { totalLines: toolResult.result.totalLines }
@@ -590,7 +594,9 @@ async function executeCoreSubagentToolAdapter(
     }
     const resourceBudget = input.modelInvocationPersistence.getState().resourceBudget;
     const ignoreNonSafetyCeilings =
-      resourceBudget.status === 'active' && resourceBudget.budget.durationOnlyChildRun === true;
+      resourceBudget.status === 'active' &&
+      (resourceBudget.budget.durationOnlyChildRun === true ||
+        resourceBudget.budget.unboundedCumulativeUsage === true);
     const modelLoop = createBuiltinSubagentModelLoopEngine<
       RuntimeState,
       RuntimeEvent,
@@ -599,7 +605,9 @@ async function executeCoreSubagentToolAdapter(
       coordinator: input.modelEffectCoordinator,
       initialMessages: messages,
       startModelInvocationOrdinal: modelInvocationOrdinal,
-      ...(resourceBudget.status === 'active' && resourceBudget.budget.unboundedToolInvocations
+      ...(resourceBudget.status === 'active' &&
+      (resourceBudget.budget.unboundedToolInvocations ||
+        resourceBudget.budget.unboundedCumulativeUsage)
         ? {}
         : { maxToolRounds: DEFAULT_SUBAGENT_MAX_TOOL_ROUNDS }),
       model,
@@ -713,7 +721,7 @@ async function executeCoreSubagentToolAdapter(
                   toolCallId: admittedToolCallId,
                   toolName: tc.name,
                   status: 'failed',
-                  summary: errMsg.slice(0, 200),
+                  summary: errMsg,
                   durationMs: 0,
                   failureReason: 'tool_not_available',
                 },
@@ -1376,7 +1384,7 @@ async function executeCoreSubagentToolAdapter(
                     : ok
                       ? 'completed'
                       : 'failed',
-                summary: toolOutput.slice(0, 200),
+                summary: toolOutput.slice(0, 8_192),
                 durationMs,
                 ...(totalLines != null ? { totalLines } : {}),
                 ...(toolTokenCount > 0 ? { toolTokenCount } : {}),

@@ -146,6 +146,7 @@ export type {
   ConcurrencyWaiter,
   ResourceBudget,
   ResourceBudgetConfiguredEvent,
+  ResourceBudgetCumulativeLimitsRemovedEvent,
   ResourceBudgetDispatchStartedEvent,
   ResourceBudgetEvent,
   ResourceBudgetReconciledEvent,
@@ -169,11 +170,13 @@ export {
   createZeroResourceUsage,
   fundingBudgetForReservation,
   fundingBudgetForRun,
+  hasUnboundedCumulativeUsage,
   INTERNAL_RESOURCE_BUDGET_,
   LIMITED_RESOURCE_BUDGET_,
   RESOURCE_BUDGET_VERSION,
   reduceResourceBudgetState,
   tightenResourceBudget,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
 } from './resource-budget';
 export type {
   StateRuntimeCommandCommitResult,

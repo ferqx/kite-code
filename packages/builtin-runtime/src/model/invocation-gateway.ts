@@ -43,7 +43,10 @@ export interface ModelInvocationStateView {
   readonly turn: { readonly turnId: string };
   readonly resourceBudget?: {
     readonly status: string;
-    readonly budget?: { readonly durationOnlyChildRun?: boolean };
+    readonly budget?: {
+      readonly durationOnlyChildRun?: boolean;
+      readonly unboundedCumulativeUsage?: boolean;
+    };
   };
 }
 
@@ -74,7 +77,10 @@ export interface ModelPreparedResumeStateView extends ModelInvocationStateView {
   >;
   readonly resourceBudget: Readonly<{
     status: string;
-    budget?: Readonly<{ durationOnlyChildRun?: boolean }>;
+    budget?: Readonly<{
+      durationOnlyChildRun?: boolean;
+      unboundedCumulativeUsage?: boolean;
+    }>;
     runId?: string;
     reservations?: Readonly<
       Record<
@@ -361,14 +367,15 @@ export class ModelInvocationGateway {
     // only leave an immutable orphan eligible for reachability-based GC.
     const surfaceArtifact = this.#artifacts.writeSurface(compiled.surface);
     const state = input.persistence.getState();
-    // The child Run's durable deadline and cancellation signal own its retry
-    // horizon. Persist safe-integer sentinels so the legacy invocation record
-    // stays decodable without imposing another attempts/time budget.
+    // The Run's durable deadline and cancellation signal own its retry horizon.
+    // Persist safe-integer sentinels so the legacy invocation record stays
+    // decodable without imposing another attempts/time budget.
     const limits = normalizeLimits(
       input.limits ??
         (input.hardAttemptTimeoutMs === undefined &&
         state.resourceBudget?.status === 'active' &&
-        state.resourceBudget.budget?.durationOnlyChildRun === true
+        (state.resourceBudget.budget?.durationOnlyChildRun === true ||
+          state.resourceBudget.budget?.unboundedCumulativeUsage === true)
           ? {
               maxAttempts: Number.MAX_SAFE_INTEGER,
               perAttemptTimeoutMs: 0,
@@ -476,13 +483,14 @@ export class ModelInvocationGateway {
     const reservationId =
       prepared?.budget.kind === 'reservation' ? prepared.budget.reservationId : '';
     const reservation = state.resourceBudget.reservations?.[reservationId];
-    // A legacy current-turn proof can retain its single-attempt limit inside a
-    // duration-only child Run; its token reservation is still unbounded.
-    const durationOnlyBudget =
+    // A legacy current-turn proof can retain its single-attempt limit inside an
+    // unbounded Run; its token reservation is still unbounded.
+    const unboundedBudget =
       state.resourceBudget.status === 'active' &&
-      state.resourceBudget.budget?.durationOnlyChildRun === true &&
+      (state.resourceBudget.budget?.durationOnlyChildRun === true ||
+        state.resourceBudget.budget?.unboundedCumulativeUsage === true) &&
       reservation?.executableUpperBound.unboundedModelTokens === true;
-    const durationOnlyPrepared = durationOnlyBudget && input.hardAttemptTimeoutMs === undefined;
+    const unboundedPrepared = unboundedBudget && input.hardAttemptTimeoutMs === undefined;
     if (
       !prepared ||
       !input.invocationId ||
@@ -508,7 +516,7 @@ export class ModelInvocationGateway {
       prepared.surfaceArtifact.byteLength !== input.surfaceArtifact.byteLength ||
       prepared.surfaceIntegrityIdentifier !== input.surfaceIntegrityIdentifier ||
       prepared.surfaceIntegrityIdentifier !== input.surfaceArtifact.integrityIdentifier ||
-      (durationOnlyPrepared
+      (unboundedPrepared
         ? prepared.limits.maxAttempts !== Number.MAX_SAFE_INTEGER ||
           prepared.limits.perAttemptTimeoutMs !== 0 ||
           prepared.limits.totalTimeBudgetMs !== Number.MAX_SAFE_INTEGER
@@ -528,7 +536,7 @@ export class ModelInvocationGateway {
       (reservation.parentReservationId ?? null) !== prepared.budget.parentReservationId ||
       reservation.executableUpperBound.counters.modelRequests !== 1 ||
       !Number.isSafeInteger(reservation.executableUpperBound.counters.inputTokens) ||
-      (!durationOnlyBudget &&
+      (!unboundedBudget &&
         prepared.estimatedInputTokens! > reservation.executableUpperBound.counters.inputTokens) ||
       !Number.isSafeInteger(reservation.executableUpperBound.counters.outputTokens)
     )
@@ -546,11 +554,11 @@ export class ModelInvocationGateway {
       verifiedRef.byteLength !== input.surfaceArtifact.byteLength ||
       surface.purpose !== prepared.purpose ||
       surface.route.routeFingerprint !== prepared.routeFingerprint ||
-      (!durationOnlyBudget &&
+      (!unboundedBudget &&
         (surface.request.maxOutputTokens === null ||
           surface.request.maxOutputTokens === undefined)) ||
       (surface.request.maxOutputTokens != null &&
-        !durationOnlyBudget &&
+        !unboundedBudget &&
         surface.request.maxOutputTokens > reservation.executableUpperBound.counters.outputTokens)
     )
       throw new Error('Prepared Model Surface differs from its durable artifact.');

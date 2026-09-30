@@ -34,7 +34,8 @@ export {
 
 const MAX_GRANT_TTL_MS = 5 * 60_000;
 const MAX_PATH_CHARS = 16_384;
-const MAX_OPERATION_STRING_CHARS = 16 * 1024 * 1024;
+// Operation strings are checked by their type and bound to exact digests. The
+// transport and storage layers enforce actual capacity at their boundaries.
 const MAX_IDENTITY_CHARS = 4_096;
 
 type JsonPrimitive = null | boolean | number | string;
@@ -357,12 +358,7 @@ function validatedPreparedMutation(value: unknown): {
   const byteLength = nonNegativeInteger(preimage.byteLength, 'preimage byteLength');
   let preimageDigest: string | null;
   if (preimage.existed) {
-    const content = requiredString(
-      preimage.content,
-      'preimage content',
-      MAX_OPERATION_STRING_CHARS,
-      true,
-    );
+    const content = requiredString(preimage.content, 'preimage content', undefined, true);
     preimageDigest = requiredString(preimage.contentDigest, 'preimage digest', 256);
     if (
       preimageDigest !== workspaceFilesystemStringDigest(content) ||
@@ -783,7 +779,7 @@ function validatedOperation(
     return {
       kind,
       ...common(),
-      content: requiredString(operation.content, 'content', MAX_OPERATION_STRING_CHARS, true),
+      content: requiredString(operation.content, 'content', undefined, true),
     };
   }
   if (family === 'mutation' && kind === 'edit_file') {
@@ -799,8 +795,8 @@ function validatedOperation(
     return {
       kind,
       ...common(),
-      oldString: requiredString(operation.oldString, 'oldString', MAX_OPERATION_STRING_CHARS, true),
-      newString: requiredString(operation.newString, 'newString', MAX_OPERATION_STRING_CHARS, true),
+      oldString: requiredString(operation.oldString, 'oldString', undefined, true),
+      newString: requiredString(operation.newString, 'newString', undefined, true),
       ...(operation.replaceAll === undefined ? {} : { replaceAll: operation.replaceAll }),
     };
   }
@@ -923,11 +919,16 @@ function exactKeys(
   for (const key of required) if (!Object.hasOwn(value, key)) throw new Error(`${name}.${key}`);
 }
 
-function requiredString(value: unknown, name: string, maximum: number, allowEmpty = false): string {
+function requiredString(
+  value: unknown,
+  name: string,
+  maximum?: number,
+  allowEmpty = false,
+): string {
   if (
     typeof value !== 'string' ||
     (!allowEmpty && value.length === 0) ||
-    value.length > maximum ||
+    (maximum !== undefined && value.length > maximum) ||
     value.includes('\0')
   ) {
     throw new Error(`Invalid ${name}.`);

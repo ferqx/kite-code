@@ -451,6 +451,31 @@ describe('State tool governance authorization facts', () => {
     ).toMatchObject({ kind: 'request_auto_review' });
   });
 
+  test('past rejection counts do not bypass a fresh non-Shell safety review', () => {
+    expect(
+      authorizeToolGovernance(
+        dynamicMcpFacts({
+          policy: { decision: 'ask', allowed: true, requiresApproval: true, risk: 'mcp' },
+          context: { interactionMode: 'auto', circuitBreakerTripped: true },
+          dynamicMcp: { minimumApproval: 'none', readOnly: false },
+        }),
+      ),
+    ).toMatchObject({ kind: 'request_auto_review' });
+    expect(
+      authorizeToolGovernance(
+        dynamicMcpFacts({
+          policy: {
+            decision: 'deny',
+            allowed: false,
+            requiresApproval: false,
+            risk: 'destructive',
+          },
+          context: { interactionMode: 'auto', circuitBreakerTripped: true },
+        }),
+      ),
+    ).toMatchObject({ kind: 'reject' });
+  });
+
   test('does not apply ordinary mode review again after exact Auto approval', () => {
     const approved = approvedFacts('approve_once', {
       invocation: {

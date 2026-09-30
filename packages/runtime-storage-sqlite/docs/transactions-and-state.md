@@ -10,6 +10,7 @@
 | Event / snapshot | 可重放事实与读取加速状态 | Kernel event/state codec |
 | Run | 排队、活动与终态执行索引 | Host storage port，API/查询投影 |
 | command receipt | 已提交命令的幂等结果 | Host 重放前验证 digest 与 scope |
+| completed resource reservation receipt | 已结算 reservation 的准确身份和用量 | Host 重放、子资金查证与 State CAS |
 | execution authority / effect | writer 身份及外部操作状态 | App 获取，mutation/dispatch 校验 |
 | Artifact / checkpoint | 大内容或恢复所需数据 | typed reader 与恢复入口 |
 | Agent 身份／邮件 | 每个 Session 的 Agent 身份、来源 outbox、目标 inbox、私有正文与输入水位 | 来源与目标各自的受保护 Session 事务 |
@@ -30,13 +31,15 @@ App Server 的分页 History 子进程使用[只读连接工厂](../src/log-quer
 
 start 对应 Run、command receipt、事件与 State 的关联更新必须在所属事务一致提交；后续 activation、interaction、terminal 同步 Run 索引，不能绕过 Store writer 直接改查询投影。
 
+无累计额度的 Run 在 State 中只保留活动 reservation。`reconciled`／`released` 的完整 canonical reservation 与终态事件、State 快照在同一 revision CAS 事务中写入 `runtime_resource_reservation_receipts`；Store 核对前态、终态事件和所有被移出的记录，按 Session／reservation 身份唯一保存，并以同一 Run／invocation 的已调和记录阻止重复入账。receipt 记录终态 revision；fork 只复制快照边界之前的记录，named rewind 同事务删除边界之后的记录，以允许回退 State 中的活动 reservation 再次合法结算。Host 以该私有读口验证已归档父 reservation、终态幂等重放及取消后子资金释放。旧快照仍可保留已结算记录；活动旧 Run 移除累计额度时，同一升级事务迁出这些记录。执行位、期限和未知外部效果的门禁保持有效。
+
 ### D0 子 Session 创建意图
 
 父 `receipt_evidence` 事务中的 `childSessionIntent` 同批核对创建意图、`subagent.started` 角色、dispatch Artifact ref、独立委派预算 reservation 和 `tool.finished` 的 running／required claim。Store 私下读取不可变 Task Artifact，核对 canonical bytes、owner 四元组及独立的原始任务文本 digest。父接受事务还把有界的 sealed grant canonical JSON（最多 128 KiB UTF-8）、字节长度与 SHA-256 同写入私有意图行；Store 校验 grant 的通用父／子身份、角色、Artifact ref 和任务文本 digest，不代替 Builtin 的完整 grant 语义校验。Event 与普通意图 metadata 只包含 ref／digest，不返回 grant JSON。`child_session_intents` 以确定性 childThreadId 唯一保存父 Tool 终态 eventId／revision、角色、Artifact ref、委派上限与 funding deadline。其 receipt marker 为恢复索引，不代替父预算或 Kernel State。新 `durationOnlyChildRun` 委派的父 Tool 仍有准确 reservation 与并发槽，私有 Task Artifact 的字节量不计入父 Tool 累计 Artifact 用量；Store 以原 ref／digest／owner 证明内容完整，不以零预算用量推断内容为空。
 
 `createChildSession` 在原有 Session／Controller／recovery receipt 同一 writer 事务内核对父意图和 Workspace/project、建立 `parent_session_id`；重放要求同一意图与原创建回执，冲突拒绝。revision 0 的子 State 须预绑定准确 `childSessionOrigin`、私有 Task Artifact ref 和 digest，预算仍为 unconfigured。首轮 `childBudgetActivation` 同批核对 adopted、Task input admitted、configured、turn.started、task.started 与准确子 Run insert，子预算与 deadline 不得超过持久委派上限；之后的模型／工具 dispatch 还要求父 `resource_budget.dispatch_started` ACK 和未结算的准确 child intent；`required` 要求活动父 Run，`after_turn` 允许原父 Run 已完成但仍在原 deadline 内继续执行。父创建永久失败有三个明确模式：子 Session 尚不存在；子 Session 已创建但仍为 revision 0、无 Run/Event/effect、无预算激活与 dispatch ACK；或子 Session 已激活为准确 revision 5／queued Run、但父 dispatch ACK 尚未提交、无外部尝试，且持久 execution owner 已释放为 idle／cleanupConfirmed。Store 在同一父结果事务内重验血缘、Workspace、snapshot、owner 与 mode 后 CAS 记录 failure digest；不删除已创建的内部子 Session，准确重放或冲突均按原行判断。取消后的子清理事实可继续落盘，新的外部 dispatch 拒绝。`after_turn` 的父受理事务同时预留子额度与一次自动汇报模型额度；重启时只保留已核对的 pending、同进程 live ACK 或子终态 seal 所需预留，缺失证明维持 unknown。
 
-父 Run 因用户取消而已释放子预留时，仅 `required`、revision 0 且无任何 Event／Run／effect lease 的子 Session 可走无第二次 `resource_budget.released` 的预派发取消结算。Store 在相同父事务内复核原 Run 的 `cancelled` 状态、准确预留的 `released` 状态、唯一历史释放与 `cause=user` 的原 turn 取消 Event，以及子 Session 已释放的 idle／cleanupConfirmed owner；父快照的当前 turn 可以是后来新开的 Run，不作为旧取消的证明。缺少任一证明则拒绝。普通预派发失败仍须提交原三事件，不借此变体跳过预算结算。
+父 Run 因用户取消而已释放子预留时，仅 `required`、revision 0 且无任何 Event／Run／effect lease 的子 Session 可走无第二次 `resource_budget.released` 的预派发取消结算。Store 在相同父事务内复核原 Run 的 `cancelled` 状态、State 或准确归档 receipt 中预留的 `released` 状态与原身份／上限、唯一历史释放与 `cause=user` 的原 turn 取消 Event，以及子 Session 已释放的 idle／cleanupConfirmed owner；父快照的当前 turn 可以是后来新开的 Run，不作为旧取消的证明。缺少任一证明则拒绝。普通预派发失败仍须提交原三事件，不借此变体跳过预算结算。
 
 `readChildSessionIntent` 和有界的 `listPendingChildSessionIntents(parentSessionId,limit,cursor)` 是无写入的内部恢复读口，返回准确身份和 ACK／结算 marker，不返回任务正文或 sealed grant JSON。读取私有 `readChildSealedGrant(childThreadId)` 必须处于准确父 Session 的活动执行或 recovery handle scope，再按父／子 ID 与字节 digest 复核。普通用户的 Session 列表与已知 ID 日志读取不经这些读口。根 Session 删除先取消本进程实际执行，Service 跟踪异步收尾；Store 在同一事务删除内部子树，并用元数据 revision 绑定根回执、保留各 Session tombstone。空间删除将所有目标会话纳入一次事务，不逐根调用 Host；跨范围引用和事务回滚仍保证数据一致性。数据删除不依赖执行权取得、历史恢复或 cleanup 确认，见[执行权与恢复](authority-and-recovery.md)。fork／rewind 与父 close 的完整跨线程语义仍需 D0 集成验收。
 
@@ -61,6 +64,8 @@ Store15 新跨 Session `QueueOnly`／`TriggerTurn` 邮箱保留正文非空、ca
 Store13 从完成态新续轮的目标 settlement／来源资金 ACK 派生确定性的 `reply` outbox；派发前失败或取消仅在目标终态、来源两笔资金释放及零模型尝试均匹配时派生相应状态回复；首轮 required 子结果沿原父 Run 具名结果帧交付，避免重复邮箱事件。回复复用跨 Session inbox 与未投递恢复；父 Run 已结束时回复不绑定后来 Run。只读漏写回复索引还覆盖已受理但未派发的具名失败／来源取消回执，供启动扫描恢复唯一通知；查询本身不创建会话或外部动作。来源意图可处于 `queued`，不占活动子位；历史有限备付仍锁定原持久计数，新 `durationOnlyChildRun` 备付不锁定模型／token／Artifact 累计份额。取得执行位后准确 `resource_budget.child_slot_acquired` 才允许新轮启动。来源 Run 用户取消的同批预算释放也覆盖 queued 备付，Store 才写 `source_cancelled` 回执。新 v2 已受理队列也不受独立的容量等待期限截断；目标 completed／unknown 的准确终态审计释放来源并发槽。历史有限备付的 `capacity_timeout` 要求受理时间加 `maxConcurrencyWaitMs` 已到、当前提交的槽数仍等于上限、准确备付仍 queued、无 slot acquisition／路由／目标 Run／派发，且来源同事务释放备付并记录唯一原因。已派发或 unknown 的资金不得按预派发失败释放。
 
 Store15 将 Model、子任务请求／结果／lifecycle／continuation／checkpoint、followup admission 与私有邮件正文表的 `byte_length` 固定上限改为正值校验；owner 读写仍核对 canonical JSON、准确字节长度、摘要、类型、归属与执行权。Store14→15 只在受维护锁的私有候选中重建这些表、复制旧行、复核全表内容摘要和外键后发布；故障回滚保留原 Store14。旧 Store9–14 沿既有链逐级进入 Store15，不就地改写原文件。定向升级、回滚及超过旧大小阈值的写入验证 22/22 通过。
+
+当前 Store16 的 [Store15→16 converter](../src/kite-session-store15-to16.ts)在私有候选新增终态 reservation receipt 表、History 改写代次／历史追加水位／Session 实例身份及对应精确 trigger。转换前后比较全部旧表旧列的内容摘要，候选通过外键、完整性与当前 schema 检查后才发布；故障整体回滚，原来源不就地改写。旧 Store9–15 沿冻结的转换链进入 Store16。[Store16 回归](../test/kite-session-store15-to16.test.ts)覆盖旧内容保持、纯追加、改写、删后重插、Session 重建及失败回滚，[格式锁](../test/kite-session-store-format-lock.test.ts)分别固定旧15与新16的独立结构指纹。
 
 Store14 在 Session 行增添内部 History 内容代次，保留 Store13 的邮箱语义。`runtime_events` 的 INSERT／UPDATE／DELETE trigger 与事件写入同事务推进对应 Session 的 `history_generation`，使同水位回退重写也能失效首屏缓存；代次不作为跨库内容相等性的依据。Store13→14 使用受维护保护的私有候选并核对旧表内容；其中旧 active／detached 执行 owner 提升代次并转为未确认清理的 `recovery_required`，旧的已确认恢复状态继续保留，原 Store 不改写。合并仅在事务内暂停精确校验过的内建 trigger，复制后重建；未知 trigger／view 仍拒绝。每条事件写入多一次 Session 行更新，写入开销与读缓存命中收益都需按实际负载判断。[升级及代次测试](../test/kite-session-store13-to14.test.ts)和[合并测试](../test/kite-session-store-merge.test.ts)为当前验证入口。
 

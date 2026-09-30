@@ -67,6 +67,7 @@ import type {
   ServiceRuntimeConnectionBinding,
   ServiceWorkspaceAdmissionResult,
 } from './ports';
+import { createRuntimeOutboundSpool } from './runtime-outbound-spool';
 
 export const KITE_SERVICE_LOOPBACK_HOST = '127.0.0.1' as const;
 export const KITE_SERVICE_CONNECT_PATH = '/_kite/connect' as const;
@@ -1326,6 +1327,7 @@ class ServiceSocketSession implements RuntimeServerLogicalMessageConnection {
       (connectionId) => this.#application.onConnectionBound?.(connectionId, this.#workspace),
     );
     this.#connection = this.#server.open(this, {
+      outboundSpool: createRuntimeOutboundSpool(),
       admission: this.#admission,
       onClose: (connectionId) => {
         this.#admission?.close();

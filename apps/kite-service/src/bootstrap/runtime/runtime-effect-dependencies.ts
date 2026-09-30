@@ -304,17 +304,18 @@ export function prepareRuntimeEffectForBudget(
   });
   const providerOutputLimit =
     preflight.reservedOutputTokens ?? configuredMaxOutput ?? capabilities.maxOutputTokens;
-  const durationOnlyChildRun =
+  const unboundedCumulativeUsage =
     state.resourceBudget.status === 'active' &&
-    state.resourceBudget.budget.durationOnlyChildRun === true;
+    (state.resourceBudget.budget.durationOnlyChildRun === true ||
+      state.resourceBudget.budget.unboundedCumulativeUsage === true);
   const remainingOutputTokens =
     state.resourceBudget.status === 'active'
-      ? durationOnlyChildRun
+      ? unboundedCumulativeUsage
         ? providerOutputLimit
         : state.resourceBudget.budget.maxRunOutputTokens -
           committedResourceUsage(state.resourceBudget).counters.outputTokens
       : providerOutputLimit;
-  if (remainingOutputTokens == null && !durationOnlyChildRun) {
+  if (remainingOutputTokens == null && !unboundedCumulativeUsage) {
     throw new Error('Model output admission requires a configured Runtime resource budget.');
   }
   const maxOutputTokens =

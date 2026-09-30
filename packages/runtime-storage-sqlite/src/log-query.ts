@@ -321,10 +321,14 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
   }
   const db = input.database;
   const rootOnly = hasSessionLineage(db) && !input.childScope;
-  const hasHistoryGeneration = db
-    .query<{ name: string }, []>('PRAGMA table_info(runtime_sessions)')
-    .all()
-    .some((column) => column.name === 'history_generation');
+  const sessionColumns = new Set(
+    db
+      .query<{ name: string }, []>('PRAGMA table_info(runtime_sessions)')
+      .all()
+      .map((column) => column.name),
+  );
+  const hasHistoryGeneration = sessionColumns.has('history_generation');
+  const hasHistoryRewriteGeneration = sessionColumns.has('history_rewrite_generation');
   if (
     input.childScope &&
     (!hasSessionLineage(db) ||
@@ -362,10 +366,12 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
               model_name: string | null;
               last_sequence: number;
               history_generation?: number;
+              history_rewrite_generation?: number;
+              history_instance_id?: string;
             },
             string[]
           >(`SELECT s.session_id, s.name, s.updated_at, s.model_provider, s.model_name,
-          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence${hasHistoryGeneration ? ', s.history_generation' : ''}
+          COALESCE((SELECT MAX(e.sequence) FROM runtime_events e WHERE e.session_id = s.session_id), 0) AS last_sequence${hasHistoryGeneration ? ', s.history_generation' : ''}${hasHistoryRewriteGeneration ? ', s.history_rewrite_generation, s.history_instance_id' : ''}
           FROM runtime_sessions s WHERE s.session_id = ?${rootOnly ? ' AND s.parent_session_id IS NULL' : ''}${input.childScope ? ' AND s.parent_session_id = ?' : ''}`)
           .get(sessionId, ...(input.childScope ? [input.childScope.parentSessionId] : []));
         return row
@@ -377,6 +383,12 @@ export function createSqliteRuntimeLogQueryPortFromDatabase_<
               ...(row.history_generation === undefined
                 ? {}
                 : { historyGeneration: row.history_generation }),
+              ...(row.history_rewrite_generation === undefined
+                ? {}
+                : {
+                    historyRewriteGeneration: row.history_rewrite_generation,
+                    historyInstanceId: row.history_instance_id,
+                  }),
               ...(row.model_provider && row.model_name
                 ? { model: { provider: row.model_provider, name: row.model_name } }
                 : {}),

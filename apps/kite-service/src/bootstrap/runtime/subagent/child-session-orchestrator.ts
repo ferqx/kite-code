@@ -22,6 +22,8 @@ import {
 } from '@kite-ai/runtime-contract';
 import type { RuntimeHostLeasePort } from '@kite-ai/runtime-host';
 import {
+  assertResourceUsage,
+  type BudgetReservation,
   type CrossSessionFollowupAdmission,
   type CrossSessionFollowupPolicy,
   type CrossSessionIndependentTurnPolicyProof,
@@ -1726,6 +1728,60 @@ export function createChildSessionOrchestrator(input: {
       }),
     );
   };
+  const followupModelsForRun = (
+    state: RuntimeState,
+    targetSessionId: string,
+    runId: string,
+  ): readonly {
+    model: RuntimeState['modelInvocations'][string];
+    reservation: BudgetReservation;
+  }[] => {
+    const ledger = fundingBudgetForRun(state, runId);
+    const reservations = new Map(
+      Object.values(ledger?.reservations ?? {})
+        .filter((reservation) => reservation.resourceKind === 'model')
+        .map((reservation) => [reservation.reservationId, reservation]),
+    );
+    const store = input.owner.storage.completedResourceReservations;
+    const archived = store?.listForRun
+      ? store.listForRun({
+          sessionId: targetSessionId,
+          runId,
+          atRevision: state.revision,
+          resourceKind: 'model',
+        })
+      : Object.values(state.modelInvocations).flatMap((model) => {
+          if (model.budget.kind !== 'reservation') return [];
+          const receipt = store?.lookup(targetSessionId, model.budget.reservationId);
+          return receipt?.runId === runId ? [receipt] : [];
+        });
+    for (const receipt of archived) {
+      if (receipt.resourceKind !== 'model') continue;
+      if (
+        receipt.version !== 1 ||
+        receipt.runId !== runId ||
+        typeof receipt.reservationId !== 'string' ||
+        (receipt.state !== 'released' && receipt.state !== 'reconciled') ||
+        reservations.has(receipt.reservationId)
+      )
+        throw new Error('Followup Model has conflicting archived reservation authority.');
+      const reservation = receipt as unknown as BudgetReservation;
+      assertResourceUsage(reservation.executableUpperBound);
+      if (reservation.actual) assertResourceUsage(reservation.actual);
+      reservations.set(reservation.reservationId, reservation);
+    }
+    return Object.values(state.modelInvocations).flatMap((model) => {
+      if (model.purpose !== 'primary_agent' || model.budget.kind !== 'reservation') return [];
+      const reservation = reservations.get(model.budget.reservationId);
+      if (!reservation) return [];
+      if (
+        reservation.runId !== runId ||
+        reservation.invocationId !== `model-invocation:${model.invocationId}`
+      )
+        throw new Error('Followup Model reservation differs from its exact invocation.');
+      return [{ model, reservation }];
+    });
+  };
   const completeFollowupTurn = (
     child: ReturnType<typeof ensureChild>,
     followup: NonNullable<RuntimeState['activeFollowupTurn']>,
@@ -1741,17 +1797,14 @@ export function createChildSessionOrchestrator(input: {
       completedState.resourceBudget.runId !== followup.targetRunId
     )
       return false;
-    const completedModels = Object.values(completedState.modelInvocations).filter((model) => {
-      if (model.purpose !== 'primary_agent' || model.budget.kind !== 'reservation') return false;
-      const reservation = completedState.resourceBudget.reservations[model.budget.reservationId];
-      return reservation?.runId === followup.targetRunId && reservation.resourceKind === 'model';
-    });
+    const completedModels = followupModelsForRun(
+      completedState,
+      targetSessionId,
+      followup.targetRunId,
+    );
+    // Multi-Model v2 Turns finish through the ordinary Tool loop completion path.
     if (completedModels.length !== 1) return false;
-    const model = completedModels[0]!;
-    const reservation =
-      completedState.resourceBudget.reservations[
-        model.budget.kind === 'reservation' ? model.budget.reservationId : ''
-      ];
+    const { model, reservation } = completedModels[0]!;
     if (
       model.status !== 'completed' ||
       !model.responseArtifact ||
@@ -1939,11 +1992,13 @@ export function createChildSessionOrchestrator(input: {
       );
       if (!funding) return false;
       const target = input.owner.storage.sessions.loadSnapshot<RuntimeState>(targetSessionId);
-      const ledger = target?.resourceBudget;
-      const local =
-        ledger?.status === 'active'
-          ? ledger.reservations[funding.targetModelReservationId]
-          : undefined;
+      const local = target
+        ? followupModelsForRun(target, targetSessionId, funding.targetRunId).find(
+            ({ model, reservation }) =>
+              model.invocationId === funding.modelInvocationId &&
+              reservation.reservationId === funding.targetModelReservationId,
+          )?.reservation
+        : undefined;
       if (
         !target ||
         target.turn.turnId !== funding.targetRunId ||
@@ -2178,10 +2233,13 @@ export function createChildSessionOrchestrator(input: {
         const route = mail.readFollowupRoute(targetSessionId, submissionId);
         const followup = target.activeFollowupTurn;
         const model = funding ? target.modelInvocations[funding.modelInvocationId] : undefined;
-        const local =
-          target.resourceBudget.status === 'active' && funding
-            ? target.resourceBudget.reservations[funding.targetModelReservationId]
-            : undefined;
+        const local = funding
+          ? followupModelsForRun(target, targetSessionId, funding.targetRunId).find(
+              ({ model: candidate, reservation }) =>
+                candidate.invocationId === funding.modelInvocationId &&
+                reservation.reservationId === funding.targetModelReservationId,
+            )?.reservation
+          : undefined;
         if (
           !funding ||
           !route ||
@@ -2386,13 +2444,11 @@ export function createChildSessionOrchestrator(input: {
           state.resourceBudget.status !== 'active'
         )
           return false;
-        const followupModels = Object.values(state.modelInvocations).filter(
-          (model) =>
-            model.purpose === 'primary_agent' &&
-            model.budget.kind === 'reservation' &&
-            state.resourceBudget.reservations[model.budget.reservationId]?.runId ===
-              followup.targetRunId,
-        );
+        const followupModels = followupModelsForRun(
+          state,
+          targetSessionId,
+          followup.targetRunId,
+        ).map(({ model }) => model);
         if (
           followupModels.length > 1 ||
           followupModels.some((model) => model.status !== 'prepared' || model.attempts !== 0)
@@ -3314,14 +3370,11 @@ export function createChildSessionOrchestrator(input: {
           current.activeFollowupTurn.submissionId !== submissionId
         )
           throw new Error('Independent followup lost its active target Run.');
-        const localModels = Object.values(current.modelInvocations).filter(
-          (candidate) =>
-            candidate.purpose === 'primary_agent' &&
-            candidate.budget.kind === 'reservation' &&
-            current.resourceBudget.status === 'active' &&
-            current.resourceBudget.reservations[candidate.budget.reservationId]?.runId ===
-              current.activeFollowupTurn!.targetRunId,
-        );
+        const localModels = followupModelsForRun(
+          current,
+          targetSessionId,
+          current.activeFollowupTurn.targetRunId,
+        ).map(({ model }) => model);
         if (localModels.length === 0) {
           if (!(await executeAcceptedFollowupFirstModel(targetSessionId, submissionId, signal))) {
             const settled = input.detachedScope.runInAsyncScope(() =>
@@ -3370,13 +3423,22 @@ export function createChildSessionOrchestrator(input: {
           throw new Error('Independent followup tool loop did not reach a durable terminal.');
         return;
       }
+      const followupModelIds = new Set(
+        current?.activeFollowupTurn?.submissionId === submissionId
+          ? followupModelsForRun(
+              current,
+              targetSessionId,
+              current.activeFollowupTurn.targetRunId,
+            ).map(({ model }) => model.invocationId)
+          : [],
+      );
       const belongsToFollowup = (model: RuntimeState['modelInvocations'][string]): boolean =>
         current?.activeFollowupTurn?.submissionId === submissionId &&
         current.resourceBudget.status === 'active' &&
         current.resourceBudget.runId === current.activeFollowupTurn.targetRunId &&
         model.purpose === 'primary_agent' &&
         model.budget.kind === 'reservation' &&
-        current.resourceBudget.reservations[model.budget.reservationId] !== undefined;
+        followupModelIds.has(model.invocationId);
       const models = current
         ? Object.values(current.modelInvocations).filter(
             (model) => belongsToFollowup(model) && model.status !== 'completed',
@@ -4212,7 +4274,7 @@ export function createChildSessionOrchestrator(input: {
           originToolCallId: result.originToolCallId,
           attempt: result.attempt,
           status: result.afterTurn.status,
-          shortReport: typeof summary === 'string' ? summary.slice(0, 2_000) : '',
+          shortReport: typeof summary === 'string' ? summary : '',
           resultArtifact: owned.ref,
           cancelRequested: result.afterTurn.cancelRequested,
         },
@@ -4670,6 +4732,11 @@ export function createChildSessionOrchestrator(input: {
         cancelled,
         alreadyReleasedAfterParentCancel,
         hasCancelledParentRunProof,
+        readCompletedReservation: (reservationId) =>
+          input.owner.storage.completedResourceReservations?.lookup(
+            input.parentSessionId,
+            reservationId,
+          ) ?? null,
         ...(intent.disposition === 'after_turn' ? { afterTurnPhase } : {}),
       }),
     );

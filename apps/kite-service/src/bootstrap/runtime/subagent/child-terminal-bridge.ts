@@ -296,7 +296,7 @@ export function importChildTerminalResult(input: {
     taskId: origin.childInvocationId,
     notificationId: `subagent:${origin.childInvocationId}:${terminal.resultRef.integrityIdentifier}`,
     artifactIntegrityIdentifier: terminal.resultRef.integrityIdentifier,
-    shortReport: typeof result.summary === 'string' ? result.summary.slice(0, 2_000) : '',
+    shortReport: typeof result.summary === 'string' ? result.summary : '',
     source: 'subagent',
     modelRole: 'user',
     originRunId: link.originRunId,

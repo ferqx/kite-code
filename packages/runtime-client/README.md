@@ -47,6 +47,9 @@
   超出既定 enrichment 规则的投影差异均被拒绝或标记 resync。Server 的短期 notification replay 只帮助断线恢复，不是完整 history。
 - History adapter/protocol adapter与control transport正交；Client facade可以同时暴露两者。History不通过Server
   notification retention，也不让Client取得raw Runtime event或Store authority。
+- 协议 History 读取同时只组装 4 份完整 transcript；更多调用排队等待，等待和每页响应分别受请求期限约束，
+  全程可由 AbortSignal 取消。服务端明确返回 `overloaded` 时，只读页保留原水位和 digest 在该页期限内等待重试。客户端不按记录数或字节数
+  拒绝完整历史；接口返回的整份 records/events 仍需实际内存承载。
 - Native descriptor/discovery/process、WebSocket/History/App Control connector contract 位于
   `@kite-ai/kite-local-runtime/client`；本 package 不反向依赖该 Native owner，也不在 browser build 中加入环境分支。
 - 后台执行facade从投影的`sessionRevision`构造Session CAS，从item `ownerGeneration + revision`构造准确执行fence；Store以
@@ -54,6 +57,8 @@
   作为detail合并条件。
 - 同一会话并发后台列表查询按请求发起顺序接纳成功回执；较早查询即使晚返回且 aggregate generation 不同，也不覆盖
   较新查询的展示列表。较新查询失败时仍可接受尚未完成的较早成功回执；最后一个读取订阅离开时清除该顺序水位。
+- 缺省后台列表查询会跨协议页读全量后一次性更新展示快照；显式 `cursor` 或 `limit` 只返回单页，不把局部页写成完整目录。
+  页间目录身份或水位变化时客户端让出并重读，直到原请求期限或调用方 `AbortSignal` 结束，不能发布混合版本。
 - 连接恢复后，若已过期的后台列表收到当前代次的同一 aggregate generation、watermark 与 session revision 查询结果，
   Store 将其重新标为新鲜；列表项保留先前更高 revision 的 detail 和已确认终态，曾因 Server 更换而标为不可用的项目
   则以这次新鲜查询的实际状态恢复。旧代次查询与较低 watermark 仍不解除过期状态。

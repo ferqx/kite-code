@@ -28,9 +28,6 @@ import type {
 } from '../../state';
 
 const EPOCH_CREATED_AT = '1970-01-01T00:00:00.000Z';
-const MAX_AUTO_COMPACTIONS_PER_WINDOW = 3;
-const AUTO_COMPACTION_WINDOW_TURNS = 10;
-const MAX_CONSECUTIVE_LOW_GAIN = 2;
 
 const COMPACTION_ERROR_KINDS: readonly ContextCompactionErrorKind[] = [
   'unsafe_boundary',
@@ -139,7 +136,6 @@ function parseCheckpoint(value: unknown): ContextCompactionCheckpoint | undefine
     !isSafeNonNegativeInteger(inputTokensBefore) ||
     !isSafeNonNegativeInteger(inputTokensAfter) ||
     inputTokensAfter >= inputTokensBefore ||
-    inputTokensBefore - inputTokensAfter < 1024 ||
     !isCompactionReason(reason) ||
     !createdAt ||
     !isTimestamp(createdAt)
@@ -190,24 +186,20 @@ function updateAutoGuard(
     return {
       ...guard,
       consecutiveLowGain,
-      disabledUntilManualAction: consecutiveLowGain >= MAX_CONSECUTIVE_LOW_GAIN,
+      disabledUntilManualAction: false,
     };
   }
   const recent: ContextAutoGuardEntry[] = [
-    ...guard.recentAutomaticCompactions,
     {
       turnIndex: event.turnIndex,
       reductionRatio: event.reductionRatio,
       tokensAfter: event.tokensAfter,
     },
-  ].filter((entry) => event.turnIndex - entry.turnIndex <= AUTO_COMPACTION_WINDOW_TURNS);
-  const tooFrequent = recent.length >= MAX_AUTO_COMPACTIONS_PER_WINDOW;
-  const refilledFast =
-    recent.length >= 2 && recent[recent.length - 2]!.turnIndex >= event.turnIndex - 1;
+  ];
   return {
     recentAutomaticCompactions: recent,
     consecutiveLowGain: 0,
-    disabledUntilManualAction: tooFrequent || refilledFast,
+    disabledUntilManualAction: false,
     recoveryAttempted: false,
   };
 }
@@ -474,6 +466,9 @@ export function reduceContextState(
       const failure: ContextCompactionFailure = {
         compactionId,
         sourceRevision,
+        ...(nonEmptyStringField(payload, 'sourceDigest')
+          ? { sourceDigest: nonEmptyStringField(payload, 'sourceDigest') }
+          : {}),
         errorKind: payload.errorKind,
         message,
         retryable,

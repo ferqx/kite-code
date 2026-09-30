@@ -101,13 +101,14 @@ describe('CapabilityArtifactStore', () => {
     ).toThrow('filesystem observation');
   });
 
-  test('rejects oversize results and unsafe invocation IDs', () => {
+  test('ignores legacy artifact quotas and rejects unsafe invocation IDs', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-limit-'));
     process.env.KITE_CODE_HOME = tempHome;
     const store = new CapabilityArtifactStore({ maxArtifactBytes: 20 });
-    expect(() =>
-      store.write(invocationId, { status: 'success', content: [{ type: 'text', text: 'x' }] }),
-    ).toThrow(CapabilityArtifactError);
+    const result = { status: 'success' as const, content: [{ type: 'text', text: 'x' }] };
+    const ref = store.write(invocationId, result);
+    expect(ref.byteLength).toBeGreaterThan(20);
+    expect(store.read(ref)).toEqual(result);
     expect(() => store.write('../escape', { status: 'success', content: [] })).toThrow(
       CapabilityArtifactError,
     );

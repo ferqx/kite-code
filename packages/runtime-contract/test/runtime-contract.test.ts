@@ -994,6 +994,26 @@ describe('runtime contract package boundary', () => {
     };
     expect(isRuntimeQuery(query)).toBe(true);
     expect(() => assertRuntimeQuery({ ...query, extra: true })).toThrow('Invalid RuntimeQuery');
+    for (const type of [
+      'get_session_projection',
+      'get_session_recovery',
+      'get_context_status',
+      'list_checkpoints',
+    ] as const) {
+      const unpagedQuery = { schema: 'kite.runtime-query.v1', type, sessionId: 'session-1' };
+      expect(isRuntimeQuery(unpagedQuery)).toBe(true);
+      expect(isRuntimeQuery({ ...unpagedQuery, cursor: 0 })).toBe(false);
+      expect(isRuntimeQuery({ ...unpagedQuery, limit: 1 })).toBe(false);
+    }
+    expect(
+      isRuntimeQuery({
+        schema: 'kite.runtime-query.v1',
+        type: 'list_background_executions',
+        sessionId: 'session-1',
+        cursor: 0,
+        limit: 1,
+      }),
+    ).toBe(true);
     const listRuns = {
       schema: 'kite.runtime-query.v1' as const,
       type: 'list_runs' as const,

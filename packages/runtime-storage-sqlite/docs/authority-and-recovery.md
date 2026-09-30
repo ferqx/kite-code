@@ -10,11 +10,17 @@ controllerGeneration 与 authority revision 描述持久执行所有权；PID、
 
 同一 profile 可以有多个连接读取；同一 Session 的执行 writer 必须满足 generation fence。takeover 后旧句柄不能继续 dispatch 或 commit。
 
+执行权读取和准入仍逐次校验当前 Store 结构。表、索引与触发器从同一次 inventory 查询读取，列清单通过一次 table-valued PRAGMA 查询按表及列序归组；元数据、user_version、完整触发器定义和外键继续核对。这里只合并重复查询，不缓存校验成功，也不将旧结构结果用于新的读取。
+
 ## 恢复顺序
 
 冷会话权限设置允许在 idle 或 recovery_required 下提交无执行资源的决定，具体约束见[事务提交](transactions-and-state.md)。它不取得或释放执行权，不确认 cleanup；active／detached owner 仍阻断该入口。
 
 recovery.inspect 只读 authority、pending 与 unknown effects；reconcile 绑定预期 authority revision，并返回需要处理的 unknown effects。无完整结果的操作不能标记成“没有执行”。Kernel/Host 根据这些 facts 决定继续、拒绝或要求处理，SQLite 不自行重跑 Provider。
+
+历史 v1 续轮首模型准备后过期的来源备付释放，先用目标准确 Run 的活动 reservation 与持久 receipt 筛选 Model，再核验未尝试、未派发及本地失败事件。更早 Run 的已完成 Model 不属于这个证明范围；候选的完整 receipt 身份及终态仍逐项验证。
+
+Service 续轮恢复使用 Session／Run 索引批量读取该 Run 的模型 receipt，校验 JSON 身份与行身份一致及 terminal revision 不超过所观察的快照。活动和归档同 ID 冲突仍拒绝；已释放准备意图不能触发重新准备，已完成模型的实际用量仍供来源 ACK 查证。旧自定义读取 port 可按准确 reservation ID 查证，当前 SQLite port 使用一次索引查询。
 
 进程退出、连接中断、业务取消和数据删除是不同操作。可信 Service owner 的数据删除入口直接操作元数据及关联行，不取得执行权或恢复快照，不要求旧 Run、工具、effect、租约或 cleanup 标签先成为终态。单会话删除在同一事务中保存绑定当前元数据 revision 的命令回执；空间删除对全部根及子会话执行一次事务，共用一次附件候选和引用扫描。数据与 authority 一并移除，tombstone 阻止旧句柄及迟到写入复活数据。Service 负责取消真实执行实例并管理异步收尾。事务保留目标范围和引用一致性，共享附件不误删。
 

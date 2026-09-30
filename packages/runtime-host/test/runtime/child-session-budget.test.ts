@@ -60,6 +60,12 @@ describe('independent child funding', () => {
     expect(() =>
       assertChildBudgetWithinDelegation({
         ...input,
+        childBudget: { ...budget, unboundedCumulativeUsage: true },
+      }),
+    ).toThrow('exceeds its parent delegation');
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
         reservation: {
           ...reservation,
           executableUpperBound: { ...upper, durationOnlyChildRun: undefined },
@@ -125,6 +131,12 @@ describe('independent child funding', () => {
       childMayWrite: false,
     };
     expect(() => assertChildBudgetWithinDelegation(input)).not.toThrow();
+    expect(() =>
+      assertChildBudgetWithinDelegation({
+        ...input,
+        childBudget: { ...budget, unboundedCumulativeUsage: true },
+      }),
+    ).toThrow('exceeds its parent delegation');
     expect(() =>
       assertChildBudgetWithinDelegation({
         ...input,

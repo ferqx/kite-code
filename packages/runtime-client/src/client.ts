@@ -56,9 +56,24 @@ const NO_RUNTIME_FEATURES: RuntimeClientFeatures = Object.freeze({
 });
 
 const MAX_ACTIVE_HISTORY_LOADS = 4;
-const MAX_WAITING_HISTORY_LOADS = 1024;
-const MAX_HISTORY_TRANSCRIPT_RECORDS = 50_000;
-const MAX_HISTORY_TRANSCRIPT_RECORD_BYTES = 40 * 1024 * 1024;
+
+function waitForHistoryRetry(signal: AbortSignal, delayMs: number): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise<void>((resolve, reject) => {
+    const finish = (): void => signal.removeEventListener('abort', onAbort);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      finish();
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      finish();
+      resolve();
+    }, delayMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
 
 interface WaitingHistoryLoad {
   start(): void;
@@ -350,6 +365,7 @@ export class RuntimeClient implements AsyncDisposable {
     }
     const requestHistory = this.#request.bind(this);
     const scheduleHistoryLoad = this.#scheduleHistoryLoad.bind(this);
+    const historyPageTimeoutMs = this.#requestTimeoutMs;
     this.#history =
       options.history === 'protocol'
         ? Object.freeze({
@@ -408,10 +424,8 @@ export class RuntimeClient implements AsyncDisposable {
       signal: AbortSignal,
     ): Promise<RuntimeHistorySessionTranscript> {
       const sessionId = 'sessionId' in identity ? identity.sessionId : identity.childSessionId;
-      const encoder = new TextEncoder();
       for (let attempt = 0; attempt < 2; attempt++) {
         const records: RuntimeHistorySessionTranscript['records'][number][] = [];
-        let recordBytes = 0;
         let afterSequence: number | undefined;
         let snapshotSequence = throughSequence;
         let snapshotDigest: string | undefined;
@@ -420,19 +434,40 @@ export class RuntimeClient implements AsyncDisposable {
         try {
           for (;;) {
             signal.throwIfAborted();
-            const result = await requestHistory(
-              method,
-              {
-                ...identity,
-                page: {
-                  ...(afterSequence === undefined ? {} : { afterSequence }),
-                  ...(snapshotSequence === undefined ? {} : { throughSequence: snapshotSequence }),
-                  ...(snapshotDigest === undefined ? {} : { snapshotDigest }),
-                },
+            const pageRequest = {
+              ...identity,
+              page: {
+                ...(afterSequence === undefined ? {} : { afterSequence }),
+                ...(snapshotSequence === undefined ? {} : { throughSequence: snapshotSequence }),
+                ...(snapshotDigest === undefined ? {} : { snapshotDigest }),
               },
-              undefined,
-              signal,
-            );
+            };
+            let retryDelayMs = 25;
+            const pageDeadline = Date.now() + historyPageTimeoutMs;
+            let result: RuntimeProtocolResult;
+            for (;;) {
+              signal.throwIfAborted();
+              const remainingMs = pageDeadline - Date.now();
+              if (remainingMs <= 0)
+                throw new RuntimeClientError('request_timeout', 'Runtime History page timed out.');
+              try {
+                result = await requestHistory(method, pageRequest, undefined, signal, remainingMs);
+                break;
+              } catch (error) {
+                signal.throwIfAborted();
+                if (
+                  !(error instanceof RuntimeClientError) ||
+                  error.code !== 'request_overloaded' ||
+                  error.protocol?.data.code !== 'overloaded'
+                )
+                  throw error;
+                await waitForHistoryRetry(
+                  signal,
+                  Math.min(retryDelayMs, pageDeadline - Date.now()),
+                );
+                retryDelayMs = Math.min(retryDelayMs * 2, 250);
+              }
+            }
             signal.throwIfAborted();
             if (
               !('type' in result) ||
@@ -469,17 +504,6 @@ export class RuntimeClient implements AsyncDisposable {
                 );
               previous = record.sequence;
             }
-            if (records.length + result.records.length > MAX_HISTORY_TRANSCRIPT_RECORDS)
-              throw new RuntimeClientError(
-                'history_too_large',
-                'Runtime History transcript exceeds the record limit.',
-              );
-            recordBytes += encoder.encode(JSON.stringify(result.records)).byteLength;
-            if (recordBytes > MAX_HISTORY_TRANSCRIPT_RECORD_BYTES)
-              throw new RuntimeClientError(
-                'history_too_large',
-                'Runtime History transcript exceeds the byte limit.',
-              );
             records.push(...result.records);
             if (result.nextCursor === undefined)
               return {
@@ -623,7 +647,7 @@ export class RuntimeClient implements AsyncDisposable {
     return { receipt, ...(execution ? { execution } : {}) };
   }
 
-  async query(query: RuntimeQuery): Promise<RuntimeQueryResult> {
+  async query(query: RuntimeQuery, signal?: AbortSignal): Promise<RuntimeQueryResult> {
     if (
       (query.type === 'list_background_executions' || query.type === 'get_background_execution') &&
       !this.#features.backgroundQuery
@@ -643,6 +667,10 @@ export class RuntimeClient implements AsyncDisposable {
     const connectionGeneration = this.#connectionGeneration;
     const backgroundSessionId =
       query.type === 'list_background_executions' ? query.sessionId : undefined;
+    const completeBackgroundList =
+      query.type === 'list_background_executions' &&
+      query.cursor === undefined &&
+      query.limit === undefined;
     const backgroundListQuery =
       query.type === 'list_background_executions' ? ++this.#nextBackgroundListQuery : undefined;
     const backgroundSubscribers =
@@ -656,14 +684,111 @@ export class RuntimeClient implements AsyncDisposable {
             )
             .map((state) => state.id)
         : [];
-    const result = await this.#request('runtime/query', { query: wire });
-    if (!isQueryResult(result)) {
+    const queryDeadline = Date.now() + this.#requestTimeoutMs;
+    const rawResult = await this.#request('runtime/query', { query: wire }, undefined, signal);
+    if (!isQueryResult(rawResult)) {
       throw new RuntimeClientError('protocol_error', 'Protocol returned a non-query result.');
+    }
+    let result: RuntimeQueryResult = rawResult;
+    if (
+      completeBackgroundList &&
+      result.status === 'ok' &&
+      result.queryType === 'list_background_executions' &&
+      result.backgroundSnapshot
+    ) {
+      const deadline = queryDeadline;
+      let first = result;
+      let anchor = result.backgroundSnapshot;
+      if (anchor.sessionId !== backgroundSessionId)
+        throw new RuntimeClientError(
+          'protocol_error',
+          'Background response belongs to another session.',
+        );
+      let executions = [...anchor.executions];
+      let cursor = first.nextBackgroundCursor;
+      while (cursor !== undefined) {
+        signal?.throwIfAborted();
+        if (Date.now() >= deadline)
+          throw new RuntimeClientError(
+            'request_timeout',
+            'Background directory changed during pagination.',
+          );
+        const pageQuery = mapRuntimeQueryToProtocol({ ...query, cursor });
+        if (!pageQuery)
+          throw new RuntimeClientError('protocol_error', 'Background page query is invalid.');
+        const page = await this.#request(
+          'runtime/query',
+          { query: pageQuery },
+          undefined,
+          signal,
+          Math.max(1, deadline - Date.now()),
+        );
+        if (
+          !isQueryResult(page) ||
+          page.status !== 'ok' ||
+          page.queryType !== 'list_background_executions' ||
+          !page.backgroundSnapshot
+        )
+          throw new RuntimeClientError('protocol_error', 'Background page response is invalid.');
+        const current = page.backgroundSnapshot;
+        if (current.sessionId !== anchor.sessionId)
+          throw new RuntimeClientError(
+            'protocol_error',
+            'Background page belongs to another session.',
+          );
+        if (
+          current.aggregateGeneration !== anchor.aggregateGeneration ||
+          current.watermark !== anchor.watermark ||
+          current.sessionRevision !== anchor.sessionRevision
+        ) {
+          // A changing directory cannot be represented as one complete snapshot.
+          // Let the owner settle briefly, then restart from its current first page.
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          signal?.throwIfAborted();
+          const restart = await this.#request(
+            'runtime/query',
+            { query: wire },
+            undefined,
+            signal,
+            Math.max(1, deadline - Date.now()),
+          );
+          if (
+            !isQueryResult(restart) ||
+            restart.status !== 'ok' ||
+            restart.queryType !== 'list_background_executions' ||
+            !restart.backgroundSnapshot
+          )
+            throw new RuntimeClientError(
+              'protocol_error',
+              'Background restart response is invalid.',
+            );
+          first = restart;
+          anchor = restart.backgroundSnapshot;
+          if (anchor.sessionId !== backgroundSessionId)
+            throw new RuntimeClientError(
+              'protocol_error',
+              'Background restart belongs to another session.',
+            );
+          executions = [...anchor.executions];
+          cursor = restart.nextBackgroundCursor;
+          continue;
+        }
+        if (page.nextBackgroundCursor !== undefined && page.nextBackgroundCursor <= cursor)
+          throw new RuntimeClientError('protocol_error', 'Background page cursor did not advance.');
+        executions.push(...current.executions);
+        cursor = page.nextBackgroundCursor;
+      }
+      result = {
+        ...first,
+        backgroundSnapshot: { ...anchor, executions },
+        nextBackgroundCursor: undefined,
+      };
     }
     if (
       result.status === 'ok' &&
       result.queryType === 'list_background_executions' &&
       result.backgroundSnapshot !== undefined &&
+      completeBackgroundList &&
       backgroundSubscribers.some((id) => this.#subscriptions.has(id)) &&
       connectionGeneration === this.#connectionGeneration &&
       backgroundSessionId !== undefined &&
@@ -1288,15 +1413,6 @@ export class RuntimeClient implements AsyncDisposable {
   ): Promise<T> {
     if (this.#closed) return Promise.reject(closedError());
     if (signal?.aborted) return Promise.reject(signal.reason);
-    if (
-      this.#activeHistoryLoads.size >= MAX_ACTIVE_HISTORY_LOADS &&
-      this.#waitingHistoryLoads.length >= MAX_WAITING_HISTORY_LOADS
-    ) {
-      return Promise.reject(
-        new RuntimeClientError('request_overloaded', 'Runtime History request queue is full.'),
-      );
-    }
-
     return new Promise<T>((resolve, reject) => {
       const controller = new AbortController();
       const waitDeadline = Date.now() + this.#requestTimeoutMs;
@@ -1344,19 +1460,19 @@ export class RuntimeClient implements AsyncDisposable {
       };
       const onAbort = (): void => task.cancel(signal?.reason);
       signal?.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(
+        () =>
+          task.cancel(
+            new RuntimeClientError('request_timeout', 'Runtime History request timed out.'),
+          ),
+        Math.max(0, waitDeadline - Date.now()),
+      );
       if (signal?.aborted) {
         task.cancel(signal.reason);
       } else if (this.#activeHistoryLoads.size < MAX_ACTIVE_HISTORY_LOADS) {
         task.start();
       } else {
         this.#waitingHistoryLoads.push(task);
-        timer = setTimeout(
-          () =>
-            task.cancel(
-              new RuntimeClientError('request_timeout', 'Runtime History request wait timed out.'),
-            ),
-          Math.max(0, waitDeadline - Date.now()),
-        );
       }
     });
   }

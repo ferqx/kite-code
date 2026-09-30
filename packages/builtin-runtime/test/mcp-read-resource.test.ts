@@ -203,7 +203,7 @@ describe('RM-11 MCP read provider failure boundary', () => {
     ).rejects.toBe(unknown);
   });
 
-  test('preserves exact and partial output behavior at the 128 KiB boundary', async () => {
+  test('preserves the complete output beyond the former 128 KiB boundary', async () => {
     const exact = 'x'.repeat(128 * 1024);
     const exactReceipt = await executeRead(async () => exact);
     expect(exactReceipt.status).toBe('succeeded');
@@ -216,18 +216,13 @@ describe('RM-11 MCP read provider failure boundary', () => {
     expect(exactReceipt.value.resultMeta).toMatchObject({ truncated: false });
 
     const oversized = 'x'.repeat(128 * 1024 + 20);
-    const partialReceipt = await executeRead(async () => oversized, 'invocation-2', 'attempt-2');
-    expect(partialReceipt.status).toBe('succeeded');
-    expect(isBuiltinOperationExecutionValue(partialReceipt.value)).toBe(true);
-    if (!isBuiltinOperationExecutionValue(partialReceipt.value)) {
-      throw new Error('partial MCP read result is not a Builtin value');
+    const largeReceipt = await executeRead(async () => oversized, 'invocation-2', 'attempt-2');
+    expect(largeReceipt.status).toBe('succeeded');
+    expect(isBuiltinOperationExecutionValue(largeReceipt.value)).toBe(true);
+    if (!isBuiltinOperationExecutionValue(largeReceipt.value)) {
+      throw new Error('large MCP read result is not a Builtin value');
     }
-    const partial = JSON.parse(partialReceipt.value.stdout) as Record<string, unknown>;
-    expect(partial).toMatchObject({
-      status: 'partial',
-      truncated: true,
-      original_characters: oversized.length,
-    });
-    expect(partialReceipt.value.resultMeta).toMatchObject({ truncated: true });
+    expect(largeReceipt.value.stdout).toBe(oversized);
+    expect(largeReceipt.value.resultMeta).toMatchObject({ truncated: false });
   });
 });

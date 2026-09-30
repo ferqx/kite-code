@@ -36,6 +36,7 @@ export type ContextEventMap = {
     type: 'context.compaction_failed';
     compactionId: string;
     sourceRevision: number;
+    sourceDigest?: string;
     errorKind:
       | 'unsafe_boundary'
       | 'oversized_turn'

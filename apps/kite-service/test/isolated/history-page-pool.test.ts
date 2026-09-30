@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -69,9 +69,19 @@ test('bounded child-process pages retain root and child scope and detect same-se
       ...(process.env.KITE_HISTORY_TEST_COMPILED === '1' ? { standaloneEntrypoint: true } : {}),
     });
     const first = await pool.loadSessionPage({ sessionId: 'parent' });
+    const initialSnapshotDirectories = pool.liveSnapshotDirectories();
+    expect(initialSnapshotDirectories).toHaveLength(1);
+    const parentSnapshotDirectory = initialSnapshotDirectories[0]!;
+    expect(existsSync(parentSnapshotDirectory)).toBe(true);
     expect(first.records).toHaveLength(512);
     expect(first.nextCursor).toBe(512);
     expect(first.snapshotDigest).toMatch(/^[a-f0-9]{64}$/u);
+    const queuedPages = await Promise.all(
+      Array.from({ length: 80 }, () => pool!.loadSessionPage({ sessionId: 'parent' })),
+    );
+    expect(queuedPages).toHaveLength(80);
+    expect(queuedPages.every((page) => page.snapshotDigest === first.snapshotDigest)).toBe(true);
+    expect(pool.liveChildPids().length).toBeLessThanOrEqual(2);
     const complete = await pool.loadSessionFull({ sessionId: 'parent' });
     expect(complete.records).toHaveLength(520);
     expect(complete.events).toHaveLength(520);
@@ -112,6 +122,9 @@ test('bounded child-process pages retain root and child scope and detect same-se
     await expect(
       pool.searchSessions({ limit: 1, query: 'message 1', cursor: searchFirst.nextCursor }),
     ).resolves.toMatchObject({ entries: [{ sessionId: 'second' }], hasMore: false });
+    database
+      .query('UPDATE runtime_sessions SET name = ?, updated_at = ? WHERE session_id = ?')
+      .run('renamed parent', 9, 'parent');
     const second = await pool.loadSessionPage({
       sessionId: 'parent',
       throughSequence: first.session.lastSequence,
@@ -120,6 +133,29 @@ test('bounded child-process pages retain root and child scope and detect same-se
     });
     expect(second.records).toHaveLength(8);
     expect(second.nextCursor).toBeUndefined();
+    expect(second.session).toMatchObject({ displayName: 'renamed parent', updatedAt: 9 });
+    expect(second.snapshotDigest).toBe(first.snapshotDigest);
+    for (const afterSequence of [500, 510]) {
+      let cursor = afterSequence;
+      const seen: number[] = [];
+      for (;;) {
+        const arbitrary = await pool.loadSessionPage({
+          sessionId: 'parent',
+          throughSequence: first.session.lastSequence,
+          afterSequence: cursor,
+          snapshotDigest: first.snapshotDigest,
+        });
+        seen.push(...arbitrary.records.map((record) => record.sequence));
+        expect(arbitrary.session).toMatchObject({ displayName: 'renamed parent', updatedAt: 9 });
+        expect(arbitrary.snapshotDigest).toBe(first.snapshotDigest);
+        if (arbitrary.nextCursor === undefined) break;
+        expect(arbitrary.nextCursor).toBeGreaterThan(cursor);
+        cursor = arbitrary.nextCursor;
+      }
+      expect(seen).toEqual(
+        Array.from({ length: 520 - afterSequence }, (_, index) => afterSequence + index + 1),
+      );
+    }
     insertEvent.run(
       'parent',
       'parent-521',
@@ -141,6 +177,37 @@ test('bounded child-process pages retain root and child scope and detect same-se
     expect(appendedContinuation.records).toEqual(second.records);
     expect(appendedContinuation.snapshotDigest).toBe(first.snapshotDigest);
     expect((await pool.loadSessionPage({ sessionId: 'parent' })).session.lastSequence).toBe(521);
+    database
+      .query('UPDATE runtime_events SET event_json = ? WHERE session_id = ? AND sequence = 1')
+      .run(
+        JSON.stringify({
+          type: 'user.message_appended',
+          messageId: 'parent-1',
+          content: 'rewritten inside pinned prefix',
+        }),
+        'parent',
+      );
+    await expect(
+      pool.loadSessionPage({
+        sessionId: 'parent',
+        throughSequence: first.session.lastSequence,
+        afterSequence: first.nextCursor,
+        snapshotDigest: first.snapshotDigest,
+      }),
+    ).rejects.toMatchObject({ code: 'history_snapshot_changed' });
+    const rewritten = await pool.loadSessionPage({ sessionId: 'parent' });
+    expect(rewritten.snapshotDigest).not.toBe(first.snapshotDigest);
+    database
+      .query('DELETE FROM runtime_events WHERE session_id = ? AND sequence = ?')
+      .run('parent', 2);
+    await expect(
+      pool.loadSessionPage({
+        sessionId: 'parent',
+        throughSequence: rewritten.session.lastSequence,
+        afterSequence: rewritten.nextCursor,
+        snapshotDigest: rewritten.snapshotDigest,
+      }),
+    ).rejects.toMatchObject({ code: 'history_snapshot_changed' });
     await expect(pool.loadSessionPage({ sessionId: 'child' })).rejects.toMatchObject({
       code: 'session_not_found',
     });
@@ -160,6 +227,34 @@ test('bounded child-process pages retain root and child scope and detect same-se
       );
     const revised = await pool.loadSessionPage({ sessionId: 'child', parentSessionId: 'parent' });
     expect(revised.snapshotDigest).not.toBe(child.snapshotDigest);
+    insertSession.run(
+      'new-parent',
+      `sha256:${'b'.repeat(64)}`,
+      SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+      'new parent',
+      null,
+    );
+    database
+      .query('UPDATE runtime_sessions SET parent_session_id = ? WHERE session_id = ?')
+      .run('new-parent', 'child');
+    await expect(
+      pool.loadSessionPage({
+        sessionId: 'child',
+        parentSessionId: 'parent',
+        throughSequence: revised.session.lastSequence,
+        afterSequence: revised.nextCursor,
+        snapshotDigest: revised.snapshotDigest,
+      }),
+    ).rejects.toMatchObject({ code: 'session_not_found' });
+    const reparented = await pool.loadSessionPage({
+      sessionId: 'child',
+      parentSessionId: 'new-parent',
+    });
+    expect(reparented).toMatchObject({
+      type: 'history_session_page',
+      session: { sessionId: 'child' },
+    });
+    expect(reparented.records[0]).toMatchObject({ sequence: 1 });
     const activeController = new AbortController();
     const cancelledActive = pool.loadSessionPage(
       { sessionId: 'parent' },
@@ -169,6 +264,7 @@ test('bounded child-process pages retain root and child scope and detect same-se
     activeController.abort();
     await expect(cancelledActive).rejects.toMatchObject({ code: 'temporarily_unavailable' });
     await expect(survivingQueued).resolves.toMatchObject({ type: 'history_session_page' });
+    expect(existsSync(parentSnapshotDirectory)).toBe(false);
     const queuedController = new AbortController();
     const independent = pool.loadSessionPage({ sessionId: 'parent' });
     const cancelledQueued = pool.loadSessionPage(
@@ -248,16 +344,20 @@ test('bounded child-process pages retain root and child scope and detect same-se
       }),
       1,
     );
-    await expect(pool.loadSessionPage({ sessionId: 'oversized' })).rejects.toMatchObject({
-      code: 'history_too_large',
+    await expect(pool.loadSessionPage({ sessionId: 'oversized' })).resolves.toMatchObject({
+      type: 'history_session_page',
+      records: [expect.objectContaining({ sequence: 1 })],
     });
     await expect(pool.loadSessionPage({ sessionId: 'parent' })).resolves.toMatchObject({
       type: 'history_session_page',
     });
     const closing = pool.close();
+    const directoriesAtClose = pool.liveSnapshotDirectories();
     expect(pool.close()).toBe(closing);
     await closing;
     expect(pool.liveChildPids()).toHaveLength(0);
+    expect(pool.liveSnapshotDirectories()).toHaveLength(0);
+    for (const directory of directoriesAtClose) expect(existsSync(directory)).toBe(false);
     await expect(pool.loadSessionPage({ sessionId: 'parent' })).rejects.toMatchObject({
       code: 'session_unavailable',
     });

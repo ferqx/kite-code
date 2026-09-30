@@ -1,8 +1,79 @@
 import { expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { classifyFailure } from '../../src/bootstrap/runtime/failures';
 import { failedTerminalOutcome } from '../../src/bootstrap/runtime/terminal-outcome';
 import { exerciseChildOrchestration } from './child-session-orchestrator-integration-fixture';
 import { submitRealParentFollowup } from './cross-session-followup-pipeline-fixture';
+
+test('independent followup completes a Tool loop after both Model reservations are archived', async () => {
+  await exerciseChildOrchestration(
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    async (fixture) => {
+      const { owner, model, orchestrator, childSessionId, parentSessionId, workspace } = fixture;
+      writeFileSync(join(workspace, 'followup-input.txt'), 'FULL_FOLLOWUP_INPUT');
+      const { accepted, raw } = await submitRealParentFollowup(
+        fixture,
+        'Read and finish the followup.',
+      );
+      expect(
+        await orchestrator.receiveAcceptedFollowup(childSessionId, accepted.submissionId),
+      ).toBe(true);
+      const before = model.getRequestCount();
+      model.setResponses([
+        {
+          response: async () => ({
+            message: {
+              tool_calls: [
+                { id: 'followup-read', name: 'read_file', args: { path: 'followup-input.txt' } },
+              ],
+            },
+            toolContinuation: 'required' as const,
+            usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 },
+          }),
+        },
+        {
+          response: async () => ({
+            message: { content: 'FOLLOWUP_TOOL_LOOP_COMPLETED' },
+            expectedRequest: { toolResults: [{ toolCallId: 'followup-read' }] },
+            usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 },
+          }),
+        },
+      ]);
+      expect(
+        await orchestrator.executeAcceptedFollowupFirstModel(childSessionId, accepted.submissionId),
+      ).toBe(true);
+      const state = owner.loadCurrentSnapshot(childSessionId);
+      if (!state) throw new Error('Completed followup snapshot is unavailable.');
+      expect(state.turn.status).toBe('completed');
+      expect(state.transcript.final).toBe('FOLLOWUP_TOOL_LOOP_COMPLETED');
+      expect(state.tools.calls['followup-read']?.status).toBe('succeeded');
+      const receipts = owner.storage.completedResourceReservations?.listForRun?.({
+        sessionId: childSessionId,
+        runId: state.turn.turnId,
+        atRevision: state.revision,
+        resourceKind: 'model',
+      });
+      expect(receipts).toHaveLength(2);
+      expect(receipts?.every((receipt) => receipt.state === 'reconciled')).toBe(true);
+      expect(model.getRequestCount()).toBe(before + 2);
+      expect(
+        owner.runWithSessionExecution(parentSessionId, () =>
+          raw.readFollowupTerminalForSource(parentSessionId, accepted.submissionId),
+        ),
+      ).toMatchObject({ disposition: 'completed' });
+      expect((await orchestrator.recoverPendingFollowups()).recoveryRequired).toEqual([]);
+      expect(model.getRequestCount()).toBe(before + 2);
+    },
+  );
+}, 30_000);
 
 test('failed first followup Model before dispatch releases funding and replies with failed status', async () => {
   await exerciseChildOrchestration(

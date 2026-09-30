@@ -5396,15 +5396,13 @@ describe('executeTestRuntimeTools', () => {
       state,
       toolCallIds: ['followUp'],
       sandboxAvailable: true,
-      shellExecutor: {
-        execute: async () => ({
-          ok: true,
-          command: 'node --version',
-          exitCode: 0,
-          stdout: '84\n',
-          stderr: '',
-        }),
-      } as never,
+      shellExecutor: async () => ({
+        ok: true,
+        command: 'node --version',
+        exitCode: 0,
+        stdout: '84\n',
+        stderr: '',
+      }),
     });
 
     expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
@@ -6108,7 +6106,7 @@ describe('executeTestRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('uses hardened execution for read-only Git only after Full authorizes Shell', async () => {
+  test('keeps Full shell scope separate from read-only Git environment hardening', async () => {
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-readonly-git-shell',
@@ -6137,7 +6135,9 @@ describe('executeTestRuntimeTools', () => {
       sandboxAvailable: true,
       shellExecutor: async (input) => {
         executed.push(input.command);
-        expect(input.executionTrust).toBe('policy_proven_read_only');
+        // Full preserves its approved full_access scope. Builtin derives the
+        // hardened Git environment from the sealed command at preparation.
+        expect(input.executionTrust).toBeUndefined();
         return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
       },
     });

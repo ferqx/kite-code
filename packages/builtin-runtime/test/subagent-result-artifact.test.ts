@@ -39,6 +39,8 @@ describe('Subagent terminal result Artifact', () => {
       string,
       { ref: Ref; payload: Uint8Array; ownerKey: string; taskId: string }
     >();
+    let reads = 0;
+    let returnCrossOwner = false;
     const backend: PrivateImmutableArtifactStorageBackend<'subagent_task'> = {
       write(ref, payload) {
         const value = JSON.parse(new TextDecoder().decode(payload)) as {
@@ -47,11 +49,16 @@ describe('Subagent terminal result Artifact', () => {
         };
         rows.set(ref.artifactId, { ref, payload, ownerKey: value.ownerKey, taskId: value.taskId });
       },
-      read: (ref) => rows.get(ref.artifactId)!.payload,
+      read: (ref) => {
+        reads++;
+        return rows.get(ref.artifactId)!.payload;
+      },
       findByOwnerTask: (ownerKey, taskId) =>
         [...rows.values()].find((row) => row.ownerKey === ownerKey && row.taskId === taskId)?.ref,
       listByOwner: (ownerKey) =>
-        [...rows.values()].filter((row) => row.ownerKey === ownerKey).map((row) => row.ref),
+        [...rows.values()]
+          .filter((row) => returnCrossOwner || row.ownerKey === ownerKey)
+          .map((row) => row.ref),
       collectGarbage: () => ({
         scannedEntries: rows.size,
         retainedArtifacts: rows.size,
@@ -67,6 +74,10 @@ describe('Subagent terminal result Artifact', () => {
     const rebuilt = new SubagentResultArtifactStore({ backend });
     expect(rebuilt.lookup('session-a', 'child-a')?.result).toMatchObject({ summary: 'durable' });
     expect(rebuilt.lookup('session-b', 'child-a')).toBeUndefined();
+    const beforeList = reads;
     expect(rebuilt.list('session-a').map((item) => item.taskId)).toEqual(['child-a']);
+    expect(reads - beforeList).toBe(1);
+    returnCrossOwner = true;
+    expect(() => rebuilt.list('session-b')).toThrow();
   });
 });

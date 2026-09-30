@@ -218,6 +218,8 @@ export interface KiteSessionAppServerStorageOwner extends AsyncDisposable {
   readSnapshot<Result>(operation: () => Result): Result;
   ownsSessionExecution(sessionId: string): boolean;
   setExecutionLossHandler(handler: (sessionId: string) => Promise<void>): void;
+  beginHostDisposal(): void;
+  drainExecutionLossCleanup(): Promise<void>;
   commitRecoveryDecision: KiteSessionRuntimeStorageOwner<
     RuntimeEvent,
     RuntimeState
@@ -262,12 +264,27 @@ export function createKiteSessionAppServerStorage(input: {
   const target = input.target;
   const owned = new Map<string, OwnedExecution>();
   const pendingRecoveryIdentities = new Map<string, string>();
+  const pendingExecutionLossCleanup = new Set<Promise<void>>();
+  const executionLossFailures: unknown[] = [];
+  let executionLossDrainTimedOut = false;
+  let executionLossDrainDeadlineAt: number | undefined;
   let executionLossHandler: ((sessionId: string) => Promise<void>) | undefined;
+  let hostDisposalStarted = false;
   const loseExecution = (sessionId: string): void => {
     const execution = owned.get(sessionId);
-    if (!execution || !owned.delete(sessionId) || !executionLossHandler) return;
-    void executionLossHandler(sessionId)
+    const handler = executionLossHandler;
+    if (!execution || !owned.delete(sessionId)) return;
+    if (hostDisposalStarted) {
+      executionLossFailures.push(
+        new Error(`Session ${sessionId} lost execution authority during Host disposal.`),
+      );
+      return;
+    }
+    if (!handler) return;
+    const cleanup = Promise.resolve()
+      .then(() => handler(sessionId))
       .then(() => {
+        if (closed || executionLossDrainTimedOut) return;
         const current = target.authority.read(sessionId);
         // Only the generation whose local cleanup we just awaited may confirm cleanup.
         if (
@@ -281,9 +298,12 @@ export function createKiteSessionAppServerStorage(input: {
           });
         }
       })
-      .catch((error) =>
-        console.error('Session cleanup confirmation failed.', { sessionId, error }),
-      );
+      .catch((error) => {
+        executionLossFailures.push(error);
+        console.error('Session cleanup confirmation failed.', { sessionId, error });
+      });
+    pendingExecutionLossCleanup.add(cleanup);
+    void cleanup.finally(() => pendingExecutionLossCleanup.delete(cleanup));
   };
   let hostClosed = false;
   let closed = false;
@@ -619,6 +639,39 @@ export function createKiteSessionAppServerStorage(input: {
   }, renewIntervalMs);
   renewTimer.unref?.();
 
+  const drainExecutionLossCleanup = async (): Promise<void> => {
+    // Stop renewal before taking the drain snapshot; a late in-flight loss is
+    // picked up by the loop. Match the Host's bounded disposal window.
+    clearInterval(renewTimer);
+    executionLossDrainDeadlineAt ??= Date.now() + 10_000;
+    const deadlineAt = executionLossDrainDeadlineAt;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        (async () => {
+          while (pendingExecutionLossCleanup.size > 0) {
+            await Promise.all([...pendingExecutionLossCleanup]);
+          }
+        })(),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => {
+              executionLossDrainTimedOut = true;
+              reject(new Error('Session execution loss cleanup exceeded 10 seconds.'));
+            },
+            Math.max(0, deadlineAt - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+    const failures = executionLossFailures.splice(0);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'Session execution loss cleanup failed.');
+    }
+  };
+
   const commit = (
     channel: keyof RuntimeStorage<RuntimeEvent, RuntimeState>['transactions'],
     transaction: Parameters<
@@ -878,6 +931,10 @@ export function createKiteSessionAppServerStorage(input: {
     setExecutionLossHandler: (handler) => {
       executionLossHandler = handler;
     },
+    beginHostDisposal: () => {
+      hostDisposalStarted = true;
+    },
+    drainExecutionLossCleanup,
     recovery: target.recovery,
     commitRecoveryDecision: target.commitRecoveryDecision,
     ownedSessionIds: () => Object.freeze([...owned.keys()]),

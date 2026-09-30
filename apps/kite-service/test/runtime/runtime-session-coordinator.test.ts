@@ -880,21 +880,20 @@ describe('retained TUI session coordinator', () => {
           commandEvidence(sessionId, `command_steer_order_${index}`),
         );
       }
-      expect(coordinator.canAcceptSteerInput()).toBe(false);
-      expect(() =>
-        coordinator.commitSteerTurnCommand(
-          {
-            schema: RUNTIME_COMMAND_SCHEMA_,
-            commandId: 'command_steer_queue_full',
-            type: 'steer_turn',
-            sessionId,
-            expectedRunId: runId,
-            expectedTurnId: turnId,
-            input: 'This input exceeds the pending queue.',
-          },
-          commandEvidence(sessionId, 'command_steer_queue_full'),
-        ),
-      ).toThrow('Runtime steer queue is full.');
+      expect(coordinator.canAcceptSteerInput()).toBe(true);
+      const ninth = coordinator.commitSteerTurnCommand(
+        {
+          schema: RUNTIME_COMMAND_SCHEMA_,
+          commandId: 'command_steer_order_9',
+          type: 'steer_turn',
+          sessionId,
+          expectedRunId: runId,
+          expectedTurnId: turnId,
+          input: 'Ninth accepted input.',
+        },
+        commandEvidence(sessionId, 'command_steer_order_9'),
+      );
+      expect(ninth.input.sequence).toBeGreaterThan(second.input.sequence);
 
       const preparedStateRevision = coordinator.getState().revision;
       coordinator.control.processEventBatch([

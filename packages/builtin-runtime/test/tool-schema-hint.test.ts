@@ -28,6 +28,33 @@ function modelEntry(name: string): BuiltinModelToolCatalogEntry {
 }
 
 describe('Builtin catalog schema-hint formatter', () => {
+  test('accepts tool_search queries and candidate counts beyond former fixed ceilings', () => {
+    const toolSearch = modelEntry('tool_search');
+    expect(toolSearch.parse({ query: 'q'.repeat(513), limit: 13 })).toMatchObject({
+      success: true,
+    });
+  });
+
+  test('accepts plans beyond former text and step count ceilings', () => {
+    const steps = Array.from({ length: 14 }, (_, index) => ({
+      id: `step_${index}`,
+      title: `Step ${index} ${'x'.repeat(170)}`,
+    }));
+    expect(
+      modelEntry('write_plan').parse({
+        title: 'x'.repeat(130),
+        body_markdown: 'x'.repeat(30_001),
+        steps,
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      modelEntry('update_plan').parse({
+        plan_id: 'plan_1',
+        updates: steps.map((step) => ({ step_id: step.id, status: 'completed' })),
+      }),
+    ).toMatchObject({ success: true });
+  });
+
   test('uses the immutable catalog schema and Builtin contract for hints', () => {
     expect(formatBuiltinToolSchemaHint(modelEntry('ask_user'))).toContain('questions');
     expect(formatBuiltinToolSchemaHint(modelEntry('ask_user'))).toContain('recommended');

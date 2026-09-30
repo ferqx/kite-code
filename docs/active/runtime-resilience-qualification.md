@@ -55,7 +55,9 @@ Host 仍是唯一 mailbox/lifecycle/recovery/receipt owner。一个 applied Runt
 
 Model lease并发资格还必须覆盖运行中user control revision：durable attempt-start之后切换interaction mode，原exact invocation的stream继续投影，response/retry/terminal evidence仍原子提交且Run继续；同一变化发生在attempt-start之前必须拒绝旧Surface dispatch。Turn abort、不同invocation ID、已terminal invocation或夹带非Model批次事件必须拒绝迟到结果。该测试证明无关revision不会产生`Model invocation evidence acknowledgement was rejected`，不放宽跨Turn、跨identity或pre-dispatch revision fence。
 
-执行权韧性回归覆盖一次 Store 续租写失败后，在原租约有效且 owner／generation 未变时重试，以及写失败持续至到期或 generation 变化时停止；[续租测试](../../apps/kite-service/test/session-execution-renewal.test.ts)验证这些边界。[三子屏障测试](../../apps/kite-service/test/isolated/runtime-server-required-background-three-child-barrier.test.ts)另验证 required 独立子租约过期会让父 Run 及时记录恢复错误而不伪完成。这些是本机定向证据，不代替故障注入 soak 或发布资格。
+执行权韧性回归覆盖一次 Store 续租写失败后，在原租约有效且 owner／generation 未变时重试，以及写失败持续至到期或 generation 变化时停止；[续租测试](../../apps/kite-service/test/session-execution-renewal.test.ts)还验证清理失败向排空调用传播、Host 已进入释放阶段时不启动新的失权回调。[Server 生命周期测试](../../apps/kite-service/test/isolated/runtime-server-multi-workspace.test.ts)以受控延迟证明关闭先等待已启动的失权清理再释放 Host，并验证三条实际子模型连接会中止。[三子屏障测试](../../apps/kite-service/test/isolated/runtime-server-required-background-three-child-barrier.test.ts)另验证 required 独立子租约过期会让父 Run 及时记录恢复错误而不伪完成。这些是本机定向证据，不代替故障注入 soak 或发布资格。
+
+终态预约移出活动 State 后，[续轮 SIGKILL 回归](../../apps/kite-service/test/isolated/exclusive/cross-session-followup-sigkill.test.ts)核对未路由的准备意图保持待恢复、已激活且未尝试的首模型沿原身份执行一次、结果不明的已尝试调用保持 unknown 而不重派。Service 按目标准确 Run 合并活动及归档模型预约，归档查询绑定所观察的快照 revision；[多模型续轮回归](../../apps/kite-service/test/isolated/cross-session-followup-new-turn.test.ts)另核对两个模型加读工具正常完成，来源 ACK 已结算后恢复扫描不再次派发。[排队续轮 SIGKILL 回归](../../apps/kite-service/test/isolated/exclusive/cross-session-followup-queued-sigkill.test.ts)固定来源 Tool 已成功且槽位未释放的崩溃窗口，核对未知执行占满容量后及时报告需恢复、准确 queued 意图保持、零目标重派；并发等待分类另核对混合占位继续等待、空位仍可取得。这些是本机真实 Store／受控 Provider 证据。
 
 Agent API context是纯Worker内存admission事实，不是receipt或Session lifecycle。contract incompatibility、Workspace
 untrusted/unavailable与context overload在认证前拒绝且不消费capability；一旦one-shot capability已认证并消费，后续private read connection
@@ -168,7 +170,7 @@ owner-only DACL与non-reparse验证fail closed；其owner负向测试已接入Wi
 candidate build/verify/smoke也通过；smoke结束后无残留Service进程。该结果不升级任何上述pending三平台或formal
 qualification结论，CI-profile soak按设计`qualificationMetricsSupported=false`。
 
-本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；queued 与 in-flight send 共同计入 connection/global byte ceiling 的 outbound/backpressure；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 [Agent Note 0053](../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md)。
+本地 implementation evidence 覆盖 in-process、stdio 与 development loopback WebSocket path：bounded stdio JSONL 与 protocol-only stdout；outbound 暂满时等待、可靠帧以 Service-owned 私有磁盘 spool 排队且实际发送预留全局 resident bytes，carrier stdout 也等待容量而非因累计条数／字节直接断链；从入队到 send 完成受 drain 时限约束，关闭回收容量、等待者、监听器和文件；malformed/oversized frame rejection；generation 切换清空旧 Session readiness/projection、cursor 超前时 authoritative reset、stale-generation rejection 和 atomic Session-index reset 的 reconnect/resubscribe；WebSocket bootstrap auth、Host/Origin checks、heartbeat 与对 restarted carrier 的 reconnect；以及 bounded sequential ping soak。ephemeral 展示通知可丢弃，Runtime mutation 不因 transport failure 重放。这些只是 local/conformance evidence，不构成 production Web support claim。development-only WebSocket carrier 不改变 [Agent Note 0053](../../.agents/notes/implemented/architecture/2026-07-30-local-single-user-first-topology.md)。
 
 本 tranche 的 implementation head `f3646fec1d99db053304dfc013806caf0e3d8272` 已形成三平台 PR CI evidence：
 [Required run 32978173084](https://github.com/ferqx/kite-code/actions/runs/32978173084) 的 unit、quality、
@@ -223,9 +225,7 @@ sealed handle publish → low-information handle-ready ack → activate。Provid
 cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
 或 cleanup timeout 必须进入 `capability.execution_unknown`，不得提交普通失败 receipt 或自动重放。
 
-Subagent正常执行还必须独立于共享`resourceBudget`证明模型工具循环有界：12轮成功工具响应后只允许一次空工具面的总结请求，
-正常总结继续闭合parent Run，伪造工具调用则child失败且模型请求数不再增长。owner单元测试固定上限、失败关闭与continuation ordinal；
-Service集成测试显式关闭`resourceBudget`并执行12个真实只读步骤；串行PTY再证明child总结、parent最终回复与`Working`共同收敛。
+历史有限预算或关闭共享 `resourceBudget` 的 Subagent 模型工具循环保留 12 轮工具响应上限：达到上限后只允许一次空工具面的总结请求，伪造工具调用则 child 失败。新独立子 Run 与新主 Run 不因该固定轮数提前截断，必须由 Run 截止时间、取消、并发和工具授权收敛。原 owner 单元测试和关闭预算的 Service 集成测试继续验证旧路径；新模式的继续执行由资源准入和正式 Runtime Server 回归验证。
 
 current schema v25 以五类 `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
 dispatch intent、observation 与 cleanup ordinal；event codec、reducer 和 snapshot invariant 都拒绝额外字段、非法
@@ -417,7 +417,7 @@ fault/soak qualification 仍由独立 workflow 绑定最终 SHA。
 
 真实 MCP stdio server 在 tool invocation 中退出时，调用必须返回 typed `provider_unavailable`，provider 进入 `degraded`，并保留最后一次成功 catalog 供诊断；它不等于签发新 Binding 或自动重放调用。
 
-模型 HTTP `429` 属于可重试的 rate-limit failure，但只允许消费统一的 bounded attempt/time budget；attempt budget 包含首次请求，time budget 从第一次可重试失败开始，首次请求在失败前的 wall time 不得提前耗尽重试窗口。长时间 in-flight 后发生 socket/网络错误时，只要 attempt budget 尚有余量就必须观察到第一次 retry。生产分类必须读取 AI SDK `APICallError.statusCode`（并兼容旧 adapter 的 `status`），预算耗尽必须抛出最后一次 429，并由 failure-mode policy 收敛为 `model_retry_exhausted`。本地 HTTP fixture 必须穿透 `createChatModel` 和 provider middleware 证明 429 后恢复；其他 4xx 仍不可重试。
+模型 HTTP `429` 属于可重试的 rate-limit failure。新 `unboundedCumulativeUsage` 主 Run 和 `durationOnlyChildRun` 子 Run 的重试以各自持久截止时间和取消信号为界；历史有限请求沿原有 bounded attempt/time budget，attempt budget 包含首次请求，time budget 从第一次可重试失败开始。长时间 in-flight 后发生 socket/网络错误时，只要执行权仍有效且该路径仍可重试，就必须观察到第一次 retry。生产分类必须读取 AI SDK `APICallError.statusCode`（并兼容旧 adapter 的 `status`）；历史请求的预算耗尽抛出最后一次 429，由 failure-mode policy 收敛为 `model_retry_exhausted`。本地 HTTP fixture 必须穿透 `createChatModel` 和 provider middleware 证明 429 后恢复；其他 4xx 仍不可重试。
 
 专门验证下游统一取消信号的 wall-clock deadline fixture 必须给 provider 或 interaction 留出在繁忙
 CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若 deadline 在模型 dispatch 前

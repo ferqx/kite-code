@@ -170,6 +170,9 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
     storage = await createKiteSessionAppServerStorageComposition({
       databasePath,
       hostInstanceId: 'capacity-host',
+      ...(process.env.KITE_FOLLOWUP_CAPACITY_SHORT_TEST_LEASE === '1'
+        ? { executionLeaseMs: 1_000, renewIntervalMs: 200 }
+        : {}),
     });
     server = createKiteMultiWorkspaceRuntimeServer({
       checkpointPath: databasePath,
@@ -344,6 +347,8 @@ async function exerciseCapacity(outcome: Outcome): Promise<void> {
       runId: fundingRunId,
     });
     expect(targetRequests).toBe(1);
+    if (process.env.KITE_FOLLOWUP_CAPACITY_QUEUED_SIGKILL_SEED === '1')
+      await new Promise<void>(() => {});
     if (outcome === 'wait_past_old_timeout') {
       await Bun.sleep(16_000);
       expect(targetRequests).toBe(1);

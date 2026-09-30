@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { KernelEvent } from '../src/events';
+import { assertAgentStateInvariants } from '../src/invariants';
 import {
   classifyToolOutcome,
   isToolOutcome,
@@ -18,9 +19,52 @@ import {
   recordToolOwnedProgress,
   toolFailureInstanceId,
 } from '../src/recovery';
+import { reduceAgentState } from '../src/reducer';
 import { createInitialAgentState } from '../src/state';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+test('a legal 129th failed Tool transition preserves every unresolved recovery claim', () => {
+  let state = createInitialAgentState({
+    threadId: 'session',
+    userId: 'user',
+    workspace: '/workspace',
+    turnId: 'turn',
+    recoveryIdentityKey: IDENTITY_KEY,
+  });
+  for (let i = 0; i < 129; i++) {
+    const toolCallId = `call-${i}`;
+    state = reduceAgentState(state, {
+      type: 'tool.queued',
+      toolCallId,
+      name: 'unknown_tool',
+      args: { i },
+      modelMessageId: 'model',
+    } as KernelEvent);
+    state = reduceAgentState(state, { type: 'tool.started', toolCallId } as KernelEvent);
+    state = reduceAgentState(state, {
+      type: 'tool.failed',
+      toolCallId,
+      failure: {
+        kind: 'tool_not_found',
+        message: 'unknown tool',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: true,
+        terminatesTurn: false,
+        journal: true,
+      },
+      outcome: userActionOutcome(),
+    } as KernelEvent);
+  }
+  expect(Object.keys(state.tools.calls)).toHaveLength(129);
+  expect(state.toolRecovery.order).toHaveLength(129);
+  expect(
+    state.toolRecovery.order.some((id) => state.toolRecovery.failures[id]?.toolCallId === 'call-0'),
+  ).toBe(true);
+  expect(state.toolRecovery.qualityGuard.blocked).toBe(false);
+  assertAgentStateInvariants(state);
+});
 
 function userActionOutcome(): ToolOutcome {
   return {

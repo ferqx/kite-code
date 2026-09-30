@@ -157,7 +157,7 @@ describe('State runner effect acknowledgements', () => {
         return [];
       },
       { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-      5,
+      1,
     ))
       yielded.push(event.type);
     expect(yielded).toEqual([

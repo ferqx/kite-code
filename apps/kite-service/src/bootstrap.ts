@@ -140,11 +140,14 @@ import {
 } from './bootstrap/kite-session-app-server-storage';
 import { createKiteModelOperationExecutionPort } from './bootstrap/model-operation-execution';
 import { createInstalledKiteRuntimeCompositionFactory } from './bootstrap/model-runtime-composition';
+import { BackgroundExecutionPages } from './bootstrap/runtime/background-execution-pages';
 import {
   type CliRuntimeBridgeInput,
   type CliRuntimeInteractionResolution,
   type ConfigurableCliRuntimeBridge,
   createCliRuntimeBridge,
+  pageBackgroundExecutionSnapshot,
+  readBackgroundExecutionById,
   readBackgroundExecutionSnapshot,
   shutdownSettledSessionWithoutConfig,
 } from './bootstrap/runtime/CliRuntimeBridge';
@@ -1020,6 +1023,8 @@ export interface KiteRuntimeStorageOwner {
   readonly readSnapshot?: <Result>(operation: () => Result) => Result;
   readonly ownsSessionExecution?: (sessionId: string) => boolean;
   readonly setExecutionLossHandler?: (handler: (sessionId: string) => Promise<void>) => void;
+  readonly beginHostDisposal?: () => void;
+  readonly drainExecutionLossCleanup?: () => Promise<void>;
   readonly commitRecoveryDecision?: KiteSessionAppServerStorageOwner['commitRecoveryDecision'];
   readonly ownedSessionIds?: () => readonly string[];
   readonly recovery?: KiteSessionAppServerStorageOwner['recovery'];
@@ -1685,6 +1690,8 @@ function createKiteCliRuntimeHost(
             host.resolveAfterTurnOriginRun(sessionId, activeTurnId),
           scheduleAfterTurnWake: (wake) => host.scheduleAfterTurnWake(wake),
         },
+        (sessionId, reservationId) =>
+          storage.completedResourceReservations?.lookup(sessionId, reservationId) ?? null,
       );
       const modelInvocationRuntimeFactory = (workspace: string) => ({
         ...modelRuntime(workspace),
@@ -1921,6 +1928,8 @@ export function createKiteMultiWorkspaceRuntimeServer(
             host.resolveAfterTurnOriginRun(sessionId, activeTurnId),
           scheduleAfterTurnWake: (wake) => host.scheduleAfterTurnWake(wake),
         },
+        (sessionId, reservationId) =>
+          owner.storage.completedResourceReservations?.lookup(sessionId, reservationId) ?? null,
       );
       const modelInvocationRuntimeFactory = (workspace: string) => ({
         ...modelRuntime(workspace),
@@ -1961,6 +1970,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
           console.error('Session data-deletion cleanup could not start.', { sessionId, error });
         }
       };
+      const unownedBackgroundPages = new BackgroundExecutionPages();
       readUnownedBackgroundQuery = (query) => {
         const state = owner.loadCurrentSnapshot(query.sessionId);
         const admission = readPersistedAdmissionForSession(query.sessionId);
@@ -1986,7 +1996,7 @@ export function createKiteMultiWorkspaceRuntimeServer(
             code: 'session_unavailable',
           };
         }
-        const independentChildSnapshot =
+        const independentChildSnapshot = () =>
           'readChildExecutionAuthority' in owner && owner.readChildSessionIntent
             ? projectIndependentChildExecutions({
                 parentState: state,
@@ -1996,23 +2006,32 @@ export function createKiteMultiWorkspaceRuntimeServer(
                 nowMs: Date.now(),
               })
             : undefined;
-        const snapshot = readBackgroundExecutionSnapshot({
+        const backgroundInput = {
           sessionId: query.sessionId,
           sessionRevision: state.revision,
           workspace: admission.canonicalPath,
           modelInvocationRuntimeFactory,
           recoveryIdentityKey,
-          ...(independentChildSnapshot ? { independentChildSnapshot } : {}),
-        });
+        };
         if (query.type === 'list_background_executions') {
+          const snapshot = unownedBackgroundPages.read(
+            JSON.stringify([query.sessionId, state.revision, recoveryIdentityKey]),
+            query.cursor,
+            () =>
+              readBackgroundExecutionSnapshot({
+                ...backgroundInput,
+                independentChildSnapshot: independentChildSnapshot(),
+              }),
+          );
           return {
             status: 'ok',
             queryType: query.type,
-            backgroundSnapshot: snapshot,
+            ...pageBackgroundExecutionSnapshot(snapshot, query.cursor, query.limit),
           };
         }
-        const execution = snapshot.executions.find(
-          (candidate) => candidate.executionId === query.executionId,
+        const execution = readBackgroundExecutionById(
+          { ...backgroundInput, independentChildSnapshot: independentChildSnapshot() },
+          query.executionId,
         );
         return execution
           ? { status: 'ok', queryType: query.type, backgroundExecution: execution }
@@ -2195,6 +2214,9 @@ export function createKiteMultiWorkspaceRuntimeServer(
                   turnReservationId: entry.turnReservationId,
                   modelReservationId: entry.modelReservationId,
                   modelInvocationId: entry.modelInvocationId,
+                  ...(entry.releasedBackupReservation
+                    ? { releasedBackupReservation: entry.releasedBackupReservation }
+                    : {}),
                   ...(targetProof &&
                   targetProof.submissionId === entry.submissionId &&
                   targetProof.targetRunId === entry.targetRunId &&
@@ -3437,9 +3459,6 @@ export function createKiteMultiWorkspaceRuntimeServer(
             },
           };
     }
-    // Projection queries refresh the Host subscriber registry from the Store.
-    // Recovery and resource cleanup are admitted only by execution commands.
-    if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
     if (
       (query.type === 'list_background_executions' || query.type === 'get_background_execution') &&
       owner.ownsSessionExecution?.(query.sessionId) !== true
@@ -3452,6 +3471,9 @@ export function createKiteMultiWorkspaceRuntimeServer(
         }
       );
     }
+    // Projection queries refresh the Host subscriber registry from the Store.
+    // Recovery and resource cleanup are admitted only by execution commands.
+    if (!owner.readSnapshot || query.type === 'get_session_projection') return host.query(query);
     const direct = owner.readSnapshot(() => {
       if (query.type === 'list_sessions') {
         return {
@@ -3838,7 +3860,20 @@ export function createKiteMultiWorkspaceRuntimeServer(
           failures.push(error);
         }
         try {
+          await owner.drainExecutionLossCleanup?.();
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        owner.beginHostDisposal?.();
+        try {
           await host[Symbol.asyncDispose]();
+        } catch (error) {
+          cleanupConfirmed = false;
+          failures.push(error);
+        }
+        try {
+          await owner.drainExecutionLossCleanup?.();
         } catch (error) {
           cleanupConfirmed = false;
           failures.push(error);

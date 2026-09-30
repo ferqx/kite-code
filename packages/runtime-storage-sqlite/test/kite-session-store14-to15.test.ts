@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { createKiteHomeArtifactStore } from '../src/kite-home-artifacts';
 import {
   assertKiteSessionStore14Schema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore15Schema,
   KITE_SESSION_STORE14_DDL,
 } from '../src/kite-home-store';
 import { convertKiteSessionStore14CandidateTo15 } from '../src/kite-session-store14-to15';
@@ -54,7 +54,7 @@ test('Store 14 candidate upgrades without changing rows and accepts private arti
       createdAt: 1,
     });
     convertKiteSessionStore14CandidateTo15({ database });
-    assertKiteSessionStoreSchema(database);
+    assertKiteSessionStore15Schema(database);
     expect(
       store.readSubagentTask({ ...original.ref, kind: 'subagent_task_request' }).canonicalJson,
     ).toBe(original.json);

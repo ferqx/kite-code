@@ -101,11 +101,16 @@ context，逐项等于 Builtin projection。旧 Core `invokeGovernedTool()` 已�
 command/path/resultMeta、private recovery guidance 或 canonical-private lineage。`read_file` 的 ENOENT 公共结果固定
 为低信息稳定文本，具体 path 已由原 tool call 表达，不能在 Tool Result 重复泄露。
 
-`read_file` 省略 `limit` 时默认读取最多 2000 个源行；无论模型提供多大的显式 `limit`，
-Builtin result projection 的完整文本（含 marker）都必须保持在 64 KiB 字符内。多行截断 marker 只能
-给出最后一个完整可见源行之后的准确 continuation offset；单行超限必须标记该行被 clipped，
-并明确 line offset 无法在行内无损续读。`resultMeta` 同时声明 `truncated` 和截断前结果摘要，
-完整 `rawContent` 只供 read-state 指纹使用，不属于模型结果契约。
+`read_file` 省略 `limit` 时读取从 `offset` 起的全部剩余源行，不受旧默认 2000 行或 64 KiB 字符投影
+额度裁剪。显式 `limit` 仍选择调用者请求的行区间，marker 只能给出最后一个完整可见源行之后的准确
+continuation offset；单行内容不能被无法续读的前缀替代。`resultMeta` 声明本次行区间是否仍有后续内容和
+结果摘要，完整 `rawContent` 只供 Runtime digest-only freshness 使用，不额外复制为模型结果。
+
+MCP resource、dynamic tool result 与声明的 Skill reference 返回完整有效内容，不再受旧 128 KiB
+模型投影／直接读取额度限制；来源、schema、active revision 与文件路径边界仍须成立。MCP 清单默认
+完整返回，显式正整数 `limit` 可使用一致性 cursor 分页。正常 Shell 的短预览必须带可读取完整磁盘输出的
+受管句柄，`shell_read` 分页不裁掉累计历史。`web_fetch` 默认返回完整提取正文，用户显式 `max_chars`
+只限制该次请求；单次外网响应体仍须通过读取期间的解析内存保护和网络权限检查。
 
 ### 契约与实现的同步
 
@@ -125,8 +130,8 @@ Builtin catalog 的输入 schema/parser 只描述并校验上述模型形态，�
 
 ### Plan 工具契约边界
 
-`write_plan` 新写入 V2 Plan，标题/step title 为单行、正文至少 20 字符、step ID 唯一且总数不超过
-12。首次保存由 Runtime 创建 identity；后续 save、submit 与 executing replan 都要求模型原样回传
+`write_plan` 新写入 V2 Plan，标题/step title 为非空单行、正文非空、step ID 唯一，不再设旧的正文长度和
+步骤数量额度。首次保存由 Runtime 创建 identity；后续 save、submit 与 executing replan 都要求模型原样回传
 `plan_id + version + structural_digest`。`update_plan` 也要求同一完整 identity，并只接受 step progress、
 note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 command、path、stdout、
 `completion_evidence` 和模型自报 success。完成证据由 Runtime terminal Tool/Verification/Approval 事实

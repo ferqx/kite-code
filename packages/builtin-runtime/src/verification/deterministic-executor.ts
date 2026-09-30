@@ -118,7 +118,7 @@ async function executeCheck(
     return {
       checkId: check.checkId,
       outcome: observation.outcome,
-      summary: observation.summary.slice(0, 2_000),
+      summary: observation.summary,
       evidenceDigest: digestCapabilityBindingValue(observation.evidence),
       startedAt,
       finishedAt: now().toISOString(),
@@ -128,7 +128,7 @@ async function executeCheck(
     return {
       checkId: check.checkId,
       outcome: 'inconclusive',
-      summary: (error instanceof Error ? error.message : String(error)).slice(0, 2_000),
+      summary: error instanceof Error ? error.message : String(error),
       startedAt,
       finishedAt: now().toISOString(),
     };

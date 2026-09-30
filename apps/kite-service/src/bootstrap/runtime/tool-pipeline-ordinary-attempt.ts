@@ -748,31 +748,38 @@ function createShellExecutor(input: {
         }
         return result;
       };
-      if (shellInput.yieldMs === undefined) {
-        return execute(shellInput.signal, shellInput.onProgress);
-      }
       const snapshot = await managedShellRuntime.start({
         ownerKey: input.ownerKey,
         mode: shellInput.mode ?? 'finite',
-        yieldMs: shellInput.yieldMs,
-        execute: (signal, onProgress) => execute(signal, onProgress),
+        yieldMs: shellInput.yieldMs ?? 0,
+        execute: (signal, onProgress) =>
+          execute(AbortSignal.any([signal, shellInput.signal]), (chunk, stream) => {
+            onProgress(chunk, stream);
+            shellInput.onProgress?.(chunk, stream);
+          }),
       });
-      if (snapshot.result) {
+      const settled =
+        shellInput.yieldMs === undefined
+          ? await managedShellRuntime.wait(snapshot.shellId, input.ownerKey)
+          : snapshot;
+      if (settled.result) {
         return {
-          ...snapshot.result,
-          shellId: snapshot.shellId,
+          ...settled.result,
+          shellId: settled.shellId,
           status: 'exited' as const,
-          cursor: snapshot.cursor,
+          // The terminal preview does not consume the complete spool. Cursor
+          // zero lets shell_read replay every byte, including omitted middle.
+          cursor: 0,
         };
       }
       return {
         command: shellInput.command,
-        stdout: snapshot.stdout,
-        stderr: snapshot.stderr,
+        stdout: settled.stdout,
+        stderr: settled.stderr,
         intent: classifyBuiltinShellIntent(shellInput.command),
-        shellId: snapshot.shellId,
+        shellId: settled.shellId,
         status: 'running' as const,
-        cursor: snapshot.cursor,
+        cursor: settled.cursor,
       };
     },
   });

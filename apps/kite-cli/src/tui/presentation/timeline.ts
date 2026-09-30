@@ -248,13 +248,23 @@ export function advanceOutputBlockTimeline(
   blocks: readonly OutputBlock[],
   renderEpoch = previous?.renderEpoch ?? 0,
 ): TimelineState {
-  const next = projectOutputBlockTimeline(blocks, renderEpoch);
-  if (!previous || previous.renderEpoch !== renderEpoch) return next;
-  const previousById = new Map(previous.items.map((item) => [item.id, item]));
+  if (!previous || previous.renderEpoch !== renderEpoch) {
+    return projectOutputBlockTimeline(blocks, renderEpoch);
+  }
+  // Reducers preserve unchanged block references. Reuse their timeline items,
+  // including already computed digests, while projecting only changed blocks.
+  // A map is needed only if a reducer reorders or removes an existing block.
+  let previousById: Map<string, TimelineItem> | undefined;
   return {
     renderEpoch,
-    items: next.items.map((item) => {
-      const prior = previousById.get(item.id);
+    items: blocks.map((block, index) => {
+      const samePosition = previous.items[index];
+      if (samePosition?.renderModel.block === block) return samePosition;
+      const item = projectOutputBlockTimelineItem(block);
+      if (samePosition?.id !== item.id && previousById === undefined) {
+        previousById = new Map(previous.items.map((candidate) => [candidate.id, candidate]));
+      }
+      const prior = samePosition?.id === item.id ? samePosition : previousById?.get(item.id);
       if (prior?.state !== 'sealed') return item;
       if (item.state === 'sealed' && item.visualDigest === prior.visualDigest) return prior;
       // A late progress packet must never mutate or reopen a committed item.

@@ -27,6 +27,8 @@ import {
 import {
   KITE_HISTORY_GENERATION_TRIGGER_NAMES,
   KITE_HISTORY_GENERATION_TRIGGERS,
+  KITE_HISTORY_REVISION_TRIGGER_NAMES,
+  KITE_HISTORY_REVISION_TRIGGERS,
 } from './kite-history-generation';
 import {
   KITE_SESSION_AGENT_CROSS_SESSION_DDL,
@@ -298,7 +300,41 @@ export const KITE_SESSION_STORE14_TABLE_COLUMNS = Object.freeze({
   ...KITE_SESSION_STORE13_TABLE_COLUMNS,
   runtime_sessions: [...KITE_SESSION_STORE13_TABLE_COLUMNS.runtime_sessions, 'history_generation'],
 });
-export const KITE_SESSION_STORE_TABLE_COLUMNS = KITE_SESSION_STORE14_TABLE_COLUMNS;
+export const KITE_SESSION_STORE15_TABLE_COLUMNS = KITE_SESSION_STORE14_TABLE_COLUMNS;
+export const KITE_RESOURCE_RESERVATION_RECEIPT_COLUMNS = Object.freeze([
+  'session_id',
+  'run_id',
+  'reservation_id',
+  'invocation_id',
+  'state',
+  'reservation_json',
+  'terminal_revision',
+]);
+export const KITE_RESOURCE_RESERVATION_RECEIPT_DDL = `CREATE TABLE runtime_resource_reservation_receipts (
+    session_id TEXT NOT NULL REFERENCES runtime_sessions(session_id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL,
+    reservation_id TEXT NOT NULL,
+    invocation_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('released', 'reconciled')),
+    reservation_json TEXT NOT NULL,
+    terminal_revision INTEGER NOT NULL CHECK (terminal_revision >= 0),
+    PRIMARY KEY (session_id, reservation_id)
+  ) STRICT`;
+export const KITE_RESOURCE_RESERVATION_RECEIPT_INDEXES = Object.freeze([
+  'CREATE INDEX runtime_resource_reservation_receipts_run ON runtime_resource_reservation_receipts(session_id, run_id)',
+  'CREATE INDEX runtime_resource_reservation_receipts_revision ON runtime_resource_reservation_receipts(session_id, terminal_revision)',
+  "CREATE UNIQUE INDEX runtime_resource_reservation_receipts_live_invocation ON runtime_resource_reservation_receipts(session_id, run_id, invocation_id) WHERE state = 'reconciled'",
+]);
+export const KITE_SESSION_STORE_TABLE_COLUMNS = Object.freeze({
+  ...KITE_SESSION_STORE15_TABLE_COLUMNS,
+  runtime_sessions: [
+    ...KITE_SESSION_STORE15_TABLE_COLUMNS.runtime_sessions,
+    'history_rewrite_generation',
+    'history_append_sequence',
+    'history_instance_id',
+  ],
+  runtime_resource_reservation_receipts: KITE_RESOURCE_RESERVATION_RECEIPT_COLUMNS,
+});
 
 const DIGEST_CHECK = "length(%s) = 64 AND %s NOT GLOB '*[^a-f0-9]*'";
 const digestCheck = (column: string): string => DIGEST_CHECK.replaceAll('%s', column);
@@ -631,9 +667,25 @@ const unboundedPrivateArtifactDdl = (statement: string): string => {
   return updated;
 };
 
-export const KITE_SESSION_STORE_DDL = Object.freeze(
+export const KITE_SESSION_STORE15_DDL = Object.freeze(
   KITE_SESSION_STORE14_DDL.map(unboundedPrivateArtifactDdl),
 );
+export const KITE_SESSION_STORE_DDL = Object.freeze([
+  ...KITE_SESSION_STORE15_DDL.filter((statement) => !statement.startsWith('CREATE TRIGGER ')).map(
+    (statement) =>
+      statement.startsWith('CREATE TABLE runtime_sessions ')
+        ? statement.replace(
+            '\n  ) STRICT',
+            ',\n    history_rewrite_generation INTEGER NOT NULL DEFAULT 0 CHECK (history_rewrite_generation >= 0)' +
+              ',\n    history_append_sequence INTEGER NOT NULL DEFAULT 0 CHECK (history_append_sequence >= 0)' +
+              ",\n    history_instance_id TEXT NOT NULL DEFAULT ''\n  ) STRICT",
+          )
+        : statement,
+  ),
+  ...KITE_HISTORY_REVISION_TRIGGERS,
+  KITE_RESOURCE_RESERVATION_RECEIPT_DDL,
+  ...KITE_RESOURCE_RESERVATION_RECEIPT_INDEXES,
+]);
 
 interface ExactKiteStoreProfile {
   readonly schemaVersion: number;
@@ -642,6 +694,7 @@ interface ExactKiteStoreProfile {
   readonly tableColumns: Readonly<Record<string, readonly string[]>>;
   readonly indexes: readonly string[];
   readonly triggers?: readonly string[];
+  readonly triggerSql?: readonly string[];
 }
 
 const kiteHomeStoreProfile = (): ExactKiteStoreProfile => ({
@@ -657,6 +710,25 @@ const kiteSessionStoreProfile = (): ExactKiteStoreProfile => ({
   formatEpoch: KITE_SESSION_STORE_FORMAT_EPOCH,
   ddl: KITE_SESSION_STORE_DDL,
   tableColumns: KITE_SESSION_STORE_TABLE_COLUMNS,
+  indexes: [
+    ...KITE_HOME_STORE_INDEXES,
+    ...KITE_SESSION_AGENT_INDEXES,
+    'child_session_intents_parent_pending',
+    'child_approval_proxies_parent_pending',
+    'agent_interrupt_intents_target_pending',
+    'runtime_resource_reservation_receipts_run',
+    'runtime_resource_reservation_receipts_revision',
+    'runtime_resource_reservation_receipts_live_invocation',
+  ],
+  triggers: KITE_HISTORY_REVISION_TRIGGER_NAMES,
+  triggerSql: KITE_HISTORY_REVISION_TRIGGERS,
+});
+
+const kiteSessionStore15Profile = (): ExactKiteStoreProfile => ({
+  schemaVersion: 15,
+  formatEpoch: 'kite-session-unbounded-child-artifacts-2026-09-29',
+  ddl: KITE_SESSION_STORE15_DDL,
+  tableColumns: KITE_SESSION_STORE15_TABLE_COLUMNS,
   indexes: [
     ...KITE_HOME_STORE_INDEXES,
     ...KITE_SESSION_AGENT_INDEXES,
@@ -818,6 +890,11 @@ export function assertKiteSessionStoreSchema(database: Database): void {
 }
 
 /** Read-only source assertion for the frozen Store 14 candidate format. */
+export function assertKiteSessionStore15Schema(database: Database): void {
+  assertExactKiteStoreSchema(database, kiteSessionStore15Profile());
+  assertKiteSessionLineageForeignKeys(database);
+}
+
 export function assertKiteSessionStore14Schema(database: Database): void {
   assertExactKiteStoreSchema(database, kiteSessionStore14Profile());
   assertKiteSessionLineageForeignKeys(database);
@@ -893,59 +970,57 @@ export function assertKiteStoreIntegrity(database: Database): void {
 function assertExactKiteStoreSchema(database: Database, profile: ExactKiteStoreProfile): void {
   database.run('PRAGMA foreign_keys = ON');
 
-  const tables = database
-    .query<{ name: string }, []>(
-      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  const inventory = database
+    .query<{ type: string; name: string; sql: string }, []>(
+      `SELECT type, name, sql FROM sqlite_schema
+       WHERE type IN ('table', 'index', 'trigger')
+         AND (type = 'trigger' OR name NOT LIKE 'sqlite_%') ORDER BY name`,
     )
-    .all()
-    .map((row) => row.name);
+    .all();
+  const tables = inventory.filter((row) => row.type === 'table').map((row) => row.name);
   const expectedTables = Object.keys(profile.tableColumns).sort();
   if (JSON.stringify(tables) !== JSON.stringify(expectedTables)) {
     fail('Kite Home Store table inventory is incompatible.');
   }
 
+  const columns = new Map<string, string[]>();
+  for (const row of database
+    .query<{ table_name: string; column_name: string }, []>(
+      `SELECT schema.name AS table_name, info.name AS column_name
+       FROM sqlite_schema AS schema, pragma_table_info(schema.name) AS info
+       WHERE schema.type = 'table' AND schema.name NOT LIKE 'sqlite_%'
+       ORDER BY schema.name, info.cid`,
+    )
+    .all()) {
+    const names = columns.get(row.table_name) ?? [];
+    names.push(row.column_name);
+    columns.set(row.table_name, names);
+  }
   for (const [table, expectedColumns] of Object.entries(profile.tableColumns)) {
-    const actual = database
-      .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
-      .all()
-      .map((row) => row.name);
+    const actual = columns.get(table) ?? [];
     if (JSON.stringify(actual) !== JSON.stringify(expectedColumns)) {
       fail(`Kite Home Store table '${table}' columns are incompatible.`);
     }
   }
 
-  const indexes = database
-    .query<{ name: string }, []>(
-      "SELECT name FROM sqlite_schema WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
-    )
-    .all()
-    .map((row) => row.name);
+  const indexes = inventory.filter((row) => row.type === 'index').map((row) => row.name);
   const expectedIndexes = [...profile.indexes].sort();
   if (JSON.stringify(indexes) !== JSON.stringify(expectedIndexes)) {
     fail('Kite Home Store index inventory is incompatible.');
   }
 
   if (profile.triggers) {
-    const triggers = database
-      .query<{ name: string }, []>(
-        "SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name",
-      )
-      .all()
-      .map((row) => row.name);
+    const actualSql = inventory.filter((row) => row.type === 'trigger');
+    const triggers = actualSql.map((row) => row.name);
     if (JSON.stringify(triggers) !== JSON.stringify([...profile.triggers].sort())) {
       fail('Kite Home Store trigger inventory is incompatible.');
     }
     const expectedSql = new Map<string, string>(
-      KITE_HISTORY_GENERATION_TRIGGERS.map((sql, index) => [
-        KITE_HISTORY_GENERATION_TRIGGER_NAMES[index]!,
+      (profile.triggerSql ?? KITE_HISTORY_GENERATION_TRIGGERS).map((sql, index) => [
+        profile.triggers![index]!,
         sql,
       ]),
     );
-    const actualSql = database
-      .query<{ name: string; sql: string }, []>(
-        "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'",
-      )
-      .all();
     if (actualSql.some((row) => row.sql !== expectedSql.get(row.name))) {
       fail('Kite Home Store trigger definition is incompatible.');
     }

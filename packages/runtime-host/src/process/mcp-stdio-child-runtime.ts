@@ -82,6 +82,7 @@ export function runMcpStdioChildRuntime(
   let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
   let goSeen = false;
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'> | undefined;
+  let childInputPending: Promise<void> = Promise.resolve();
   let childPid = 0;
   let processStartIdentity = '';
   let hostSequence = -1;
@@ -135,11 +136,7 @@ export function runMcpStdioChildRuntime(
         failClosed(new Error('MCP stdio wrapper child stdin is unavailable.'));
         return;
       }
-      try {
-        child.stdin.write(chunk);
-      } catch (error) {
-        failClosed(error);
-      }
+      forwardChildInput(chunk);
       return;
     }
     try {
@@ -174,7 +171,7 @@ export function runMcpStdioChildRuntime(
       if (goSeen && buffer.byteLength > 0 && child?.stdin) {
         const pending = buffer;
         buffer = Buffer.alloc(0);
-        child.stdin.write(pending);
+        forwardChildInput(pending);
         pending.fill(0);
       }
     } catch (error) {
@@ -186,17 +183,39 @@ export function runMcpStdioChildRuntime(
   process.stdin.on('end', () => {
     if (!goSeen && !failed) failClosed(new Error('MCP stdio wrapper stdin ended before GO.'));
     if (goSeen && child?.stdin) {
-      try {
-        child.stdin.end();
-      } catch {
-        failClosed(new Error('MCP stdio child stdin could not close.'));
-      }
+      void childInputPending.then(() => {
+        try {
+          child?.stdin.end();
+        } catch {
+          failClosed(new Error('MCP stdio child stdin could not close.'));
+        }
+      }, failClosed);
     }
   });
   process.stdin.on('error', failClosed);
   process.stdin.resume();
 
   return completion;
+
+  function forwardChildInput(bytes: Uint8Array): void {
+    if (!child?.stdin) {
+      failClosed(new Error('MCP stdio wrapper child stdin is unavailable.'));
+      return;
+    }
+    const copy = Buffer.from(bytes);
+    process.stdin.pause();
+    childInputPending = childInputPending.then(async () => {
+      try {
+        await Promise.resolve(child!.stdin.write(copy));
+        await Promise.resolve(child!.stdin.flush());
+      } finally {
+        copy.fill(0);
+      }
+    });
+    void childInputPending.then(() => {
+      if (!failed) process.stdin.resume();
+    }, failClosed);
+  }
 
   async function startChild(go: GoPayload): Promise<void> {
     if (child || failed) throw new Error('MCP stdio wrapper child lifecycle is invalid.');

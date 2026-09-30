@@ -1,13 +1,10 @@
 import { digestCapability } from './capability-domain';
-import { inspectRuntimeSecret } from './secret-inspector';
+import { collectRuntimeSecrets, inspectRuntimeSecret } from './secret-inspector';
 
 export type McpArgumentInspection = 'clear' | 'secret' | 'unknown';
 export type McpArgumentSnapshot =
   | { ok: true; arguments: Readonly<Record<string, unknown>> }
   | { ok: false };
-const REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS = 1_000_000;
-const REMOTE_MCP_ARGUMENT_INSPECTION_MAX_DEPTH = 32;
-const REMOTE_MCP_ARGUMENT_INSPECTION_MAX_NODES = 4_096;
 const REMOTE_MCP_SECRET_FIELD =
   /^(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|auth(?:orization)?|client[_-]?secret|credential|password|secret)$/i;
 
@@ -30,31 +27,25 @@ export function mcpArgumentDigest(argumentsValue: Record<string, unknown>): stri
  */
 export function snapshotMcpArguments(argumentsValue: Record<string, unknown>): McpArgumentSnapshot {
   const seen = new Set<object>();
-  let capturedChars = 0;
-  let capturedNodes = 0;
-
-  const capture = (value: unknown, depth: number): { ok: true; value: unknown } | { ok: false } => {
-    capturedNodes += 1;
-    if (
-      capturedNodes > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_NODES ||
-      depth > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_DEPTH
-    ) {
-      return { ok: false };
-    }
-    if (value === null || typeof value === 'boolean') return { ok: true, value };
-    if (typeof value === 'string') {
-      capturedChars += value.length;
-      return capturedChars <= REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS
-        ? { ok: true, value }
-        : { ok: false };
-    }
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? { ok: true, value } : { ok: false };
-    }
-    if (typeof value !== 'object' || seen.has(value)) return { ok: false };
-    seen.add(value);
-
-    try {
+  const root: { value?: unknown } = {};
+  const frozen: object[] = [];
+  const pending: Array<{ value: unknown; assign: (captured: unknown) => void }> = [
+    { value: argumentsValue, assign: (captured) => (root.value = captured) },
+  ];
+  try {
+    while (pending.length > 0) {
+      const { value, assign } = pending.pop()!;
+      if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+        assign(value);
+        continue;
+      }
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return { ok: false };
+        assign(value);
+        continue;
+      }
+      if (typeof value !== 'object' || seen.has(value)) return { ok: false };
+      seen.add(value);
       if (Array.isArray(value)) {
         if (Object.getPrototypeOf(value) !== Array.prototype) return { ok: false };
         const keys = Reflect.ownKeys(value);
@@ -62,124 +53,116 @@ export function snapshotMcpArguments(argumentsValue: Record<string, unknown>): M
           keys.some((key) => typeof key !== 'string') ||
           keys.length !== value.length + 1 ||
           !keys.includes('length')
-        ) {
+        )
           return { ok: false };
-        }
-        const copy: unknown[] = [];
-        for (let index = 0; index < value.length; index += 1) {
+        const copy: unknown[] = new Array(value.length);
+        assign(copy);
+        frozen.push(copy);
+        for (let index = value.length - 1; index >= 0; index -= 1) {
           const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-          if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+          if (!descriptor || !('value' in descriptor) || !descriptor.enumerable)
             return { ok: false };
-          }
-          const captured = capture(descriptor.value, depth + 1);
-          if (!captured.ok) return captured;
-          copy.push(captured.value);
+          pending.push({ value: descriptor.value, assign: (captured) => (copy[index] = captured) });
         }
-        return { ok: true, value: Object.freeze(copy) };
+        continue;
       }
-
       const prototype = Object.getPrototypeOf(value);
       if (prototype !== Object.prototype && prototype !== null) return { ok: false };
       const copy = Object.create(null) as Record<string, unknown>;
-      for (const key of Reflect.ownKeys(value)) {
+      assign(copy);
+      frozen.push(copy);
+      for (const key of Reflect.ownKeys(value).reverse()) {
         if (typeof key !== 'string') return { ok: false };
-        capturedChars += key.length;
-        if (capturedChars > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS) return { ok: false };
         const descriptor = Object.getOwnPropertyDescriptor(value, key);
-        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
-          return { ok: false };
-        }
-        const captured = capture(descriptor.value, depth + 1);
-        if (!captured.ok) return captured;
-        Object.defineProperty(copy, key, {
-          value: captured.value,
-          enumerable: true,
-          writable: false,
-          configurable: false,
+        if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) return { ok: false };
+        pending.push({
+          value: descriptor.value,
+          assign: (captured) =>
+            Object.defineProperty(copy, key, {
+              value: captured,
+              enumerable: true,
+              writable: false,
+              configurable: false,
+            }),
         });
       }
-      return { ok: true, value: Object.freeze(copy) };
-    } catch {
-      return { ok: false };
     }
-  };
-
-  const captured = capture(argumentsValue, 0);
-  return captured.ok &&
-    captured.value &&
-    typeof captured.value === 'object' &&
-    !Array.isArray(captured.value)
-    ? { ok: true, arguments: captured.value as Readonly<Record<string, unknown>> }
-    : { ok: false };
+    for (const value of frozen) Object.freeze(value);
+    return root.value && typeof root.value === 'object' && !Array.isArray(root.value)
+      ? { ok: true, arguments: root.value as Readonly<Record<string, unknown>> }
+      : { ok: false };
+  } catch {
+    return { ok: false };
+  }
 }
 
 /**
  * Inspect final structured arguments before a permit is requested and again
  * at the Manager boundary. Secret/protected-path signals are never representable
- * as a sendable permit classification; unsupported or over-budget input is
- * unknown and therefore fail closed.
+ * as a sendable permit classification; unsupported input is unknown and
+ * therefore fails closed. Every field is inspected, regardless of size.
  */
 export function inspectMcpArguments(
   argumentsValue: Record<string, unknown>,
   options: { knownSecrets?: Iterable<string | undefined> } = {},
 ): McpArgumentInspection {
   const seen = new Set<object>();
-  let inspectedChars = 0;
-  let inspectedNodes = 0;
-
+  const preparedSecrets = collectRuntimeSecrets(options.knownSecrets);
   const inspectText = (text: string, field?: string): McpArgumentInspection => {
-    inspectedChars += text.length;
-    if (inspectedChars > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS) return 'unknown';
+    const inspected = field ? `${field}=${text}` : text;
     return inspectRuntimeSecret({
-      text: field ? `${field}=${text}` : text,
-      knownSecrets: options.knownSecrets,
-      maxInspectionChars: REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS,
+      text: inspected,
+      preparedSecrets,
+      maxInspectionChars: inspected.length,
     });
   };
-
-  const visit = (
-    value: unknown,
-    field: string | undefined,
-    depth: number,
-  ): McpArgumentInspection => {
-    inspectedNodes += 1;
-    if (
-      inspectedNodes > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_NODES ||
-      depth > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_DEPTH
-    ) {
-      return 'unknown';
-    }
+  const pending: Array<{ value: unknown; field?: string }> = [{ value: argumentsValue }];
+  while (pending.length > 0) {
+    const { value, field } = pending.pop()!;
     if (field) {
-      inspectedChars += field.length;
-      if (inspectedChars > REMOTE_MCP_ARGUMENT_INSPECTION_MAX_CHARS) return 'unknown';
       if (REMOTE_MCP_SECRET_FIELD.test(field) && value != null && value !== '') return 'secret';
     }
-    if (value === null) return 'clear';
-    if (typeof value === 'string') return inspectText(value, field);
-    if (typeof value === 'boolean') return 'clear';
-    if (typeof value === 'number') return Number.isFinite(value) ? 'clear' : 'unknown';
+    if (value === null || typeof value === 'boolean') continue;
+    if (typeof value === 'string') {
+      const verdict = inspectText(value, field);
+      if (verdict !== 'clear') return verdict;
+      continue;
+    }
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) return 'unknown';
+      continue;
+    }
     if (typeof value !== 'object') return 'unknown';
     if (seen.has(value)) return 'unknown';
     seen.add(value);
-
-    let values: Array<[string | undefined, unknown]>;
     try {
       if (Array.isArray(value)) {
-        values = value.map((entry) => [undefined, entry]);
+        if (Object.getPrototypeOf(value) !== Array.prototype) return 'unknown';
+        const keys = Reflect.ownKeys(value);
+        if (
+          keys.some((key) => typeof key !== 'string') ||
+          keys.length !== value.length + 1 ||
+          !keys.includes('length')
+        )
+          return 'unknown';
+        for (let index = value.length - 1; index >= 0; index -= 1) {
+          const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+          if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) return 'unknown';
+          pending.push({ value: descriptor.value });
+        }
       } else {
         const prototype = Object.getPrototypeOf(value);
         if (prototype !== Object.prototype && prototype !== null) return 'unknown';
-        values = Object.entries(value);
+        for (const key of Reflect.ownKeys(value).reverse()) {
+          if (typeof key !== 'string') return 'unknown';
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) return 'unknown';
+          pending.push({ value: descriptor.value, field: key });
+        }
       }
     } catch {
       return 'unknown';
     }
-    for (const [nestedField, nestedValue] of values) {
-      const verdict = visit(nestedValue, nestedField, depth + 1);
-      if (verdict !== 'clear') return verdict;
-    }
-    return 'clear';
-  };
-
-  return visit(argumentsValue, undefined, 0);
+  }
+  return 'clear';
 }

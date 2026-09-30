@@ -1,6 +1,6 @@
 import type { SessionData } from '#kite-cli/session-types';
 import { createInitialState } from './initialState';
-import { eventReducer } from './reducers';
+import { reduceEvent } from './reducers';
 import type { InterruptState, OutputBlock, TuiState } from './types';
 
 /**
@@ -19,7 +19,9 @@ export function sessionDataToUI(data: SessionData): {
   // may consume durable terminals before a live Runtime authority exists.
   let state: TuiState = { ...createInitialState(), presentationMode: 'history' };
   for (const event of data.runtimeEvents) {
-    state = eventReducer(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
+    // Replay returns the reducer's block sequence. Its intermediate Timeline
+    // is never rendered; building it for every event rehashes the entire past.
+    state = reduceEvent(state, { type: 'ACCEPT_PRESENTATION_ENVELOPE', event });
   }
   state = {
     ...state,

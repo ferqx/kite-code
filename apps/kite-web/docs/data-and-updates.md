@@ -5,6 +5,7 @@
 Browser adapter 只消费 browser-safe agent-api-client → agent-api-contract，不导入 Native、Host、Store、Protocol、SQLite 或 Service raw source。Web 本地 presentation 经[页面投影](../src/presentation/page.ts)转换后交给共享 React 页面；组件不直接消费 REST DTO。
 
 同源 `/v1` 验证 browser principal 的`background_executions/workspaces/sessions/history`能力；workspaces 独立分页，首个 workspace 可预取 Sessions，其余展开读取。Session 选择读取 history、checkpoint metadata与closed后台执行快照，logs 独立按需读取。后台执行只使用agent-api-client的canonical method，Web不直接fetch该route、不维护第二套wire decoder；刷新失败保留最后快照并标记stale。
+Model Context由canonical client读取分块页并完整组装；Web在关闭检查器或切换Session时取消在途读取，不保留未完成片段。
 
 selected Session running/waiting 且页面可见时，约 2 秒单飞读取 after_sequence History 并刷新 Session projection；page 生命周期停止对应工作。logs 只显式刷新，不新增第二个 scheduler。失败保留最后快照并显式错误，不恢复旧 bootstrap、WebSocket、SSE、BFF 或离线 fallback。
 
@@ -16,6 +17,6 @@ index 响应建立 HttpOnly/SameSite Browser session，JavaScript 不兑换 laun
 
 ## 分页边界
 
-transport 自动追踪 next_cursor，每次读取最多 32 页；工作区、会话和恢复点请求每页 100 项，History/日志每页 200 项。超过 32 页且仍有 cursor 时返回 protocol_error，不返回部分成功。首次读取与后续增量均受此限制，日志刷新当前从起点重读。界面没有手动翻页控件；发生上限错误不能据此判断数据已删除。实现与上限定义见 [transport](../src/transport/client.ts)。
+transport 自动追踪 next_cursor，直到当前结果读取完毕；工作区、会话、恢复点和后台执行请求每页 100 项，History/日志每页 200 项。重复 cursor、跨页 History/日志序列水位变化或后台执行快照版本变化返回 protocol_error，不返回部分成功。首次读取与后续增量都使用相同的游标检查；日志刷新当前从起点重读。界面没有手动翻页控件。实现见 [transport](../src/transport/client.ts)。
 
 生产请求在正文解码前核对 Web Gateway 的 x-kite-web-identity 响应头与 shell meta。摘要由同一 instanceId/buildId 派生，不是凭据；不匹配抛出 protocol_error 并显示重新加载提示。它不修改公共 Agent API DTO，也不改变 browser principal 权限。验证见 [页面身份测试](../test/page-identity.test.ts)。

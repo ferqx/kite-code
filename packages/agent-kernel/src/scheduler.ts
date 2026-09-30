@@ -1,4 +1,8 @@
 import { decideCompletion, requiredBackgroundTaskIds } from './completion';
+import {
+  canResumeQuotaExhaustedVerification,
+  verificationRepairsAreUnbounded,
+} from './domains/verification/repair-policy';
 import type {
   McpProviderDirectoryStatus,
   McpProviderRecoveryAction,
@@ -539,8 +543,11 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
     const repair = recordField(recordField(value, 'spec') ?? {}, 'repair');
     return (
       stringField(value, 'mode') === 'required' &&
-      ['failed', 'inconclusive'].includes(stringField(value, 'status') ?? '') &&
-      (numberField(value, 'repairAttempts') ?? 0) < (numberField(repair ?? {}, 'maxAttempts') ?? 0)
+      (['failed', 'inconclusive'].includes(stringField(value, 'status') ?? '') ||
+        canResumeQuotaExhaustedVerification(state, value)) &&
+      (verificationRepairsAreUnbounded(state) ||
+        (numberField(value, 'repairAttempts') ?? 0) <
+          (numberField(repair ?? {}, 'maxAttempts') ?? 0))
     );
   });
   if (repairable)
@@ -581,16 +588,6 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
       type: 'compact_context',
       compactionId: stringField(pendingCompaction, 'compactionId') ?? '',
     };
-  const lastFailure = recordField(context, 'lastFailure');
-  if (
-    stringField(lastFailure ?? {}, 'reason') === 'auto' &&
-    stringField(lastFailure ?? {}, 'requestedAtTurnId') === state.turn.turnId
-  )
-    return {
-      type: 'recovery_blocked',
-      reason: `Automatic context compaction failed: ${stringField(lastFailure ?? {}, 'message') ?? 'unknown failure'}`,
-      failureKind: 'compaction_failed',
-    };
   if (
     isToolRecoveryQualityBlocked(
       state.toolRecovery,
@@ -601,7 +598,8 @@ export function decideNextEffect(state: AgentState, facts?: SchedulerFacts): Run
       {
         ignoreNonSafetyCeilings:
           state.resourceBudget.status === 'active' &&
-          state.resourceBudget.budget.durationOnlyChildRun === true,
+          (state.resourceBudget.budget.durationOnlyChildRun === true ||
+            state.resourceBudget.budget.unboundedCumulativeUsage === true),
       },
     )
   )

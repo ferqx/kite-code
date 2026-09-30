@@ -29,11 +29,7 @@ import {
   formatDiffOutput,
   formatMultiHunkDiff,
 } from '../filesystem/diff';
-import {
-  projectionDigest,
-  truncateProjectedLines,
-  truncateProjectedStreams,
-} from '../filesystem/projection';
+import { projectionDigest } from '../filesystem/projection';
 import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
 import { createBuiltinPolicyCompiler, fileBuiltinPolicyRule } from '../policy-compiler';
 import { builtinToolDescription } from '../tool-contracts';
@@ -346,8 +342,6 @@ async function executeFilesystemOperation(
   }
 }
 
-export const MAX_MODEL_READ_FILE_CHARS_ = 64 * 1024;
-
 function projectReadFile(
   path: string,
   result: BuiltinFilesystemPipelineResult,
@@ -391,50 +385,17 @@ function projectReadFile(
 function projectReadContent(
   output: Extract<WorkspaceFilesystemObserveObservation, { kind: 'read_file' }>,
 ): { content: string; truncated: boolean } {
-  const fromLine = output.fromLine ?? 1;
-  const toLine = output.toLine ?? fromLine;
-  const sourceHasMore = toLine < output.totalLines;
-  if (!sourceHasMore && output.content.length <= MAX_MODEL_READ_FILE_CHARS_) {
-    return { content: output.content, truncated: false };
-  }
-  const lines = output.content.split('\n');
-  const kept: string[] = [];
-  let keptLength = 0;
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
-    const sourceLine = fromLine + index;
-    const hasMore = sourceLine < output.totalLines;
-    const candidateLength = keptLength + (kept.length > 0 ? 1 : 0) + line.length;
-    const marker = continuationMarker(output.totalLines, sourceLine + 1);
-    if (
-      (hasMore ? candidateLength + marker.length + 1 : candidateLength) > MAX_MODEL_READ_FILE_CHARS_
-    ) {
-      break;
-    }
-    kept.push(line);
-    keptLength = candidateLength;
-  }
-  if (kept.length > 0) {
+  if (output.toLine !== undefined && output.toLine < output.totalLines) {
     return {
-      content: `${kept.join('\n')}\n${continuationMarker(output.totalLines, fromLine + kept.length)}`,
+      content: `${output.content}\n${continuationMarker(output.totalLines, output.toLine + 1)}`,
       truncated: true,
     };
   }
-  const marker = `... [read_file truncated; total_lines=${output.totalLines}; line ${fromLine} clipped; line offset cannot continue within this line]`;
-  const available = Math.max(0, MAX_MODEL_READ_FILE_CHARS_ - marker.length - 1);
-  const prefix = safePrefix(lines[0] ?? '', available);
-  return { content: prefix ? `${prefix}\n${marker}` : marker, truncated: true };
+  return { content: output.content, truncated: false };
 }
 
 function continuationMarker(totalLines: number, nextOffset: number): string {
   return `... [read_file truncated; total_lines=${totalLines}; continue with offset=${nextOffset}]`;
-}
-
-function safePrefix(value: string, maximum: number): string {
-  if (value.length <= maximum) return value;
-  const prefix = value.slice(0, maximum);
-  const last = prefix.charCodeAt(prefix.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? prefix.slice(0, -1) : prefix;
 }
 
 function projectSearchFiles(
@@ -458,11 +419,10 @@ function projectSearchFiles(
   }
   const raw =
     result.observation.matches.length > 0 ? `${result.observation.matches.join('\n')}\n` : '';
-  const streams = truncateProjectedStreams(raw, '');
-  return operationSuccess(streams.stdout, {
+  return operationSuccess(raw, {
     path,
     matchCount: result.observation.matches.length,
-    truncated: streams.truncated,
+    truncated: false,
     rawResultDigest: projectionDigest(raw, '', 0),
   });
 }
@@ -490,11 +450,10 @@ function projectSearchContent(
     (match) => `${match.path}:${match.line}:${match.text}`,
   );
   const raw = lines.length > 0 ? `${lines.join('\n')}\n` : '';
-  const streams = truncateProjectedStreams(raw, '');
-  return operationSuccess(streams.stdout, {
+  return operationSuccess(raw, {
     path,
     matchCount: lines.length,
-    truncated: streams.truncated,
+    truncated: false,
     rawResultDigest: projectionDigest(raw, '', 0),
   });
 }
@@ -526,12 +485,11 @@ function projectWriteFile(
   } else {
     rawContent = formatContentOutput(content, `Wrote ${result.observation.lines} lines to ${path}`);
   }
-  const projected = truncateProjectedLines(rawContent);
   return operationSuccess(
-    projected.content,
+    rawContent,
     {
       path,
-      truncated: projected.truncated,
+      truncated: false,
       workspaceMutationScope: [path],
       rawResultDigest: projectionDigest(rawContent, '', 0),
     },
@@ -587,12 +545,11 @@ function projectEditFile(
   }
   if (operation.oldString === operation.newString) parts.push('(no effective change)');
   const rawContent = parts.join('\n');
-  const projected = truncateProjectedLines(rawContent);
   return operationSuccess(
-    projected.content,
+    rawContent,
     {
       path: operation.path,
-      truncated: projected.truncated,
+      truncated: false,
       workspaceMutationScope: [operation.path],
       rawResultDigest: projectionDigest(rawContent, '', 0),
     },

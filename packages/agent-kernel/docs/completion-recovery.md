@@ -21,9 +21,11 @@ completed、aborted、blocked、unknown、budget_exhausted 和 resource_saturate
 
 ## 历史与重启
 
+恢复日志始终保留仍阻塞的失败及其血缘；已解除的历史最多保留最近 128 项。多个不同工具失败不会因固定日志条数而消失，因而不会出现完成守卫仍看到失败但恢复选择已丢失其身份的状态。关闭任务或 Turn 时立即压缩已解除历史；完整工具结果仍由对应 State 工具记录承载。
+
 [state migration](../src/state-migration.ts) 与 [state codec](../src/state-codec.ts) 按受支持格式解码；历史读取不重新授予当前 execution authority。Host 负责重新检查持久 lease 与操作状态，Kernel 根据明确 facts 选择恢复，不能自己读取数据库或杀进程。
 
-TriggerTurn 来源的待结算备付只凭 Store 提供的准确 admission 与 reservation 证明保留。已受理阶段兼容旧 `reserved` 与新 `queued` 备付；后者锁定有限计数但尚未取得活动子位，恢复时不得把它当作已派发，也不能在缺少证明时保留。
+TriggerTurn 来源的待结算备付只凭 Store 提供的准确 admission 与 reservation 证明保留。旧版备付完成替换后若 `released` 记录已移出 State，Store 将准确终态 receipt 随恢复证明传给 Kernel；Kernel 再核对同一 Run、提交 ID 和备付身份。已受理阶段兼容旧 `reserved` 与新 `queued` 备付；后者锁定有限计数但尚未取得活动子位，恢复时不得把它当作已派发，也不能在缺少证明时保留。无累计模型 token 上限的 after-turn 汇报预留可记录零 token 占位，恢复时仍检查明确的 `unboundedModelTokens` 标记及其余身份事实。
 
 当前State epoch早期写入的后台结果可能没有`admissionRevision`。解码时保留其Session、transcript与已结算工具事实，但删除这条无法验证的`backgroundResult` authority；不得推测或补造revision。当前writer产生的后台结果仍必须携带完整revision并通过严格invariant。
 

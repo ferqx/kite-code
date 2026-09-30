@@ -345,6 +345,10 @@ export interface RuntimeLogSessionRecord {
   readonly lastSequence: number;
   /** Store-owned content generation, advanced by every event row mutation. */
   readonly historyGeneration?: number;
+  /** Store-owned generation advanced by changes to existing event rows. */
+  readonly historyRewriteGeneration?: number;
+  /** Changes when a deleted Session ID is created again. */
+  readonly historyInstanceId?: string;
   readonly model?: { readonly provider: string; readonly name: string };
 }
 export interface RuntimeLogSessionReadPage {
@@ -760,6 +764,8 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly commandReceipt?: RuntimeStoredCommandReceipt;
   /** Store 8-only Run row change committed by the same transaction owner. */
   readonly runMutation?: RuntimeRunTransactionMutation;
+  /** Terminal reservation receipts moved out of a rolling State snapshot atomically. */
+  readonly completedResourceReservations?: readonly RuntimeCompletedResourceReservationMutation[];
   /** Session model metadata committed with the same accepted command decision. */
   readonly sessionModelRoute?: RuntimeSessionModelRoute;
   /** Store11 Agent facts; private bodies share the State/receipt transaction. */
@@ -776,6 +782,31 @@ export interface RuntimeTransactionInput<Event = unknown, State = unknown> {
   readonly followupRunStart?: RuntimeFollowupRunStartMutation;
   /** Requires the parent command receipt in this exact decision transaction. */
   readonly childApprovalProxyDecision?: RuntimeChildApprovalProxyDecisionMutation;
+}
+
+/** The Store verifies each complete receipt against the prior State and terminal event. */
+export interface RuntimeCompletedResourceReservationMutation {
+  readonly reservation: object;
+}
+
+/** Private durable authority for terminal reservation replay and child funding lookup. */
+export interface RuntimeCompletedResourceReservationRunQuery {
+  readonly sessionId: string;
+  readonly runId: string;
+  readonly atRevision: number;
+  readonly resourceKind?: string;
+}
+
+export interface RuntimeCompletedResourceReservationPort {
+  lookup(sessionId: string, reservationId: string): Readonly<Record<string, unknown>> | null;
+  listForRun?(
+    input: RuntimeCompletedResourceReservationRunQuery,
+  ): readonly Readonly<Record<string, unknown>>[];
+  findNonReleasedInvocation(
+    sessionId: string,
+    runId: string,
+    invocationId: string,
+  ): Readonly<Record<string, unknown>> | null;
 }
 
 /** Store 4 lease predicate checked atomically with the guarded commit. */
@@ -904,6 +935,8 @@ export interface RuntimeStorage<Event = unknown, State = unknown> extends Runtim
   readonly commandReceipts: RuntimeCommandReceiptPort;
   /** Present only for a fully preflighted Store 8 owner. */
   readonly runs?: RuntimeRunStorePort;
+  /** Required for Runs whose completed reservation receipts are externalized. */
+  readonly completedResourceReservations?: RuntimeCompletedResourceReservationPort;
   close(): void;
 }
 

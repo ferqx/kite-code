@@ -24,7 +24,13 @@ Host 分配时间和 ID，Kernel 只校验与使用。重放同一已提交事�
 
 `turn.aborted` 会由授权归约同时取消尚未结算的审批 Tool。若该 Tool 已开始执行，Host 在提交同一批次前为仍活动的 Capability 补入带 Host 时间的 `capability.execution_unknown`；外部执行结果未获确认时保持 unknown，避免 Tool 已终态而 Capability 仍在运行，也不把异常结束误记为用户主动取消。
 
-资源等待记录现在接受 `['artifact_capacity']`，并继续读取旧 `['writer']`、`['tool']`、`['tool', 'shell_invocation']` 记录。Kernel 只验证持久事实、顺序和状态转移；等待准入、超时后的局部 Tool 失败以及 Run 级失败选择由 Service 和 Host 决定。
+新主 Run 的持久预算使用 `unboundedCumulativeUsage`，旧活动主 Run 由 `resource_budget.cumulative_limits_removed` 事件幂等升级；Kernel 保留累计实际用量、执行期限和并发校验，并放宽当前 Run 尚未结算的直接模型／工具预留上界。已结束历史 Run 与旧子 grant 不因当前配置改写。资源等待记录仍接受历史 `['artifact_capacity']`，并继续读取旧 `['writer']`、`['tool']`、`['tool', 'shell_invocation']` 记录。Kernel 只验证持久事实、顺序和状态转移；等待重算、超时后的局部 Tool 失败以及 Run 级失败选择由 Service 和 Host 决定。
+
+无累计额度的活动账本用 `externalizedClosedReservations` 标记，只在 State 保留尚未结算的 reservation。Kernel 结算时移出记录；Host 与 Store 在同一 State revision 事务写入完整终态 receipt。旧账本升级时迁出既有终态记录，旧有限账本仍沿原状态格式恢复。已归档身份的幂等重放与父 reservation 血缘由 Host 的 Store receipt 查证，Kernel 不读取数据库。
+
+在 `unboundedCumulativeUsage`／`durationOnlyChildRun` 活动 Run 中，required verification 的 `repair.maxAttempts` 保留事件格式但不作为修复次数门禁；失败或无法确认时继续 `repair_pending`→模型修复→验证，只有通过或用户的结构化 waiver 才能完成。旧主 Run 升级后，因次数耗尽而产生、没有规范诊断的 `budget_exhausted` 可恢复修复；无效规范、缺少校验事实和身份不符仍阻塞。回归见 [Service verification](../../../apps/kite-service/test/runtime/verification.test.ts)。
+
+自动压缩的失败保留原 checkpoint 和 transcript，scheduler 可继续模型请求；失败的可选 `sourceDigest` 进入持久状态，Builtin 用它抑制同一来源的立即重复压缩。新增上下文后可再次尝试，旧记录无 digest 时按当前 Turn 防止重复。低收益、频次和冷却计数不再禁用自动压缩；有效 checkpoint 须有实际正向减少、准确来源与覆盖边界，不要求节省固定 1024 token。PlanDocument 的结构、摘要、身份与完成证据继续验证，正文／步骤／标题长度不再作门禁。Auto 审查的重复与拒绝计数只保留观察语义，授权仍按每次调用的真实策略和能力决定。
 
 ## 与持久化的交接
 

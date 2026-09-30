@@ -56,11 +56,11 @@ export function contextCompactionTerminalNotice(
       case 'stale_context':
         return 'Context changed while compaction was running; retry /compact. The original conversation was preserved.';
       case 'oversized_turn':
-        return 'The conversation exceeds compaction.maxSummaryInputTokens; increase that limit or run /clear. The original conversation was preserved.';
+        return 'The conversation exceeds the selected Provider context window; select a model with sufficient capacity or reduce the request. The original conversation was preserved.';
       case 'empty_summary':
       case 'truncated_summary':
       case 'unexpected_tool_call':
-        return 'The selected model returned an unusable compaction summary; try another model or adjust the compaction summary limits. The original conversation was preserved.';
+        return 'The selected model returned an unusable compaction summary; retry with a model that can return a complete summary. The original conversation was preserved.';
       case 'summary_model_failed':
         return 'The compaction Provider request failed; check the selected model, credentials, connection, and context/output limits, then retry or run /clear. The original conversation was preserved.';
       case 'invalid_candidate':

@@ -21,6 +21,7 @@ import {
   type KernelEvent,
   normalizeAgentEvent,
   normalizeCanonicalTaskCompletionFact,
+  type ResourceReservation,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeEffect,
@@ -54,6 +55,7 @@ import type {
   RuntimeChildTerminalCheckpointMutation,
   RuntimeChildTerminalImportMutation,
   RuntimeCommandCommitEvidence,
+  RuntimeCompletedResourceReservationMutation,
   RuntimeCrossSessionAgentMailMutation,
   RuntimeEventMetadata,
   RuntimeFollowupRunStartMutation,
@@ -344,6 +346,9 @@ export type StateRuntimeChildCreationFailureInput = {
       readonly releaseEvent?: never;
       readonly alreadyReleasedAfterParentCancel: true;
       readonly hasCancelledParentRunProof: (runId: string) => boolean;
+      readonly readCompletedReservation: (
+        reservationId: string,
+      ) => Readonly<Record<string, unknown>> | null;
     }
 );
 
@@ -615,6 +620,11 @@ function assertAgentMailboxFactMutations(
 export interface StateRuntimeSession {
   readonly sessionId: string;
   getState(): Readonly<AgentState>;
+  readCompletedReservation(reservationId: string): Readonly<Record<string, unknown>> | null;
+  findCompletedReservationForInvocation(
+    runId: string,
+    invocationId: string,
+  ): Readonly<Record<string, unknown>> | null;
   waitForRevisionChange?(revision: number, signal?: AbortSignal): Promise<void>;
   /** True only when the injected storage owner has passed Store 8 preflight. */
   supportsRunStorage(): boolean;
@@ -885,6 +895,69 @@ function assertStateRuntimeSessionState(state: AgentState): void {
  * lease boundary around the pure Agent Kernel; it owns no Builtin, Model,
  * Prompt, Tool, or MCP semantics.
  */
+function completedReservationMutations(
+  before: AgentState,
+  after: AgentState,
+  events: readonly KernelEvent[],
+): readonly RuntimeCompletedResourceReservationMutation[] {
+  const pending = new Map<string, ResourceReservation>();
+  const completed = new Map<string, ResourceReservation>();
+  const find = (reservationId: string): ResourceReservation | undefined => {
+    const known = pending.get(reservationId);
+    if (known) return known;
+    if (before.resourceBudget.status === 'active') {
+      const active = before.resourceBudget.reservations[reservationId];
+      if (active) return active;
+    }
+    for (const ledger of Object.values(before.retainedResourceBudgets)) {
+      const retained = ledger.reservations[reservationId];
+      if (retained) return retained;
+    }
+    return undefined;
+  };
+  for (const event of events) {
+    if (event.type === 'resource_budget.reserved') {
+      pending.set(event.reservation.reservationId, event.reservation);
+    } else if (event.type === 'resource_budget.bounded_replaced') {
+      const released = {
+        ...find(event.reservationId)!,
+        state: 'released' as const,
+      };
+      pending.set(event.reservationId, released);
+      completed.set(event.reservationId, released);
+      pending.set(event.turnReservation.reservationId, event.turnReservation);
+      pending.set(event.replacement.reservationId, event.replacement);
+    } else if (event.type === 'resource_budget.reconciled') {
+      const previous = find(event.reservationId);
+      if (previous)
+        completed.set(event.reservationId, {
+          ...previous,
+          actual: event.actual,
+          state: 'reconciled',
+        });
+    } else if (event.type === 'resource_budget.released') {
+      const previous = find(event.reservationId);
+      if (previous) completed.set(event.reservationId, { ...previous, state: 'released' });
+    } else if (
+      event.type === 'resource_budget.cumulative_limits_removed' &&
+      before.resourceBudget.status === 'active'
+    ) {
+      for (const reservation of Object.values(before.resourceBudget.reservations)) {
+        if (reservation.state === 'reconciled' || reservation.state === 'released')
+          completed.set(reservation.reservationId, reservation);
+      }
+    }
+  }
+  const remaining = (reservation: ResourceReservation): boolean =>
+    (after.resourceBudget.status === 'active' &&
+      after.resourceBudget.reservations[reservation.reservationId] !== undefined) ||
+    after.retainedResourceBudgets[reservation.runId]?.reservations[reservation.reservationId] !==
+      undefined;
+  return [...completed.values()]
+    .filter((reservation) => !remaining(reservation))
+    .map((reservation) => ({ reservation }));
+}
+
 class StateRuntimeSessionImpl implements StateRuntimeSession {
   readonly sessionId: string;
   readonly #services: RuntimeHostExecutionServices<KernelEvent, AgentState>;
@@ -949,6 +1022,23 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
 
   getState(): Readonly<AgentState> {
     return this.#state;
+  }
+  readCompletedReservation(reservationId: string): Readonly<Record<string, unknown>> | null {
+    return (
+      this.#services.completedResourceReservations?.lookup(this.sessionId, reservationId) ?? null
+    );
+  }
+  findCompletedReservationForInvocation(
+    runId: string,
+    invocationId: string,
+  ): Readonly<Record<string, unknown>> | null {
+    return (
+      this.#services.completedResourceReservations?.findNonReleasedInvocation(
+        this.sessionId,
+        runId,
+        invocationId,
+      ) ?? null
+    );
   }
 
   waitForRevisionChange(revision: number, signal?: AbortSignal): Promise<void> {
@@ -1319,9 +1409,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const reservation = fundingBudgetForRun(this.#state, link?.fundingRunId ?? '')?.reservations[
       link?.delegatedReservationId ?? ''
     ];
+    const alreadyReleased = input.alreadyReleasedAfterParentCancel === true;
+    const released =
+      alreadyReleased && link
+        ? (reservation ?? input.readCompletedReservation(link.delegatedReservationId))
+        : reservation;
     const artifact = input.readFailureArtifact(failure.resultRef, failure.childInvocationId);
     const cancelled = failure.type === 'subagent.child_pre_dispatch_cancelled';
-    const alreadyReleased = input.alreadyReleasedAfterParentCancel === true;
     const receiptDigest = cancelled ? failure.terminalReceiptDigest : failure.failureReceiptDigest;
     if (
       !link ||
@@ -1335,7 +1429,11 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         ? !cancelled ||
           input.mode !== 'created_unactivated' ||
           input.hasCancelledParentRunProof?.(link.originRunId) !== true ||
-          reservation?.state !== 'released'
+          released?.state !== 'released' ||
+          released.reservationId !== link.delegatedReservationId ||
+          released.runId !== link.fundingRunId ||
+          released.invocationId !== `child-allotment:${link.childThreadId}` ||
+          released.resourceKind !== 'subagent'
         : (reservation?.state !== 'reserved' && reservation?.state !== 'queued') ||
           input.releaseEvent?.reservationId !== link.delegatedReservationId) ||
       receiptDigest !== failure.resultRef.integrityIdentifier ||
@@ -2660,6 +2758,43 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       throw new Error('Agent mail facts require exactly one private Store mutation authority.');
     const previousState = this.#state;
     assertStateRuntimeSessionState(previousState);
+    const completedStore = this.#services.completedResourceReservations;
+    for (const event of preparedEvents) {
+      if (event.type === 'resource_budget.reserved') {
+        const parentId = event.reservation.parentReservationId;
+        if (
+          parentId &&
+          previousState.resourceBudget.status === 'active' &&
+          !previousState.resourceBudget.reservations[parentId]
+        ) {
+          const parent = completedStore?.lookup(this.sessionId, parentId);
+          if (!parent || parent.runId !== event.reservation.runId)
+            throw new Error('Parent reservation has no durable same-run receipt.');
+        }
+      }
+      if (event.type !== 'resource_budget.reconciled' && event.type !== 'resource_budget.released')
+        continue;
+      const active =
+        previousState.resourceBudget.status === 'active'
+          ? previousState.resourceBudget.reservations[event.reservationId]
+          : undefined;
+      const retained = Object.values(previousState.retainedResourceBudgets).find(
+        (ledger) => ledger.reservations[event.reservationId],
+      )?.reservations[event.reservationId];
+      if (active || retained) continue;
+      const receipt = completedStore?.lookup(this.sessionId, event.reservationId);
+      const matching =
+        receipt &&
+        receipt.state ===
+          (event.type === 'resource_budget.reconciled' ? 'reconciled' : 'released') &&
+        (event.type === 'resource_budget.released' ||
+          JSON.stringify(receipt.actual) === JSON.stringify(event.actual));
+      if (!matching) throw new Error('Terminal reservation replay lacks matching durable receipt.');
+      if (preparedEvents.length !== 1)
+        throw new Error('Archived reservation replay must be a single-event batch.');
+      this.#lastAppliedEvents = [];
+      return { events: [] };
+    }
     if (agentMailboxMutations?.some((mutation) => mutation.kind === 'accept_mail')) {
       assertAgentMailboxFunding(
         assertAgentMailboxAcceptance(preparedEvents, agentMailboxMutations),
@@ -2697,6 +2832,12 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       this.#lastAppliedEvents = [];
       throw new Error(`Runtime State transition rejected: ${decision.code}.`);
     }
+    if (
+      decision.nextState.resourceBudget.status === 'active' &&
+      decision.nextState.resourceBudget.externalizedClosedReservations === true &&
+      !this.#services.completedResourceReservations
+    )
+      throw new Error('Externalized reservations require the durable receipt Store.');
     if (agentMailboxMutations)
       assertAgentMailboxFactMutations(decision.events, agentMailboxMutations);
     assertAgentStateInvariants(decision.nextState);
@@ -2732,6 +2873,13 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
     const receipt = receiptEvidence
       ? createRuntimeStoredCommandReceipt(receiptEvidence, decision.nextState.revision)
       : undefined;
+    const completedResourceReservations = completedReservationMutations(
+      previousState,
+      decision.nextState,
+      decision.events,
+    );
+    if (completedResourceReservations.length > 0 && !this.#services.completedResourceReservations)
+      throw new Error('Terminal reservation receipt Store is unavailable.');
     const input: RuntimeTransactionInput<KernelEvent, AgentState> = {
       sessionId: this.sessionId,
       events: decision.events,
@@ -2740,6 +2888,7 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
       expectedRestoreBoundary: this.#restoreBoundary(),
       ...(receipt ? { commandReceipt: receipt } : {}),
       ...(runCommit ? { runMutation: runCommit.mutation } : {}),
+      ...(completedResourceReservations.length > 0 ? { completedResourceReservations } : {}),
       ...(sessionModelRoute === undefined ? {} : { sessionModelRoute }),
       ...(agentMailboxMutations ? { agentMailboxMutations } : {}),
       ...(childSessionIntent ? { childSessionIntent } : {}),
@@ -3124,8 +3273,9 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
           report.parentReservationId !== undefined ||
           report.executableUpperBound.source !== 'versioned_upper_bound' ||
           report.executableUpperBound.counters.modelRequests !== 1 ||
-          report.executableUpperBound.counters.inputTokens < 1 ||
-          report.executableUpperBound.counters.outputTokens < 1 ||
+          (report.executableUpperBound.unboundedModelTokens !== true &&
+            (report.executableUpperBound.counters.inputTokens < 1 ||
+              report.executableUpperBound.counters.outputTokens < 1)) ||
           report.executableUpperBound.gauges.activeSubagents !== 0 ||
           report.executableUpperBound.gauges.activeWriters !== 0)) ||
       tool.name !== 'task' ||
@@ -3146,8 +3296,9 @@ class StateRuntimeSessionImpl implements StateRuntimeSession {
         events.indexOf(grant) < events.indexOf(intent) &&
         events.indexOf(intent) < events.indexOf(tool)
       )
-    )
+    ) {
       throw new Error('Child Session intent and Task receipt are not exact.');
+    }
     const projected = events.reduce((state, event) => {
       const occurredAt = this.#eventTimestamp();
       return reduceAgentState(

@@ -124,10 +124,14 @@ async function exerciseChildInputAdmission(durationOnlyChildRun: boolean): Promi
     const ceiling = Math.floor(estimate * 1.5);
     expect(ceiling).toBeGreaterThanOrEqual(estimate);
     expect(ceiling).toBeLessThan(estimate * 2);
+    const { externalizedClosedReservations: _marker, ...legacyBudget } = active.resourceBudget;
     const state: RuntimeState = {
       ...childState,
       resourceBudget: {
-        ...active.resourceBudget,
+        ...legacyBudget,
+        // This root-test harness uses the legacy SQLite adapter without the
+        // durable completed-reservation port. Exercise the duration-only
+        // admission policy in its retained-reservation compatibility mode.
         budget: {
           ...active.resourceBudget.budget,
           ...(durationOnlyChildRun ? {} : { maxRunInputTokens: ceiling }),

@@ -79,7 +79,13 @@ function fixture(created: boolean, activated = false, releasedAfterCancel = fals
     },
     retainedResourceBudgets: {
       'parent-run': {
-        reservations: { delegated: { state: releasedAfterCancel ? 'released' : 'reserved' } },
+        reservations: {
+          delegated: {
+            reservationId: 'delegated',
+            runId: 'parent-run',
+            state: releasedAfterCancel ? 'released' : 'reserved',
+          },
+        },
       },
     },
     ...(releasedAfterCancel
@@ -119,13 +125,17 @@ function fixture(created: boolean, activated = false, releasedAfterCancel = fals
   const proof = created
     ? { childRevision: activated ? 5 : 0, ownerStatus: 'idle' as const, cleanupConfirmed: true }
     : null;
-  const call = (overrides: Record<string, unknown> = {}) =>
+  const call = (
+    overrides: Record<string, unknown> = {},
+    completed?: Readonly<Record<string, unknown>>,
+  ) =>
     settleAcceptedChildCreationFailure({
       parentState,
       childThreadId,
       parentOwnerKey: 'owner',
       readIntent: () => ({ ...intent, ...overrides }) as never,
       readPreDispatchChildProof: () => proof,
+      readCompletedReservation: () => completed ?? null,
       artifacts,
       ...(releasedAfterCancel
         ? {
@@ -171,6 +181,19 @@ test('user-cancelled, already released revision-zero child settles without a sec
     state: 'reserved',
   });
   expect(() => f.call()).toThrow('exact parent claim');
+});
+
+test('user-cancelled child accepts only its exact archived released funding proof', () => {
+  const f = fixture(true, false, true);
+  delete (
+    f.parentState.retainedResourceBudgets['parent-run']!.reservations as Record<string, unknown>
+  ).delegated;
+  const proof = { reservationId: 'delegated', runId: 'parent-run', state: 'released' };
+  expect(f.call({}, proof).map((event) => event.type)).toEqual([
+    'subagent.child_pre_dispatch_cancelled',
+    'subagent.background_result_persisted',
+  ]);
+  expect(() => f.call({}, { ...proof, runId: 'other-run' })).toThrow('exact parent claim');
 });
 
 test.each([false, true])('failure receipt selects the Store CAS mode for created=%p', (created) => {

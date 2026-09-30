@@ -219,6 +219,24 @@ test('one Runtime Run waits for required background work, accepts steering, and 
     const run = waiting.projection.session.currentRun;
     expect(run?.runId).toBeDefined();
     expect(run?.activeTurnId).toBeDefined();
+    const database = new Database(join(workspace, 'kite-session.sqlite'), { readonly: true });
+    const configured = database
+      .query<{ event_json: string }, [string]>(
+        'SELECT event_json FROM runtime_events WHERE session_id = ? ORDER BY sequence',
+      )
+      .all(sessionId)
+      .map(
+        (row) => JSON.parse(row.event_json) as { type?: string; budget?: Record<string, unknown> },
+      )
+      .find((event) => event.type === 'resource_budget.configured');
+    database.close();
+    expect(configured?.budget).toMatchObject({
+      unboundedCumulativeUsage: true,
+      maxTurns: 0,
+      maxModelRequests: 0,
+      maxToolInvocations: 0,
+      maxArtifactBytes: 0,
+    });
     await bounded(childRequestStarted.promise, 'child model request start');
     expect(parentRequest).toBe(3);
     expect(model.getRequestCount()).toBe(4);

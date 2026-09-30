@@ -15,14 +15,16 @@ import {
   agentApiBackgroundExecutionPageSchema,
   agentApiCheckpointPageSchema,
   agentApiCheckpointPreviewSchema,
+  agentApiCompleteModelContextSchema,
   agentApiHistoryPageSchema,
   agentApiLogPageSchema,
-  agentApiModelContextSchema,
+  agentApiModelContextPageSchema,
   agentApiProblemSchema,
   agentApiServerInfoSchema,
   agentApiSessionPageSchema,
   agentApiSessionSchema,
   agentApiWorkspacePageSchema,
+  assertSameAgentApiJsonShape,
   decodeAgentApiResponse,
 } from '@kite-ai/agent-api-contract';
 
@@ -58,7 +60,7 @@ export interface AgentApiBrowserClient {
   getSession(sessionId: string, signal?: AbortSignal): Promise<AgentApiSession>;
   listBackgroundExecutions(
     sessionId: string,
-    signal?: AbortSignal,
+    options?: AgentApiPageOptions,
   ): Promise<AgentApiBackgroundExecutionPage>;
   listHistory(
     sessionId: string,
@@ -93,11 +95,64 @@ export class AgentApiClientError extends Error {
   }
 }
 
+class ModelContextReadQueue {
+  #running = 0;
+  readonly #pending: {
+    start: () => void;
+    signal?: AbortSignal;
+    reject: (error: unknown) => void;
+    onAbort: () => void;
+  }[] = [];
+
+  run<Result>(signal: AbortSignal | undefined, read: () => Promise<Result>): Promise<Result> {
+    if (signal?.aborted) return Promise.reject(signal.reason);
+    return new Promise<Result>((resolve, reject) => {
+      const job = {
+        signal,
+        reject,
+        onAbort: () => {
+          const index = this.#pending.indexOf(job);
+          if (index < 0) return;
+          this.#pending.splice(index, 1);
+          reject(signal?.reason);
+        },
+        start: () => {
+          signal?.removeEventListener('abort', job.onAbort);
+          this.#running += 1;
+          void read()
+            .then(resolve, reject)
+            .finally(() => {
+              this.#running -= 1;
+              this.#drain();
+            });
+        },
+      };
+      this.#pending.push(job);
+      signal?.addEventListener('abort', job.onAbort, { once: true });
+      this.#drain();
+    });
+  }
+
+  #drain(): void {
+    while (this.#running < 4) {
+      const next = this.#pending.shift();
+      if (!next) return;
+      if (next.signal?.aborted) {
+        next.signal.removeEventListener('abort', next.onAbort);
+        next.reject(next.signal.reason);
+        continue;
+      }
+      next.start();
+    }
+  }
+}
+
 export function createAgentApiBrowserClient(
   options: AgentApiBrowserClientOptions = {},
 ): AgentApiBrowserClient {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const modelContextQueue = new ModelContextReadQueue();
 
   const client: AgentApiBrowserClient = {
     async refreshBrowserSession(signal) {
@@ -124,11 +179,11 @@ export function createAgentApiBrowserClient(
         method: 'GET',
         signal,
       }),
-    listBackgroundExecutions: (sessionId, signal) =>
+    listBackgroundExecutions: (sessionId, page = {}) =>
       requestJson(
-        `/v1/sessions/${identifier(sessionId)}/background-executions`,
+        `/v1/sessions/${identifier(sessionId)}/background-executions${pageQuery(page)}`,
         agentApiBackgroundExecutionPageSchema,
-        { method: 'GET', signal },
+        { method: 'GET', signal: page.signal },
       ),
     listHistory: (sessionId, page = {}) =>
       requestJson(
@@ -143,11 +198,76 @@ export function createAgentApiBrowserClient(
         { method: 'GET', signal: page.signal },
       ),
     getModelContext: (sessionId, invocationId, signal) =>
-      requestJson(
-        `/v1/sessions/${identifier(sessionId)}/model-invocations/${identifier(invocationId)}/context`,
-        agentApiModelContextSchema,
-        { method: 'GET', signal },
-      ),
+      modelContextQueue.run(signal, async () => {
+        const path = `/v1/sessions/${identifier(sessionId)}/model-invocations/${identifier(invocationId)}/context`;
+        const chunks: Uint8Array[] = [];
+        const cursors = new Set<string>();
+        let cursor: string | undefined;
+        let snapshotId: string | undefined;
+        let sha256: string | undefined;
+        let sequence: number | undefined;
+        let totalBytes: number | undefined;
+        let offset = 0;
+        for (;;) {
+          if (signal?.aborted) throw signal.reason;
+          const page = await requestJson(
+            `${path}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+            agentApiModelContextPageSchema,
+            { method: 'GET', signal },
+          );
+          if (
+            page.session_id !== sessionId ||
+            page.invocation_id !== invocationId ||
+            page.offset !== offset ||
+            (snapshotId !== undefined &&
+              (page.snapshot_id !== snapshotId ||
+                page.sha256 !== sha256 ||
+                page.sequence !== sequence ||
+                page.total_bytes !== totalBytes))
+          ) {
+            throw new AgentApiClientError(409);
+          }
+          snapshotId = page.snapshot_id;
+          sha256 = page.sha256;
+          sequence = page.sequence;
+          totalBytes = page.total_bytes;
+          const bytes = Uint8Array.from(atob(page.payload_base64), (character) =>
+            character.charCodeAt(0),
+          );
+          if (bytes.length === 0 || offset + bytes.length > page.total_bytes) {
+            throw new AgentApiClientError(409);
+          }
+          chunks.push(bytes);
+          offset += bytes.length;
+          if (!page.next_cursor) break;
+          if (cursors.has(page.next_cursor)) throw new AgentApiClientError(409);
+          cursors.add(page.next_cursor);
+          cursor = page.next_cursor;
+        }
+        if (offset !== totalBytes || sha256 === undefined) throw new AgentApiClientError(409);
+        const complete = new Uint8Array(offset);
+        let copied = 0;
+        for (const chunk of chunks) {
+          complete.set(chunk, copied);
+          copied += chunk.length;
+        }
+        const digest = await globalThis.crypto.subtle.digest('SHA-256', complete);
+        if (signal?.aborted) throw signal.reason;
+        const actual = Array.from(new Uint8Array(digest), (byte) =>
+          byte.toString(16).padStart(2, '0'),
+        ).join('');
+        if (actual !== sha256) throw new AgentApiClientError(409);
+        try {
+          const body: unknown = JSON.parse(
+            new TextDecoder('utf-8', { fatal: true }).decode(complete),
+          );
+          const parsed = agentApiCompleteModelContextSchema.parse(body);
+          assertSameAgentApiJsonShape(body, parsed, 'model context');
+          return parsed;
+        } catch {
+          throw new AgentApiClientError(409);
+        }
+      }),
     listCheckpoints: (sessionId, page = {}) =>
       requestJson(
         `/v1/sessions/${identifier(sessionId)}/checkpoints${pageQuery(page)}`,

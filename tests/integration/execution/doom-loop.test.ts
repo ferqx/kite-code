@@ -58,11 +58,28 @@ describe('buildToolFingerprint', () => {
     expect(buildToolFingerprint(a)).not.toBe(buildToolFingerprint(b));
   });
 
-  test('shell_execute uses command+cwd, write_file uses path — different fingerprint structures', () => {
+  test('tool identity and complete arguments produce distinct fingerprints', () => {
     const shell = makeRequest('shell_execute', { command: 'echo hi', cwd: '/tmp' });
     const write = makeRequest('write_file', { path: 'echo hi' });
     // Different tool name → different fingerprint (even if args overlap)
     expect(buildToolFingerprint(shell)).not.toBe(buildToolFingerprint(write));
+  });
+
+  test('different edits and writes to the same path have distinct identities', () => {
+    expect(
+      buildToolFingerprint(makeRequest('write_file', { path: 'same.txt', content: 'v1' })),
+    ).not.toBe(
+      buildToolFingerprint(makeRequest('write_file', { path: 'same.txt', content: 'v2' })),
+    );
+    expect(
+      buildToolFingerprint(
+        makeRequest('edit_file', { path: 'same.txt', old_string: 'a', new_string: 'b' }),
+      ),
+    ).not.toBe(
+      buildToolFingerprint(
+        makeRequest('edit_file', { path: 'same.txt', old_string: 'b', new_string: 'c' }),
+      ),
+    );
   });
 
   test('non-mutation tools include canonical full args without depending on key order', () => {
@@ -85,16 +102,16 @@ describe('checkDoomLoop', () => {
     expect(result.fingerprint).toBeDefined();
   });
 
-  test('windowed repeats ≥ threshold → blocked', () => {
+  test('repeated calls remain eligible for their own safety review', () => {
     const req = makeRequest('write_file', { path: 'test.txt', content: 'v1' });
     const fp = buildToolFingerprint(req);
     const tracker: Record<string, DoomLoopTrackerEntry> = {
       [fp]: { count: 3, lastSeenAt: Date.now() },
     };
     const result = checkDoomLoop(tracker, req, 3, 60_000);
-    expect(result.blocked).toBe(true);
+    expect(result.blocked).toBe(false);
     expect(result.count).toBe(3);
-    expect(result.reason).toContain('Doom loop detected');
+    expect(result.reason).toBeUndefined();
   });
 
   test('repeat outside window → not blocked (counter resets)', () => {

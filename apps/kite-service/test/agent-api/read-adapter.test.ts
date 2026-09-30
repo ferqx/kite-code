@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { AGENT_API_LIMITS } from '@kite-ai/agent-api-contract';
 import type { RuntimeLogEventEntry, RuntimeQuery } from '@kite-ai/runtime-contract';
 import {
   type AgentApiReadContext,
   dispatchAgentApiReadRequest,
+  disposeModelContextPageSnapshots,
 } from '../../src/agent-api/read-adapter';
 
 const sessionProjection = {
@@ -32,6 +34,8 @@ function fixture(
     readonly directorySessionName?: string;
     readonly events?: readonly RuntimeLogEventEntry[];
     readonly projectionDisplayName?: string;
+    readonly backgroundExecutionCount?: number;
+    readonly backgroundGeneration?: string;
   } = {},
 ) {
   const queries: RuntimeQuery[] = [];
@@ -110,28 +114,35 @@ function fixture(
           : { status: 'not_found', queryType: query.type, code: 'checkpoint_unavailable' };
       }
       if (query.type === 'list_background_executions') {
+        const executions = Array.from(
+          { length: options.backgroundExecutionCount ?? 1 },
+          (_, index) => ({
+            executionId: `shell-${index + 1}`,
+            sessionId: query.sessionId,
+            sessionRevision: 7,
+            kind: 'service' as const,
+            status: 'running' as const,
+            ownerGeneration: 'owner-1',
+            revision: 3,
+            cleanupConfirmed: false,
+            cursor: 7,
+          }),
+        );
+        const offset = query.cursor ?? 0;
+        const selected = executions.slice(offset, offset + (query.limit ?? executions.length));
         return {
           status: 'ok',
           queryType: query.type,
           backgroundSnapshot: {
             sessionId: query.sessionId,
             sessionRevision: 7,
-            aggregateGeneration: 'aggregate-1',
+            aggregateGeneration: options.backgroundGeneration ?? 'aggregate-1',
             watermark: 3,
-            executions: [
-              {
-                executionId: 'shell-1',
-                sessionId: query.sessionId,
-                sessionRevision: 7,
-                kind: 'service',
-                status: 'running',
-                ownerGeneration: 'owner-1',
-                revision: 3,
-                cleanupConfirmed: false,
-                cursor: 7,
-              },
-            ],
+            executions: selected,
           },
+          ...(offset + selected.length < executions.length
+            ? { nextBackgroundCursor: offset + selected.length }
+            : {}),
         };
       }
       return { status: 'rejected', queryType: query.type, code: 'unsupported' };
@@ -553,49 +564,115 @@ describe('Agent API bounded read adapter', () => {
       result: {
         ok: true,
         body: {
-          schema: 'kite.agent-api.model-context.v1',
+          schema: 'kite.agent-api.model-context-page.v1',
           session_id: 'session-1',
           invocation_id: 'invocation-1',
           sequence: 3,
-          purpose: 'primary_agent',
-          model: { provider: 'openai-compatible', name: 'model-1' },
-          system_prompt: {
-            text: 'You are Kite.\n\nUse the available tools carefully.',
-            truncated: false,
-          },
-          messages: [
-            {
-              index: 0,
-              role: 'user',
-              parts: [{ type: 'text', text: 'Inspect this workspace.', truncated: false }],
-            },
-            {
-              index: 1,
-              role: 'assistant',
-              parts: [
-                {
-                  type: 'tool_call',
-                  tool_call_id: 'tool-call-1',
-                  tool_name: 'read_file',
-                  input_json: '{"path":"README.md"}',
-                  truncated: false,
-                },
-              ],
-            },
-          ],
-          tools: [
-            {
-              name: 'read_file',
-              description: 'Read a file.',
-              input_schema_json: '{"type":"object"}',
-              truncated: false,
-            },
-          ],
-          request_settings: { message_count: 2, tool_count: 1 },
         },
       },
     });
+    if (!result.matched || !result.result.ok) throw new Error('Expected context page.');
+    const page = result.result.body as { payload_base64: string };
+    const context = JSON.parse(Buffer.from(page.payload_base64, 'base64').toString('utf8'));
+    expect(context).toMatchObject({
+      schema: 'kite.agent-api.model-context.v1',
+      purpose: 'primary_agent',
+      model: { provider: 'openai-compatible', name: 'model-1' },
+      system_prompt: {
+        text: 'You are Kite.\n\nUse the available tools carefully.',
+        truncated: false,
+      },
+      messages: [
+        { index: 0, role: 'user' },
+        { index: 1, role: 'assistant' },
+      ],
+      tools: [{ name: 'read_file', input_schema_json: '{"type":"object"}' }],
+      request_settings: { message_count: 2, tool_count: 1 },
+    });
     expect(JSON.stringify(result)).not.toMatch(/artifact|integrity|credential|api[_-]?key/iu);
+  });
+
+  test('pages complete large Model Context without dropping messages, tools or field tails', async () => {
+    const f = fixture();
+    const original = f.context.modelContexts!.get('session-1', 'invocation-1')!;
+    const source = {
+      ...original,
+      systemPrompt: `System start ${'指令'.repeat(200_000)} system end`,
+      messages: Array.from({ length: 211 }, (_, index) => ({
+        role: 'user' as const,
+        parts: [{ type: 'text' as const, text: `message-${index}-${'内容'.repeat(1_000)}` }],
+      })),
+      tools: Array.from({ length: 213 }, (_, index) => ({
+        name: `tool-${index}`,
+        description: `description-${index}-${'说明'.repeat(1_000)}`,
+        inputSchemaJson: `{"name":"tool-${index}","body":"${'x'.repeat(8_000)}"}`,
+      })),
+    };
+    const context: AgentApiReadContext = {
+      ...f.context,
+      modelContexts: { get: () => source },
+    };
+    const pages: Buffer[] = [];
+    let cursor: string | undefined;
+    let firstCursor: string | undefined;
+    let digest: string | undefined;
+    let totalBytes = 0;
+    let offset = 0;
+    try {
+      do {
+        const result = await dispatch(
+          context,
+          `/v1/sessions/session-1/model-invocations/invocation-1/context${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+        );
+        if (!result.matched || !result.result.ok) {
+          throw new Error(`Expected context page: ${JSON.stringify(result)}`);
+        }
+        const page = result.result.body as {
+          session_id: string;
+          invocation_id: string;
+          offset: number;
+          total_bytes: number;
+          sha256: string;
+          payload_base64: string;
+          next_cursor?: string;
+        };
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(1_048_576);
+        expect(page.session_id).toBe('session-1');
+        expect(page.invocation_id).toBe('invocation-1');
+        expect(page.offset).toBe(offset);
+        const bytes = Buffer.from(page.payload_base64, 'base64');
+        pages.push(bytes);
+        offset += bytes.length;
+        totalBytes = page.total_bytes;
+        digest = page.sha256;
+        cursor = page.next_cursor;
+        firstCursor ??= cursor;
+      } while (cursor);
+      expect(pages.length).toBeGreaterThan(32);
+      expect(offset).toBe(totalBytes);
+      const complete = Buffer.concat(pages);
+      expect(createHash('sha256').update(complete).digest('hex')).toBe(digest);
+      const projection = JSON.parse(complete.toString('utf8'));
+      expect(projection.system_prompt.text.endsWith(' system end')).toBe(true);
+      expect(projection.system_prompt.truncated).toBe(false);
+      expect(projection.messages).toHaveLength(211);
+      expect(projection.messages[210].parts[0].text.endsWith('内容')).toBe(true);
+      expect(projection.tools).toHaveLength(213);
+      expect(projection.tools[212].input_schema_json.endsWith('"}')).toBe(true);
+      expect(projection.tools[212].description.endsWith('说明')).toBe(true);
+      expect(projection.messages_truncated).toBe(false);
+      expect(projection.tools_truncated).toBe(false);
+      const wrongInvocation = await dispatch(
+        context,
+        `/v1/sessions/session-1/model-invocations/other/context?cursor=${encodeURIComponent(firstCursor!)}`,
+      );
+      expect(wrongInvocation).toMatchObject({
+        matched: true,
+        result: { ok: false, status: 400, code: 'invalid_cursor' },
+      });
+    } finally {
+      disposeModelContextPageSnapshots(context.modelContexts!);
+    }
   });
 
   test('hides Model Context from an Agent bearer read context', async () => {
@@ -768,6 +845,40 @@ describe('Agent API bounded read adapter', () => {
     ).toMatchObject({
       result: { ok: false, status: 404 },
     });
+  });
+
+  test('paginates background executions with a scoped cursor', async () => {
+    const f = fixture({ backgroundExecutionCount: 3 });
+    const first = await dispatch(f.context, '/v1/sessions/session-1/background-executions?limit=2');
+    expect(first).toMatchObject({
+      matched: true,
+      result: {
+        ok: true,
+        body: { items: [{ execution_id: 'shell-1' }, { execution_id: 'shell-2' }] },
+      },
+    });
+    if (!first.matched || !first.result.ok) throw new Error('Missing background page.');
+    const cursor = (first.result.body as { next_cursor?: string }).next_cursor;
+    expect(typeof cursor).toBe('string');
+    const second = await dispatch(
+      f.context,
+      `/v1/sessions/session-1/background-executions?limit=2&cursor=${cursor}`,
+    );
+    expect(second).toMatchObject({
+      matched: true,
+      result: { ok: true, body: { items: [{ execution_id: 'shell-3' }] } },
+    });
+    const queries = f.queries.filter((query) => query.type === 'list_background_executions');
+    expect(queries[0]).not.toHaveProperty('cursor');
+    expect(queries[0]).toMatchObject({ limit: 2 });
+    expect(queries[1]).toMatchObject({ cursor: 2, limit: 2 });
+    const changed = fixture({ backgroundExecutionCount: 3, backgroundGeneration: 'aggregate-2' });
+    expect(
+      await dispatch(
+        changed.context,
+        `/v1/sessions/session-1/background-executions?limit=2&cursor=${cursor}`,
+      ),
+    ).toMatchObject({ result: { ok: false, status: 409, code: 'cursor_invalidated' } });
   });
 
   test('does not register mutation methods or unknown read paths', async () => {

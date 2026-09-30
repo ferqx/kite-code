@@ -83,6 +83,7 @@ export class BuiltinModelEffectCoordinator {
       maxNarrativeTokens: input.maxNarrativeTokens,
       modelContextWindowTokens: input.modelContextWindowTokens,
       modelMaxOutputTokens: input.modelMaxOutputTokens,
+      modelRequestMaxOutputTokens: input.modelRequestMaxOutputTokens,
     });
   }
 }

@@ -83,13 +83,11 @@ execution AbortSignal 会传播给普通模型、compaction、tool/MCP、Subagen
 `turn.aborted(cause=error)`，然后才 abort 执行。Abort 必须唤醒 FIFO permit wait，且之后不能
 产生新的 model/tool dispatch；同一信号也必须唤醒没有后台 effect 的 ask_user、Plan/工具审批、
 Verification 和 Provider action/admission 等交互等待。执行链退出后还必须追加唯一的结构化
-`run.error`：清理已确认时
-failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown reservation 时仍
+`run.error`：到期且清理已确认时使用 failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown reservation 时仍
 保留 `knownExternalEffects=unknown` 和 reconciliation 入口。清理未确认时改为
 failure/reason=`cancel_incomplete`。
 
-普通Tool与Shell不按活动数量取得permit；一次模型响应中通过traits冲突检查的调用直接并行，`maxToolInvocations`
-只限制整轮累计调用数。Resource Budget仍限制Subagent与writer并发，并保留统一deadline、取消和unknown
+普通Tool与Shell不按活动数量取得permit；一次模型响应中通过traits冲突检查的调用直接并行。新主 Run 的 `maxToolInvocations`、模型请求、token、turn 和 Artifact 累计字段只记录兼容占位，不构成终止条件；旧活动 Run 先持久提交 `resource_budget.cumulative_limits_removed`，以同一 Run 身份保留期限、并发和既有使用记录。Resource Budget仍限制Subagent与writer并发，并保留统一deadline、取消和unknown
 reconciliation。生产release restriction不得单独压低Tool/Shell活动并发；这避免少量模型siblings因permit
 排队、唤醒或超时路径永久停在`tool.queued`。整次运行已经到期时，子Agent不能再申请新的模型或工具资源；
 正在等待的Subagent/writer项目由统一取消负责清理。

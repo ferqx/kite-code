@@ -134,6 +134,10 @@ export type RuntimeQuery =
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
       readonly type: 'list_background_executions';
       readonly sessionId: string;
+      /** Zero-based offset in the stable execution-id order. */
+      readonly cursor?: number;
+      /** Maximum entries in this transport page. */
+      readonly limit?: number;
     }
   | {
       readonly schema: typeof RUNTIME_QUERY_SCHEMA_;
@@ -160,6 +164,7 @@ export type RuntimeQueryResult =
       readonly runs?: readonly RuntimeRunProjection[];
       readonly nextRunCursor?: RuntimeRunPageCursor;
       readonly backgroundSnapshot?: RuntimeBackgroundExecutionSnapshot;
+      readonly nextBackgroundCursor?: number;
       readonly backgroundExecution?: RuntimeBackgroundExecutionProjection;
     }
   | {
@@ -189,8 +194,21 @@ export function isRuntimeQuery(value: unknown): value is RuntimeQuery {
     case 'get_session_recovery':
     case 'get_context_status':
     case 'list_checkpoints':
-    case 'list_background_executions':
       return hasExactKeys(value, ['schema', 'type', 'sessionId']) && isIdentifier(value.sessionId);
+    case 'list_background_executions':
+      return (
+        hasExactKeys(value, [
+          'schema',
+          'type',
+          'sessionId',
+          ...(Object.hasOwn(value, 'cursor') ? ['cursor'] : []),
+          ...(Object.hasOwn(value, 'limit') ? ['limit'] : []),
+        ]) &&
+        isIdentifier(value.sessionId) &&
+        (!Object.hasOwn(value, 'cursor') || isNonNegativeSafeInteger(value.cursor)) &&
+        (!Object.hasOwn(value, 'limit') ||
+          (isNonNegativeSafeInteger(value.limit) && value.limit >= 1 && value.limit <= 10_000))
+      );
     case 'get_child_session_projection':
       return (
         hasExactKeys(value, ['schema', 'type', 'sessionId', 'childSessionId']) &&

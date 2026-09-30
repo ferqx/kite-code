@@ -29,6 +29,8 @@
   `aggregateGeneration`只标识组合目录，item的`ownerGeneration`只标识原生执行owner，item的`revision`
   只排序并fence该执行的状态。客户端不得在这些字段之间代换；准确停止同时携带item owner generation与
   execution revision。
+- 后台列表查询可用可选 `cursor`/`limit` 按稳定执行身份读取单页，结果的 `nextBackgroundCursor` 仅指向下一页；
+  每页保留相同目录身份和水位供客户端核对。详情查询按执行 ID 定位旧句柄，不要求把全部历史压入一次响应。
 - 定义private、closed的Run projection、`get_run`/bounded `list_runs` query，以及applied/replayed command receipt上的original
   Run resource；这些DTO不代表Public Agent API route已开放。
 - Session projection schema v2把`activeTask`与current-or-last `currentRun`分开；currentRun携带stable

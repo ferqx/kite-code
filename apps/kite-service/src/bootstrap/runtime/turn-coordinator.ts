@@ -27,11 +27,11 @@ import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
-  LIMITED_RESOURCE_BUDGET_,
   requiredBackgroundTaskIds,
   requiredManagedShellIds,
   runtimeHostStateResolveFailureMode as resolveFailureMode,
   type StateRuntimeEffectExecutor,
+  UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { CHILD_SESSION_TASK_USER_GOAL } from '@kite-ai/runtime-host/storage';
 import {
@@ -637,8 +637,12 @@ export async function* executeRuntimeTurn(
       const budgetRunId = precommittedStart?.turnId;
       const budget = kernel.getState().resourceBudget;
       const configureForNewRun =
-        budgetRunId !== undefined &&
-        (budget.status === 'unconfigured' || budget.runId !== budgetRunId);
+        (budgetRunId !== undefined &&
+          (budget.status === 'unconfigured' || budget.runId !== budgetRunId)) ||
+        (budgetRunId === undefined &&
+          !precommittedChildActivation &&
+          budget.status === 'active' &&
+          kernel.getState().turn.status !== 'active');
       if (budget.status !== 'unconfigured' && !configureForNewRun) {
         if (budget.status !== 'active') {
           const failure = recordRuntimeFailure({
@@ -668,20 +672,34 @@ export async function* executeRuntimeTurn(
           }
           return;
         }
+        if (
+          !kernel.getState().childSessionOrigin &&
+          budget.budget.unboundedCumulativeUsage !== true &&
+          budget.budget.durationOnlyChildRun !== true
+        ) {
+          const event: RuntimeEvent = {
+            type: 'resource_budget.cumulative_limits_removed',
+            runId: budget.runId,
+          };
+          for (const accepted of kernel.processEventBatch([event])) {
+            collector.recordRuntime(accepted);
+            yield accepted;
+          }
+        }
       } else {
         const startedAt = new Date();
         const maxConcurrentSubagents =
           input.config.resources?.maxConcurrentSubagents ??
-          LIMITED_RESOURCE_BUDGET_.maxConcurrentSubagents;
+          UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_.maxConcurrentSubagents;
         const event: RuntimeEvent = {
           type: 'resource_budget.configured',
           runId: budgetRunId ?? randomUUID(),
           startedAt: startedAt.toISOString(),
           deadlineAt: new Date(
-            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_.maxRunDurationMs,
+            startedAt.getTime() + UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_.maxRunDurationMs,
           ).toISOString(),
           budget: {
-            ...LIMITED_RESOURCE_BUDGET_,
+            ...UNBOUNDED_CUMULATIVE_RESOURCE_BUDGET_,
             maxConcurrentSubagents,
             maxConcurrentWriters: maxConcurrentSubagents,
           },

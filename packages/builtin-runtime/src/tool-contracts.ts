@@ -96,10 +96,10 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'text',
       description:
-        'Line-numbered file content with explicit truncation and continuation markers; the complete model-visible result is capped at 64 KiB.',
+        'Line-numbered file content; an explicit line limit includes a continuation marker for the remaining content.',
     },
     constraints:
-      'Workspace-relative, absolute, and home-relative paths are readable without path approval; offset and limit must be positive, omitted limit defaults to 2000 lines, and binary files are not returned as text.',
+      'Workspace-relative, absolute, and home-relative paths are readable without path approval; offset and limit must be positive, omitted limit reads the full remaining file, and binary files are not returned as text.',
     recovery:
       'For ENOENT, locate the file with search_files and retry once with the exact path. For an invalid range, correct offset or limit. Permission or binary failures require user action or an alternative capability, not blind replay.',
   },
@@ -160,23 +160,24 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'text',
       description:
-        'Bounded stdout on success or bounded stderr on failure; a legacy planning deferral reports deferred: true and until_phase: building. Command status, exit code and result metadata remain Runtime-owned.',
+        'Output preview and a managed Shell handle for complete cursor reads, including after exit; a legacy planning deferral reports deferred: true and until_phase: building. Command status, exit code and result metadata remain Runtime-owned.',
     },
     constraints:
-      'The model supplies command plus optional description/timeout_ms only; policy derives effects and exact approval. Commands whose effects cannot be proven require user approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
+      'The model supplies command and optional description, timeout_ms, yield_ms, mode and result_disposition; policy derives effects and exact approval. Service mode and after_turn require their governed Runtime authorization. Commands whose effects cannot be proven require user approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
     recovery:
       'A planning write is deferred until building: do not retry and do not ask for shell approval. Policy/approval denial, timeout, cancellation or unknown effects are never replayed; correct only explicit pre-dispatch argument errors.',
   },
   shell_read: {
-    summary: 'Read bounded output or wait for a managed Shell execution.',
+    summary: 'Read a complete output page or wait for a managed Shell execution.',
     useWhen:
       'Inspect a shell_execute handle. Pass the cursor returned by the previous shell_read to receive only later output; use wait_until terminal when a finite command has no independent work left.',
     returns: {
       format: 'json',
-      description: 'Current status, cursor, bounded output and terminal cleanup facts.',
+      description:
+        'Current status, cursor, complete output page, moreOutput and terminal cleanup facts.',
     },
     constraints:
-      'The handle must belong to the active Runtime scope. Preserve the returned cursor between reads; wait_ms and wait_until are mutually exclusive. Do not poll unchanged output with fixed-interval reads.',
+      'The handle must belong to the active Runtime scope. While moreOutput is true, continue from the returned cursor to read the retained output. wait_ms and wait_until are mutually exclusive. Do not poll unchanged output with fixed-interval reads.',
     recovery:
       'A cancelled read ends only the wait; use shell_stop to terminate the execution. If still running, continue independent work or use one bounded wait for a needed result.',
   },
@@ -198,7 +199,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Locate symbols or text before reading matching files. Prefer this over shell grep/rg and use a path/glob to bound broad searches.',
     returns: {
       format: 'text',
-      description: 'Bounded matching file/line text; zero matches is a successful empty result.',
+      description: 'Complete matching file/line text; zero matches is a successful empty result.',
     },
     constraints:
       'Pattern must be a valid regex; ignored files stay excluded and search is discovery, not file reading.',
@@ -206,11 +207,11 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Treat successful empty output as no match and stop or broaden only with a justified new pattern/scope. Correct invalid regex/path once; do not repeat identical no-match searches.',
   },
   search_files: {
-    summary: 'Find files by bounded name/glob pattern.',
+    summary: 'Find files by name/glob pattern.',
     useWhen: 'Locate an unknown path before read_file. Prefer this over shell find/ls.',
     returns: {
       format: 'text',
-      description: 'Sorted bounded file paths; zero matches is a successful empty result.',
+      description: 'Complete sorted file paths; zero matches is a successful empty result.',
     },
     constraints:
       'Use a meaningful filename fragment or extension rather than a bare workspace-wide wildcard.',
@@ -275,11 +276,10 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'json',
       description:
-        'ok, activation_id, declared path, encoding and bounded content from the governed Skill root.',
+        'ok, activation_id, declared path, encoding and complete content from the governed Skill root.',
       fields: ['ok', 'activation_id', 'path', 'encoding', 'content'],
     },
-    constraints:
-      'Reference must be declared, non-symlink, inside the Skill root and at most 128 KiB.',
+    constraints: 'Reference must be declared, non-symlink and inside the Skill root.',
     recovery:
       'For an unknown reference, inspect the active Skill contract and choose a declared item. Boundary or symlink denial is terminal for that reference.',
   },
@@ -289,7 +289,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Discover resource URIs before read_mcp_resource; this does not invoke dynamic MCP tools.',
     returns: {
       format: 'json',
-      description: 'Bounded provider/resource metadata and stable resource URIs.',
+      description: 'Complete provider/resource metadata and stable resource URIs.',
       fields: ['ok', 'resource_count', 'resources', 'truncated', 'next_step'],
     },
     constraints:
@@ -303,7 +303,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Inspect connected-provider tool availability when metadata discovery is explicitly needed.',
     returns: {
       format: 'json',
-      description: 'Bounded dynamic tool names, descriptions and schema metadata.',
+      description: 'Complete governed provider and tool names, with optional cursor pagination.',
       fields: [
         'ok',
         'configured_provider_count',
@@ -312,9 +312,11 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
         'providers',
         'tools',
         'truncated',
+        'next_cursor',
       ],
     },
-    constraints: 'Listing does not bind, approve or execute a dynamic capability.',
+    constraints:
+      'Listing does not bind, approve or execute a dynamic capability. Omit limit for the complete inventory; an explicit limit uses cursor pagination.',
     recovery:
       'Unavailable providers require user/provider action or an alternate capability; unchanged empty/error results are not retry loops.',
   },
@@ -323,8 +325,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     useWhen: 'Use after list_mcp_resources provides the exact server and URI.',
     returns: {
       format: 'text',
-      description:
-        'Bounded resource content; oversized content is a JSON partial-result envelope with truncation metadata.',
+      description: 'Complete resource content from the governed MCP Provider.',
     },
     constraints: 'Server/URI must match the current resource catalog and network/provider policy.',
     recovery:
@@ -545,10 +546,10 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'text',
       description:
-        'Bounded status/content metadata, cleaned text, links, truncation and fetch timing.',
+        'Extracted document content and status; returns full extracted text unless max_chars is explicitly provided.',
     },
     constraints:
-      'Only public http/https URLs; SSRF, robots, network and size limits are enforced. timeout_ms is bounded.',
+      'Only public http/https URLs; SSRF, robots, network and response-body parsing safety limits are enforced. timeout_ms must be a positive integer.',
     recovery:
       'Do not retry the same 403/robots/unextractable URL; choose another source. Correct 404 URLs, respect 429, and increase timeout once only for a known large public page.',
   },

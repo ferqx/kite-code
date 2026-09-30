@@ -2390,7 +2390,15 @@ test('production executor all-settled waits for a full-authorized sibling when a
     },
   );
   expect(slowFinished).toBe(true);
-  expect(persistedEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  expect(persistedEvents.filter((event) => event.type === 'tool.finished')).toMatchObject([
+    { toolCallId: 'slow' },
+  ]);
+  expect(persistedEvents.filter((event) => event.type === 'tool.failed')).toMatchObject([
+    { toolCallId: 'throwing' },
+  ]);
+  expect(
+    persistedEvents.filter((event) => event.type === 'capability.execution_unknown'),
+  ).toHaveLength(1);
   expect(runtimeState.tools.calls.throwing?.status).toBe('failed');
   expect(runtimeState.tools.calls.slow?.status).toBe('succeeded');
   expect(JSON.stringify(persistedEvents)).not.toContain('private adapter failure');

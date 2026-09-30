@@ -15,9 +15,6 @@ import type { AgentConfig } from '#kite-service/config/index';
 import { runtimeStartTurnDerivedId } from '../turn-command-decision';
 import type { BackgroundSubagentCompletionNotification } from './background-runtime';
 
-/** Existing primary Model retry horizon; after-turn cannot consume past the root deadline. */
-const AFTER_TURN_REPORT_WINDOW_MS_ = 60_000;
-
 export interface AfterTurnContinuationReservation {
   readonly reservationId: string;
   readonly originRunId: string;
@@ -44,10 +41,10 @@ export function planAfterTurnContinuationReservation(input: {
     throw new DescendantResourceAdmissionError('budget_unconfigured');
   }
   const now = input.now ?? Date.now();
-  if (Date.parse(budget.deadlineAt) - now < AFTER_TURN_REPORT_WINDOW_MS_) {
+  if (Date.parse(budget.deadlineAt) <= now) {
     throw new DescendantResourceAdmissionError(
       'budget_exhausted',
-      'After-turn report window does not fit before the original Run deadline.',
+      'The original Run deadline has elapsed.',
     );
   }
   const capabilities = resolveModelCapabilities({

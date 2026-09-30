@@ -611,9 +611,7 @@ function decideMode(
   const acceptEdits = decideAcceptEdits(policy);
   if (context.interactionMode === 'accept_edits') return acceptEdits;
   if (acceptEdits === 'deny' || acceptEdits === 'allow') return acceptEdits;
-  return context.circuitBreakerTripped && context.executionMechanism !== 'shell'
-    ? 'approval'
-    : 'auto_review';
+  return 'auto_review';
 }
 
 function decideAcceptEdits(

@@ -969,7 +969,7 @@ test('already released child settles only with persisted user cancellation and n
     resourceBudget: {
       status: 'active',
       runId: 'run',
-      reservations: { reservation: { state: 'released' } },
+      reservations: { reservation: { ...reservation, runId: 'run', state: 'released' } },
     },
   };
   db.query(`INSERT INTO runtime_snapshots(session_id,schema_version,format_epoch,revision,state_json,event_position,state_checksum,created_at)
@@ -1028,6 +1028,28 @@ test('already released child settles only with persisted user cancellation and n
       turn: { turnId: 'new-run', status: 'active' },
       resourceBudget: { status: 'active', runId: 'new-run', reservations: {} },
       retainedResourceBudgets: { run: parentState.resourceBudget },
+    }),
+  );
+  expect(() =>
+    settleChildCreationFailureInTransaction(db, 'receipt_evidence', failure),
+  ).not.toThrow();
+  db.query(`INSERT INTO runtime_resource_reservation_receipts
+    (session_id,run_id,reservation_id,invocation_id,state,reservation_json,terminal_revision)
+    VALUES ('root','run','reservation',?,'released',?,0)`).run(
+    reservation.invocationId,
+    JSON.stringify(parentState.resourceBudget.reservations.reservation),
+  );
+  db.query("UPDATE runtime_snapshots SET state_json = ? WHERE session_id = 'root'").run(
+    JSON.stringify({
+      ...parentState,
+      resourceBudget: { status: 'active', runId: 'new-run', reservations: {} },
+      retainedResourceBudgets: {
+        run: {
+          ...parentState.resourceBudget,
+          externalizedClosedReservations: true,
+          reservations: {},
+        },
+      },
     }),
   );
   expect(() =>

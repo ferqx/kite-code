@@ -14,6 +14,7 @@ import {
   createZeroResourceUsage,
   fundingBudgetForReservation,
   fundingBudgetForRun,
+  hasUnboundedCumulativeUsage,
   type ResourceBudgetRuntimeState,
   type ResourceUsage,
   reduceResourceBudgetState,
@@ -67,6 +68,8 @@ export function planModelInvocationResource(
     requestedMaxOutputTokens?: number;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
+    /** Store authority for a reconciled Subagent parent removed from active State. */
+    readCompletedReservation?: (reservationId: string) => Readonly<Record<string, unknown>> | null;
     /** Reserved after-turn report budget replaced atomically by this exact Surface. */
     replaceReservationId?: string;
     now?: Date;
@@ -79,9 +82,24 @@ export function planModelInvocationResource(
     );
   }
   const linkedReservationId = input.parentReservationId ?? input.replaceReservationId;
-  const linkedBudget = linkedReservationId
+  let linkedBudget = linkedReservationId
     ? fundingBudgetForReservation(state, linkedReservationId)
     : undefined;
+  const archivedParent =
+    input.parentReservationId && !linkedBudget
+      ? input.readCompletedReservation?.(input.parentReservationId)
+      : null;
+  if (archivedParent && typeof archivedParent.runId === 'string') {
+    const candidate = fundingBudgetForRun(state, archivedParent.runId);
+    if (
+      candidate?.externalizedClosedReservations === true &&
+      archivedParent.reservationId === input.parentReservationId &&
+      archivedParent.resourceKind === 'subagent' &&
+      archivedParent.state === 'reconciled' &&
+      typeof archivedParent.invocationId === 'string'
+    )
+      linkedBudget = candidate;
+  }
   if (linkedReservationId && !linkedBudget)
     throw new DescendantResourceAdmissionError('reconciliation_required');
   if (!linkedBudget && state.resourceBudget.status === 'unconfigured') {
@@ -131,7 +149,7 @@ export function planModelInvocationResource(
     throw new DescendantResourceAdmissionError('reconciliation_required');
   }
   if (input.parentReservationId) {
-    const parent = budget.reservations[input.parentReservationId];
+    const parent = budget.reservations[input.parentReservationId] ?? archivedParent;
     if (
       !parent ||
       (parent.state !== 'dispatch_started' &&
@@ -165,7 +183,7 @@ export function planModelInvocationResource(
     preparationEvents.push(release);
   }
   const committed = committedResourceUsage(budget);
-  const durationOnly = budget.budget.durationOnlyChildRun === true;
+  const durationOnly = hasUnboundedCumulativeUsage(budget.budget);
   const remainingInput = Math.min(
     durationOnly
       ? Number.MAX_SAFE_INTEGER
@@ -419,7 +437,7 @@ function workspacePath(state: RuntimeState, path: string): string | undefined {
 function artifactUpperBound(state: RuntimeState, toolCallId: string): number {
   const call = state.tools.calls[toolCallId];
   if (!call || state.resourceBudget.status !== 'active') return 0;
-  if (state.resourceBudget.budget.durationOnlyChildRun === true && call.name !== 'task') return 0;
+  if (hasUnboundedCumulativeUsage(state.resourceBudget.budget) && call.name !== 'task') return 0;
   const committed = committedResourceUsage(state.resourceBudget);
   const remaining = state.resourceBudget.budget.maxArtifactBytes - committed.counters.artifactBytes;
   if (call.name === 'task') {
@@ -471,14 +489,21 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
   usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
   if (
     state.resourceBudget.status === 'active' &&
-    state.resourceBudget.budget.durationOnlyChildRun === true &&
+    hasUnboundedCumulativeUsage(state.resourceBudget.budget) &&
     state.tools.calls[toolCallId]?.name !== 'task'
   )
     usage.unboundedArtifactBytes = true;
   return usage;
 }
 
-function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): PlannedInvocation[] {
+function plannedInvocations(
+  state: RuntimeState,
+  effect: RuntimeEffect,
+  readCompletedInvocation?: (
+    runId: string,
+    invocationId: string,
+  ) => Readonly<Record<string, unknown>> | null,
+): PlannedInvocation[] {
   // Model-bearing effects reserve from the exact frozen Surface inside
   // ModelInvocationGateway. The runner must not create a second coarse
   // reservation before that Surface exists.
@@ -549,34 +574,49 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
         ? Object.values(state.resourceBudget.reservations).find(
             (reservation) =>
               reservation.invocationId === taskInvocationPrefix &&
+              reservation.resourceKind === resourceKind &&
               reservation.state === 'reconciled',
           )
         : undefined;
-    const completedTaskAttempts =
-      call?.name === 'task' &&
-      state.suspendedSubagents[toolCallId] &&
-      state.resourceBudget.status === 'active'
-        ? Object.values(state.resourceBudget.reservations).filter(
-            (reservation) =>
-              reservation.resourceKind === 'subagent' &&
-              reservation.state === 'reconciled' &&
-              (reservation.invocationId === taskInvocationPrefix ||
-                reservation.invocationId.startsWith(`${taskInvocationPrefix}:resume:`)),
-          ).length
-        : 0;
+    const archivedPreApproval =
+      approvedPending &&
+      !preApprovalReservation &&
+      state.resourceBudget.status === 'active' &&
+      state.resourceBudget.externalizedClosedReservations === true
+        ? readCompletedInvocation?.(state.resourceBudget.runId, taskInvocationPrefix)
+        : null;
+    const hasPriorApprovalAttempt =
+      Boolean(preApprovalReservation) ||
+      (state.resourceBudget.status === 'active' &&
+        archivedPreApproval?.runId === state.resourceBudget.runId &&
+        archivedPreApproval.invocationId === taskInvocationPrefix &&
+        archivedPreApproval.resourceKind === resourceKind &&
+        archivedPreApproval.state === 'reconciled');
+    const suspended = call?.name === 'task' ? state.suspendedSubagents[toolCallId] : undefined;
+    const parent = suspended
+      ? state.capabilities.invocations[suspended.parentInvocationId]
+      : undefined;
+    if (
+      suspended &&
+      (parent?.toolCallId !== toolCallId ||
+        parent.attemptsStarted !== suspended.parentAttempt ||
+        parent.subagentProviderLifecycle?.attempt !== suspended.parentAttempt)
+    )
+      throw new DescendantResourceAdmissionError('reconciliation_required');
+    const completedTaskAttempts = suspended?.parentAttempt ?? 0;
     return [
       {
         invocationId:
           completedTaskAttempts > 0
             ? `${taskInvocationPrefix}:resume:${completedTaskAttempts}`
-            : approvedPending && preApprovalReservation
+            : approvedPending && hasPriorApprovalAttempt
               ? `${taskInvocationPrefix}:approval:${approvedPending.receiptId}`
               : taskInvocationPrefix,
         toolCallId,
         resourceKind,
         requiredPermits:
           state.resourceBudget.status === 'active' &&
-          state.resourceBudget.budget.durationOnlyChildRun === true
+          hasUnboundedCumulativeUsage(state.resourceBudget.budget)
             ? []
             : call?.sideEffect &&
                 ![
@@ -607,6 +647,7 @@ export function createDescendantResourceAdmission(input: {
   state: RuntimeState;
   parentReservationId: string;
   getState?(): Readonly<RuntimeState>;
+  readCompletedReservation?: (reservationId: string) => Readonly<Record<string, unknown>> | null;
   persistEvent(event: RuntimeEvent): Promise<boolean>;
   persistEvents(events: RuntimeEvent[]): Promise<boolean>;
   persistLateResourceReconciliation?(
@@ -756,9 +797,22 @@ export function createDescendantResourceAdmission(input: {
       );
     }
     const currentParent = budget.reservations[parent.reservationId];
+    const archived =
+      !currentParent && budget.externalizedClosedReservations === true
+        ? input.readCompletedReservation?.(parent.reservationId)
+        : null;
     if (
-      currentParent?.resourceKind !== 'subagent' ||
-      (currentParent.state !== 'dispatch_started' && currentParent.state !== 'reconciled')
+      (currentParent?.resourceKind !== 'subagent' ||
+        (currentParent.state !== 'dispatch_started' && currentParent.state !== 'reconciled')) &&
+      !(
+        archived?.reservationId === parent.reservationId &&
+        archived.runId === parent.runId &&
+        archived.invocationId === parent.invocationId &&
+        archived.resourceKind === 'subagent' &&
+        archived.state === 'reconciled' &&
+        JSON.stringify(archived.executableUpperBound) ===
+          JSON.stringify(parent.executableUpperBound)
+      )
     ) {
       throw new DescendantResourceAdmissionError(
         'reconciliation_required',
@@ -1043,14 +1097,12 @@ export function createDescendantResourceAdmission(input: {
     async reserveModel(request) {
       const budget = refreshProjected();
       const committed = committedResourceUsage(budget);
-      const remainingOutput =
-        budget.budget.durationOnlyChildRun === true
-          ? Number.MAX_SAFE_INTEGER
-          : budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
-      const outputTokens =
-        budget.budget.durationOnlyChildRun === true
-          ? request.requestedMaxOutputTokens
-          : Math.min(request.requestedMaxOutputTokens ?? remainingOutput, remainingOutput);
+      const remainingOutput = hasUnboundedCumulativeUsage(budget.budget)
+        ? Number.MAX_SAFE_INTEGER
+        : budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
+      const outputTokens = hasUnboundedCumulativeUsage(budget.budget)
+        ? request.requestedMaxOutputTokens
+        : Math.min(request.requestedMaxOutputTokens ?? remainingOutput, remainingOutput);
       if (outputTokens !== undefined && outputTokens <= 0) {
         throw new DescendantResourceAdmissionError(
           'budget_exhausted',
@@ -1059,7 +1111,7 @@ export function createDescendantResourceAdmission(input: {
       }
       const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.modelRequests = 1;
-      if (budget.budget.durationOnlyChildRun === true) {
+      if (hasUnboundedCumulativeUsage(budget.budget)) {
         usage.unboundedModelTokens = true;
       } else {
         usage.counters.inputTokens = request.inputTokens;
@@ -1078,7 +1130,7 @@ export function createDescendantResourceAdmission(input: {
       const budget = refreshProjected();
       const usage = createZeroResourceUsage('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.toolInvocations = 1;
-      if (budget.budget.durationOnlyChildRun === true) {
+      if (hasUnboundedCumulativeUsage(budget.budget)) {
         usage.unboundedArtifactBytes = true;
       } else {
         const committed = committedResourceUsage(budget);
@@ -1269,8 +1321,12 @@ export function planRuntimeBudgetAdmission(
   state: RuntimeState,
   effect: RuntimeEffect,
   now = new Date(),
+  readCompletedInvocation?: (
+    runId: string,
+    invocationId: string,
+  ) => Readonly<Record<string, unknown>> | null,
 ): RuntimeBudgetAdmissionPlan {
-  const invocations = plannedInvocations(state, effect);
+  const invocations = plannedInvocations(state, effect, readCompletedInvocation);
   if (invocations.length === 0) {
     return {
       status: 'not_required',
@@ -1591,6 +1647,7 @@ export function reconciliationEventsForReservations(
   state: RuntimeState,
   reservationIds: string[],
   terminalEvents: RuntimeEvent[] = [],
+  readCompletedReservation?: (reservationId: string) => Readonly<Record<string, unknown>> | null,
 ): Array<Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>> {
   return reservationIds
     .filter(
@@ -1606,14 +1663,29 @@ export function reconciliationEventsForReservations(
       const reservation = fundingBudgetForReservation(state, reservationId)?.reservations[
         reservationId
       ];
-      if (!reservation)
+      if (!reservation) {
+        const receipt = readCompletedReservation?.(reservationId);
+        const runId = receipt?.runId;
+        if (
+          receipt?.reservationId === reservationId &&
+          (receipt.state === 'reconciled' || receipt.state === 'released') &&
+          typeof runId === 'string' &&
+          ((state.resourceBudget.status === 'active' && state.resourceBudget.runId === runId) ||
+            state.retainedResourceBudgets[runId] !== undefined)
+        )
+          return undefined;
         throw new Error(`Missing reservation ${reservationId} during reconciliation.`);
+      }
       return {
         type: 'resource_budget.reconciled' as const,
         reservationId,
         actual: actualUsageForReservation(state, reservation, terminalEvents),
       };
     })
+    .filter(
+      (event): event is Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }> =>
+        event !== undefined,
+    )
     .filter((event) => {
       const reservation = fundingBudgetForReservation(state, event.reservationId)?.reservations[
         event.reservationId

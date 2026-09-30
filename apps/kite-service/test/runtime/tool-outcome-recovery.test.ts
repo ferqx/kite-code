@@ -886,7 +886,7 @@ describe('durable recovery journal', () => {
     }
   });
 
-  test('prunes the 129th record with its recovery lineage intact', () => {
+  test('keeps the 129th unresolved record with its recovery lineage intact', () => {
     let journal = createToolRecoveryJournal(TEST_RECOVERY_IDENTITY_KEY);
     for (let index = 0; index < 127; index += 1) {
       journal = recordRecoveryFailure(journal, {
@@ -925,7 +925,7 @@ describe('durable recovery journal', () => {
     });
     const childId = journal.order.at(-1)!;
 
-    expect(journal.order).toHaveLength(128);
+    expect(journal.order).toHaveLength(129);
     expect(journal.failures[parentId]).toBeDefined();
     expect(journal.failures[childId]?.outcome.lineage?.recoveryOf).toBe(parentId);
     expect(
@@ -2413,8 +2413,8 @@ describe('ToolOutcome Runtime event integration', () => {
         journal: child,
       }),
     ).not.toThrow();
-    expect(kernel.getState().toolRecovery.order).toHaveLength(128);
-    expect(kernel.getState().toolRecovery.failures[historicalRecoveryOf]).toBeUndefined();
+    expect(kernel.getState().toolRecovery.order).toHaveLength(129);
+    expect(kernel.getState().toolRecovery.failures[historicalRecoveryOf]).toBeDefined();
     expect(kernel.getState().toolRecovery.failures[parentId]).toBeDefined();
     expect(kernel.getState().toolRecovery.failures[childId]?.outcome.lineage?.recoveryOf).toBe(
       parentId,

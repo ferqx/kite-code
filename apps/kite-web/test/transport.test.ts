@@ -195,6 +195,107 @@ it('coalesces an expired Browser session refresh and retries concurrent reads on
 });
 
 describe('Web REST transport', () => {
+  it('reads every background execution page with a consistent snapshot', async () => {
+    const base = client();
+    const listBackgroundExecutions = vi.fn(
+      async (_sessionId: string, page?: { cursor?: string }) => {
+        const start = page?.cursor === undefined ? 0 : Number(page.cursor);
+        return {
+          schema: 'kite.agent-api.background-execution-page.v1' as const,
+          session_id: 'session-one',
+          session_revision: 7,
+          aggregate_generation: 'aggregate-1',
+          watermark: 4,
+          stale: false,
+          items: Array.from({ length: Math.min(50, 51 - start) }, (_, offset) => ({
+            schema: 'kite.agent-api.background-execution.v1' as const,
+            execution_id: `task-${start + offset}`,
+            owner_generation: 'owner-1',
+            revision: 3,
+            kind: 'subagent' as const,
+            status: 'completed' as const,
+            cleanup_confirmed: true,
+          })),
+          ...(start === 0 ? { next_cursor: '50' } : {}),
+        };
+      },
+    );
+    const transport = createWebRestTransport({
+      client: { ...base, listBackgroundExecutions },
+    });
+    await transport.connect();
+    const snapshot = await transport.loadBackgroundExecutions?.('session-one');
+    expect(snapshot?.executions).toHaveLength(51);
+    expect(snapshot?.executions.at(-1)?.executionId).toBe('task-50');
+    expect(listBackgroundExecutions).toHaveBeenCalledTimes(2);
+    expect(listBackgroundExecutions).toHaveBeenLastCalledWith('session-one', {
+      cursor: '50',
+      limit: 100,
+    });
+  });
+
+  it('reads History beyond 32 pages and rejects cursor loops', async () => {
+    const base = client();
+    const listHistory = vi.fn(async (_sessionId: string, page?: { cursor?: string }) => {
+      const start = page?.cursor === undefined ? 0 : Number(page.cursor);
+      const end = Math.min(start + 200, 6401);
+      return {
+        schema: 'kite.agent-api.history-page.v1' as const,
+        session_id: 'session-one',
+        through_sequence: 6401,
+        items: Array.from({ length: end - start }, (_, offset) => ({
+          schema: 'kite.agent-api.history-item.v1' as const,
+          session_id: 'session-one',
+          sequence: start + offset + 1,
+          public_ordinal: 0,
+          occurred_at: '2026-08-31T00:00:00.000Z',
+          content: {
+            type: 'user.message' as const,
+            message_id: `message-${start + offset}`,
+            text: 'hello',
+          },
+        })),
+        ...(end < 6401 ? { next_cursor: String(end) } : {}),
+      };
+    });
+    const transport = createWebRestTransport({ client: { ...base, listHistory } });
+    await transport.connect();
+    expect((await transport.loadHistory('session-one')).messages).toHaveLength(6401);
+    expect(listHistory).toHaveBeenCalledTimes(33);
+
+    const looping = createWebRestTransport({
+      client: {
+        ...base,
+        listHistory: vi.fn(async () => ({
+          schema: 'kite.agent-api.history-page.v1' as const,
+          session_id: 'session-one',
+          through_sequence: 1,
+          items: [],
+          next_cursor: 'repeat',
+        })),
+      },
+    });
+    await looping.connect();
+    await expect(looping.loadHistory('session-one')).rejects.toMatchObject({
+      reason: 'protocol_error',
+    });
+  });
+
+  it('restarts one expired Model Context snapshot from the same invocation', async () => {
+    const base = client();
+    const getModelContext = vi
+      .fn()
+      .mockRejectedValueOnce(new AgentApiClientError(409))
+      .mockImplementation((sessionId, invocationId) =>
+        base.getModelContext(sessionId, invocationId),
+      );
+    const transport = createWebRestTransport({ client: { ...base, getModelContext } });
+    await transport.connect();
+    const context = await transport.loadModelContext('session-one', 'invocation-one');
+    expect(context.systemPrompt.text).toBe('You are Kite.');
+    expect(getModelContext).toHaveBeenCalledTimes(2);
+  });
+
   it('coalesces each tool lifecycle into one terminal or current message', async () => {
     const api: AgentApiBrowserClient = {
       ...client(),
@@ -361,7 +462,10 @@ it('loads typed background summaries through a read-only GET', async () => {
       { executionId: 'task-1', kind: 'subagent', status: 'completed', cleanupConfirmed: true },
     ],
   });
-  expect(api.listBackgroundExecutions).toHaveBeenCalledWith('session-one');
+  expect(api.listBackgroundExecutions).toHaveBeenCalledWith('session-one', {
+    cursor: undefined,
+    limit: 100,
+  });
 });
 
 function toolLifecycleItem(

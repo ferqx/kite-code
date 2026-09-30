@@ -7,7 +7,6 @@
  * tests and fixtures.
  */
 
-import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite-ai/agent-kernel';
 import { createChatModel, type SupportedChatModel } from '@kite-ai/builtin-runtime/model';
 import { sandboxBackendAvailable } from '@kite-ai/builtin-runtime/sandbox';
@@ -21,7 +20,7 @@ import type { AuthorizedExecutionControl } from '../../apps/kite-service/src/boo
 import type { RuntimeExecutorDependencies } from '../../apps/kite-service/src/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEffectExecutor } from '../../apps/kite-service/src/bootstrap/runtime/state-runtime';
 import { restoreStateHostSessionHarness, type StateHostSessionHarness } from './runtime-host-state';
-import type { TestRuntimeStore } from './runtime-storage';
+import { type TestRuntimeStore, testStateProjectIdentityForWorkspace } from './runtime-storage';
 
 export type TestRuntimeAgentInput = Omit<
   RuntimeTurnInput,
@@ -60,10 +59,7 @@ export async function* runTestRuntimeAgent(
     threadId: input.threadId,
     userId: input.userId,
     workspace: input.workspace,
-    projectId: 'project_test_runtime_agent',
-    canonicalWorkspaceDigest: `sha256:${createHash('sha256')
-      .update(input.workspace)
-      .digest('hex')}`,
+    ...testStateProjectIdentityForWorkspace(input.workspace),
     store,
     recoveryIdentityKey,
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',

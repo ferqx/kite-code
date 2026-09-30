@@ -346,6 +346,9 @@ async function executeAppRuntimeToolsEffectUnchecked(
               state: state as RuntimeState,
               parentReservationId,
               getState: () => (descendantPersistence.getState?.() ?? state) as RuntimeState,
+              ...(executionContext?.readCompletedReservation
+                ? { readCompletedReservation: executionContext.readCompletedReservation }
+                : {}),
               persistEvent: (event) => descendantPersistence.persistEvents([event]),
               persistEvents: descendantPersistence.persistEvents,
               ...(!backgroundTask && executionContext?.persistLateResourceReconciliation

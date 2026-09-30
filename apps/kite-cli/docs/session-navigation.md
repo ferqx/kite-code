@@ -2,7 +2,7 @@
 
 产品预期见[会话操作](../../../docs/handbook/clients/tui/guides/sessions.md)。实现入口为[SessionNavigationAuthority](../src/tui/session-navigation.ts)、[SessionSelector](../src/tui/components/SessionSelector.tsx)及[TUI bootstrap](../src/tui/index.tsx)。
 
-历史读取通过 injected HistoryClient 向前分页取得 closed transcript，再进入与 live 相同的 reducer；subscription replay/gap snapshot 不能替代完整历史。打开历史先等待 typed readiness/recovery，随后才提交 navigation。
+历史读取通过 injected HistoryClient 向前分页取得 closed transcript，再进入与 live 相同的事件投影 reducer；回放只在末尾取得完整 block 序列，不在每个历史事件之后重建未渲染的 Timeline。已加载的 turn 全部保留，不静默截断前 500 轮。subscription replay/gap snapshot 不能替代完整历史。打开历史先等待 typed readiness/recovery，随后才提交 navigation。
 
 会话目录任一页失败都向选择器报告明确错误，不能把已读取部分或空数组冒充完整成功；读取失败不会删除原会话。启动期异步准入的 readiness Promise 在创建时即观察拒绝，避免尚无等待者时导致 TUI 退出，之后等待 readiness 的调用仍接收原错误。真实多页故障验证见[历史分页错误场景](../../../tests/tui-system/scenarios/session-history-page-error.test.ts)。
 

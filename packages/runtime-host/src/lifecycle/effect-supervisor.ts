@@ -1,5 +1,6 @@
 import type {
   CheckpointPort,
+  RuntimeCompletedResourceReservationPort,
   RuntimeRecoveryIdentityPort,
   RuntimeRunStorePort,
   RuntimeStorage,
@@ -48,6 +49,7 @@ export interface RuntimeHostExecutionServices<Event = unknown, State = unknown> 
   readonly checkpoints: CheckpointPort<State>;
   readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
   readonly runs?: RuntimeRunStorePort;
+  readonly completedResourceReservations?: RuntimeCompletedResourceReservationPort;
 }
 
 interface ActiveLease {
@@ -76,6 +78,9 @@ export class EffectSupervisor<Event = unknown, State = unknown> {
       checkpoints: storage.checkpoints,
       recoveryIdentities: storage.recoveryIdentities,
       ...(storage.runs ? { runs: storage.runs } : {}),
+      ...(storage.completedResourceReservations
+        ? { completedResourceReservations: storage.completedResourceReservations }
+        : {}),
       transactions: Object.freeze({
         commit: (
           acknowledgement: RuntimeTransactionAcknowledgement,

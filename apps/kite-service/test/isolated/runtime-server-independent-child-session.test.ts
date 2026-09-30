@@ -565,9 +565,20 @@ for (const terminalAction of ['complete', 'stop', 'approve'] as const)
         parentEvents().some((event) => event.type === 'subagent.child_terminal_imported'),
       );
       const child = storage.loadCurrentSnapshot(childThreadId);
-      expect(child?.childSessionOrigin?.terminal?.status).toBe(
-        terminalAction === 'stop' ? 'cancelled' : 'completed',
-      );
+      const childFailureFacts = storage.storage.sessions
+        .loadEventsStrict(childThreadId)
+        .map(({ event }) => event)
+        .filter(
+          (event) =>
+            event.type === 'turn.aborted' ||
+            event.type === 'tool.failed' ||
+            event.type === 'run.error' ||
+            event.type === 'model.invocation_interrupted',
+        );
+      expect(
+        child?.childSessionOrigin?.terminal?.status,
+        `Child failure facts: ${JSON.stringify(childFailureFacts).replaceAll('fixture-key', '[redacted]')}`,
+      ).toBe(terminalAction === 'stop' ? 'cancelled' : 'completed');
       if (terminalAction === 'stop') {
         const childModels = Object.values(child?.modelInvocations ?? {});
         expect(childModels).toHaveLength(1);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   agentApiContextSchema,
-  agentApiModelContextSchema,
+  agentApiModelContextPageSchema,
   agentApiProblemSchema,
   agentApiServerInfoSchema,
   decodeAgentApiResponse,
@@ -155,7 +155,8 @@ describe('Agent API context and route shell', () => {
       },
       modelContexts: {
         get: (sessionId, invocationId) =>
-          sessionId === 'session-1' && invocationId === 'invocation-1'
+          sessionId === 'session-1' &&
+          (invocationId === 'invocation-1' || invocationId === 'invocation-large')
             ? {
                 sessionId,
                 invocationId,
@@ -163,7 +164,10 @@ describe('Agent API context and route shell', () => {
                 purpose: 'primary_agent',
                 provider: 'openai',
                 model: 'model-1',
-                systemPrompt: 'Browser-only prompt.',
+                systemPrompt:
+                  invocationId === 'invocation-large'
+                    ? `HTTP start ${'x'.repeat(1_200_000)} HTTP end`
+                    : 'Browser-only prompt.',
                 messages: [],
                 tools: [],
                 settings: {
@@ -264,9 +268,38 @@ describe('Agent API context and route shell', () => {
       browserAuth,
     );
     expect(modelContext.status).toBe(200);
+    const page = decodeAgentApiResponse(agentApiModelContextPageSchema, await modelContext.json());
     expect(
-      decodeAgentApiResponse(agentApiModelContextSchema, await modelContext.json()).system_prompt,
+      JSON.parse(Buffer.from(page.payload_base64, 'base64').toString('utf8')).system_prompt,
     ).toEqual({ text: 'Browser-only prompt.', truncated: false });
+
+    const chunks: Buffer[] = [];
+    let cursor: string | undefined;
+    do {
+      const response = await f.handler.handle(
+        new Request(
+          `http://127.0.0.1:43123/v1/sessions/session-1/model-invocations/invocation-large/context${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+          {
+            headers: {
+              ...browserHeaders,
+              cookie: 'kite_web_test=session',
+              accept: 'application/json',
+            },
+          },
+        ),
+        browserAuth,
+      );
+      expect(response.status).toBe(200);
+      const json = await response.text();
+      expect(Buffer.byteLength(json)).toBeLessThan(1_048_576);
+      const part = decodeAgentApiResponse(agentApiModelContextPageSchema, JSON.parse(json));
+      chunks.push(Buffer.from(part.payload_base64, 'base64'));
+      cursor = part.next_cursor;
+    } while (cursor);
+    expect(chunks.length).toBeGreaterThan(10);
+    expect(
+      JSON.parse(Buffer.concat(chunks).toString('utf8')).system_prompt.text.endsWith(' HTTP end'),
+    ).toBe(true);
 
     const stillValid = await f.handler.handle(
       new Request('http://127.0.0.1:43123/v1/auth/browser/session', {

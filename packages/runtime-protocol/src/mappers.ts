@@ -473,6 +473,9 @@ export function mapRuntimeQueryResultToProtocol(
             status: 'ok',
             queryType: result.queryType,
             backgroundSnapshot: result.backgroundSnapshot,
+            ...(result.nextBackgroundCursor === undefined
+              ? {}
+              : { nextBackgroundCursor: result.nextBackgroundCursor }),
           }).data;
     case 'get_background_execution':
       return result.backgroundExecution === undefined

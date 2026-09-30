@@ -10,9 +10,9 @@
 
 Directory 的 `hasRootSession(sessionId)` 直接按 `runtime_sessions` 主键查询；存在父子血缘列时同时要求 `parent_session_id IS NULL`。Browser 的 direct Session read 以此逐次核对可见性，不依赖有界目录页覆盖全部根线程，也不重复运行目录聚合查询。
 
-Store14 的 `runtime_sessions.history_generation` 随本 Session 的 Event 增删改在同一事务递增，也覆盖同序号重写。索引 `getSession` 只向内部 History adapter 返回代次，不加入客户端目录 DTO。重复进入父／子详情时，Service 先核验 Session 与准确父子血缘，再以代次决定能否复用首屏投影；旧读取端口没有代次时重扫。Store13→14 只在受维护保护的私有候选中转换，原库和 Event 内容保持；内建 trigger 的定义参与严格 schema 校验。[Store14 回归](../test/kite-session-store13-to14.test.ts)核对升级、同水位改写、级联删除和失败回滚。
+当前 Store16 同事务维护 `history_generation`、`history_rewrite_generation`、历史追加水位和 `history_instance_id`。Event 的 UPDATE／DELETE 与历史序号内 INSERT 推进改写代次；纯尾部 INSERT 只推进内容代次和追加水位。历史追加水位不随删除回退，因此删后重插不能伪装为尾部追加；Session 删除重建取得新的实例身份。索引 `getSession` 只向内部 History adapter 返回这些证明，不加入客户端目录 DTO。Service 在同一只读快照内核验准确 Session／父子范围；固定前缀与实例、改写代次均未变时，不再逐页扫描原始前缀。Store15→16 只转换私有候选，旧行及原来源保持，全部 trigger 定义参与严格 schema 校验；见 [Store16 回归](../test/kite-session-store15-to16.test.ts)。
 
-内部只读 History reader 提供固定 sequence 前缀的原始行摘要，按 sequence 顺序覆盖事件身份、schema、causation、时间和原始 JSON，不解码事件。调用方 History worker 在同一 read snapshot 内完成 Session／父子作用域核对、摘要与投影读取；超出记录或字节预算不提供复用证明。摘要不增加持久表或执行权限。实现与验证见 [log query](../src/log-query.ts) 和 [History worker 回归](../../../apps/kite-service/test/isolated/history-page-pool.test.ts)。
+旧读取端口仍可提供固定 sequence 前缀的原始行摘要，按顺序覆盖事件身份、schema、causation、时间和原始 JSON，不解码事件；没有改写代次／实例证明时，代次变化才按该摘要核对，缺少任何复用证明则重新投影。当前 Store16 worker 不为纯尾部追加重新扫描前缀。证明不授予执行权限，也不代替跨页投影摘要。实现与验证见 [log query](../src/log-query.ts) 和 [History worker 回归](../../../apps/kite-service/test/isolated/history-page-pool.test.ts)。
 
 内部恢复可在同一 Store read snapshot 中按 childThreadId 查询不可变父 Tool 意图，或按 parentSessionId／childThreadId cursor 有界列出尚未失败、尚未结算的意图。返回创建、预算激活、父 dispatch ACK 和结算 marker，不返回 Task Artifact 正文或 sealed grant JSON。后者仅由准确父 Session execution／recovery handle scope 的私有 getter 读取并复核字节 digest；普通 Session 列表和客户端已知 ID 日志不使用此读口。
 

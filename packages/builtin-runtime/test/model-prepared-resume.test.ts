@@ -249,6 +249,43 @@ test('resumes an exact duration-only child preparation without a separate attemp
   );
 });
 
+test('resumes an unbounded primary preparation with the same durable authority checks', async () => {
+  const f = fixture(false);
+  const state = f.state;
+  const prepared = state.modelInvocations.invocation!;
+  const reservation = state.resourceBudget.reservations!.reservation!;
+  f.setState({
+    ...state,
+    modelInvocations: {
+      invocation: {
+        ...prepared,
+        limits: {
+          maxAttempts: Number.MAX_SAFE_INTEGER,
+          perAttemptTimeoutMs: 0,
+          totalTimeBudgetMs: Number.MAX_SAFE_INTEGER,
+        },
+      },
+    },
+    resourceBudget: {
+      ...state.resourceBudget,
+      budget: { unboundedCumulativeUsage: true },
+      reservations: {
+        reservation: {
+          ...reservation,
+          executableUpperBound: {
+            unboundedModelTokens: true,
+            counters: { modelRequests: 1, inputTokens: 0, outputTokens: 0 },
+          },
+        },
+      },
+    },
+  });
+  const { hardAttemptTimeoutMs: _legacyTimeout, ...unboundedInput } = f.input;
+  const pending = await f.gateway.resumePrepared(unboundedInput);
+  await pending.commit();
+  expect(f.order).toContain('provider');
+});
+
 test('resumes a legacy single-attempt preparation inside a duration-only child budget', async () => {
   const f = fixture();
   const state = f.state;

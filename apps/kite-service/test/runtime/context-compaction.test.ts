@@ -327,6 +327,28 @@ describe('eventized context compaction', () => {
     });
   });
 
+  test('Kernel accepts a genuine checkpoint saving fewer than 1024 tokens', async () => {
+    const state = requestedState();
+    const candidate = validCheckpoint(
+      state,
+      'auto',
+      state.revision,
+      'retain this fact '.repeat(1_100).trim(),
+    );
+    const saved = candidate.inputTokensBefore - candidate.inputTokensAfter;
+    expect(saved).toBeGreaterThan(0);
+    expect(saved).toBeLessThan(1_024);
+    const events = await executeContextCompaction({
+      state,
+      compactionId: 'compact-1',
+      compact: async () => candidate,
+    });
+    expect(events[0]?.type).toBe('context.compaction_completed');
+    expect(reduceRuntimeState(state, events[0]!).context.activeCheckpoint?.summary).toBe(
+      candidate.summary,
+    );
+  });
+
   test.each([
     'manual',
     'auto',
@@ -854,7 +876,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       retryable: false,
     });
     expect(second.context.hardBlock).toBeUndefined();
-    expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
+    expect(second.context.autoGuard.disabledUntilManualAction).toBe(false);
   });
 
   test('manual failure does NOT create hard block', () => {
@@ -914,7 +936,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(decideNextEffect(state).type).toBe('recovery_blocked');
   });
 
-  test('thrash breaker disables proactive auto after 2 consecutive low-gain', () => {
+  test('repeated low gain remains diagnostic and does not disable proactive auto', () => {
     const state = requestedState();
     // First low gain
     const current = reduceRuntimeState(state, {
@@ -945,7 +967,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       retryable: false,
     });
     expect(second.context.autoGuard.consecutiveLowGain).toBe(2);
-    expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
+    expect(second.context.autoGuard.disabledUntilManualAction).toBe(false);
   });
 
   test('successful manual compaction clears the automatic thrash breaker', () => {

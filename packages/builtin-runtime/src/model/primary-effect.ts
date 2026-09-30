@@ -429,9 +429,6 @@ export async function executeBuiltinPrimaryModelEffect<
                   warningRatio: input.config.compaction?.warningRatio,
                 })
               : preflight;
-            if (addition && exactPreflight.status === 'hard_limit')
-              throw new Error('Prepared Agent mail exceeds the model context limit.');
-            effectiveMetrics = contextMetrics(modelCapabilities, exactPreflight);
             const exactOutputTokens = [
               requestedMaxOutputTokens,
               exactPreflight.reservedOutputTokens,
@@ -441,6 +438,14 @@ export async function executeBuiltinPrimaryModelEffect<
                 (least, value) => (least === undefined ? value : Math.min(least, value)),
                 undefined,
               );
+            if (
+              addition &&
+              modelCapabilities.contextWindowTokens !== undefined &&
+              estimate.totalInputTokens + (exactOutputTokens ?? 0) >
+                modelCapabilities.contextWindowTokens
+            )
+              throw new Error('Prepared Agent mail exceeds the model context limit.');
+            effectiveMetrics = contextMetrics(modelCapabilities, exactPreflight);
             return {
               compiled: compile(
                 [...projection.providerMessages, ...prepared.frames],

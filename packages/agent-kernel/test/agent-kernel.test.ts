@@ -1183,7 +1183,7 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'agent-kernel-current',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(168);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(169);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(23);
     expect(STATE_DEFAULT_EVENT_TYPES).toHaveLength(21);
   });
@@ -1415,10 +1415,10 @@ describe('agent kernel package boundary', () => {
 
   test('classifies all current events into one static owner or an explicit default no-op', () => {
     const covered = Object.values(STATE_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(168);
-    expect(new Set(covered).size).toBe(168);
-    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(147);
-    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(168);
+    expect(covered).toHaveLength(169);
+    expect(new Set(covered).size).toBe(169);
+    expect(covered.length - STATE_DEFAULT_EVENT_TYPES.length).toBe(148);
+    expect(new Set([...covered, ...STATE_DIAGNOSTIC_EVENT_TYPES]).size).toBe(169);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>

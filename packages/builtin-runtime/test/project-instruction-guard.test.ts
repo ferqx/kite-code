@@ -119,4 +119,42 @@ describe('Builtin project instruction snapshot guard', () => {
       path: 'AGENTS.md',
     });
   });
+
+  test('keeps large instruction files and detects their deletion', () => {
+    const root = workspace();
+    const content = 'Follow the workspace rules.\n'.repeat(4_000);
+    writeFileSync(join(root, 'AGENTS.md'), content);
+    const visible = resolveProjectInstructionSnapshot({ workspace: root });
+    expect(visible.documents).toHaveLength(1);
+    expect(visible.documents[0]?.content).toBe(content);
+    expect(visible.warnings).toEqual([]);
+
+    rmSync(join(root, 'AGENTS.md'));
+    expect(
+      checkProjectInstructionSnapshotFreshness({
+        workspace: root,
+        visibleSnapshot: visible,
+        target: { targetPath: '.', reason: 'shell' },
+      }),
+    ).toMatchObject({ status: 'changed', path: 'AGENTS.md' });
+  });
+
+  test('ignores visible instructions outside the current target scope', () => {
+    const root = workspace();
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'AGENTS.md'), 'root rule');
+    writeFileSync(join(root, 'src', 'AGENTS.md'), 'source rule');
+    const visible = resolveProjectInstructionSnapshot({
+      workspace: root,
+      targetPaths: ['src/file.ts'],
+    });
+    expect(visible.documents).toHaveLength(2);
+    expect(
+      checkProjectInstructionSnapshotFreshness({
+        workspace: root,
+        visibleSnapshot: visible,
+        target: { targetPath: '.', reason: 'shell' },
+      }),
+    ).toEqual({ status: 'accepted' });
+  });
 });

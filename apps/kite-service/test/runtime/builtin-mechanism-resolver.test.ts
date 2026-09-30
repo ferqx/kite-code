@@ -268,6 +268,33 @@ describe('App Builtin mechanism resolver', () => {
     );
     await (uncertainMap.shell as typeof shell).execute({ command: 'custom-tool', timeoutMs: 100 });
     expect(shellInputs[4]).toMatchObject({
+      readOnly: false,
+      networkAccess: 'none',
+      filesystemAccess: 'workspace_only',
+    });
+
+    const planningScopeWithoutProof = resolve(
+      baseInput({
+        executionMechanism: 'shell',
+        canonicalArguments: frozenJson({ command: 'custom-tool' }),
+        grantUsed: 'approve_once',
+        authorizationKind: 'approved_call',
+        sandboxScope: Object.freeze({
+          kind: 'baseline',
+          filesystem: 'read_only',
+          network: 'disabled',
+          digest: 'scope-planning-read-only',
+        }),
+        policyEffects: Object.freeze({ uncertainEffects: true }),
+        shellExecutor,
+      }),
+    );
+    await (planningScopeWithoutProof.shell as typeof shell).execute({
+      command: 'custom-tool',
+      timeoutMs: 100,
+    });
+    expect(shellInputs[5]).toMatchObject({
+      readOnly: false,
       networkAccess: 'none',
       filesystemAccess: 'workspace_only',
     });

@@ -9,8 +9,6 @@ import type { RuntimeBackgroundExecutionProjection } from '@kite-ai/runtime-cont
 import type { RuntimeState } from '../state-runtime';
 import type { SubAgentResult } from './types';
 
-const MAX_BACKGROUND_REPORT_CHARS = 2_000;
-
 export interface BackgroundSubagentCompletionNotification {
   readonly notificationId: string;
   readonly source: 'subagent';
@@ -363,7 +361,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
         await record.cancel('task_cancel');
       } catch (error) {
         record.status = 'unknown';
-        record.terminalError = boundedError(error);
+        record.terminalError = errorMessage(error);
         this.#bump(record);
         return this.#snapshot(record);
       }
@@ -380,7 +378,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       this.#bump(record);
       void record.cancel('stop_background_execution').catch((error) => {
         record.status = 'unknown';
-        record.terminalError = boundedError(error);
+        record.terminalError = errorMessage(error);
         this.#bump(record);
         onTerminal();
       });
@@ -449,7 +447,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
           callbackSucceeded = true;
         } catch (error) {
           record.status = 'unknown';
-          record.terminalError = boundedError(error);
+          record.terminalError = errorMessage(error);
           if (
             settlementRecoveryReservationId ||
             (error && typeof error === 'object' && 'event' in error)
@@ -484,7 +482,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
             // The callback may already have committed an after-turn wake. Do
             // not release its exact replacement reservation on proof failure.
             record.status = 'unknown';
-            record.terminalError = boundedError(error);
+            record.terminalError = errorMessage(error);
             this.#bump(record);
           }
         }
@@ -496,7 +494,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
       }
     } catch (error) {
       record.status = 'unknown';
-      record.terminalError = boundedError(error);
+      record.terminalError = errorMessage(error);
       if (settlementRecoveryReservationId && record.resultArtifact) {
         try {
           this.#persistSettlementRecovery(
@@ -508,7 +506,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
           // A failed recovery write is itself the terminal boundary. Publish
           // only after the attempt so waiters either observe its durable claim
           // or fail closed against a genuinely unavailable recovery record.
-          record.terminalError = boundedError(recoveryError);
+          record.terminalError = errorMessage(recoveryError);
         }
       }
       this.#bump(record);
@@ -643,7 +641,7 @@ export class BackgroundSubagentRuntime implements BackgroundSubagentControlRunti
             .then(() => record.cancel(reason))
             .catch((error) => {
               record.status = 'unknown';
-              record.terminalError = boundedError(error);
+              record.terminalError = errorMessage(error);
               this.#bump(record);
             }),
         );
@@ -910,10 +908,10 @@ function validCheckpointRef(value: unknown): value is SubagentCheckpointArtifact
   );
 }
 
-function boundedError(error: unknown): string {
+function errorMessage(error: unknown): string {
   const message =
     error instanceof Error ? error.message : 'Background sub-agent outcome is unknown.';
-  return message.slice(0, 1_024);
+  return message;
 }
 
 async function notifySettlementFailed(
@@ -950,5 +948,5 @@ async function waitBounded(work: Promise<unknown>, timeoutMs: number): Promise<v
 
 function shortReport(result: Readonly<SubAgentResult>): string {
   const summary = typeof result.summary === 'string' ? result.summary.trim() : '';
-  return summary.slice(0, MAX_BACKGROUND_REPORT_CHARS) || 'Background sub-agent completed.';
+  return summary || 'Background sub-agent completed.';
 }

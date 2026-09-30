@@ -10,6 +10,10 @@ import {
 } from '../../reducer-utils';
 import type { AgentState } from '../../state';
 import { verificationSchemaAdmissionDigest } from '../../verification-schema-facts';
+import {
+  canResumeQuotaExhaustedVerification,
+  verificationRepairsAreUnbounded,
+} from './repair-policy';
 
 const EPOCH_CREATED_AT = '1970-01-01T00:00:00.000Z';
 
@@ -248,7 +252,10 @@ export function reduceVerificationState(
       const status =
         outcome === 'passed'
           ? 'passed'
-          : mode === 'required' && maxAttempts !== undefined && repairAttempts >= maxAttempts
+          : mode === 'required' &&
+              !verificationRepairsAreUnbounded(state) &&
+              maxAttempts !== undefined &&
+              repairAttempts >= maxAttempts
             ? 'budget_exhausted'
             : outcome === 'failed'
               ? 'failed'
@@ -261,7 +268,13 @@ export function reduceVerificationState(
     }
     case 'verification.repair_requested': {
       const status = stringField(current ?? {}, 'status');
-      if (!current || (status !== 'failed' && status !== 'inconclusive')) return state;
+      if (
+        !current ||
+        (status !== 'failed' &&
+          status !== 'inconclusive' &&
+          !canResumeQuotaExhaustedVerification(state, asJsonObject(current)))
+      )
+        return state;
       const repairAttempt = numberField(payload, 'repairAttempt');
       const instruction = stringField(payload, 'instruction');
       if (

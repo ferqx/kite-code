@@ -34,6 +34,7 @@ export type BuiltinContextCompactionTerminal =
       readonly compactionId: string;
       readonly sourceRevision: number;
       readonly errorKind: ContextCompactionErrorKind;
+      readonly sourceDigest: string;
       readonly message: string;
       readonly retryable: boolean;
       readonly requestedAtTurnId: string;
@@ -43,6 +44,7 @@ export type BuiltinContextCompactionTerminal =
 function failure(input: {
   pending: Readonly<NonNullable<BuiltinRuntimeStateView['context']['pendingCompaction']>>;
   sourceRevision: number;
+  sourceDigest: string;
   errorKind: ContextCompactionErrorKind;
   message: string;
   retryable: boolean;
@@ -59,6 +61,7 @@ function failure(input: {
     type: 'context.compaction_failed',
     compactionId: input.pending.compactionId,
     sourceRevision: input.sourceRevision,
+    sourceDigest: input.sourceDigest,
     errorKind: input.errorKind,
     message: input.message,
     retryable: input.retryable,
@@ -86,6 +89,12 @@ export async function executeBuiltinContextCompaction(input: {
 
   input.onProgress?.('preparing');
   const sourceRevision = input.state.revision;
+  const sourceDigest = expectedCompactionSourceDigest(
+    input.state.context.activeCheckpoint?.sourceDigest,
+    input.state.transcript.messages,
+  );
+  const fail = (details: Omit<Parameters<typeof failure>[0], 'sourceDigest'>) =>
+    failure({ ...details, sourceDigest });
   const leasedEnvironment = input.resolveProjectionEnvironment?.() ?? input.projectionEnvironment;
   const leasedEnvironmentDigest = leasedEnvironment
     ? digestProjectionEnvironment(leasedEnvironment)
@@ -93,7 +102,7 @@ export async function executeBuiltinContextCompaction(input: {
   if (!input.compact) {
     input.onProgress?.(undefined);
     return [
-      failure({
+      fail({
         pending,
         sourceRevision,
         errorKind: 'summary_model_failed',
@@ -120,7 +129,7 @@ export async function executeBuiltinContextCompaction(input: {
       : undefined;
     if (completedEnvironmentDigest !== leasedEnvironmentDigest) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'stale_context',
@@ -137,7 +146,7 @@ export async function executeBuiltinContextCompaction(input: {
       checkpoint.reason !== pending.reason
     ) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'invalid_candidate',
@@ -153,7 +162,7 @@ export async function executeBuiltinContextCompaction(input: {
     );
     if (!coveredMessage || coveredMessage.turnId !== checkpoint.coveredThroughTurnId) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'unsafe_boundary',
@@ -195,7 +204,7 @@ export async function executeBuiltinContextCompaction(input: {
       checkpoint.sourceDigest !== expectedCompactionSourceDigest(base?.sourceDigest, sourceMessages)
     ) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'invalid_candidate',
@@ -219,7 +228,7 @@ export async function executeBuiltinContextCompaction(input: {
       !Number.isFinite(Date.parse(checkpoint.createdAt))
     ) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'invalid_candidate',
@@ -249,7 +258,7 @@ export async function executeBuiltinContextCompaction(input: {
       checkpoint.inputTokensAfter !== expectedAfter
     ) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'invalid_candidate',
@@ -260,14 +269,14 @@ export async function executeBuiltinContextCompaction(input: {
         }),
       ];
     }
-    const reductionFailed = expectedBefore - expectedAfter < 1_024;
+    const reductionFailed = expectedAfter >= expectedBefore;
     if (reductionFailed) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: 'insufficient_reduction',
-          message: 'Compaction did not save enough tokens (minimum 1024).',
+          message: 'Compaction did not reduce the projected context.',
           retryable: pending.reason === 'auto',
           reporter: input.reporter,
           durationMs: elapsed(),
@@ -298,7 +307,7 @@ export async function executeBuiltinContextCompaction(input: {
   } catch (error) {
     if (error instanceof ContextCompactionValidationError) {
       return [
-        failure({
+        fail({
           pending,
           sourceRevision,
           errorKind: error.kind,
@@ -312,7 +321,7 @@ export async function executeBuiltinContextCompaction(input: {
       ];
     }
     return [
-      failure({
+      fail({
         pending,
         sourceRevision,
         errorKind: 'summary_model_failed',

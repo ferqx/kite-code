@@ -14,9 +14,6 @@ import type { SubAgentEventSink } from '@kite-ai/runtime-contract';
 import {
   runtimeHostStateDecideAutoReview as decideAutoReview,
   deferredStateRuntimeEffect,
-  runtimeHostStateCheckDoomLoopFingerprint,
-  runtimeHostStateToolDoomLoopFingerprint,
-  runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
 } from '@kite-ai/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#kite-service/config/features';
 import { readPrivateSuspendedSubagent } from '../../runtime/tool-execution/subagent-executor';
@@ -150,6 +147,9 @@ export function createAppRuntimeEffectExecutor(
         if (!executionContext) {
           throw new Error('Model effect persistence context is unavailable.');
         }
+        const requestedOutputTokens =
+          dependencies.config.modelKwargs?.maxOutputTokens ??
+          dependencies.config.modelKwargs?.maxTokens;
         contextCompactor = modelEffectCoordinator.createContextCompactor({
           config: dependencies.config,
           model: dependencies.model,
@@ -173,6 +173,8 @@ export function createAppRuntimeEffectExecutor(
             config: dependencies.config,
             adapter: dependencies.model.capabilityMetadata,
           }).maxOutputTokens,
+          modelRequestMaxOutputTokens:
+            typeof requestedOutputTokens === 'number' ? requestedOutputTokens : undefined,
         });
       }
       const leasedCompactor: ContextCompactor = async (input) => {
@@ -504,26 +506,6 @@ async function projectAutoReviewEffect(
     );
   }
   const request = parsed.request;
-  const observedAt = Date.now();
-  const doomLoop = suspended
-    ? runtimeHostStateCheckDoomLoopFingerprint(
-        state.doomLoop,
-        toolInvocationFingerprint({
-          toolName: request.name,
-          parsedArgs: request.args,
-          identityRevision: 'subagent-blocked-v1',
-        }),
-        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
-        60_000,
-        observedAt,
-      )
-    : runtimeHostStateCheckDoomLoopFingerprint(
-        state.doomLoop,
-        runtimeHostStateToolDoomLoopFingerprint(request),
-        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
-        60_000,
-        observedAt,
-      );
 
   // Admission to the review queue is not the start of the reviewer. Persist
   // the selected effect's execution boundary before dispatching its model.
@@ -582,14 +564,6 @@ async function projectAutoReviewEffect(
         isSubAgent: suspended != null,
         ...(suspended ? { subAgentRole: suspended.role } : {}),
         workspaceRoot: state.session.workspace,
-        ...(doomLoop.blocked && doomLoop.fingerprint && doomLoop.count
-          ? {
-              doomLoopInfo: {
-                fingerprint: doomLoop.fingerprint,
-                count: doomLoop.count,
-              },
-            }
-          : {}),
       },
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
       signal: dependencies.signal,

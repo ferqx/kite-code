@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,6 +51,7 @@ function acceptedQueued(
       .get(parentSessionId);
     if (!mail || !snapshot) return undefined;
     const state = JSON.parse(snapshot.state_json) as {
+      tools?: { calls?: Record<string, { status?: string }> };
       resourceBudget?: {
         reservations?: Record<
           string,
@@ -58,6 +59,7 @@ function acceptedQueued(
         >;
       };
     };
+    if (state.tools?.calls?.['capacity-followup-tool']?.status !== 'succeeded') return undefined;
     const backup = Object.entries(state.resourceBudget?.reservations ?? {}).find(
       ([, reservation]) =>
         reservation.invocationId === mail.submission_id &&
@@ -103,7 +105,12 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
       cwd: join(import.meta.dir, '../../../../..'),
       stdout: 'pipe',
       stderr: 'pipe',
-      env: { ...process.env, TMPDIR: root },
+      env: {
+        ...process.env,
+        TMPDIR: root,
+        KITE_FOLLOWUP_CAPACITY_SHORT_TEST_LEASE: '1',
+        KITE_FOLLOWUP_CAPACITY_QUEUED_SIGKILL_SEED: '1',
+      },
     },
   );
   let home: string | undefined;
@@ -112,11 +119,11 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
   let client: RuntimeClient | undefined;
   const recoveryDiagnostics: unknown[] = [];
   const originalConsoleError = console.error;
-  console.error = (...args: unknown[]) => {
+  const consoleErrorSpy = spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
     if (args[0] === 'Independent child followup recovery requires attention.')
       recoveryDiagnostics.push(args[1]);
     originalConsoleError(...args);
-  };
+  });
   const model = createMockModelServer();
   let recoveredTargetRequests = 0;
   model.setResponses(
@@ -139,9 +146,8 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
     const pending = acceptedQueued(databasePath);
     if (!pending) throw new Error('Queued backup was not durable at the crash boundary.');
     expect(pending.initialAttempts).toBe(1);
-    // The reused production-entry capacity fixture has the default 30-second
-    // session lease. Its killed owner must expire before a new host may recover.
-    await Bun.sleep(30_500);
+    // The seed explicitly uses a one-second test lease; recovery still waits for its expiry.
+    await Bun.sleep(1_200);
     process.env.KITE_CODE_HOME = home!;
     storage = await createKiteSessionAppServerStorageComposition({
       databasePath,
@@ -233,7 +239,9 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
             ),
         ),
       'explicit followup recovery-required diagnostic',
-    );
+    ).catch((error) => {
+      throw new Error(JSON.stringify({ pending, recoveryDiagnostics }), { cause: error });
+    });
     const source = storage.loadCurrentSnapshot(parentSessionId);
     expect(source?.resourceBudget).toMatchObject({
       reservations: { [pending.reservationId]: { state: 'queued' } },
@@ -275,7 +283,7 @@ test('SIGKILL with unknown occupied attempts keeps a queued followup fail closed
     await Promise.resolve(server?.[Symbol.asyncDispose]()).catch(() => {});
     storage?.disposeStorage();
     model.stop();
-    console.error = originalConsoleError;
+    consoleErrorSpy.mockRestore();
     if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousHome;
     rmSync(root, { recursive: true, force: true });

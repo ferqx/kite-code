@@ -119,7 +119,7 @@ test('child seal persists exact result and parent import presents one terminal c
     const terminalReceiptId = 'terminal-receipt';
     const result = {
       ok: true,
-      summary: 'Finished the delegated task.',
+      summary: 'Finished the delegated task. '.repeat(100),
       terminalStatus: 'completed' as const,
       toolCallCount: 2,
       durationMs: 15,
@@ -234,6 +234,7 @@ test('child seal persists exact result and parent import presents one terminal c
     expect(captured!.resultEvent.notificationId).toBe(
       `subagent:${childInvocationId}:${sealed.ref.integrityIdentifier}`,
     );
+    expect(captured!.resultEvent.shortReport).toBe(result.summary);
     expect(captured!.readResultArtifact(sealed.ref, childInvocationId)).toEqual(result);
     expect(() =>
       captured!.readResultArtifact({ ...sealed.ref, artifactId: 'wrong' }, childInvocationId),

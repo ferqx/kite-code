@@ -370,6 +370,32 @@ describe('State restart recovery projection', () => {
       turnId,
       modelId,
     ]);
+    const releasedBackup = replaced.resourceBudget.reservations[backupId]!;
+    const { [backupId]: _archived, ...activeReservations } = replaced.resourceBudget.reservations;
+    const externalized = {
+      ...replaced,
+      resourceBudget: {
+        ...replaced.resourceBudget,
+        externalizedClosedReservations: true as const,
+        reservations: activeReservations,
+      },
+    } as AgentState;
+    expect([
+      ...verifiedPendingFollowupReservationIds(externalized, [
+        { ...replacedProof[0]!, releasedBackupReservation: releasedBackup },
+      ]),
+    ]).toEqual([turnId, modelId]);
+    expect(() => verifiedPendingFollowupReservationIds(externalized, replacedProof)).toThrow(
+      'conflicts with State',
+    );
+    expect(() =>
+      verifiedPendingFollowupReservationIds(externalized, [
+        {
+          ...replacedProof[0]!,
+          releasedBackupReservation: { ...releasedBackup, invocationId: 'other' },
+        },
+      ]),
+    ).toThrow('conflicts with State');
     expect(
       projectStateRestartRecoveryEvents(replaced, {
         ...noOtherRecovery,
@@ -722,6 +748,25 @@ describe('State restart recovery projection', () => {
       delegatedReservationId,
       reportReservationId,
     ]);
+    const zeroTokenReport = {
+      ...originBudget.reservations[reportReservationId]!,
+      executableUpperBound: {
+        ...reportUpper,
+        unboundedModelTokens: true as const,
+        counters: { ...reportUpper.counters, inputTokens: 0, outputTokens: 0 },
+      },
+    };
+    const durationOnly = {
+      ...source,
+      resourceBudget: {
+        ...originBudget,
+        reservations: { ...originBudget.reservations, [reportReservationId]: zeroTokenReport },
+      },
+    } as AgentState;
+    expect([...verifiedPendingAfterTurnReservationIds(durationOnly, [proof])]).toEqual([
+      delegatedReservationId,
+      reportReservationId,
+    ]);
     expect(
       projectStateRestartRecoveryEvents(source, {
         ...noOtherRecovery,
@@ -788,6 +833,19 @@ describe('State restart recovery projection', () => {
     expect([...verifiedSealedAfterTurnReportReservationIds(dispatched, [sealedProof])]).toEqual([
       reportReservationId,
     ]);
+    const durationOnlySealed = {
+      ...dispatched,
+      resourceBudget: {
+        ...dispatched.resourceBudget,
+        reservations: {
+          ...dispatched.resourceBudget.reservations,
+          [reportReservationId]: zeroTokenReport,
+        },
+      },
+    } as AgentState;
+    expect([
+      ...verifiedSealedAfterTurnReportReservationIds(durationOnlySealed, [sealedProof]),
+    ]).toEqual([reportReservationId]);
     expect(
       projectStateRestartRecoveryEvents(dispatched, {
         ...noOtherRecovery,

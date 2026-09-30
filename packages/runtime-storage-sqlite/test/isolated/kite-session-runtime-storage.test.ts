@@ -72,6 +72,114 @@ const codec = {
 };
 
 describe('multi-connection Kite Session Runtime storage', () => {
+  test('terminal reservation receipts follow named rewind and current fork boundaries', () => {
+    const fixture = createFixture(['source']);
+    const owner = openOwner(fixture.path);
+    try {
+      const handle = owner.bindExecution(acquire(owner, 'source', 'receipt-owner'));
+      const reservation = {
+        reservationId: 'reservation-1',
+        runId: 'run-1',
+        invocationId: 'invocation-1',
+        state: 'dispatch_started',
+        resourceKind: 'model',
+        executableUpperBound: {},
+      };
+      const withReservation = {
+        ...state(1, 'e'.repeat(64)),
+        resourceBudget: {
+          status: 'active',
+          runId: 'run-1',
+          reservations: { 'reservation-1': reservation },
+        },
+        retainedResourceBudgets: {},
+      } as State;
+      const withoutReservation = {
+        ...state(2, 'e'.repeat(64)),
+        resourceBudget: { status: 'active', runId: 'run-1', reservations: {} },
+        retainedResourceBudgets: {},
+      } as State;
+      owner.runWithExecution(handle, () => {
+        owner.storage.transactions.commitDecision({
+          sessionId: 'source',
+          events: [{ type: 'resource_budget.reserved', reservation }],
+          metadata: [{ eventId: 'reserved-1', revision: 1 }],
+          snapshot: withReservation,
+        });
+        owner.storage.checkpoints.saveNamedSnapshot(
+          'source',
+          'before-terminal',
+          withReservation,
+          1,
+        );
+        owner.storage.transactions.commitDecision({
+          sessionId: 'source',
+          events: [{ type: 'resource_budget.released', reservationId: 'reservation-1' }],
+          metadata: [{ eventId: 'released-1', revision: 2 }],
+          snapshot: withoutReservation,
+          completedResourceReservations: [{ reservation: { ...reservation, state: 'released' } }],
+        });
+      });
+      expect(
+        owner.storage.completedResourceReservations?.lookup('source', 'reservation-1')?.state,
+      ).toBe('released');
+      expect(
+        owner.runWithExecution(handle, () =>
+          owner.storage.checkpoints.forkCurrentSession('source', 'target', 'f'.repeat(64)),
+        ),
+      ).toBe(true);
+      expect(
+        owner.storage.completedResourceReservations?.lookup('target', 'reservation-1')?.state,
+      ).toBe('released');
+      expect(
+        owner.runWithExecution(handle, () =>
+          owner.storage.checkpoints.forkSession(
+            'source',
+            'before-terminal',
+            'target-before',
+            'a'.repeat(64),
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        owner.storage.completedResourceReservations?.lookup('target-before', 'reservation-1'),
+      ).toBeNull();
+      expect(
+        owner.runWithExecution(handle, () =>
+          owner.storage.checkpoints.restoreNamedSnapshot('source', 'before-terminal'),
+        ),
+      ).toBe(true);
+      expect(
+        owner.storage.completedResourceReservations?.lookup('source', 'reservation-1'),
+      ).toBeNull();
+      expect(
+        owner.storage.completedResourceReservations?.lookup('target', 'reservation-1')?.state,
+      ).toBe('released');
+      expect(
+        (
+          owner.storage.sessions.loadSnapshot('source') as State & {
+            resourceBudget: { reservations: Record<string, unknown> };
+          }
+        ).resourceBudget.reservations['reservation-1'],
+      ).toBeDefined();
+      owner.runWithExecution(handle, () =>
+        owner.storage.transactions.commitDecision({
+          sessionId: 'source',
+          events: [{ type: 'resource_budget.released', reservationId: 'reservation-1' }],
+          metadata: [{ eventId: 'released-again', revision: 2 }],
+          snapshot: withoutReservation,
+          completedResourceReservations: [{ reservation: { ...reservation, state: 'released' } }],
+        }),
+      );
+      expect(
+        owner.storage.completedResourceReservations?.lookup('source', 'reservation-1')?.state,
+      ).toBe('released');
+    } finally {
+      owner.close();
+      fixture.remove();
+    }
+  });
+
   test('deletes a root without children using a retained receipt', () => {
     const fixture = createFixture(['parent']);
     const owner = openOwner(fixture.path);

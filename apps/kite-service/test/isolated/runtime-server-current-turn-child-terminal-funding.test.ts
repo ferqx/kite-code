@@ -21,7 +21,7 @@ async function until(check: () => boolean, label: string): Promise<void> {
   if (!check()) throw new Error(`Current-turn budget fixture did not reach ${label}.`);
 }
 
-test('independent followup releases source funding and replies when its new Run cannot prepare Model context', async () => {
+test('independent followup completes after extended child work and settles source funding once', async () => {
   const home = mkdtempSync(join(realpathSync(tmpdir()), 'kite-current-turn-budget-'));
   const workspace = join(home, 'workspace');
   mkdirSync(workspace);
@@ -59,10 +59,12 @@ test('independent followup releases source funding and replies when its new Run 
             if (childCalls === 15) await lastOldModelReleased;
             if (childCalls > 15)
               return {
-                message: { content: 'FOLLOWUP_AFTER_OLD_BUDGET' },
-                expectedRequest: {
-                  toolResults: [{ toolCallId: `old-budget-read-${childCalls - 1}` }],
+                message: {
+                  content: childCalls === 16 ? 'INITIAL_CHILD_COMPLETE' : 'FOLLOWUP_COMPLETE',
                 },
+                ...(childCalls === 16
+                  ? { expectedRequest: { toolResults: [{ toolCallId: 'old-budget-read-15' }] } }
+                  : {}),
               };
             return {
               message: {
@@ -268,10 +270,8 @@ test('independent followup releases source funding and replies when its new Run 
       () =>
         storage!.storage.sessions
           .loadEventsStrict(childSessionId)
-          .some(
-            ({ event }) => event.type === 'run.error' || event.type === 'agent.followup_routed',
-          ),
-      'target terminal or followup route',
+          .some(({ event }) => event.type === 'agent.followup_turn_settled'),
+      'followup terminal',
     );
     const targetEvents = storage.storage.sessions
       .loadEventsStrict(childSessionId)
@@ -282,29 +282,30 @@ test('independent followup releases source funding and replies when its new Run 
       throw new Error('Target ledger is unavailable.');
     expect(targetState.resourceBudget.budget.durationOnlyChildRun).toBe(true);
     expect(targetState.resourceBudget.budget.maxModelRequests).toBe(0);
-    expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(0);
-    expect(targetEvents.filter((event) => event.type === 'run.completed')).toHaveLength(1);
+    expect(targetState.resourceBudget.reconciledUsage.counters.modelRequests).toBe(1);
+    expect(targetEvents.filter((event) => event.type === 'run.completed')).toHaveLength(2);
     expect(
       targetEvents.filter((event) => event.type === 'agent.followup_turn_prepared'),
     ).toHaveLength(1);
-    expect(targetEvents.find((event) => event.type === 'run.error')).toMatchObject({
-      message: 'Independent followup could not dispatch its first Model attempt.',
-    });
+    expect(targetEvents.filter((event) => event.type === 'run.error')).toHaveLength(0);
     expect(targetEvents.filter((event) => event.type === 'agent.followup_turn_settled')).toEqual([
-      expect.objectContaining({ submissionId: accepted.submissionId, status: 'failed' }),
+      expect.objectContaining({ submissionId: accepted.submissionId, status: 'completed' }),
     ]);
     expect(
       targetEvents.filter((event) => event.type === 'model.invocation_attempt_started'),
-    ).toHaveLength(16);
+    ).toHaveLength(17);
     expect(
       targetEvents.filter(
         (event) => event.type === 'agent.followup_routed' && event.route === 'current_turn',
       ),
     ).toHaveLength(0);
     expect(targetEvents.filter((event) => event.type === 'agent.mail_input_prepared')).toHaveLength(
-      0,
+      1,
     );
-    expect(childInputs.every((input) => !input.includes('BUDGET_FOLLOWUP_MESSAGE'))).toBe(true);
+    expect(
+      childInputs.slice(0, 16).every((input) => !input.includes('BUDGET_FOLLOWUP_MESSAGE')),
+    ).toBe(true);
+    expect(childInputs.at(-1)).toContain('BUDGET_FOLLOWUP_MESSAGE');
     await until(
       () =>
         parentEvents().some(
@@ -323,23 +324,34 @@ test('independent followup releases source funding and replies when its new Run 
           event.type === 'agent.followup_independent_settled' &&
           event.submissionId === accepted.submissionId,
       ),
-    ).toEqual([expect.objectContaining({ disposition: 'pre_dispatch_released' })]);
+    ).toEqual([expect.objectContaining({ disposition: 'completed' })]);
     expect(
       parentEvents().filter(
         (event) =>
-          event.type === 'resource_budget.released' &&
+          event.type === 'resource_budget.reconciled' &&
           event.reservationId === row.backupReservationId,
       ),
-    ).toEqual([expect.objectContaining({ proof: 'local_pre_dispatch_failure' })]);
+    ).toHaveLength(1);
     expect(
       parentEvents().filter(
         (event) => event.type === 'agent.mail_accepted' && event.mode === 'reply',
       ),
     ).toHaveLength(1);
-    expect(storage.loadCurrentSnapshot(parentSessionId)?.resourceBudget).toMatchObject({
-      reservations: { [row.backupReservationId]: { state: 'released' } },
+    const settledSource = storage.loadCurrentSnapshot(parentSessionId);
+    if (settledSource?.resourceBudget.status !== 'active')
+      throw new Error('Settled source ledger is unavailable.');
+    expect(settledSource.resourceBudget.reservations[row.backupReservationId]).toBeUndefined();
+    expect(
+      storage.storage.completedResourceReservations?.lookup(
+        parentSessionId,
+        row.backupReservationId,
+      ),
+    ).toMatchObject({
+      reservationId: row.backupReservationId,
+      state: 'reconciled',
     });
-    expect(childCalls).toBe(16);
+    expect(childCalls).toBe(17);
+    model.assertComplete({ allowUnconsumedResponses: true });
   } catch (error) {
     failed = true;
     throw error;

@@ -440,11 +440,29 @@ for (const stage of ['prepared', 'activated', 'attempt_started'] as const)
             .loadEventsStrict(ids.childSessionId)
             .filter(({ event }) => event.type === 'model.invocation_attempt_started'),
         ).toHaveLength(beforeAttempts.length);
-        expect(
-          storage.storage.sessions
-            .loadEventsStrict(ids.childSessionId)
-            .filter(({ event }) => event.type === 'agent.followup_turn_settled'),
-        ).toHaveLength(0);
+        const targetEvents = storage.storage.sessions
+          .loadEventsStrict(ids.childSessionId)
+          .map(({ event }) => event);
+        const settled = targetEvents.filter(
+          (event) => event.type === 'agent.followup_turn_settled',
+        );
+        if (settled.length !== 0)
+          throw new Error(
+            JSON.stringify({
+              stage,
+              settled,
+              targetFailures: targetEvents.filter(
+                (event) => event.type === 'run.error' || event.type === 'task.failed',
+              ),
+              sourceTerminal: storage.runWithSessionExecution(parentSessionId, () =>
+                storage!.storage.crossSessionQueueMail.readFollowupTerminalForSource(
+                  parentSessionId,
+                  ids.submissionId,
+                ),
+              ),
+            }),
+          );
+        expect(settled).toHaveLength(0);
       }
       expect(ids.submissionId).toMatch(/^submission_/u);
     } finally {

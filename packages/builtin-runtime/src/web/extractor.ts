@@ -6,14 +6,49 @@ const robotsCache = new Map<string, { disallowed: Set<string>; fetchedAt: number
 const robotsPending = new Map<string, Promise<void>>(); // 防止并发重复请求
 const ROBOTS_CACHE_TTL_MS = 300_000; // 5 分钟
 const MAX_ROBOTS_CACHE_SIZE = 200; // LRU 上限
-const MAX_ROBOTS_RULES = 100; // 单域名 Disallow 规则上限
+const MAX_WEB_RESPONSE_BYTES = 5_000_000;
+
+/** Enforce the parser's memory boundary before accumulating an untrusted body. */
+async function readBoundedResponseText(response: Response, maximumBytes: number): Promise<string> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+    await response.body?.cancel();
+    throw new Error(`Response body exceeds the ${maximumBytes} byte parsing safety limit.`);
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let observedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      observedBytes += value.byteLength;
+      if (observedBytes > maximumBytes) {
+        await reader.cancel();
+        throw new Error(`Response body exceeds the ${maximumBytes} byte parsing safety limit.`);
+      }
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 /** 检查目标路径是否被 robots.txt 禁止（基础规则解析）。
  *  不可达或超时时默许放行，不做阻断。
  *
  *  Check if target path is disallowed by robots.txt (basic rule parsing).
  *  Gracefully allows on unreachable/timeout — never blocks requests. */
-async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ allowed: boolean }> {
+async function checkRobotsTxt(
+  parsed: URL,
+  fetchImpl: typeof fetch,
+  signal?: AbortSignal,
+): Promise<{ allowed: boolean }> {
+  signal?.throwIfAborted();
   const domain = parsed.hostname;
   const cached = robotsCache.get(domain);
   if (cached && Date.now() - cached.fetchedAt < ROBOTS_CACHE_TTL_MS) {
@@ -24,7 +59,7 @@ async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ a
   const pending = robotsPending.get(domain);
   if (pending) {
     try {
-      await pending;
+      await waitForAbortable(pending, signal);
     } catch {
       /* fall through to cached check */
     }
@@ -43,20 +78,28 @@ async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ a
   );
 
   let timeout: ReturnType<typeof setTimeout> | undefined;
+  let removeAbort: (() => void) | undefined;
   try {
     const controller = new AbortController();
-    timeout = setTimeout(() => controller.abort(), 3000);
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener('abort', abort, { once: true });
+    removeAbort = () => signal?.removeEventListener('abort', abort);
+    if (signal?.aborted) abort();
+    timeout = setTimeout(() => controller.abort(new Error('Robots timeout')), 3000);
     // robots.txt fetch 用 manual redirect + SSRF 检查
     let robotsUrl = `https://${domain}/robots.txt`;
     let httpFallback = false;
     let robotsRedirects = 0;
     let resp: Response | undefined;
     while (robotsRedirects <= 2) {
-      const r = await fetchImpl(robotsUrl, {
-        signal: controller.signal,
-        headers: { 'User-Agent': 'KiteCode/1.0 WebFetchBot', Accept: 'text/plain' },
-        redirect: 'manual',
-      });
+      const r = await waitForAbortable(
+        fetchImpl(robotsUrl, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'KiteCode/1.0 WebFetchBot', Accept: 'text/plain' },
+          redirect: 'manual',
+        }),
+        signal,
+      );
       const location = r.headers.get('location');
       if (location && r.status >= 300 && r.status < 400) {
         const target = new URL(location, robotsUrl).href;
@@ -86,24 +129,11 @@ async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ a
       return { allowed: true };
     }
 
-    // 限制大小
-    const cl = resp.headers.get('content-length');
-    if (cl && parseInt(cl, 10) > 500_000) {
-      robotsCache.set(domain, { disallowed: new Set(), fetchedAt: Date.now() });
-      evictRobotsCache();
-      return { allowed: true };
-    }
-    const text = await resp.text();
-    if (text.length > 500_000) {
-      robotsCache.set(domain, { disallowed: new Set(), fetchedAt: Date.now() });
-      evictRobotsCache();
-      return { allowed: true };
-    }
+    const text = await waitForAbortable(readBoundedResponseText(resp, 500_000), signal);
 
     const disallowed = new Set<string>();
     let currentAgent = '*';
     for (const line of text.split('\n')) {
-      if (disallowed.size >= MAX_ROBOTS_RULES) break; // 规则数上限
       const trimmed = line.trim();
       if (/^User-agent:\s*(.+)/i.test(trimmed)) {
         currentAgent = RegExp.$1.trim().toLowerCase();
@@ -123,9 +153,11 @@ async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ a
 
     return { allowed: ![...disallowed].some((p) => parsed.pathname.startsWith(p)) };
   } catch {
+    signal?.throwIfAborted();
     return { allowed: true };
   } finally {
     clearTimeout(timeout);
+    removeAbort?.();
     robotsPending.delete(domain);
     resolvePending!();
   }
@@ -143,23 +175,45 @@ function evictRobotsCache() {
 // ── per-domain 请求节流：同域名串行化 + 至少间隔 500ms ──
 const domainThrottle = new Map<string, Promise<void>>();
 const DOMAIN_THROTTLE_MS = 500;
-const MAX_THROTTLE_SIZE = 500; // 长 session 内存上限
 
-async function throttleDomain(hostname: string): Promise<void> {
-  const prev = domainThrottle.get(hostname);
-  if (prev) await prev;
+async function throttleDomain(hostname: string, signal?: AbortSignal): Promise<void> {
+  const previous = domainThrottle.get(hostname);
   let resolve: () => void;
   const promise = new Promise<void>((r) => {
     resolve = r;
   });
   domainThrottle.set(hostname, promise);
-  // 内存上限：淘汰最老的非活跃条目
-  if (domainThrottle.size > MAX_THROTTLE_SIZE) {
-    const toDelete = [...domainThrottle.keys()].slice(0, domainThrottle.size - MAX_THROTTLE_SIZE);
-    for (const k of toDelete) domainThrottle.delete(k);
+  try {
+    if (previous) await waitForAbortable(previous, signal);
+    signal?.throwIfAborted();
+    await waitForAbortable(new Promise((r) => setTimeout(r, DOMAIN_THROTTLE_MS)), signal);
+  } finally {
+    resolve!();
+    if (domainThrottle.get(hostname) === promise) domainThrottle.delete(hostname);
   }
-  await new Promise((r) => setTimeout(r, DOMAIN_THROTTLE_MS));
-  resolve!();
+}
+
+function waitForAbortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener('abort', abort);
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    work.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', abort);
+        reject(error);
+      },
+    );
+  });
 }
 
 export interface ExtractOptions {
@@ -167,9 +221,9 @@ export interface ExtractOptions {
   signal?: AbortSignal;
   /** 超时时间（毫秒），默认 15000 / Timeout in ms, default 15000 */
   timeoutMs?: number;
-  /** 正文截断长度，默认 8000 / Max extracted content length */
+  /** Caller-selected content limit; omitted returns the complete extracted text. */
   maxChars?: number;
-  /** 最大重定向次数，默认 3 / Max redirect count */
+  /** Caller-selected redirect count; otherwise governed by timeout and cycle detection. */
   maxRedirects?: number;
   /** Governed fetch implementation. Production boundaries must provide one. */
   fetch?: typeof fetch;
@@ -193,7 +247,7 @@ interface WorkerResult {
 async function parseInWorker(
   html: string,
   url: string,
-  maxChars: number,
+  maxChars: number | undefined,
   signal?: AbortSignal,
 ): Promise<WorkerResult> {
   try {
@@ -261,7 +315,11 @@ async function parseInWorker(
  * 内联解析（Worker 不可用时的 fallback）。
  * 直接在当前线程执行 JSDOM + readability + turndown。
  */
-async function parseInline(html: string, url: string, maxChars: number): Promise<WorkerResult> {
+async function parseInline(
+  html: string,
+  url: string,
+  maxChars: number | undefined,
+): Promise<WorkerResult> {
   const { JSDOM } = await import('jsdom');
   const { Readability } = await import('@mozilla/readability');
   const TurndownService = (await import('turndown')).default;
@@ -289,7 +347,7 @@ async function parseInline(html: string, url: string, maxChars: number): Promise
   let content = turndown.turndown(article.content);
   let truncated = false;
 
-  if (content.length > maxChars) {
+  if (maxChars !== undefined && content.length > maxChars) {
     content = `${content.slice(0, maxChars)}\n\n... (content truncated)`;
     truncated = true;
   }
@@ -313,51 +371,91 @@ export async function fetchAndExtract(
     return { ok: false, url, truncated: false, error: initialCheck.reason };
   }
 
-  // ── 2. robots.txt 检查 + domain 节流 ──
+  // One deadline covers robots, domain queue, fetch, and extraction.
+  const controller = new AbortController();
+  const timeoutAt = Date.now() + (options?.timeoutMs ?? 15000);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const armTimeout = () => {
+    const remaining = timeoutAt - Date.now();
+    if (remaining <= 0) {
+      controller.abort(new Error('Fetch timeout'));
+      return;
+    }
+    // Long caller timeouts must not overflow the host timer into a 1ms timeout.
+    timeout = setTimeout(armTimeout, Math.min(remaining, 2_147_483_647));
+  };
+  armTimeout();
+  const onExternalAbort = () => controller.abort();
+  if (options?.signal) {
+    options.signal.addEventListener('abort', onExternalAbort);
+    if (options.signal.aborted) onExternalAbort();
+  }
+
   const parsedUrl = new URL(url);
   const fetchImpl = options?.fetch ?? fetch;
-  const robotsCheck = await checkRobotsTxt(parsedUrl, fetchImpl);
-  if (!robotsCheck.allowed) {
+  let readyForFetch = false;
+  try {
+    const robotsCheck = await checkRobotsTxt(parsedUrl, fetchImpl, controller.signal);
+    controller.signal.throwIfAborted();
+    if (!robotsCheck.allowed) {
+      return {
+        ok: false,
+        url,
+        truncated: false,
+        error: `Blocked by robots.txt: ${parsedUrl.hostname} disallows crawling ${parsedUrl.pathname}`,
+      };
+    }
+    await throttleDomain(parsedUrl.hostname, controller.signal);
+    readyForFetch = true;
+  } catch (error) {
     return {
       ok: false,
       url,
       truncated: false,
-      error: `Blocked by robots.txt: ${parsedUrl.hostname} disallows crawling ${parsedUrl.pathname}`,
+      error: controller.signal.aborted ? 'Fetch cancelled or timed out.' : String(error),
     };
+  } finally {
+    if (!readyForFetch) {
+      clearTimeout(timeout);
+      options?.signal?.removeEventListener('abort', onExternalAbort);
+    }
   }
-  await throttleDomain(parsedUrl.hostname);
 
   // ── 3. 抓取 HTML ──
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(new Error('Fetch timeout')),
-    options?.timeoutMs ?? 15000,
-  );
-  const onExternalAbort = () => controller.abort();
-  if (options?.signal) {
-    options.signal.addEventListener('abort', onExternalAbort);
-  }
 
   let html: string | undefined;
   let finalUrl = url;
   let contentType = '';
   let isHtml = false;
+  let readyToParse = false;
 
   try {
     // 手动处理 redirect 以检查每次跳转目标 / Manual redirect handling for per-hop SSRF check
     let currentUrl = url;
     let redirects = 0;
-    const maxRedirects = options?.maxRedirects ?? 3;
+    const maxRedirects = options?.maxRedirects ?? Number.POSITIVE_INFINITY;
+    const seenRequests = new Set<string>();
 
     while (redirects <= maxRedirects) {
-      const resp = await fetchImpl(currentUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'KiteCode/1.0 WebFetchBot',
-          Accept: 'text/html, application/xhtml+xml',
-        },
-        redirect: 'manual',
-      });
+      if (Date.now() >= timeoutAt) controller.abort(new Error('Fetch timeout'));
+      controller.signal.throwIfAborted();
+      const requestUrl = new URL(currentUrl);
+      requestUrl.hash = '';
+      if (seenRequests.has(requestUrl.href)) {
+        return { ok: false, url, truncated: false, error: 'Redirect loop detected.' };
+      }
+      seenRequests.add(requestUrl.href);
+      const resp = await waitForAbortable(
+        fetchImpl(currentUrl, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'KiteCode/1.0 WebFetchBot',
+            Accept: 'text/html, application/xhtml+xml',
+          },
+          redirect: 'manual',
+        }),
+        controller.signal,
+      );
 
       // 处理 redirect（3xx + Location header）/ Handle redirects
       const location = resp.headers.get('location');
@@ -437,30 +535,10 @@ export async function fetchAndExtract(
         };
       }
 
-      // 拒绝超大响应（>5MB header 声明 + body 实际大小）
-      const contentLength = resp.headers.get('content-length');
-      if (contentLength && parseInt(contentLength, 10) > 5_000_000) {
-        return {
-          ok: false,
-          url,
-          finalUrl,
-          contentType,
-          truncated: false,
-          error: `Response too large: ${contentLength} bytes`,
-        };
-      }
-
-      html = await resp.text();
-      if (html.length > 5_000_000) {
-        return {
-          ok: false,
-          url,
-          finalUrl,
-          contentType,
-          truncated: false,
-          error: `Response body too large: ${html.length} bytes`,
-        };
-      }
+      html = await waitForAbortable(
+        readBoundedResponseText(resp, MAX_WEB_RESPONSE_BYTES),
+        controller.signal,
+      );
       break;
     }
 
@@ -472,6 +550,7 @@ export async function fetchAndExtract(
         error: `Too many redirects (>${maxRedirects})`,
       };
     }
+    readyToParse = true;
   } catch (err) {
     if (err instanceof Error && err.name === 'NetworkBoundaryError') throw err;
     if (err instanceof Error && err.name === 'AbortError') {
@@ -489,19 +568,22 @@ export async function fetchAndExtract(
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
-    clearTimeout(timeout);
-    // 不移除 abort listener — parseInWorker 还需要它
+    if (!readyToParse) {
+      clearTimeout(timeout);
+      options?.signal?.removeEventListener('abort', onExternalAbort);
+    }
   }
 
   // ── 3. 解析（HTML → readability，纯文本 → 直接返回）──
-  const maxChars = options?.maxChars ?? 8000;
+  const maxChars = options?.maxChars;
 
   try {
     if (!isHtml) {
+      controller.signal.throwIfAborted();
       // 纯文本 / JSON / XML / CSV — 返回原始内容，不做提取
       let content = html;
       let truncated = false;
-      if (content.length > maxChars) {
+      if (maxChars !== undefined && content.length > maxChars) {
         content = `${content.slice(0, maxChars)}\n\n... (content truncated)`;
         truncated = true;
       }
@@ -552,6 +634,7 @@ export async function fetchAndExtract(
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
+    clearTimeout(timeout);
     if (options?.signal) {
       options.signal.removeEventListener('abort', onExternalAbort);
     }

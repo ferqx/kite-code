@@ -52,6 +52,7 @@ export type ContextCompactionErrorKind =
 export interface ContextCompactionFailure {
   readonly compactionId: string;
   readonly sourceRevision: number;
+  readonly sourceDigest?: string;
   readonly errorKind: ContextCompactionErrorKind;
   readonly message: string;
   readonly retryable: boolean;

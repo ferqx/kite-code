@@ -64,8 +64,7 @@ History/SSE工具生命周期将`rejected`作为独立terminal状态：它只表
 
 Model Context route只接受Browser principal，并以可见Session与exact invocation绑定。Service从prepared event取得private Surface ref，经Builtin reader
 完成schema/integrity验证后再交叉验证ref integrity、route fingerprint与purpose；Public响应不含Artifact ref/digest、Provider options、endpoint或Credential。
-system prompt、canonical messages与tool declarations使用独立累计byte budget并逐段报告truncated，整体仍受1 MiB response limit。Web只在用户从
-`model.invocation_prepared`显式打开Inspector时读取，不做预取、轮询、缓存或持久化。
+完整的provider-neutral system prompt、canonical messages和tool declarations序列化为Service私有快照，通过受1 MiB单响应保护的分块页传输。页cursor绑定read facade owner、Session、invocation和快照；Client按序核对页身份、offset、总长度及SHA-256后组装完整投影，不用累计内容额度截断。Web只在用户从`model.invocation_prepared`显式打开Inspector时读取，关闭或切换时取消在途请求，不做预取、轮询或持久化。
 
 Workspace Session的`display_name`优先使用Directory中的持久化名称；名称为空时，Service通过同一History authority从首条用户消息派生只读展示名，
 不存在用户消息或标题读取不可用时回退Session ID。该展示派生不引入第二份标题状态，也不回写Store。

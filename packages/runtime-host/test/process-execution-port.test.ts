@@ -1,5 +1,20 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeHostProcessExecutionPort } from '../src/process/execution-port';
+import { readRuntimeHostProcessOutput } from '../src/process/output';
+
+test('process output callback receives every byte beyond the terminal preview size', async () => {
+  const complete = 'x'.repeat(300 * 1024);
+  const chunks: string[] = [];
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(complete));
+      controller.close();
+    },
+  });
+  const preview = await readRuntimeHostProcessOutput(stream, (chunk) => chunks.push(chunk));
+  expect(chunks.join('')).toBe(complete);
+  expect(preview).toContain('chars omitted during shell capture');
+});
 
 describe.skipIf(process.platform === 'win32')('Runtime Host watched process execution port', () => {
   test('preserves output and exit status through the POSIX watchdog', async () => {

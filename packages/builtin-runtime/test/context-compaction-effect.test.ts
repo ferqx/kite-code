@@ -4,7 +4,9 @@ import {
   type BuiltinContextCompactor,
   buildContextProjection,
   ContextCompactionValidationError,
+  countTokens,
   createNarrativeContextCompactor,
+  decideAutomaticContextCompaction,
   executeBuiltinContextCompaction,
   expectedCompactionSourceDigest,
   findSafeCompactionBoundary,
@@ -199,6 +201,173 @@ test('narrative compaction restores public Task arguments without exposing priva
   expect(requests).toHaveLength(1);
 });
 
+test('compaction preserves long instructions and accepts a useful summary above old local limits', async () => {
+  const original = stateWithPending();
+  const customInstructions = 'Keep this requirement. '.repeat(300);
+  const summary = 'fact '.repeat(6_500).trim();
+  expect(customInstructions.length).toBeGreaterThan(4_096);
+  expect(countTokens(summary)).toBeGreaterThan(6_000);
+  const state: BuiltinRuntimeStateView = {
+    ...original,
+    context: {
+      ...original.context,
+      pendingCompaction: { ...original.context.pendingCompaction!, customInstructions },
+    },
+  };
+  const requests: Array<{ input: string; maxOutputTokens?: number }> = [];
+  const compact = createNarrativeContextCompactor({
+    generate: async (request) => {
+      requests.push(request);
+      return summary;
+    },
+    maxSummaryTokens: 100,
+    maxSummaryInputTokens: 100,
+    maxNarrativeTokens: 100,
+  });
+  const checkpoint = await compact({
+    state,
+    pending: state.context.pendingCompaction!,
+    sourceRevision: state.revision,
+  });
+  expect(checkpoint.summary).toBe(summary);
+  expect(requests[0]?.input).toContain(customInstructions);
+  expect(requests[0]?.maxOutputTokens).toBeUndefined();
+});
+
+test('compaction accepts a real reduction smaller than the old 1024 token threshold', async () => {
+  const original = stateWithPending();
+  const state: BuiltinRuntimeStateView = {
+    ...original,
+    transcript: {
+      messages: original.transcript.messages.map((message) => ({
+        ...message,
+        content: 'A settled fact. '.repeat(30),
+      })),
+    },
+  };
+  const compact = createNarrativeContextCompactor({
+    generate: async () => 'The settled facts were retained.',
+  });
+  const checkpoint = await compact({
+    state,
+    pending: state.context.pendingCompaction!,
+    sourceRevision: state.revision,
+  });
+  const saved = checkpoint.inputTokensBefore - checkpoint.inputTokensAfter;
+  expect(saved).toBeGreaterThan(0);
+  expect(saved).toBeLessThan(1_024);
+});
+
+test('compaction uses the tighter real provider and single-request output capacity', async () => {
+  const state = stateWithPending();
+  let requestedMaxOutputTokens: number | undefined;
+  const compact = createNarrativeContextCompactor({
+    generate: async (request) => {
+      requestedMaxOutputTokens = request.maxOutputTokens;
+      return 'The settled facts were retained.';
+    },
+    modelMaxOutputTokens: 4_096,
+    modelRequestMaxOutputTokens: 2_048,
+  });
+  await compact({
+    state,
+    pending: state.context.pendingCompaction!,
+    sourceRevision: state.revision,
+  });
+  expect(requestedMaxOutputTokens).toBe(2_048);
+});
+
+test('automatic compaction can run again after prior count and cooldown limits', () => {
+  const original = stateWithPending();
+  const state: BuiltinRuntimeStateView = {
+    ...original,
+    context: {
+      ...original.context,
+      pendingCompaction: undefined,
+      lastCompactionTurnIndex: original.turn.turnIndex,
+      autoGuard: {
+        recentAutomaticCompactions: Array.from({ length: 4 }, (_, index) => ({
+          turnIndex: index + 1,
+          reductionRatio: 0.01,
+          tokensAfter: 10_000,
+        })),
+        consecutiveLowGain: 3,
+        disabledUntilManualAction: true,
+        recoveryAttempted: true,
+      },
+    },
+  };
+  expect(
+    decideAutomaticContextCompaction({
+      state,
+      mode: 'live',
+      preflight: {
+        estimate: original.context.pendingCompaction!.estimate,
+        providerSafetyMarginTokens: 0,
+        usableInputTokens: 20_000,
+        utilization: 0.99,
+        status: 'compact_due',
+      },
+    }),
+  ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
+});
+
+test('automatic compaction does not retry an unchanged failed turn immediately', () => {
+  const original = stateWithPending();
+  const state: BuiltinRuntimeStateView = {
+    ...original,
+    context: {
+      ...original.context,
+      pendingCompaction: undefined,
+      lastFailure: {
+        retryable: true,
+        reason: 'auto',
+        requestedAtTurnId: original.turn.turnId,
+        sourceDigest: expectedCompactionSourceDigest(
+          original.context.activeCheckpoint?.sourceDigest,
+          original.transcript.messages,
+        ),
+      },
+    },
+  };
+  const preflight = {
+    estimate: original.context.pendingCompaction!.estimate,
+    providerSafetyMarginTokens: 0,
+    usableInputTokens: 20_000,
+    utilization: 0.99,
+    status: 'compact_due' as const,
+  };
+  expect(decideAutomaticContextCompaction({ state, mode: 'live', preflight })).toEqual({
+    action: 'invoke',
+  });
+  const newTurn = { ...state, turn: { ...state.turn, turnId: 'new-turn', turnIndex: 6 } };
+  expect(decideAutomaticContextCompaction({ state: newTurn, mode: 'live', preflight })).toEqual({
+    action: 'invoke',
+  });
+  expect(
+    decideAutomaticContextCompaction({
+      state: {
+        ...newTurn,
+        transcript: {
+          messages: [
+            ...newTurn.transcript.messages,
+            {
+              kind: 'user',
+              messageId: 'new-message',
+              turnId: 'new-turn',
+              ordinal: newTurn.transcript.messages.length,
+              createdAt: '2026-08-21T00:00:07.000Z',
+              content: 'New context arrived.',
+            },
+          ],
+        },
+      },
+      mode: 'live',
+      preflight,
+    }),
+  ).toMatchObject({ action: 'request_compaction' });
+});
+
 describe('executeBuiltinContextCompaction', () => {
   test('emits a JSON-safe completed terminal DTO with deterministic timing', async () => {
     const state = stateWithPending();
@@ -355,10 +524,7 @@ describe('executeBuiltinContextCompaction', () => {
       },
       now: fixedNow(),
     });
-    expect(terminal(lowGain)).toMatchObject({
-      errorKind: 'insufficient_reduction',
-      retryable: false,
-    });
+    expect(terminal(lowGain)).toMatchObject({ type: 'context.compaction_completed' });
 
     const generic = await executeBuiltinContextCompaction({
       state,

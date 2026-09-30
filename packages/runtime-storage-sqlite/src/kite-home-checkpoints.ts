@@ -81,6 +81,26 @@ export function createKiteHomeCheckpointStore<Event, State>(input: {
   const deleteNamedAfter = input.database.query(
     'DELETE FROM runtime_named_snapshots WHERE session_id = ? AND event_position > ?',
   );
+  const hasCompletedReservations =
+    input.database
+      .query<{ present: number }, []>(
+        "SELECT 1 AS present FROM sqlite_master WHERE type='table' AND name='runtime_resource_reservation_receipts'",
+      )
+      .get() !== null;
+  const deleteCompletedReservationsAfter = hasCompletedReservations
+    ? input.database.query(
+        'DELETE FROM runtime_resource_reservation_receipts WHERE session_id = ? AND terminal_revision > ?',
+      )
+    : undefined;
+  const copyCompletedReservationsThrough = hasCompletedReservations
+    ? input.database.query(
+        `INSERT INTO runtime_resource_reservation_receipts
+      (session_id,run_id,reservation_id,invocation_id,state,reservation_json,terminal_revision)
+     SELECT ?,run_id,reservation_id,invocation_id,state,reservation_json,terminal_revision
+       FROM runtime_resource_reservation_receipts
+      WHERE session_id = ? AND terminal_revision <= ?`,
+      )
+    : undefined;
   const selectLatestNamedPosition = input.database.query<
     { event_position: number | null },
     [string]
@@ -369,6 +389,11 @@ export function createKiteHomeCheckpointStore<Event, State>(input: {
         encoded.metadata.stateChecksum,
         encoded.metadata.schemaVersion,
       );
+      copyCompletedReservationsThrough?.run(
+        targetSessionId,
+        sourceSessionId,
+        sourceRow.state_revision,
+      );
       const runFork = input.runs.forkSession({
         sourceSessionId,
         targetSessionId,
@@ -485,6 +510,7 @@ export function createKiteHomeCheckpointStore<Event, State>(input: {
         const rewind = input.runs.rewindSession(sessionId, row.state_revision);
         if (rewind.status !== 'applied') return false;
         input.events.deleteAfter(sessionId, row.event_position);
+        deleteCompletedReservationsAfter?.run(sessionId, row.state_revision);
         deleteNamedAfter.run(sessionId, row.event_position);
         deletePreimagesAfter.run(sessionId, row.event_position);
         const encoded = input.snapshots.encode(state);

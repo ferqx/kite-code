@@ -9,6 +9,7 @@ import {
   type LocalBootstrapAuth,
   type LocalBootstrapAuthOptions,
 } from './local-bootstrap-auth';
+import { createRuntimeOutboundSpool } from './runtime-outbound-spool';
 
 const LOOPBACK_HOST = '127.0.0.1';
 const DEFAULT_LOGICAL_QUEUE_MESSAGES = 32;
@@ -251,7 +252,7 @@ class LoopbackSocketSession implements RuntimeServerLogicalMessageConnection {
       () => this.#tickHeartbeat(),
       this.#limits.heartbeatIntervalMs,
     );
-    this.#server.open(this);
+    this.#server.open(this, { outboundSpool: createRuntimeOutboundSpool() });
   }
 
   message(socket: Bun.ServerWebSocket<SocketData>, message: string | Buffer): void {

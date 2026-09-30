@@ -146,7 +146,7 @@ describe('narrative compaction e2e', () => {
     }
   });
 
-  test('auto failure gates the normal model for this turn and releases on the next turn', async () => {
+  test('auto failure preserves the original context and lets the normal model continue', async () => {
     const state = requested('auto');
     const [event] = await executeContextCompaction({
       state,
@@ -159,14 +159,12 @@ describe('narrative compaction e2e', () => {
       type: 'context.compaction_failed',
       errorKind: 'summary_model_failed',
       requestedAtTurnId: state.turn.turnId,
+      sourceDigest: expectedCompactionSourceDigest(undefined, state.transcript.messages),
     });
 
     const failed = reduceRuntimeState(state, event!);
-    expect(decideNextEffect(failed)).toEqual({
-      type: 'recovery_blocked',
-      failureKind: 'compaction_failed',
-      reason: 'Automatic context compaction failed: provider rejected summary',
-    });
+    expect(failed.context.activeCheckpoint).toBeUndefined();
+    expect(decideNextEffect(failed)).toEqual({ type: 'call_model' });
 
     const next = reduceRuntimeState(failed, { type: 'turn.started', turnId: 'next-turn' });
     expect(decideNextEffect(next)).toEqual({ type: 'call_model' });

@@ -65,7 +65,7 @@ Verification executor 的 Artifact reader 与 Tool receipt writer 必须来自�
 任何验证检查都不会启动模型，也不会用模型猜测缺失证据。Concrete Tool/Subagent runner import 由 App/Host static
 boundary 固定在 Pipeline dispatch adapter。
 
-所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。
+所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。新 `unboundedCumulativeUsage` 主 Run 和 `durationOnlyChildRun` 子 Run 的 `required` 验证可持续 repair／reverify，不因 `repair.maxAttempts` 或历史累计 repair 计数进入 `budget_exhausted`；旧有限 Run 的持久额度仍适用。已持久化为 `budget_exhausted`、且仅由旧 repair 额度耗尽造成的记录在升级后的无累计额度 Run 中可以恢复；spec 无效或另有诊断时仍不得绕过。实现见 [repair policy](../../packages/agent-kernel/src/domains/verification/repair-policy.ts)、[reducer](../../packages/agent-kernel/src/domains/verification/reducer.ts)和 [scheduler](../../packages/agent-kernel/src/scheduler.ts)。
 
 ## 完成与恢复语义
 
@@ -76,8 +76,8 @@ stateDiagram-v2
     running --> passed: checks passed
     running --> failed: deterministic failure
     running --> inconclusive: evidence unavailable
-    failed --> repair_pending: budget available
-    inconclusive --> repair_pending: budget available
+    failed --> repair_pending: 可继续修复
+    inconclusive --> repair_pending: 可继续修复
     repair_pending --> running: repaired final produced
     failed --> budget_exhausted: budget exhausted
     inconclusive --> budget_exhausted: budget exhausted
@@ -92,8 +92,8 @@ stateDiagram-v2
 
 - `not_required` 不创建执行门禁；普通问答保持直接完成。
 - `best_effort` 会执行并记录结果，但失败或不确定不阻止 `emit_final`。
-- `required` 的 pending/running 会先产生 `run_verification`；failed/inconclusive 在 budget 内产生 `repair_verification`，把验证失败作为 Runtime system context 重新进入正常模型/工具/policy 链路。
-- budget 耗尽、compensated 但未重新验证等状态产生 `request_verification_decision`，在 CLI/TUI 请求用户选择 replan、compensation 或 waiver，不得发出 `run.completed`。
+- `required` 的 pending/running 会先产生 `run_verification`；failed/inconclusive 在当前 Run 仍可修复时产生 `repair_verification`，把验证失败作为 Runtime system context 重新进入正常模型/工具/policy 链路。无累计额度 Run 的该循环受执行期限、取消和实际安全／证据条件约束。
+- 历史有限 Run 的 repair 额度耗尽、compensated 但未重新验证等状态产生 `request_verification_decision`，在 CLI/TUI 请求用户选择 replan、compensation 或 waiver，不得发出 `run.completed`。
 - waiver、replan 和 compensation 只能由 `RuntimeUserAction` 入口产生。Waiver 必须包含理由并持久化 `actor: user`；模型没有 waiver event 或 effect 的生成入口。
 - compensation 只有在用户结构化请求后执行。Compensation 成功不等于原结果已验证，仍须 replan/reverify 或用户 waive。
 

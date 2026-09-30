@@ -349,7 +349,30 @@ async function executeManagedShellOperation(
         });
   if (!snapshot)
     return failedReceipt(request.invocationId, context, 'mechanism_unavailable', executorRevision);
-  const text = JSON.stringify(snapshot);
+  // The live output page is already present on the snapshot. Repeating a
+  // terminal preview inside result would bloat the Tool frame and can exceed
+  // the protocol envelope before the caller can request the next cursor.
+  const terminal = snapshot.result as BuiltinShellTerminalExecutionResult | undefined;
+  const projectedSnapshot =
+    terminal && typeof terminal === 'object' && !Array.isArray(terminal)
+      ? {
+          ...snapshot,
+          result: {
+            ...(terminal.status ? { status: terminal.status } : {}),
+            ok: terminal.ok,
+            exitCode: terminal.exitCode,
+            intent: terminal.intent,
+            ...(terminal.timedOut ? { timedOut: true } : {}),
+            ...(terminal.aborted ? { aborted: true } : {}),
+            ...(terminal.terminationReason
+              ? { terminationReason: terminal.terminationReason }
+              : {}),
+            ...(terminal.executionPhase ? { executionPhase: terminal.executionPhase } : {}),
+            ...(terminal.processCleanup ? { processCleanup: terminal.processCleanup } : {}),
+          },
+        }
+      : snapshot;
+  const text = JSON.stringify(projectedSnapshot);
   return succeededReceipt(
     request.invocationId,
     context,
@@ -360,7 +383,7 @@ async function executeManagedShellOperation(
       stderr: '',
       resultMeta: Object.freeze({
         operation: operationId,
-        snapshot: snapshot as never,
+        snapshot: projectedSnapshot as never,
         ...(typeof snapshot.shellId === 'string' ? { shellId: snapshot.shellId } : {}),
         ...(snapshot.status === 'running' || snapshot.status === 'exited'
           ? { shellStatus: snapshot.status }
@@ -479,6 +502,7 @@ function projectShellResult(output: BuiltinShellExecutionResult): BuiltinOperati
       intent: output.intent,
       truncated: streams.truncated,
       ...(output.shellId ? { shell_id: output.shellId } : {}),
+      ...(output.shellId ? { shellId: output.shellId, shellStatus: 'exited' as const } : {}),
       ...(output.status ? { status: output.status } : {}),
       ...(output.cursor !== undefined ? { cursor: output.cursor } : {}),
       rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),

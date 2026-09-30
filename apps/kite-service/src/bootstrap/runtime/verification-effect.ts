@@ -29,7 +29,15 @@ export async function executeVerificationEffect(
   const record = state.verification.records[effect.verificationId];
   if (!record) return [];
   if (effect.type === 'repair_verification') {
-    if (!['failed', 'inconclusive'].includes(record.status)) return [];
+    const resumedQuotaExhaustion =
+      record.mode === 'required' &&
+      record.status === 'budget_exhausted' &&
+      state.resourceBudget.status === 'active' &&
+      (state.resourceBudget.budget.unboundedCumulativeUsage === true ||
+        state.resourceBudget.budget.durationOnlyChildRun === true) &&
+      !record.diagnostics?.length &&
+      record.repairAttempts >= record.spec.repair.maxAttempts;
+    if (!['failed', 'inconclusive'].includes(record.status) && !resumedQuotaExhaustion) return [];
     const failures = Object.values(record.checkResults)
       .filter((result) => result.outcome !== 'passed')
       .map((result) => `${result.checkId}: ${result.summary}`)
@@ -80,7 +88,7 @@ export async function executeVerificationEffect(
         summary:
           result.exitCode === 0
             ? 'Compensation completed successfully.'
-            : `Compensation exited with code ${result.exitCode}: ${result.stderr}`.slice(0, 2_000),
+            : `Compensation exited with code ${result.exitCode}: ${result.stderr}`,
         completedAt: new Date().toISOString(),
       },
     ];

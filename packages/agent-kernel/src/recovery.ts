@@ -200,13 +200,9 @@ function compactFailures(
 ): { failures: Record<string, ToolRecoveryFailure>; order: string[] } {
   const order = [...new Set(inputOrder)].filter((id) => failures[id] != null);
   if (order.length <= 128) return { failures: { ...failures }, order };
-  const prioritized = [
-    ...[...order].reverse().filter((id) => failureStillBlocks(failures[id]!)),
-    ...[...order].reverse().filter((id) => !failureStillBlocks(failures[id]!)),
-  ];
   const retained = new Set<string>();
-  for (const candidate of prioritized) {
-    if (retained.has(candidate)) continue;
+  const retainClosure = (candidate: string, limit?: number): void => {
+    if (retained.has(candidate)) return;
     const closure: string[] = [];
     const seen = new Set<string>();
     let current: string | undefined = candidate;
@@ -217,9 +213,20 @@ function compactFailures(
       closure.push(current);
       current = failure.outcome.lineage?.recoveryOf;
     }
-    if (retained.size + closure.filter((id) => !retained.has(id)).length > 128) continue;
+    if (
+      limit !== undefined &&
+      retained.size + closure.filter((id) => !retained.has(id)).length > limit
+    )
+      return;
     for (const id of closure) retained.add(id);
-    if (retained.size === 128) break;
+  };
+  for (const id of [...order].reverse()) {
+    if (failureStillBlocks(failures[id]!)) retainClosure(id);
+  }
+  const limit = retained.size + 128;
+  for (const id of [...order].reverse()) {
+    if (!failureStillBlocks(failures[id]!)) retainClosure(id, limit);
+    if (retained.size >= limit) break;
   }
   const retainedOrder = order.filter((id) => retained.has(id));
   return {
@@ -505,13 +512,14 @@ function closeFailures(
       return [id, { ...failure, status: recover ? 'recovered' : 'exhausted', resolution }];
     }),
   );
-  return changed
-    ? {
-        ...journal,
-        failures,
-        qualityGuard: qualityAfterMutation(journal, { blocked: false, observedFailures: 0 }),
-      }
-    : journal;
+  if (!changed) return journal;
+  const compacted = compactFailures(failures, journal.order);
+  return {
+    ...journal,
+    failures: compacted.failures,
+    order: compacted.order,
+    qualityGuard: qualityAfterMutation(journal, { blocked: false, observedFailures: 0 }),
+  };
 }
 export function closeToolRecoveryScope(
   journal: ToolRecoveryJournal,
@@ -752,11 +760,11 @@ export function normalizeToolRecoveryJournal(
     return blocked(numberValue(quality, 'observedFailures'));
   const order = candidate.order as readonly unknown[];
   const failuresRecord = candidate.failures as Readonly<Record<string, unknown>>;
+  const orderSet = new Set(order);
   if (
-    order.length > 128 ||
-    new Set(order).size !== order.length ||
+    orderSet.size !== order.length ||
     order.some((id) => typeof id !== 'string' || !/^[a-f0-9]{64}$/u.test(id)) ||
-    Object.keys(failuresRecord).some((id) => !order.includes(id))
+    Object.keys(failuresRecord).some((id) => !orderSet.has(id))
   )
     return blocked(numberValue(quality, 'observedFailures'));
   const candidateProgressRevision = numberValue(candidate, 'progressRevision') ?? -1;

@@ -28,6 +28,7 @@ import {
   assertKiteSessionStore12Schema,
   assertKiteSessionStore13Schema,
   assertKiteSessionStore14Schema,
+  assertKiteSessionStore15Schema,
   assertKiteSessionStoreSchema,
   assertKiteStoreIntegrity,
   KITE_HOME_STORE_TABLE_COLUMNS,
@@ -37,6 +38,7 @@ import {
   KITE_SESSION_STORE12_TABLE_COLUMNS,
   KITE_SESSION_STORE13_TABLE_COLUMNS,
   KITE_SESSION_STORE14_TABLE_COLUMNS,
+  KITE_SESSION_STORE15_TABLE_COLUMNS,
 } from './kite-home-store';
 import {
   acquireKiteSessionStoreMaintenance,
@@ -329,6 +331,9 @@ function captureKnownStore(database: Database): KiteSessionCapture {
       assertKiteSessionStore14Schema(database);
       columns = KITE_SESSION_STORE14_TABLE_COLUMNS;
     } else if (metadata.schemaVersion === 15) {
+      assertKiteSessionStore15Schema(database);
+      columns = KITE_SESSION_STORE15_TABLE_COLUMNS;
+    } else if (metadata.schemaVersion === 16) {
       assertKiteSessionStoreSchema(database);
       columns = KITE_SESSION_STORE_TABLE_COLUMNS;
     } else {

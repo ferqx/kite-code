@@ -31,10 +31,6 @@ import { countTokens } from './token-counter';
 
 export { normalizeCompactionSummary, serializeCompactionSummary };
 
-const DEFAULT_MAX_SUMMARY_TOKENS = 6_000;
-const DEFAULT_MAX_NARRATIVE_TOKENS = 6_000;
-const MINIMUM_REDUCTION_TOKENS = 1_024;
-
 export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
   | 'oversized_turn'
@@ -71,7 +67,7 @@ the Markdown narrative.`;
 export interface ContextSummaryGenerationRequest {
   systemPrompt: string;
   input: string;
-  maxOutputTokens: number;
+  maxOutputTokens?: number;
 }
 
 export interface ContextSummaryGenerationResult {
@@ -111,7 +107,9 @@ export function createModelContextSummaryGenerator(input: {
       model: input.model,
       tools: {},
       messages: [systemMessage(request.systemPrompt), humanMessage(request.input)],
-      maxOutputTokens: request.maxOutputTokens,
+      ...(request.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: request.maxOutputTokens }),
       providerOptions: input.model.compactionProviderOptions,
       transport: 'generate',
     });
@@ -230,16 +228,16 @@ export function createNarrativeContextCompactor(options: {
   maxNarrativeTokens?: number;
   modelContextWindowTokens?: number;
   modelMaxOutputTokens?: number;
+  modelRequestMaxOutputTokens?: number;
 }) {
-  const maxSummaryTokens = Math.min(
-    options.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS,
-    options.modelMaxOutputTokens ?? Number.POSITIVE_INFINITY,
-  );
-  const maxNarrativeTokens = options.maxNarrativeTokens ?? DEFAULT_MAX_NARRATIVE_TOKENS;
-  const maxInputTokens = options.maxSummaryInputTokens;
-  if (maxSummaryTokens > maxNarrativeTokens) {
-    throw new Error('maxSummaryTokens must not exceed maxNarrativeTokens.');
-  }
+  // The selected model's output capacity is the only summary output ceiling.
+  // Historical compaction limit settings remain decodable but do not restrict
+  // new summaries or discard user-provided compaction instructions.
+  const outputCapacities = [
+    options.modelMaxOutputTokens,
+    options.modelRequestMaxOutputTokens,
+  ].filter((value): value is number => value !== undefined && Number.isFinite(value) && value > 0);
+  const maxSummaryTokens = outputCapacities.length > 0 ? Math.min(...outputCapacities) : undefined;
 
   return async (input: {
     state: Readonly<BuiltinRuntimeStateView>;
@@ -266,7 +264,7 @@ export function createNarrativeContextCompactor(options: {
 
     const base = input.state.context.activeCheckpoint;
     const candidateSource = base ? incrementalBoundary(safe, input.state, base) : safe;
-    const customInstructions = input.pending.customInstructions?.slice(0, 4_096);
+    const customInstructions = input.pending.customInstructions;
     const narrativeOnly = base != null && candidateSource.coveredMessages.length === 0;
     if (narrativeOnly) {
       throw new ContextCompactionValidationError(
@@ -296,9 +294,7 @@ export function createNarrativeContextCompactor(options: {
       transcriptToolCallArgs: input.projectionEnvironment?.transcriptToolCallArgs,
     };
     const before = buildContextProjection(projectionInput).estimate.totalInputTokens;
-    // Use the smallest valid narrative to calculate an upper bound on possible
-    // savings. If even that best case cannot clear the acceptance threshold,
-    // a Provider call can only waste time and tokens.
+    // A compaction must be able to remove at least some context.
     const bestCaseCheckpoint: BuiltinContextCheckpointView = {
       compactionId: input.pending.compactionId,
       version: 1,
@@ -318,10 +314,10 @@ export function createNarrativeContextCompactor(options: {
       candidateCheckpoint: bestCaseCheckpoint,
     }).estimate.totalInputTokens;
     const maximumReduction = before - bestCaseAfter;
-    if (maximumReduction < MINIMUM_REDUCTION_TOKENS) {
+    if (maximumReduction <= 0) {
       throw new ContextCompactionValidationError(
         'insufficient_reduction',
-        `Not enough reducible context to compact (at most ${Math.max(0, maximumReduction)} tokens; ${MINIMUM_REDUCTION_TOKENS} required).`,
+        'No reducible context remains.',
       );
     }
     const requestInput = summaryInput({
@@ -333,15 +329,12 @@ export function createNarrativeContextCompactor(options: {
       countTokens(SUMMARY_SYSTEM_PROMPT) + countTokens(requestInput) + 8;
     const modelInputLimit =
       options.modelContextWindowTokens != null
-        ? Math.max(0, options.modelContextWindowTokens - maxSummaryTokens)
+        ? Math.max(0, options.modelContextWindowTokens - (maxSummaryTokens ?? 0))
         : undefined;
-    if (
-      (maxInputTokens != null && completeRequestTokens > maxInputTokens) ||
-      (modelInputLimit != null && completeRequestTokens > modelInputLimit)
-    ) {
+    if (modelInputLimit != null && completeRequestTokens > modelInputLimit) {
       throw new ContextCompactionValidationError(
         'oversized_turn',
-        'The complete conversation exceeds the configured summary input limit.',
+        'The complete conversation exceeds the model context window.',
       );
     }
 
@@ -351,7 +344,7 @@ export function createNarrativeContextCompactor(options: {
         await options.generate({
           systemPrompt: SUMMARY_SYSTEM_PROMPT,
           input: requestInput,
-          maxOutputTokens: maxSummaryTokens,
+          ...(maxSummaryTokens === undefined ? {} : { maxOutputTokens: maxSummaryTokens }),
         }),
       );
     } catch (error) {
@@ -376,13 +369,6 @@ export function createNarrativeContextCompactor(options: {
         'Summary model returned a tool call.',
       );
     }
-    if (countTokens(summary) > maxNarrativeTokens) {
-      throw new ContextCompactionValidationError(
-        'truncated_summary',
-        'Summary exceeds the narrative token limit.',
-      );
-    }
-
     const checkpoint: BuiltinContextCheckpointView = {
       compactionId: input.pending.compactionId,
       ...(generated.modelInvocationId ? { modelInvocationId: generated.modelInvocationId } : {}),
@@ -402,10 +388,10 @@ export function createNarrativeContextCompactor(options: {
       ...projectionInput,
       candidateCheckpoint: checkpoint,
     }).estimate.totalInputTokens;
-    if (before - after < MINIMUM_REDUCTION_TOKENS) {
+    if (before - after <= 0) {
       throw new ContextCompactionValidationError(
         'insufficient_reduction',
-        `Compaction saved ${before - after} tokens; ${MINIMUM_REDUCTION_TOKENS} required.`,
+        'Compaction did not reduce context.',
       );
     }
     return { ...checkpoint, inputTokensAfter: after };

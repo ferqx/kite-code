@@ -175,7 +175,13 @@ export function sealChildTerminalCheckpointInTransaction(
   const followupModel = route ? record(record(state.modelInvocations)[route.invocationId]) : {};
   const followupResponse = record(followupModel.responseArtifact);
   const followupLocalReservation = route
-    ? record(record(record(state.resourceBudget).reservations)[route.reservationId])
+    ? reservationWithTerminalReceipt(
+        database,
+        sessionId,
+        state,
+        mutation.terminalRunId,
+        route.reservationId,
+      )
     : {};
   const followupResponseRow =
     followupResponse.artifactId && typeof followupResponse.artifactId === 'string'
@@ -1512,8 +1518,12 @@ function verifyIndependentChildFollowupWork(
     const toolCallId = String(work.toolCallId ?? '');
     const call = record(record(record(state.tools).calls)[toolCallId]);
     const parentModel = record(record(state.modelInvocations)[String(call.modelInvocationId)]);
-    const parentModelReservation = record(
-      record(ledger.reservations)[String(record(parentModel.budget).reservationId)],
+    const parentModelReservation = reservationWithTerminalReceipt(
+      database,
+      targetSessionId,
+      state,
+      targetRunId,
+      String(record(parentModel.budget).reservationId),
     );
     const route = readCrossSessionFollowupRoute(database, targetSessionId, submissionId);
     return (
@@ -1788,12 +1798,13 @@ export function readIndependentCrossSessionFollowupActivation(
     )
     .get(sourceSessionId);
   const source = sourceRow ? parse(sourceRow.state_json) : {};
-  const active = record(source.resourceBudget);
-  const ledger =
-    active.runId === row.source_run_id
-      ? active
-      : record(record(source.retainedResourceBudgets)[row.source_run_id]);
-  const backup = record(record(ledger.reservations)[String(admission.backupReservationId)]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    sourceSessionId,
+    source,
+    row.source_run_id,
+    String(admission.backupReservationId),
+  );
   if (!['dispatch_started', 'reconciled', 'unknown'].includes(String(backup.state))) return null;
   const targetRow = database
     .query<{ state_json: string }, [string]>(
@@ -2775,14 +2786,14 @@ export function settleCancelledAcceptedFollowupsInTransaction(
       admission.fundingRunId !== row.source_run_id
     )
       invalid();
-    const active = record(state.resourceBudget);
-    const ledger =
-      active.runId === row.source_run_id
-        ? active
-        : record(record(state.retainedResourceBudgets)[row.source_run_id]);
-    const backup = record(record(ledger.reservations)[backupId]);
+    const backup = reservationWithTerminalReceipt(
+      database,
+      input.sourceSessionId,
+      state,
+      row.source_run_id,
+      backupId,
+    );
     if (
-      ledger.runId !== row.source_run_id ||
       backup.reservationId !== backupId ||
       backup.runId !== row.source_run_id ||
       backup.resourceKind !== 'subagent' ||
@@ -2865,11 +2876,31 @@ function provenUnfundedExpiredTarget(
     ledger.runId !== targetRunId
   )
     return false;
+  // Historical Models belong to earlier Runs; only resolve this Run's exact candidates.
+  const reservationIds = new Set(Object.keys(record(ledger.reservations)));
+  const archived = database
+    .query<{ reservation_id: string }, [string, string]>(
+      'SELECT reservation_id FROM runtime_resource_reservation_receipts WHERE session_id=? AND run_id=?',
+    )
+    .all(input.targetSessionId, targetRunId);
+  for (const row of archived) reservationIds.add(row.reservation_id);
   const models = Object.values(record(state.modelInvocations))
     .map((value) => record(value))
     .filter((model) => {
-      const reservation = record(
-        record(ledger.reservations)[String(record(model.budget).reservationId)],
+      const budget = record(model.budget);
+      if (
+        model.purpose !== 'primary_agent' ||
+        budget.kind !== 'reservation' ||
+        typeof budget.reservationId !== 'string' ||
+        !reservationIds.has(budget.reservationId)
+      )
+        return false;
+      const reservation = reservationWithTerminalReceipt(
+        database,
+        input.targetSessionId,
+        state,
+        targetRunId,
+        budget.reservationId,
       );
       return (
         model.purpose === 'primary_agent' &&
@@ -2880,7 +2911,13 @@ function provenUnfundedExpiredTarget(
   if (models.length !== 1) return false;
   const model = models[0]!;
   const reservationId = String(record(model.budget).reservationId);
-  const local = record(record(ledger.reservations)[reservationId]);
+  const local = reservationWithTerminalReceipt(
+    database,
+    input.targetSessionId,
+    state,
+    targetRunId,
+    reservationId,
+  );
   if (
     typeof model.invocationId !== 'string' ||
     model.status !== 'prepared' ||
@@ -3231,7 +3268,13 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
       ? active
       : record(record(state.retainedResourceBudgets)[outbox.source_run_id]);
   const backupId = String(admission.backupReservationId);
-  const backup = record(record(ledger.reservations)[backupId]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    state,
+    outbox.source_run_id,
+    backupId,
+  );
   const tool = record(record(record(state.tools).calls)[outbox.source_tool_call_id]);
   const preparedTool = record(admission.preparedTool);
   const invocation = record(
@@ -3293,7 +3336,6 @@ export function releaseAcceptedCrossSessionFollowupBackupInTransaction(
     admission.submissionId !== input.submissionId ||
     admission.messageId !== outbox.message_id ||
     admission.fundingRunId !== outbox.source_run_id ||
-    ledger.runId !== outbox.source_run_id ||
     backup.reservationId !== backupId ||
     backup.runId !== outbox.source_run_id ||
     backup.resourceKind !== 'subagent' ||
@@ -3492,13 +3534,14 @@ export function releaseCrossSessionCurrentTurnBackupInTransaction(
   const admission = admissionRow ? parse(admissionRow.canonical_json) : {};
   const acceptedPolicy = record(admission.policy);
   const sourceState = input.sourceSnapshot;
-  const active = record(sourceState.resourceBudget);
-  const ledger =
-    active.runId === outbox.source_run_id
-      ? active
-      : record(record(sourceState.retainedResourceBudgets)[outbox.source_run_id]);
   const backupId = String(admission.backupReservationId);
-  const backup = record(record(ledger.reservations)[backupId]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    sourceState,
+    outbox.source_run_id,
+    backupId,
+  );
   const tool = record(record(record(sourceState.tools).calls)[outbox.source_tool_call_id]);
   const preparedTool = record(admission.preparedTool);
   const invocation = record(
@@ -3560,7 +3603,6 @@ export function releaseCrossSessionCurrentTurnBackupInTransaction(
     acceptedPolicy.interactionMode !== sourceState.mode ||
     acceptedPolicy.interactionModeRevision !== sourceState.interactionModeRevision ||
     acceptedPolicy.workspaceAccess !== sourceState.workspaceAccess ||
-    ledger.runId !== outbox.source_run_id ||
     backup.reservationId !== backupId ||
     backup.runId !== outbox.source_run_id ||
     backup.resourceKind !== 'subagent' ||
@@ -3671,12 +3713,13 @@ export function readCrossSessionCurrentTurnBackupReleaseForTarget(
     .get(sourceSessionId, submissionId);
   const admission = admissionRow ? parse(admissionRow.canonical_json) : {};
   const state = source ? parse(source.state_json) : {};
-  const active = record(state.resourceBudget);
-  const ledger =
-    active.runId === row.source_run_id
-      ? active
-      : record(record(state.retainedResourceBudgets)[row.source_run_id]);
-  const backup = record(record(ledger.reservations)[String(admission.backupReservationId)]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    sourceSessionId,
+    state,
+    row.source_run_id,
+    String(admission.backupReservationId),
+  );
   const routeDigest = route
     ? `sha256:${createHash('sha256').update(JSON.stringify(route)).digest('hex')}`
     : '';
@@ -3704,7 +3747,6 @@ export function readCrossSessionCurrentTurnBackupReleaseForTarget(
     sourceSession.workspace_id !== target.workspace_id ||
     sourceSession.project_id !== target.project_id ||
     sourceSession.workspace_digest !== target.workspace_digest ||
-    ledger.runId !== row.source_run_id ||
     backup.reservationId !== admission.backupReservationId ||
     backup.state !== 'released' ||
     !currentTurnReleasedBackupHistoryProven(
@@ -4477,22 +4519,32 @@ export function settleCrossSessionFollowupFundingInTransaction(
     invalid();
   const target = parse(targetRow.state_json);
   const targetModel = record(record(target.modelInvocations)[input.modelInvocationId]);
-  const local = record(
-    record(record(target.resourceBudget).reservations)[funding.targetModelReservationId],
+  const local = reservationWithTerminalReceipt(
+    database,
+    input.targetSessionId,
+    target,
+    input.targetRunId,
+    funding.targetModelReservationId,
   );
   const targetRun = database
     .query<{ status: string }, [string, string]>(
       'SELECT status FROM runtime_runs WHERE session_id=? AND run_id=?',
     )
     .get(input.targetSessionId, input.targetRunId);
-  const sourceBudget = record(input.sourceSnapshot.resourceBudget);
-  const ledger =
-    sourceBudget.runId === funding.fundingRunId
-      ? sourceBudget
-      : record(record(input.sourceSnapshot.retainedResourceBudgets)[funding.fundingRunId]);
-  const reservations = record(ledger.reservations);
-  const turn = record(reservations[funding.turnReservationId]);
-  const model = record(reservations[funding.modelReservationId]);
+  const turn = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    input.sourceSnapshot,
+    funding.fundingRunId,
+    funding.turnReservationId,
+  );
+  const model = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    input.sourceSnapshot,
+    funding.fundingRunId,
+    funding.modelReservationId,
+  );
   const eventById = new Map(input.events.map((event) => [event.reservationId, event]));
   const turnEvent = record(eventById.get(funding.turnReservationId));
   const modelEvent = record(eventById.get(funding.modelReservationId));
@@ -4659,7 +4711,6 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
   const targetLedger = record(target.resourceBudget);
   const targetUsage = record(targetLedger.reconciledUsage);
   const targetCounters = record(targetUsage.counters);
-  const sourceActive = record(input.sourceSnapshot.resourceBudget);
   const sourceRow = database
     .query<{ revision: number; state_json: string }, [string]>(
       `SELECT s.revision,p.state_json FROM runtime_sessions s JOIN runtime_snapshots p
@@ -4667,13 +4718,13 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
     )
     .get(input.sourceSessionId);
   const admission = proof?.admission ?? {};
-  const sourceLedger =
-    sourceActive.runId === admission.fundingRunId
-      ? sourceActive
-      : record(
-          record(input.sourceSnapshot.retainedResourceBudgets)[String(admission.fundingRunId)],
-        );
-  const backup = record(record(sourceLedger.reservations)[String(admission.backupReservationId)]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    input.sourceSnapshot,
+    String(admission.fundingRunId),
+    String(admission.backupReservationId),
+  );
   const durationOnlyChildRun = record(backup.executableUpperBound).durationOnlyChildRun === true;
   const route = readCrossSessionFollowupRoute(database, input.targetSessionId, input.submissionId);
   const run = database
@@ -4736,7 +4787,6 @@ export function settleIndependentCrossSessionFollowupFundingInTransaction(
     input.sourceRevision < 1 ||
     !Number.isSafeInteger(input.createdAtMs) ||
     input.createdAtMs < 0 ||
-    sourceLedger.runId !== admission.fundingRunId ||
     backup.reservationId !== admission.backupReservationId ||
     !sameCanonicalValue(backup.executableUpperBound, admission.executableUpperBound) ||
     auditEvents.length !== 1 ||
@@ -4947,13 +4997,30 @@ export function settleCrossSessionFollowupFundingAfterUnknownRecoveryInTransacti
     active.runId === funding.fundingRunId
       ? active
       : record(record(source.retainedResourceBudgets)[funding.fundingRunId]);
-  const reservations = record(ledger.reservations);
-  const turn = record(reservations[funding.turnReservationId]);
-  const model = record(reservations[funding.modelReservationId]);
+  const turn = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    source,
+    funding.fundingRunId,
+    funding.turnReservationId,
+  );
+  const model = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    source,
+    funding.fundingRunId,
+    funding.modelReservationId,
+  );
   const target = parse(targetRow.state_json);
   const targetModel = record(record(target.modelInvocations)[input.modelInvocationId]);
   const targetLedger = record(target.resourceBudget);
-  const local = record(record(targetLedger.reservations)[funding.targetModelReservationId]);
+  const local = reservationWithTerminalReceipt(
+    database,
+    input.targetSessionId,
+    target,
+    input.targetRunId,
+    funding.targetModelReservationId,
+  );
   const targetRun = database
     .query<{ status: string }, [string, string]>(
       'SELECT status FROM runtime_runs WHERE session_id=? AND run_id=?',
@@ -5184,6 +5251,7 @@ export interface PendingCrossSessionFollowupFunding {
   readonly stage: 'accepted' | 'replaced' | 'routed' | 'activated';
   readonly fundingRunId: string;
   readonly reservationIds: readonly string[];
+  readonly releasedBackupReservation?: Readonly<Record<string, unknown>>;
 }
 
 /** Only the source owner may feed these exact held IDs into restart recovery. */
@@ -5267,7 +5335,18 @@ export function listPendingCrossSessionFollowupFunding(
         ? active
         : record(record(state.retainedResourceBudgets)[row.source_run_id]);
     const reservations = record(ledger.reservations);
-    const backup = record(reservations[backupId]);
+    const backupInState = record(reservations[backupId]);
+    const backup = reservationWithTerminalReceipt(
+      database,
+      sourceSessionId,
+      state,
+      row.source_run_id,
+      backupId,
+    );
+    const releasedBackupReservation =
+      backupInState.reservationId === undefined && backup.state === 'released'
+        ? { releasedBackupReservation: backup }
+        : {};
     if (admission.schema === 'kite.cross-session-followup-admission.v2') {
       const accepted = readAcceptedIndependentFollowupSourcePolicyProof(
         database,
@@ -5313,7 +5392,11 @@ export function listPendingCrossSessionFollowupFunding(
       admission.fundingRunId !== row.source_run_id ||
       ledger.runId !== row.source_run_id ||
       backup.reservationId !== backupId ||
-      backup.runId !== row.source_run_id
+      backup.runId !== row.source_run_id ||
+      backup.invocationId !== row.submission_id ||
+      backup.resourceKind !== 'subagent' ||
+      backup.parentReservationId !== undefined ||
+      !sameCanonicalValue(backup.executableUpperBound, admission.executableUpperBound)
     )
       invalid();
     if (row.turn_reservation_id && row.model_reservation_id) {
@@ -5344,6 +5427,7 @@ export function listPendingCrossSessionFollowupFunding(
               : ('replaced' as const),
         fundingRunId: row.source_run_id,
         reservationIds: Object.freeze([row.turn_reservation_id, row.model_reservation_id]),
+        ...releasedBackupReservation,
       });
     }
     if (
@@ -5562,7 +5646,13 @@ export function replaceCrossSessionFollowupBackupInTransaction(
   const backupId = String(admission.backupReservationId);
   const turn = record(replacementEvent.turnReservation);
   const model = record(replacementEvent.replacement);
-  const backup = record(reservations[backupId]);
+  const backup = reservationWithTerminalReceipt(
+    database,
+    input.sourceSessionId,
+    input.sourceSnapshot,
+    outbox.source_run_id,
+    backupId,
+  );
   const storedTurn = record(reservations[turn.reservationId as string]);
   const storedModel = record(reservations[model.reservationId as string]);
   const modelUpper = record(model.executableUpperBound);
@@ -6945,6 +7035,73 @@ function parse(json: string): RecordValue {
 
 function record(value: unknown): RecordValue {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as RecordValue) : {};
+}
+
+/** A terminal reservation is either retained by an older State or sealed in the same Store. */
+function reservationWithTerminalReceipt(
+  database: Database,
+  sessionId: string,
+  state: RecordValue,
+  runId: string,
+  reservationId: string,
+): RecordValue {
+  const active = record(state.resourceBudget);
+  const ledger =
+    active.runId === runId ? active : record(record(state.retainedResourceBudgets)[runId]);
+  const inState = record(record(ledger.reservations)[reservationId]);
+  if (inState.reservationId !== undefined) return inState;
+  if (!reservationId) return {};
+  const row = database
+    .query<
+      {
+        run_id: string;
+        invocation_id: string;
+        state: string;
+        reservation_json: string;
+        terminal_revision: number;
+      },
+      [string, string]
+    >(`SELECT run_id,invocation_id,state,reservation_json,terminal_revision
+      FROM runtime_resource_reservation_receipts WHERE session_id=? AND reservation_id=?`)
+    .get(sessionId, reservationId);
+  if (!row) return {};
+  const revision = Number(state.revision);
+  if (
+    row.run_id !== runId ||
+    !Number.isSafeInteger(revision) ||
+    !Number.isSafeInteger(row.terminal_revision) ||
+    row.terminal_revision < 1 ||
+    row.terminal_revision > revision ||
+    (row.state !== 'released' && row.state !== 'reconciled')
+  )
+    invalid();
+  const reservation = parse(row.reservation_json);
+  if (
+    reservation.reservationId !== reservationId ||
+    reservation.runId !== runId ||
+    reservation.invocationId !== row.invocation_id ||
+    reservation.state !== row.state
+  )
+    invalid();
+  const eventRow = database
+    .query<{ event_json: string }, [string, number]>(
+      'SELECT event_json FROM runtime_events WHERE session_id=? AND sequence=?',
+    )
+    .get(sessionId, row.terminal_revision);
+  if (!eventRow) invalid();
+  const event = parse(eventRow.event_json);
+  const matches =
+    (event.type === 'resource_budget.reconciled' &&
+      row.state === 'reconciled' &&
+      event.reservationId === reservationId &&
+      sameCanonicalValue(event.actual, reservation.actual)) ||
+    ((event.type === 'resource_budget.released' ||
+      event.type === 'resource_budget.bounded_replaced') &&
+      row.state === 'released' &&
+      event.reservationId === reservationId) ||
+    (event.type === 'resource_budget.cumulative_limits_removed' && event.runId === runId);
+  if (!matches) invalid();
+  return reservation;
 }
 
 function sameCanonicalValue(left: unknown, right: unknown): boolean {

@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import {
   type KiteAppControlClient,
@@ -20,6 +23,7 @@ import type {
 import { RUNTIME_PROTOCOL_VERSION } from '@kite-ai/runtime-protocol';
 import { RuntimeServer, type RuntimeServerAdmissionPort } from '@kite-ai/runtime-server';
 import { WorkspaceRemovalError } from '#kite-service/app-control/workspace-removal-error';
+import { createRuntimeOutboundSpool } from '#kite-service/carrier/runtime-outbound-spool';
 import {
   createNodeRuntimeStdioOutput,
   createRuntimeStdioCarrier,
@@ -32,6 +36,29 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 describe('Runtime stdio carrier', () => {
+  test('logical outbound spool is lazy, private, and removed on close', () => {
+    const before = new Set(
+      readdirSync(tmpdir()).filter((name) => name.startsWith('kite-runtime-outbound-')),
+    );
+    const spool = createRuntimeOutboundSpool();
+    expect(
+      readdirSync(tmpdir())
+        .filter((name) => name.startsWith('kite-runtime-outbound-'))
+        .filter((name) => !before.has(name)),
+    ).toHaveLength(0);
+    const message = { jsonrpc: '2.0', id: 'spooled', result: { status: 'ok' } } as const;
+    const reference = spool.write(message as never);
+    const directories = readdirSync(tmpdir()).filter(
+      (name) => name.startsWith('kite-runtime-outbound-') && !before.has(name),
+    );
+    expect(directories).toHaveLength(1);
+    const directory = join(tmpdir(), directories[0]!);
+    expect(statSync(directory).mode & 0o777).toBe(0o700);
+    expect(statSync(join(directory, reference)).mode & 0o777).toBe(0o600);
+    expect(spool.read(reference)).toEqual(message);
+    spool.close();
+    expect(readdirSync(tmpdir())).not.toContain(directories[0]);
+  });
   test('advertises History cancellation only when this carrier has a History owner', async () => {
     const server = new RuntimeServer(
       { runtime: new FakeRuntime(), admission: allowAdmission },
@@ -112,6 +139,26 @@ describe('Runtime stdio carrier', () => {
     completeWrite?.();
     await completion;
     expect(flushed).toBe(true);
+  });
+
+  test('aborting a drain wait removes the writable listener', async () => {
+    let listener: (() => void) | undefined;
+    let removed = false;
+    const output = createNodeRuntimeStdioOutput({
+      write: () => false,
+      once: (_event, callback) => {
+        listener = callback;
+      },
+      off: (_event, callback) => {
+        removed = callback === listener;
+      },
+    });
+    const controller = new AbortController();
+    const waiting = output.waitForDrain?.(controller.signal);
+    expect(listener).toBeDefined();
+    controller.abort();
+    await waiting;
+    expect(removed).toBeTrue();
   });
 
   test('decodes fragmented, multiple, CRLF JSONL frames and keeps stdout protocol-only', async () => {
@@ -692,7 +739,7 @@ describe('Runtime stdio carrier', () => {
     await carrier.done;
   });
 
-  test('bounds queued History input bytes while leaving control frames responsive', async () => {
+  test('spools queued History input bytes while leaving control frames responsive', async () => {
     const input = new BytesInput();
     const output = new FakeOutput();
     let releaseReads!: () => void;
@@ -763,7 +810,7 @@ describe('Runtime stdio carrier', () => {
             frame.id === 'byte-marker',
         ),
       );
-      expect(protocolFrames(output)).toContainEqual(
+      expect(protocolFrames(output)).not.toContainEqual(
         expect.objectContaining({
           id: 'large-4',
           error: expect.objectContaining({ data: { code: 'overloaded' } }),
@@ -1162,22 +1209,10 @@ describe('Runtime stdio carrier', () => {
             params: { request: { schema: RELEASE_STATUS_REQUEST_SCHEMA_ } },
           })}\n`,
         );
-      await eventually(() =>
-        protocolFrames(output).some(
-          (frame) =>
-            typeof frame === 'object' &&
-            frame !== null &&
-            'id' in frame &&
-            frame.id === 'bounded-255',
-        ),
-      );
       await eventually(() => calls === 16);
       expect(calls).toBe(16);
-      expect(protocolFrames(output)).toContainEqual(
-        expect.objectContaining({
-          id: 'bounded-255',
-          error: expect.objectContaining({ data: { code: 'overloaded' } }),
-        }),
+      expect(protocolFrames(output)).not.toContainEqual(
+        expect.objectContaining({ id: 'bounded-255' }),
       );
       input.pushText(
         `${JSON.stringify({
@@ -1202,6 +1237,22 @@ describe('Runtime stdio carrier', () => {
           result: { entries: [], hasMore: false },
         }),
       );
+      release();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'bounded-255',
+        ),
+      );
+      expect(protocolFrames(output)).toContainEqual(
+        expect.objectContaining({
+          id: 'bounded-255',
+          result: expect.objectContaining({ method: 'app/release/status' }),
+        }),
+      );
     } finally {
       release();
       input.close();
@@ -1209,7 +1260,7 @@ describe('Runtime stdio carrier', () => {
     }
   });
 
-  test('bounded overload replies do not stall later ping behind blocked stdout', async () => {
+  test('queued reads do not stall later ping behind blocked stdout', async () => {
     const input = new BytesInput();
     const output = new FakeOutput({ blockFirstWrite: true });
     let release!: () => void;
@@ -1243,6 +1294,10 @@ describe('Runtime stdio carrier', () => {
           }),
         ).join('\n')}\n${JSON.stringify({
           jsonrpc: '2.0',
+          method: 'history/cancel',
+          params: { requestId: 'flood-1199' },
+        })}\n${JSON.stringify({
+          jsonrpc: '2.0',
           id: 'after-flood-ping',
           method: 'server/ping',
           params: {},
@@ -1262,14 +1317,37 @@ describe('Runtime stdio carrier', () => {
       const frames = protocolFrames(output);
       expect(frames).toContainEqual(expect.objectContaining({ id: 'after-flood-ping' }));
       expect(
-        frames.filter(
+        frames.some(
           (frame) =>
             typeof frame === 'object' &&
             frame !== null &&
             'error' in frame &&
             (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
-        ).length,
-      ).toBeGreaterThan(900);
+        ),
+      ).toBe(false);
+      release();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'flood-1198',
+        ),
+      );
+      expect(
+        protocolFrames(output).filter(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            typeof frame.id === 'string' &&
+            frame.id.startsWith('flood-'),
+        ),
+      ).toHaveLength(1199);
+      expect(protocolFrames(output)).not.toContainEqual(
+        expect.objectContaining({ id: 'flood-1199' }),
+      );
     } finally {
       release();
       input.close();
@@ -1277,7 +1355,7 @@ describe('Runtime stdio carrier', () => {
     }
   });
 
-  test('closes a blocked connection before output responses can grow without bound', async () => {
+  test('holds a blocked connection with bounded active responses until drain', async () => {
     const input = new BytesInput();
     const output = new FakeOutput({ blockFirstWrite: true });
     const diagnostics = new FakeDiagnostics();
@@ -1313,8 +1391,22 @@ describe('Runtime stdio carrier', () => {
           }),
         ).join('\n')}\n`,
       );
-      await eventually(() => diagnostics.text().includes('stdout_overloaded'));
+      await Bun.sleep(50);
       expect(output.writeCount).toBe(1);
+      expect(diagnostics.text()).not.toContain('stdout_overloaded');
+      expect(carrier.server.connectionCount).toBe(1);
+      output.drain();
+      release();
+      await eventually(() =>
+        protocolFrames(output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'id' in frame &&
+            frame.id === 'saturated-2999',
+        ),
+      );
+      expect(carrier.server.connectionCount).toBe(1);
     } finally {
       release();
       output.drain();
@@ -1704,14 +1796,15 @@ describe('Runtime stdio carrier', () => {
             .every((frame) => frame.id?.startsWith(`peer-${peer.index}-read-`)),
         ).toBe(true);
       }
-      const rejected = protocolFrames(disconnected.output).filter(
-        (frame) =>
-          typeof frame === 'object' &&
-          frame !== null &&
-          'error' in frame &&
-          (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
-      );
-      expect(rejected.length).toBeGreaterThan(0);
+      expect(
+        protocolFrames(disconnected.output).some(
+          (frame) =>
+            typeof frame === 'object' &&
+            frame !== null &&
+            'error' in frame &&
+            (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
+        ),
+      ).toBe(false);
     } finally {
       release();
       for (const peer of peers) peer.input.close();
@@ -1876,7 +1969,7 @@ describe('Runtime stdio carrier', () => {
     }
   });
 
-  test('bounds aggregate queued History input bytes across connections', async () => {
+  test('spools aggregate queued History input bytes across connections', async () => {
     const server = new RuntimeServer(
       { runtime: new FakeRuntime(), admission: allowAdmission },
       { serverInfo: { version: 'test', instanceId: 'byte-budget' } },
@@ -1932,7 +2025,8 @@ describe('Runtime stdio carrier', () => {
           ).join('\n')}\n`,
         );
       }
-      await eventually(() =>
+      await Bun.sleep(50);
+      expect(
         peers.some((peer) =>
           protocolFrames(peer.output).some(
             (frame) =>
@@ -1942,7 +2036,7 @@ describe('Runtime stdio carrier', () => {
               (frame.error as { data?: { code?: string } }).data?.code === 'overloaded',
           ),
         ),
-      );
+      ).toBe(false);
       expect(active).toBe(8);
     } finally {
       release();
@@ -2056,10 +2150,18 @@ describe('Runtime stdio carrier', () => {
       diagnostics: timeoutDiagnostics,
       drainDeadlineMs: 5,
     });
-    timeoutInput.pushText('{not json}\n');
+    timeoutInput.pushText(initializeLine());
+    timeoutInput.pushText(
+      Array.from(
+        { length: 20 },
+        (_, index) =>
+          `${JSON.stringify({ jsonrpc: '2.0', id: `late-${index}`, method: 'server/ping', params: {} })}\n`,
+      ).join(''),
+    );
     await timeout.done;
     await eventually(() => timeout.server.connectionCount === 0);
     expect(timeoutDiagnostics.text()).toContain('stdout_failure');
+    expect(timeoutOutput.writeCount).toBe(1);
   });
 
   test('stdin EOF releases only the Server connection, not the owner composition', async () => {

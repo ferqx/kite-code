@@ -25,6 +25,7 @@ import {
   KITE_SESSION_STORE12_DDL,
   KITE_SESSION_STORE13_DDL,
   KITE_SESSION_STORE14_DDL,
+  KITE_SESSION_STORE15_DDL,
 } from '../../src/kite-home-store';
 import { validateKiteSessionStoreContinuity } from '../../src/kite-session-continuity-validation';
 import { acquireKiteSessionStoreMaintenance } from '../../src/kite-session-maintenance';
@@ -42,6 +43,7 @@ import { convertKiteSessionStore11CandidateTo12 } from '../../src/kite-session-s
 import { convertKiteSessionStore12CandidateTo13 } from '../../src/kite-session-store12-to13';
 import { convertKiteSessionStore13CandidateTo14 } from '../../src/kite-session-store13-to14';
 import { convertKiteSessionStore14CandidateTo15 } from '../../src/kite-session-store14-to15';
+import { convertKiteSessionStore15CandidateTo16 } from '../../src/kite-session-store15-to16';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from '../../src/log-query';
 import { checksum, SQLITE_RUNTIME_RUN_FORMAT_EPOCH } from '../../src/preflight';
 
@@ -94,7 +96,7 @@ function fixture() {
   };
 }
 
-function singleRetiredStore(version: 12 | 13 | 14, epoch: string) {
+function singleRetiredStore(version: 12 | 13 | 14 | 15, epoch: string) {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'kite-preparation-single-')));
   const databasePath = join(root, 'kite-session.sqlite');
   const database = new Database(databasePath);
@@ -103,7 +105,9 @@ function singleRetiredStore(version: 12 | 13 | 14, epoch: string) {
     ? KITE_SESSION_STORE12_DDL
     : version === 13
       ? KITE_SESSION_STORE13_DDL
-      : KITE_SESSION_STORE14_DDL)
+      : version === 14
+        ? KITE_SESSION_STORE14_DDL
+        : KITE_SESSION_STORE15_DDL)
     database.run(sql);
   database
     .query('INSERT INTO kite_meta(key,value) VALUES (?,?)')
@@ -285,8 +289,9 @@ await prepareKiteSessionStore({
     [12, 'kite-session-child-approval-2026-09-25'],
     [13, 'kite-session-cross-followup-2026-09-25'],
     [14, 'kite-session-history-generation-2026-09-28'],
+    [15, 'kite-session-unbounded-child-artifacts-2026-09-29'],
   ] as const) {
-    test(`upgrades a single exact Store ${version} to Store 15 at startup`, async () => {
+    test(`upgrades a single exact Store ${version} to Store 16 at startup`, async () => {
       using data = singleRetiredStore(version, epoch);
       const result = await prepareKiteSessionStore({
         databasePath: data.databasePath,
@@ -299,7 +304,7 @@ await prepareKiteSessionStore({
       assertKiteSessionStoreSchema(upgraded);
       expect(
         upgraded.query("SELECT value FROM kite_meta WHERE key='schema_version'").get(),
-      ).toEqual({ value: '15' });
+      ).toEqual({ value: '16' });
     });
   }
 
@@ -531,7 +536,7 @@ await prepareKiteSessionStore({
     expect(admissions).toBe(2);
     using database = new Database(data.databasePath, { readonly: true });
     expect(database.query("SELECT value FROM kite_meta WHERE key='schema_version'").get()).toEqual({
-      value: '15',
+      value: '16',
     });
   });
   test('writer admission lease spans candidate validation and publication and is released on success', async () => {
@@ -806,6 +811,7 @@ await prepareKiteSessionStore({
       convertKiteSessionStore12CandidateTo13({ database: candidateWriter });
       convertKiteSessionStore13CandidateTo14({ database: candidateWriter });
       convertKiteSessionStore14CandidateTo15({ database: candidateWriter });
+      convertKiteSessionStore15CandidateTo16({ database: candidateWriter });
     } finally {
       candidateWriter.close(false);
     }

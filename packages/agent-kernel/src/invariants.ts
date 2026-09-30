@@ -93,6 +93,13 @@ function assertResourceBudget(state: AgentState): void {
   }
   const active = state.resourceBudget;
   assert(
+    active.externalizedClosedReservations === undefined ||
+      (active.externalizedClosedReservations === true &&
+        (active.budget.unboundedCumulativeUsage === true ||
+          active.budget.durationOnlyChildRun === true)),
+    'externalized reservation receipts require an unbounded Run.',
+  );
+  assert(
     active.runId.length > 0 &&
       validTimestamp(active.startedAt) &&
       validTimestamp(active.deadlineAt),
@@ -146,13 +153,14 @@ function assertResourceBudget(state: AgentState): void {
     'maxArtifactBytes',
   ];
   const zeroAllowedBudgetFields = new Set([
-    ...(budget.durationOnlyChildRun === true
+    ...(budget.durationOnlyChildRun === true || budget.unboundedCumulativeUsage === true
       ? [
           'maxTurns',
           'maxModelRequests',
           'maxRunInputTokens',
           'maxRunOutputTokens',
           'maxConcurrencyWaitMs',
+          'maxArtifactBytes',
         ]
       : []),
     'maxToolInvocations',
@@ -174,6 +182,10 @@ function assertResourceBudget(state: AgentState): void {
     budget.unboundedToolInvocations === undefined ||
       (budget.unboundedToolInvocations === true && budget.maxToolInvocations === 0),
     'unbounded Tool budget marker is invalid.',
+  );
+  assert(
+    budget.unboundedCumulativeUsage === undefined || budget.unboundedCumulativeUsage === true,
+    'unbounded cumulative budget marker is invalid.',
   );
   assert(
     budget.durationOnlyChildRun === undefined ||
@@ -207,6 +219,11 @@ function assertResourceBudget(state: AgentState): void {
   let delegatedToolInvocations = 0;
   for (const [reservationId, reservationValue] of Object.entries(active.reservations)) {
     const reservation = record(reservationValue);
+    if (active.externalizedClosedReservations === true)
+      assert(
+        reservation?.state !== 'reconciled' && reservation?.state !== 'released',
+        'externalized reservation ledger retains a terminal receipt.',
+      );
     assert(
       reservation != null &&
         Object.keys(reservation).every((key) =>
@@ -315,17 +332,17 @@ function assertResourceBudget(state: AgentState): void {
       );
     if (childUpper?.unboundedArtifactBytes === true)
       assert(
-        budget.durationOnlyChildRun === true &&
+        (budget.durationOnlyChildRun === true || budget.unboundedCumulativeUsage === true) &&
           ['tool', 'mcp', 'skill'].includes(stringValue(reservation, 'resourceKind') ?? ''),
-        'unbounded Artifact authority requires a duration-only child Tool.',
+        'unbounded Artifact authority requires an unbounded cumulative Tool Run.',
       );
     if (childUpper?.unboundedModelTokens === true)
       assert(
-        budget.durationOnlyChildRun === true &&
+        (budget.durationOnlyChildRun === true || budget.unboundedCumulativeUsage === true) &&
           ['model', 'compaction', 'verification'].includes(
             stringValue(reservation, 'resourceKind') ?? '',
           ),
-        'unbounded model token authority requires a duration-only child model invocation.',
+        'unbounded model token authority requires an unbounded cumulative model Run.',
       );
     const actual = recordValue(reservation, 'actual');
     if (actual) {
@@ -342,15 +359,19 @@ function assertResourceBudget(state: AgentState): void {
     const parent = stringValue(reservation, 'parentReservationId');
     if (parent)
       assert(
-        parent !== reservationId && active.reservations[parent] !== undefined,
+        parent !== reservationId &&
+          (active.reservations[parent] !== undefined ||
+            active.externalizedClosedReservations === true),
         'resource reservation parent is invalid.',
       );
     const replaced = stringValue(reservation, 'replacesReservationId');
     if (replaced)
       assert(
         replaced !== reservationId &&
-          active.reservations[replaced]?.state === 'released' &&
-          active.reservations[replaced]?.resourceKind === 'subagent',
+          ((active.reservations[replaced]?.state === 'released' &&
+            active.reservations[replaced]?.resourceKind === 'subagent') ||
+            (active.reservations[replaced] === undefined &&
+              active.externalizedClosedReservations === true)),
         'resource reservation replacement is invalid.',
       );
   }
@@ -660,6 +681,7 @@ function committedUsageWithinBudget(
     Object.entries(counterLimits).every(
       ([field, limit]) =>
         budget.durationOnlyChildRun === true ||
+        budget.unboundedCumulativeUsage === true ||
         (field === 'toolInvocations' && budget.unboundedToolInvocations === true) ||
         counterSums[field]! - (field === 'toolInvocations' ? delegatedToolInvocations : 0) <=
           (numberValue(budget, limit) ?? -1),
@@ -2080,6 +2102,11 @@ export function assertAgentStateInvariants(state: AgentState): void {
   }
   assertResourceBudget(state);
   assertRetainedResourceBudgets(state);
+  if (state.resourceBudget.status === 'active' && state.childSessionOrigin !== undefined)
+    assert(
+      state.resourceBudget.budget.unboundedCumulativeUsage !== true,
+      'child Session cannot use primary unbounded cumulative authority.',
+    );
   if (
     state.resourceBudget.status === 'active' &&
     state.resourceBudget.budget.durationOnlyChildRun === true
@@ -2193,7 +2220,6 @@ export function assertAgentStateInvariants(state: AgentState): void {
   );
   assert(state.toolRecovery.schemaVersion === 1, 'tool recovery journal schema is invalid.');
   assertUnique(state.toolRecovery.order, 'tool recovery order');
-  assert(state.toolRecovery.order.length <= 128, 'tool recovery order exceeds its bound.');
   assert(
     Number.isSafeInteger(state.toolRecovery.progressRevision) &&
       state.toolRecovery.progressRevision >= 0,

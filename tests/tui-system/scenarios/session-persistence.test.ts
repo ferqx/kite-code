@@ -304,7 +304,7 @@ function materializeHistoricalStore(home: string, version: 9 | 11): void {
       );
       target.run('PRAGMA user_version=11');
     }
-    const tableColumns =
+    const tableColumns: Readonly<Record<string, readonly string[]>> =
       version === 9 ? KITE_HOME_STORE_TABLE_COLUMNS : KITE_SESSION_STORE_TABLE_COLUMNS;
     const historicalTables = new Set(
       target

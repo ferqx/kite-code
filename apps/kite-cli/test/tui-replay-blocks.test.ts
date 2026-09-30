@@ -16,6 +16,37 @@ function historyEnvelope(event: RuntimeClientEvent, revision = 1): AcceptedPrese
 }
 
 describe('safe TUI replay', () => {
+  test('keeps every turn when replaying more than 500 durable messages', () => {
+    const result = sessionDataToUI({
+      threadId: 'session-1',
+      messages: [],
+      runtimeEvents: Array.from({ length: 501 }, (_, index) => ({
+        ...historyEnvelope(
+          {
+            type: 'user.message',
+            messageId: `message-${index}`,
+            kind: 'task',
+            text: `Prompt ${index}`,
+          },
+          index + 1,
+        ),
+        runId: `run-${index}`,
+        taskId: `task-${index}`,
+        turnId: `turn-${index}`,
+      })),
+      interrupt: null,
+      modelProvider: 'test',
+      modelName: 'test',
+      thinkingLevel: null,
+      plan: null,
+      interactionMode: 'accept_edits',
+      recovery: 'normal',
+    });
+    expect(result.blocks).toHaveLength(501);
+    expect(result.blocks[0]).toMatchObject({ content: 'Prompt 0' });
+    expect(result.blocks.at(-1)).toMatchObject({ content: 'Prompt 500' });
+  });
+
   test('replays only client-safe event projections', () => {
     const result = sessionDataToUI({
       threadId: 'session-1',

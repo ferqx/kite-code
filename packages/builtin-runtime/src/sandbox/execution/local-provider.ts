@@ -11,6 +11,7 @@ import type {
   SandboxPreparation,
   SandboxPreparationGrant,
 } from '@kite-ai/runtime-spi';
+import { isReadOnlyShellCommand } from '../../catalog-contract';
 import { generateBwrapArgs } from '../bwrap';
 import type { CgroupPidsRunner } from '../cgroup-pids-contract';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from '../profile';
@@ -247,7 +248,9 @@ export class LocalSandboxExecutionProvider implements SandboxExecutionProvider {
   ): PreparedSandboxExecution {
     const preparation = grant.preparation;
     const command = commandFromArgv(preparation.argv);
-    const policyProvenReadOnly = preparation.executionTrust === 'policy_proven_read_only';
+    // Recheck the sealed command rather than treating a caller supplied trust
+    // marker as an environment authority. Full keeps its allow_all scope.
+    const policyProvenReadOnly = isReadOnlyShellCommand(command);
     const hardenedEnv = buildHardenedEnv(workspace, runtimeRoots.dataRoot, {
       policyProvenReadOnly,
     });

@@ -310,6 +310,8 @@ environment，由 preparation 在POSIX使用中性`HOME/XDG_CONFIG_HOME`，固�
 optional locks与repository fsmonitor，并且不从Runtime环境注入`GIT_EXTERNAL_DIFF`；空字符串会被Git当成待执行的
 空helper，不能用于关闭。其他 Git 使用普通获批 Shell environment；remote、external target 和无法证明的 effects 继续作为
 reviewer 与 sandbox scope 的结构化事实。
+
+Builtin 现在从原始命令和 Provider 解出的封印 argv 重新取得上述闭集环境事实，不依赖 App 传入 `executionTrust` 才硬化。Full 继续保留已批准的 `allow_all` 文件／网络范围，不与只读信任标记组合；命中分类时仍选择可信解释器、中性 HOME／Git 配置环境。Planning 只读文件范围也不自动签发命令只读标记。POSIX、Windows preparation 与获批 host Shell 的环境选择使用同一 Builtin 分类；当前本机回归覆盖 Full scope 保留、真实环境投影、未命中命令与伪造标记，不能替代 Windows 实际受限进程资格。
 普通 Shell 的 Planning、关键系统 destructive 和 capability admission 继续独立治理；不按 raw Git token
 强制转交已退役的 `git_inspect`。开发期 Git config 的读取来自通用 Shell read scope，不来自 Broker revision 或 Git 特判。
 

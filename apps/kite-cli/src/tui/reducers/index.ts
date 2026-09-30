@@ -64,7 +64,7 @@ const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST
 // EXPORT_SESSION_DONE, INJECT_MCP_PROMPT,
 // SET_PHASE, CTRL_C, ESCAPE）
 
-function reduceEvent(state: TuiState, action: Action): TuiState {
+export function reduceEvent(state: TuiState, action: Action): TuiState {
   if (action.type === 'ACCEPT_PRESENTATION_ENVELOPE') {
     return handleClientEventAction(state, action.event);
   }

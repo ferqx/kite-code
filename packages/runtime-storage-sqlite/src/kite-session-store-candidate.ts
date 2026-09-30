@@ -29,6 +29,7 @@ import { convertKiteSessionStore11CandidateTo12 } from './kite-session-store11-t
 import { convertKiteSessionStore12CandidateTo13 } from './kite-session-store12-to13';
 import { convertKiteSessionStore13CandidateTo14 } from './kite-session-store13-to14';
 import { convertKiteSessionStore14CandidateTo15 } from './kite-session-store14-to15';
+import { convertKiteSessionStore15CandidateTo16 } from './kite-session-store15-to16';
 import type { SqliteRuntimeSnapshotCodec } from './preflight';
 
 export interface KiteSessionStoreCandidate {
@@ -128,11 +129,16 @@ export function createKiteSessionStoreCandidate<Event, State>(input: {
       } else if (schemaVersion === 13 && formatEpoch === 'kite-session-cross-followup-2026-09-25') {
         convertKiteSessionStore13CandidateTo14({ database });
       } else if (
-        schemaVersion !== 14 ||
-        formatEpoch !== 'kite-session-history-generation-2026-09-28'
+        !(
+          (schemaVersion === 14 && formatEpoch === 'kite-session-history-generation-2026-09-28') ||
+          (schemaVersion === 15 &&
+            formatEpoch === 'kite-session-unbounded-child-artifacts-2026-09-29') ||
+          schemaVersion === 16
+        )
       )
         assertKiteSessionStoreSchema(database);
-      if (schemaVersion !== 15) convertKiteSessionStore14CandidateTo15({ database });
+      if (schemaVersion < 15) convertKiteSessionStore14CandidateTo15({ database });
+      if (schemaVersion < 16) convertKiteSessionStore15CandidateTo16({ database });
       input.validate(database);
       const mode = database
         .query<{ journal_mode: string }, []>('PRAGMA journal_mode = DELETE')

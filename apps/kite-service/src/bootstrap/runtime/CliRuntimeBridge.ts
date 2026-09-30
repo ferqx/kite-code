@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
 import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
 import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
@@ -37,6 +37,7 @@ import type {
   RuntimeCommandCommitEvidence,
   RuntimeStoredCommandReceipt,
 } from '@kite-ai/runtime-host/storage';
+import { RUNTIME_PROTOCOL_LIMITS } from '@kite-ai/runtime-protocol';
 import type { ProjectIdentity } from '@kite-ai/runtime-spi';
 import type { AgentConfig } from '#kite-service/config';
 import { getFeatureFlags } from '#kite-service/config/features';
@@ -63,6 +64,7 @@ import {
 import { RuntimePresentationFrame } from '../../runtime-client/presentation-frame';
 import { KiteAppServerSessionError } from '../kite-session-app-server-storage';
 import { projectRuntimeEphemeralNotification } from '../presentation-notification';
+import { BackgroundExecutionPages } from './background-execution-pages';
 import type { PrecommittedInteractionActionDescriptor } from './command-interaction-decision';
 import { assertPrecommittedRewind } from './command-rewind-decision';
 import { managedShellOwnerKey, managedShellRuntime } from './managed-shell';
@@ -259,7 +261,15 @@ export function readBackgroundExecutionSnapshot(input: {
   return Object.freeze({
     sessionId: input.sessionId,
     sessionRevision: input.sessionRevision,
-    aggregateGeneration: `${shell.aggregateGeneration}:${children?.aggregateGeneration ?? 'no-subagents'}:${independent?.aggregateGeneration ?? 'no-independent-children'}`,
+    aggregateGeneration: `bg_${createHash('sha256')
+      .update(
+        JSON.stringify([
+          shell.aggregateGeneration,
+          children?.aggregateGeneration ?? null,
+          independent?.aggregateGeneration ?? null,
+        ]),
+      )
+      .digest('hex')}`,
     // Both owner watermarks are monotonic within the combined aggregate
     // generation. Their sum advances whenever either directory changes.
     watermark: shell.watermark + (children?.watermark ?? 0) + (independent?.watermark ?? 0),
@@ -271,6 +281,72 @@ export function readBackgroundExecutionSnapshot(input: {
       ].map((item) => Object.freeze({ ...item, sessionRevision: input.sessionRevision })),
     ),
   });
+}
+
+const sortedBackgroundExecutions = new WeakMap<
+  RuntimeBackgroundExecutionSnapshot,
+  readonly RuntimeBackgroundExecutionProjection[]
+>();
+
+/** Keep each directory response inside one protocol frame without limiting history. */
+export function pageBackgroundExecutionSnapshot(
+  snapshot: RuntimeBackgroundExecutionSnapshot,
+  cursor = 0,
+  limit: number = RUNTIME_PROTOCOL_LIMITS.maxArrayLength,
+): {
+  readonly backgroundSnapshot: RuntimeBackgroundExecutionSnapshot;
+  readonly nextBackgroundCursor?: number;
+} {
+  if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(limit) || limit < 1)
+    throw new Error('Background execution page request is invalid.');
+  let executions = sortedBackgroundExecutions.get(snapshot);
+  if (!executions) {
+    executions = Object.freeze(
+      [...snapshot.executions].sort((left, right) =>
+        left.executionId < right.executionId ? -1 : left.executionId > right.executionId ? 1 : 0,
+      ),
+    );
+    sortedBackgroundExecutions.set(snapshot, executions);
+  }
+  const selected: RuntimeBackgroundExecutionProjection[] = [];
+  const base = {
+    status: 'ok',
+    queryType: 'list_background_executions',
+    backgroundSnapshot: { ...snapshot, executions: [] },
+    nextBackgroundCursor: executions.length,
+  };
+  let bytes = Buffer.byteLength(JSON.stringify(base), 'utf8');
+  const maximum = RUNTIME_PROTOCOL_LIMITS.maxMessageBytes - 65_536;
+  for (let index = cursor; index < executions.length && selected.length < limit; index++) {
+    const execution = executions[index]!;
+    const size = Buffer.byteLength(JSON.stringify(execution), 'utf8') + 1;
+    if (bytes + size > maximum) {
+      if (selected.length === 0) throw new Error('Background execution exceeds one protocol page.');
+      break;
+    }
+    selected.push(execution);
+    bytes += size;
+  }
+  const next = cursor + selected.length;
+  return {
+    backgroundSnapshot: Object.freeze({ ...snapshot, executions: Object.freeze(selected) }),
+    ...(next < executions.length ? { nextBackgroundCursor: next } : {}),
+  };
+}
+
+export function readBackgroundExecutionById(
+  input: Parameters<typeof readBackgroundExecutionSnapshot>[0],
+  executionId: string,
+): RuntimeBackgroundExecutionProjection | undefined {
+  const shell = managedShellRuntime.getProjection(
+    input.sessionId,
+    managedShellOwnerKey(input.sessionId, input.workspace),
+    executionId,
+  );
+  if (shell) return Object.freeze({ ...shell, sessionRevision: input.sessionRevision });
+  return readBackgroundExecutionSnapshot(input).executions.find(
+    (execution) => execution.executionId === executionId,
+  );
 }
 
 /** Stop process-local execution after data deletion without loading historical State. */
@@ -324,6 +400,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   readonly #pendingIndependentStops = new Set<string>();
   #activeRunConfig: AgentConfig | undefined;
   readonly #pendingAfterTurnRecoveries = new Set<string>();
+  readonly #backgroundPages = new BackgroundExecutionPages();
 
   constructor(
     input: CliRuntimeBridgeInput,
@@ -1835,6 +1912,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     reason: string,
     publish: (notification: RuntimeNotification) => void,
   ): Promise<void> {
+    this.#backgroundPages.clear();
     if (sessionId !== this.#input.sessionId || !this.#created) return;
     this.#rejectPendingInteraction(new Error(reason));
     if (!this.#closed) this.#persistCancellation(reason, publish);
@@ -1891,6 +1969,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
   }
 
   async close(): Promise<void> {
+    this.#backgroundPages.clear();
     if (this.#ownsInteractionBroker) this.#interactionBroker.close();
     await managedShellRuntime.disposeOwner(
       managedShellOwnerKey(this.#input.sessionId, this.#input.workspace),
@@ -1960,23 +2039,37 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       });
     }
     if (query.type === 'list_background_executions' || query.type === 'get_background_execution') {
-      const snapshot = readBackgroundExecutionSnapshot({
+      const input = {
         sessionId: this.#input.sessionId,
         sessionRevision: projection.revision,
         workspace: this.#input.workspace,
         modelInvocationRuntimeFactory: this.#modelInvocationRuntimeFactory,
         recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
-        independentChildSnapshot: this.#input.childSessionAcceptance?.backgroundSnapshot?.(),
-      });
-      const executions = snapshot.executions;
+      };
+      const project = () =>
+        readBackgroundExecutionSnapshot({
+          ...input,
+          independentChildSnapshot: this.#input.childSessionAcceptance?.backgroundSnapshot?.(),
+        });
       if (query.type === 'list_background_executions') {
+        const snapshot = this.#backgroundPages.read(
+          JSON.stringify([input.sessionId, input.sessionRevision, input.recoveryIdentityKey]),
+          query.cursor,
+          project,
+        );
         return Promise.resolve({
           status: 'ok',
           queryType: query.type,
-          backgroundSnapshot: snapshot,
+          ...pageBackgroundExecutionSnapshot(snapshot, query.cursor, query.limit),
         });
       }
-      const execution = executions.find((item) => item.executionId === query.executionId);
+      const execution = readBackgroundExecutionById(
+        {
+          ...input,
+          independentChildSnapshot: this.#input.childSessionAcceptance?.backgroundSnapshot?.(),
+        },
+        query.executionId,
+      );
       return Promise.resolve(
         execution
           ? { status: 'ok', queryType: query.type, backgroundExecution: execution }

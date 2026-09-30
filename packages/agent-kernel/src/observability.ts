@@ -126,6 +126,7 @@ const IGNORED_RUNTIME_EVENT_TYPES_ = [
   'agent.mail_input_prepared',
   'agent.task_settled',
   'resource_budget.configured',
+  'resource_budget.cumulative_limits_removed',
   'resource_budget.required_child_wait_started',
   'resource_budget.required_child_wait_ended',
   'resource_budget.bounded_replaced',

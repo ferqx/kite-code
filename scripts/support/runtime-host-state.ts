@@ -101,6 +101,17 @@ export class StateHostSessionHarness {
     return this.#session.getState();
   }
 
+  readCompletedReservation(reservationId: string): Readonly<Record<string, unknown>> | null {
+    return this.#session.readCompletedReservation(reservationId);
+  }
+
+  findCompletedReservationForInvocation(
+    runId: string,
+    invocationId: string,
+  ): Readonly<Record<string, unknown>> | null {
+    return this.#session.findCompletedReservationForInvocation(runId, invocationId);
+  }
+
   processEvent(event: KernelEvent) {
     return this.#session.processEvent(event);
   }
@@ -380,34 +391,39 @@ function testExecutionServices(
 ): RuntimeHostExecutionServices<KernelEvent, AgentState> {
   return {
     sessions: store,
-    transactions: {
-      commit: (_acknowledgement, input, requiredLease) =>
-        store.appendEventsAndSnapshot(
-          input.sessionId,
-          input.events,
-          input.snapshot,
-          input.metadata,
-          input.snapshotMetadata,
-          input.expectedRestoreBoundary,
-          requiredLease
-            ? {
-                effectId: requiredLease.effectId,
-                ownerId: requiredLease.ownerId,
-                observedAtMs: source.now(),
-              }
-            : input.requiredEffectLease,
-        ),
-      commitCommandDecision: (input) =>
-        store.appendEventsAndSnapshot(
-          input.sessionId,
-          input.events,
-          input.snapshot,
-          input.metadata,
-          input.snapshotMetadata,
-          input.expectedRestoreBoundary,
-          input.requiredEffectLease,
-        ),
-    },
+    ...(store.completedResourceReservations
+      ? { completedResourceReservations: store.completedResourceReservations }
+      : {}),
+    transactions: store.completedResourceReservations
+      ? store.transactions
+      : {
+          commit: (_acknowledgement, input, requiredLease) =>
+            store.appendEventsAndSnapshot(
+              input.sessionId,
+              input.events,
+              input.snapshot,
+              input.metadata,
+              input.snapshotMetadata,
+              input.expectedRestoreBoundary,
+              requiredLease
+                ? {
+                    effectId: requiredLease.effectId,
+                    ownerId: requiredLease.ownerId,
+                    observedAtMs: source.now(),
+                  }
+                : input.requiredEffectLease,
+            ),
+          commitCommandDecision: (input) =>
+            store.appendEventsAndSnapshot(
+              input.sessionId,
+              input.events,
+              input.snapshot,
+              input.metadata,
+              input.snapshotMetadata,
+              input.expectedRestoreBoundary,
+              input.requiredEffectLease,
+            ),
+        },
     leases: {
       tryAcquire: (sessionId, effectId, ownerId, expiresAtMs) =>
         store.tryAcquireEffectLease(sessionId, effectId, ownerId, expiresAtMs),

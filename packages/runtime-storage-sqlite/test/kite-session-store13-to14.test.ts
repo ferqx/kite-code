@@ -14,6 +14,7 @@ import {
 import { validateKiteSessionStoreContinuity } from '../src/kite-session-continuity-validation';
 import { convertKiteSessionStore13CandidateTo14 } from '../src/kite-session-store13-to14';
 import { convertKiteSessionStore14CandidateTo15 } from '../src/kite-session-store14-to15';
+import { convertKiteSessionStore15CandidateTo16 } from '../src/kite-session-store15-to16';
 import { createSqliteRuntimeLogQueryPortFromDatabase_ } from '../src/log-query';
 import { checksum, SQLITE_RUNTIME_RUN_FORMAT_EPOCH } from '../src/preflight';
 
@@ -257,6 +258,7 @@ describe('private Store 13 to 14 candidate conversion', () => {
       putAuthority(database, authorityRecord('child', 'active'));
       convertKiteSessionStore13CandidateTo14({ database });
       convertKiteSessionStore14CandidateTo15({ database });
+      convertKiteSessionStore15CandidateTo16({ database });
       expect(
         database
           .query<{ value: string }, []>(

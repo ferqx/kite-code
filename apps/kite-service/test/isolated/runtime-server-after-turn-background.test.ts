@@ -19,6 +19,10 @@ import {
   type MockResponse,
 } from '../../../../tests/tui-system/harness/fixtures';
 import { createKiteCliRuntimeServer } from '../../src/bootstrap';
+import {
+  managedShellOwnerKey,
+  managedShellRuntime,
+} from '../../src/bootstrap/runtime/managed-shell';
 import { createPreparedAppShellExecutor } from '../../src/sandbox/composition';
 
 const ROOT_MARKER = 'ROOT_AFTER_TURN_SCENARIO';
@@ -232,6 +236,13 @@ test('default App Server preserves after-turn, retained service, stop, and recon
     });
     const setupRunId = setupTerminal.projection.session.currentRun?.runId;
     expect(model.getRequestCount()).toBe(2);
+    const retainedReceipt = model
+      .getRequests()[1]
+      ?.messages.find(
+        (message) => message.role === 'tool' && message.tool_call_id === 'retained-service',
+      );
+    const retainedShellId = JSON.stringify(retainedReceipt?.content).match(/sh_[a-f0-9-]+/u)?.[0];
+    if (!retainedShellId) throw new Error('Retained service receipt has no Shell identity.');
     await waitForAsync(() => sessionIsIdle(first, sessionId));
     const setupBackground = await backgroundExecutions(first, sessionId);
     if (!setupBackground.some((execution) => execution.kind === 'service')) {
@@ -317,7 +328,9 @@ test('default App Server preserves after-turn, retained service, stop, and recon
     expect(model.getRequestCount()).toBe(6);
 
     let background = await backgroundExecutions(first, sessionId);
-    const retained = requiredExecution(background, 'service', 'running');
+    const retained = background.find((execution) => execution.executionId === retainedShellId);
+    if (!retained) throw new Error('Retained service is absent from the directory.');
+    expect(retained).toMatchObject({ kind: 'service', status: 'running' });
     const child = requiredExecution(background, 'subagent', 'completed');
     artifactTaskId = child.executionId;
 
@@ -330,6 +343,25 @@ test('default App Server preserves after-turn, retained service, stop, and recon
           (execution) =>
             execution.executionId !== retained.executionId && execution.status === 'completed',
         );
+    }).catch((error) => {
+      const services = background
+        .filter((execution) => execution.kind === 'service')
+        .map((execution) => {
+          try {
+            return {
+              execution,
+              shell: managedShellRuntime.read(
+                execution.executionId,
+                managedShellOwnerKey(sessionId, workspace),
+              ),
+            };
+          } catch (readError) {
+            return { execution, readError: String(readError) };
+          }
+        });
+      throw new Error(
+        `Natural service did not complete: ${String(error)} services=${JSON.stringify(services)}`,
+      );
     });
     expect(model.getRequestCount()).toBe(6);
 

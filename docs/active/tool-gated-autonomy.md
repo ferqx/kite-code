@@ -449,7 +449,7 @@ handler。
 
 Builtin operation receipt/result projection 只产生模型内容、双流内容与 Runtime 结果元数据，不包含 display hint。Skill 与 Plan executor 输出可以携带领域 events；capability-backed `tool_search` 没有第二 concrete executor，Builtin prepared adapter 从 frozen search result 逐字段投影既有 `capability.search_completed` 与 stdout。App Tool Pipeline 只按顺序提交这些事实并形成 terminal，不重新计算搜索结果。App 根据持久 RuntimeEvent 与结果元数据决定展示。Skill activation 的 disclosure、approval 与 fork adapter 仍属于 App tool coordinator 的跨领域治理边界。
 
-`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 读取继续限制为声明文件、非 symlink、Skill 根目录内且不超过 128 KiB；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
+`read_skill_reference` 与 `complete_skill` 已迁入 Builtin catalog：entry parser 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 完整读取声明文件，不设旧的 128 KiB 字节额度，仍要求非 symlink 且位于 Skill 根目录内；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
 
 `activate_skill` 也已迁入 Builtin catalog：Controller 保留 disclosure、approval 与 mode-policy 前置治理；entry parser 负责 activation validation、inline/fork 生命周期、fork 结构化输出校验、frame close 和 verification 投影。fork 子 Agent 仅作为受治理 provider adapter 注入。
 
@@ -467,8 +467,9 @@ App 的 `read_plan/update_plan/write_plan/task` 没有 concrete executor；Task 
 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`apps/kite-service/test/tool-definitions.test.ts`、`tests/integration/tool-parse-error.test.ts`
 与 RM schema parity 测试棘轮守护：Builtin catalog 的 27/19/8、exact schema/revision/executor/effects、model
 ToolSet 无 execute、internal 不可伪装 visible、以及 supplied-port-only dispatch 均机械验证。shell_execute 的
-模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Builtin/Host execution
-path 必须使用 600000ms 默认硬超时，显式正整数可以覆盖；副作用分类和审计 `action.intent` 可由命令形态
+模型参数包含 `command` 及可选 `description`、`timeout_ms`、`yield_ms`、`mode`、`result_disposition`；未提供
+`timeout_ms` 时，新建／已升级无累计额度 Run 的有限命令使用 Run 剩余期限，旧有限调用保留 600000ms
+默认硬超时，显式正整数可以覆盖。显式 service 的跨轮生命周期仍需准确 Runtime 授权；副作用分类和审计 `action.intent` 可由命令形态
 派生，但审批 payload 不接受模型建议授权或 prefix rule。[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md) 的回归语料必须证明 `ls`、`pwd`、`rg`、
 direct `git status`/无patch `git log`在phase baseline内可direct，Workspace mutation与local Git扩scope进入既有
 mode-aware route，未知脚本在Auto中进入审批模型、在其他模式请求exact真人审批。`git_inspect` 已退役，不进入 model ToolSet。

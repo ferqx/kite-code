@@ -119,7 +119,6 @@ export async function reviewToolApproval(input: {
       model: input.model,
       tools: {},
       messages,
-      maxOutputTokens: 1_000,
       transport: 'generate',
     });
     const state = input.persistence.getState();
@@ -233,8 +232,8 @@ const REVIEWER_SYSTEM_PROMPT = [
   'CONTEXT RULES:',
   '- If an approved plan exists, actions aligning with the plan are expected.',
   '- If the user task describes a specific goal, actions serving that goal are expected.',
-  '- If this same tool was recently rejected, do NOT approve unless the args have changed meaningfully.',
-  '- If doom-loop is detected (same call repeated), ALWAYS deny.',
+  '- Evaluate each invocation against the current task, authorization, arguments, and safety evidence.',
+  '- A prior rejection remains relevant when its safety reason still applies. Repetition alone is not a reason to deny.',
   '',
   'DECISION RULES:',
   '- Use "approve" when the call is safe, scoped, and aligned with the user task.',
@@ -244,7 +243,7 @@ const REVIEWER_SYSTEM_PROMPT = [
   'OUTPUT FORMAT: Return ONLY a JSON object:',
   '{',
   '  "decision": "approve_once" | "reject" | "ask_user",',
-  '  "reason": "brief explanation (max 200 chars)",',
+  '  "reason": "explain the safety and authorization decision",',
   '  "riskAssessment": "low" | "medium" | "high" | "critical"',
   '}',
   '',
@@ -271,17 +270,13 @@ function buildReviewPrompt(
   };
 
   if (context) {
-    if (context.userTask) reviewData.userTask = context.userTask.slice(0, 500);
-    if (context.planSummary) reviewData.planSummary = context.planSummary.slice(0, 800);
+    if (context.userTask) reviewData.userTask = context.userTask;
+    if (context.planSummary) reviewData.planSummary = context.planSummary;
     if (context.workspaceRoot) reviewData.workspaceRoot = context.workspaceRoot;
     if (context.isSubAgent) reviewData.isSubAgent = true;
     if (context.subAgentRole) reviewData.subAgentRole = context.subAgentRole;
-    if (context.doomLoopInfo) {
-      reviewData.doomLoopDetected = true;
-      reviewData.doomLoopCount = context.doomLoopInfo.count;
-    }
     if (context.recentRejections?.length) {
-      reviewData.recentRejections = context.recentRejections.slice(-5).map((r) => ({
+      reviewData.recentRejections = context.recentRejections.map((r) => ({
         toolName: r.toolName,
         reason: r.reason,
       }));

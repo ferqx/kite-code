@@ -162,6 +162,10 @@ export function createInstalledKiteRuntimeCompositionFactory(
   operationExecution: BuiltinModelOperationExecutionPort,
   artifactBackends?: KiteHomeBuiltinArtifactBackends,
   afterTurnScheduler?: AfterTurnWakeScheduler,
+  readCompletedReservation?: (
+    sessionId: string,
+    reservationId: string,
+  ) => Readonly<Record<string, unknown>> | null,
 ): InstalledKiteRuntimeCompositionFactory {
   const installed = new Map<string, InstalledKiteRuntimeComposition>();
   const subagentComposition = installedSubagentComposition(artifactBackends);
@@ -178,6 +182,7 @@ export function createInstalledKiteRuntimeCompositionFactory(
       artifactBackends,
       subagentComposition,
       afterTurnContinuationRuntime,
+      readCompletedReservation,
     );
     installed.set(canonicalWorkspace, created);
     return created;
@@ -191,6 +196,10 @@ export function resolveInstalledKiteRuntimeComposition(
   artifactBackends?: KiteHomeBuiltinArtifactBackends,
   injectedSubagentRuntime?: InstalledSubagentRuntime,
   afterTurnContinuationRuntime?: AfterTurnContinuationRuntime,
+  readCompletedReservation?: (
+    sessionId: string,
+    reservationId: string,
+  ) => Readonly<Record<string, unknown>> | null,
 ): InstalledKiteRuntimeComposition {
   if (!operationExecution) {
     throw new Error('Builtin Model operation execution port is unavailable.');
@@ -238,7 +247,16 @@ export function resolveInstalledKiteRuntimeComposition(
     artifacts,
     source: createLiveModelResponseSource(),
     operationExecution,
-    planResource: (state, request) => planModelInvocationResource(state as RuntimeState, request),
+    planResource: (state, request) =>
+      planModelInvocationResource(state as RuntimeState, {
+        ...request,
+        ...(readCompletedReservation && request.parentReservationId
+          ? {
+              readCompletedReservation: (id: string) =>
+                readCompletedReservation((state as RuntimeState).session.threadId, id),
+            }
+          : {}),
+      }),
   });
   return {
     status: 'available',

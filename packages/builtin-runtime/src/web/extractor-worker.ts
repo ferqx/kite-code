@@ -13,7 +13,7 @@ import TurndownService from 'turndown';
 interface WorkerInput {
   html: string;
   url: string;
-  maxChars: number;
+  maxChars?: number;
 }
 
 interface WorkerOutput {
@@ -53,7 +53,7 @@ self.onmessage = (event: MessageEvent<WorkerInput>) => {
     let content = turndown.turndown(article.content);
     let truncated = false;
 
-    if (content.length > maxChars) {
+    if (maxChars !== undefined && content.length > maxChars) {
       content = `${content.slice(0, maxChars)}\n\n... (content truncated)`;
       truncated = true;
     }

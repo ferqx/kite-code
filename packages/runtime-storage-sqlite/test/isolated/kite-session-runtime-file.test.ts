@@ -44,15 +44,21 @@ describe('Kite Session Store physical file', () => {
   test('does not promise a converter from an older schema number alone', () => {
     const check = (schemaVersion: number | null, formatEpoch = KITE_SESSION_STORE_FORMAT_EPOCH) =>
       checkKiteSessionStoreCompatibility({ schemaVersion, formatEpoch });
-    expect(check(15)).toEqual({ status: 'compatible', access: 'read_write' });
+    expect(check(KITE_SESSION_STORE_SCHEMA_VERSION)).toEqual({
+      status: 'compatible',
+      access: 'read_write',
+    });
     expect(check(9)).toMatchObject({
       status: 'incompatible',
       reason: 'unsupported_schema',
       actualSchema: 9,
-      expectedSchema: 15,
+      expectedSchema: KITE_SESSION_STORE_SCHEMA_VERSION,
     });
     expect(check(10)).toMatchObject({ status: 'incompatible', reason: 'unsupported_schema' });
-    expect(check(16)).toMatchObject({ status: 'incompatible', reason: 'store_too_new' });
+    expect(check(KITE_SESSION_STORE_SCHEMA_VERSION + 1)).toMatchObject({
+      status: 'incompatible',
+      reason: 'store_too_new',
+    });
     expect(check(11, 'kite-session-accepted-runs-2026-09-15')).toMatchObject({
       status: 'incompatible',
       reason: 'unknown_format',
@@ -64,7 +70,11 @@ describe('Kite Session Store physical file', () => {
     for (const [version, epoch, code] of [
       [9, KITE_SESSION_STORE_FORMAT_EPOCH, 'store_incompatible'],
       [10, 'kite-session-app-server-2026-09-02', 'store_incompatible'],
-      [16, KITE_SESSION_STORE_FORMAT_EPOCH, 'store_incompatible'],
+      [
+        KITE_SESSION_STORE_SCHEMA_VERSION + 1,
+        KITE_SESSION_STORE_FORMAT_EPOCH,
+        'store_incompatible',
+      ],
       [11, 'kite-session-accepted-runs-2026-09-15', 'store_incompatible'],
     ] as const) {
       const root = temporaryRoot('kite-session-store-compatibility-');
@@ -88,7 +98,10 @@ describe('Kite Session Store physical file', () => {
         expect(failure).toBeInstanceOf(KiteSessionStoreOpenError);
         expect(failure).toMatchObject({
           code,
-          compatibility: { actualSchema: version, expectedSchema: 15 },
+          compatibility: {
+            actualSchema: version,
+            expectedSchema: KITE_SESSION_STORE_SCHEMA_VERSION,
+          },
         });
         expect(readFileSync(path)).toEqual(before);
       } finally {

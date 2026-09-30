@@ -60,6 +60,23 @@ function makeState() {
   });
 }
 
+test('Kernel persists a complete plan beyond the former body and step limits', () => {
+  const plan = makePlan(
+    'A long plan title. '.repeat(10).trim(),
+    Array.from({ length: 13 }, (_, index) =>
+      `${index + 1}: ${'Detailed step. '.repeat(20)}`.trim(),
+    ),
+  );
+  plan.description = 'Detailed plan content. '.repeat(1_500).trim();
+  const event = draftEvent(plan, 'draft-large-plan', 'large-plan', 1);
+  const state = reduceRuntimeState(makeState(), event);
+  expect(planning(state).kind).toBe('planning_draft');
+  expect(planning(state).document.bodyMarkdown).toBe(plan.description);
+  expect(planning(state).document.title).toBe(plan.name);
+  expect(planning(state).document.steps).toHaveLength(13);
+  expect(planning(state).document.steps[0]?.title).toBe(plan.steps[0]?.step);
+});
+
 function makeDigestInput(plan: AgentPlan) {
   return {
     title: plan.name.slice(0, 120),

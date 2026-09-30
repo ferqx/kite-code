@@ -1,14 +1,13 @@
 import type { Database } from 'bun:sqlite';
 import {
   assertKiteSessionStore14Schema,
-  assertKiteSessionStoreSchema,
+  assertKiteSessionStore15Schema,
   assertKiteStoreIntegrity,
-  KITE_SESSION_STORE_DDL,
   KITE_SESSION_STORE14_DDL,
   KITE_SESSION_STORE14_TABLE_COLUMNS,
+  KITE_SESSION_STORE15_DDL,
   KITE_SESSION_STORE15_UNBOUNDED_TABLES,
 } from './kite-home-store';
-import { KITE_SESSION_STORE_FORMAT_EPOCH } from './kite-session-store-format';
 import { captureSqliteTableContentDigests } from './sqlite-table-content';
 
 /** Rebuild only the private payload tables in a verified, disposable Store 14 candidate. */
@@ -38,7 +37,7 @@ export function convertKiteSessionStore14CandidateTo15(input: {
   database.run('BEGIN IMMEDIATE');
   try {
     for (const table of KITE_SESSION_STORE15_UNBOUNDED_TABLES) {
-      const statement = KITE_SESSION_STORE_DDL.find((sql) =>
+      const statement = KITE_SESSION_STORE15_DDL.find((sql) =>
         sql.startsWith(`CREATE TABLE ${table} (`),
       );
       if (!statement) throw new Error(`Store 15 table ${table} is missing.`);
@@ -52,11 +51,11 @@ export function convertKiteSessionStore14CandidateTo15(input: {
     database.query('UPDATE kite_meta SET value=? WHERE key=?').run('15', 'schema_version');
     database
       .query('UPDATE kite_meta SET value=? WHERE key=?')
-      .run(KITE_SESSION_STORE_FORMAT_EPOCH, 'format_epoch');
+      .run('kite-session-unbounded-child-artifacts-2026-09-29', 'format_epoch');
     database.run('PRAGMA user_version = 15');
     const foreignKeyErrors = database.query('PRAGMA foreign_key_check').all();
     if (foreignKeyErrors.length > 0) throw new Error('Store 15 candidate has broken foreign keys.');
-    assertKiteSessionStoreSchema(database);
+    assertKiteSessionStore15Schema(database);
     const after = captureSqliteTableContentDigests(database, KITE_SESSION_STORE14_TABLE_COLUMNS);
     for (const table of Object.keys(KITE_SESSION_STORE14_TABLE_COLUMNS)) {
       if (table !== 'kite_meta' && JSON.stringify(before[table]) !== JSON.stringify(after[table]))
@@ -74,6 +73,6 @@ export function convertKiteSessionStore14CandidateTo15(input: {
   } finally {
     database.run('PRAGMA foreign_keys = ON');
   }
-  assertKiteSessionStoreSchema(database);
+  assertKiteSessionStore15Schema(database);
   assertKiteStoreIntegrity(database);
 }

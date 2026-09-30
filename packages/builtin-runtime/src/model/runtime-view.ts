@@ -69,6 +69,7 @@ export interface BuiltinContextFailureView {
   readonly reason?: 'manual' | 'auto';
   readonly retryable: boolean;
   readonly requestedAtTurnId?: string;
+  readonly sourceDigest?: string;
 }
 
 export interface BuiltinContextRuntimeView {

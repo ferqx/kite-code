@@ -10,6 +10,8 @@ Message Projector 是聚合及 Live→Sealed 的业务 owner。OutputBlock 为�
 
 同一 epoch 下 sealed item 不重新打开；迟到包不能修改已封口模型内容或追加第二份正文。canonical messageId 实现 live/replay 幂等，不按正文去重。两个相同文本但不同 identity 的消息必须保留两条。
 
+Live Timeline 对未变化的 OutputBlock 引用复用已有 item 与 visualDigest；变更的块仍按当前值投影，并以原 sealed item 拦截迟到改写。历史回放仅需要最终 block 序列，因此逐事件执行相同业务投影但不生成中间 Timeline。
+
 Subagent step 使用稳定 stepId/toolCallId，approval 使用 interactionId、generation 与完整 owner；不按工具名、上一个 pending step 或当前块猜测归属。History 缺少已支持的旧 identity 只由 persistence-order migration reader 处理，不在 renderer 创建兼容写路径。
 
 event-free snapshot 按同 revision 的完整 interaction queue 替换本地集合，不能与旧集合求并集。低于已接受 command revision 的 snapshot 不能结束新 Run；本地 Promise 收尾不生成伪 idle、取消或完成事件。

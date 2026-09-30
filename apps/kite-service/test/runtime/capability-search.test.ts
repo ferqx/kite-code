@@ -225,7 +225,8 @@ describe('progressive capability disclosure', () => {
       featureEnabled: true,
       providerSupportsToolCalls: true,
       descriptors,
-      budgetTokens: 2_048,
+      contextWindowTokens: 2_048,
+      budgetTokens: 1,
     });
     const results = searchCapabilitySnapshot({
       snapshot,
@@ -237,6 +238,30 @@ describe('progressive capability disclosure', () => {
     expect(decision.mode).toBe('search');
     expect(results[0]?.capabilityId).toBe('mcp:catalog/tool-417');
     expect(results).toHaveLength(1);
+  });
+
+  test('binds more than twenty tools when the catalog fits the provider window', () => {
+    const descriptors = Array.from({ length: 25 }, (_, index) => descriptor(`tool-${index}`));
+    expect(
+      chooseCapabilityDisclosure({
+        featureEnabled: true,
+        providerSupportsToolCalls: true,
+        descriptors,
+        contextWindowTokens: 128_000,
+        budgetTokens: 1,
+      }).mode,
+    ).toBe('all');
+  });
+
+  test('searches a long query and returns every match unless a larger explicit limit is set', () => {
+    const descriptors = Array.from({ length: 25 }, (_, index) =>
+      descriptor(`tool-${index}`, 'needle'),
+    );
+    const snapshot = createCapabilitySnapshot(descriptors);
+    const longQuery = `${'unused '.repeat(80)}needle`;
+    expect(longQuery.length).toBeGreaterThan(512);
+    expect(searchCapabilitySnapshot({ snapshot, query: longQuery })).toHaveLength(25);
+    expect(searchCapabilitySnapshot({ snapshot, query: 'needle', limit: 20 })).toHaveLength(20);
   });
 
   test('small catalogs (≤ 20 tools) bind directly without requiring tool_search', async () => {
@@ -364,6 +389,8 @@ describe('progressive capability disclosure', () => {
   });
 
   test('redirects inventory queries to list_mcp_tools instead of searching last-known names', async () => {
+    const query = `${'catalog_context '.repeat(45)}which MCP tools`;
+    expect(query.length).toBeGreaterThan(512);
     const state = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'inventory-revision-race',
@@ -374,7 +401,7 @@ describe('progressive capability disclosure', () => {
       toolCallId: 'search',
       modelMessageId: 'model',
       name: 'tool_search',
-      args: { query: 'available MCP tools', limit: 12 },
+      args: { query, limit: 12 },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -532,7 +559,7 @@ describe('progressive capability disclosure', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    // Use >20 tools and a low budget to stay in progressive-disclosure search mode for this test
+    // The catalog exceeds the known provider window, so search is required.
     const largeCatalog = Array.from({ length: 25 }, (_, i) =>
       i < 2
         ? descriptor(i === 0 ? 'publish-release' : 'delete-repository')
@@ -555,7 +582,7 @@ describe('progressive capability disclosure', () => {
       model: createMockModel([{ message: aiMessage({ content: 'ready' }) }]),
       state,
       config: config({
-        modelCapabilities: { contextWindowTokens: 128_000 },
+        modelCapabilities: { contextWindowTokens: 1_000 },
         modelKwargs: { capabilityDisclosureBudgetTokens: 1 },
       }),
       mcpManager: manager,
@@ -688,7 +715,7 @@ describe('progressive capability disclosure', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    // Use >20 tools and a low budget to stay in progressive-disclosure search mode for this test
+    // The catalog exceeds the known provider window, so search is required.
     const oldLarge = [
       descriptor('publish-release'),
       ...Array.from({ length: 24 }, (_, i) => descriptor(`filler-${i}`)),
@@ -714,7 +741,7 @@ describe('progressive capability disclosure', () => {
       model: createMockModel([{ message: aiMessage({ content: 'search again' }) }]),
       state,
       config: config({
-        modelCapabilities: { contextWindowTokens: 128_000 },
+        modelCapabilities: { contextWindowTokens: 1_000 },
         modelKwargs: { capabilityDisclosureBudgetTokens: 1 },
       }),
       mcpManager: manager,

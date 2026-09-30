@@ -24,7 +24,6 @@ export const MCP_STDIO_HOST_PEER_ID_ = 'runtime-host';
 export const MCP_STDIO_WRAPPER_PEER_ID_ = 'mcp-stdio-wrapper';
 export const MCP_STDIO_WRAPPER_ENTRYPOINT_ = '--kite-internal-mcp-stdio-v1';
 export const MCP_STDIO_MAX_LINE_BYTES_ = 1024 * 1024;
-export const MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_ = 16 * 1024 * 1024;
 // The wrapper must start its exact MCP child before it can publish ready.
 // Standalone + TypeScript child cold starts routinely exceed five seconds on
 // loaded machines, so retain a finite but realistic startup bound.
@@ -210,9 +209,13 @@ async function spawnRuntimeHostMcpStdioProcess(
   const processTree = guardProcessTree(proc);
 
   let outputController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let outputPull: (() => void) | undefined;
   const stdout = new ReadableStream<Uint8Array>({
     start(controller) {
       outputController = controller;
+    },
+    pull() {
+      outputPull?.();
     },
   });
   const readyDeferred = deferred<RuntimeHostMcpStdioReady>();
@@ -230,11 +233,11 @@ async function spawnRuntimeHostMcpStdioProcess(
   let inputClosed = false;
   let cleanupStarted = false;
   let cleanupResult: RuntimeHostMcpStdioCleanup | undefined;
-  let forwardedBytes = 0;
 
   const closeOutput = (error?: Error): void => {
     if (outputClosed) return;
     outputClosed = true;
+    outputPull?.();
     if (error) outputController?.error(error);
     else outputController?.close();
   };
@@ -258,17 +261,19 @@ async function spawnRuntimeHostMcpStdioProcess(
       terminalSeen = true;
       terminalDeferred.resolve(terminal);
     },
-    onMessage(bytes) {
+    async onMessage(bytes) {
       if (!readySeen || terminalSeen) {
         throw new Error('MCP stdio protocol message crossed an invalid lifecycle boundary.');
-      }
-      forwardedBytes += bytes.byteLength;
-      if (forwardedBytes > MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_) {
-        throw new Error('MCP stdio output exceeded the bounded process budget.');
       }
       const copy = new Uint8Array(bytes.byteLength);
       copy.set(bytes);
       outputController?.enqueue(copy);
+      if (outputController && (outputController.desiredSize ?? 0) <= 0 && !outputClosed) {
+        await new Promise<void>((resolve) => {
+          outputPull = resolve;
+        });
+        outputPull = undefined;
+      }
     },
     onError(error) {
       failProtocol(error);
@@ -390,8 +395,8 @@ async function spawnRuntimeHostMcpStdioProcess(
     exited,
     async write(data: Uint8Array): Promise<void> {
       if (cleanupStarted || inputClosed) throw new Error('MCP stdio process input is closed.');
-      if (!(data instanceof Uint8Array) || data.byteLength > MCP_STDIO_MAX_LINE_BYTES_ + 1) {
-        throw new Error('MCP stdio process input is not bounded.');
+      if (!(data instanceof Uint8Array)) {
+        throw new Error('MCP stdio process input is invalid.');
       }
       if (data.byteLength < 2 || data[data.byteLength - 1] !== 0x0a) {
         throw new Error('MCP stdio process input must be one exact JSON-RPC line.');
@@ -432,7 +437,7 @@ interface WrapperOutputCallbacks {
   readySeen: boolean;
   onReady(ready: RuntimeHostMcpStdioReady): void;
   onTerminal(terminal: RuntimeHostMcpStdioTerminal): void;
-  onMessage(bytes: Uint8Array): void;
+  onMessage(bytes: Uint8Array): Promise<void>;
   onError(error: Error): void;
   isClosing(): boolean;
 }
@@ -442,7 +447,8 @@ async function consumeWrapperOutput(
   callbacks: WrapperOutputCallbacks,
 ): Promise<void> {
   const reader = stream.getReader();
-  let buffer = Buffer.alloc(0) as Buffer<ArrayBufferLike>;
+  const pendingParts: Buffer[] = [];
+  let pendingBytes = 0;
   let terminalSeen = false;
   try {
     while (true) {
@@ -450,18 +456,32 @@ async function consumeWrapperOutput(
       if (done) break;
       if (!(value instanceof Uint8Array))
         throw new Error('MCP stdio wrapper emitted invalid bytes.');
-      buffer = appendBoundedBuffer(buffer, value, MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_);
-      while (true) {
-        const newline = buffer.indexOf(0x0a);
-        if (newline < 0) break;
-        const line = Buffer.from(buffer.subarray(0, newline));
-        buffer = Buffer.from(buffer.subarray(newline + 1));
+      let offset = 0;
+      while (offset < value.byteLength) {
+        const newline = value.indexOf(0x0a, offset);
+        if (newline < 0) {
+          const tail = Buffer.from(value.subarray(offset));
+          pendingParts.push(tail);
+          pendingBytes += tail.byteLength;
+          break;
+        }
+        const segment = Buffer.from(value.subarray(offset, newline));
+        pendingParts.push(segment);
+        pendingBytes += segment.byteLength;
+        const line = Buffer.concat(pendingParts, pendingBytes);
+        for (const part of pendingParts) part.fill(0);
+        pendingParts.length = 0;
+        pendingBytes = 0;
+        offset = newline + 1;
         try {
-          if (line.byteLength === 0 || line.byteLength > MCP_STDIO_MAX_LINE_BYTES_) {
-            throw new Error('MCP stdio wrapper emitted an empty or oversized line.');
+          if (line.byteLength === 0) {
+            throw new Error('MCP stdio wrapper emitted an empty line.');
           }
           const value = parseMcpStdioJsonLine(line);
           if (isRuntimeControlFrame(value)) {
+            if (line.byteLength > MCP_STDIO_MAX_LINE_BYTES_) {
+              throw new Error('MCP stdio wrapper emitted an oversized control frame.');
+            }
             if (canonicalControlFrameJson(value) !== decodeUtf8Strict(line)) {
               throw new Error('MCP stdio control frame is not canonical JSON.');
             }
@@ -498,15 +518,18 @@ async function consumeWrapperOutput(
             const output = Buffer.alloc(line.byteLength + 1);
             line.copy(output, 0);
             output[line.byteLength] = 0x0a;
-            callbacks.onMessage(output);
-            output.fill(0);
+            try {
+              await callbacks.onMessage(output);
+            } finally {
+              output.fill(0);
+            }
           }
         } finally {
           line.fill(0);
         }
       }
     }
-    if (buffer.byteLength !== 0 && !callbacks.isClosing()) {
+    if (pendingBytes !== 0 && !callbacks.isClosing()) {
       throw new Error('MCP stdio wrapper output was truncated.');
     }
     if (!terminalSeen && !callbacks.isClosing()) {
@@ -517,7 +540,7 @@ async function consumeWrapperOutput(
     callbacks.onError(error instanceof Error ? error : new Error(String(error)));
     throw error;
   } finally {
-    buffer.fill(0);
+    for (const part of pendingParts) part.fill(0);
     reader.releaseLock();
   }
 }
@@ -630,22 +653,6 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
     actual.length === sortedExpected.length &&
     actual.every((key, index) => key === sortedExpected[index])
   );
-}
-
-function appendBoundedBuffer(
-  buffer: Buffer<ArrayBufferLike>,
-  chunk: Uint8Array,
-  maximumBytes: number,
-): Buffer<ArrayBufferLike> {
-  const nextLength = buffer.byteLength + chunk.byteLength;
-  if (nextLength > maximumBytes) {
-    throw new Error('MCP stdio wrapper emitted an oversized buffered line.');
-  }
-  const next = Buffer.alloc(nextLength) as Buffer<ArrayBufferLike>;
-  buffer.copy(next, 0);
-  Buffer.from(chunk).copy(next, buffer.byteLength);
-  buffer.fill(0);
-  return next;
 }
 
 async function writeFileSink(sink: Bun.FileSink, bytes: Uint8Array): Promise<void> {

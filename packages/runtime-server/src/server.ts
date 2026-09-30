@@ -72,6 +72,15 @@ export interface RuntimeServerOpenOptions {
   readonly onClose?: (connectionId: string) => void;
   /** Only a carrier that consumes History cancellation may advertise it. */
   readonly historyCancellation?: boolean;
+  /** App-owned bounded-resident backing for reliable frames waiting to send. */
+  readonly outboundSpool?: RuntimeServerOutboundSpool;
+}
+
+export interface RuntimeServerOutboundSpool {
+  write(message: RuntimeProtocolMessage): string;
+  read(reference: string): RuntimeProtocolMessage;
+  remove(reference: string): void;
+  close(): void;
 }
 
 export interface RuntimeServerBackend {
@@ -110,6 +119,8 @@ export const DEFAULT_RUNTIME_SERVER_GLOBAL_LIMITS: RuntimeServerGlobalLimits = O
 
 export interface RuntimeServerOptions {
   readonly serverInfo: Readonly<{ version: string; instanceId: string }>;
+  /** App-owned factory creates one spool for each accepted logical connection. */
+  readonly outboundSpool?: () => RuntimeServerOutboundSpool;
   readonly limits?: Partial<RuntimeServerLimits>;
   readonly globalLimits?: Partial<RuntimeServerGlobalLimits>;
   readonly historyMethods?: boolean;
@@ -137,6 +148,7 @@ export class RuntimeServer {
   readonly #connections = new Set<ServerConnection>();
   #subscriptionCount = 0;
   #queuedBytes = 0;
+  readonly #queuedByteWaiters = new Set<() => void>();
   #nextConnection = 0;
   #draining = false;
 
@@ -168,9 +180,14 @@ export class RuntimeServer {
       this.#options.serverControlMethods === true,
       this.#limits,
       this.#globalLimits.drainTimeoutMs,
+      options?.outboundSpool ?? this.#options.outboundSpool?.(),
       () => this.#reserveSubscription(),
       () => this.#releaseSubscription(),
       (delta) => this.#reserveQueuedBytes(delta),
+      (wake) => {
+        this.#queuedByteWaiters.add(wake);
+        return () => this.#queuedByteWaiters.delete(wake);
+      },
       () => {
         try {
           options?.onClose?.(session.connectionId);
@@ -208,8 +225,16 @@ export class RuntimeServer {
 
   #reserveQueuedBytes(delta: number): boolean {
     if (!Number.isSafeInteger(delta)) return false;
-    if (delta > 0 && this.#queuedBytes + delta > this.#globalLimits.maxQueuedBytes) return false;
+    if (
+      delta > 0 &&
+      this.#queuedBytes > 0 &&
+      this.#queuedBytes + delta > this.#globalLimits.maxQueuedBytes
+    )
+      return false;
     this.#queuedBytes = Math.max(0, this.#queuedBytes + delta);
+    if (delta < 0) {
+      for (const wake of this.#queuedByteWaiters) wake();
+    }
     return true;
   }
 }
@@ -236,9 +261,11 @@ class ServerConnection implements RuntimeServerConnection {
   readonly #serverControlMethods: boolean;
   readonly #limits: RuntimeServerLimits;
   readonly #drainTimeoutMs: number;
+  readonly #outboundSpool: RuntimeServerOutboundSpool | undefined;
   readonly #reserveSubscription: () => boolean;
   readonly #releaseSubscription: () => void;
   readonly #reserveQueuedBytes: (delta: number) => boolean;
+  readonly #waitQueuedBytes: (wake: () => void) => () => void;
   readonly #onClose: () => void;
   readonly #outbound: OutboundQueue;
   readonly #inFlight = new Set<Promise<void>>();
@@ -268,9 +295,11 @@ class ServerConnection implements RuntimeServerConnection {
     serverControlMethods: boolean,
     limits: RuntimeServerLimits,
     drainTimeoutMs: number,
+    outboundSpool: RuntimeServerOutboundSpool | undefined,
     reserveSubscription: () => boolean,
     releaseSubscription: () => void,
     reserveQueuedBytes: (delta: number) => boolean,
+    waitQueuedBytes: (wake: () => void) => () => void,
     onClose: () => void,
   ) {
     this.connectionId = connectionId;
@@ -285,14 +314,19 @@ class ServerConnection implements RuntimeServerConnection {
     this.#serverControlMethods = serverControlMethods;
     this.#limits = limits;
     this.#drainTimeoutMs = drainTimeoutMs;
+    this.#outboundSpool = outboundSpool;
     this.#reserveSubscription = reserveSubscription;
     this.#releaseSubscription = releaseSubscription;
     this.#reserveQueuedBytes = reserveQueuedBytes;
+    this.#waitQueuedBytes = waitQueuedBytes;
     this.#onClose = onClose;
     this.#outbound = new OutboundQueue(
       limits,
       connection,
       this.#reserveQueuedBytes,
+      this.#waitQueuedBytes,
+      drainTimeoutMs,
+      this.#outboundSpool,
       () => void this.close('slow_consumer'),
     );
   }
@@ -1072,21 +1106,32 @@ export class Subscription {
 type OutboundMessageKind = 'response' | 'durable' | 'ephemeral' | 'control';
 
 interface OutboundItem {
-  readonly message: RuntimeProtocolMessage;
+  readonly reference?: string;
+  readonly message?: RuntimeProtocolMessage;
   readonly bytes: number;
+  readonly deadline: number;
   readonly kind: OutboundMessageKind;
   readonly resolve: (accepted: boolean) => void;
+  reserved: boolean;
 }
 
-class OutboundQueue {
+/** @internal Logical send queue; exported only for focused package tests. */
+export class OutboundQueue {
   readonly #limits: RuntimeServerLimits;
   readonly #connection: RuntimeServerLogicalMessageConnection;
   readonly #reserveBytes: (delta: number) => boolean;
+  readonly #waitQueuedBytes: (wake: () => void) => () => void;
+  readonly #drainTimeoutMs: number;
+  readonly #spool: RuntimeServerOutboundSpool | undefined;
   readonly #onOverflow: () => void;
-  readonly #items: OutboundItem[] = [];
+  #items: (OutboundItem | undefined)[] = [];
+  #head = 0;
+  #queuedCount = 0;
+  #queuedEphemeralCount = 0;
   readonly #idleWaiters = new Set<() => void>();
+  readonly #capacityWaiters = new Set<() => void>();
+  #active: OutboundItem | undefined;
   #bytes = 0;
-  #messageCount = 0;
   #sending = false;
   #closed = false;
 
@@ -1094,39 +1139,50 @@ class OutboundQueue {
     limits: RuntimeServerLimits,
     connection: RuntimeServerLogicalMessageConnection,
     reserveBytes: (delta: number) => boolean,
+    waitQueuedBytes: (wake: () => void) => () => void,
+    drainTimeoutMs: number,
+    spool: RuntimeServerOutboundSpool | undefined,
     onOverflow: () => void,
   ) {
     this.#limits = limits;
     this.#connection = connection;
     this.#reserveBytes = reserveBytes;
+    this.#waitQueuedBytes = waitQueuedBytes;
+    this.#drainTimeoutMs = drainTimeoutMs;
+    this.#spool = spool;
     this.#onOverflow = onOverflow;
   }
 
   enqueue(message: RuntimeProtocolMessage, kind: OutboundMessageKind): Promise<boolean> {
     if (this.#closed) return Promise.resolve(false);
     const bytes = encodedBytes(message);
-    if (!this.#canAccept(bytes)) {
+    if (kind === 'ephemeral' && !this.#canAcceptEphemeral(bytes)) {
       this.#dropQueuedEphemeral();
+      if (!this.#canAcceptEphemeral(bytes)) return Promise.resolve(true);
     }
-    if (!this.#canAccept(bytes)) {
-      if (kind === 'ephemeral') return Promise.resolve(true);
-      this.#onOverflow();
-      return Promise.resolve(false);
-    }
-    let globallyReserved = this.#reserveBytes(bytes);
-    if (!globallyReserved) {
-      this.#dropQueuedEphemeral();
-      globallyReserved = this.#reserveBytes(bytes);
-    }
-    if (!globallyReserved) {
-      if (kind === 'ephemeral') return Promise.resolve(true);
-      this.#onOverflow();
-      return Promise.resolve(false);
+    let reference: string | undefined;
+    const holdInMemory = !this.#spool || (!this.#sending && this.#queuedCount === 0);
+    if (!holdInMemory) {
+      try {
+        reference = this.#spool!.write(message);
+      } catch {
+        this.#onOverflow();
+        return Promise.resolve(false);
+      }
     }
     return new Promise<boolean>((resolve) => {
-      this.#items.push({ message, bytes, kind, resolve });
+      this.#items.push({
+        reference,
+        message: holdInMemory ? message : undefined,
+        bytes,
+        deadline: Date.now() + this.#drainTimeoutMs,
+        kind,
+        resolve,
+        reserved: false,
+      });
+      this.#queuedCount++;
+      if (kind === 'ephemeral') this.#queuedEphemeralCount++;
       this.#bytes += bytes;
-      this.#messageCount += 1;
       void this.#drain();
     });
   }
@@ -1134,15 +1190,29 @@ class OutboundQueue {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
-    for (const item of this.#items.splice(0)) {
+    for (const wake of this.#capacityWaiters) wake();
+    this.#capacityWaiters.clear();
+    for (let index = this.#head; index < this.#items.length; index++) {
+      const item = this.#items[index];
+      if (!item) continue;
       this.#release(item);
       item.resolve(false);
     }
+    this.#items = [];
+    this.#head = 0;
+    this.#queuedCount = 0;
+    this.#queuedEphemeralCount = 0;
+    if (this.#active) {
+      this.#release(this.#active);
+      this.#active.resolve(false);
+      this.#active = undefined;
+    }
+    this.#spool?.close();
     if (!this.#sending) this.#notifyIdle();
   }
 
   whenIdle(): Promise<void> {
-    if (!this.#sending && this.#items.length === 0) return Promise.resolve();
+    if (!this.#sending && this.#queuedCount === 0) return Promise.resolve();
     return new Promise<void>((resolve) => this.#idleWaiters.add(resolve));
   }
 
@@ -1151,55 +1221,127 @@ class OutboundQueue {
     this.#sending = true;
     try {
       while (!this.#closed) {
-        const item = this.#items.shift();
+        const item = this.#take();
         if (!item) {
           this.#notifyIdle();
           return;
         }
+        this.#active = item;
         try {
-          await this.#connection.send(item.message);
+          if (!(await this.#awaitCapacity(item))) return;
+          if (this.#closed) return;
+          const message = item.message ?? this.#spool!.read(item.reference!);
+          if (item.reference) this.#spool!.remove(item.reference);
+          if (this.#closed) return;
+          const remaining = item.deadline - Date.now();
+          if (remaining <= 0) throw new Error('Runtime Server outbound wait timed out.');
+          await withDeadline(this.#connection.send(message), remaining);
+          if (this.#closed) return;
           this.#release(item);
           item.resolve(true);
         } catch {
+          if (this.#closed) return;
           this.#release(item);
           item.resolve(false);
           this.#onOverflow();
           return;
+        } finally {
+          if (this.#active === item) this.#active = undefined;
         }
       }
     } finally {
       this.#sending = false;
-      if (this.#items.length === 0) this.#notifyIdle();
+      if (this.#queuedCount === 0) this.#notifyIdle();
     }
   }
 
-  #canAccept(bytes: number): boolean {
+  #take(): OutboundItem | undefined {
+    while (this.#head < this.#items.length) {
+      const item = this.#items[this.#head];
+      this.#items[this.#head++] = undefined;
+      if (!item) continue;
+      this.#queuedCount--;
+      if (item.kind === 'ephemeral') this.#queuedEphemeralCount--;
+      this.#compact();
+      return item;
+    }
+    this.#compact();
+    return undefined;
+  }
+
+  #compact(): void {
+    if (this.#queuedCount === 0) {
+      this.#items = [];
+      this.#head = 0;
+    } else if (this.#head >= 256 && this.#head * 2 >= this.#items.length) {
+      this.#items = this.#items.slice(this.#head);
+      this.#head = 0;
+    }
+  }
+
+  async #awaitCapacity(item: OutboundItem): Promise<boolean> {
+    while (!this.#closed) {
+      const remaining = item.deadline - Date.now();
+      if (remaining <= 0) {
+        this.#onOverflow();
+        return false;
+      }
+      if (this.#reserveBytes(item.bytes)) {
+        item.reserved = true;
+        return true;
+      }
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer);
+          unsubscribe();
+          this.#capacityWaiters.delete(wake);
+          resolve();
+        };
+        const unsubscribe = this.#waitQueuedBytes(wake);
+        this.#capacityWaiters.add(wake);
+        const timer = setTimeout(wake, remaining);
+      });
+    }
+    return false;
+  }
+
+  #canAcceptEphemeral(bytes: number): boolean {
     return (
       bytes <= this.#limits.maxOutboundBytes &&
-      this.#messageCount < this.#limits.maxOutboundMessages &&
+      this.#queuedCount < this.#limits.maxOutboundMessages &&
       this.#bytes + bytes <= this.#limits.maxOutboundBytes
     );
   }
 
   #dropQueuedEphemeral(): void {
-    for (let index = this.#items.length - 1; index >= 0; index -= 1) {
+    if (this.#queuedEphemeralCount === 0) return;
+    for (let index = this.#items.length - 1; index >= this.#head; index -= 1) {
       const item = this.#items[index];
       if (item?.kind !== 'ephemeral') continue;
-      this.#items.splice(index, 1);
+      this.#items[index] = undefined;
+      this.#queuedCount--;
+      this.#queuedEphemeralCount--;
       this.#release(item);
       item.resolve(true);
       if (
-        this.#messageCount < this.#limits.maxOutboundMessages &&
+        this.#queuedCount < this.#limits.maxOutboundMessages &&
         this.#bytes < this.#limits.maxOutboundBytes
       )
-        return;
+        break;
     }
+    while (this.#items.length > this.#head && !this.#items[this.#items.length - 1]) {
+      this.#items.pop();
+    }
+    this.#compact();
   }
 
   #release(item: OutboundItem): void {
     this.#bytes -= item.bytes;
-    this.#messageCount -= 1;
-    this.#reserveBytes(-item.bytes);
+    if (item.reserved) {
+      item.reserved = false;
+      this.#reserveBytes(-item.bytes);
+    }
+    if (item.reference) this.#spool?.remove(item.reference);
   }
 
   #notifyIdle(): void {

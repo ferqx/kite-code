@@ -63,7 +63,7 @@ maintenance barrier，不能由任一App Server自行扫描后删除。
 
 带回执的根 Session 树删除是窄范围例外：Store 在同一写事务中收集树内已保存的 typed Artifact ref，删除整棵树后只清理可证明不再被保留 Store 行引用的候选正文。共享 ref、归属不明的孤立正文保留；该操作不启用常规全库 GC，也不承诺物理覆写。当前实现与验证见 [SQLite Artifact owner](../../packages/runtime-storage-sqlite/docs/queries-and-artifacts.md)。
 
-Model 私有 Artifact 的默认 16 MiB 单件上限已移除；Capability Artifact 仍沿其 owner 的容量规则。独立子 Run 的私有 Task／结果／lifecycle／continuation／checkpoint／followup admission Artifact 在 Store15 也不再施加旧单件固定字节上限。两类 Artifact 均须满足 canonical 格式、内容摘要、准确字节长度、所属执行权与物理存储检查；容量规则不能代替完整性验证。
+Model、Capability result 和 filesystem preimage 私有 Artifact 不再施加旧默认 16 MiB 单件上限；Capability store 的旧 `maxArtifactBytes` 参数保留源兼容但不作为写入拒绝额度。独立子 Run 的私有 Task／结果／lifecycle／continuation／checkpoint／followup admission Artifact 在 Store15 也不再施加旧单件固定字节上限。这些 Artifact 均须满足 canonical 格式、内容摘要、准确字节长度、所属执行权与物理存储检查；容量规则不能代替完整性验证。回归见 [Capability Artifact](../../packages/builtin-runtime/test/capability-artifact-size.test.ts) 与 [filesystem preimage](../../packages/builtin-runtime/test/persistence/filesystem-preimage-artifacts.test.ts)。
 
 ## Runtime 生命周期
 

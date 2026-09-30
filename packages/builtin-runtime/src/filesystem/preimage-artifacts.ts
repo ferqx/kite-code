@@ -11,7 +11,6 @@ import {
 } from '../model';
 import { userKiteCodeDir } from '../model/artifact-paths';
 
-const DEFAULT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SHA256_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const PARTITIONS = Object.freeze([
@@ -120,7 +119,9 @@ export class FilesystemPreimageArtifactStore implements FilesystemPreimageArtifa
           : { root: this.#options.root ?? filesystemPreimageArtifactRoot() }),
         namespace: 'filesystem-preimages',
         partitions: PARTITIONS,
-        maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
+        ...(this.#options.maxArtifactBytes === undefined
+          ? {}
+          : { maxArtifactBytes: this.#options.maxArtifactBytes }),
         ...(this.#options.platform ? { platform: this.#options.platform } : {}),
         ...(this.#options.secureWindowsPath
           ? { secureWindowsPath: this.#options.secureWindowsPath }

@@ -1,4 +1,7 @@
 import { type ChildProcessByStdio, spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type {
   ListRuntimeLogSessionsRequest,
@@ -42,7 +45,6 @@ export type KiteHistoryWorkerResponse =
   | { readonly id: number; readonly failure: { readonly code: string; readonly message: string } };
 
 const PROCESSES = 2;
-const MAX_WAITING_PER_PROCESS = 64;
 const MAX_READ_MS = 9_000;
 const MAX_OUTPUT_FRAME_BYTES = RUNTIME_PROTOCOL_LIMITS.maxMessageBytes + 65_536;
 
@@ -55,13 +57,16 @@ type Job = {
   readonly reject: (error: Error) => void;
   readonly signal?: AbortSignal;
   onAbort?: () => void;
+  queueTimer?: ReturnType<typeof setTimeout>;
 };
 
 type HistoryChild = ChildProcessByStdio<Writable, Readable, null>;
 
 type Lane = {
   child?: HistoryChild;
+  snapshotDirectory?: string;
   retiring?: HistoryChild;
+  retiringSnapshotDirectory?: string;
   retirement?: Promise<boolean>;
   unavailable?: boolean;
   active?: Job;
@@ -76,12 +81,16 @@ function codedError(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
-/** Fixed two-process pool with bounded per-process input and one active read each. */
+/** Fixed two-process pool with timed waiting and one active read per process. */
 export function createKiteHistoryPagePool(input: {
   readonly databasePath: string;
   readonly entrypointPath?: string;
   readonly standaloneEntrypoint?: boolean;
-}): KiteHistoryPageClient & { close(): Promise<void>; liveChildPids(): readonly number[] } {
+}): KiteHistoryPageClient & {
+  close(): Promise<void>;
+  liveChildPids(): readonly number[];
+  liveSnapshotDirectories(): readonly string[];
+} {
   const entrypointPath = input.entrypointPath ?? process.argv[1];
   if (!entrypointPath) throw new Error('History child entrypoint is unavailable.');
   const lanes: Lane[] = Array.from({ length: PROCESSES }, () => ({
@@ -95,14 +104,26 @@ export function createKiteHistoryPagePool(input: {
   let closePromise: Promise<void> | undefined;
   const detach = (job: Job) => {
     if (job.signal && job.onAbort) job.signal.removeEventListener('abort', job.onAbort);
+    if (job.queueTimer) clearTimeout(job.queueTimer);
+    job.queueTimer = undefined;
+  };
+  const removeSnapshotDirectory = (directory: string | undefined) => {
+    if (!directory) return;
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {
+      // Disposable cache cleanup must not prevent retirement or queued reads.
+    }
   };
   let startNext: (lane: Lane) => void;
-  const retire = (lane: Lane, child: HistoryChild): void => {
+  const retire = (lane: Lane, child: HistoryChild, snapshotDirectory?: string): void => {
     if (child.exitCode !== null || child.signalCode !== null) {
+      removeSnapshotDirectory(snapshotDirectory);
       startNext(lane);
       return;
     }
     lane.retiring = child;
+    lane.retiringSnapshotDirectory = snapshotDirectory;
     lane.retirement = new Promise<boolean>((resolve) => {
       const force = setTimeout(() => {
         if (child.pid) child.kill('SIGKILL');
@@ -121,8 +142,10 @@ export function createKiteHistoryPagePool(input: {
         clearTimeout(deadline);
         child.off('exit', finished);
         child.off('close', finished);
+        removeSnapshotDirectory(snapshotDirectory);
         if (lane.retiring !== child) return;
         lane.retiring = undefined;
+        lane.retiringSnapshotDirectory = undefined;
         lane.retirement = undefined;
         resolve(true);
         startNext(lane);
@@ -147,10 +170,13 @@ export function createKiteHistoryPagePool(input: {
       }
     }
     const child = lane.child;
+    const snapshotDirectory = lane.snapshotDirectory;
     lane.child = undefined;
+    lane.snapshotDirectory = undefined;
     lane.pendingOutput = '';
     lane.decoder = new TextDecoder();
-    if (child) retire(lane, child);
+    if (child) retire(lane, child, snapshotDirectory);
+    else removeSnapshotDirectory(snapshotDirectory);
   };
   startNext = (lane: Lane): void => {
     if (closed || lane.unavailable || lane.retiring || lane.active || lane.waiting.length === 0)
@@ -161,6 +187,7 @@ export function createKiteHistoryPagePool(input: {
           ? [input.entrypointPath ?? process.execPath, '--kite-internal-history-page-v1']
           : [process.execPath, entrypointPath, '--kite-internal-history-page-v1'];
       try {
+        lane.snapshotDirectory = mkdtempSync(join(tmpdir(), 'kite-history-pages-'));
         const child = spawn(command[0]!, command.slice(1), { stdio: ['pipe', 'pipe', 'ignore'] });
         lane.child = child;
         child.stdout.on('data', (chunk: Buffer) => {
@@ -247,6 +274,8 @@ export function createKiteHistoryPagePool(input: {
       }
     }
     const job = lane.waiting.shift()!;
+    if (job.queueTimer) clearTimeout(job.queueTimer);
+    job.queueTimer = undefined;
     lane.active = job;
     const id = lane.nextId++;
     lane.timer = setTimeout(
@@ -255,12 +284,18 @@ export function createKiteHistoryPagePool(input: {
     );
     const frame = JSON.stringify(
       job.kind === 'search'
-        ? { id, search: job.request, databasePath: input.databasePath }
+        ? {
+            id,
+            search: job.request,
+            databasePath: input.databasePath,
+            snapshotDirectory: lane.snapshotDirectory,
+          }
         : {
             id,
             request: job.request,
             ...(job.kind === 'full' ? { full: true } : {}),
             databasePath: input.databasePath,
+            snapshotDirectory: lane.snapshotDirectory,
           },
     );
     if (Buffer.byteLength(frame, 'utf8') > 65_535) {
@@ -294,9 +329,6 @@ export function createKiteHistoryPagePool(input: {
       ]!;
     if (lane.unavailable)
       return Promise.reject(codedError('temporarily_unavailable', 'History child is unavailable.'));
-    if (lane.waiting.length >= MAX_WAITING_PER_PROCESS) {
-      return Promise.reject(codedError('temporarily_unavailable', 'History child queue is full.'));
-    }
     return new Promise<KiteHistoryPage | RuntimeHistorySessionTranscript | RuntimeLogSessionPage>(
       (resolve, reject) => {
         const job: Job = {
@@ -327,6 +359,13 @@ export function createKiteHistoryPagePool(input: {
           job.onAbort = onAbort;
           options.signal.addEventListener('abort', onAbort, { once: true });
         }
+        job.queueTimer = setTimeout(() => {
+          const index = lane.waiting.indexOf(job);
+          if (index < 0) return;
+          lane.waiting.splice(index, 1);
+          detach(job);
+          reject(codedError('temporarily_unavailable', 'History read queue wait timed out.'));
+        }, MAX_READ_MS);
         lane.waiting.push(job);
         startNext(lane);
       },
@@ -357,6 +396,11 @@ export function createKiteHistoryPagePool(input: {
       return lanes
         .flatMap((lane) => [lane.child?.pid, lane.retiring?.pid])
         .filter((pid): pid is number => pid !== undefined);
+    },
+    liveSnapshotDirectories() {
+      return lanes
+        .flatMap((lane) => [lane.snapshotDirectory, lane.retiringSnapshotDirectory])
+        .filter((directory): directory is string => directory !== undefined);
     },
   };
 }

@@ -40,7 +40,11 @@ function ref<K extends 'model_surface' | 'model_response'>(
 function fixture(
   admitted = true,
   maxOutputTokens?: number,
-  options: { durationOnlyChildRun?: boolean; retryableFailures?: number } = {},
+  options: {
+    durationOnlyChildRun?: boolean;
+    unboundedCumulativeUsage?: boolean;
+    retryableFailures?: number;
+  } = {},
 ) {
   const order: string[] = [];
   let providerCalls = 0;
@@ -103,7 +107,9 @@ function fixture(
       turn: { turnId: 'admission-turn' },
       resourceBudget: options.durationOnlyChildRun
         ? { status: 'active', budget: { durationOnlyChildRun: true } }
-        : { status: 'unconfigured' },
+        : options.unboundedCumulativeUsage
+          ? { status: 'active', budget: { unboundedCumulativeUsage: true } }
+          : { status: 'unconfigured' },
     }),
     persistEvents: async (events) => {
       order.push(`events:${events.map((event) => event.type).join(',')}`);
@@ -122,6 +128,25 @@ function fixture(
 }
 
 describe('Gateway prepared Surface admission', () => {
+  test('retries a primary Run beyond the legacy attempt count under its Run deadline', async () => {
+    const value = fixture(true, undefined, {
+      unboundedCumulativeUsage: true,
+      retryableFailures: 6,
+    });
+    const pending = await value.invoke(() => ({
+      compiled: compileModelSurface({
+        purpose: 'primary_agent',
+        config,
+        model,
+        messages: [humanMessage('finish the Run')],
+        tools: {},
+        estimatedInputTokens: 8,
+      }),
+    }));
+    await pending.commit();
+    expect(value.providerCalls()).toBe(7);
+  });
+
   test('retries a duration-only child beyond the legacy five-attempt ceiling', async () => {
     const value = fixture(true, undefined, {
       durationOnlyChildRun: true,

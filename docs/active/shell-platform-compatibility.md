@@ -216,7 +216,7 @@ direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固�
 
 ## 7. 超时必须终止整棵进程树
 
-Shell 命令未提供 `timeout_ms` 时必须使用 600000ms 的默认硬超时；显式 `timeout_ms` 可以覆盖为更短或更长的正整数，但不得存在无限执行路径。达到有效超时后，执行器必须先停止 stdout/stderr reader术语（标准输出/错误读取器），再强制终止 shell 包装进程及其全部后代，并等待终止动作完成后返回 exit code 124。用户通过 AbortSignal术语（中止信号）取消时必须复用同一套 reader 停止和进程树终止流程，但返回 exit code 130 与取消提示，不得继续等待默认超时或误报为超时。不得只结束 shell 包装进程而留下后台子进程。
+Shell 命令未提供 `timeout_ms` 时，新建／已升级无累计额度 Run 的有限命令使用该 Run 的剩余期限，旧有限调用保留 600000ms 默认硬超时；显式 `timeout_ms` 可以覆盖为更短或更长的正整数，仍受当前 Run 的取消和期限管理。显式 service 使用受管跨轮生命周期，不得由普通有限命令暗中获得这一执行权。达到有效超时后，执行器必须先停止 stdout/stderr reader术语（标准输出/错误读取器），再强制终止 shell 包装进程及其全部后代，并等待终止动作完成后返回 exit code 124。用户通过 AbortSignal术语（中止信号）取消时必须复用同一套 reader 停止和进程树终止流程，但返回 exit code 130 与取消提示，不得继续等待默认超时或误报为超时。不得只结束 shell 包装进程而留下后台子进程。
 
 - Windows 在命令启动后立即关联 Job Object术语（作业对象），并在 guard 建立及终止根 Shell 前扩展已知原生 process snapshot术语（进程快照）。终止整个 Job 后仍须清扫关联前已经启动的后代；根 Shell 在 graceful 等待期内先退出不得跳过该 sweep，因为未被 Job 追踪的后代可能已重设 parent。原生句柄不可用时降级为 `taskkill /T /F`。原生终止必须保留 process handle术语（进程句柄）并等待其进入终态后再返回。
 - Unix 启动命令时创建独立 process group术语（进程组）。终止时先向整组发送 `SIGTERM` 并等待 500ms；仍存活时发送 `SIGKILL`，再进行最多 2 秒的退出确认。忽略 SIGTERM 的后代必须由强制阶段清理。
@@ -229,4 +229,11 @@ descendant 数。Tool Controller 只能把这些安全事实写入 result metada
 Bun spawn 不直接消费 AbortSignal，整棵树的取消由 ProcessTreeGuard 唯一负责，避免只终止
 root process。
 
-stdout/stderr reader 必须持续 drain 子进程管道，但执行期每路最多保留 256 KiB head+tail；超过上限时写入明确 capture omission marker，不能继续持有完整输出副本。实时 progress 按完整逻辑行发布，单个未终止长行最多保留 16 KiB tail；CRLF 在进入事件层前规范为 LF 行语义。Windows restricted-token runner 的任意二进制 frame 必须先用跨 frame `TextDecoder` 解码并经过同一有界行缓冲，禁止把 8 KiB transport chunk 当成一行或在 frame 边界插入假换行。最终模型投影仍继续使用 `packages/builtin-runtime/src/filesystem/projection.ts` 的每路 4000 字符 head+tail 边界。
+stdout/stderr reader 必须持续 drain 子进程管道，以跨 chunk `TextDecoder` 保留完整字符，并把每份解码后的
+原始 chunk 交给调用者。正常 Shell 的 Managed Shell owner 持续保存完整私有磁盘 spool，模型用 cursor
+分页读取；每路 256 KiB head+tail capture 与 `shell_execute` 的 4000 字符结果只作为终态预览，不能代替
+完整输出或丢弃中间历史。读取页同时核对原始字节与实际 JSON 编码长度，控制字符转义后仍适配协议边界；
+只返回终态正文的 executor 按路补写，已经流式捕获的路不重复追加预览。Windows restricted-token runner 同样把解码后的 chunk 直接交给 spool，不能
+因旧的 16 KiB 未终止行缓冲丢失长行，也不能在二进制 frame 边界插入假换行。spool 写入失败必须明确失败；
+进程终态关闭写 FD，每次分页只临时打开读 FD，避免累计执行数耗尽句柄。输出存储由当前 Runtime 生命周期
+管理；目录在首次 Shell 启动时创建，owner 关闭并确认真实清理后回收其全部终态及未读输出，最后一项移除时回收目录。未知清理仍保留恢复事实，不跨宿主重启接管旧进程或旧句柄。长轮询在每个结束分支清理定时器及监听器，预先取消的读取立即返回；本会话 watermark 不受其他 owner 的进度影响。

@@ -1087,7 +1087,8 @@ export async function executeAppRuntimeTools(params: {
               workspace: liveState.session.workspace,
               ...(cutoverExecutionMechanism === 'shell' &&
               budget.status === 'active' &&
-              budget.budget.durationOnlyChildRun === true
+              (budget.budget.durationOnlyChildRun === true ||
+                budget.budget.unboundedCumulativeUsage === true)
                 ? { durationOnlyChildRunDeadlineAt: budget.deadlineAt }
                 : {}),
               ...(cutoverExecutionMechanism === 'shell'

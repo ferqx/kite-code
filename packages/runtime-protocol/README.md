@@ -79,6 +79,8 @@ Session 的可选 `workspaceDigest` 在 wire 中保留，供客户端目录归�
 - Background list/detail results preserve separate `sessionRevision`, aggregate-directory generation, execution-owner generation,
   and execution-local revision fields. The stop command uses only `sessionRevision` for Session CAS and the item owner generation
   plus execution revision for exact execution fencing; the wire codec rejects conflated or omitted fields.
+- Background list queries accept optional page `cursor`/`limit`; `nextBackgroundCursor` continues the same ID-ordered directory.
+  The 1 MiB message and 10,000-item array checks apply to each frame, while complete history remains addressable across pages and by execution ID.
 - A live connection never dual-publishes projection v1/v2. An incompatible client/daemon fails initialize or decode closed; no codec fallback
   upgrades, downgrades, or rewrites persisted Runtime history.
 - App Control responses repeat the requested closed method. Runtime Client rejects a mismatched method before the
