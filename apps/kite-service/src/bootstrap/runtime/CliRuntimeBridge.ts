@@ -1,6 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { McpRuntimeProvider } from '@kite-ai/builtin-runtime/mcp';
-import { createChatModel, createModelSecretDetector } from '@kite-ai/builtin-runtime/model';
+import {
+  createChatModel,
+  createModelSecretDetector,
+  primaryModelProviderOptions,
+} from '@kite-ai/builtin-runtime/model';
 import type { ShellExecutor } from '@kite-ai/builtin-runtime/sandbox';
 import type { SubagentResultArtifactAccess } from '@kite-ai/builtin-runtime/subagent';
 import type { InteractionMode, SkillManifest, SkillScanOptions } from '@kite-ai/runtime-contract';
@@ -180,6 +184,27 @@ interface CliRuntimeTurnExecutionInput {
   readonly commandContext?: Readonly<RuntimeCommandContext>;
   /** Immutable model/config snapshot selected when this Run was admitted. */
   readonly config: AgentConfig;
+}
+
+/** Restore the accepted Run override from its durable start fact, not the latest Provider default. */
+export function recoverActiveRunConfig(
+  desiredConfig: AgentConfig,
+  turnId: string,
+  journal: readonly RuntimeEvent[],
+): AgentConfig {
+  for (let index = journal.length - 1; index >= 0; index--) {
+    const event = journal[index];
+    if (event?.type !== 'turn.started' || event.turnId !== turnId) continue;
+    if (event.reasoningEffort === undefined) return desiredConfig;
+    const recovered = { ...desiredConfig, reasoningEffort: event.reasoningEffort };
+    if (primaryModelProviderOptions(recovered) === undefined)
+      throw new KiteAppServerSessionError(
+        'recovery_required',
+        'The accepted Run reasoning effort is no longer supported by its Provider configuration.',
+      );
+    return recovered;
+  }
+  return desiredConfig;
 }
 
 function canResumeRequiredChildWait(
@@ -508,6 +533,16 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
     this.#created = true;
     this.#closed = false;
     const state = coordinator.getState();
+    if (state.turn.status === 'active' && state.turn.turnId) {
+      this.#activeRunConfig = recoverActiveRunConfig(
+        this.#desiredConfig,
+        state.turn.turnId,
+        coordinator
+          .getStateRuntimeStorage()
+          .sessions.loadEventsStrict(sessionId)
+          .map((entry) => entry.event),
+      );
+    }
     this.#revision = state.revision;
     if (!coordinator.recoveryChanged && !recoveryOwnership) return;
     // Resolve the restored Run at the committed revision before projecting
@@ -1324,9 +1359,18 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
       if (hasPendingSubagentProviderRecovery(coordinator.getState())) {
         return terminal(this.#rejected(command, 'runtime_busy'));
       }
-      const admittedConfig = command.model
+      const desiredConfig = command.model
         ? this.#resolveModelConfig(command.model)
         : this.#desiredConfig;
+      const admittedConfig =
+        command.reasoningEffort === undefined
+          ? desiredConfig
+          : { ...desiredConfig, reasoningEffort: command.reasoningEffort };
+      if (
+        command.reasoningEffort !== undefined &&
+        primaryModelProviderOptions(admittedConfig) === undefined
+      )
+        return terminal(this.#rejected(command, 'unsupported'));
       return {
         kind: 'accepted',
         decision: {
@@ -1340,7 +1384,7 @@ class CliRuntimeBridge implements ConfigurableCliRuntimeBridge {
             );
             const receipt = receiptFromStored(committed.receipt);
             if (command.model) {
-              this.#desiredConfig = admittedConfig;
+              this.#desiredConfig = desiredConfig;
             }
             return {
               receipt,

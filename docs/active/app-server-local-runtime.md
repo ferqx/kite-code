@@ -49,6 +49,7 @@ no-follow/owner校验，并把client与child统一到最终canonical target。Wi
 ## Authority
 
 桌面模型配置使用既有 Native Provider write，以及 App Control 的默认模型选择和模型启用状态写入；后两者按 Workspace revision 做 CAS。启用状态保存在用户配置，Service 快照显式投影，运行时不会默认选择已禁用模型，也会拒绝显式调用它。当前默认模型须先切换后才能禁用。凭据只进入精确写入接口，结果未知先查询且不重放。计划审核由 Service 同时向实时与 History 投影封闭的有界 review 正文和截断标记，参与稳定交互身份比对；没有新增 Store、进程或业务重试队列。
+Runtime `start_turn` 的可选思考档位只进入当次 Run 的冻结配置与持久 `turn.started` 事实；恢复按活动 turnId 还原覆盖，不写 Provider 全局配置。服务在准入时拒绝无法真实发送档位的 Provider，恢复时 Provider 变为不支持则保留需恢复状态，不能静默执行另一档位。缺省参数继续采用原 Provider 配置。
 
 桌面设置中的 MCP 状态、认证／取消认证／重连及 Skills 目录复用已存在的 App Control 方法；请求绑定完整 Workspace identity 和 Server revision，操作未知时不重放，Browser principal 不取得该控制能力。具体页面与验证范围见[扩展设置](../../apps/kite-desktop/docs/extensions.md)。
 

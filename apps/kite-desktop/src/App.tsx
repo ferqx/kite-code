@@ -14,7 +14,7 @@ import {
 } from '@kite-ai/kite-client-ui';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import appIcon from '../app-icon.svg';
-import { CommandResultUnknown, type DesktopClient } from './client';
+import { CommandResultUnknown, type DesktopClient, type DesktopModelSelection } from './client';
 import { Interaction } from './Interaction';
 import { OperationToast } from './OperationToast';
 import { isActiveRun, projectEventWithIdentity, showRunRecovery } from './presentation';
@@ -100,13 +100,8 @@ export function App({ client }: { client: DesktopClient }) {
   const [newConversationWorkspace, setNewConversationWorkspace] = useState<string>();
   const [newConversationBranch, setNewConversationBranch] = useState(view.branch);
   const [newConversationTargetBranch, setNewConversationTargetBranch] = useState<string>();
-  const [newConversationModel, setNewConversationModel] = useState<{
-    provider: string;
-    name: string;
-  }>();
-  const [sessionModels, setSessionModels] = useState<
-    Record<string, { provider: string; name: string }>
-  >({});
+  const [newConversationModel, setNewConversationModel] = useState<DesktopModelSelection>();
+  const [sessionModels, setSessionModels] = useState<Record<string, DesktopModelSelection>>({});
   const [firstSubmission, setFirstSubmission] = useState<FirstSubmission>();
   const [scheduledTasksView, setScheduledTasksView] = useState(false);
   const [navigation] = useState(readNavigation);
@@ -445,7 +440,7 @@ export function App({ client }: { client: DesktopClient }) {
     void client.refreshChildSessions(selected).catch((error) => client.report(error));
   }, [client, selected, connected, ready, preparing, scheduledTasksView]);
   const active = !preparing && isActiveRun(projection);
-  const model = preparing
+  const model: DesktopModelSelection | undefined = preparing
     ? (newConversationModel ?? view.models?.selected)
     : selected
       ? (sessionModels[selected] ??
@@ -978,8 +973,18 @@ export function App({ client }: { client: DesktopClient }) {
                   .map((item) => ({
                     provider: provider.provider,
                     name: item.name,
+                    reasoningEffortSupported: provider.reasoningEffortSupported,
+                    reasoningEffort: provider.reasoningEffort,
                   })),
               ),
+              reasoningEffort: model?.reasoningEffort,
+              onReasoningEffortChange: (reasoningEffort) => {
+                if (!model) return;
+                const selection = { provider: model.provider, name: model.name, reasoningEffort };
+                if (preparing) setNewConversationModel(selection);
+                else if (selected)
+                  setSessionModels((current) => ({ ...current, [selected]: selection }));
+              },
               modelDisabled: (!preparing && busy) || !connected || !view.models,
               onModelChange: (provider, name) => {
                 if (preparing) setNewConversationModel({ provider, name });
@@ -1103,6 +1108,13 @@ export function App({ client }: { client: DesktopClient }) {
                           }
                           await client.prepareNewConversation();
                           targetSession = await client.newSession(model);
+                          if (model) {
+                            const createdSession = targetSession;
+                            setSessionModels((current) => ({
+                              ...current,
+                              [createdSession]: model,
+                            }));
+                          }
                           sessionCreated = true;
                           setFirstSubmission({
                             phase: 'sending',

@@ -141,6 +141,7 @@ admission revision，State codec只丢弃这条无法验证的background authori
 Provider/model、MCP、Skill、execution/release与Native credential均有exact route/codec；secret只进入Native credential
 owner，browser-safe App Contract不携带secret。Trust query另投影Workspace关联的历史exact external-read roots与digest；开发期Native Shell读取可见性由Service composition选择的broad read scope决定，封存生产仍使用这些exact roots；
 Provider 设置中的显式默认选择即使返回 `already_selected` 也重新读取当前配置；未绑定 route 的 Session 更新默认配置，已绑定 Session 则重新解析自己的 route，避免同名模型替换凭据或地址后继续使用旧配置，也不能借默认选择覆盖其模型。Composer 选择通过 `create_session.model` 或下一次 `start_turn.model` 绑定并原子持久化到对应 Session；恢复优先使用该 route，不能被同一 Workspace 的其他 Session 覆盖。活动执行始终保持开始时捕获的配置。
+`start_turn.reasoningEffort` 六值覆盖在准入时仅写入该 Run 的冻结配置，模型路由仍按原 `provider + name` 身份解析，缺省时沿用 Provider 配置。Service 以主模型适配器能实际构造 `reasoning_effort` 且未显式关闭 reasoning 为准判定支持；不支持时在 Run 提交前拒绝。覆盖值随同一事务进入持久 `turn.started`，活动 Run 恢复时按 turnId 取回，不能使用后来变动的 Provider effort；若当前 Provider 已无法发送该值，恢复保持 `recovery_required`，不静默降级。App Control 的 Provider 快照只投影可用标识与配置值，不将本次 Run 覆盖写回用户配置。
 [Service composition](../src/composition.ts)把 App Control `runtimeInputsFor` 的 `resolveModelConfig` 一并传入 Workspace template，恢复持久 Session 和显式选择模型均通过同一配置 owner 解析完整路由；不能把当前默认配置当成唯一可用模型。[组合回归](../test/composition.test.ts)核对非默认模型创建、重启恢复、后续切换及会话隔离。
 
 [事件投影](../src/runtime-client/event-projector.ts)在 `run.error` 的通用 `blocked` outcome 下保留已分类 failure kind，例如 `provider_auth_required`，同时保留 outcome 的重试与恢复约束；不公开原始错误文本。[事件投影回归](../test/runtime-client-event-projector.test.ts)核对安全分类和策略不被覆盖。

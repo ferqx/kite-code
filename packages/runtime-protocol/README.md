@@ -60,6 +60,7 @@ Session 的可选 `workspaceDigest` 在 wire 中保留，供客户端目录归�
 - `subagent.started.concurrencyGroupId`, when present, is the bounded opaque Runtime dispatch identity copied by the App projector. The wire codec preserves it for live and History presentation grouping; it is neither scheduling nor authorization authority, and sequential or older events may omit it.
 - `subagent.completed` preserves the required Runtime-measured tool count and duration. `subagent.failed` admits optional terminal count/duration plus an exact content-free `{code,stage}` diagnostic; opaque model invocation correlation is not part of the wire shape.
 - `create_session` and `start_turn` may carry a strict `{provider,name}` model route. It identifies the target Session configuration only; Workspace paths, credentials, endpoints, and resolved Provider options remain outside the wire contract.
+- `start_turn.reasoningEffort` 可选且只接受 `minimal|low|medium|high|xhigh|max`；它仅覆盖本次 Run，旧请求缺省时继续使用既有 Provider 配置。
 - Every wire Session carries one complete `interactionQueue` replacement projection. Queue revision equals Session revision,
   every interaction carries that revision, identities are unique, and the optional active identity must name one queue member.
   `sessionRevision` is the current settlement CAS rather than a creation-time identity; stable kind-specific identity fields

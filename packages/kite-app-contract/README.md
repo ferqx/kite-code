@@ -10,6 +10,7 @@
 
 - Workspace Trust query/decision；
 - Provider/model snapshot 与 model selection；
+- Provider/model snapshot 可选投影 Provider 级 `reasoningEffortSupported` 与已配置的 `reasoningEffort`；支持标识依据真实主模型请求适配器和显式禁用设置，不包含密钥或逐模型能力推测。
 - MCP safe snapshot 与当前管理动作；
 - admitted Workspace 的 Skill catalog/status；
 - authoritative execution/release status；

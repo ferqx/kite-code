@@ -860,19 +860,10 @@ body {
   .composer[data-permission-pending="true"] .model-trigger:disabled {
     opacity: 1;
   }
-  .model-menu,
   .permission-menu {
     border-color: var(--border);
     background: var(--card);
     color: var(--foreground);
-  }
-  .model-menu {
-    min-width: 220px;
-    max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
-  }
-  .model-provider-label {
-    color: var(--muted-foreground);
-    font-size: 11px;
   }
   .permission-trigger {
     min-height: 26px;
@@ -2983,4 +2974,272 @@ body {
   .kite-client .session-view:has(> .environment-information) .history-panel > .notice {
     transition: none;
   }
+}
+
+/* The accepted gemstone treatment extends the installed shadcn Slider;
+   dragging, stepping, keyboard input and accessibility stay with Radix. */
+.effort-value {
+  color: #3068cc;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 550;
+}
+.effort-value[data-maximum="true"] {
+  color: #7852bf;
+}
+[data-theme="dark"] .effort-value {
+  color: #78a8fa;
+}
+[data-theme="dark"] .effort-value[data-maximum="true"] {
+  color: #b9a0ef;
+}
+.gem-slider {
+  height: 40px;
+  --gem-track-size: 26px;
+  --gem-thumb-size: 28px;
+}
+.gem-slider [data-slot="slider-track"] {
+  height: var(--gem-track-size);
+  background: var(--accent);
+  border: 1px solid var(--border);
+}
+.gem-slider [data-slot="slider-range"] {
+  min-width: calc(var(--gem-thumb-size) / 2);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, #071b5a33 0%, #071b5a00 30%, #071b5a00 68%, #071b5a44 100%),
+    radial-gradient(
+      ellipse 70% 180% at 27% -18% in oklab,
+      #75bfff66 0%,
+      #478bec29 54%,
+      #2963c000 100%
+    ),
+    radial-gradient(
+      ellipse 50% 160% at 80% 120% in oklab,
+      #438cf14d 0%,
+      #3379d51f 52%,
+      #2863c000 100%
+    ),
+    linear-gradient(105deg in oklab, #1747a2, #225dc5 48%, #17479e);
+}
+.gem-slider [data-slot="slider-range"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  background:
+    linear-gradient(180deg, #160b4033 0%, #160b4000 30%, #160b4000 68%, #160b4044 100%),
+    radial-gradient(
+      ellipse 42% 240% at -6% 55% in oklab,
+      #2261bcde 0%,
+      #3f52bb8a 42%,
+      #6136b944 68%,
+      #7131ca00 100%
+    ),
+    radial-gradient(
+      ellipse 30% 210% at 106% 50% in oklab,
+      #3b6ccc95 0%,
+      #5655bd52 45%,
+      #6842b600 100%
+    ),
+    radial-gradient(
+      ellipse 70% 180% at 27% -18% in oklab,
+      #bdaaff66 0%,
+      #955feb29 54%,
+      #6a36bf00 100%
+    ),
+    radial-gradient(
+      ellipse 50% 160% at 80% 120% in oklab,
+      #9659f14d 0%,
+      #7a43d51f 52%,
+      #6232b000 100%
+    ),
+    linear-gradient(105deg in oklab, #492299, #7131ca 48%, #4b248f);
+}
+.gem-slider[data-maximum="true"] [data-slot="slider-range"]::before {
+  opacity: 1;
+}
+.gem-slider canvas {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  pointer-events: none;
+}
+.gem-slider [data-slot="slider-thumb"] {
+  position: relative;
+  width: var(--gem-thumb-size);
+  height: var(--gem-thumb-size);
+  background: #fff;
+  border: 1px solid #00000006;
+  box-shadow: 0 1px 2px #0000000a;
+  transition: none;
+}
+.gem-ticks {
+  position: absolute;
+  inset: 0 calc((var(--gem-thumb-size) - 2px) / 2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.gem-ticks i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  opacity: 0.6;
+}
+.gem-ticks i[data-passed="true"] {
+  opacity: 0;
+}
+.gem-release {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.gem-release-particle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2.4px;
+  height: 2.4px;
+  border-radius: 50%;
+  color: #cbe6ff;
+  background: currentColor;
+  box-shadow: 0 0 5px currentColor;
+  animation: gem-release 620ms cubic-bezier(0.12, 0.7, 0.25, 1) var(--delay) both;
+}
+.gem-release-particle:nth-child(2n) {
+  width: 1.8px;
+  height: 1.8px;
+}
+.gem-slider[data-maximum="true"] .gem-release-particle {
+  color: #dac6ff;
+}
+.gem-release-particle:nth-child(3n),
+.gem-slider[data-maximum="true"] .gem-release-particle:nth-child(3n) {
+  color: #8fbdf5;
+}
+@keyframes gem-release {
+  from {
+    opacity: 0;
+    transform: translate(
+        calc(var(--x) * (var(--gem-thumb-size) / 2 + 2px) - 50%),
+        calc(var(--y) * (var(--gem-thumb-size) / 2 + 2px) - 50%)
+      )
+      scale(0.6);
+  }
+  12% {
+    opacity: 0.95;
+  }
+  55% {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 0;
+    transform: translate(
+        calc(var(--x) * var(--distance) - 50%),
+        calc(var(--y) * var(--distance) - 50%)
+      )
+      scale(0.65);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gem-slider [data-slot="slider-range"]::before {
+    transition: none;
+  }
+  .gem-release {
+    display: none;
+  }
+}
+
+/* Compact shadcn Popover with independent provider/model scroll areas. */
+.kite-client .model-effort-trigger {
+  height: 32px;
+  min-height: 32px;
+  max-width: 280px;
+  font-size: 14px;
+  padding: 4px 8px;
+}
+.model-effort-summary {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+.model-effort-popover {
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  box-sizing: border-box;
+}
+.model-effort-popover * {
+  box-sizing: border-box;
+}
+.model-effort-popover button {
+  font-family: inherit;
+  color: inherit;
+}
+.model-effort-popover-models {
+  width: 320px;
+}
+.model-effort-panel {
+  padding: 16px;
+}
+.model-effort-popover .model-effort-switch {
+  height: 32px;
+  max-width: 100%;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 14px;
+}
+.model-effort-unavailable {
+  margin: 12px 0 0;
+  color: var(--muted-foreground);
+  text-align: center;
+  font-size: 14px;
+}
+.model-effort-columns {
+  display: grid;
+  height: 352px;
+  grid-template-columns: 112px 1px minmax(0, 1fr);
+  overflow: hidden;
+}
+.model-effort-popover .model-effort-providers {
+  display: flex;
+  height: auto;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  background: transparent;
+}
+.model-effort-popover .model-effort-provider {
+  height: 36px;
+  min-width: 0;
+  justify-content: flex-start;
+  padding-inline: 8px;
+  font-size: 14px;
+  border: 0;
+  background: transparent;
+}
+.model-effort-popover .model-effort-provider[data-state="active"] {
+  background: transparent;
+  color: var(--foreground);
+  box-shadow: none;
+}
+.model-effort-popover .model-effort-option {
+  height: 36px;
+  min-width: 0;
+  justify-content: space-between;
+  font-size: 14px;
 }

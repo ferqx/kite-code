@@ -1,3 +1,4 @@
+import { strict as assert } from 'node:assert';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,8 +39,10 @@ try {
     workspace: join(home, 'workspace'),
   });
   model.assertComplete();
+  assert.equal(model.getRequests()[0]?.body.reasoning_effort, 'max');
+  assert.equal(Object.hasOwn(model.getRequests()[1]?.body ?? {}, 'reasoning_effort'), false);
   console.log(
-    `Desktop Electron transport: renderer reattachment during streaming, durable history, active EOF cleanup and successor read passed (${Math.round(result.startupMilliseconds)}ms to initial directory). No external Provider was used.`,
+    `Desktop Electron transport: per-Run reasoning effort, renderer reattachment during streaming, durable history, active EOF cleanup and successor read passed (${Math.round(result.startupMilliseconds)}ms to initial directory). No external Provider was used.`,
   );
 } finally {
   model.stop();

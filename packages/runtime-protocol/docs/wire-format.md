@@ -8,6 +8,8 @@
 
 连接 request identity 用于关联 wire response；业务 command identity 和 Session revision 用于幂等及状态校验，二者不能混用。连接重建不允许自动重放未知副作用命令。
 
+`runtime/command` 的 `start_turn` 可选携带 `reasoningEffort`，只接受 `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 六个字符串。该字段由严格 command codec 校验；省略时沿用既有模型配置，非法类型、档位及其他未知字段均拒绝。
+
 修改 contract 后同时核对 mapper、codec、producer 和 consumer。只有输出字段的投影允许时才能新增客户端信息；生成参考不替代运行 codec。与 Public Agent API 的关系见[整体依赖](../../../docs/development/architecture/dependencies.md)。
 
 `turn.started` 与 `turn.terminal` 使用同一封闭事件 codec 和精确 Turn identity 校验。持久订阅通知和 History record 的可选 `occurredAt` 只接受规范化 UTC 毫秒 ISO 时间；ephemeral 帧没有该字段。旧记录缺失时间时可正常解码，wire 层不填补时间。

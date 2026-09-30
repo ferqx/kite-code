@@ -1261,6 +1261,19 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       requireNonEmptyString(value, 'taskId');
       requireNonEmptyString(value, 'planId');
       break;
+    case 'turn.started': {
+      exactEventKeys(value, [
+        ...CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type],
+        ...(Object.hasOwn(value, 'reasoningEffort') ? ['reasoningEffort'] : []),
+      ]);
+      if (
+        Object.hasOwn(value, 'reasoningEffort') &&
+        (typeof value.reasoningEffort !== 'string' ||
+          !['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value.reasoningEffort))
+      )
+        throw new Error('Runtime turn.started reasoning effort is invalid.');
+      break;
+    }
     case 'tool.failed':
       requireNonEmptyString(value, 'toolCallId');
       if (!isRecord(value.failure))

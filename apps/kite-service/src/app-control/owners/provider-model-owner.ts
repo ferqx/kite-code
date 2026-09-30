@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { primaryModelProviderOptions } from '@kite-ai/builtin-runtime/model';
 import {
   type AppModelProviderType,
   PROVIDER_MODEL_SELECT_RESPONSE_SCHEMA_,
@@ -78,9 +79,14 @@ function snapshot(input: ProviderModelOwnerOptions): ProviderModelSnapshot {
           })
         : undefined;
       const config = readiness?.status === 'ready' ? readiness.config : undefined;
+      const configuredEffort = config?.reasoningEffort?.trim();
       return {
         provider,
         type: providerType(config?.providerType ?? provider),
+        reasoningEffortSupported:
+          config !== undefined &&
+          primaryModelProviderOptions({ ...config, reasoningEffort: 'low' }) !== undefined,
+        ...(configuredEffort ? { reasoningEffort: configuredEffort } : {}),
         readiness:
           readiness?.status === 'ready'
             ? ('ready' as const)

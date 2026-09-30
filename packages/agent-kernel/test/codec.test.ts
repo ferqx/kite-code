@@ -8,6 +8,17 @@ import {
 import type { KernelEvent } from '../src/events';
 
 describe('State event codec', () => {
+  test('retains a closed per-Run reasoning effort on the durable turn start', () => {
+    const started = { type: 'turn.started', turnId: 'turn-1', reasoningEffort: 'high' } as const;
+    expect(decodeCurrentRuntimeEventJson(encodeCurrentRuntimeEventJson(started))).toEqual(started);
+    expect(() => assertCurrentRuntimeEvent({ ...started, reasoningEffort: 'ultra' })).toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...started, reasoningEffort: ['low'] })).toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...started, reasoningEffort: 1 })).toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...started, extra: true })).toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({ type: 'turn.started', turnId: 'turn-1' }),
+    ).not.toThrow();
+  });
   test('round-trips interrupted Provider observations while retaining old terminal statuses', () => {
     for (const status of [
       'completed',

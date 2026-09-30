@@ -147,6 +147,12 @@ Ask 历史沿用 TUI 单题/多题信息结构，使用共享 UI 的有序明细
 
 ## 用户菜单与外观
 
+模型与思考选择器由 [App](../src/App.tsx)沿用新对话准备页与每个会话的模型选择状态，在同一选择对象中保存临时 `reasoningEffort`，切换模型清除旧档位，创建成功后转移到新会话；不另建存储或全局设置。Provider snapshot 的支持标记与配置档位交给共享 [ModelEffortSelector](../../../packages/kite-client-ui/src/ModelEffortSelector.tsx)，尺寸与动画规则见[共享设计规范](../../../packages/kite-client-ui/docs/design-system.md#图标与操作状态)。
+
+[DesktopClient.send](../src/client.ts)只在 `start_turn` 携带独立的 `reasoningEffort`，模型身份仍为 Provider／name；`create_session` 只提交身份，运行中的 `steer_turn` 只提交文本引导。未选择档位时不补造覆盖值。共享 UI 不负责 Runtime 请求，Service 对支持状态与实际运行配置保持权威。页面刷新不保存临时选择；Run 的冻结与恢复由 Service 负责。
+
+[UI 回归](../test/isolated/ui.test.tsx)覆盖对话间选择隔离和新对话首发，[真实 Service 回归](../test/session-calibration.test.ts)核对命令字段与模型请求；[配套服务 smoke](../../../tests/qualification/desktop-service-smoke.ts)在隔离 home／workspace 和本地模型中验证编译后制品发送本轮 `reasoning_effort`、后续未覆盖请求保持默认，并复验流式重接、历史与 EOF 清理。浏览器预览覆盖暗／亮主题、固定双栏、键盘调节及松手粒子；本次未复验 Electron 窗口和系统输入法。
+
 共享侧栏的用户按钮通过 shadcn DropdownMenu 展示设置入口与主题单选项，设置继续使用原有页面。桌面 [theme.ts](../src/theme.ts) 持有暗、亮、系统跟随偏好，保存在 `kite.desktop.theme`，默认系统跟随；入口挂载前应用已保存主题，系统模式订阅媒体查询并在卸载时移除监听。共享侧栏只消费宿主传入的主题值与回调，不持有存储。Electron 的封闭 `setTheme` IPC 同步原生外观与实色窗口背景，不涉及 Runtime 或会话配置。桌面端不加载侧栏透明或玻璃原生模块，Web 保留现有主题入口与行为。
 
 本次使用隔离数据与真实共享组件在浏览器核对黑灰暗色、亮色、系统跟随菜单、选中标记和刷新后偏好恢复。自动化覆盖 [主题生命周期](../test/isolated/theme.test.tsx)、[设置菜单入口](../test/isolated/ui.test.tsx) 与 [preload 桥接](../test/preload-bridge.test.ts)。Electron 构建和参数边界已验证，未实测原生窗口中的系统外观切换。
