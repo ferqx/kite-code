@@ -124,3 +124,11 @@ Desktop DB5 的 [desktop-answers.ts](desktop-answers.ts) 独立核准确 `answer
 记录闭合完整原intent/subject/bodySha256/requestSha256/phase；intent含原Session/Workspace/full identity与准确extension.invoke/builtin.mcp.sources/mcp.source.approve/1 request，input只有mcp-64hex serverId和六字段Source readSet，各文件identity/etag/error保持。error沿string|null，无新增字段长度规则；完整request与去Store/Command的Core request分别重算SHA，Command ID全文件唯一。128条/16MiB/fatal UTF-8/private owner/mode/no-follow/single-link/held stat适用于原文件、复制候选与inspect；submitting/pending/saved/failed/cancelled/unknown都原样保留，不淘汰未知、不恢复hot prepare权。
 
 [真实维护测试](../../test/isolated/maintenance/mcp-source-approval-intents.test.ts)当前4项70断言通过，包含上文默认原Core DB/WAL/SHM的完整presence和bytes守卫；此前4/58与十维护文件邻接67/945属于旧窗口。public create/inspect/restore v10 A→B保6221原字节、原IDs/subject/scope/SHA/phase，v9 outer重算仍拒新文件，坏body/hash/duplicate/UTF-8/permission/link/128/16MiB分别拒绝。恢复只复制原caller元数据，不retag新Store、不POST/执行Source审批或查vault。实际当前B `TuiMcpSourceApprovalPort`在任何HTTP前拒绝A意图、原cursor/bytes不变由[CLI owner](../../../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)独立实际验证；这份离线资产测试不替代UI、异常收尾或Windows资格。
+
+## MCP 重连申请的独立离线资产
+
+[Agent独立codec](mcp-reconnection-intents.ts)闭合验证准确 `ui/mcp-reconnection-intents.json@1`，不依赖CLI/UI/Client。仅资产实际present时创建closed backup v11，携完整v10旧项并增加准确mcpReconnectionIntents元数据；absent不造journal，旧v2–v10字段、格式与物理白名单保持。重标v10或重算outer proof不能接纳新资产，profileComplete仍false。
+
+closed document最多128条/16MiB，记录保完整原S/W/physical identity、本次reconnect request与准确前一C/R的flat targetRequest、subject、两种SHA及phase；原ref恰六字段、closed Source/static replacement与完整read-set分别验证。完整body与Core request摘要重算，unknown不淘汰；私有owner/mode、no-follow/单硬链、held实体、fatal UTF8与inner proof分别核验。
+
+[公共维护测试](../../test/isolated/maintenance/mcp-reconnection-intents.test.ts)实际4项114断言核v11 create/inspect/restore、旧v10 outer重算拒绝、坏closed输入/摘要/UTF8/容量/权限/链接，以及A→B完整原bytes保持。恢复不retag、不执行申请、不恢复热ticket或POST权；[实际foreign Host](../../../../apps/cli/test/isolated/tui-mcp-reconnection-restore.test.ts)进一步核原list/lookup/duplicate/observe全部HTTP0。此资格沿owned临时离线范围，不声明完整Profile、Windows维护或OSvault。

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { ActionContext, ArtifactRef, Json, ReadContext } from '../extensions';
 import { canonicalJson } from '../json';
+import { proveConnectionParent, savedReconnection } from './reconnection-proof';
 
 export const toolsSnapshotType = 'builtin.mcp.tools.snapshot';
 export interface ToolsOrigin {
@@ -332,7 +333,11 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
   const result = obj(publisher?.result),
     details = obj(result.details),
     metadata = obj(details.toolsMetadata);
-  const sourceProof = { ...details };
+  const reconnectPublisher = publisher?.definitionId === 'builtin.mcp/mcp.reconnect';
+  let reconnectProof: Awaited<ReturnType<typeof savedReconnection>> | undefined;
+  if (reconnectPublisher && publisher) reconnectProof = await savedReconnection(context, publisher);
+  const catalogueDetails = reconnectProof ? obj(details.catalogue) : details;
+  const sourceProof = { ...catalogueDetails };
   delete sourceProof.toolsMetadata;
   const prefix = `connection/${o.serverId}/`;
   if (
@@ -342,20 +347,7 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
     !connection?.parentExecutionId
   )
     throw new Error('mcp_tools_scope_unavailable');
-  const connectionPublisher = await context.getExecution(connection.parentExecutionId);
-  if (
-    !connectionPublisher ||
-    connectionPublisher.sessionId !== o.sessionId ||
-    connectionPublisher.originStoreId !== o.originStoreId ||
-    connectionPublisher.definitionVersion !== '1' ||
-    !['mcp.connect', 'builtin.mcp/mcp.connect'].includes(connectionPublisher.definitionId ?? '') ||
-    !['tool', 'job'].includes(connectionPublisher.kind) ||
-    connectionPublisher.rootWorkCommandId !== connection.rootWorkCommandId ||
-    connectionPublisher.rootWorkSeq !== connection.rootWorkSeq ||
-    connectionPublisher.inputDigest !==
-      hash(encoded({ serverId: o.serverId, key: operation.key.slice(prefix.length) }))
-  )
-    throw new Error('mcp_tools_scope_unavailable');
+  await proveConnectionParent(context, connection, operation, o.serverId, o.configDigest);
   if (
     !publisher ||
     !connection ||
@@ -375,6 +367,7 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
       'builtin.mcp/mcp.connect',
       'mcp.catalogue.refresh',
       'builtin.mcp/mcp.catalogue.refresh',
+      'builtin.mcp/mcp.reconnect',
     ].includes(publisher.definitionId ?? '') ||
     !['tool', 'job'].includes(publisher.kind) ||
     connection.kind !== 'job' ||
@@ -395,14 +388,14 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
     metadata.recordKey !== key ||
     metadata.availability !== s.availability ||
     metadata.reason !== s.reason ||
-    details.serverId !== o.serverId ||
-    details.configDigest !== o.configDigest ||
-    details.generation !== o.generation ||
+    catalogueDetails.serverId !== o.serverId ||
+    catalogueDetails.configDigest !== o.configDigest ||
+    catalogueDetails.generation !== o.generation ||
     !same(sourceProof, v) ||
-    !same(details.operationRef, v.operationRef) ||
+    !same(catalogueDetails.operationRef, v.operationRef) ||
     !Array.isArray(v.definitions) ||
     v.definitions.length !== s.toolCount ||
-    !same(details.definitions, v.definitions) ||
+    !same(catalogueDetails.definitions, v.definitions) ||
     (source.contentType === 'builtin.mcp.refresh'
       ? v.executionId !== o.publisherExecutionId ||
         s.sourceRecordKey !== `refresh/${o.publisherExecutionId}` ||
@@ -413,14 +406,18 @@ export async function readToolsSnapshot(context: ReadContext, key: string): Prom
         v.runId !== publisher.runId
       : source.contentType !== 'builtin.mcp.catalogue' ||
         !s.sourceRecordKey.startsWith(`connection/${o.serverId}/`) ||
-        !['mcp.connect', 'builtin.mcp/mcp.connect'].includes(publisher.definitionId ?? '') ||
-        publisher.inputDigest !==
-          hash(
-            encoded({
-              serverId: o.serverId,
-              key: s.sourceRecordKey.slice(`connection/${o.serverId}/`.length),
-            }),
-          ))
+        (reconnectProof
+          ? reconnectProof.stage.input.serverId !== o.serverId ||
+            reconnectProof.stage.input.key !== s.sourceRecordKey.slice(prefix.length) ||
+            !same(reconnectProof.stage.newOperationRef, operation)
+          : !['mcp.connect', 'builtin.mcp/mcp.connect'].includes(publisher.definitionId ?? '') ||
+            publisher.inputDigest !==
+              hash(
+                encoded({
+                  serverId: o.serverId,
+                  key: s.sourceRecordKey.slice(`connection/${o.serverId}/`.length),
+                }),
+              )))
   )
     throw new Error('mcp_tools_scope_unavailable');
   return s as unknown as ToolsSnapshot;

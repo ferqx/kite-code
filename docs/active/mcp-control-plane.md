@@ -1,9 +1,15 @@
 # MCP Control Plane 与 TUI 状态视图
 
 状态：active
-读取时机：修改 `McpConnectionManager` 生命周期、`McpSupervisor`、MCP control snapshot、TUI `/mcp` 路由或 Runtime MCP provider 边界时。
-验证：`bun test packages/builtin-runtime/test packages/runtime-host/test tests/mcp tests/tui-system`、`bun run typecheck`、`bun run check:core-boundary`。
+读取时机：修改当前MCP生命周期、原连接/重连Query、持久发布或TUI MCP路由时；旧Manager/Supervisor合同仅作历史核对。
+验证：`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:unified-api`与当前根默认测试；具体MCP/Service/Caller实际断言和平台范围沿对应owner及[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 相关：[Agent Note 0010](../../.agents/notes/implemented/architecture/2026-07-15-mcp-supervisor-control-plane.md)、[Agent Note 0013](../../.agents/notes/implemented/feature/2026-07-16-mcp-credential-store-and-oauth-session.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0015](../../.agents/notes/implemented/architecture/2026-07-17-mcp-provider-availability-boundary.md)、[Agent Note 0016](../../.agents/notes/implemented/feature/2026-07-17-mcp-provider-action-runtime-lifecycle.md)、[Agent Note 0017](../../.agents/notes/implemented/feature/2026-07-17-required-mcp-provider-admission.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、[`mcp-config-management.md`](mcp-config-management.md)、[`mcp-authentication.md`](mcp-authentication.md)、`packages/builtin-runtime/src/mcp/supervisor.ts`、`packages/builtin-runtime/src/mcp/control-types.ts`、`apps/kite-cli/src/tui/mcp/`。
+
+## 当前通用 Agent 边界
+
+正式/default/CI已使用八workspace通用Agent与Service。当前MCP生命周期、原catalogue、Source、强制重连与最终wire准入由[Agent MCP owner](../../packages/agent/src/mcp/README.md)承担，可信来源/transport装配归[Service](../../apps/service/README.md)，共享TUI与薄Caller分别归[UI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md)。原Query不恢复transport或许可，独立Action/Job沿同一Execution；恢复与发布不变量见[当前跨包合同](mcp-config-management.md#强制重连的来源发布与恢复边界)。
+
+下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
 ## 权威与依赖
 

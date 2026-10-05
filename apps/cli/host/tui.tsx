@@ -36,6 +36,7 @@ import {
   verifyArtifact,
 } from './index';
 import { openMcpConnectionJournal } from './mcp-connection-journal';
+import { openMcpReconnectionJournal } from './mcp-reconnection-journal';
 import { openMcpSelectionJournal } from './mcp-selection-journal';
 import { openMcpSourceApprovalJournal } from './mcp-source-approval-journal';
 import { openRecoveryJournal } from './recovery-journal';
@@ -206,6 +207,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   let fileRecoveryOwner: ReturnType<typeof openFileRecoveryJournal> | undefined;
   let mcpOwner: ReturnType<typeof openMcpSelectionJournal> | undefined;
   let mcpConnectionOwner: ReturnType<typeof openMcpConnectionJournal> | undefined;
+  let mcpReconnectionOwner: ReturnType<typeof openMcpReconnectionJournal> | undefined;
   let mcpSourceApprovalOwner: ReturnType<typeof openMcpSourceApprovalJournal> | undefined;
   let callerOwner: ReturnType<typeof openCallerJournal> | undefined;
   let recoveryOwner: ReturnType<typeof openRecoveryJournal> | undefined;
@@ -313,6 +315,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
     });
+    mcpReconnectionOwner = openMcpReconnectionJournal({
+      access: profileAccess,
+      acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
+    });
     mcpSourceApprovalOwner = openMcpSourceApprovalJournal({
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
@@ -366,7 +372,14 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       }),
       fileCandidates: createTuiFileCandidates(client, storeId),
       storeId,
-      mcp: createTuiMcpPort(client, storeId, mcpOwner, mcpConnectionOwner, mcpSourceApprovalOwner),
+      mcp: createTuiMcpPort(
+        client,
+        storeId,
+        mcpOwner,
+        mcpConnectionOwner,
+        mcpSourceApprovalOwner,
+        mcpReconnectionOwner,
+      ),
       exportLoadedText: createTuiExporter(profile.profilePath, storeId),
       recovery: {
         restore: async () =>
@@ -752,6 +765,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     try {
       mcpOwner?.close();
       mcpConnectionOwner?.close();
+      mcpReconnectionOwner?.close();
       mcpSourceApprovalOwner?.close();
       callerOwner?.close();
       fileRecoveryOwner?.close();

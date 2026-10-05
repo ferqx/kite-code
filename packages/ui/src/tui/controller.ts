@@ -48,6 +48,12 @@ import type {
 } from './management';
 import type { TuiMcpIntent, TuiMcpOutcome, TuiMcpPort, TuiMcpSnapshot } from './mcp';
 import type { TuiMcpConnectionIntent, TuiMcpConnectionOutcome } from './mcp-connection';
+import type { TuiMcpReconnectionObservation, TuiMcpReconnectionOutcome } from './mcp-reconnection';
+import {
+  parseReconnectionIntent,
+  reconnectionCarrier,
+  sameReconnectionValue,
+} from './mcp-reconnection-state';
 import type {
   TuiMcpSourceApprovalIntent,
   TuiMcpSourceApprovalOutcome,
@@ -213,6 +219,13 @@ export interface TuiState {
   mcpConnections?: readonly TuiMcpConnectionOutcome[];
   mcpConnectionUnavailable?: string;
   mcpConnectionReading?: boolean;
+  mcpReconnectionOpen?: boolean;
+  mcpReconnection?: TuiMcpReconnectionOutcome;
+  mcpReconnections?: readonly TuiMcpReconnectionOutcome[];
+  mcpReconnectionObservation?: TuiMcpReconnectionObservation;
+  mcpReconnectionReading?: boolean;
+  mcpReconnectionObserving?: boolean;
+  mcpReconnectionUnavailable?: string;
   mcpSourceOpen?: boolean;
   mcpSource?: { facts?: TuiMcpSourceSnapshot; read: 'reading' | 'ready' | 'failed' };
   mcpSourceOutcome?: TuiMcpSourceApprovalOutcome;
@@ -356,6 +369,9 @@ export class TuiController {
   private mcpConnectionRead?: AbortController;
   private mcpConnectionIntents = new Map<string, TuiMcpConnectionOutcome>();
   private mcpConnectionBusy = false;
+  private mcpReconnectionRead?: AbortController;
+  private mcpReconnectionIntents = new Map<string, TuiMcpReconnectionOutcome>();
+  private mcpReconnectionBusy = false;
   private mcpSourceRead?: AbortController;
   private mcpSourceLookupRead?: AbortController;
   private mcpSourceBusy = false;
@@ -800,6 +816,11 @@ export class TuiController {
       mcpOutcome: same ? this.value.mcpOutcome : undefined,
       mcpConnection: same ? this.value.mcpConnection : undefined,
       mcpConnectionReading: false,
+      mcpReconnectionOpen: same ? this.value.mcpReconnectionOpen : false,
+      mcpReconnection: same ? this.value.mcpReconnection : undefined,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
       mcpSourceOpen: same ? this.value.mcpSourceOpen : false,
       mcpSource: same ? this.value.mcpSource : undefined,
       mcpSourceOutcome: same ? this.value.mcpSourceOutcome : undefined,
@@ -842,9 +863,14 @@ export class TuiController {
       ) {
         this.mcpToolsRead?.abort();
         this.mcpConnectionRead?.abort();
+        this.mcpReconnectionRead?.abort();
         this.mcpSourceRead?.abort();
         this.mcpSourceLookupRead?.abort();
         this.publish({
+          mcpReconnection: undefined,
+          mcpReconnectionObservation: undefined,
+          mcpReconnectionReading: false,
+          mcpReconnectionObserving: false,
           mcpSource: undefined,
           mcpSourceOutcome: undefined,
           mcpSourceReading: false,
@@ -1111,6 +1137,7 @@ export class TuiController {
     this.mcpRead?.abort();
     this.mcpToolsRead?.abort();
     this.mcpConnectionRead?.abort();
+    this.mcpReconnectionRead?.abort();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
     this.permissionRead?.abort();
@@ -1118,6 +1145,10 @@ export class TuiController {
     this.publish({
       panel: undefined,
       chooserRequested: false,
+      mcpReconnectionOpen: false,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
       mcpSourceOpen: false,
       mcpSourceReading: false,
     });
@@ -1813,7 +1844,15 @@ export class TuiController {
         const known = restored.get(id);
         if (known && JSON.stringify(known.intent) !== JSON.stringify(row.intent))
           throw Error('mcp_connection_restore_conflict');
-        restored.set(id, known ?? freezeIntent(structuredClone(row)));
+        restored.set(
+          id,
+          known ??
+            freezeIntent(
+              this.port.mcp?.reconnection
+                ? { intent: structuredClone(row.intent), phase: 'outcome_unknown' as const }
+                : structuredClone(row),
+            ),
+        );
       }
       if (restored.size > 128) throw Error('mcp_connection_intent_limit');
       if (this.disposed) return false;
@@ -1848,6 +1887,7 @@ export class TuiController {
       !port ||
       this.disposed ||
       this.mcpConnectionBusy ||
+      this.mcpReconnectionBusy ||
       this.value.stale ||
       this.value.panel !== 'mcp' ||
       this.value.mcp?.read !== 'ready' ||
@@ -1860,8 +1900,10 @@ export class TuiController {
       return;
     if (
       !(await this.restoreMcpConnections()) ||
+      (this.port.mcp?.reconnection && !(await this.restoreMcpReconnections())) ||
       this.disposed ||
       this.mcpConnectionBusy ||
+      this.mcpReconnectionBusy ||
       this.value.snapshot?.view.session.id !== session.id ||
       this.value.snapshot?.view.session.workspaceId !== session.workspaceId ||
       this.value.panel !== 'mcp' ||
@@ -1875,7 +1917,7 @@ export class TuiController {
       return;
     }
     if (
-      [...this.mcpConnectionIntents.values()].some(
+      [...this.mcpConnectionIntents.values(), ...this.mcpReconnectionIntents.values()].some(
         (row) =>
           row.intent.request.expectedStoreId === this.port.storeId &&
           row.intent.sessionId === session.id &&
@@ -1983,6 +2025,392 @@ export class TuiController {
       return;
     this.publish({ mcpConnection: outcome, mcpConnectionReading: false });
   }
+  private async restoreMcpReconnections(): Promise<boolean> {
+    const port = this.port.mcp?.reconnection;
+    if (!port) return false;
+    try {
+      const rows = await port.list();
+      if (!Array.isArray(rows) || rows.length > 128) throw Error('mcp_reconnection_intent_limit');
+      const restored = new Map(this.mcpReconnectionIntents),
+        seen = new Set<string>();
+      for (const row of rows) {
+        if (
+          !row ||
+          typeof row !== 'object' ||
+          Object.keys(row).some((k) => !['intent', 'phase', 'command', 'fact'].includes(k)) ||
+          !['pending', 'ready', 'failed', 'cancelled', 'outcome_unknown'].includes(row.phase)
+        )
+          throw Error('mcp_reconnection_journal_invalid');
+        const intent = freezeIntent(parseReconnectionIntent(row.intent)),
+          id = intent.request.commandId;
+        if (seen.has(id)) throw Error('mcp_reconnection_restore_conflict');
+        seen.add(id);
+        const known = restored.get(id);
+        if (known && !sameReconnectionValue(known.intent, intent))
+          throw Error('mcp_reconnection_restore_conflict');
+        // Cold phases and cached facts never admit a new force operation before explicit Check.
+        restored.set(id, known ?? freezeIntent({ intent, phase: 'outcome_unknown' as const }));
+      }
+      if (restored.size > 128) throw Error('mcp_reconnection_intent_limit');
+      if (this.disposed) return false;
+      this.mcpReconnectionIntents = restored;
+      this.publish({
+        mcpReconnections: [...restored.values()],
+        mcpReconnectionUnavailable: undefined,
+      });
+      return true;
+    } catch (error) {
+      if (!this.disposed)
+        this.publish({
+          mcpReconnectionUnavailable:
+            error instanceof Error ? error.message : 'mcp_reconnection_journal_unavailable',
+        });
+      return false;
+    }
+  }
+  async openMcpReconnections() {
+    if (!this.port.mcp?.reconnection || !this.value.snapshot?.view.session || this.disposed) return;
+    this.closeMcpSources();
+    this.mcpToolsRead?.abort();
+    this.mcpReconnectionRead?.abort();
+    this.publish({
+      panel: 'mcp',
+      mcpTools: undefined,
+      mcpReconnectionOpen: true,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
+    });
+    await this.restoreMcpReconnections();
+  }
+  closeMcpReconnections() {
+    this.mcpReconnectionRead?.abort();
+    this.publish({
+      mcpReconnectionOpen: false,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
+    });
+  }
+  selectMcpReconnection(commandId: string) {
+    const row = this.mcpReconnectionIntents.get(commandId);
+    if (
+      !row ||
+      row.intent.workspaceId !== this.value.snapshot?.view.session.workspaceId ||
+      this.value.panel !== 'mcp' ||
+      !this.value.mcpReconnectionOpen
+    )
+      return;
+    this.mcpReconnectionRead?.abort();
+    this.publish({
+      mcpReconnection: row,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
+    });
+  }
+  canReviewMcpReconnection(kind: 'connection' | 'reconnection') {
+    const session = this.value.snapshot?.view.session;
+    return (
+      !!session &&
+      !!this.port.mcp?.reconnection &&
+      !this.value.stale &&
+      !this.value.snapshotStale &&
+      !!reconnectionCarrier(
+        kind === 'connection' ? this.value.mcpConnection : this.value.mcpReconnection,
+        this.port.storeId,
+        session.id,
+        session.workspaceId,
+      )
+    );
+  }
+  async reviewMcpReconnection(kind: 'connection' | 'reconnection') {
+    const port = this.port.mcp?.reconnection,
+      session = this.value.snapshot?.view.session;
+    if (
+      !port ||
+      !session ||
+      this.disposed ||
+      this.value.panel !== 'mcp' ||
+      !this.canReviewMcpReconnection(kind)
+    )
+      return;
+    const outcome = kind === 'connection' ? this.value.mcpConnection : this.value.mcpReconnection;
+    const carrier = reconnectionCarrier(
+      outcome,
+      this.port.storeId,
+      session.id,
+      session.workspaceId,
+    );
+    if (!carrier || !outcome?.fact) return;
+    const fact = outcome.fact;
+    this.closeMcpSources();
+    this.mcpToolsRead?.abort();
+    this.mcpReconnectionRead?.abort();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpReconnectionRead = read;
+    const current = () =>
+      !this.disposed &&
+      !read.signal.aborted &&
+      this.mcpReconnectionRead === read &&
+      generation === this.generation &&
+      this.value.panel === 'mcp' &&
+      this.value.mcpReconnectionOpen &&
+      this.value.sessionId === session.id &&
+      this.value.snapshot?.view.session.workspaceId === session.workspaceId;
+    this.publish({
+      mcpTools: undefined,
+      mcpReconnectionOpen: true,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionObserving: true,
+      error: undefined,
+    });
+    try {
+      const observed = await port.observe(freezeIntent(carrier), read.signal);
+      if (!current()) return;
+      const ref = 'newOperationRef' in fact ? fact.newOperationRef : fact.operationRef;
+      const connection = 'newConnection' in fact ? fact.newConnection : fact.connection;
+      if (
+        !sameReconnectionValue(observed.carrier, carrier) ||
+        !ref ||
+        !connection ||
+        observed.target.carrierExecutionId !== fact.execution.id ||
+        observed.target.carrierKey !== carrier.request.input.key ||
+        !sameReconnectionValue(observed.target.operationRef, ref) ||
+        observed.target.connectionExecutionId !== connection.id ||
+        observed.target.configDigest !== fact.ready?.configDigest ||
+        observed.target.currentGeneration !== fact.currentGeneration ||
+        observed.management.storeId !== this.port.storeId ||
+        observed.management.sessionId !== session.id ||
+        observed.management.workspaceId !== session.workspaceId ||
+        observed.management.workspaceIdentity !== carrier.workspaceIdentity
+      )
+        throw Error('mcp_reconnection_observation_mismatch');
+      if (
+        observed.replacement.kind === 'source' &&
+        (!observed.source ||
+          observed.source.storeId !== this.port.storeId ||
+          observed.source.sessionId !== session.id ||
+          observed.source.workspaceId !== session.workspaceId ||
+          observed.source.workspaceIdentity !== carrier.workspaceIdentity ||
+          !sameReconnectionValue(observed.replacement.expectedReadSet, observed.source.readSet))
+      )
+        throw Error('mcp_reconnection_source_mismatch');
+      const validation = [
+        'ui_review_validation_0',
+        'ui_review_validation_1',
+        'ui_review_validation_2',
+        'ui_review_validation_3',
+        'ui_review_validation_4',
+      ].find(
+        (value) =>
+          value !== carrier.request.commandId &&
+          value !== observed.target.operationRef.commandId &&
+          value !== observed.target.carrierKey &&
+          value !== observed.target.operationRef.key.split('/')[2],
+      )!;
+      // Validate both full requests before showing Confirm, without consuming a Command ID.
+      parseReconnectionIntent({
+        ...carrier,
+        targetRequest: carrier.request,
+        request: {
+          expectedStoreId: this.port.storeId,
+          commandId: validation,
+          kind: 'extension.invoke',
+          extensionId: 'builtin.mcp',
+          actionId: 'mcp.reconnect',
+          definitionVersion: '1',
+          input: {
+            serverId: carrier.request.input.serverId,
+            key: validation,
+            target: observed.target,
+            replacement: observed.replacement,
+          },
+        },
+      });
+      this.publish({
+        mcpReconnectionObservation: freezeIntent(structuredClone(observed)),
+        mcpReconnectionObserving: false,
+      });
+    } catch (error) {
+      if (current())
+        this.publish({
+          mcpReconnectionObserving: false,
+          error: error instanceof Error ? error.message : 'mcp_reconnection_observation_failed',
+        });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
+  private currentReconnectionObservation(observed: TuiMcpReconnectionObservation) {
+    const session = this.value.snapshot?.view.session;
+    if (!session) return false;
+    const carrier = reconnectionCarrier(
+      observed.carrier.request.actionId === 'mcp.connect'
+        ? this.value.mcpConnection
+        : this.value.mcpReconnection,
+      this.port.storeId,
+      session.id,
+      session.workspaceId,
+    );
+    return !!carrier && sameReconnectionValue(carrier, observed.carrier);
+  }
+  async confirmMcpReconnection(observed = this.value.mcpReconnectionObservation) {
+    const port = this.port.mcp?.reconnection,
+      session = this.value.snapshot?.view.session;
+    if (
+      !port ||
+      !session ||
+      !observed ||
+      observed !== this.value.mcpReconnectionObservation ||
+      !this.currentReconnectionObservation(observed) ||
+      this.disposed ||
+      this.value.stale ||
+      this.value.snapshotStale ||
+      this.mcpConnectionBusy ||
+      this.mcpReconnectionBusy ||
+      !this.value.mcpReconnectionOpen ||
+      this.value.panel !== 'mcp'
+    )
+      return;
+    if (
+      !(await this.restoreMcpReconnections()) ||
+      (this.port.mcp?.connection && !(await this.restoreMcpConnections())) ||
+      observed !== this.value.mcpReconnectionObservation ||
+      !this.currentReconnectionObservation(observed) ||
+      this.disposed ||
+      this.value.stale ||
+      this.value.snapshotStale ||
+      this.mcpReconnectionBusy ||
+      this.mcpConnectionBusy ||
+      this.value.sessionId !== session.id ||
+      this.value.snapshot?.view.session.workspaceId !== session.workspaceId ||
+      !this.value.mcpReconnectionOpen ||
+      this.value.panel !== 'mcp'
+    )
+      return;
+    if (
+      [...this.mcpConnectionIntents.values(), ...this.mcpReconnectionIntents.values()].some(
+        (row) =>
+          row.intent.request.expectedStoreId === this.port.storeId &&
+          row.intent.sessionId === session.id &&
+          row.intent.request.input.serverId === observed.carrier.request.input.serverId &&
+          ['pending', 'outcome_unknown'].includes(row.phase),
+      )
+    ) {
+      this.publish({ error: 'mcp_original_connection_required' });
+      return;
+    }
+    if (this.mcpReconnectionIntents.size >= 128) {
+      this.publish({ error: 'mcp_reconnection_intent_limit' });
+      return;
+    }
+    const intent = freezeIntent(
+      parseReconnectionIntent({
+        sessionId: session.id,
+        workspaceId: session.workspaceId,
+        workspaceIdentity: observed.carrier.workspaceIdentity,
+        targetRequest: observed.carrier.request,
+        request: {
+          expectedStoreId: this.port.storeId,
+          commandId: this.port.nextCommandId(),
+          kind: 'extension.invoke',
+          extensionId: 'builtin.mcp',
+          actionId: 'mcp.reconnect',
+          definitionVersion: '1',
+          input: {
+            serverId: observed.carrier.request.input.serverId,
+            key: globalThis.crypto.randomUUID(),
+            target: observed.target,
+            replacement: observed.replacement,
+          },
+        },
+      }),
+    );
+    const generation = this.generation;
+    let outcome: TuiMcpReconnectionOutcome = { intent, phase: 'outcome_unknown' };
+    this.mcpReconnectionBusy = true;
+    this.mcpReconnectionRead?.abort();
+    this.mcpReconnectionIntents.set(intent.request.commandId, outcome);
+    this.publish({
+      mcpReconnection: outcome,
+      mcpReconnections: [...this.mcpReconnectionIntents.values()],
+      mcpReconnectionObservation: undefined,
+      error: undefined,
+    });
+    try {
+      const reply = await port.submit(intent, observed);
+      if (
+        sameReconnectionValue(reply.intent, intent) &&
+        ['pending', 'ready', 'failed', 'cancelled', 'outcome_unknown'].includes(reply.phase)
+      )
+        outcome = freezeIntent(structuredClone(reply));
+    } catch {
+    } finally {
+      this.mcpReconnectionBusy = false;
+    }
+    this.mcpReconnectionIntents.set(intent.request.commandId, outcome);
+    this.publish({ mcpReconnections: [...this.mcpReconnectionIntents.values()] });
+    if (
+      !this.disposed &&
+      generation === this.generation &&
+      this.value.panel === 'mcp' &&
+      this.value.mcpReconnectionOpen &&
+      this.value.sessionId === session.id &&
+      this.value.snapshot?.view.session.workspaceId === session.workspaceId &&
+      this.value.mcpReconnection?.intent.request.commandId === intent.request.commandId
+    )
+      this.publish({ mcpReconnection: outcome });
+  }
+  async lookupMcpReconnection() {
+    const original = this.value.mcpReconnection,
+      port = this.port.mcp?.reconnection,
+      session = this.value.snapshot?.view.session;
+    if (
+      !original ||
+      !port ||
+      !session ||
+      this.disposed ||
+      this.value.panel !== 'mcp' ||
+      !this.value.mcpReconnectionOpen ||
+      original.intent.request.expectedStoreId !== this.port.storeId ||
+      original.intent.workspaceId !== session.workspaceId
+    )
+      return;
+    this.mcpReconnectionRead?.abort();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpReconnectionRead = read;
+    this.publish({ mcpReconnectionReading: true, mcpReconnectionObservation: undefined });
+    let outcome: TuiMcpReconnectionOutcome = { intent: original.intent, phase: 'outcome_unknown' };
+    try {
+      const reply = await port.lookup(original.intent, read.signal);
+      if (
+        !read.signal.aborted &&
+        sameReconnectionValue(reply.intent, original.intent) &&
+        ['pending', 'ready', 'failed', 'cancelled', 'outcome_unknown'].includes(reply.phase)
+      )
+        outcome = freezeIntent(structuredClone(reply));
+    } catch {
+    } finally {
+      this.reads.delete(read);
+    }
+    if (read.signal.aborted) return;
+    this.mcpReconnectionIntents.set(original.intent.request.commandId, outcome);
+    this.publish({ mcpReconnections: [...this.mcpReconnectionIntents.values()] });
+    if (
+      !this.disposed &&
+      this.mcpReconnectionRead === read &&
+      generation === this.generation &&
+      this.value.panel === 'mcp' &&
+      this.value.mcpReconnectionOpen &&
+      this.value.sessionId === session.id &&
+      this.value.snapshot?.view.session.workspaceId === session.workspaceId &&
+      this.value.mcpReconnection?.intent.request.commandId === original.intent.request.commandId
+    )
+      this.publish({ mcpReconnection: outcome, mcpReconnectionReading: false });
+  }
   private async restoreMcpSources() {
     const port = this.port.mcp?.source;
     if (!port) return false;
@@ -2015,6 +2443,7 @@ export class TuiController {
     }
   }
   async openMcpSources() {
+    this.closeMcpReconnections();
     const session = this.value.snapshot?.view.session,
       port = this.port.mcp?.source;
     if (!session || !port || this.disposed) return;
@@ -2233,6 +2662,7 @@ export class TuiController {
     this.publish({ mcpSourceOutcome: outcome, mcpSourceReading: false });
   }
   async openMcpTools(afterKey?: string) {
+    this.closeMcpReconnections();
     const port = this.port.mcp,
       sessionId = this.value.sessionId;
     if (!sessionId || !port?.readToolsSnapshots) {
@@ -2357,6 +2787,7 @@ export class TuiController {
       return;
     }
     this.mcpConnectionRead?.abort();
+    this.closeMcpReconnections();
     this.closeMcpSources();
     this.mcpRead?.abort();
     this.mcpToolsRead?.abort();
@@ -2375,6 +2806,16 @@ export class TuiController {
       error: undefined,
     });
     try {
+      if (port.reconnection) {
+        await this.restoreMcpReconnections();
+        if (
+          read.signal.aborted ||
+          generation !== this.generation ||
+          this.value.panel !== 'mcp' ||
+          this.value.sessionId !== session.id
+        )
+          return;
+      }
       if (port.connection) {
         await this.restoreMcpConnections();
         if (

@@ -174,6 +174,12 @@ MCP adapter 同步 frozen metadata getter与原可执行 catalogue共享同一�
 
 UI只持可选connection port和原读取代次；Host用公开完整Workspace目录、实际canonical identity和原完整observed核新申请。独立 `ui/mcp-connection-intents.json@1` 只在durable prepare成功的热调用允许首次POST；冷或既有intent只原GET，Store+Session+Server未知冲突不借新key绕过。subject/Store不等在HTTP前拒绝，关闭/切scope只abort所属reader，晚到结果归原intent但不覆盖后来选择。maintenance v9保原资产bytes/身份/phase，旧v8闭合格式不扩，不恢复热权限。实际Query、Host、A→B原GET前拒绝、普通审批与源码外TUI范围见[Agent](../../packages/agent/src/mcp/README.md#原连接申请的有限事实)、[CLI](../../apps/cli/README.md#tui-mcp-显式连接与原申请)、[UI](../../packages/ui/src/tui/README.md#mcp-显式连接与原申请)和[maintenance](../../packages/agent/src/maintenance/README.md#mcp-连接申请的独立离线资产)。
 
+## 未提交普通 Action 与同 owner 重调度
+
+准确原Action的最终结果提交失败时，Command.applied只保原受理事实。Runtime每个accepted普通Command前由Store短事务观察原receipt主Execution仍planned/dispatching/running的真实身份，停止本Session普通派发并保accepted请求；重复同instance owner与后台onActivity不绕过。该观察不恢复owner、补result或重派原effect，不把合法detached Job当未提交Action，也不改变已持久terminal outcome_unknown的原恢复边界。原GET和owned关闭继续，合同与[真实故障测试](../../packages/agent/test/isolated/execution/action-result-boundary.test.ts)由[Store owner](../../packages/agent/src/storage/README.md#未提交普通-action-的串行边界)维护。
+
+第八/九/十一轮与首次有限诊断曾在原30s用例期限内超时，需精确监督本次owned child退出。两条真实fixture改为直接await同一个原五秒waiter、再断言实际wait_timeout后通过，正常SQLite回复与owned close均确认；Runtime/SQLite生产、业务断言和期限保持。这个对照限定在两条fixture的pending Promise匹配入口，纯timer和Worker对照未复现，底层原因仍未知。真实失败、监督清理边界和复验保在总体进度。
+
 ## 当前发布与资格工具
 
 根 `agent/tui/prod:tui` 固定完整新 Terminal，`desktop` 固定完整 Native，`server` 显式复用新默认 daemon/Web。八 workspace 的 build/typecheck 与统一默认计划共用同一发现源；root 仅有限脚本安全测试及新公开制品场景。静态守卫检查 root/workspace scripts、递归 aliases、CI run 与实际 import 闭包，包含四个标准/Native CLI/TUI entry；计算模块的 fixture 仍记 pending，不把静态检查当运行资格。

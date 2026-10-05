@@ -28,6 +28,8 @@
 - [Skills](src/skills/README.md)与[MCP](src/mcp/README.md)：摘要发现、按需正文/资源与具有版本的普通 Tool 快照；leaf import 不连接远端或启动进程。
 - [Skill Workflow](src/business/skill-workflow/README.md)：有条件 activation、inline/fork、严格输出和普通核验 Job；业务记录及必要条件归扩展，沿用唯一 Loop 与实际父子权限。
 
+未提交普通Action的结果不以Command.applied视为完成；同Session后续普通派发须继续核原receipt主Execution。准确Store/owner观察、合法detached Job与未提交Action的区分，以及真实最终提交故障测试归[Store owner](src/storage/README.md#未提交普通-action-的串行边界)。
+
 ## 当前执行与恢复边界
 
 创建与命令写入核对原 `expectedStoreId`，同一 ID/语义返回原事实，内容冲突拒绝。统一执行先保存意图和派发依据，再调用真实适配器；权限、取消与必要依据在派发边界复查。已派发工具没有可核实结果时保留 `outcome_unknown`，不以普通异常推断没有外部效果。模型不完整响应不能启动工具。

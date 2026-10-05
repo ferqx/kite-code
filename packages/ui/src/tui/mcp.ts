@@ -10,6 +10,7 @@ import type {
   QueryResponse,
 } from '@kite-ai/client';
 import type { TuiMcpConnectionPort } from './mcp-connection';
+import type { TuiMcpReconnectionPort } from './mcp-reconnection';
 import type { TuiMcpSourceApprovalPort } from './mcp-source';
 
 export type TuiMcpReadSet = {
@@ -66,6 +67,7 @@ export interface TuiMcpOutcome {
 }
 export interface TuiMcpPort {
   connection?: TuiMcpConnectionPort;
+  reconnection?: TuiMcpReconnectionPort;
   source?: TuiMcpSourceApprovalPort;
   readToolsSnapshots?(
     sessionId: string,

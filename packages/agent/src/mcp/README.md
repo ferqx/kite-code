@@ -2,6 +2,8 @@
 
 原目录工具描述查看已完成 connect/refresh、[公共 Client](../../../client/README.md)与[暖/冷 TUI](../../../ui/src/tui/README.md)的有限实际链路，普通 Model Tool refresh 与公共备份恢复 A→B 后的原 metadata 读取均已实际验证；整体 V1.3 继续实施。查看不授予执行能力或完整管理中心资格。
 
+强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。本机23个目标主任务、源码外80×24整例及当前动态完整默认545文件/441主任务分别通过；真实冻结输入、结果提交故障、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；OAuth/续期、增删、持续Soak、三平台和完整V1.3继续分别验收。
+
 [createMcpAdapter](index.ts) 是显式可选协议适配器，没有第二 Runtime。import/factory 不 spawn、连接或读取旧配置；配置选择一个稳定 server ID 和 stdio（绝对 command/cwd、明确 args/env）或 HTTP URL/headers。凭据由宿主显式注入，adapter 不发现全局凭据、打开认证浏览器或打印远端错误正文。
 
 `scope(scopeId)` 只建立引用。`snapshotTools()` 才按需连接并读取有界目录，返回冻结的 `ToolDefinition[]`，由宿主在下一安全装配边界注册进相同 UnifiedExecution。定义 ID 绑定 server/远端名称；版本摘要绑定配置与完整 descriptor。再次 snapshot 产生新版本，不修改旧定义或自动热替换 Runtime。旧定义保留原 input/output schema 和连接以便历史说明；目录版本变化或失效后，旧定义调用在 wire 前以 `mcp_catalogue_stale` 明确拒绝，不切换到新实现。工具移除不销毁旧快照或历史。
@@ -190,3 +192,17 @@ source resolver 冻结私有 server/port，来源变化使旧 Run/连接/捕获�
 [Service source 资格](../../../../apps/service/test/isolated/mcp-source-configuration.test.ts)覆盖实际公共 Client/HTTP、SQLite、临时 vault、固定 compatible SDK、owned stdio：安全目录/首 Model、项目遮蔽、实际批准/绑定与伪 proof 拒绝、独立 Job deny/Ask、原 Run 漂移和下一 Run、完整低信任 Prompt artifact、DNS/vault barrier 零 wire、cold metadata 和 unknown 原事实保持。[stdio admission barrier](../../test/isolated/mcp/stdio-port.test.ts)核实际 SQLite Job 与 source 变更后零 guardian startup ledger，原未知 Job及 drain refusal 保留。此资格不声明 OAuth、完整 raw 编辑界面或跨平台 stdio。
 
 Service source factory 的 `deriveChildSelection` 在 resolver 阶段封存父原选择与完整来源 read-set、安全 parent Run/Execution/root-work 身份；当时不产生 child ID。实际 child 激活后，可信 host observer 核实际 Session/Run/Command/carrier、完整 child configuration 与父原 snapshot，才独立派生 child 内存 binding。父 snapshot 和 Session digest 不重标；同 Workspace 的长期来源批准可复用，但 child connect Tool 和 source Job 仍各自核独立权限，Core 继续按父子 policy AND。最后 transport hook 同时保原 parent/child 来源和批准/auth/root 字节检查。[delegated source 资格](../../../../apps/service/test/isolated/mcp-source-delegated.test.ts)核真实独立连接/效果、两次原用户 Ask、独立 denial、捕获后漂移零额外连接、错误 scope/template 与真实双 Workspace 派生拒绝。父原 catalogue 尚未包含远端 schema 时，child 引入新 Tool 仍由 Core 动态上界准确拒绝。默认 worker 的固定 role wrapper 只从 `snapshot.configuration.mcp.sources` 读取原封存选择，普通 root 从 `snapshot.mcp.sources` 读取；不展开任意层次。真实 carrier 从持久 `child.start` Command 的原 `parentExecutionId` 精确读取，再核全部 activation/配置关系。[默认 child 资格](../../../../apps/service/test/isolated/mcp-source-default-child.test.ts)的一层正向与 deny/source drift/cold-parent schema 场景通过真实默认策略、SDK 持久 Ask、SQLite 和 owned HTTP，核 child Tool/Job 分别批准、效果一次及父原完整 read-set 不变。祖先权限验证实际更深 lineage，仍核每一真实 carrier 和来源。完整三层 required-task 资格核 root/child/grandchild Run 完成、两层原 carrier 成功并 consumed、原结果接纳/Command/ref、完整原 source/read-set、11 个独立审批和远端效果一次。该三层 fixture 采用 30 秒观测预算，其余直接/deny/drift/cold 场景仍为 15 秒；生产 child deadline 保持 30 分钟，root 无总 deadline，Task 保持 required/attached。早期 15 秒三层 fixture 失败保留；两次独立完整诊断为 16.15/16.513 秒，正式单文件三层观测为 13.944 秒，这些是本机运行测量而非性能 SLA。公共 child cold recovery 的支持范围未因该热执行资格扩大。
+
+## 强制重连、持久发布与原事实
+
+[lifecycle](lifecycle.ts)的普通 `builtin.mcp/mcp.reconnect@1` Action 接收[完整 closed input](reconnection-types.ts)。target 绑定准确 carrier Execution/key、六字段原 operation ref、真实 connection Job、config digest 和观察 generation；carrier 可为 warm B 引用 Job A，也可为准确上一 R，不序列化递归历史。replacement 独立选择当前 Source capture 或 factory 固定 static config，不能互换或从旧 Run snapshot 推导新配置。
+
+同 factory 的 Store+Session+Server 私有 ticket 绑定实际 holder、epoch/ref、原 R inputDigest 和 Job bootstrap。stop 前的拒绝保旧连接；实际 owned stop 与旧 Job 的持久 transportStopped 证明之后才 ensure 新 Job。新 Job 与 R 的普通许可独立，process slot=1仍可前进。held/unknown stop、未确认阶段 CAS、迟到 open 或缺原证明保持 fence，不从 Action 返回、目录 ready 或 finally 推导热可用。
+
+新目录 staged ready 后仍保 publishing ticket。Step、最终 Tool/Task wire、warm connect、后续重连、refresh 和 Resource/Prompt 准入都从原 R 实际 succeeded result、完整 catalogue/ref、inputDigest、Store/Session/root-work 与新 Job parent 证明确认发布。Query 先核完整成功事实，再 await 准确 holder 的发布证明；它不凭公共 phase 清票，冷 ready/live=false仍合法。callback保留在 holder 上，后续证明漂移继续拒绝。
+
+ensure已保存原 Job、但 `new_planned` CAS 或 preflight失败且 owned port 尚未打开时，只可由私有 ensure ticket和真实 Job/ref/input/parent 身份返回 unopened supervision handle。observe保存准确 ended/failed及transportStopped，不能把自报 bootstrap、已打开或迟到 handle当作零 port；缺私有绑定保持原拒绝。该 leaf收尾不修改通用 Execution 终态规则。
+
+[reconnection-proof](reconnection-proof.ts)与[query](reconnection-query.ts)把 stage视为索引，独立核实际旧停止、新 Job与完整原结果。`mcp.reconnection@1` input恰 `{executionId}`，closed envelope≤16KiB，actions/artifactRefs为空；oldStop.confirmed、ready、live/currentGeneration独立。历史读取零 Source、Workspace文件、vault、transport、Model、补record或cursor推进。已有 connection Query与metadata publisher只新增准确 R parent/catalogue 分支，普通 C证明不放宽。
+
+[真实 Core 及故障用例](../../test/isolated/mcp/reconnection.test.ts)、[纯协议反例](../../test/isolated/mcp/reconnection-proof.test.ts)、[真实 HTTP Host](../../../../apps/cli/test/isolated/tui-mcp-reconnection-host.test.ts)与[物理丢回执](../../../../apps/cli/test/isolated/tui-mcp-reconnection-recovery.test.ts)分别验证其断言。当前完整默认在准确冻结的545文件/441主任务全部通过，代码与生成输入保持后单独核对文档归位；有限组、源码外整例与whole各有独立范围。未提交 Action 的串行门禁故障、直接await原waiter的匹配入口对照、正常关闭和历史红保在总体进度，底层停滞原因未知。上述本机资格不证明持续 Soak、远端停止或三平台。

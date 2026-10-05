@@ -887,6 +887,11 @@ export {
   mcpReadToolIds,
   mcpSourceConnectionJobId,
 } from './lifecycle';
+export type {
+  McpReconnectionInput,
+  McpReconnectionReplacement,
+  McpReconnectionTarget,
+} from './reconnection-types';
 export {
   createMcpStdioTransportPort,
   McpStdioPortError,

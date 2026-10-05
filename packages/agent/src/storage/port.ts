@@ -516,6 +516,7 @@ export interface Store {
   inspectOwnerDispatch(input: OwnedWrite & { sessionId: string }): Promise<{
     hasPendingCommands: boolean;
     hasUnsettledWork: boolean;
+    hasUncommittedAction: boolean;
   }>;
   startRun(
     input: OwnedWrite & { commandId: string; configuration: Json; requirements?: RequirementRef[] },

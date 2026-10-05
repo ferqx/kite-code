@@ -417,3 +417,11 @@ proof恰decisionId/storeId/sessionId/interactionId/acceptedRevision/subjectId/re
 failed/cancelled仅在准确零effect及没有不明HostMutation时解除冲突。Source cancel须完整原proof/persistent scope；普通Action未进入adapter的failed/cancelled是独立路径：原closed `{outcome,content:code,details:{code,adapterAttempted:false}}`、准确最终receipt/status、实际mutation null，code只接approval_denied/permission_denied/cancelled_before_dispatch/cancel_requested/execution_cancel_requested，cancel另有原Command/Execution durable cancelRequestedAt。reprepare、context_refresh_required、不持久cancel、service_shutdown、bad result或任何mutation继续unknown，不虚构Source Question。
 
 [真实public Service/SQLite Query测试](test/isolated/mcp-source-result.test.ts)最终16项133断言通过、原5s/10s期限；默认Process无configure与自定义冻结subject、三decision、普通许可拒绝/持久取消零adapter、四来源CAS/零发布、缺错observer、原scope/proof/receipt/partial/运行中mutation反例及物理W移走后历史只读分别核证。此前五文件邻接32项391断言早于最终Query收紧；当前第27轮534文件/432唯一主任务完整默认已通过，准确作用域另见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。跨独立读watermark可保守unknown，下一次准确原GET确认，不改为猜saved；物理丢回执与恢复A→B由[CLI Host](../cli/README.md#tui-mcp-项目来源决定与原申请)单独验证。
+
+## 当前来源的强制重连准入
+
+[source configuration](src/mcp-source-configuration.ts)的 `resolveReplacement` 只从可信实际 Runtime读取原 R Execution、Store/Session/subject及完整 closed input。它独立捕获当前完整 Source/read-set与host selection；旧 Run 的 selected-server集合只证明 server被选择，不能把当前 replacement digest强等旧 selected config，也不改写旧 Run snapshot。普通 connect、Tool和Job原配置门禁保持。
+
+replacement captureDigest绑定完整新 snapshot/server及本次完整 R inputDigest。可信 optional snapshotDigest仅比较同来源暖复用；bootstrap/final admission仍核实际父 R、准确新 Job/ref、config/capture/inputDigest与当前 freshness。stop前和新Job最终port.open前都检查原 capture；来源或授权漂移局部失败，历史Query不读当前来源、物理Workspace或vault，也不恢复热 ticket。
+
+[replacement resolver测试](test/isolated/mcp-source-replacement.test.ts)实际13项73断言只证明resolver/full binding与freshness。真实默认Service/Client/SQLite的Action/Job独立Ask、旧停止先于新initialize、重复R及warm B→A链由[Host测试](../cli/test/isolated/tui-mcp-reconnection-host.test.ts)证明；[recovery](../cli/test/isolated/tui-mcp-reconnection-recovery.test.ts)与[restore](../cli/test/isolated/tui-mcp-reconnection-restore.test.ts)分别维护原回执和foreign Store范围。源码外流程、当前完整默认、OAuth/OSvault及三平台按[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)核对。

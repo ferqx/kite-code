@@ -37,6 +37,14 @@ Process host 只解析一次真实 subject，并同时交给配置 factory 和 `
 
 CLI 新提交核当前完整 Workspace、physical identity 与完整同版本 Source 分页。独立 `ui/mcp-source-approval-intents.json@1` 私有 durable prepare 才赋予当前首次 POST 权；冲突域为 Store+Workspace+Server，不含 Session 或 source fingerprint。128条/16MiB不淘汰unknown；冷记录或重复只原GET，错Store/subject在任何HTTP前拒绝，历史不依赖当前物理目录。条件 backup v10保持旧v2–v9白名单及原bytes，恢复新Store不retag、不恢复热权利。当前事实分别归[CLI](../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)、[TUI](../../packages/ui/src/tui/README.md#mcp-项目来源与原决定申请)和[maintenance](../../packages/agent/src/maintenance/README.md#mcp-来源决定申请的独立离线资产)；它们不完成认证、强制重连、增删或三平台发行。
 
+## 强制重连的来源、发布与恢复边界
+
+新正式TUI以独立普通 `builtin.mcp/mcp.reconnect@1`替换准确当前live holder，普通connect继续同来源暖复用。target与新replacement分别证明：旧Run host-selected server只证明选择，当前Source完整capture/read-set/config由Service独立准入，static只核factory固定config，不能互换或改写旧Run snapshot。完整协议和holder发布归[Agent owner](../../packages/agent/src/mcp/README.md#强制重连持久发布与原事实)，可信resolver归[Service](../../apps/service/README.md#当前来源的强制重连准入)。
+
+旧owned transport实际stop与原Job持久transportStopped成立后才ensure新Job。R和新Job许可独立；旧停新deny/drift/fail保持旧停止事实，无自动恢复。阶段CAS只是索引，结果提交前保private publishing fence；完整原R succeeded与真实新Job/catalogue证明后才发布Step/wire/live。Query按成功事实后await该私有确认，cold旧ready不重建ticket。未提交原Action的Core串行边界与实际故障复验单独保进度，不以目录ready代证。
+
+原重连Query闭合有限事实≤16KiB，历史零Source/Workspace文件/vault/transport/Model/补写。Caller独立原intent journal与ordinary journal同短锁核Store+S+Server未确认冲突；只有本次durable prepare可首次POST，cold/duplicate仅原GET，foreign身份全部HTTP前拒绝。条件v11保存原bytes/subject/SHA/phase，旧v2–v10白名单不扩大，新Store不retag或授热权利。操作归[TUI手册](../handbook/clients/tui/guides/mcp-and-skills.md#强制重连与原申请)，Caller与维护归[CLI](../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[maintenance](../../packages/agent/src/maintenance/README.md#mcp-重连申请的独立离线资产)。当前有限真实范围、失败和未验证窗口沿[进度](../plans/unified-agent-refactor-v1-progress.md)记录，OAuth/续期、增删、持续Soak及三平台另验。
+
 ## 历史实现与仍适用的约束
 
 下方记录旧Repository/Supervisor和App的历史实现，旧home路径、owner和测试不能作为新入口支持。原JSONC保未知字节、来源审批、secret隔离、generation和未知效果不重放等理由仍适用；已退役路径不因历史记录而重新参与正式调度。

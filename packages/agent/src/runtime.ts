@@ -3204,6 +3204,12 @@ export class AgentRuntime {
         for (const command of commands) {
           if (this.closing) break;
           if ((await this.options.store.getCommand(command.id))?.status !== 'accepted') continue;
+          const dispatch = await this.options.store.inspectOwnerDispatch({
+            expectedStoreId: command.originStoreId,
+            owner,
+            sessionId,
+          });
+          if (dispatch.hasUncommittedAction) throw new AgentError('session_recovery_required');
           if (command.kind === 'input.steer' || command.kind === 'result.include') {
             await this.options.store.rejectCommand({
               expectedStoreId: command.originStoreId,

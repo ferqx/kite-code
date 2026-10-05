@@ -4,13 +4,19 @@
 
 ## 正常 owner 空闲交接
 
-`inspectOwnerDispatch` 是可信宿主 Store 的有限观察：在同一短事务内核对原 Store、root owner 的 instance/generation 和准确目标 Session，只返回该 Session 是否有普通 accepted Command，以及整个原执行组是否有 active Run 或未结算 Execution。它不取得新 owner、不恢复工作，也不向扩展或 HTTP 暴露。acquire、release 与这一观察共用 [owner-dispatch](sqlite/owner-dispatch.ts) 的阻塞条件，保留准确原 Job reconciliation 已核实结果的既有例外。
+`inspectOwnerDispatch` 是可信宿主 Store 的有限观察：在同一短事务内核对原 Store、root owner 的 instance/generation 和准确目标 Session，返回该 Session 是否有普通 accepted Command、整个原执行组是否有 active Run 或未结算 Execution，以及下述主 Action 是否尚未提交结果。它不取得新 owner、不恢复工作，也不向扩展或 HTTP 暴露。acquire、release 与前两项观察共用 [owner-dispatch](sqlite/owner-dispatch.ts) 的阻塞条件，保留准确原 Job reconciliation 已核实结果的既有例外。
 
-Runtime 仅在原 accepted 列表为空、实际 release 返回 false 且没有原 hot work 时使用这一观察。新命令在旧列表读取后、release 事务前提交，且原组没有未结算工作时，原 generation 继续循环处理准确 Session；新命令已取消时尝试有限 release 后退出。其他 Session 的命令保持自己的调度，真实 unknown/cold active 仍返回 `session_recovery_required`，不将正常交接扩大为自动接管。
+正常空闲交接仅在原 accepted 列表为空、实际 release 返回 false 且没有原 hot work 时使用前两项观察。新命令在旧列表读取后、release 事务前提交，且原组没有未结算工作时，原 generation 继续循环处理准确 Session；新命令已取消时尝试有限 release 后退出。其他 Session 的命令保持自己的调度，真实 unknown/cold active 仍返回 `session_recovery_required`，不将正常交接扩大为自动接管。
 
 [交接测试](../../test/isolated/execution/owner-handoff.test.ts) 用真实 SQLite、实际 accepted Command 和所属 detached Job 的结算 barrier，稳定复现旧分支错误；验证 pending 精确执行一次、unknown/cancel 零新增执行，以及独立 Session 的隔离。现有原 owner 生命周期、恢复与 child 测试同时验证既有 release 和 fencing 条件；独立 Session 反例不代表专门覆盖了同 group 跨 Session 的运行交错。
 
 有限观察与恢复权分离、共用原阻塞条件的理由见[交接修复 Note](../../../../.agents/notes/implemented/bug-fix/2026-10-03-idle-owner-intake-keeps-original-generation.md)。
+
+## 未提交普通 Action 的串行边界
+
+`inspectOwnerDispatch.hasUncommittedAction`在同一原owner短事务内核准确applied `extension.invoke` Command的receipt主Execution、Store/Session/root/generation/root-work、定义和Run身份。原主Action仍planned/dispatching/running时，Runtime每次处理本Session accepted Command前停止普通派发并报告`session_recovery_required`。原Action结果不补写，后续Command保持accepted，反复同instance调度不能跨过；读取与owned关闭继续。已持久terminal outcome_unknown和合法detached connection Job不由此新增条件判断。
+
+[真实结果提交故障测试](../../test/isolated/execution/action-result-boundary.test.ts)核普通Action实际效果一次、最终apply前失败、queued与later重调度零Execution/效果、独立Session、原五秒waiter与正常关闭；[MCP故障测试](../../test/isolated/mcp/reconnection.test.ts)另核持有新目录时不发布Step或wire。当前实际复验按[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)记录，代码和静态定义不代证该边界已运行通过。
 
 ## 目录分页
 

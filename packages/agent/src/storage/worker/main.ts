@@ -124,7 +124,26 @@ function execute(request: WorkerRequest): void {
           "SELECT id FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') LIMIT 1",
           input.sessionId,
         );
-        return { hasPendingCommands, hasUnsettledWork };
+        // A detached Job is not the ordinary Action's primary receipt Execution.
+        // Only actual current-owner identity can establish this submission boundary.
+        const hasUncommittedAction = !!operations!.row(
+          `SELECT e.id FROM command c JOIN execution e
+          ON e.id=json_extract(c.receipt_json,'$.executionId')
+          WHERE c.session_id=? AND c.kind='extension.invoke' AND c.status='applied'
+          AND c.origin_store_id=? AND e.origin_store_id=c.origin_store_id
+          AND e.origin_command_id=c.id AND e.session_id=c.session_id
+          AND e.root_session_id=? AND e.owner_generation=?
+          AND e.root_work_command_id=c.root_work_command_id AND e.root_work_seq=c.root_work_seq
+          AND e.kind='job' AND e.run_id IS NULL AND e.state IN('planned','dispatching','running')
+          AND json_extract(c.request_json,'$.kind')=c.kind
+          AND e.adapter_id=json_extract(c.request_json,'$.extensionId') || '/' || json_extract(c.request_json,'$.actionId')
+          AND e.definition_version=json_extract(c.request_json,'$.definitionVersion') LIMIT 1`,
+          input.sessionId,
+          input.expectedStoreId,
+          root,
+          input.owner.generation,
+        );
+        return { hasPendingCommands, hasUnsettledWork, hasUncommittedAction };
       });
     else if (method === 'releaseSessionOwner')
       result = operations.tx(() => {

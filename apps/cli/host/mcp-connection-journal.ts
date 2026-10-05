@@ -23,6 +23,11 @@ import {
   mcpConnectionRecordIdentity,
   parseMcpConnectionRecord,
 } from './mcp-connection-intents';
+import { parseMcpReconnectionRecord } from './mcp-reconnection-intents';
+import {
+  assertMcpTransportJournalAvailable,
+  readMcpTransportJournal,
+} from './mcp-transport-journal-files';
 export interface McpConnectionJournal {
   prepare(record: McpConnectionRecord): boolean;
   record(record: McpConnectionRecord, phase: McpConnectionRecord['phase']): void;
@@ -176,8 +181,11 @@ export function openMcpConnectionJournal(input: {
       if (read().etag !== hash(bytes)) throw unavailable();
       return next.result;
     } finally {
-      if (temporary) rmSync(temporary, { force: true });
-      lock.release();
+      try {
+        if (temporary) rmSync(temporary, { force: true });
+      } finally {
+        lock.release();
+      }
     }
   };
   return {
@@ -194,6 +202,17 @@ export function openMcpConnectionJournal(input: {
             return { result: false, changed: false };
           }
           if (rows.length >= 128) throw Error('mcp_connection_intent_limit');
+          // Same data lock as this publication; the other asset is never checked from a cache.
+          assertMcpTransportJournalAvailable(
+            readMcpTransportJournal(
+              input.access,
+              'mcp-reconnection-intents.json',
+              parseMcpReconnectionRecord,
+              unavailable,
+            ).records,
+            record,
+            () => Error('mcp_connection_original_outcome_required'),
+          );
           if (
             rows.some(
               (row) =>

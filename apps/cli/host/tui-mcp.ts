@@ -16,6 +16,7 @@ import {
   type TuiMcpPort,
 } from '@kite-ai/ui/tui';
 import type { McpConnectionJournal } from './mcp-connection-journal';
+import type { McpReconnectionJournal } from './mcp-reconnection-journal';
 import {
   createMcpSelectionRecord,
   mcpCanonical,
@@ -25,6 +26,7 @@ import {
 import type { McpSelectionJournal } from './mcp-selection-journal';
 import type { McpSourceApprovalJournal } from './mcp-source-approval-journal';
 import { createTuiMcpConnectionPort } from './tui-mcp-connection';
+import { createTuiMcpReconnectionPort } from './tui-mcp-reconnection';
 import { createTuiMcpSourceApprovalPort } from './tui-mcp-source-approval';
 
 const obj = (value: unknown): Record<string, unknown> | undefined =>
@@ -65,6 +67,7 @@ export function createTuiMcpPort(
   journal?: McpSelectionJournal,
   connectionJournal?: McpConnectionJournal,
   sourceJournal?: McpSourceApprovalJournal,
+  reconnectionJournal?: McpReconnectionJournal,
 ): TuiMcpPort {
   const currentSubject = () => client.serverInfo?.subjectId;
   function toolsAdmission(sessionId: string, signal: AbortSignal) {
@@ -229,40 +232,34 @@ export function createTuiMcpPort(
       throw Error('mcp_original_mutation_mismatch');
     return { intent, phase: 'applied', command, execution };
   }
+  const fullClient = client.listAllWorkspaces
+    ? {
+        get serverInfo() {
+          return client.serverInfo;
+        },
+        queryExtension: client.queryExtension.bind(client),
+        invokeExtension: client.invokeExtension.bind(client),
+        getCommand: client.getCommand.bind(client),
+        getView: client.getView.bind(client),
+        listAllWorkspaces: client.listAllWorkspaces.bind(client),
+      }
+    : undefined;
+  const source =
+    sourceJournal && fullClient
+      ? createTuiMcpSourceApprovalPort(fullClient, storeId, sourceJournal)
+      : undefined;
   return {
-    ...(sourceJournal && client.listAllWorkspaces
-      ? {
-          source: createTuiMcpSourceApprovalPort(
-            {
-              get serverInfo() {
-                return client.serverInfo;
-              },
-              queryExtension: client.queryExtension.bind(client),
-              invokeExtension: client.invokeExtension.bind(client),
-              getCommand: client.getCommand.bind(client),
-              getView: client.getView.bind(client),
-              listAllWorkspaces: client.listAllWorkspaces.bind(client),
-            },
-            storeId,
-            sourceJournal,
-          ),
-        }
+    ...(source ? { source } : {}),
+    ...(connectionJournal && fullClient
+      ? { connection: createTuiMcpConnectionPort(fullClient, storeId, connectionJournal) }
       : {}),
-    ...(connectionJournal && client.listAllWorkspaces
+    ...(connectionJournal && reconnectionJournal && fullClient
       ? {
-          connection: createTuiMcpConnectionPort(
-            {
-              get serverInfo() {
-                return client.serverInfo;
-              },
-              queryExtension: client.queryExtension.bind(client),
-              invokeExtension: client.invokeExtension.bind(client),
-              getCommand: client.getCommand.bind(client),
-              getView: client.getView.bind(client),
-              listAllWorkspaces: client.listAllWorkspaces.bind(client),
-            },
+          reconnection: createTuiMcpReconnectionPort(
+            fullClient,
             storeId,
-            connectionJournal,
+            { connection: connectionJournal, reconnection: reconnectionJournal },
+            source,
           ),
         }
       : {}),

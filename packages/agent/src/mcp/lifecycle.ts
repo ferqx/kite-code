@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import type { McpSourceReadSet } from '../config/mcp-sources';
 import type {
   ActionContext,
   Extension,
   JobDefinition,
+  JobHandle,
   Json,
   OperationRef,
   StopConfirmation,
@@ -17,6 +19,21 @@ import {
   type McpReadRequest,
   type McpTransportConfiguration,
 } from './index';
+import {
+  confirmedStop,
+  decodeReconnectionInput,
+  equal as proofEqual,
+  hash as proofHash,
+  object as proofObject,
+  proveCarrier,
+  type ReconnectionStage,
+  reconnectionId,
+  reconnectionInputSchema,
+  reconnectionType,
+  stoppedOrUnopened,
+} from './reconnection-proof';
+import { readReconnection } from './reconnection-query';
+import type { McpReconnectionInput } from './reconnection-types';
 import {
   publishToolsSnapshot,
   readToolsPage,
@@ -159,11 +176,23 @@ export const mcpSourceConnectionJobId = 'mcp.source.connection';
 export interface McpScopedSourceResolution {
   server: McpLifecycleOptions['servers'][number];
   captureDigest: string;
+  /** Same selected snapshot identity only; never a bootstrap permit. */
+  snapshotDigest?: string;
   transportPort: McpLifecycleTransportPort;
   /** Synchronous original-source check at the final local wire boundary. */
   assertFresh(options: { signal: AbortSignal }): void;
 }
 export interface McpScopedSourcePort {
+  resolveReplacement?(
+    input: {
+      serverId: string;
+      sessionId: string;
+      executionId: string;
+      expectedConfigDigest: string;
+      expectedReadSet: McpSourceReadSet;
+    },
+    options: { signal: AbortSignal },
+  ): Promise<McpScopedSourceResolution>;
   resolve(
     input: { serverId: string; sessionId: string; executionId: string },
     options: { signal: AbortSignal },
@@ -222,6 +251,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
   type Scope = ReturnType<Adapter['scope']>;
   type OwnedTransport = Awaited<ReturnType<McpLifecycleTransportPort['open']>>;
   type Entry = {
+    epoch: number;
     executionId: string;
     sessionId: string;
     storeId: string;
@@ -242,7 +272,107 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     ref?: OperationRef;
     stopping?: Promise<StopConfirmation>;
     stopRequested?: boolean;
+    confirmPublication?: () => Promise<void>;
   };
+  type Ticket = {
+    scope: string;
+    epoch: number;
+    executionId: string;
+    inputDigest: string;
+    holder?: Entry;
+    holderEpoch?: number;
+    holderRef?: string;
+    newEntry?: Entry;
+    mode: 'opening' | 'replacing' | 'publishing' | 'quarantined';
+    bootstrapId?: string;
+    bootstrapExecutionId?: string;
+    ref?: OperationRef;
+    jobInputDigest?: string;
+    jobDefinitionId?: string;
+    jobDefinitionVersion?: string;
+    rootWorkCommandId?: string | null;
+    rootWorkSeq?: string | null;
+    ensureAttempted?: boolean;
+    completed?: boolean;
+    safeTerminal?: boolean;
+    openAllowed: ReturnType<typeof deferred<void>>;
+    onRef?: (ref: OperationRef) => Promise<void>;
+    verifyUnopened?: (sessionId: string, executionId: string, input: Json) => Promise<boolean>;
+  };
+  const tickets = new Map<string, Ticket>();
+  let holderEpoch = 0;
+  function claim(
+    storeId: string,
+    sessionId: string,
+    serverId: string,
+    executionId: string,
+    inputDigest: string,
+    mode: Ticket['mode'],
+  ): Ticket {
+    const scope = scopeKey(storeId, sessionId, serverId);
+    if (tickets.has(scope)) throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+    if (tickets.size >= 512) throw new McpAdapterError('mcp_scope_limit');
+    const holder = live.get(scope);
+    if (holder?.terminal === 'unknown' || (holder?.stopRequested && holder.terminal !== 'ended'))
+      throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+    const ticket: Ticket = {
+      scope,
+      epoch: ++holderEpoch,
+      executionId,
+      inputDigest,
+      holder,
+      holderEpoch: holder?.epoch,
+      holderRef: holder?.ref ? proofHash(holder.ref) : undefined,
+      mode,
+      openAllowed: deferred<void>(),
+    };
+    tickets.set(scope, ticket);
+    return ticket;
+  }
+  function assertTicket(ticket: Ticket) {
+    if (closed || tickets.get(ticket.scope) !== ticket || ticket.mode === 'quarantined')
+      throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+    const entry = live.get(ticket.scope);
+    if (
+      ticket.holder &&
+      (ticket.holder.epoch !== ticket.holderEpoch ||
+        (ticket.holderRef !== undefined && proofHash(ticket.holder.ref) !== ticket.holderRef))
+    )
+      throw new McpAdapterError('mcp_holder_changed');
+    if (entry !== ticket.holder && entry !== ticket.newEntry)
+      throw new McpAdapterError('mcp_holder_changed');
+  }
+  function wireFresh(entry: Entry, publicationProbe = false) {
+    const ticket = tickets.get(scopeKey(entry.storeId, entry.sessionId, entry.serverId));
+    if (
+      closed ||
+      entry.stopRequested ||
+      entry.terminal ||
+      live.get(scopeKey(entry.storeId, entry.sessionId, entry.serverId)) !== entry ||
+      (ticket &&
+        (ticket.mode === 'quarantined' ||
+          (ticket.mode === 'publishing' && !publicationProbe) ||
+          (ticket.mode === 'replacing' && entry === ticket.holder) ||
+          (entry !== ticket.holder && entry !== ticket.newEntry)))
+    )
+      throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+  }
+  async function confirmPublication(entry: Entry) {
+    await entry.confirmPublication?.();
+    const scope = scopeKey(entry.storeId, entry.sessionId, entry.serverId);
+    const ticket = tickets.get(scope);
+    if (ticket?.mode === 'publishing') {
+      if (!entry.confirmPublication || ticket.newEntry !== entry || !ticket.completed)
+        throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+      assertTicket(ticket);
+      tickets.delete(scope);
+      if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+    }
+  }
+  async function confirmScopePublication(storeId: string, sessionId: string, serverId: string) {
+    const entry = live.get(scopeKey(storeId, sessionId, serverId));
+    if (entry) await confirmPublication(entry);
+  }
   const admitted = new Map<
     string,
     {
@@ -250,6 +380,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       sessionId: string;
       serverId: string;
       key: string;
+      ticket: Ticket;
       parentExecutionId?: string;
       parentInputDigest?: string;
       source?: McpScopedSourceResolution;
@@ -257,6 +388,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     }
   >();
   const entries = new Map<string, Entry>();
+  const unopened = new Map<string, { handle: JobHandle; code: string }>();
   const live = new Map<string, Entry>();
   const starting = new Map<string, ReturnType<typeof deferred<Entry>>>();
   let closed = false;
@@ -372,7 +504,6 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       ? { resources: { slot: 'process' as const } }
       : {}),
     async start(input, context) {
-      if (closed) throw new McpAdapterError('mcp_transport_unavailable');
       const value = input as {
         serverId: string;
         configDigest: string;
@@ -383,35 +514,92 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         parentExecutionId?: string;
         parentInputDigest?: string;
       };
-      const admission = admitted.get(value.bootstrapId);
-      const server = staticServer ?? admission?.server;
-      const source = staticServer ? undefined : admission?.source;
-      const jobPort = source?.transportPort ?? port;
-      if (!server || !jobPort) throw new McpAdapterError('mcp_bootstrap_unavailable');
-      if (value.serverId !== server.id || value.configDigest !== server.configDigest)
-        throw new McpAdapterError('mcp_catalogue_stale');
-      if (
-        !admission ||
-        admission.storeId !== value.originStoreId ||
-        admission.sessionId !== context.sessionId ||
-        admission.serverId !== server.id ||
-        admission.key !== value.key
-      )
-        throw new McpAdapterError('mcp_bootstrap_unavailable');
-      if (
-        !staticServer &&
-        (!source ||
-          source.captureDigest !== value.captureDigest ||
-          admission.parentExecutionId !== value.parentExecutionId ||
-          admission.parentInputDigest !== value.parentInputDigest)
-      )
-        throw new McpAdapterError('mcp_bootstrap_unavailable');
-      admitted.delete(value.bootstrapId);
-      if (entries.size >= 512) throw new McpAdapterError('mcp_scope_limit');
-      const scopeId = scopeKey(value.originStoreId, context.sessionId, server.id);
-      const existing = live.get(scopeId);
-      if (existing && !existing.terminal) throw new McpAdapterError('mcp_connection_already_live');
+      const prepare = async () => {
+        if (closed) throw new McpAdapterError('mcp_transport_unavailable');
+        const admission = admitted.get(value.bootstrapId);
+        const server = staticServer ?? admission?.server;
+        const source = staticServer ? undefined : admission?.source;
+        const jobPort = source?.transportPort ?? port;
+        if (!server || !jobPort) throw new McpAdapterError('mcp_bootstrap_unavailable');
+        if (value.serverId !== server.id || value.configDigest !== server.configDigest)
+          throw new McpAdapterError('mcp_catalogue_stale');
+        if (
+          !admission ||
+          admission.storeId !== value.originStoreId ||
+          admission.sessionId !== context.sessionId ||
+          admission.serverId !== server.id ||
+          admission.key !== value.key
+        )
+          throw new McpAdapterError('mcp_bootstrap_unavailable');
+        if (
+          !staticServer &&
+          (!source ||
+            source.captureDigest !== value.captureDigest ||
+            admission.parentExecutionId !== value.parentExecutionId ||
+            admission.parentInputDigest !== value.parentInputDigest)
+        )
+          throw new McpAdapterError('mcp_bootstrap_unavailable');
+        assertTicket(admission.ticket);
+        await Promise.race([
+          admission.ticket.openAllowed.promise,
+          new Promise<never>((_resolve, reject) => {
+            if (context.signal.aborted) {
+              reject(context.signal.reason);
+              return;
+            }
+            const abort = () => reject(context.signal.reason);
+            context.signal.addEventListener('abort', abort, { once: true });
+            void admission.ticket.openAllowed.promise.then(
+              () => context.signal.removeEventListener('abort', abort),
+              () => context.signal.removeEventListener('abort', abort),
+            );
+          }),
+        ]);
+        context.signal.throwIfAborted();
+        assertTicket(admission.ticket);
+        if (admission.ticket.bootstrapExecutionId !== context.executionId)
+          throw new McpAdapterError('mcp_bootstrap_unavailable');
+        admitted.delete(value.bootstrapId);
+        if (entries.size >= 512) throw new McpAdapterError('mcp_scope_limit');
+        const scopeId = scopeKey(value.originStoreId, context.sessionId, server.id);
+        const existing = live.get(scopeId);
+        if (existing && !existing.terminal)
+          throw new McpAdapterError('mcp_connection_already_live');
+        return { admission, server, source, jobPort, scopeId };
+      };
+      let prepared: Awaited<ReturnType<typeof prepare>>;
+      try {
+        prepared = await prepare();
+      } catch (error) {
+        // Only this local preflight has run: neither an Entry nor an owned port was created.
+        const ticket = [...tickets.values()].find(
+          (candidate) =>
+            candidate.bootstrapId === value.bootstrapId &&
+            candidate.bootstrapExecutionId === context.executionId &&
+            candidate.scope === scopeKey(value.originStoreId, context.sessionId, value.serverId),
+        );
+        if (
+          !ticket?.verifyUnopened ||
+          entries.has(context.executionId) ||
+          unopened.has(context.executionId) ||
+          ticket.newEntry?.executionId === context.executionId ||
+          !(await ticket.verifyUnopened(context.sessionId, context.executionId, input))
+        )
+          throw error;
+        if (unopened.size >= 512 || unopened.has(context.executionId))
+          throw new McpAdapterError('mcp_scope_limit');
+        const handle: JobHandle = {
+          reference: { executionId: context.executionId, unopened: true },
+        };
+        unopened.set(context.executionId, {
+          handle,
+          code: error instanceof McpAdapterError ? error.code : 'mcp_bootstrap_unavailable',
+        });
+        return handle;
+      }
+      const { admission, server, source, jobPort, scopeId } = prepared;
       const entry: Entry = {
+        epoch: ++holderEpoch,
         executionId: context.executionId,
         sessionId: context.sessionId,
         storeId: value.originStoreId,
@@ -428,6 +616,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       entries.set(context.executionId, entry);
       starting.get(context.executionId)?.resolve(entry);
       starting.delete(context.executionId);
+      admission.ticket.newEntry = entry;
       live.set(scopeId, entry);
       let openingAttempted = false;
       try {
@@ -438,9 +627,22 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           transport: server.transport,
           limits: server.limits,
           tasks: true,
-          ...(source ? { assertFresh: () => source.assertFresh({ signal: context.signal }) } : {}),
+          admitToolCall: async () => {
+            await confirmPublication(entry);
+            wireFresh(entry);
+            if (tickets.has(scopeId)) throw new McpAdapterError('mcp_scope_transition_unconfirmed');
+          },
+          assertFresh: () => {
+            // This local probe performs no RPC. Every Tool/Task wire then awaits admitToolCall;
+            // explicit resource/prompt reads await confirmPublication in their leaf adapter.
+            wireFresh(entry, true);
+            source?.assertFresh({ signal: context.signal });
+          },
           createTransport: async () => {
             source?.assertFresh({ signal: context.signal });
+            assertTicket(admission.ticket);
+            if (admission.ticket.newEntry !== entry)
+              throw new McpAdapterError('mcp_holder_changed');
             openingAttempted = true;
             entry.transport = await jobPort.open(
               Object.freeze({
@@ -458,7 +660,13 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
               (value) => end(entry, value.supervision),
               () => end(entry, 'unknown'),
             );
-            if (closed || entry.stopRequested || context.signal.aborted) {
+            if (
+              closed ||
+              entry.stopRequested ||
+              context.signal.aborted ||
+              tickets.get(admission.ticket.scope) !== admission.ticket ||
+              admission.ticket.mode === 'quarantined'
+            ) {
               // A stop may have arrived before there was a handle. Collect the actual late handle
               // before the SDK starts it, and retain unknown supervision if stop is unconfirmed.
               await stop(entry);
@@ -468,7 +676,9 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           },
         });
         entry.scope = entry.adapter.scope(scopeId);
+        // Discovery belongs to the admitted opening; later cached calls use wireFresh.
         await entry.scope.snapshotTools();
+        assertTicket(admission.ticket);
         context.signal.throwIfAborted();
         if (closed || entry.stopRequested || entry.terminal)
           throw new McpAdapterError('mcp_connection_unavailable');
@@ -503,6 +713,19 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       }
     },
     async *observe(handle) {
+      const neverOpened = unopened.get(String(object(handle.reference).executionId));
+      if (neverOpened?.handle === handle) {
+        yield {
+          type: 'terminal',
+          result: {
+            outcome: 'failed',
+            content: neverOpened.code,
+            details: { transportStopped: true, remoteToolStopConfirmed: false },
+          },
+          supervision: 'ended',
+        };
+        return;
+      }
       const entry = entries.get((handle.reference as { executionId: string }).executionId);
       if (!entry) {
         yield {
@@ -533,17 +756,103 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       };
     },
     async cancel(handle) {
+      const neverOpened = unopened.get(String(object(handle.reference).executionId));
+      if (neverOpened?.handle === handle) return { status: 'already_finished' };
       const entry = entries.get((handle.reference as { executionId: string }).executionId);
       return entry ? stop(entry) : { status: 'unknown' };
     },
     async dispose(handle) {
+      const id = String(object(handle.reference).executionId);
+      if (unopened.get(id)?.handle === handle) {
+        unopened.delete(id);
+        return;
+      }
       const entry = entries.get((handle.reference as { executionId: string }).executionId);
       if (entry?.terminal === 'ended') await entry.scope?.release();
     },
   });
   const jobs: JobDefinition[] = [...servers.values()].map(createConnectionJob);
   if (options.scopedSources) jobs.push(createConnectionJob());
+  async function safeJobTerminal(context: ActionContext, ticket: Ticket) {
+    try {
+      if (!ticket.ref?.executionId || !ticket.jobInputDigest) return false;
+      const n = await context.getExecution(ticket.ref.executionId);
+      return (
+        !!n &&
+        n.kind === 'job' &&
+        n.parentExecutionId === ticket.executionId &&
+        n.originCommandId === ticket.ref.commandId &&
+        n.originStoreId === ticket.ref.originStoreId &&
+        n.sessionId === ticket.ref.sessionId &&
+        n.inputDigest === ticket.jobInputDigest &&
+        n.definitionId === ticket.jobDefinitionId &&
+        n.definitionVersion === ticket.jobDefinitionVersion &&
+        n.rootWorkCommandId === ticket.rootWorkCommandId &&
+        n.rootWorkSeq === ticket.rootWorkSeq &&
+        stoppedOrUnopened(n)
+      );
+    } catch {
+      return false;
+    }
+  }
   async function connect(input: Json, context: ActionContext): Promise<ToolResult> {
+    const request = input as { serverId: string; key: string };
+    const own = await context.getExecution(context.executionId);
+    if (
+      !own?.originStoreId ||
+      !own.inputDigest ||
+      own.sessionId !== context.sessionId ||
+      own.definitionVersion !== '1' ||
+      !['tool', 'job'].includes(own.kind) ||
+      !['mcp.connect', `${mcpLifecycleExtensionId}/mcp.connect`].includes(own.definitionId ?? '') ||
+      own.inputDigest !== proofHash(input)
+    )
+      return {
+        outcome: 'failed',
+        content: 'operation_unverifiable',
+        details: { adapterAttempted: false },
+      };
+    let ticket: Ticket;
+    try {
+      await confirmScopePublication(own.originStoreId, context.sessionId, request.serverId);
+      ticket = claim(
+        own.originStoreId,
+        context.sessionId,
+        request.serverId,
+        own.id,
+        own.inputDigest,
+        'opening',
+      );
+    } catch (error) {
+      return {
+        outcome: 'failed',
+        content: error instanceof McpAdapterError ? error.code : 'mcp_connection_unavailable',
+        details: { adapterAttempted: false },
+      };
+    }
+    try {
+      const result = await connectCore(input, context, ticket);
+      ticket.completed = result.outcome === 'succeeded';
+      return result;
+    } finally {
+      if (tickets.get(ticket.scope) === ticket) {
+        const settled = await safeJobTerminal(context, ticket);
+        if (ticket.ensureAttempted && !ticket.completed && !settled) ticket.mode = 'quarantined';
+        else {
+          tickets.delete(ticket.scope);
+          if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+        }
+        if (!ticket.completed)
+          ticket.openAllowed.reject(new McpAdapterError('mcp_connection_unavailable'));
+      }
+    }
+  }
+  async function connectCore(
+    input: Json,
+    context: ActionContext,
+    ticket: Ticket,
+    replacement?: { server: Server; source?: McpScopedSourceResolution },
+  ): Promise<ToolResult> {
     if (closed || (!port && !options.scopedSources))
       return {
         outcome: 'failed',
@@ -553,9 +862,9 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     const request = input as { serverId: string; key: string };
     const own = await context.getExecution(context.executionId);
     if (!own?.originStoreId) return { outcome: 'failed', content: 'operation_unverifiable' };
-    let server = servers.get(request.serverId);
-    let source: McpScopedSourceResolution | undefined;
-    if (!server && options.scopedSources) {
+    let server = replacement?.server ?? servers.get(request.serverId);
+    let source: McpScopedSourceResolution | undefined = replacement?.source;
+    if (!server && !replacement && options.scopedSources) {
       try {
         if (
           own.id !== context.executionId ||
@@ -576,7 +885,11 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           { signal: context.signal },
         );
         const captured = freeze(structuredClone(source.server));
-        if (captured.id !== request.serverId || !/^[a-f0-9]{64}$/.test(source.captureDigest))
+        if (
+          captured.id !== request.serverId ||
+          !/^[a-f0-9]{64}$/.test(source.captureDigest) ||
+          (source.snapshotDigest !== undefined && !/^[a-f0-9]{64}$/.test(source.snapshotDigest))
+        )
           throw new McpAdapterError('mcp_source_unavailable');
         server = {
           ...captured,
@@ -597,9 +910,20 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         content: 'mcp_server_unavailable',
         details: { adapterAttempted: false },
       };
+    assertTicket(ticket);
     const recordKey = `connection/${server.id}/${request.key}`;
     const prior = await context.records.get(recordKey);
-    if (prior && prior.originStoreId !== own.originStoreId)
+    assertTicket(ticket);
+    if (
+      prior &&
+      (prior.originStoreId !== own.originStoreId ||
+        prior.sessionId !== context.sessionId ||
+        prior.forkProvenance ||
+        prior.contentType !== contentType ||
+        prior.contentVersion !== 1 ||
+        object(prior.value).serverId !== server.id ||
+        object(prior.value).configDigest !== server.configDigest)
+    )
       return { outcome: 'failed', content: 'operation_unverifiable' };
     let entry = live.get(scopeKey(own.originStoreId, context.sessionId, server.id));
     if (prior) {
@@ -615,7 +939,9 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     if (
       entry &&
       (entry.server.configDigest !== server.configDigest ||
-        entry.source?.captureDigest !== source?.captureDigest)
+        (entry.source?.snapshotDigest !== undefined && source?.snapshotDigest !== undefined
+          ? entry.source.snapshotDigest !== source.snapshotDigest
+          : entry.source?.captureDigest !== source?.captureDigest))
     )
       return {
         outcome: 'failed',
@@ -631,7 +957,10 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           details: { adapterAttempted: false },
         };
       const bootstrapId = randomUUID();
+      assertTicket(ticket);
+      ticket.bootstrapId = bootstrapId;
       admitted.set(bootstrapId, {
+        ticket,
         storeId: own.originStoreId,
         sessionId: context.sessionId,
         serverId: server.id,
@@ -641,30 +970,88 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           : {}),
       });
       try {
+        const jobInput: Json = {
+          serverId: server.id,
+          configDigest: server.configDigest,
+          originStoreId: own.originStoreId,
+          key: request.key,
+          bootstrapId,
+          ...(source
+            ? {
+                captureDigest: source.captureDigest,
+                parentExecutionId: own.id,
+                parentInputDigest: own.inputDigest!,
+              }
+            : {}),
+        };
+        ticket.jobInputDigest = proofHash(jobInput);
+        ticket.jobDefinitionId = source ? mcpSourceConnectionJobId : `mcp.connection.${server.id}`;
+        ticket.jobDefinitionVersion = source ? '1' : server.configDigest;
+        ticket.rootWorkCommandId = own.rootWorkCommandId;
+        ticket.rootWorkSeq = own.rootWorkSeq;
+        ticket.ensureAttempted = true;
         ref = await context.operations.ensure({
           key: recordKey,
           cancellation: 'detached',
           request: {
             kind: 'job',
-            definitionId: source ? mcpSourceConnectionJobId : `mcp.connection.${server.id}`,
-            definitionVersion: source ? '1' : server.configDigest,
-            input: {
-              serverId: server.id,
-              configDigest: server.configDigest,
-              originStoreId: own.originStoreId,
-              key: request.key,
-              bootstrapId,
-              ...(source
-                ? {
-                    captureDigest: source.captureDigest,
-                    parentExecutionId: own.id,
-                    parentInputDigest: own.inputDigest!,
-                  }
-                : {}),
-            },
+            definitionId: ticket.jobDefinitionId,
+            definitionVersion: ticket.jobDefinitionVersion,
+            input: jobInput,
           },
         });
+        assertTicket(ticket);
+        if (
+          !ref.executionId ||
+          ref.sessionId !== context.sessionId ||
+          ref.originStoreId !== own.originStoreId ||
+          ref.extensionId !== mcpLifecycleExtensionId ||
+          ref.key !== recordKey
+        )
+          throw new McpAdapterError('operation_unverifiable');
+        ticket.ref = ref;
+        ticket.bootstrapExecutionId = ref.executionId;
+        const originalRef = structuredClone(ref);
+        const originalJobInputDigest = ticket.jobInputDigest;
+        const originalJobDefinitionId = ticket.jobDefinitionId;
+        const originalJobDefinitionVersion = ticket.jobDefinitionVersion;
+        ticket.verifyUnopened = async (sessionId, executionId, originalInput) => {
+          if (
+            ticket.bootstrapId !== bootstrapId ||
+            ticket.bootstrapExecutionId !== executionId ||
+            originalRef.executionId !== executionId ||
+            originalRef.sessionId !== sessionId ||
+            originalRef.originStoreId !== own.originStoreId ||
+            originalRef.extensionId !== mcpLifecycleExtensionId ||
+            originalRef.key !== recordKey ||
+            ticket.jobInputDigest !== originalJobInputDigest ||
+            proofHash(originalInput) !== originalJobInputDigest ||
+            entries.has(executionId)
+          )
+            return false;
+          const actual = await context.getExecution(executionId);
+          return (
+            !!actual &&
+            actual.id === executionId &&
+            actual.kind === 'job' &&
+            actual.originCommandId === originalRef.commandId &&
+            actual.originStoreId === own.originStoreId &&
+            actual.sessionId === sessionId &&
+            actual.runId === own.runId &&
+            actual.parentExecutionId === own.id &&
+            actual.rootWorkCommandId === own.rootWorkCommandId &&
+            actual.rootWorkSeq === own.rootWorkSeq &&
+            actual.definitionId === originalJobDefinitionId &&
+            actual.definitionVersion === originalJobDefinitionVersion &&
+            actual.inputDigest === originalJobInputDigest &&
+            ['dispatching', 'running'].includes(actual.status) &&
+            !entries.has(executionId)
+          );
+        };
+        await ticket.onRef?.(ref);
+        ticket.openAllowed.resolve();
       } catch (error) {
+        ticket.openAllowed.reject(error);
         admitted.delete(bootstrapId);
         throw error;
       }
@@ -679,8 +1066,16 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       }
       entry.ref = ref;
     }
-    if (!entry?.scope || entry.terminal || !entry.adapter?.getCatalogue().available)
+    assertTicket(ticket);
+    source?.assertFresh({ signal: context.signal });
+    if (
+      !entry?.scope ||
+      entry.stopRequested ||
+      entry.terminal ||
+      !entry.adapter?.getCatalogue().available
+    )
       return { outcome: 'failed', content: 'mcp_connection_unavailable' };
+    wireFresh(entry);
     const metadata = entry.adapter.getToolsMetadata();
     const catalogue = {
       configDigest: metadata.configDigest,
@@ -690,14 +1085,16 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         version: tool.definitionVersion,
       })),
     };
-    const value: Json = {
-      originalStoreId: own.originStoreId,
-      serverId: server.id,
-      configDigest: catalogue.configDigest,
-      generation: catalogue.generation,
-      definitions: catalogue.definitions,
-      operationRef: ref as unknown as Json,
-    };
+    const value: Json = prior
+      ? structuredClone(prior.value)
+      : {
+          originalStoreId: own.originStoreId,
+          serverId: server.id,
+          configDigest: catalogue.configDigest,
+          generation: catalogue.generation,
+          definitions: catalogue.definitions,
+          operationRef: ref as unknown as Json,
+        };
     if (!prior)
       await context.records.write({
         key: recordKey,
@@ -741,6 +1138,281 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       details: value,
     };
   }
+  async function reconnect(raw: Json, context: ActionContext): Promise<ToolResult> {
+    const input = decodeReconnectionInput(raw);
+    const own = await context.getExecution(context.executionId);
+    if (
+      !own?.originStoreId ||
+      own.sessionId !== context.sessionId ||
+      own.definitionId !== `${mcpLifecycleExtensionId}/${reconnectionId}` ||
+      own.definitionVersion !== '1' ||
+      own.kind !== 'job' ||
+      own.inputDigest !== proofHash(input)
+    )
+      throw new McpAdapterError('operation_unverifiable');
+    let ticket: Ticket | undefined,
+      stage: ReconnectionStage | undefined,
+      revision: string | null = null;
+    let stopAttempted = false,
+      stopConfirmed = false;
+    const details = () => ({
+      originalStoreId: own.originStoreId!,
+      serverId: input.serverId,
+      target: input.target,
+      oldStop: stage?.oldStop ?? null,
+      stopAttempted,
+      newConnectionAttempted: ticket?.ensureAttempted === true,
+      newOperationRef: stage?.newOperationRef ?? null,
+      catalogue: stage?.catalogue ?? null,
+    });
+    const persist = async (next: ReconnectionStage['stage']) => {
+      if (!stage) throw new McpAdapterError('mcp_reconnection_unconfirmed');
+      stage = { ...stage, stage: next };
+      const receipt = await context.records.write({
+        key: `reconnection/${own.id}`,
+        expectedRevision: revision,
+        contentType: reconnectionType,
+        contentVersion: 1,
+        executable: true,
+        value: stage as unknown as Json,
+      });
+      revision = receipt.revision;
+    };
+    try {
+      context.signal.throwIfAborted();
+      const observed = live.get(scopeKey(own.originStoreId, context.sessionId, input.serverId));
+      const observedAdapter = observed?.adapter;
+      if (observed) await confirmPublication(observed);
+      const old = await proveCarrier(
+        context,
+        input.target.carrierExecutionId,
+        input.target.carrierKey,
+        input.serverId,
+      );
+      if (
+        !observed?.scope ||
+        !observedAdapter ||
+        observed.terminal ||
+        observed.stopRequested ||
+        observed.executionId !== input.target.connectionExecutionId ||
+        !proofEqual(observed.ref, input.target.operationRef) ||
+        !proofEqual(old.ref, input.target.operationRef) ||
+        old.catalogue.configDigest !== input.target.configDigest ||
+        old.connection.id !== observed.executionId ||
+        !['running', 'dispatching'].includes(old.connection.status) ||
+        observedAdapter.getCatalogue().generation !== input.target.currentGeneration ||
+        !observedAdapter.getCatalogue().available
+      )
+        throw new McpAdapterError('mcp_reconnection_target_stale');
+      let source: McpScopedSourceResolution | undefined, server: Server | undefined;
+      if (input.replacement.kind === 'static') server = servers.get(input.serverId);
+      else {
+        if (servers.has(input.serverId) || !options.scopedSources?.resolveReplacement)
+          throw new McpAdapterError('mcp_source_unavailable');
+        source = await options.scopedSources.resolveReplacement(
+          {
+            serverId: input.serverId,
+            sessionId: context.sessionId,
+            executionId: own.id,
+            expectedConfigDigest: input.replacement.expectedConfigDigest,
+            expectedReadSet: input.replacement.expectedReadSet,
+          },
+          { signal: context.signal },
+        );
+        const captured = freeze(structuredClone(source.server));
+        if (
+          captured.id !== input.serverId ||
+          !/^[a-f0-9]{64}$/.test(source.captureDigest) ||
+          (source.snapshotDigest !== undefined && !/^[a-f0-9]{64}$/.test(source.snapshotDigest))
+        )
+          throw new McpAdapterError('mcp_source_unavailable');
+        source.assertFresh({ signal: context.signal });
+        server = {
+          ...captured,
+          configDigest: createMcpAdapter(captured).getCatalogue().configDigest,
+        };
+      }
+      if (
+        !server ||
+        server.configDigest !== input.replacement.expectedConfigDigest ||
+        (!source && !port)
+      )
+        throw new McpAdapterError('mcp_source_stale');
+      context.signal.throwIfAborted();
+      if (await context.records.get(`connection/${input.serverId}/${input.key}`))
+        throw new McpAdapterError('mcp_result_already_recorded');
+      ticket = claim(
+        own.originStoreId,
+        context.sessionId,
+        input.serverId,
+        own.id,
+        own.inputDigest,
+        'replacing',
+      );
+      if (ticket.holder !== observed) throw new McpAdapterError('mcp_holder_changed');
+      const checked = await proveCarrier(
+        context,
+        input.target.carrierExecutionId,
+        input.target.carrierKey,
+        input.serverId,
+      );
+      assertTicket(ticket);
+      if (
+        checked.record.revision !== old.record.revision ||
+        !proofEqual(checked.ref, input.target.operationRef) ||
+        observedAdapter.getCatalogue().generation !== input.target.currentGeneration
+      )
+        throw new McpAdapterError('mcp_reconnection_target_stale');
+      stage = {
+        version: 1,
+        originalStoreId: own.originStoreId,
+        sessionId: context.sessionId,
+        executionId: own.id,
+        input,
+        inputDigest: own.inputDigest,
+        targetRecordKey: old.record.key,
+        targetRecordRevision: old.record.revision,
+        stage: 'prepared',
+        oldStop: null,
+        newOperationRef: null,
+        catalogue: null,
+      };
+      await persist('prepared');
+      assertTicket(ticket);
+      source?.assertFresh({ signal: context.signal });
+      context.signal.throwIfAborted();
+      stopAttempted = true;
+      const confirmation = await stop(observed);
+      if (!['stopped', 'already_finished'].includes(confirmation.status))
+        throw new McpAdapterError('mcp_reconnection_stop_unconfirmed');
+      await context.operations.wait(old.ref, { signal: context.signal, timeoutMs: timeout });
+      const terminal = await context.getExecution(observed.executionId);
+      if (!terminal) throw new McpAdapterError('mcp_reconnection_stop_unconfirmed');
+      stage.oldStop = {
+        connectionExecutionId: terminal.id,
+        resultRevision: terminal.resultRevision,
+        resultDigest: proofHash(terminal.result),
+      };
+      await confirmedStop(context, input, stage.oldStop);
+      await persist('old_stopped');
+      stopConfirmed = true;
+      assertTicket(ticket);
+      source?.assertFresh({ signal: context.signal });
+      context.signal.throwIfAborted();
+      ticket.mode = 'opening';
+      ticket.onRef = async (ref) => {
+        if (
+          !stage ||
+          !ref.executionId ||
+          !proofEqual(ref, {
+            commandId: ref.commandId,
+            sessionId: context.sessionId,
+            originStoreId: own.originStoreId,
+            extensionId: mcpLifecycleExtensionId,
+            key: `connection/${input.serverId}/${input.key}`,
+            executionId: ref.executionId,
+          })
+        )
+          throw new McpAdapterError('operation_unverifiable');
+        stage.newOperationRef = ref as McpReconnectionInput['target']['operationRef'];
+        await persist('new_planned');
+      };
+      const result = await connectCore(
+        { serverId: input.serverId, key: input.key },
+        context,
+        ticket,
+        { server, source },
+      );
+      if (result.outcome !== 'succeeded')
+        throw new McpAdapterError('mcp_reconnection_new_unconfirmed');
+      const catalogue = { ...proofObject(result.details) };
+      const metadata = catalogue.toolsMetadata;
+      delete catalogue.toolsMetadata;
+      stage.catalogue = catalogue as Json;
+      await persist('ready');
+      const publishedEntry = ticket.newEntry;
+      if (!publishedEntry || !stage.newOperationRef)
+        throw new McpAdapterError('mcp_reconnection_unconfirmed');
+      const originalInputDigest = own.inputDigest;
+      const originalRef = structuredClone(stage.newOperationRef);
+      const originalCatalogue = structuredClone(stage.catalogue);
+      publishedEntry.confirmPublication = async () => {
+        if (!context.readExecutionGroupSafety)
+          throw new McpAdapterError('mcp_reconnection_scope_unavailable');
+        const safety = await context.readExecutionGroupSafety();
+        if (safety.originStoreId !== own.originStoreId)
+          throw new McpAdapterError('mcp_reconnection_scope_unavailable');
+        const proof = await proveCarrier(context, own.id, input.key, input.serverId);
+        if (
+          proof.e.originStoreId !== publishedEntry.storeId ||
+          proof.e.sessionId !== publishedEntry.sessionId ||
+          proof.e.inputDigest !== originalInputDigest ||
+          !proofEqual(proof.ref, originalRef) ||
+          !proofEqual(proof.catalogue, originalCatalogue) ||
+          proof.connection.id !== publishedEntry.executionId ||
+          proof.connection.parentExecutionId !== own.id ||
+          !['dispatching', 'running'].includes(proof.connection.status) ||
+          !proofEqual(publishedEntry.ref, originalRef)
+        )
+          throw new McpAdapterError('mcp_reconnection_scope_unavailable');
+      };
+      ticket.completed = true;
+      ticket.mode = 'publishing';
+      return {
+        outcome: 'succeeded',
+        content: 'MCP replacement ready; remote calls still require ordinary permission',
+        details: {
+          ...details(),
+          ...(metadata === undefined ? {} : { toolsMetadata: metadata }),
+        } as unknown as Json,
+      };
+    } catch (error) {
+      if (ticket?.ensureAttempted && stage?.newOperationRef) {
+        ticket.openAllowed.reject(error);
+        ticket.safeTerminal = await safeJobTerminal(context, ticket);
+      }
+      const knownNoNew = !ticket?.ensureAttempted || ticket.safeTerminal === true;
+      const knownStop = stopConfirmed;
+      const outcome: ToolResult['outcome'] =
+        (!stopAttempted || knownStop) && knownNoNew
+          ? context.signal.aborted
+            ? 'cancelled'
+            : 'failed'
+          : 'outcome_unknown';
+      if (stage) {
+        try {
+          await persist(outcome === 'outcome_unknown' ? 'outcome_unknown' : 'failed');
+        } catch {
+          if (ticket) ticket.mode = 'quarantined';
+          return {
+            outcome: 'outcome_unknown',
+            content: 'mcp_reconnection_persistence_unconfirmed',
+            details: details() as unknown as Json,
+          };
+        }
+      }
+      return {
+        outcome,
+        content: error instanceof McpAdapterError ? error.code : 'mcp_reconnection_unconfirmed',
+        details: details() as unknown as Json,
+      };
+    } finally {
+      if (ticket && tickets.get(ticket.scope) === ticket) {
+        if (
+          ticket.mode === 'quarantined' ||
+          (stopAttempted && !stopConfirmed) ||
+          (ticket.ensureAttempted && !ticket.completed && !ticket.safeTerminal)
+        )
+          ticket.mode = 'quarantined';
+        else if (ticket.mode !== 'publishing') {
+          tickets.delete(ticket.scope);
+          if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+        }
+        if (!ticket.completed)
+          ticket.openAllowed.reject(new McpAdapterError('mcp_reconnection_unconfirmed'));
+      }
+    }
+  }
   async function refresh(input: Json, context: ActionContext): Promise<ToolResult> {
     const reject = (code: string): ToolResult => ({
       outcome: context.signal.aborted ? 'cancelled' : 'failed',
@@ -761,6 +1433,14 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     const entry = live.get(
       scopeKey(own.originStoreId, context.sessionId, String(request.serverId)),
     );
+    if (entry) {
+      try {
+        await confirmPublication(entry);
+        wireFresh(entry);
+      } catch {
+        return reject('mcp_scope_transition_unconfirmed');
+      }
+    }
     const server = servers.get(String(request.serverId)) ?? entry?.server;
     if (!server || server.configDigest !== request.configDigest)
       return reject('mcp_catalogue_stale');
@@ -900,6 +1580,14 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     const entry = live.get(
       scopeKey(own.originStoreId, context.sessionId, String(request.serverId)),
     );
+    if (entry) {
+      try {
+        await confirmPublication(entry);
+        wireFresh(entry);
+      } catch {
+        return reject('mcp_scope_transition_unconfirmed');
+      }
+    }
     const server = servers.get(String(request.serverId)) ?? entry?.server;
     if (!server || server.configDigest !== request.configDigest)
       return reject('mcp_catalogue_stale');
@@ -1202,6 +1890,15 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     ],
     actions: [
       {
+        id: reconnectionId,
+        version: '1',
+        description:
+          'Explicitly stop the exact owned MCP connection before admitting a replacement',
+        inputSchema: reconnectionInputSchema,
+        prepare: async (input: Json) => decodeReconnectionInput(input) as unknown as Json,
+        execute: reconnect,
+      },
+      {
         id: 'mcp.connect',
         version: '1',
         description: 'Explicitly admit one scoped MCP connection',
@@ -1232,6 +1929,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     records: [
       contentType,
       refreshContentType,
+      reconnectionType,
       toolsSnapshotType,
       ...Object.values(readContentTypes),
     ].map((contentType) => ({
@@ -1240,6 +1938,60 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       schema: { type: 'object' },
     })),
     queries: [
+      {
+        id: 'mcp.reconnection',
+        version: '1',
+        outputSchema: { type: 'array' },
+        description: 'Read one original forced reconnection; never reconnects',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['executionId'],
+          properties: { executionId: bindingProperties.serverId },
+        },
+        async execute(input, context) {
+          const originalId = String(object(input).executionId);
+          const payload = await readReconnection(
+            context,
+            originalId,
+            async (storeId, serverId, executionId, configDigest) => {
+              const scope = scopeKey(storeId, context.sessionId, serverId);
+              const entry = live.get(scope);
+              if (
+                !entry ||
+                entry.executionId !== executionId ||
+                entry.server.configDigest !== configDigest
+              )
+                return { live: false, generation: null };
+              const ticket = tickets.get(scope);
+              if (ticket?.mode === 'publishing' && ticket.executionId !== originalId)
+                return { live: false, generation: null };
+              try {
+                await confirmPublication(entry);
+                wireFresh(entry);
+              } catch {
+                return { live: false, generation: null };
+              }
+              const c = entry.adapter?.getCatalogue();
+              return { live: !!c?.available, generation: c?.available ? c.generation : null };
+            },
+          );
+          const result = [
+            {
+              extensionId: mcpLifecycleExtensionId,
+              contentType: reconnectionType,
+              contentVersion: 1,
+              summary: 'Original forced reconnection; not permissions',
+              payload: payload as unknown as Json,
+              actions: [],
+              artifactRefs: [],
+            },
+          ];
+          if (Buffer.byteLength(JSON.stringify(result)) > 16 * 1024)
+            throw new McpAdapterError('mcp_reconnection_metadata_limit');
+          return result;
+        },
+      },
       {
         id: 'mcp.connection',
         version: '1',
@@ -1560,6 +2312,13 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       const facts: Json[] = [];
       if (closed) return { extensions, toolIds, snapshot: { mcp: facts } as Json };
       for (const entry of live.values()) {
+        try {
+          await confirmPublication(entry);
+          wireFresh(entry);
+          if (tickets.has(scopeKey(entry.storeId, entry.sessionId, entry.serverId))) continue;
+        } catch {
+          continue;
+        }
         if (
           entry.storeId !== input.command.originStoreId ||
           entry.sessionId !== input.session.id ||

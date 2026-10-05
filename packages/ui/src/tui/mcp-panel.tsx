@@ -2,6 +2,7 @@ import { Box, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import type { TuiMcpSnapshot } from './mcp';
+import { TuiMcpReconnectionPanel } from './mcp-reconnection-panel';
 import { TuiMcpSourcePanel } from './mcp-source-panel';
 import { TuiMcpToolsPanel } from './mcp-tools-panel';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -35,7 +36,9 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           | 'tools'
           | 'connection'
           | 'connectionLookup'
-          | 'sources';
+          | 'sources'
+          | 'reconnections'
+          | 'reconnectReview';
       };
   const actions: Choice[] = server
     ? [
@@ -76,6 +79,11 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           .filter((row) => row.intent.sessionId === state.sessionId)
           .map((row) => ({ kind: 'connectionSaved' as const, id: row.intent.request.commandId })),
       ];
+  if (controller.port.mcp?.reconnection) {
+    actions.push({ kind: 'reconnections' });
+    if (controller.canReviewMcpReconnection('connection'))
+      actions.push({ kind: 'reconnectReview' });
+  }
   if (controller.port.mcp?.source) actions.unshift({ kind: 'sources' });
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new observation invalidates the selected choice and confirmation.
   useEffect(() => {
@@ -118,6 +126,14 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
       else if (key.return) {
         const action = actions[index];
         if (!action) return;
+        if (action.kind === 'reconnections') {
+          void controller.openMcpReconnections();
+          return;
+        }
+        if (action.kind === 'reconnectReview') {
+          void controller.reviewMcpReconnection('connection');
+          return;
+        }
         if (action.kind === 'sources') {
           void controller.openMcpSources();
           return;
@@ -179,8 +195,9 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           });
       }
     },
-    { isActive: !state.mcpTools && !state.mcpSourceOpen },
+    { isActive: !state.mcpTools && !state.mcpSourceOpen && !state.mcpReconnectionOpen },
   );
+  if (state.mcpReconnectionOpen) return <TuiMcpReconnectionPanel controller={controller} />;
   if (state.mcpSourceOpen) return <TuiMcpSourcePanel controller={controller} />;
   if (state.mcpTools) return <TuiMcpToolsPanel controller={controller} />;
   const offset = Math.max(0, Math.min(index - 2, actions.length - 5));
@@ -195,6 +212,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
     if (action.kind === 'refresh') return t('Refresh servers');
     if (action.kind === 'lookup') return t('Check original change');
     if (action.kind === 'back') return t('Back');
+    if (action.kind === 'reconnections') return t('Forced reconnects');
+    if (action.kind === 'reconnectReview') return t('Review forced reconnect');
     if (action.kind === 'sources') return t('Project sources');
     if (action.kind === 'tools') return t('Saved tool snapshots');
     const row = action.kind === 'server' ? rows.find((value) => value.id === action.id) : undefined;

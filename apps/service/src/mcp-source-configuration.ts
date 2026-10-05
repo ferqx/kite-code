@@ -223,6 +223,56 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
   const profile = Object.freeze({ ...options.profile });
   const broker = createMcpCredentialBroker({ vault: options.credentialVault });
   const programmatic = new Set(options.programmaticServerIds ?? []);
+  // A finite trusted resolution association, not an execution/approval permit. Pending
+  // bindings are never evicted; a new factory is required after the bound is reached.
+  const replacements = new Map<
+    string,
+    {
+      sessionId: string;
+      originStoreId: string;
+      serverId: string;
+      configDigest: string;
+      parentInputDigest: string;
+      captureDigest: string;
+    }
+  >();
+  function replacementAdmission(request: AuthorizationRequest): boolean {
+    if (
+      request.kind !== 'job' ||
+      request.definitionId !== mcpSourceConnectionJobId ||
+      request.definitionVersion !== '1'
+    )
+      return false;
+    const value = object(request.input);
+    if (
+      !closedKeys(value, [
+        'serverId',
+        'configDigest',
+        'originStoreId',
+        'key',
+        'bootstrapId',
+        'captureDigest',
+        'parentExecutionId',
+        'parentInputDigest',
+      ]) ||
+      typeof value.parentExecutionId !== 'string' ||
+      typeof value.key !== 'string' ||
+      typeof value.bootstrapId !== 'string' ||
+      !value.bootstrapId
+    )
+      return false;
+    const binding = replacements.get(value.parentExecutionId);
+    return (
+      !!binding &&
+      request.sessionId === binding.sessionId &&
+      value.originStoreId === binding.originStoreId &&
+      value.serverId === binding.serverId &&
+      value.configDigest === binding.configDigest &&
+      value.captureDigest === binding.captureDigest &&
+      value.parentInputDigest === binding.parentInputDigest
+    );
+  }
+
   async function scope(sessionId: string) {
     const host = runtime();
     const [metadata, session] = await Promise.all([host.getMetadata(), host.getSession(sessionId)]);
@@ -458,7 +508,11 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
         const server = chosen.get(id);
         if (!server) return 'mcp_server_not_selected';
         const supplied = raw.configDigest ?? binding.configDigest;
-        if (supplied !== undefined && supplied !== server.configDigest)
+        if (
+          supplied !== undefined &&
+          supplied !== server.configDigest &&
+          !replacementAdmission(request)
+        )
           return 'mcp_definition_version_unavailable';
         return null;
       },
@@ -841,157 +895,314 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       throw new McpAdapterError('mcp_source_stale');
     return now;
   }
-  const sourcePort: McpScopedSourcePort = {
-    async resolve(input, { signal }): Promise<McpScopedSourceResolution> {
-      const source = await scope(input.sessionId);
-      const own = await source.host.getExecution(input.executionId);
+  type Replacement = { expectedConfigDigest: string; expectedReadSet: McpSourceReadSet };
+  const closedKeys = (value: unknown, keys: readonly string[]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const actual = Object.keys(value);
+    return actual.length === keys.length && actual.every((key) => keys.includes(key));
+  };
+  async function verifyReplacementParent(
+    source: Awaited<ReturnType<typeof scope>>,
+    own: ExecutionRecord,
+    input: { serverId: string; sessionId: string; executionId: string },
+    replacement: Replacement,
+  ) {
+    const value = object(own.input),
+      next = object(value.replacement),
+      target = object(value.target),
+      ref = object(target.operationRef);
+    const validId = (v: unknown, max = 128) =>
+      typeof v === 'string' && new RegExp(`^[A-Za-z0-9_-]{1,${max}}$`).test(v);
+    const validDigest = (v: unknown) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+    const refKey = typeof ref.key === 'string' ? ref.key : '';
+    const refSuffix = refKey.slice(`connection/${input.serverId}/`.length);
+    const command = own.originCommandId ? await source.host.getCommand(own.originCommandId) : null;
+    const request = object(command?.request);
+    if (
+      !options.observerSubjectId ||
+      !command ||
+      command.id !== own.originCommandId ||
+      command.kind !== 'extension.invoke' ||
+      command.originStoreId !== source.sourceScope.storeId ||
+      command.sessionId !== source.session.id ||
+      command.subjectId !== options.observerSubjectId ||
+      command.cancelRequestedAt !== null ||
+      own.cancelRequestedAt !== null ||
+      !['dispatching', 'running'].includes(own.status) ||
+      command.rootWorkCommandId !== own.rootWorkCommandId ||
+      command.rootWorkSeq !== own.rootWorkSeq ||
+      !closedKeys(request, ['kind', 'extensionId', 'actionId', 'definitionVersion', 'input']) ||
+      request.kind !== 'extension.invoke' ||
+      request.extensionId !== 'builtin.mcp' ||
+      request.actionId !== 'mcp.reconnect' ||
+      request.definitionVersion !== '1' ||
+      hash(command.request) !== command.requestDigest ||
+      hash(request.input) !== hash(own.input) ||
+      mcpCanonical(request.input) !== mcpCanonical(own.input) ||
+      own.id !== input.executionId ||
+      own.kind !== 'job' ||
+      own.definitionId !== 'builtin.mcp/mcp.reconnect' ||
+      own.definitionVersion !== '1' ||
+      own.originStoreId !== source.sourceScope.storeId ||
+      own.sessionId !== input.sessionId ||
+      input.sessionId !== source.session.id ||
+      !closedKeys(value, ['serverId', 'key', 'target', 'replacement']) ||
+      value.serverId !== input.serverId ||
+      !validId(value.serverId) ||
+      !validId(value.key, 64) ||
+      !validId(target.carrierExecutionId) ||
+      !validId(target.carrierKey, 64) ||
+      !validId(target.connectionExecutionId) ||
+      !validDigest(target.configDigest) ||
+      !Number.isSafeInteger(target.currentGeneration) ||
+      Number(target.currentGeneration) < 1 ||
+      !validId(ref.commandId) ||
+      !validId(ref.executionId) ||
+      ref.extensionId !== 'builtin.mcp' ||
+      ref.originStoreId !== source.sourceScope.storeId ||
+      ref.sessionId !== source.session.id ||
+      ref.executionId !== target.connectionExecutionId ||
+      !refKey.startsWith(`connection/${input.serverId}/`) ||
+      !validId(refSuffix, 64) ||
+      value.key === target.carrierKey ||
+      value.key === refSuffix ||
+      ref.commandId === command.id ||
+      !validDigest(next.expectedConfigDigest) ||
+      !closedKeys(target, [
+        'carrierExecutionId',
+        'carrierKey',
+        'operationRef',
+        'connectionExecutionId',
+        'configDigest',
+        'currentGeneration',
+      ]) ||
+      !closedKeys(target.operationRef, [
+        'commandId',
+        'sessionId',
+        'originStoreId',
+        'extensionId',
+        'key',
+        'executionId',
+      ]) ||
+      !closedKeys(next, ['kind', 'expectedConfigDigest', 'expectedReadSet']) ||
+      next.kind !== 'source' ||
+      next.expectedConfigDigest !== replacement.expectedConfigDigest ||
+      mcpCanonical(next.expectedReadSet) !== mcpCanonical(replacement.expectedReadSet)
+    )
+      throw new McpAdapterError('operation_unverifiable');
+  }
+  async function resolveSource(
+    input: { serverId: string; sessionId: string; executionId: string },
+    { signal }: { signal: AbortSignal },
+    replacement?: Replacement,
+  ): Promise<McpScopedSourceResolution> {
+    const source = await scope(input.sessionId);
+    const own = await source.host.getExecution(input.executionId);
+    if (
+      !own ||
+      own.originStoreId !== source.sourceScope.storeId ||
+      own.sessionId !== source.session.id ||
+      own.definitionVersion !== '1' ||
+      !(replacement
+        ? own.kind === 'job' && own.definitionId === 'builtin.mcp/mcp.reconnect'
+        : ['mcp.connect', 'builtin.mcp/mcp.connect'].includes(own.definitionId))
+    )
+      throw new McpAdapterError('operation_unverifiable');
+    const current = replacement ? observe(source) : null;
+    const state: ReturnType<typeof observe> & {
+      snapshot: McpSelectedSourceSnapshot;
+      derivations?: readonly Derivation[];
+    } = current
+      ? {
+          ...current,
+          snapshot: select(current.capture, selection(source.sourceScope, source.root)).snapshot,
+        }
+      : await original(source, own);
+    const expected = state.snapshot;
+    if (replacement) await verifyReplacementParent(source, own, input, replacement);
+
+    const fresh = ({ signal }: { signal: AbortSignal }) => {
+      assertSnapshot(source, expected, input.serverId, signal, state.derivations ?? []);
+    };
+    const now = assertSnapshot(source, expected, input.serverId, signal, state.derivations ?? []);
+    const entry = now.state.entries.find((entry) => entry.server.id === input.serverId)!;
+    const transport = configuration(entry, source.root)!;
+    const configDigest = createMcpAdapter({ id: input.serverId, transport }).getCatalogue()
+      .configDigest;
+    if (
+      replacement &&
+      (configDigest !== replacement.expectedConfigDigest ||
+        mcpCanonical(expected.readSet) !== mcpCanonical(replacement.expectedReadSet))
+    )
+      throw new McpAdapterError('mcp_source_stale');
+    await acceptedMetadata(source, now.state, entry);
+    fresh({ signal });
+    const snapshotDigest = hash({ snapshot: expected, serverId: input.serverId });
+    const captureDigest = replacement
+      ? hash({ snapshot: expected, serverId: input.serverId, parentInputDigest: hash(own.input) })
+      : snapshotDigest;
+    const admit = async (
+      binding: Parameters<McpLifecycleTransportPort['open']>[0],
+      { signal }: { signal: AbortSignal },
+    ) => {
+      signal.throwIfAborted();
+      const job = await source.host.getExecution(binding.executionId);
       if (
-        !own ||
-        own.originStoreId !== source.sourceScope.storeId ||
-        own.sessionId !== source.session.id ||
-        own.definitionVersion !== '1' ||
-        !['mcp.connect', 'builtin.mcp/mcp.connect'].includes(own.definitionId)
+        !job ||
+        job.kind !== 'job' ||
+        job.definitionId !== mcpSourceConnectionJobId ||
+        job.definitionVersion !== '1' ||
+        job.originStoreId !== source.sourceScope.storeId ||
+        job.sessionId !== source.session.id ||
+        !['dispatching', 'running'].includes(job.status) ||
+        binding.originalStoreId !== job.originStoreId ||
+        binding.sessionId !== job.sessionId ||
+        binding.serverId !== input.serverId ||
+        binding.configDigest !== configDigest ||
+        object(job.input).parentExecutionId !== own.id ||
+        object(job.input).parentInputDigest !== hash(own.input) ||
+        object(job.input).captureDigest !== captureDigest ||
+        object(job.input).configDigest !== configDigest ||
+        object(job.input).originStoreId !== job.originStoreId ||
+        !object(job.input).bootstrapId
       )
         throw new McpAdapterError('operation_unverifiable');
-      const state = await original(source, own),
-        expected = state.snapshot;
-      const fresh = ({ signal }: { signal: AbortSignal }) => {
-        assertSnapshot(
-          source,
-          expected,
-          input.serverId,
-          signal,
-          'derivations' in state ? state.derivations : [],
-        );
-      };
-      const now = assertSnapshot(
-        source,
-        expected,
-        input.serverId,
-        signal,
-        'derivations' in state ? state.derivations : [],
-      );
-      const entry = now.state.entries.find((entry) => entry.server.id === input.serverId)!;
-      await acceptedMetadata(source, now.state, entry);
-      fresh({ signal });
-      const transport = configuration(entry, source.root)!;
-      const configDigest = createMcpAdapter({ id: input.serverId, transport }).getCatalogue()
-        .configDigest;
-      const captureDigest = hash({ snapshot: expected, serverId: input.serverId });
-      const admit = async (
-        binding: Parameters<McpLifecycleTransportPort['open']>[0],
-        { signal }: { signal: AbortSignal },
-      ) => {
-        signal.throwIfAborted();
-        const job = await source.host.getExecution(binding.executionId);
+      if (replacement) {
         if (
-          !job ||
-          job.kind !== 'job' ||
-          job.definitionId !== mcpSourceConnectionJobId ||
-          job.definitionVersion !== '1' ||
-          job.originStoreId !== source.sourceScope.storeId ||
-          job.sessionId !== source.session.id ||
-          !['dispatching', 'running'].includes(job.status) ||
-          binding.originalStoreId !== job.originStoreId ||
-          binding.sessionId !== job.sessionId ||
-          binding.serverId !== input.serverId ||
-          binding.configDigest !== configDigest ||
-          object(job.input).parentExecutionId !== own.id ||
-          object(job.input).parentInputDigest !== hash(own.input) ||
-          object(job.input).captureDigest !== captureDigest ||
-          object(job.input).configDigest !== configDigest ||
-          object(job.input).originStoreId !== job.originStoreId ||
-          !object(job.input).bootstrapId
+          job.parentExecutionId !== own.id ||
+          job.runId !== own.runId ||
+          job.rootWorkCommandId !== own.rootWorkCommandId ||
+          job.rootWorkSeq !== own.rootWorkSeq ||
+          !closedKeys(job.input, [
+            'serverId',
+            'configDigest',
+            'originStoreId',
+            'key',
+            'bootstrapId',
+            'captureDigest',
+            'parentExecutionId',
+            'parentInputDigest',
+          ]) ||
+          typeof object(job.input).bootstrapId !== 'string' ||
+          typeof object(job.input).key !== 'string' ||
+          object(job.input).serverId !== input.serverId
         )
           throw new McpAdapterError('operation_unverifiable');
-        fresh({ signal });
-        const current = observe(source);
-        await acceptedMetadata(
-          source,
-          current.state,
-          current.state.entries.find((entry) => entry.server.id === input.serverId)!,
-        );
-        fresh({ signal });
-      };
-      let port: McpLifecycleTransportPort;
-      if (transport.type === 'http') {
-        const savedBinding = entry.credentialBinding;
-        port = createMcpHttpTransportPort({
-          ...options.http,
-          servers: [
-            {
-              id: input.serverId,
-              url: transport.url,
-              ...(savedBinding
-                ? {
-                    credential: {
-                      broker,
-                      async bind(binding, { signal }) {
-                        await admit(binding, { signal });
-                        fresh({ signal });
-                        const identity: McpCredentialIdentity = {
-                          profileId: profile.profileAccessKey,
-                          originalStoreId: source.sourceScope.storeId,
-                          workspaceId: source.workspace.id,
-                          workspaceIdentity: source.identity,
-                          sessionId: source.session.id,
-                          connectionExecutionId: binding.executionId,
-                          source: {
-                            kind: entry.server.source.kind,
-                            id: entry.server.source.pathDigest,
-                            revision: entry.server.rawEntryDigest,
-                          },
-                          serverId: input.serverId,
-                          configDigest,
-                          authProfileId: savedBinding.authProfile,
-                          policyRevision: hash(savedBinding),
-                        };
-                        const issued = broker.issue({
-                          identity,
-                          purpose: 'mcp.http',
-                          credentialRef: savedBinding.vaultRef,
-                          expiresAt: savedBinding.expiresAt,
-                          revocationRevision: 0,
-                        });
-                        fresh({ signal });
-                        return { ref: issued, identity, revocationRevision: 0 };
-                      },
-                    },
-                  }
-                : {}),
-            },
-          ],
-          admit,
-          assertFresh: (_binding, { signal }) => fresh({ signal }),
-        });
-      } else {
-        if (!options.stdio) throw new McpAdapterError('mcp_stdio_asset_unavailable');
-        port = createMcpStdioTransportPort({
-          ...options.stdio,
-          servers: [
-            {
-              id: input.serverId,
-              configuration: { ...transport, args: [...transport.args], env: { ...transport.env } },
-            },
-          ],
-          allowedEnvNames: Object.keys(transport.env),
-          admit,
-          assertFresh: (_binding, { signal }) => fresh({ signal }),
-        });
+        const currentParent = await source.host.getExecution(own.id);
+        if (!currentParent || hash(currentParent.input) !== hash(own.input))
+          throw new McpAdapterError('operation_unverifiable');
+        await verifyReplacementParent(source, currentParent, input, replacement);
       }
-      return Object.freeze({
-        server: seal({
-          id: input.serverId,
-          transport,
-          ...(typeof entry.transport?.timeout === 'number'
-            ? { limits: { timeoutMs: entry.transport.timeout } }
-            : {}),
-        }),
-        captureDigest,
-        transportPort: port,
-        assertFresh: fresh,
+      fresh({ signal });
+      const current = observe(source);
+      await acceptedMetadata(
+        source,
+        current.state,
+        current.state.entries.find((entry) => entry.server.id === input.serverId)!,
+      );
+      fresh({ signal });
+    };
+    let port: McpLifecycleTransportPort;
+    if (transport.type === 'http') {
+      const savedBinding = entry.credentialBinding;
+      port = createMcpHttpTransportPort({
+        ...options.http,
+        servers: [
+          {
+            id: input.serverId,
+            url: transport.url,
+            ...(savedBinding
+              ? {
+                  credential: {
+                    broker,
+                    async bind(binding, { signal }) {
+                      await admit(binding, { signal });
+                      fresh({ signal });
+                      const identity: McpCredentialIdentity = {
+                        profileId: profile.profileAccessKey,
+                        originalStoreId: source.sourceScope.storeId,
+                        workspaceId: source.workspace.id,
+                        workspaceIdentity: source.identity,
+                        sessionId: source.session.id,
+                        connectionExecutionId: binding.executionId,
+                        source: {
+                          kind: entry.server.source.kind,
+                          id: entry.server.source.pathDigest,
+                          revision: entry.server.rawEntryDigest,
+                        },
+                        serverId: input.serverId,
+                        configDigest,
+                        authProfileId: savedBinding.authProfile,
+                        policyRevision: hash(savedBinding),
+                      };
+                      const issued = broker.issue({
+                        identity,
+                        purpose: 'mcp.http',
+                        credentialRef: savedBinding.vaultRef,
+                        expiresAt: savedBinding.expiresAt,
+                        revocationRevision: 0,
+                      });
+                      fresh({ signal });
+                      return { ref: issued, identity, revocationRevision: 0 };
+                    },
+                  },
+                }
+              : {}),
+          },
+        ],
+        admit,
+        assertFresh: (_binding, { signal }) => fresh({ signal }),
       });
-    },
+    } else {
+      if (!options.stdio) throw new McpAdapterError('mcp_stdio_asset_unavailable');
+      port = createMcpStdioTransportPort({
+        ...options.stdio,
+        servers: [
+          {
+            id: input.serverId,
+            configuration: { ...transport, args: [...transport.args], env: { ...transport.env } },
+          },
+        ],
+        allowedEnvNames: Object.keys(transport.env),
+        admit,
+        assertFresh: (_binding, { signal }) => fresh({ signal }),
+      });
+    }
+    if (replacement) {
+      fresh({ signal });
+      const binding = {
+        sessionId: source.session.id,
+        originStoreId: own.originStoreId,
+        serverId: input.serverId,
+        configDigest,
+        parentInputDigest: hash(own.input),
+        captureDigest,
+      };
+      const prior = replacements.get(own.id);
+      if (
+        (prior && mcpCanonical(prior) !== mcpCanonical(binding)) ||
+        (!prior && replacements.size >= 512)
+      )
+        throw new McpAdapterError('mcp_scope_limit');
+      replacements.set(own.id, Object.freeze(binding));
+    }
+    return Object.freeze({
+      server: seal({
+        id: input.serverId,
+        transport,
+        ...(typeof entry.transport?.timeout === 'number'
+          ? { limits: { timeoutMs: entry.transport.timeout } }
+          : {}),
+      }),
+      captureDigest,
+      snapshotDigest,
+      transportPort: port,
+      assertFresh: fresh,
+    });
+  }
+  const sourcePort: McpScopedSourcePort = {
+    resolve: (input, options) => resolveSource(input, options),
+    resolveReplacement: (input, options) => resolveSource(input, options, input),
   };
   function page(servers: McpSourceCapture['servers'], input: Json) {
     const request = object(input),

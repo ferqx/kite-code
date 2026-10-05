@@ -21,6 +21,7 @@ import { TuiStatusPanel } from './status-panel';
 export * from './controller';
 export { TerminalMarkdown } from './markdown';
 export * from './mcp-connection';
+export * from './mcp-reconnection';
 export * from './mcp-source';
 
 /** Independent Ink renderer. Host owns admission, full readers and Service lifetime. */

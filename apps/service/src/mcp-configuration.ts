@@ -218,7 +218,35 @@ export function createMcpConfiguration(options?: McpLifecycleOptions) {
               : {};
           if (typeof input.serverId !== 'string' || !selected.has(input.serverId))
             return 'mcp_server_not_selected';
+          const reconnect =
+            request.kind === 'job' &&
+            ['mcp.reconnect', 'builtin.mcp/mcp.reconnect'].includes(request.definitionId) &&
+            request.definitionVersion === '1';
+          if (reconnect) {
+            const replacement =
+              input.replacement &&
+              typeof input.replacement === 'object' &&
+              !Array.isArray(input.replacement)
+                ? input.replacement
+                : {};
+            const registered = servers.get(input.serverId);
+            if (registered) {
+              if (
+                !options?.transportPort ||
+                replacement.kind !== 'static' ||
+                replacement.expectedConfigDigest !== registered.configDigest
+              )
+                return 'mcp_definition_version_unavailable';
+            } else if (
+              !options?.scopedSources?.resolveReplacement ||
+              replacement.kind !== 'source' ||
+              typeof replacement.expectedConfigDigest !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(replacement.expectedConfigDigest)
+            )
+              return 'mcp_source_selection_unavailable';
+          }
           if (
+            !reconnect &&
             request.definitionId !== 'mcp.connect' &&
             request.definitionId !== 'builtin.mcp/mcp.connect' &&
             request.definitionId !== mcpSourceConnectionJobId &&

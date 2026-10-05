@@ -486,7 +486,11 @@ test('the actual idle handoff with an unknown connection blocks precise new inta
           generation: session!.ownerGeneration,
         },
       }),
-    ).toEqual({ hasPendingCommands: true, hasUnsettledWork: true });
+    ).toEqual({
+      hasPendingCommands: true,
+      hasUnsettledWork: true,
+      hasUncommittedAction: false,
+    });
     expect(await f.store.getCommand('blocked-after-unknown')).toMatchObject({
       status: 'accepted',
       originStoreId: f.expectedStoreId,

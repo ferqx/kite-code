@@ -8,7 +8,7 @@ MCP 提供外部工具和资源，Skills 提供可发现的任务指导或工作
 
 当前原目录工具快照与完整描述查看已接入通用 Terminal；暖读和同Profile冷重开后的实际键盘链已验证，准确范围仍按[总体进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
-完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、详情、用户或项目范围启停、显式申请连接、原申请查询和原工具描述查看；认证、强制重连和增删 Server 尚未在该面板实现。下面保留完整管理预期，当前可执行步骤见[通用 TUI 的 MCP 目录与选择](#通用-tui-的-mcp-目录与选择)和[显式连接与原申请](#显式连接与原申请)，实际制品与平台范围按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、详情、用户或项目范围启停、显式申请连接、原申请查询和原工具描述查看；已接入准确原连接的强制重连与独立原申请；认证和增删 Server 尚未在该面板实现。下面保留完整管理预期，当前可执行步骤见[通用 TUI 的 MCP 目录与选择](#通用-tui-的-mcp-目录与选择)和[显式连接与原申请](#显式连接与原申请)，实际制品与平台范围按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
 输入 `/mcp` 打开管理面板。上下选择 Server，Enter 查看详情；按界面提供的操作进行连接、配置、认证或查看工具。Esc 返回上一层。操作失败时保留结果提示，不能因下一次状态刷新就假定配置已应用。
 
@@ -40,7 +40,17 @@ Server移除或冷重开后仍可查看已保存的历史；旧generation不会�
 
 同 Session 的原连接申请 ID 保存在 Profile 中；空目录、目录失败和 Server 已移除时仍可选择。上下、Enter 只选择原 ID，再选择“Check original connection”（查询原连接申请）并 Enter 才读取原结果。冷重开不自动查询或提交。结果未知时先查原申请，不能用新 key 绕过同 Store、Session、Server 的未确认申请；404、无法核对原身份或坏结果都保留 unknown，不重发。冷后确需新连接时，在核原申请后重新选择可用 Server，以独立确认和新的普通审批申请。
 
-关闭、Esc、Ctrl+C 和切会话只释放所属读取，已提交的工作与原审批继续。离线恢复生成新 Store 后，旧申请保持原身份，不能成为当前 Store 的查询或提交许可。实际 Host、普通连接和源码外 80×24 暖冷键盘验证见[CLI owner](../../../../../apps/cli/README.md#tui-mcp-显式连接与原申请)；当前本机资格不代替完整认证、强制重连、增删或三平台发行。
+关闭、Esc、Ctrl+C 和切会话只释放所属读取，已提交的工作与原审批继续。离线恢复生成新 Store 后，旧申请保持原身份，不能成为当前 Store 的查询或提交许可。实际 Host、普通连接和源码外 80×24 暖冷键盘验证见[CLI owner](../../../../../apps/cli/README.md#tui-mcp-显式连接与原申请)；该普通连接窗口不证明强制重连；强制重连的实际范围见下一节，完整认证、增删和三平台发行仍分别验收。
+
+## 强制重连与原申请
+
+普通申请连接仍可复用同来源连接。确需替换当前连接时，先明确查询准确原连接或原重连申请，确认当前 live 后选择“Review reconnect”（审查重连）。审查页重新核对原 carrier、连接 Job、观察代次及当前替换来源；再以独立 Enter 确认本次申请。旧原目录 ready 不等于当前 live，观察失效时需重新读取。
+
+原重连 Action 和新连接 Job 分别经过普通审批。旧 owned transport 已确认停止、原 Job 已保存停止终态后，才申请新的连接 Job；等待新 Job 审批时，旧连接已经停止。拒绝新 Job、来源变化或建立失败会保留“旧已停、新未建立”，不会自动恢复旧连接。停止本地 transport 不证明远端 Tool 已停止。停止或收尾未确认时保持 unknown，不能通过新的 key 绕过同 Store、Session、Server 的冲突。
+
+“Forced reconnects”（强制重连申请）保存同 Session 的原 ID。上下、Enter 只选择原 ID；明确选择“Check original forced reconnect”才查询原 Command 和结果。冷重开不自动查询或重连；来源文件或工作区目录已移除时仍可查原结果。原 ready、旧停止、当前 live 和 current generation分别显示。离线恢复至新 Store 后保留原申请身份，原记录不成为新 Store 的查询或提交许可。
+
+Esc 或 Ctrl+C 返回父 MCP 面板，再返回主界面；它们只结束所属读取，已提交工作和原待决审批继续。主界面有待决审批时先回答原卡片，完成后才恢复任务输入。关闭或切会话后的迟到结果只保存到原记录。当前实现、有限实际 Host 和源码外键盘验收范围由[CLI owner](../../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)、[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-强制重连与原申请)及[总体进度](../../../../plans/unified-agent-refactor-v1-progress.md)分别记录。
 
 ## 项目来源与原决定
 

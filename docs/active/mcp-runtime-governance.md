@@ -2,14 +2,20 @@
 
 状态：active
 
-读取时机：修改 MCP discovery、动态工具绑定、transport、credential、MCP policy、Tool/Resource 调用或结果归一化时。
+读取时机：修改当前MCP目录、动态Tool/Task最终wire、transport、credential或未知结果边界时；旧provider治理合同仅作历史核对。
 
-验证：`bun test apps/kite-service/test/mcp.test.ts tests/integration/mcp-manager.test.ts tests/integration/mcp-stdio-transport.test.ts packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts packages/builtin-runtime/test/mcp-credential-broker.test.ts apps/kite-service/test/mcp/write-admission.test.ts packages/builtin-runtime/test/mcp/write-dispatch-governance.test.ts apps/kite-service/test/isolated/runtime/tool-controller.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun run typecheck`、`bun run check:core-boundary`、`bun run check:runtime-packages`、`bun run check:unified-api`与当前根默认测试；具体MCP/Service/Caller实际断言和平台范围沿对应owner及[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
 
 相关：[Agent Note 0127](../../.agents/notes/implemented/simplification/2026-08-23-remove-rav1-speculative-authority.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、`mcp-control-plane.md`、`mcp-authentication.md`、`mcp-project-approval.md`。
 
 MCP native keyring 与 LangChain live smoke 使用正式 CI 基线 Bun `1.4.2`，不得与 Required CI
 形成第二套 Bun 基线。
+
+## 当前通用 Agent 边界
+
+正式/default/CI已使用八workspace通用Agent与Service。当前MCP生命周期、原catalogue、Source、强制重连与最终wire准入由[Agent MCP owner](../../packages/agent/src/mcp/README.md)承担，可信来源/transport装配归[Service](../../apps/service/README.md)，共享TUI与薄Caller分别归[UI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md)。原Query不恢复transport或许可，独立Action/Job沿同一Execution；恢复与发布不变量见[当前跨包合同](mcp-config-management.md#强制重连的来源发布与恢复边界)。
+
+下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
 ## 唯一 owner 与 binding
 

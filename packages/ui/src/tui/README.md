@@ -137,3 +137,13 @@ controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID�
 显示原catalogue ready、当前live/currentGeneration与created/reused各自事实。accepted不显示ready，warm复用不称新建，冷ready不称当前live；错误或无法核验保持unknown。原Select和Tools菜单位置保留，新选项在同一五行viewport完整导航，无字母业务快捷键。关闭/Esc/Ctrl+C不取消已提交工作、原Run或审批。
 
 [新connection controller/Ink](../../test/tui/mcp-connection.test.tsx)、原15Select、7Tools与7preferences组合当前38项699断言通过，覆盖确认、原ID零GET、明确查回、空失败目录、迟到及读取隔离。MCP与Tools固定提示沿[presentation catalog](presentation.tsx)翻译；Server ID、availability/reason、工具名称、描述及完整Schema JSON保持原文。[Tools中文键盘测试](../../test/tui/mcp-tools.test.tsx)实际切换语言、跨工具页及End至Unicode尾部，保持原metadata字节与已发布对象，切语言无新增reader或业务调用；英文源码外PTY不作为中文现场证明。真实普通审批、journal及源码外80×24暖/冷/共享detach资格归[CLI](../../../../apps/cli/README.md#tui-mcp-显式连接与原申请)。此切片提供显式新申请与warm复用，认证、强制重连、完整增删和三平台仍按整体进度核对。
+
+## MCP 强制重连与原申请
+
+[独立 DTO](mcp-reconnection.ts)、[state](mcp-reconnection-state.ts)与[panel](mcp-reconnection-panel.tsx)通过可选 `TuiMcpPort.reconnection`接线。准确原 connection/R有限fact确认live后，Review调用host重新观察完整target和当前replacement；确认页独立Enter才产生本次原Command/key。UI不持Core ticket、transport、文件、vault或热POST权，原Action和新Job仍分别使用普通审批。
+
+controller按原scope、selected ID、Abort和generation隔离读取，热submit迟到只更新原Map，不覆盖后选ID或后来Session。同Session原ID列表在空、失败、removed目录仍可进入；只选择零GET，明确Check才lookup。冷记录保持unknown；事实匹配原Store/S/Command/inputDigest及closed protocol后才显示ready/failed，旧停止、原ready代次和当前live/currentGeneration独立，合法当前代次可以高于原ready代次。
+
+未知原申请阻同Store+S+Server冲突，不淘汰128条或换key绕过。Esc/Ctrl+C关闭重连子面板后返回父MCP，再关闭父面板回Main；待决卡继续，完成普通回答前不要求New Run composer出现。physical Workspace移除后父面板标题为unavailable，原结果读取仍可用。Scope关闭不取消R/Run/Job或原审批，固定文案沿presentation三locale，metadata和原身份保持。
+
+[Ink/controller测试](../../test/tui/mcp-reconnection.test.tsx)实际16项123断言覆盖独立确认、select零GET、冷/foreign/scope/late/unknown和ready/currentGeneration反例。真实Host、journal、源码外80×24和收尾资格分别归[CLI owner](../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不由UI fixture推导HTTP、完整默认或三平台。

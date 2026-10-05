@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Json, PublicExecution, ReadContext } from '../extensions';
 import { canonicalJson } from '../json';
+import { proveConnectionParent } from './reconnection-proof';
 
 const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -88,27 +89,23 @@ export async function readConnection(
       id(r.key.slice(`connection/${input.serverId}/`.length), 64)
     ) {
       const c = await context.getExecution(r.executionId as string);
-      const parent = c?.parentExecutionId ? await context.getExecution(c.parentExecutionId) : null;
       const config = details.configDigest;
+      let parentValid = false;
+      if (c && typeof config === 'string') {
+        try {
+          await proveConnectionParent(context, c, r, input.serverId, config);
+          parentValid = true;
+        } catch {
+          /* Exact parent proof failed. */
+        }
+      }
       if (
         c &&
-        parent &&
+        parentValid &&
         c.kind === 'job' &&
         c.sessionId === context.sessionId &&
         c.originStoreId === e.originStoreId &&
         c.originCommandId === r.commandId &&
-        parent.sessionId === context.sessionId &&
-        parent.originStoreId === e.originStoreId &&
-        ['tool', 'job'].includes(parent.kind) &&
-        ['mcp.connect', 'builtin.mcp/mcp.connect'].includes(parent.definitionId ?? '') &&
-        parent.definitionVersion === '1' &&
-        parent.rootWorkCommandId === c.rootWorkCommandId &&
-        parent.rootWorkSeq === c.rootWorkSeq &&
-        parent.inputDigest ===
-          sha({
-            serverId: input.serverId,
-            key: r.key.slice(`connection/${input.serverId}/`.length),
-          }) &&
         typeof config === 'string' &&
         /^[a-f0-9]{64}$/.test(config) &&
         ((c.definitionId === 'mcp.source.connection' && c.definitionVersion === '1') ||

@@ -105,7 +105,8 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
           manifest.assets.fileRecoveryIntents?.present ||
           manifest.assets.mcpSelectionIntents?.present ||
           manifest.assets.mcpConnectionIntents?.present ||
-          manifest.assets.mcpSourceApprovalIntents?.present
+          manifest.assets.mcpSourceApprovalIntents?.present ||
+          manifest.assets.mcpReconnectionIntents?.present
             ? ['ui']
             : []),
         ].includes(item.name)
@@ -127,6 +128,9 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
                         ? ['file-recovery-intents.json']
                         : []),
                       ...(manifest.assets.tuiPreferences.present ? ['preferences.jsonc'] : []),
+                      ...(manifest.assets.mcpReconnectionIntents?.present
+                        ? ['mcp-reconnection-intents.json']
+                        : []),
                       ...(manifest.assets.mcpSourceApprovalIntents?.present
                         ? ['mcp-source-approval-intents.json']
                         : []),
@@ -354,17 +358,19 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     }
     const assets = await captureAssets(access.profilePath, staging, input.signal);
     const manifest = parseManifest({
-      version: assets.mcpSourceApprovalIntents
-        ? 10
-        : assets.mcpConnectionIntents
-          ? 9
-          : assets.mcpSelectionIntents
-            ? 8
-            : assets.desktopUi.format?.userVersion === 5
-              ? 7
-              : assets.fileRecoveryIntents
-                ? 6
-                : 5,
+      version: assets.mcpReconnectionIntents
+        ? 11
+        : assets.mcpSourceApprovalIntents
+          ? 10
+          : assets.mcpConnectionIntents
+            ? 9
+            : assets.mcpSelectionIntents
+              ? 8
+              : assets.desktopUi.format?.userVersion === 5
+                ? 7
+                : assets.fileRecoveryIntents
+                  ? 6
+                  : 5,
       kind: 'profile_backup',
       createdAt: new Date().toISOString(),
       source: { ...sourceCapture, profileAccessKey: access.profileAccessKey },
