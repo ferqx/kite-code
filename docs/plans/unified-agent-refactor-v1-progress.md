@@ -1206,3 +1206,5 @@ Provider/Broker16/114、network7/61、lifecycle10/149与reconnection15/316、Cal
 当前 arm64/Bun 1.4.2 native 6/74、普通 Shell 最新 10/52、现有 Service/Core、显式 Shell 与严格受限补偿三文件 15/201 实际通过；严格 confined 原 13 项在相同生产输入通过。Agent 正常 build/types、四文件 Biome 与独立只读审查通过。首次 native 竞态 fixture 等根 PID 消失而超时，改为 cancel 前真实后代 TERM 观测后通过；原 5000ms 和终态/准确清理断言保留。原红与当前日志在 Note 维护，不把局部结果拼成完整默认图通过。
 
 仅原 group 所有权取得本机资格；strict deny-fork、文件/网络/保护根与 temp 合同未变。默认 ProcessService 仍无可信 Shell 绑定；已有 allow-fork 私有探针需额外拒绝 posix_spawn，尚无通用 Bun/Node 工具链资格，不能据此默认启用不受限后端。x86_64 实跑、Linux/Windows、完整进程树和生产默认 Shell 仍有缺口；37项继续 partial，§35/适用T-E、正式旧路径退役与持续 Soak 未完成，Goal active。
+
+guardian 切片已本地提交 `a609fd399009b44a1bd1eccc6afe9444baa8399b`，准确12路径和七项正常hooks通过，无关AGENTS未纳入、无push/PR。其当前真实 [TUI Job stop caller](../../apps/cli/test/isolated/tui-caller-job-stop.test.ts)另验1/16、2.877s：POST前原journal、caller SIGKILL、cold首原GET物理丢回执、第二原GET、零coldPOST、sibling仍running和Model两次。原有持久caller已实现，UI owner及能力表“仅内存”旧描述修正；缺caller port的有限组件仍只保内存。此fixture实际选普通Shell，configurationId名称不赋OS隔离，相关CLI owner与fixture注释一并纠正。产品行为、预算及业务断言不变，未运行第三完整默认图。

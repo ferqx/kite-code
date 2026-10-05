@@ -8,7 +8,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { untilRecovery } from './recovery-profile';
 
-/** Explicit host permission policy and actual compatible SDK/default Shell factory; two confined processes. */
+/** Explicit host policy and actual compatible SDK; two independent ordinary Shell Jobs. */
 export async function callerJobProfile() {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-caller-jobs-')),
     workspace = join(root, 'workspace'),
