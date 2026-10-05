@@ -299,6 +299,101 @@ posixTest(
 );
 
 posixTest(
+  'cancel joins natural cleanup without repeating termination or the terminal',
+  async () => {
+    const f = await fixture();
+    const signalsPath = join(f.root, 'signals.txt');
+    const guardian = Bun.spawn([process.execPath, f.path], {
+      cwd: f.root,
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const frames: Record<string, unknown>[] = [];
+    const output = (async () => {
+      const reader = guardian.stdout.getReader();
+      const decoder = new TextDecoder();
+      let buffered = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        buffered += decoder.decode(value, { stream: !done });
+        while (buffered.includes('\n')) {
+          const boundary = buffered.indexOf('\n');
+          frames.push(JSON.parse(buffered.slice(0, boundary)));
+          buffered = buffered.slice(boundary + 1);
+        }
+        if (done) break;
+      }
+      expect(buffered).toBe('');
+    })();
+    const errors = new Response(guardian.stderr).text();
+    const nonce = crypto.randomUUID();
+    const pidFile = join(f.root, 'overlap-background.pid');
+    const readyFile = join(f.root, 'background.ready');
+    const background = `trap ${quote(`printf 'term\\n' >> ${quote(signalsPath)}`)} TERM; printf ready > ${quote(readyFile)}; i=0; while [ "$i" -lt 100 ]; do /bin/sleep 0.02; i=$((i + 1)); done`;
+    guardian.stdin.write(
+      `${JSON.stringify({
+        type: 'start',
+        nonce,
+        executable: '/bin/sh',
+        argv: [
+          '-c',
+          `/bin/sh -c ${quote(background)} & echo $! > ${quote(pidFile)}; while [ ! -f ${quote(readyFile)} ]; do /bin/sleep 0.01; done; exit 0`,
+        ],
+        cwd: f.root,
+        env: { PATH: '/usr/bin:/bin' },
+        graceMs: 500,
+      })}\n`,
+    );
+    let groupId: number | undefined;
+    let descendant: number | undefined;
+    try {
+      await until(() => {
+        const ready = frames.find((frame) => frame.type === 'ready');
+        if (!ready) return false;
+        groupId = Number(ready.processGroupId);
+        try {
+          descendant = Number(readFileSync(pidFile, 'utf8'));
+          return (
+            groupId > 1 &&
+            descendant > 1 &&
+            alive(descendant) &&
+            readFileSync(signalsPath, 'utf8') === 'term\n'
+          );
+        } catch {
+          return false;
+        }
+      });
+      // Before any cancel, the real descendant's TERM proves natural cleanup began.
+      // macOS deliberately keeps the exited original root unreaped until this cleanup ends.
+      guardian.stdin.write(`${JSON.stringify({ type: 'cancel', nonce })}\n`);
+      await until(() => guardian.exitCode !== null);
+      expect(await guardian.exited).toBe(0);
+      await output;
+      expect(await errors).toBe('');
+      expect(alive(descendant!)).toBe(false);
+      expect(readFileSync(signalsPath, 'utf8').trim().split('\n')).toEqual(['term']);
+      expect(frames.filter((frame) => frame.type === 'terminal')).toEqual([
+        expect.objectContaining({
+          nonce,
+          outcome: 'succeeded',
+          exitCode: 0,
+          groupStopped: true,
+          forced: true,
+        }),
+      ]);
+    } finally {
+      if (guardian.exitCode === null) guardian.stdin.end();
+      await until(() => guardian.exitCode !== null);
+      await guardian.exited;
+      await output;
+      await errors;
+      if (descendant) await until(() => !alive(descendant!));
+    }
+  },
+);
+
+posixTest(
   'unconfirmed terminal cannot report success; later stop proof does not rewrite unknown effect',
   async () => {
     const f = await fixture();

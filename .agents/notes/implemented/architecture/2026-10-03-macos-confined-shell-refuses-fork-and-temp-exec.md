@@ -24,3 +24,5 @@ Status: implemented
 真实普通/受限组合22项134断言通过，含允许 fork 的逃逸反例、拒绝 fork/daemon/setsid/foreign signal、真实 TCP/Unix 零 accept、复制临时 native execv 的 EPERM 和零 main marker、root/profile 漂移、EOF/SIGKILL 清理及源码外完整 manifest。日志 `/private/tmp/kite-confined-shell-tenth-qualified.log`；真实旧 Shell Service 4项51断言通过，日志 `/private/tmp/kite-confined-shell-service-qualified.log`。types/build/Biome/docs/边界/归属亦通过。修前 copied-temp 失败保留 `/private/tmp/kite-confined-shell-eighth-qualified.log`，其他 fixture 编译/终态期望中间失败没有改写为产品资格。
 
 负责事实见 [Jobs](../../../../packages/agent/src/jobs/README.md) 与[平台资产](../../../../packages/agent/src/platform/README.md)。
+
+2026-10-06 原组所有权与一次收尾加固见[原根保留决定](../bug-fix/2026-10-06-macos-shell-root-ownership.md)。它只替换 guardian 的 macOS child ownership，保留本记录的 deny-fork、临时程序执行拒绝和无 fallback 理由；未因此取得通用默认 Shell 或允许派生子进程的资格。

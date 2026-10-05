@@ -38,4 +38,4 @@ Node/Electron 宿主以 no-follow 打开准确 sibling fd，通过 child stdio �
 
 ## Shell guardian 与 macOS confinement
 
-[Shell Job owner](../jobs/README.md)负责可信固定 launcher、Seatbelt、资产/目录新鲜度与当前 macOS 资格。guardian 的私有帧承载固定 executable/argv 与可选准确 identity/profile digest，只在派发前复核并直接 spawn；它仍通过原私有 stdin EOF、TERM/KILL 和原组停止证明管理当前宿主进程生命周期。普通 POSIX process-group supervision 不覆盖允许 fork 后的 setsid/daemon 逃逸；confined factory 固定拒绝 fork，才使用其当前本机停止资格。该路径不提供授权、owner takeover、冷 handle 重建、Linux/Windows confinement 或可由 Model 声明的沙箱能力。
+[Shell Job owner](../jobs/README.md)负责可信固定 launcher、Seatbelt、资产/目录新鲜度与当前 macOS 资格。guardian 的私有帧承载固定 executable/argv 与可选准确 identity/profile digest，只在派发前复核；macOS 由私有 [owned-child port](process/darwin-owned-child.ts)保留准确原根直到组停止证明与精确回收，所有结束入口加入同一次 closing。它继续通过原私有 stdin EOF、TERM/KILL 和原组停止证明管理当前宿主进程生命周期；完整证明、资源所有权与测试范围在 Jobs owner 维护。普通 POSIX process-group supervision 不覆盖允许 fork 后的 setsid/daemon 逃逸；confined factory 固定拒绝 fork，才使用其当前本机停止资格。该路径不提供授权、owner takeover、冷 handle 重建、Linux/Windows confinement 或可由 Model 声明的沙箱能力。

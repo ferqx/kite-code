@@ -209,6 +209,8 @@ Shell Extension 属于每 Run 的实际绑定：`shell.launch` 经过普通 Tool
 
 [test/isolated/shell-configuration.test.ts](test/isolated/shell-configuration.test.ts) 验证真实 local compatible SDK、SQLite、已构建 guardian、Workspace cwd/固定 env、输出 read/wait、独立 Ask、拒权零进程效果、准确强制 stop、后台父轮结束后持有原绑定、单进程槽跨 Session 前进以及下一 Run 路由和原记录保持。这里只交付普通默认 Tool+Job 装配，现有 Shell Job/paired lifecycle 测试仍负责 EOF、SIGKILL、后代与 unknown 恢复证据；没有增加另一 manager、旧 runtime fallback 或生产安装资格声明。
 
+当前 macOS guardian 的原组所有权和一次收尾由 [Jobs owner](../../packages/agent/src/jobs/README.md)维护；本机 arm64 重建后，上述显式 Shell、实际 Service/Core 生命周期及受限声明补偿三文件合计 15/201 通过。它们继续消费原普通 Job/guardian，并保留 EOF、强杀后的 unknown 恢复和独立审批语义。默认 ProcessService 尚未传入可信 Shell 装配；本次所有权修复不授予该缺口、文件/网络沙箱或任意逃组后代资格。
+
 默认 Shell 的可信 command digest 固定实际 Tool/Job kind/definition/version、准确 command、Tool attached/detached、host configuration、canonical cwd、克隆的完整 env、实际 guardian/Bun/Shell bytes hash 和生效 grace/output queue；只排除新的 operation key。默认值与 Job 一致：200ms、256KiB。通用 Core 不按 Tool 名称猜命令或剥字段，非 Shell 默认仍用完整 input digest。两个新 key 的相同命令只在当前 policy 仍提供 same_command 且最终权限/epoch/必要义务成立时复用授权，Tool/Job 授权相互独立。真实 Shell/CLI/Client 组合 19 tests/180 assertions 通过，含环境/默认语义 hash 反例、命令变更重新审批、撤销后重新审批和 clear 提交后物理断线只查询原回执。
 
 默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`。`createDefaultProcessConfiguration({webFetch?})` 只接受可信宿主的 network policy/admission 与可选 extractor；缺省开发网络策略为 public，仍逐跳检查全部 DNS 地址、拒绝私有/保留/本机目标并固定真实 socket。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 仍独立经过 Core 的当前授权。实际元数据为 `network`/`unknown`、`safeRead:false`，off 为不可用；每个新 Run 封存准确 Tool 版本和非秘密 `snapshot.web`。JSONC 仅选择 Tool 与准确版本，不能提供网络权威、代理 header 或 SSRF 例外。工厂创建不进行 DNS、解析或网络 I/O。

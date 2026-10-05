@@ -1198,3 +1198,11 @@ Provider/Broker16/114、network7/61、lifecycle10/149与reconnection15/316、Cal
 前述 owned OAuth 切片已本地提交 `ba6644f3abefc6f5329220f86a3f9c55f1cebeee`，78个本任务路径与七项正常hook通过；无关AGENTS改动未纳入，没有push/PR。本片仅新增[Auth PTY](../../apps/cli/test/isolated/tui-mcp-auth-pty.test.ts)及两份fixture，不改生产行为。公开terminal candidate的80×24实际键盘沿Login→Refresh→Revoke→Login→Clear五次Review/独立Confirm，核五个完整原C/E与实际AS discovery/DCR/PKCE/callback/token/refresh/revoke；普通Ask由observer SDK按原ID/revision回答。Source与physical Workspace移除后，冷第二原ID选择零原GET，明确Check实际仅原Command和结果Query两GET、POST零、Vault/AS无新增；Model/MCP RPC零。完整资格及操作边界归[CLI owner](../../apps/cli/README.md#tui-mcp-http-认证与原申请)。
 
 当前原runTestJob/no-orphans单并发实际1pass/0fail/101assert、16.316s、exit0；packet SHA `8f5d04cd24c01c106e88798191d6f44cf65e9f880c472b8669d9bcbfd26135c0`核success/cleanupConfirmed与owned root删除，暖/冷PTY及三份Service退出收据齐全。独立审查核实际trace/wire/原身份和正常cleanup，Root当前CLI types、两TS只读Biome与Python AST各exit0。先前导航失败保留，最新完整Ink帧等待未扩大10s/12s/180s预算；不重跑完整默认图，也不把旧红/未运行范围改为通过。临时Vault/fetch callback不代系统浏览器、原生OAuth组合、异常cleanup、cursor保持、A→B或其他平台；37项仍partial，§35/适用T-E、持续Soak和正式旧路径完整退役未完成，Goal active。
+
+## 2026-10-06：macOS guardian 原根所有权与一次收尾
+
+原自然退出与 cancel 交错的真实重复 TERM 已修复；所有收尾入口共用一次 closing。macOS 改由 native owner 启动和保留准确原根，组停止证明、输出排空及精确回收后才释放身份，回收后零组信号。完整边界归 [Jobs owner](../../packages/agent/src/jobs/README.md)，长期取舍归[原根保留决定](../../.agents/notes/implemented/bug-fix/2026-10-06-macos-shell-root-ownership.md)。产品取消、独立审批和未知恢复预期经手册核对不变。
+
+当前 arm64/Bun 1.4.2 native 6/74、普通 Shell 最新 10/52、现有 Service/Core、显式 Shell 与严格受限补偿三文件 15/201 实际通过；严格 confined 原 13 项在相同生产输入通过。Agent 正常 build/types、四文件 Biome 与独立只读审查通过。首次 native 竞态 fixture 等根 PID 消失而超时，改为 cancel 前真实后代 TERM 观测后通过；原 5000ms 和终态/准确清理断言保留。原红与当前日志在 Note 维护，不把局部结果拼成完整默认图通过。
+
+仅原 group 所有权取得本机资格；strict deny-fork、文件/网络/保护根与 temp 合同未变。默认 ProcessService 仍无可信 Shell 绑定；已有 allow-fork 私有探针需额外拒绝 posix_spawn，尚无通用 Bun/Node 工具链资格，不能据此默认启用不受限后端。x86_64 实跑、Linux/Windows、完整进程树和生产默认 Shell 仍有缺口；37项继续 partial，§35/适用T-E、正式旧路径退役与持续 Soak 未完成，Goal active。

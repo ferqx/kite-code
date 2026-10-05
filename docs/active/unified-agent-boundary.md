@@ -138,6 +138,8 @@ Skill知识目录属于Service宿主：公共只读目录和实际Run装配共�
 
 专用 profile `skill-workflow.jsonc` 默认关闭三项特性，纳入[维护原字节资产](../../packages/agent/src/maintenance/README.md)，不因恢复或缺文件自动启用。原 operation 等待超过有限观测窗口仍只查询原工作；没有隐藏重启器。声明补偿在原 Workspace 内契约、可信 policy 与实际 macOS confined 后端齐备时，使用独立 ordinary `skill.workflow.compensate@1`、原 accepted decision、一次 opening/operation 与 minimum:user 审批。完整原字节含二进制被封入只读副本，固定 Bun 在原 Workspace 执行，实际网络/fork/保护写拒绝；guardian 未确认仍保 unknown 和资产。compensated 不改 failed，也不替代新验证或准确 waiver。当前仅禁止子进程模式，完整恢复、正式入口和平台范围继续按[实施进度](../plans/unified-agent-refactor-v1-progress.md)闭合；取舍见[补偿记录](../../.agents/notes/implemented/architecture/2026-10-03-declared-workflow-compensation.md)。
 
+macOS 普通 Shell 与严格受限补偿共用 guardian 的原组所有权和唯一 closing；原根保持未回收直到真实停止证明，晚到取消加入原收尾，不重发组信号或覆盖原终态。完整实现与本机 arm64 消费者资格归 [Jobs owner](../../packages/agent/src/jobs/README.md)。这只加固原组监督；严格 deny-fork、权限/恢复语义及默认 ProcessService 未装配 Shell 的边界保持。
+
 ## 新终端候选边界
 
 `release:terminal` 将六个新 workspace、实际 npm 图、固定 Bun 和全部宿主资产封存在独立候选，完整 manifest 身份交给 CLIServiceArtifact 与客户端准入。安装发布 current/previous 指针，已经运行的 CLI/TUI/Service 固定原 candidate；独立 daemon 的 artifact lease 不依赖启动 CLI 存活。归档、目录持久化、卸载白名单与平台限制由[终端 owner](../../apps/cli/docs/terminal-release.md)完整维护。制品锁不取得 Profile 或业务权限；unsigned SHA 只证明完整性，真实沙箱、发布者身份及旧正式入口退役仍须原有资格。

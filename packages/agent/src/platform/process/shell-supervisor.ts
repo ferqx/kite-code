@@ -5,6 +5,7 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from '../../jobs/launch-identity';
+import { type DarwinOwnedChild, startDarwinOwnedChild } from './darwin-owned-child';
 
 interface Request {
   nonce: string;
@@ -19,11 +20,11 @@ interface Request {
 }
 const MAX_FRAME = 1024 * 1024;
 let request: Request | undefined;
-let child: ChildProcess | undefined;
+let child: Pick<ChildProcess, 'pid' | 'stdout' | 'stderr'> | undefined;
+let ownedChild: DarwinOwnedChild | undefined;
 let buffer = '';
 let closing: Promise<void> | undefined;
 let parentGone = false;
-let terminal = false;
 let childExit: Promise<number | null> | undefined;
 let outputDrain: Promise<unknown> | undefined;
 
@@ -33,7 +34,7 @@ async function send(frame: object): Promise<void> {
     process.stdout.write(`${JSON.stringify({ nonce: request?.nonce, ...frame })}\n`, (error) => {
       if (error) {
         parentGone = true;
-        void stop(true);
+        void stop();
       }
       resolve();
     });
@@ -41,14 +42,14 @@ async function send(frame: object): Promise<void> {
 }
 process.stdout.on('error', () => {
   parentGone = true;
-  void stop(true);
+  void stop();
 });
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk: string) => {
   buffer += chunk;
   if (buffer.length > MAX_FRAME) {
     parentGone = true;
-    void stop(true);
+    void stop();
     return;
   }
   while (buffer.includes('\n')) {
@@ -79,25 +80,25 @@ process.stdin.on('data', (chunk: string) => {
           throw new Error('invalid_private_start');
         request = frame as unknown as Request;
         void start();
-      } else if (frame.type === 'cancel' && frame.nonce === request.nonce) void stop(false);
+      } else if (frame.type === 'cancel' && frame.nonce === request.nonce) void stop();
       else throw new Error('invalid_private_control');
     } catch {
       parentGone = true;
-      void stop(true);
+      void stop();
     }
   }
 });
 process.stdin.on('end', () => {
   parentGone = true;
-  void stop(true);
+  void stop();
 });
 process.stdin.on('error', () => {
   parentGone = true;
-  void stop(true);
+  void stop();
 });
 process.on('SIGTERM', () => {
   parentGone = true;
-  void stop(true);
+  void stop();
 });
 
 function groupAlive(pid: number): boolean {
@@ -165,21 +166,33 @@ async function start(): Promise<void> {
           .digest('hex') !== input.profileDigest)
     )
       throw Error('confined_profile_changed');
-    child = spawn(input.executable, input.argv, {
-      cwd: input.cwd,
-      env: input.env,
-      detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    if (process.platform === 'darwin') {
+      ownedChild = startDarwinOwnedChild({
+        executable: input.executable,
+        argv: input.argv,
+        cwd: input.cwd,
+        env: input.env,
+      });
+      child = ownedChild;
+      childExit = ownedChild.exited;
+    } else {
+      const spawned = spawn(input.executable, input.argv, {
+        cwd: input.cwd,
+        env: input.env,
+        detached: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child = spawned;
+      childExit = new Promise((resolve) => {
+        spawned.once('exit', (code) => resolve(code));
+        spawned.once('error', () => resolve(null));
+      });
+      await new Promise<void>((resolve, reject) => {
+        spawned.once('spawn', resolve);
+        spawned.once('error', reject);
+      });
+    }
     const processChild = child;
-    childExit = new Promise((resolve) => {
-      processChild.once('exit', (code) => resolve(code));
-      processChild.once('error', () => resolve(null));
-    });
-    await new Promise<void>((resolve, reject) => {
-      processChild.once('spawn', resolve);
-      processChild.once('error', reject);
-    });
     await send({ type: 'ready', processGroupId: processChild.pid, supervisorPid: process.pid });
     const outputs = Promise.all([
       drain(processChild.stdout!, 'stdout'),
@@ -187,73 +200,45 @@ async function start(): Promise<void> {
     ]);
     outputDrain = outputs;
     void outputs.catch(() => {
-      void stop(false);
+      void stop();
     });
     const code = await childExit;
-    if (closing) {
-      await closing;
-      return;
-    }
     // A shell can exit with background descendants. Its terminal includes group cleanup, not pid-only exit.
-    const stopped = await terminateGroup(processChild.pid!);
-    if (!stopped.confirmed) {
-      processChild.stdout?.destroy();
-      processChild.stderr?.destroy();
-    }
-    await outputs.catch(() => {});
-    if (stopped.confirmed && request?.runtimeTemp) {
-      try {
-        removeRuntimeTemp(request.runtimeTemp);
-      } catch {
-        stopped.confirmed = false;
-      }
-    }
-    await send({
-      type: 'terminal',
-      outcome: stopped.confirmed ? (code === 0 ? 'succeeded' : 'failed') : 'outcome_unknown',
-      exitCode: code,
-      groupStopped: stopped.confirmed,
-      forced: stopped.forced,
-    });
-    terminal = true;
-    process.exit(stopped.confirmed ? 0 : 125);
+    await close(code === 0 ? 'succeeded' : 'failed', code);
   } catch {
-    const stopped = child?.pid
-      ? await terminateGroup(child.pid)
-      : { confirmed: true, forced: false };
-    child?.stdout?.destroy();
-    child?.stderr?.destroy();
-    if (stopped.confirmed && request?.runtimeTemp) {
-      try {
-        removeRuntimeTemp(request.runtimeTemp);
-      } catch {
-        stopped.confirmed = false;
-      }
-    }
-    await send({
-      type: 'terminal',
-      outcome: stopped.confirmed ? 'failed' : 'outcome_unknown',
-      exitCode: null,
-      groupStopped: stopped.confirmed,
-      forced: stopped.forced,
-    });
-    terminal = true;
-    process.exit(125);
+    await close('failed', null, true);
   }
 }
-function stop(exitWithoutParent: boolean): Promise<void> {
+function stop(): Promise<void> {
+  if (closing) return closing;
+  if (!child?.pid) process.exit(125);
+  return close('cancelled', null);
+}
+function close(
+  outcome: 'succeeded' | 'failed' | 'cancelled',
+  exitCode: number | null,
+  helperFailure = false,
+): Promise<void> {
   if (closing) return closing;
   closing = (async () => {
-    if (!child?.pid) {
-      process.exit(125);
-    }
-    const stopped = await terminateGroup(child.pid);
+    const stopped = child?.pid
+      ? await (ownedChild
+          ? ownedChild.terminateGroup(request?.graceMs ?? 200)
+          : terminateGroup(child.pid))
+      : { confirmed: true, forced: false };
     if (stopped.confirmed) await childExit;
     else {
-      child.stdout?.destroy();
-      child.stderr?.destroy();
+      child?.stdout?.destroy();
+      child?.stderr?.destroy();
     }
     await outputDrain?.catch(() => {});
+    if (stopped.confirmed && ownedChild) {
+      try {
+        ownedChild.reapAfterConfirmedStop();
+      } catch {
+        stopped.confirmed = false;
+      }
+    }
     if (stopped.confirmed && request?.runtimeTemp) {
       try {
         removeRuntimeTemp(request.runtimeTemp);
@@ -261,17 +246,14 @@ function stop(exitWithoutParent: boolean): Promise<void> {
         stopped.confirmed = false;
       }
     }
-    if (!terminal) {
-      await send({
-        type: 'terminal',
-        outcome: stopped.confirmed ? 'cancelled' : 'outcome_unknown',
-        exitCode: null,
-        groupStopped: stopped.confirmed,
-        forced: stopped.forced,
-      });
-      terminal = true;
-    }
-    process.exit(exitWithoutParent ? (stopped.confirmed ? 0 : 125) : stopped.confirmed ? 0 : 125);
+    await send({
+      type: 'terminal',
+      outcome: stopped.confirmed ? outcome : 'outcome_unknown',
+      exitCode,
+      groupStopped: stopped.confirmed,
+      forced: stopped.forced,
+    });
+    process.exit(stopped.confirmed && !helperFailure ? 0 : 125);
   })();
   return closing;
 }
