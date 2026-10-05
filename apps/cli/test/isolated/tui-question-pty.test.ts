@@ -18,8 +18,8 @@ import { verifyTerminalBundle } from '../../host/terminal-artifact';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-const detail = '  原文 café e\u0301 🧭\n第二行保持空格  ';
-const custom = '  自定义 / @ 🚚 e\u0301  ';
+const detail = '  原文 / @ café e\u0301 🧭\n第二行保持空格  ';
+const custom = 'q3-o1';
 async function until<T>(label: string, read: () => Promise<T | undefined>): Promise<T> {
   const deadline = performance.now() + 10000;
   for (;;) {
@@ -31,7 +31,7 @@ async function until<T>(label: string, read: () => Promise<T | undefined>): Prom
 }
 type Wire = { method: string; path: string; body?: Record<string, unknown> };
 
-test('actual 80x24 TUI original schema wizard preserves labeled original IDs, edited Unicode text and Custom answer; only final Answer completes original Tool and Run', async () => {
+test('actual 80x24 default ask_user wizard preserves labeled original IDs, edited Unicode text and Custom answer; only final Answer completes original Tool and Run', async () => {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-tui-question-'));
   const evidence = `/private/tmp/kite-tui-question-evidence-${randomUUID()}`;
   mkdirSync(evidence, { mode: 0o700 });
@@ -52,6 +52,13 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
   let build: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   let observer: ReturnType<typeof createClient> | undefined;
   let control: ReturnType<typeof Bun.serve> | undefined;
+  let provider: ReturnType<typeof Bun.serve> | undefined;
+  const modelRequests: {
+    messages: { role: string; content: string }[];
+    tools?: {
+      function: { name: string; description: string; parameters: Record<string, unknown> };
+    }[];
+  }[] = [];
   const controlWork = new Set<Promise<Response>>();
   const facts: unknown[] = [];
   let original: Interaction | undefined,
@@ -76,6 +83,13 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
   try {
     const sourceSha256 = Object.fromEntries(
       [
+        'packages/agent/package.json',
+        'packages/agent/src/tools/ask-user/index.ts',
+        'apps/service/src/configuration.ts',
+        'apps/service/src/configuration-defaults.ts',
+        'apps/service/src/configuration-management.ts',
+        'apps/service/src/assembly.ts',
+        'apps/service/src/permissions.ts',
         'packages/agent/src/storage/sqlite/interaction-operations.ts',
         'packages/ui/src/tui/index.tsx',
         'packages/ui/src/tui/question.ts',
@@ -136,6 +150,99 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
     writeFileSync(join(profile.profilePath, 'ui/preferences.jsonc'), '{"language":"en-US"}', {
       mode: 0o600,
     });
+    provider = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as (typeof modelRequests)[number];
+        modelRequests.push(body);
+        const chunk = (delta: unknown, reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'owned-question', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+        const answered = body.messages.some((message) => message.role === 'tool');
+        return new Response(
+          chunk(
+            answered
+              ? { content: 'OWNED_QUESTION_COMPLETE' }
+              : {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'owned-question-call',
+                      type: 'function',
+                      function: {
+                        name: 'ask_user',
+                        arguments: JSON.stringify({
+                          questions: [
+                            {
+                              question: 'Choose original route',
+                              options: [
+                                {
+                                  label: 'First original route',
+                                  description: 'First route description',
+                                  recommended: true,
+                                },
+                                {
+                                  label: 'Second original route',
+                                  description: 'Second route description',
+                                },
+                              ],
+                            },
+                            {
+                              question: 'Write original detail',
+                              options: [
+                                {
+                                  label: 'Brief detail',
+                                  description: 'Give a brief original detail',
+                                },
+                                {
+                                  label: 'Full detail',
+                                  description: 'Give the complete original text',
+                                },
+                              ],
+                            },
+                            {
+                              question: 'Choose final delivery',
+                              options: [
+                                {
+                                  label: 'Original delivery option',
+                                  description:
+                                    'Choose this option or enter your original custom text',
+                                },
+                                {
+                                  label: 'Alternative delivery',
+                                  description: 'Use an alternative route',
+                                },
+                              ],
+                            },
+                          ],
+                        }),
+                      },
+                    },
+                  ],
+                },
+            null,
+          ) +
+            chunk({}, answered ? 'stop' : 'tool_calls') +
+            'data: [DONE]\n\n',
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      },
+    });
+    writeFileSync(
+      join(profile.profilePath, 'config.jsonc'),
+      JSON.stringify({
+        modelId: 'local',
+        models: [
+          {
+            id: 'local',
+            provider: 'compatible',
+            model: 'local',
+            baseURL: `${provider.url.href}v1`,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
     async function connected() {
       if (observer) return observer;
       const privateObserver = await until('observer', async () =>
@@ -187,6 +294,11 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
           stage === 'custom'
         ) {
           original ??= await pending();
+          const offered = modelRequests[0]!.tools!.find(
+            (tool) => tool.function.name === 'ask_user',
+          )!.function;
+          expect(offered.description).toContain('one to three');
+          expect(offered.parameters.required).toEqual(['questions']);
           expect(answers()).toHaveLength(0);
           const actual = await (await connected()).getInteraction(sessionId, original.id, {
             storeId,
@@ -195,13 +307,13 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
           expect(actual.revision).toBe(original.revision);
           expect(actual.executionId).toBe(original.executionId);
           expect(actual.runId).toBe(original.runId);
-          expect(actual.definitionId).toBe('fixture.question');
+          expect(actual.definitionId).toBe('ask_user');
           expect(actual.definitionVersion).toBe('1');
           expect(actual.originStoreId).toBe(storeId);
           expect((await (await connected()).getRun(original.runId!)).status).toBe(
             'waiting_interaction',
           );
-          expect(rows('tool.jsonl')).toEqual([{ stage: 'entered' }]);
+          expect(modelRequests).toHaveLength(1);
           facts.push({
             stage,
             interactionId: original.id,
@@ -225,7 +337,7 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
           expect(post.path).toBe(`/v1/sessions/${sessionId}/interactions/${original!.id}/answer`);
           expect(post.body!.expectedStoreId).toBe(storeId);
           expect(post.body!.expectedRevision).toBe(original!.revision);
-          const expected = { q1: 'route-b', q2: detail, q3: custom };
+          const expected = { q1: 'q1-o2', q2: { text: detail }, q3: { text: custom } };
           expect(post.body!.answer).toEqual({ kind: 'question', answers: expected });
           const saved = await (await connected()).getInteraction(sessionId, original!.id, {
             storeId,
@@ -238,13 +350,19 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
           expect(saved.request).toEqual(original!.request);
           expect(saved.sessionId).toBe(original!.sessionId);
           expect(saved.originStoreId).toBe(original!.originStoreId);
-          expect(rows('tool.jsonl')).toEqual([
-            { stage: 'entered' },
-            { stage: 'answered', answer: expected },
-          ]);
+          expect(modelRequests).toHaveLength(2);
+          const result = modelRequests[1]!.messages.find((message) => message.role === 'tool');
+          expect(result).toBeDefined();
+          expect(JSON.parse(result!.content)).toEqual({
+            answer: `Choose original route: Second original route\nWrite original detail: ${detail}\nChoose final delivery: ${custom}`,
+            answers: { q1: 'Second original route', q2: detail, q3: custom },
+          });
           expect(wire().filter((row) => row.body?.kind === 'run.start')).toHaveLength(1);
           expect(observerReads.every((row) => row.method === 'GET')).toBe(true);
-          facts.push({ stage, original, saved, run, answerPost: post, tool: rows('tool.jsonl') });
+          const execution = await (await connected()).getExecution(original!.executionId!);
+          expect(execution.status).toBe('succeeded');
+          expect(execution.definitionId).toBe('ask_user');
+          facts.push({ stage, original, saved, run, answerPost: post, execution });
           return Response.json({ checked: true });
         }
         throw Error('owned_question_unknown_control');
@@ -299,6 +417,7 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
   } finally {
     observer?.disposeNetwork();
     await control?.stop(true);
+    await provider?.stop(true);
     await Promise.allSettled([...controlWork]);
     globalThis.fetch = originalFetch;
     if (python && python.exitCode === null)
@@ -316,7 +435,7 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
         cleanupErrors.push(Error('owned_service_exit_unconfirmed'));
     for (const name of [
       'ui-http.jsonl',
-      'tool.jsonl',
+      'credentials.jsonl',
       'permissions.jsonl',
       'owned-service.jsonl',
       'service-exit.jsonl',
@@ -334,9 +453,10 @@ test('actual 80x24 TUI original schema wizard preserves labeled original IDs, ed
         error instanceof Error ? error.message : 'unknown',
       ),
       facts,
+      modelRequests,
       observerReads,
       scope:
-        'Explicit fixed-model harmless Tool requestInput with original oneOf labels, bounded string and anyOf Custom; source-free development candidate; actual macOS 80x24 keyboard; no default ask_user or installed/platform qualification',
+        'Default production ask_user via compatible loopback Provider and temporary credential backend; canonical three questions with explicit closed text Custom; source-free development candidate; actual macOS 80x24 keyboard; no native vault, paid Provider or installed/platform qualification',
     };
     writeFileSync(join(evidence, 'result.json'), JSON.stringify(packet, null, 2), { mode: 0o600 });
     console.error(

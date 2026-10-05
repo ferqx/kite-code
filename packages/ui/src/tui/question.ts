@@ -7,6 +7,8 @@ export type QuestionField = {
   description?: string;
   choices: Choice[];
   text: boolean;
+  /** Original closed single-property object used by an explicit custom-text branch. */
+  textKey?: string;
   required: boolean;
   minLength?: number;
   maxLength?: number;
@@ -27,6 +29,38 @@ const metadata = ['title', 'description'];
 const simple = (v: unknown) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
 const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
 function field(schema: unknown, required: boolean, key?: string): QuestionField | undefined {
+  if (record(schema) && schema.type === 'object') {
+    if (
+      Object.keys(schema).some(
+        (k) => ![...metadata, 'type', 'properties', 'required', 'additionalProperties'].includes(k),
+      ) ||
+      schema.additionalProperties !== false ||
+      !record(schema.properties)
+    )
+      return;
+    const entries = Object.entries(schema.properties);
+    if (entries.length !== 1) return;
+    const [textKey, textSchema] = entries[0]!;
+    if (
+      textKey === '__proto__' ||
+      !Array.isArray(schema.required) ||
+      schema.required.length !== 1 ||
+      schema.required[0] !== textKey ||
+      !record(textSchema) ||
+      textSchema.type !== 'string'
+    )
+      return;
+    const parsed = field(textSchema, true);
+    if (!parsed?.text || parsed.choices.length || parsed.textKey !== undefined) return;
+    return {
+      ...parsed,
+      key,
+      title: text(schema.title) ?? key,
+      description: text(schema.description),
+      required,
+      textKey,
+    };
+  }
   if (
     !record(schema) ||
     Object.keys(schema).some(
@@ -40,10 +74,12 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
           'anyOf',
           'minLength',
           'maxLength',
+          'pattern',
         ].includes(k),
     )
   )
     return;
+  if ('pattern' in schema && schema.pattern !== '\\S') return;
   if (['const', 'enum', 'oneOf', 'anyOf'].filter((k) => k in schema).length > 1) return;
   if ('const' in schema && !simple(schema.const)) return;
   if (
@@ -72,7 +108,8 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
   if (minLength !== undefined && maxLength !== undefined && minLength > maxLength) return;
   const lengthValid = (value: unknown) =>
     typeof value !== 'string' ||
-    ((minLength === undefined || Array.from(value).length >= minLength) &&
+    ((schema.pattern === undefined || value.trim().length > 0) &&
+      (minLength === undefined || Array.from(value).length >= minLength) &&
       (maxLength === undefined || Array.from(value).length <= maxLength));
   const compatible = (value: unknown) =>
     schema.type === undefined ||
@@ -118,7 +155,7 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
   const union = schema.oneOf ?? schema.anyOf;
   if (Array.isArray(union) && union.length) {
     const choices: Choice[] = [];
-    let free = false;
+    let free: QuestionField | undefined;
     for (const branch of union) {
       if (!record(branch) || 'oneOf' in branch || 'anyOf' in branch) return;
       const parsed = field(branch, required, key);
@@ -126,22 +163,31 @@ function field(schema: unknown, required: boolean, key?: string): QuestionField 
       if (parsed.text) {
         if (
           free ||
-          parsed.minLength !== undefined ||
-          parsed.maxLength !== undefined ||
+          (parsed.textKey === undefined &&
+            (parsed.minLength !== undefined || parsed.maxLength !== undefined)) ||
           schema.oneOf
         )
           return;
-        free = true;
+        free = parsed;
       }
       choices.push(...parsed.choices);
     }
     if (new Set(choices.map((c) => JSON.stringify(c.value))).size !== choices.length) return;
     if (
       !choices.every((c) => compatible(c.value) && lengthValid(c.value)) ||
-      (free && schema.type !== undefined && schema.type !== 'string')
+      (free &&
+        schema.type !== undefined &&
+        schema.type !== (free.textKey === undefined ? 'string' : 'object'))
     )
       return;
-    return { ...base, text: free, choices };
+    return {
+      ...base,
+      text: free !== undefined,
+      choices,
+      textKey: free?.textKey,
+      minLength: free?.textKey === undefined ? minLength : free.minLength,
+      maxLength: free?.textKey === undefined ? maxLength : free.maxLength,
+    };
   }
   if (schema.type === 'string') return { ...base, text: true, choices: [] };
   return undefined;
@@ -199,7 +245,10 @@ export function questionValue(
     draft.buffer.text.trim() &&
     !questionLengthError(field, draft.buffer.text)
   )
-    return { value: draft.buffer.text };
+    return {
+      value:
+        field.textKey === undefined ? draft.buffer.text : { [field.textKey]: draft.buffer.text },
+    };
   return undefined;
 }
 export function questionAnswer(form: QuestionForm, draft: QuestionDraft): string | undefined {

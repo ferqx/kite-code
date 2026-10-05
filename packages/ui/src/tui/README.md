@@ -12,7 +12,7 @@
 
 审批输入 `approve` 缺省一次；只有原卡 request.grants 提供时可输入 `approve same_command`。Esc 只拒绝审批，Ctrl+C 是原 work 取消；普通 question 使用下述原 schema 步骤面板，复杂输入仍明确使用原 JSON，内部 choice ID 保留，服务端仍完整校验；计划批准只接受原 offered auto/accept_edits，不创建工具授权。空答案、EOF 和关闭没有默认批准。原卡附件必须经宿主公共完整 hash/UTF-8 reader 读取后才可答复，Ctrl+A 显式读取；未知回答只允许核实原 Command。保存答案并不代表 Core 已接纳或工具派发成功。
 
-[questionForm](question.ts)只将完整可表达的标量 string、enum/const、互不重叠的 oneOf 选择及明确 anyOf string 自定义分支转为单题或浅 object 步骤。[QuestionPanel](question-panel.tsx)展示原 title/description；选择提交原值，字段键不重命名。封闭 enum 不添加 Custom；复杂、嵌套、重叠或无法完整保留约束的 schema 回退显式 JSON。required 核实际自身 properties，当前 Core 不支持的 `__proto__` 属性/必填键也不生成表单。字符串 min/maxLength 按 Unicode codepoint 核对，编辑仍沿 ComposerBuffer 字符簇、光标和多行 paste，不 trim 或截断原文。问题/选项正文与原答案不翻译，自有提示沿当前终端语言呈现。
+[questionForm](question.ts)只将完整可表达的标量 string、enum/const、互不重叠的 oneOf 选择及明确 anyOf 自定义分支转为单题或浅 object 步骤。Custom 可保原 string，或保一个 required 字符串属性且 additionalProperties:false 的闭合原对象；后者用于默认 ask_user，使同字自由文本与选项 ID 不混淆。[QuestionPanel](question-panel.tsx)展示原 title/description；选择提交原值，字段键不重命名。封闭 enum 不添加 Custom；其他复杂、嵌套、重叠或无法完整保留约束的 schema 回退显式 JSON。required 核实际自身 properties，当前 Core 不支持的 `__proto__` 属性/必填键也不生成表单。字符串 min/maxLength 按 Unicode codepoint 核对，仅准确 pattern `\\S` 表达非空白；其他正则仍回退。编辑沿 ComposerBuffer 字符簇、光标和多行 paste，不 trim 或截断原文。问题/选项正文与原答案不翻译，自有提示沿当前终端语言呈现。
 
 步骤草稿按完整 interactionKey 的 Store/source Session/presentation Session/id/revision 保留，Esc 返回上题并保留后题内容；卡版本变化清旧草稿。首选项未选、空白自由答案、尚无答案且未明确跳过的 optional 字段均不推进。最后一步才调用原 controller.answer；附件未读完、stale/loading、原答案 pending/unknown 或已经保存时不增加 Answer。后继卡或切会话不能重绑原未知回执。局部键盘覆盖见[questions.test.tsx](../../test/tui/questions.test.tsx)，当前真实多题、逐项标题/原 ID、自定义原文与正常退出资格由[CLI owner](../../../../apps/cli/README.md#tui-普通问题步骤)维护。
 
@@ -36,7 +36,7 @@ Context 有独立读取取消域、固定选择与双游标，明确是当前投
 
 写入封存确认时原 Store、Session/Workspace、两份模式 revision 或信任范围 hashes 与 revision；最多保留 128 个未决意图且不淘汰未知。重复/未知只 K 查询原 mutation，不再次 POST；CAS 失败不采纳新 revision 重试。只在原顶层 request.grants 提供时，原 approval 上下选项才包含 same_command；没有选择时 Enter 零回答，新卡/决定版本不能沿用旧选项。plan/question 与 Model 批准不制造 Tool/Job grant。保存控制或答案只显示原回执，不声称已派发或停止。
 
-[权限 controller 测试](../../test/tui/permissions.test.tsx) 验证原 CAS、迟到、关闭、child 继承与未知原查询；实际 macOS PTY 的 [child 卡测试](../../test/isolated/tui/child-permissions.test.ts) 两项保留原 child/presentation 根关系，完成例批准与问题均通过原卡，EOF 例 child 等待、父 Tool 实际等待 child、零回答/效果。实际默认 Shell 同命令 grant 保存/清除与 mode/trust 的配对证据由 [CLI owner](../../../../apps/cli/README.md) 维护。这仍未切换正式旧 TUI、三平台终端或完整设置/多题 UX。
+[权限 controller 测试](../../test/tui/permissions.test.tsx) 验证原 CAS、迟到、关闭、child 继承与未知原查询；实际 macOS PTY 的 [child 卡测试](../../test/isolated/tui/child-permissions.test.ts) 两项保留原 child/presentation 根关系，完成例批准与问题均通过原卡，EOF 例 child 等待、父 Tool 实际等待 child、零回答/效果。实际默认 Shell 同命令 grant 保存/清除与 mode/trust 的配对证据由 [CLI owner](../../../../apps/cli/README.md) 维护。这些 child 与权限断言未建立三平台终端或完整设置资格。
 
 
 `/export` 仅冻结当前已加载会话的 user/assistant 文本与已验证 loaded reasoning，调用 [纯 Markdown serializer](export.ts) 和宿主有限 `TuiExportPort`。组件不接受目标路径，不读取历史/全文，不创建执行；未读 Model output 保留当前真实 preview 并明确注明，不将 metadata 或 Artifact 引用当正文。Ctrl+O 完整校验成功后，视图同时保留 content/reasoning 供导出；普通屏仍不默认展示 reasoning。已加载 Markdown 按不可变正文复用解析和渲染节点，输入草稿与导出 notice 更新不会反复解析整份大正文。运行中仅反映点击时加载的前缀，Tool、审批、诊断不是此 Markdown 导出内容。会话切换/卸载 abort 本视图写入等待，迟到成功不写入新会话提示；写失败保留 `Export failed`。

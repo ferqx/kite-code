@@ -10,6 +10,7 @@ import {
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { validateWorkflowArguments } from '@kite-ai/agent/skill-workflow';
 import type { z } from 'zod';
+import { defaultConfiguration } from './configuration-defaults';
 import {
   SkillCataloguePageSchema,
   type SkillCatalogueQuerySchema,
@@ -105,7 +106,7 @@ export function createDefaultSkillCatalogueSource(options: {
       let effective: ReturnType<typeof resolveConfiguration>;
       try {
         effective = resolveConfiguration({
-          defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+          defaults: defaultConfiguration,
           user: readConfigurationFile({
             path: join(profile.profilePath, 'config.jsonc'),
             windowsPathPolicy: 'private',

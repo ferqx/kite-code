@@ -491,6 +491,71 @@ test('question unions preserve option IDs, titles and original multi-question an
   }
 });
 
+test('question exact nonblank string pattern rejects whitespace transactionally and preserves original answers', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('nonblank');
+    await f.dispatch('nonblank');
+    const schema: Json = {
+      type: 'object',
+      properties: {
+        q1: {
+          anyOf: [
+            { const: 'q1-o1' },
+            {
+              type: 'object',
+              properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+              required: ['text'],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ['q1'],
+      additionalProperties: false,
+    };
+    for (const [index, text] of [
+      '  自定义 Unicode 🪁 答案  ',
+      ' first\nsecond / @ q1-o1 ',
+      '\u0000',
+    ].entries()) {
+      const id = `nonblank-${index}`;
+      await f.store.requestInteraction({
+        ...f.request(id, 'nonblank', 'question'),
+        request: { schema },
+      });
+      const get = () =>
+        f.store.getInteraction({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          interactionId: id,
+        });
+      expect((await get())!.request).toEqual({ schema });
+      for (const [badIndex, blank] of ['', ' \t\r\n ', '\u00a0\u2028\u2029\ufeff'].entries()) {
+        const commandId = `blank-${index}-${badIndex}`;
+        const cursor = (await f.store.getMetadata()).lastChangeCursor;
+        await rejected(
+          f.store.answerInteraction(
+            f.answer(id, commandId, { kind: 'question', answers: { q1: { text: blank } } }),
+          ),
+          'interaction_answer_invalid',
+        );
+        expect(await f.store.getCommand(commandId)).toBeNull();
+        expect((await get())!.answer).toBeNull();
+        expect((await get())!.state).toBe('pending');
+        expect((await get())!.revision).toBe('1');
+        expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      }
+      const answer: InteractionAnswer = { kind: 'question', answers: { q1: { text } } };
+      await f.store.answerInteraction(f.answer(id, `answer-${id}`, answer));
+      expect((await get())!.answer).toEqual(answer);
+      expect((await get())!.state).toBe('answered');
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('question oneOf rejects overlapping matches while anyOf accepts them', async () => {
   const f = await fixture();
   try {
@@ -533,7 +598,26 @@ test('question unions retain closed keywords and schema depth/node budgets with 
       for (let i = 0; i < levels; i++) result = { additionalProperties: result };
       return { anyOf: [result] };
     };
+    const invalidPatterns: Json[] = [
+      '.*',
+      '\\S+',
+      '(a+)+$',
+      'a|b',
+      '(?=a)',
+      '',
+      1,
+      null,
+      {},
+      ['\\S'],
+    ];
     const invalid: Json[] = [
+      ...invalidPatterns.flatMap((pattern) => [
+        { type: 'string', pattern },
+        ...['oneOf', 'anyOf'].flatMap((union) => [
+          { [union]: [{ type: 'string', pattern }, { const: 'safe' }] },
+          { [union]: [{ const: 'safe' }, { type: 'string', pattern }] },
+        ]),
+      ]),
       ...['oneOf', 'anyOf'].flatMap((union) => [
         { [union]: [] },
         { [union]: {} },

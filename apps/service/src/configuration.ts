@@ -9,6 +9,7 @@ import {
   type RunConfiguration,
   type RuntimeOptions,
 } from '@kite-ai/agent';
+import { createAskUserExtension } from '@kite-ai/agent/ask-user';
 import {
   ConfigurationError,
   type CredentialBackend,
@@ -43,6 +44,7 @@ import {
   type SkillSelection,
 } from './child-configuration';
 import { createSummaryCompressor } from './compression-configuration';
+import { defaultConfiguration } from './configuration-defaults';
 import { createConfigurationManagement } from './configuration-management';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
 import { createDefaultHostStatusSource } from './host-status';
@@ -203,7 +205,8 @@ function hostReadOnlyTool(extensionId: string, toolId: string) {
       ['files.read', 'files.list', 'files.glob', 'files.search'].includes(toolId)) ||
     (extensionId === 'builtin.skills' && ['skills.load', 'skills.resource'].includes(toolId)) ||
     (extensionId === 'builtin.mcp.sources' && toolId === 'mcp.sources.list') ||
-    (extensionId === 'builtin.planning' && toolId === 'planning.read')
+    (extensionId === 'builtin.planning' && toolId === 'planning.read') ||
+    (extensionId === 'builtin.ask-user' && toolId === 'ask_user')
   );
 }
 export type McpHostFactory = (host: {
@@ -326,6 +329,8 @@ export function createDefaultProcessConfiguration(options: {
     afterTurn ? { afterTurn: { enabled: true } } : {},
   );
   const planning = createPlanningValidation(planningOptions);
+  const askUser = createAskUserExtension();
+  const askUserTools = new Map((askUser.tools ?? []).map((tool) => [tool.id, tool]));
   const vault = createCredentialVault({
     backend:
       options.credentialBackend ??
@@ -400,7 +405,7 @@ export function createDefaultProcessConfiguration(options: {
         present: [user, workspace, current].some((layer) => Object.hasOwn(layer, 'mcp')),
         configurations:
           resolveConfiguration({
-            defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+            defaults: defaultConfiguration,
             user,
             workspace,
             explicit: current,
@@ -654,7 +659,7 @@ export function createDefaultProcessConfiguration(options: {
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
       const effective = resolveConfiguration({
-        defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+        defaults: defaultConfiguration,
         user,
         workspace: project,
         explicit: current,
@@ -677,6 +682,11 @@ export function createDefaultProcessConfiguration(options: {
         if (selection.toolIds.some((id) => !toolIds.includes(id)))
           throw new AgentError('child_tool_unavailable');
         toolIds.splice(0, toolIds.length, ...selection.toolIds);
+      }
+      // Child roles never obtain the root-only human question capability.
+      if (selection) {
+        const index = toolIds.indexOf('ask_user');
+        if (index >= 0) toolIds.splice(index, 1);
       }
       if (planningIntent) {
         for (const id of [
@@ -737,6 +747,7 @@ export function createDefaultProcessConfiguration(options: {
         )
           throw new AgentError('tool_definition_version_unavailable');
         const actualTool =
+          askUserTools.get(selectedTool.id) ??
           businessTools.get(selectedTool.id) ??
           fileTools.get(selectedTool.id) ??
           task.tools.get(selectedTool.id) ??
@@ -754,6 +765,7 @@ export function createDefaultProcessConfiguration(options: {
         workspaceRoot: root,
         profile: options.profile,
         externallyRegisteredFileTools: files.tools,
+        externallyRegisteredExtensions: [askUser],
         toolIds,
         toolConfigurations: effective.tools,
         skills: effective.skills,
@@ -817,6 +829,7 @@ export function createDefaultProcessConfiguration(options: {
           skills: assembly.skillConfigurations,
         });
         const runExtensions = [
+          askUser,
           planning.extension,
           files.extension,
           ...(task.extension ? [task.extension] : []),
@@ -973,7 +986,9 @@ export function createDefaultProcessConfiguration(options: {
                   ? task.describe(tool.id).effects
                   : extension.id === 'builtin.shell'
                     ? shell.describe(tool.id).effects
-                    : [effect],
+                    : extension.id === askUser.id
+                      ? []
+                      : [effect],
               hardAllowed: true,
               safeRead:
                 extension.id === task.extension?.id
@@ -1398,6 +1413,7 @@ export function createDefaultProcessConfiguration(options: {
     const workflowCapabilities: Parameters<
       typeof createWorkflowConfiguration
     >[0]['capabilities'][number][] = [
+      askUser,
       planning.extension,
       files.extension,
       ...(task.extension ? [task.extension] : []),
@@ -1407,24 +1423,26 @@ export function createDefaultProcessConfiguration(options: {
         .filter((tool) => assembly.toolIds.includes(tool.id))
         .map((tool) => {
           const effects =
-            extension.id === task.extension?.id
-              ? task.describe(tool.id).effects
-              : extension.id === 'builtin.shell'
-                ? shell.describe(tool.id).effects
-                : extension.id === 'builtin.files'
-                  ? ['files.read', 'files.list', 'files.glob', 'files.search'].includes(tool.id)
-                    ? ['read']
-                    : ['workspace_write']
-                  : extension.id === planning.extension.id
-                    ? [planningEffect(tool.id)]
-                    : extension.id === 'builtin.skills' &&
-                        ['skills.load', 'skills.resource'].includes(tool.id)
+            extension.id === askUser.id
+              ? []
+              : extension.id === task.extension?.id
+                ? task.describe(tool.id).effects
+                : extension.id === 'builtin.shell'
+                  ? shell.describe(tool.id).effects
+                  : extension.id === 'builtin.files'
+                    ? ['files.read', 'files.list', 'files.glob', 'files.search'].includes(tool.id)
                       ? ['read']
-                      : (web.capabilities.find(
-                          (capability) =>
-                            capability.definitionId === tool.id &&
-                            capability.definitionVersion === tool.version,
-                        )?.effects ?? ['unknown']);
+                      : ['workspace_write']
+                    : extension.id === planning.extension.id
+                      ? [planningEffect(tool.id)]
+                      : extension.id === 'builtin.skills' &&
+                          ['skills.load', 'skills.resource'].includes(tool.id)
+                        ? ['read']
+                        : (web.capabilities.find(
+                            (capability) =>
+                              capability.definitionId === tool.id &&
+                              capability.definitionVersion === tool.version,
+                          )?.effects ?? ['unknown']);
           return {
             kind: 'tool' as const,
             definitionId: tool.id,
@@ -1434,11 +1452,14 @@ export function createDefaultProcessConfiguration(options: {
               revision: `${extension.id}:${extension.version}:${tool.version}`,
               availability: 'available' as const,
               effectiveEffects: {
-                filesystem: effects.includes('workspace_write')
-                  ? ('write' as const)
-                  : effects.every((effect) => effect === 'read')
-                    ? ('read' as const)
-                    : ('unknown' as const),
+                filesystem:
+                  effects.length === 0
+                    ? ('none' as const)
+                    : effects.includes('workspace_write')
+                      ? ('write' as const)
+                      : effects.every((effect) => effect === 'read')
+                        ? ('read' as const)
+                        : ('unknown' as const),
                 network: effects.includes('network') ? ('unknown' as const) : ('none' as const),
                 externalState: effects.some((effect) =>
                   ['external', 'process', 'unknown'].includes(effect),
@@ -1456,6 +1477,7 @@ export function createDefaultProcessConfiguration(options: {
         }),
     );
     const registeredJobs = [
+      askUser,
       planning.extension,
       files.extension,
       ...(task.extension ? [task.extension] : []),
@@ -1618,6 +1640,7 @@ export function createDefaultProcessConfiguration(options: {
           workspaceRoot,
           profile: options.profile,
           externallyRegisteredFileTools: files.tools,
+          externallyRegisteredExtensions: [askUser],
           toolIds,
           toolConfigurations: effective.tools,
           skills: [],
@@ -1644,6 +1667,7 @@ export function createDefaultProcessConfiguration(options: {
             )
               throw new AgentError('tool_definition_version_unavailable');
             const actual =
+              askUserTools.get(selected.id) ??
               businessTools.get(selected.id) ??
               fileTools.get(selected.id) ??
               task.tools.get(selected.id) ??
@@ -1679,6 +1703,7 @@ export function createDefaultProcessConfiguration(options: {
     supportsSelectedSkills: true,
     supportsExtensionInputs: true,
     extensions: [
+      askUser,
       planning.extension,
       files.extension,
       ...(task.extension ? [task.extension] : []),
@@ -1735,7 +1760,7 @@ export function createDefaultProcessConfiguration(options: {
           const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
           const current = explicitConfiguration(explicit);
           const effective = resolveConfiguration({
-            defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+            defaults: defaultConfiguration,
             user,
             workspace: project,
             explicit: current,

@@ -115,7 +115,6 @@ function validDescription(description: CapabilityDescription) {
       (typeof description.commandDigest === 'string' &&
         /^[a-f0-9]{64}$/.test(description.commandDigest))) &&
     Array.isArray(description.effects) &&
-    description.effects.length > 0 &&
     description.effects.length <= effects.size &&
     description.effects.every((effect) => effects.has(effect)) &&
     new Set(description.effects).size === description.effects.length

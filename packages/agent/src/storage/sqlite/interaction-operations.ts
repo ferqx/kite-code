@@ -80,6 +80,7 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
     'anyOf',
     'minLength',
     'maxLength',
+    'pattern',
     'minimum',
     'maximum',
     'minItems',
@@ -93,6 +94,8 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
       throw new AgentError('question_schema_invalid');
     for (const [key, child] of Object.entries(v)) {
       if (!keywords.has(key)) throw new AgentError('question_schema_invalid');
+      // Permit only the bounded, linear nonblank string constraint.
+      if (key === 'pattern' && child !== '\\S') throw new AgentError('question_schema_invalid');
       if (key === 'properties') {
         if (!child || typeof child !== 'object' || Array.isArray(child))
           throw new AgentError('question_schema_invalid');

@@ -277,6 +277,108 @@ test('closed enum never offers custom; explicit anyOf string union allows origin
   app.unmount();
 });
 
+test('closed text-object custom answers keep option-like text distinct from an original option ID', async () => {
+  const f = fixture({
+    type: 'object',
+    additionalProperties: false,
+    required: ['q1', 'q2'],
+    properties: {
+      q1: {
+        title: '原问题一',
+        anyOf: [
+          { const: 'q1-o1', title: '原选项一', description: '保留原说明' },
+          { const: 'q1-o2', title: '原选项二' },
+          {
+            type: 'object',
+            properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+            required: ['text'],
+            additionalProperties: false,
+          },
+        ],
+      },
+      q2: {
+        title: '原问题二',
+        anyOf: [
+          { const: 'q2-o1', title: '原选项三' },
+          {
+            type: 'object',
+            properties: { text: { type: 'string', minLength: 1, maxLength: 30, pattern: '\\S' } },
+            required: ['text'],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  });
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('原问题一');
+    expect(app.lastFrame()).toContain('原选项一');
+    expect(app.lastFrame()).toContain('保留原说明');
+    expect(app.lastFrame()).toContain('Custom answer');
+    expect(app.lastFrame()).not.toContain('original-schema JSON');
+    app.stdin.write('\u001b[B');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('\u001b[B');
+    await tick();
+    app.stdin.write('\u001b[B');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('   ');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('  q2-o1 é 🧭  ');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(1);
+    expect(f.answers[0]!.answer).toEqual({
+      kind: 'question',
+      answers: { q1: 'q1-o1', q2: { text: '     q2-o1 é 🧭  ' } },
+    });
+  } finally {
+    app.unmount();
+  }
+});
+
+test('text-object presentation only accepts one required own string field and closed validation', () => {
+  const custom = {
+    type: 'object',
+    properties: { text: { type: 'string', minLength: 1 } },
+    required: ['text'],
+    additionalProperties: false,
+  };
+  for (const branch of [
+    { ...custom, additionalProperties: true },
+    { ...custom, required: [] },
+    { ...custom, required: ['text', 'text'] },
+    { ...custom, properties: { text: { type: 'string' }, extra: { type: 'string' } } },
+    { ...custom, properties: { text: { type: 'string', pattern: 'unhandled' } } },
+    { ...custom, properties: { text: { type: 'object' } } },
+    {
+      ...custom,
+      properties: JSON.parse('{"__proto__":{"type":"string"}}'),
+      required: ['__proto__'],
+    },
+  ])
+    expect(questionForm({ schema: { anyOf: [{ const: 'original-id' }, branch] } })).toBeUndefined();
+  expect(
+    questionForm({ schema: { type: 'string', anyOf: [{ const: 'original-id' }, custom] } }),
+  ).toBeUndefined();
+  expect(questionForm({ schema: { anyOf: [custom, custom] } })).toBeUndefined();
+  expect(questionForm({ schema: { type: 'string', pattern: '\\S' } })).toBeDefined();
+  expect(questionForm({ schema: { type: 'string', pattern: '\\S', const: '  ' } })).toBeUndefined();
+});
+
 test('unsupported schema retains explicit original-schema JSON input', async () => {
   const f = fixture({ type: 'array', items: { type: 'string' } });
   await f.controller.select('a');

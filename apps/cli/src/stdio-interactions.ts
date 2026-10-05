@@ -22,8 +22,8 @@ export interface StdioInteractionOptions {
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
-/** Deliberately finite form subset; unsupported schemas retain the pending card. */
-function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
+/** Check every branch before matching: an unsupported branch is not a nonmatch. */
+function supportsQuestion(schema: unknown, depth = 0): schema is Record<string, unknown> {
   if (
     !record(schema) ||
     depth > 16 ||
@@ -34,6 +34,10 @@ function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
           'title',
           'description',
           'enum',
+          'const',
+          'oneOf',
+          'anyOf',
+          'pattern',
           'properties',
           'required',
           'additionalProperties',
@@ -49,9 +53,103 @@ function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
   )
     return false;
   if (
+    schema.type !== undefined &&
+    (typeof schema.type !== 'string' ||
+      !['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'].includes(schema.type))
+  )
+    return false;
+  for (const key of ['title', 'description'])
+    if (schema[key] !== undefined && typeof schema[key] !== 'string') return false;
+  if (schema.pattern !== undefined && schema.pattern !== '\\S') return false;
+  if (schema.enum !== undefined && (!Array.isArray(schema.enum) || !schema.enum.length))
+    return false;
+  for (const key of ['minLength', 'maxLength', 'minItems', 'maxItems']) {
+    const limit = schema[key];
+    if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 0))
+      return false;
+  }
+  for (const key of ['minimum', 'maximum'])
+    if (
+      schema[key] !== undefined &&
+      (typeof schema[key] !== 'number' || !Number.isFinite(schema[key]))
+    )
+      return false;
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean')
+    return false;
+  if (
+    schema.required !== undefined &&
+    (!Array.isArray(schema.required) ||
+      schema.required.some((key) => typeof key !== 'string' || key === '__proto__') ||
+      new Set(schema.required).size !== schema.required.length)
+  )
+    return false;
+  if (schema.properties !== undefined) {
+    if (
+      !record(schema.properties) ||
+      Object.hasOwn(schema.properties, '__proto__') ||
+      Object.keys(schema.properties).length > 64 ||
+      !Object.values(schema.properties).every((child) => supportsQuestion(child, depth + 1))
+    )
+      return false;
+  }
+  if (schema.items !== undefined && !supportsQuestion(schema.items, depth + 1)) return false;
+  for (const key of ['oneOf', 'anyOf']) {
+    const branches = schema[key];
+    if (
+      branches !== undefined &&
+      (!Array.isArray(branches) ||
+        !branches.length ||
+        !branches.every((branch) => supportsQuestion(branch, depth + 1)))
+    )
+      return false;
+  }
+  if (
+    schema.type === undefined &&
+    Object.keys(schema).some(
+      (key) => !['title', 'description', 'enum', 'const', 'oneOf', 'anyOf'].includes(key),
+    )
+  )
+    return false;
+  if (schema.type === 'object' && schema.properties === undefined) return false;
+  if (schema.type === 'array' && schema.items === undefined) return false;
+  return (
+    schema.type !== undefined ||
+    Object.hasOwn(schema, 'const') ||
+    schema.oneOf !== undefined ||
+    schema.anyOf !== undefined
+  );
+}
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Array.isArray(left))
+    return (
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => sameJson(item, right[index]))
+    );
+  if (record(left))
+    return (
+      record(right) &&
+      Object.keys(left).length === Object.keys(right).length &&
+      Object.entries(left).every(
+        ([key, item]) => Object.hasOwn(right, key) && sameJson(item, right[key]),
+      )
+    );
+  return left === right;
+}
+/** Deliberately finite form subset; unsupported schemas retain the pending card. */
+function matchesQuestion(schema: Record<string, unknown>, value: unknown, depth = 0): boolean {
+  if (depth > 16) return false;
+  if (Object.hasOwn(schema, 'const') && !sameJson(schema.const, value)) return false;
+  for (const key of ['oneOf', 'anyOf']) {
+    const branches = schema[key];
+    if (Array.isArray(branches)) {
+      const matches = branches.filter((branch) => matchesQuestion(branch, value, depth + 1)).length;
+      if (key === 'oneOf' ? matches !== 1 : matches === 0) return false;
+    }
+  }
+  if (
     schema.enum !== undefined &&
-    (!Array.isArray(schema.enum) ||
-      !schema.enum.some((item) => JSON.stringify(item) === JSON.stringify(value)))
+    (!Array.isArray(schema.enum) || !schema.enum.some((item) => sameJson(item, value)))
   )
     return false;
   if (schema.type === 'object') {
@@ -72,14 +170,16 @@ function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
     const properties = schema.properties;
     return Object.entries(value).every(([key, item]) =>
       Object.hasOwn(properties, key)
-        ? matchesQuestion(properties[key], item, depth + 1)
-        : schema.additionalProperties === true,
+        ? matchesQuestion(properties[key] as Record<string, unknown>, item, depth + 1)
+        : schema.additionalProperties !== false,
     );
   }
   if (schema.type === 'array')
     return (
       Array.isArray(value) &&
-      value.every((item) => matchesQuestion(schema.items, item, depth + 1)) &&
+      value.every((item) =>
+        matchesQuestion(schema.items as Record<string, unknown>, item, depth + 1),
+      ) &&
       (schema.minItems === undefined ||
         (typeof schema.minItems === 'number' && value.length >= schema.minItems)) &&
       (schema.maxItems === undefined ||
@@ -88,6 +188,7 @@ function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
   if (schema.type === 'string')
     return (
       typeof value === 'string' &&
+      (schema.pattern === undefined || /\S/u.test(value)) &&
       (schema.minLength === undefined ||
         (typeof schema.minLength === 'number' && [...value].length >= schema.minLength)) &&
       (schema.maxLength === undefined ||
@@ -105,7 +206,10 @@ function matchesQuestion(schema: unknown, value: unknown, depth = 0): boolean {
       (schema.maximum === undefined ||
         (typeof schema.maximum === 'number' && value <= schema.maximum))
     );
-  return false;
+  return (
+    schema.type === undefined &&
+    (Object.hasOwn(schema, 'const') || schema.oneOf !== undefined || schema.anyOf !== undefined)
+  );
 }
 function answer(
   interaction: Interaction,
@@ -130,7 +234,8 @@ function answer(
     if (!record(interaction.request) || !record(interaction.request.schema)) return undefined;
     try {
       const answers: unknown = JSON.parse(text);
-      return matchesQuestion(interaction.request.schema, answers)
+      return supportsQuestion(interaction.request.schema) &&
+        matchesQuestion(interaction.request.schema, answers)
         ? { kind: 'question', answers: JSON.parse(text) }
         : undefined;
     } catch {

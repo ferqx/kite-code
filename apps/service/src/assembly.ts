@@ -54,12 +54,20 @@ export async function createWorkspaceAssembly(options: {
   allowedCapabilities?: readonly string[];
   /** One trusted global builtin.files registration; this assembly keeps only its selection/facts. */
   externallyRegisteredFileTools?: readonly ToolDefinition[];
+  /** Trusted globally registered definitions, kept in the actual selected facts. */
+  externallyRegisteredExtensions?: readonly Extension[];
 }) {
   const root = await realpath(options.workspaceRoot);
   const stat = await lstat(options.workspaceRoot);
   if (!stat.isDirectory() || stat.isSymbolicLink())
     throw new AgentError('workspace_configuration_unavailable');
-  const known = new Set([...fileIds, ...skillIds, ...(options.knownToolIds ?? [])]);
+  const externalExtensions = options.externallyRegisteredExtensions ?? [];
+  const known = new Set([
+    ...fileIds,
+    ...skillIds,
+    ...(options.knownToolIds ?? []),
+    ...externalExtensions.flatMap((extension) => (extension.tools ?? []).map((tool) => tool.id)),
+  ]);
   if (options.toolIds.some((id) => !known.has(id)))
     throw new AgentError('tool_definition_unavailable');
   const externalFiles = options.externallyRegisteredFileTools;
@@ -307,7 +315,7 @@ export async function createWorkspaceAssembly(options: {
       extensions.push(defineExtension({ id: 'builtin.skills', version: '1', apiMajor: 1, tools }));
     const actualTools = new Map([
       ...(externalFiles ?? []).map((tool) => [tool.id, tool] as const),
-      ...extensions.flatMap((extension) =>
+      ...[...extensions, ...externalExtensions].flatMap((extension) =>
         (extension.tools ?? []).map((tool) => [tool.id, tool] as const),
       ),
     ]);
@@ -315,7 +323,7 @@ export async function createWorkspaceAssembly(options: {
       if (!options.toolIds.includes(String(selected.id))) continue;
       if (
         selected.definitionVersion !== undefined &&
-        [...fileIds, ...skillIds].includes(String(selected.id)) &&
+        actualTools.has(String(selected.id)) &&
         selected.definitionVersion !== actualTools.get(String(selected.id))?.version
       )
         throw new AgentError('tool_definition_version_unavailable');
@@ -329,7 +337,7 @@ export async function createWorkspaceAssembly(options: {
             definitionVersion: tool.version,
             extensionId: 'builtin.files',
           })),
-        ...extensions.flatMap(
+        ...[...extensions, ...externalExtensions].flatMap(
           (extension) =>
             extension.tools
               ?.filter((tool) => options.toolIds.includes(tool.id))

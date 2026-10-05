@@ -21,6 +21,7 @@
     "./task": "./src/extensions/task/index.ts",
     "./shell": "./src/tools/shell.ts",
     "./planning": "./src/business/planning/index.ts",
+    "./ask-user": "./src/tools/ask-user/index.ts",
     "./web-fetch": "./src/tools/web-fetch/index.ts",
     "./maintenance": "./src/maintenance/index.ts",
     "./artifact-access": "./src/artifact-access.ts",
@@ -29,7 +30,7 @@
     "./windows-path-security": "./src/platform/windows-path-security.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/extensions/index.ts ./src/storage/index.ts ./src/sqlite.ts ./src/sqlite-engine.ts ./src/platform/windows-path-security.ts ./src/sources.ts ./src/profile.ts ./src/profile-access.ts ./src/artifact-access.ts ./src/resources.ts ./src/jobs/shell.ts ./src/config/index.ts ./src/files.ts ./src/artifacts.ts ./src/skills/index.ts ./src/mcp/index.ts ./src/extensions/task/index.ts ./src/tools/shell.ts ./src/business/planning/index.ts ./src/business/skill-workflow/index.ts ./src/tools/web-fetch/index.ts ./src/maintenance/index.ts --target=bun --splitting --packages=external --root=./src --outdir=dist && bun src/storage/worker/build-assets.ts dist && bun src/jobs/build-assets.ts dist && bun src/mcp/build-assets.ts dist && bun src/tools/web-fetch/build-assets.ts dist",
+    "build": "bun build ./src/index.ts ./src/extensions/index.ts ./src/storage/index.ts ./src/sqlite.ts ./src/sqlite-engine.ts ./src/platform/windows-path-security.ts ./src/sources.ts ./src/profile.ts ./src/profile-access.ts ./src/artifact-access.ts ./src/resources.ts ./src/jobs/shell.ts ./src/config/index.ts ./src/files.ts ./src/artifacts.ts ./src/skills/index.ts ./src/mcp/index.ts ./src/extensions/task/index.ts ./src/tools/shell.ts ./src/business/planning/index.ts ./src/business/skill-workflow/index.ts ./src/tools/web-fetch/index.ts ./src/tools/ask-user/index.ts ./src/maintenance/index.ts --target=bun --splitting --packages=external --root=./src --outdir=dist && bun src/storage/worker/build-assets.ts dist && bun src/jobs/build-assets.ts dist && bun src/mcp/build-assets.ts dist && bun src/tools/web-fetch/build-assets.ts dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },

@@ -10,7 +10,7 @@
 
 `markDispatching` 对有审批绑定的 Execution 强制核实该 Interaction 当前 answered、准确 accepted revision、approve 决定、原 definition/input/source/refs 与 authorization.revision 等于封存 policyRevision。单独 allowed:true 无法绕过请求，旧答案不能复制给新参数/attempt。question 与 plan_review 都只提供信息，不建立授权 binding；它们的 accepted ID 不能传给 markDispatching 当作另一执行的许可。计划 approve/deny/revise 和 mode 是原业务记录的输入，由业务 evaluator 另行解释保存，不能替代 HostPolicy 或必要完成条件。Core 仍负责当前权限判断、用户选择的计划 mode、工具执行和真实结果；Store 不另建 Workflow Loop。
 
-question 可带 `request.schema`，其有限 JSON schema 支持 type/properties/required/additionalProperties/items/enum/const、oneOf/anyOf、数值及长度/数组上下界、title/description，最多 256 schema 节点/12 层。组合须为非空数组，每个分支计入同一预算并递归核对白名单；原 Ajv 继续分别执行恰好一项或至少一项匹配，不把选项文案代替 const/enum 原值。不支持 $ref、pattern、format、allOf 或未知关键字，避免外部 I/O 和无界正则；答案短事务按该 schema 检验。所有答案最多 32 KiB；plan_review 可带有界 feedback/mode。无 schema 的问题答案保持 bounded JSON。
+question 可带 `request.schema`，其有限 JSON schema 支持 type/properties/required/additionalProperties/items/enum/const、oneOf/anyOf、数值及长度/数组上下界、title/description，最多 256 schema 节点/12 层。组合须为非空数组，每个分支计入同一预算并递归核对白名单；原 Ajv 继续分别执行恰好一项或至少一项匹配，不把选项文案代替 const/enum 原值。pattern 仅接受准确 `\\S`，用于默认普通问题的非空白字符串约束，在保存前拒绝空白并保持原卡 pending/revision；单字符类别扫描不开放任意正则。$ref、其他 pattern、format、allOf 和未知关键字仍拒绝，避免外部 I/O 和无界正则；答案短事务按原 schema 检验。所有答案最多 32 KiB；plan_review 可带有界 feedback/mode。无 schema 的问题答案保持 bounded JSON。
 
 Ajv 使用 `ownProperties:true`，必填与属性校验只读取实际 JSON 自身字段，继承的 constructor/toString 不满足 required；明确自身同名字段仍按原值检验。当前 Ajv 编译器排除 properties 中的 `__proto__`，因此 schema 准入明确拒绝该自身属性和 required 中的同名键，包括组合分支内的声明；不能发布一张缺字段会通过、真实字段反而无法回答的卡。此有限拒绝与选项组合的取舍见[普通问题原 schema 与答案](../../../../../../.agents/notes/implemented/architecture/2026-10-06-original-question-schema-forms.md)。
 

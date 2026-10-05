@@ -1,11 +1,12 @@
 # 通用 Agent
 
-`@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。既有正式 TUI/Desktop/Web 尚未切换。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+`@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI；完整客户端迁移和正式旧路径退役仍按门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
 ## 入口与职责
 
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
+- [普通问题入口](src/tools/ask-user/README.md)：`@kite-ai/agent/ask-user` 的纯工厂通过原 `requestInput` 提供 1–3 题、原选项和自由回答，并将原答案解释为模型与历史文案；默认选择及 child 禁用归 Service。
 - [计划与 receipt 验证入口](src/business/planning/README.md)：显式业务工厂、真实用户计划审阅、来源绑定的步骤回执、required 判定和准确 waiver；共享扩展端口与唯一 Loop。完整文件/Artifact/命令/MCP 验证及自动修复继续按该 owner 范围实施。
 - [Store 端口](src/storage/port.ts)：宿主使用的具名查询和事务；[记录](src/storage/types.ts)保存业务事实，非完整内存 State。
 - [上下文选择与结果](src/storage/sqlite/context/README.md)：当前选择、完整历史和准确结果引用分开保存；双游标读取固定同一选择与顺序上界。
@@ -104,7 +105,7 @@ Job 输出与终态分开保存：单 chunk 32 KiB，内容的 JSON 编码与固
 
 真实强杀探针和显式中断测试位于[test/isolated/recovery](test/isolated/recovery)，来源与重新准备位于[test/isolated/context](test/isolated/context)。跨平台、实际安装制品、外部 adapter 核实窗口与完整客户端资格分开记录；局部测试通过不代表整个重构已完成。
 
-[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前23个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。当前1项62断言通过，含公开Workflow编译器、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
+[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前24个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。新增 ask-user 入口后本轮1项63断言通过，含公开Workflow编译器、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
 
 此前加入 maintenance 的18入口1/48与 profile-access 的19入口1/49只证明当时范围，包含v2原配置字节/摘要、原媒体/Store出处和新Store核对，零额外业务执行。源文件变化按Worker严格关闭SQLite缓存语句修复；恢复后 Artifact 读取曾混用当前 Store 与原来源，现分别校验当前 Store 准入、完整原执行链与原引用。当前源码外包继续通过实际 HTTP/Client 在新 Store 读取原 Artifact 全文，保留原 Store/hash/字节，冷读取零 Model。
 

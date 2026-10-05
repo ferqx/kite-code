@@ -164,6 +164,7 @@ nativeTest(
         './mcp': './mcp/index.js',
         './task': './extensions/task/index.js',
         './shell': './tools/shell.js',
+        './ask-user': './tools/ask-user/index.js',
         './planning': './business/planning/index.js',
         './web-fetch': './tools/web-fetch/index.js',
         './maintenance': './maintenance/index.js',
