@@ -62,3 +62,5 @@ Service admission、TUI、native profile、三平台测试与active authority；
 相关：[Agent Note 0131](../simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0132](../feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)、[Agent Note 0135](../simplification/2026-08-24-mode-aware-workspace-authorization-boundary.md)、`docs/active/workspace-trust.md`、
 
 `docs/active/execution-boundary.md`
+
+新统一 Agent 的持久 trust/controlReads 和原 HostMutation 回执由[持久权限控制决定](../architecture/2026-10-02-persisted-permission-controls-and-dispatch-read-set.md)及其当前 owner 负责。本篇关于准确额外读取范围与不扩大 mutation/network 权限的理由仍适用；旧 transport 和格式迁移不作为新链路实现依据。旧正式消费者退役状态见统一实施进度。

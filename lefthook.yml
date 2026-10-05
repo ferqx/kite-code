@@ -11,15 +11,15 @@ pre-commit:
     typecheck:
       glob: "*.{ts,tsx}"
       run: node node_modules/typescript/bin/tsc --noEmit
-    core-boundary:
+    unified-boundary:
       glob: "*.{ts,tsx}"
-      run: bun run check:core-boundary
-    golden:
+      run: bun run check:unified-agent-boundary && bun run check:runtime-packages
+    api-contract:
       glob: "*.{ts,tsx,json}"
-      run: bun test tests/golden/
+      run: bun run check:unified-api
     store-format-lock:
-      glob: "packages/runtime-storage-sqlite/**"
-      run: bun test packages/runtime-storage-sqlite/test/kite-session-store-format-lock.test.ts
+      glob: "packages/agent/src/storage/**"
+      run: bun test packages/agent/test/isolated/storage/store.test.ts packages/agent/test/isolated/storage/rollback.test.ts
     plan-evidence:
       glob: "{release/oss-first-release/**,scripts/check-plan-execution-matrix.ts,docs/active/open-source-first-release.md,.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md}"
       run: bun run check:plan-evidence

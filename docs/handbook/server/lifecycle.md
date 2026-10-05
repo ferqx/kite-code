@@ -1,5 +1,7 @@
 # 启动、查看与停止
 
+当前根正式入口已使用通用 Agent V1.3 候选，旧参数、State/stdio 拓扑及旧桌面截图只作历史参考；新入口的实际参数与行为以本页“通用”段落和[当前进度](../../plans/unified-agent-refactor-v1-progress.md)为准，未实现能力不能借旧描述启用。发行、安装与跨平台仍有未取得资格，详见[发布边界](../../active/release-control.md)。
+
 ## 默认客户端与源码入口
 
 安装版 `kite-tui` 自动启动同发布包内的配套 stdio App Server，不需要先启动 daemon；CLI 执行 Runtime 命令时使用相同的配套方式。默认客户端不构建 Web，也不隐式连接共享服务。显式 `--server <endpoint>` 才连接共享 daemon。
@@ -36,3 +38,21 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 当前未发布开发阶段遗留、没有生命周期 v1 的实例仍需用匹配客户端停止，或按[排障](troubleshooting.md)核实后显式处理。此一次性边界不通过普通启动自动清理。
 
 实现与剩余发布验证见[实施计划](../../plans/daemon-upgrade-lifecycle.md)。三平台发布资格必须由对应平台测试证明。
+
+## 通用 Agent 开发生命周期
+
+通用 Agent 开发入口已支持 `bun run cli:dev server start/status/stop/restart` 与 `bun run cli:dev web`。启动前显式构建新 Service 和 Web；默认使用独立开发 profile。正式 `kite`、根 `server` 与安装发布入口尚未切换，不能混用两条入口推断同一实例。
+
+开发命令保留上面的复用、固定工作区、空闲重启和明确取消语义。默认地址按原 profile 选择当前用户私有 Unix socket；`--server` 指定准确本地 socket，不接受 HTTP URL。status/stop/web 在没有实例时不创建目录或启动 Service；web 缺席返回错误。已有兼容实例的 start 复用不要求目标构建存在；真正启动或重启才验证目标文件。普通 start 在 Store 损坏时仍启动安全诊断服务，状态明确为数据不可用，业务读取返回错误而非空列表；restart 则先只读检查目标 Store 格式，失败保留旧实例。
+
+开发CLI任务与TUI可显式连接这个socket，操作分别见[CLI共享连接](../cli/commands.md#通用开发入口连接共享服务)和[TUI共享连接](../clients/tui/getting-started.md#通用开发-tui-的共享连接)。省略共享客户端的工作区参数沿用daemon原工作区，显式不一致则拒绝。
+
+私有 socket 只交付原身份与 HTTP 连接信息，业务和关闭使用公共 Client。父启动客户端退出不会停止 daemon。正常 stop 等待原 PID/启动身份实际退出；清理失败保留原资源。当前真实验证限 macOS；Linux 未完成平台资格，Windows 明确拒绝，不能声称已实现 named pipe/DACL。
+
+空闲关闭在服务内重新检查：运行、审批等待、后台工作、写入准备或清理中都会返回 busy，保留原服务。明确取消关闭只处理该实例拥有的工作；同 profile 的另一服务及其已接管命令不会因本实例退出被取消。普通历史读取不等于忙碌任务，但关闭会等待已有读取结束再释放数据库。
+
+关闭受理不等于已经退出。若回复丢失，只查询原实例状态；不能凭旧回复重发或转向新实例。清理未确认时显示 `drain_failed`，保留诊断和数据使用锁，维护仍可能返回 busy。进程实际退出才是宿主可确认的完成事实。关闭普通 Client 网络不会触发此关闭操作。
+
+实现、隔离进程验证与当前平台范围见[Service owner](../../../apps/service/README.md)和[V1.3 实施进度](../../plans/unified-agent-refactor-v1-progress.md)。
+
+通用终端候选安装后，可用明确 `<prefix>/bin/kite server start|status|stop` 操作新 profile 的服务；参数仍按本节通用入口规定。升级/回滚只影响后续启动，原 daemon 保持原实例和制品，其使用锁会阻止卸载；停止须使用公开生命周期命令，不强杀无关进程。安装与平台限制见[终端制品说明](../../../apps/cli/docs/terminal-release.md)。

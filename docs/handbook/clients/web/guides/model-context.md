@@ -1,5 +1,9 @@
 # 检查一次模型调用的上下文
 
+通用 Agent V1.3 的[新开发入口](../../../../../apps/web/README.md)通过 **Model calls** 按固定上界读完所选会话的调用目录，再选择准确 Execution。确认读取敏感内容后，界面显示该次持久请求的 System、Messages、Tools、原尝试与来源，以及实际 adapter/provider family、支持的 Request settings、能力版本与最后派发策略。大正文完整核对 EOF、字节数和 SHA 后才显示。opaque adapter、未记录或未来格式的字段明确显示 unavailable，不用现在的配置补造历史。`succeeded` 表示有成功回执，其他状态显示请求已准备、Provider 接收未确认。Current selected context 仍只表示当前选中的消息与结果来源。
+
+新入口的 Runtime logs 导航和完整正式客户端迁移仍按[实施进度](../../../../plans/unified-agent-refactor-v1-progress.md)记录。以下从 logs 进入的操作仍是正式产品承诺。
+
 在所选会话的 Runtime logs 中展开可用的 `model.invocation_prepared`，打开 Model Context Inspector。检查目标绑定到这一次调用，不是当前全局模型设置的估算。
 
 可用分区包括 Overview、System prompt、Messages、Tools 和 Request settings。它帮助解释“这次模型看到了什么”，不能证明模型一定正确理解或遵守这些内容。

@@ -1,0 +1,7 @@
+# Model Input Inspector tests
+
+`inspector.test.ts` uses temporary private SQLite profiles, real Workers, immutable Artifact storage, fixed models and ordinary controlled Tools. The small-input case accepts an actual steer while a Tool waits, changes a source, then proves the first request remains equal to the first actual Model request. Caller mutation, wrong Store/subject/Session and non-Model targets cannot substitute history; cold readonly reads take no owner and call neither a Provider nor source hook.
+
+The large case verifies complete 17 MiB request equality, hash and byte size, cold reopening, corruption, future body version, mismatched successful receipt and cancellation with no successful prefix. Child input is read only under its original Session/carrier and subject, while an actual failing Provider produces unconfirmed input history.
+
+Directory tests create 205 planned intents with actual finite Store owner/startRun/planExecution methods, then explicitly cancel/finalize them without calling a Provider. Actual Core calls before/after these intents are controls; this is pagination evidence, not 205 Provider calls. Two pages retain all 206 original rows under a frozen upper despite a later call. A rowid fault probe preserves an original actual call above 2^53 and verifies exact cursor strings; malformed/overflow/ahead cursors fail. Every fixture releases gates, closes its Runtimes/Stores/Artifact authorities and deletes only its temporary profile. No paid model, user data or recovery replay is used.

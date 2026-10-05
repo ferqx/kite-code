@@ -3,30 +3,19 @@ name: Runtime transport qualification
 on:
   pull_request:
     paths:
-      - "apps/kite-cli/src/bootstrap.ts"
-      - "apps/kite-cli/src/bootstrap/runtime/**"
-      - "apps/kite-cli/src/carrier/**"
-      - "apps/kite-cli/src/cli/**"
-      - "apps/kite-cli/test/isolated/runtime-stdio-*.test.ts"
-      - "apps/kite-cli/test/isolated/runtime-server-composition.test.ts"
-      - "apps/kite-cli/test/isolated/bun-stdio-child-transport.test.ts"
-      - "apps/kite-cli/test/isolated/local-bootstrap-auth.test.ts"
-      - "apps/kite-cli/test/isolated/development-loopback-carrier.test.ts"
-      - "apps/kite-cli/test/isolated/bun-websocket-transport.test.ts"
-      - "apps/kite-cli/test/isolated/development-websocket-runtime-client.test.ts"
-      - "apps/kite-cli/test/isolated/development-runtime-reference.test.ts"
-      - "apps/kite-cli/test/isolated/runtime-transport-conformance.test.ts"
-      - "tests/tui-system/harness/fixtures/**"
-      - "packages/runtime-client/**"
-      - "packages/runtime-contract/**"
-      - "packages/runtime-host/**"
-      - "packages/runtime-protocol/**"
-      - "packages/runtime-server/**"
-      - "packages/runtime-storage-sqlite/**"
-      - "packages/kite-local-runtime/**"
-      - "apps/kite-service/src/**"
-      - "tests/qualification/session-store-*.test.ts"
-      - "tests/qualification/fixtures/session-store-*.ts"
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "scripts/release/**"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
       - "package.json"
       - "bun.lock"
       - ".github/workflows/runtime-transport-qualification.yml"
@@ -42,6 +31,9 @@ concurrency:
 jobs:
   conformance:
     timeout-minutes: 15
+    env:
+      KITE_EXPECTED_CANDIDATE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      KITE_CANDIDATE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,21 +41,31 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}
+          repository: ${{ env.KITE_CANDIDATE_REPOSITORY }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run test:runtime:websocket
       - run: bun run test:runtime:transport
       - if: runner.os != 'Windows'
-        name: POSIX Store maintenance, crash release and startup cancellation
+        name: POSIX Profile locks, maintenance and recovery
         run: >-
           bun test --parallel=1 --max-concurrency=1
-          packages/runtime-storage-sqlite/test/isolated/kite-session-maintenance.test.ts
-          tests/qualification/session-store-maintenance-cancellation.test.ts
-          tests/qualification/session-store-startup-cancellation.test.ts
+          packages/agent/test/isolated/profile-access/data-lock.test.ts
+          packages/agent/test/isolated/maintenance/backup.test.ts
+          packages/agent/test/isolated/maintenance/restore.test.ts
+          apps/service/test/isolated/process-cleanup-retention.test.ts
       - if: runner.os == 'Windows'
-        name: Windows native LockFileEx maintenance qualification
-        env:
-          KITE_REQUIRE_WINDOWS_MAINTENANCE: "1"
-        run: bun test --parallel=1 --max-concurrency=1 tests/qualification/session-store-windows-maintenance.test.ts
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
+      - if: runner.os == 'Windows'
+        name: Actual Windows private Store, Worker and LockFileEx contracts
+        run: >-
+          bun test --parallel=1 --max-concurrency=1
+          packages/agent/test/isolated/windows-path-security/default.test.ts
+          packages/agent/test/isolated/config/mcp-selection-windows.test.ts
+          apps/desktop/test/isolated/windows-node-access.test.ts

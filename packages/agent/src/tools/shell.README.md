@@ -1,0 +1,7 @@
+# Ordinary Shell Tools
+
+`createShellExtension({job})` is a pure factory containing four ordinary Tools and one trusted `shell.command` Job. `shell.launch` calls ordinary `operations.ensure`, then saves an immutable own-record OperationRef. Only the registered Job's `start` may start a process. Import/factory/read/wait never create another manager or restart a cold reference. JSON input contains no cwd, environment, executable or guardian authority.
+
+`shell.read` reads the exact own-record ref through generic scoped `operations.readOutput`; pages have fixed 64-bit output cursors/high water and preserve explicit gaps. `shell.wait` timeout leaves the original Job alive. `shell.stop` saves only a cancel-request receipt and the current durable execution fact; it cannot synthesize stopped from acceptance, leader exit or EOF. Actual supervisor `ended`/`unknown` qualification remains in the Job leaf. Original Command retry is an original operation; a new parent execution cannot rebind the same operation key.
+
+Default host assembly is explicit and currently qualifies macOS POSIX process-group supervision with built assets and a fixed trusted environment. It does not prove filesystem/network sandboxing or containment of arbitrary process-group escape. Linux and Windows default qualification remain unavailable in this slice; no raw-spawn fallback is added. Test contexts in `test/isolated/tools/shell` prove only portable factory/result semantics; actual SDK/SQLite/guardian evidence is in Service's `shell-configuration.test.ts`.

@@ -5,20 +5,40 @@ on:
   push:
     branches: [main]
     paths:
-      - package.json
-      - bun.lock
-      - packages/builtin-runtime/src/mcp/credential-store.ts
-      - tests/qualification/mcp-keyring-platform-smoke.test.ts
-      - scripts/release/oss-candidate.ts
-      - .github/workflows/mcp-native-keyring-smoke.yml
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "scripts/release/**"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/mcp-native-keyring-smoke.yml"
   pull_request:
     paths:
-      - package.json
-      - bun.lock
-      - packages/builtin-runtime/src/mcp/credential-store.ts
-      - tests/qualification/mcp-keyring-platform-smoke.test.ts
-      - scripts/release/oss-candidate.ts
-      - .github/workflows/mcp-native-keyring-smoke.yml
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "scripts/release/**"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
+      - "package.json"
+      - "bun.lock"
+      - ".github/workflows/mcp-native-keyring-smoke.yml"
 
 permissions:
   contents: read
@@ -35,12 +55,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-latest
-          - windows-latest
-          - ubuntu-latest
+        os: [macos-latest, windows-latest, ubuntu-latest]
     env:
-      KITE_RUN_NATIVE_KEYRING_SMOKE: '1'
+      KITE_RUN_UNIFIED_KEYRING_SMOKE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
@@ -48,9 +65,9 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - if: runner.os != 'Linux'
-        run: bun test tests/qualification/mcp-keyring-platform-smoke.test.ts
+        run: bun test tests/isolated/unified-agent/native-credential-platform.test.ts
       - if: runner.os == 'Linux'
-        name: Start Secret Service and run smoke
+        name: Start isolated Secret Service and run actual native smoke
         shell: bash
         run: |
           sudo apt-get update
@@ -60,5 +77,5 @@ jobs:
             mkdir -p "$XDG_RUNTIME_DIR"
             chmod 700 "$XDG_RUNTIME_DIR"
             eval "$(printf %s ci-keyring | gnome-keyring-daemon --unlock --components=secrets)"
-            bun test tests/qualification/mcp-keyring-platform-smoke.test.ts
+            bun test tests/isolated/unified-agent/native-credential-platform.test.ts
           '

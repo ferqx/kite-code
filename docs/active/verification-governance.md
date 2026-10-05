@@ -2,8 +2,16 @@
 
 状态：active
 读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据、repair/waive/compensation 时。
-验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：既有正式路径用 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/verification tests/runtime` 与 `bun run check:core-boundary`；新通用路径用 `bun run test:unified-agent`、`bun run check:unified-agent-boundary`，类型检查用 `bun run typecheck`。实际范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 相关：[Agent Note 0008](../../.agents/notes/implemented/testing/2026-07-14-verification-completion-semantics.md)。
+
+## 通用 Agent 迁移状态
+
+下方 State/Kernel、VerificationSpec 与旧 events/effects 说明只保存历史机制；它们已退出正式/default/CI 调度，不能作为新 Agent 的装配入口或当前验证证据。新通用 required 义务使用[扩展 scoped 判定与最终事务 read-set](../../packages/agent/src/storage/sqlite/requirements/README.md)，Planning 与 [Skill Workflow](../../packages/agent/src/business/skill-workflow/README.md)分别持有自己的业务记录；Core 不新增业务状态机或自动重放副作用。
+
+Workflow 已交付 append-only attempts、普通 repair 及真实 accepted question 的 replan/waiver。原失败与完整输出保留，缺省调用始终指初次尝试；waiver只解除准确原 completion requirement，不把failed改成passed，不豁免权限或未知副作用。原 Store/Session/Run、要求版本、head/attempt/output digest、配置 verifier 和实际结果 proof 在接受与最终条件复核。来源、权限或取消变化拒绝旧答案；决定主体来自原持久 Interaction，业务采用时间不冒称精确用户回答时间。
+
+新 Service 的封存 policy、独立最低审批、真实 fork 和CLI/TUI普通question资格见[当前进度](../plans/unified-agent-refactor-v1-progress.md)。声明 compensation 已使用独立普通 Job：只有原 accepted question、原 Workspace 内声明与可信 macOS confined 后端均可核实时提供。完整原字节含二进制封存为只读副本，实际网络/fork/保护目录写拒绝；独立 minimum:user 审批与准确 operation/result revision 保持。补偿不改原 failed，未知停止保留代码与 unknown，不能 waiver。通用闭包安全读的 planned Job dispatch/approval CAS 与 completion/waiver 门禁分别核验；Core 没有 Skill 状态枚举。当前仅禁止派生子进程的本机 Bun 模式，其他 checkers、正式入口退役、完整恢复调用者和平台资格仍按 V1.3 闭合。
 
 ## 当前行为
 

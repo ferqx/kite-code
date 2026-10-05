@@ -27,6 +27,7 @@ export function testParallelism(): number {
 export function collectTestFiles(path: string): string[] {
   const absolute = resolve(path);
   try {
+    if (statSync(absolute).isFile()) return TEST_FILE_PATTERN.test(absolute) ? [absolute] : [];
     return readdirSync(absolute, { withFileTypes: true })
       .flatMap((entry) => {
         const child = join(absolute, entry.name);

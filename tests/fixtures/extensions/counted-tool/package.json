@@ -1,0 +1,16 @@
+{
+  "name": "@kite-test/counted-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@kite-ai/agent": "0.1.0"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external @kite-ai/agent/extensions",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

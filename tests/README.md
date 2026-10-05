@@ -1,88 +1,70 @@
 # 测试体系
 
-本页是测试归属、发现和默认执行模型的 current authority。
+本页负责当前测试归属、发现和执行。当前默认为精确八个新 workspace；下面单列的历史机制和原资格记录不参与新默认调度，也不证明当前产品或平台通过。
 
-## 环境基线
+## 环境基线与 owner
 
-Required CI、release/platform smoke 与正式 Runtime qualification 统一使用 Bun `1.4.2`。性能对比只有在
-相同 Bun 版本和同类 runner 环境下才可作为正式基线证据；其他本地版本只提供补充诊断。
+Required CI、release/platform 与正式 soak 固定 Bun 1.4.2。性能或稳定性结果只适用于准确代码、运行时和平台；workflow 定义不等于执行证据。
 
-## 目录归属
+| 目录 | 当前负责范围 |
+| --- | --- |
+| `packages/ai/test/` | 中立模型流与明确 SDK adapter |
+| `packages/agent/test/` | Loop、Execution/Job、业务 Store、I/O 与扩展 leaves |
+| `packages/client/test/` | HTTP/SSE、准入、原意图、Browser/Native 公共合同 |
+| `packages/ui/test/` | 公共表单、阅读门禁与便携 TUI 组件 |
+| `apps/service/test/` | 可信默认装配、实际 HTTP/SSE、paired/daemon、配置与 Gateway |
+| `apps/cli/test/` | 薄 CLI/TUI、宿主资源、原请求与真实 PTY |
+| `apps/desktop/test/` | 便携客户端、Electron main/preload/renderer 与私有意图存储 |
+| `apps/web/test/` | 只读 Browser controller、DOM 与敏感内容读取 |
+| `tests/fixtures/extensions/mini-review/test/` | 有独立 package/公开入口的参考扩展 |
+| `tests/isolated/unified-agent/` | 新公共进程、故障、源码外制品与安装交接 |
 
-- `packages/<owner>/test/`：单 package 行为与 contract。
-- `packages/kite-client-ui/test/`：两端共用页面的权限呈现、Markdown 安全、目录预览与阅读交互；已纳入默认 workspace 测试。两端 App 测试继续负责实际接入与命令边界，不为共享内部组件增加仅供跨包测试使用的公开导出。
-- `apps/kite-cli/test/`：CLI/TUI presentation、client preference、managed Native adapter与fake/client conformance；不得
-  创建default Host/Store composition。
-- `apps/kite-service/test/`：唯一Runtime Application/Host/Store/Builtin owner、raw History/App Control、config/MCP/
-  sandbox/session logging、Service shell、Agent API与carriers；退役Browser BFF/WebObserver不保留production composition或owner test。旧
-  Coordinator/Worker/Store 8只作为明确历史/离线机制测试；真实socket/process/state/cwd场景留在owner-local `test/isolated/`。
-- `apps/kite-web/test/`：Browser REST presentation/reducer、browser-safe Agent API client consumer与静态Agent API reference；后者固定验证
-  `/api-docs` routing、无form/execute control、same-origin no-credential artifact读取及availability未确认状态。该workspace不得引入
-  Native、Host、Store、Protocol、Service、CLI 或 raw Runtime source，也不拥有任何 Controller use case。
-- `packages/kite-local-runtime/test/manager/`：manager lifecycle、Native process/state/lock/environment与authenticated
-  instance handshake；manager不再以App-private source留在Service workspace。
-- `tests/integration/`：跨 workspace 公共边界，只导入 package exports。
-- `tests/qualification/`：fault、soak、native 与安全 qualification。
-- `tests/isolated/` 和 owner-local `test/isolated/`：修改进程环境、cwd、SQLite 文件或真实进程的逐文件测试；每个文件使用独立进程，已审计为安全的文件可跨进程并行。
-- `tests/isolated/exclusive/` 和 owner-local `test/isolated/exclusive/`：使用固定临时路径、仓库内建目录、全局进程快照、进程组、SIGKILL 或编译等共享资源的独占测试；逐文件运行，且不与其他默认测试 job 重叠。
-- `tests/tui-system/`、`tests/e2e/`、`tests/release/`、`tests/golden/`：稳定专用套件。
-- `tests/fixtures/`、`tests/helpers/`、`tests/reliability-harness/`：非测试辅助资源。
+Owner-local tests 可读自己非公开源码；root integration 使用公开 package exports 或明确 App surface。root 不通过相对 deep-import 另建生产语义，不仅为测试便利扩大 production export。fixtures/helpers 不自动拥有测试；根不保存散落测试或第二通用 `tests/runtime/` owner。
 
-根 `tests/` 不保存散落测试文件，也不使用泛化 `tests/runtime/` 作为第二 owner；clean checkout 中该目录
-必须不存在，不能依赖 Git 不跟踪的本地空目录满足 discovery gate。
+## 默认执行与隔离
 
-## Import 边界
+根 `test`、`test:all` 和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)。它只发现上述当前 owner 与有限的 root 脚本安全列表，不扩展到整个旧 integration/qualification/release/e2e/golden/TUI 树。纯 `--list` 不创建 Profile、Provider 或子进程。
 
-- Owner-local tests 可以相对导入自己的非公开源码。
-- Root integration 只能使用 workspace package exports 或 App 的正式测试/client surface。
-- Root tests 不得相对 deep-import `packages/*/src/`。
-- 不得仅为测试便利增加 production public export。
+普通测试与安全 isolated 文件使用共享槽，isolated 每文件独立进程且进程内 concurrency=1；编译、SIGKILL、全局资源和准确分类的 exclusive 文件在并行队列 drain 后逐文件执行。macOS 最多4槽，Linux最多2槽；Windows isolated 逐文件串行。失败停止新派发，已启动任务完成 cleanup。每个测试进程使用独立临时 HOME/USERPROFILE 和准确 KITE_CODE_HOME，清理只覆盖自有目录。
 
-## 默认执行
+维护的[Core备份](../packages/agent/test/isolated/maintenance/backup.test.ts)与[Desktop资产](../packages/agent/test/isolated/maintenance/assets.test.ts)在首DB前用[真实引擎夹具](fixtures/unified-agent/qualified-sqlite-fixture.ts)复用正式SQLite builder和公共initializer，核完整资产及发行身份；原业务预算不变，新增setup hook有限60秒。文件最后DB关闭后清理自有selected资产，外部preload资产只复验；loaded selection不能reset，因此这些文件沿原isolated每文件独立进程运行。[独立默认Source资产文件](../packages/agent/test/isolated/maintenance/mcp-source-approval-intents.test.ts)实测默认engine身份，并核严格关闭后实际Core DB/WAL/SHM的presence与完整bytes在create/inspect后保持。两个范围分别记录，单文件绿色不构成完整默认或三平台资格。
 
-`bun run test` 保持 deterministic 默认覆盖。runner 以同一计划发现并分类 workspace、App、root integration、Web Vitest 和 isolated 文件；普通套件达到 16 个文件时按文件大小分成最多 4 个 job。普通测试、Web Vitest 与安全的 isolated 文件共用最多 4 槽队列，较大的 job 优先启动。isolated 仍每文件单独启动 Bun，进程内 `maxConcurrency=1`；`isolated/exclusive/` 及目录外被识别出的进程级测试在并行队列结束后全局逐文件串行运行。Windows 的 isolated 文件暂全部串行执行，待平台并发验证通过后再调整。失败后不再派发新 job，已启动文件完成清理。
+## 当前公共场景与证据
 
-macOS/Windows 并发上限是 `max(1, min(4, availableParallelism()))`；Linux 上限为 2，避免 Required runner 在多个大型 Service 分片同时执行时争用资源。Linux 与 Windows 的 Bun 文件测试限时为 30 秒，覆盖仓库扫描等在 CI 上超过 Bun 默认 5 秒限时的场景，不减少断言。每个子进程使用独立临时 `HOME`，Windows `USERPROFILE`
-与其相同，`KITE_CODE_HOME`固定为该home下的exact `.kite-code` root；结束后连同root一起清理。
+通用 Agent V1.3 的当前切片通过 `bun run test:unified-agent` 验证：新包 owner、真实 HTTP/SSE 与双 Service、外部计数工具/mini-review、[两真实进程](isolated/unified-agent/persistence.test.ts)、取消、来源刷新、显式恢复与[目标依赖边界](isolated/scripts/unified-agent-boundary.test.ts)。runner 复用默认 isolated/exclusive 分类，编译与强杀场景按逐文件隔离运行。新 `ai/agent/client/ui` 与 `apps/service/cli/desktop/web` 已纳入默认发现和 build/typecheck，根正式/default/CI已选择新闭包，原客户端测试仅作历史参考；完整能力替代与平台仍待验收。平台、完整交互、维护恢复与制品结果按[进度](../docs/plans/unified-agent-refactor-v1-progress.md)记录，部分子场景不代表完整 T/E 场景通过。
 
-默认测试排除真实 PTY、fault/soak、native sandbox、spike 和 live Provider；这些使用已有显式命令。
-默认source TUI使用parent-owned App Server与worktree持久profile；旧single-Service real-child/manager/build replacement矩阵已随production
-控制面删除，不再保留只为测试存在的兼容路径。
-`apps/kite-service/test/isolated/exclusive/app-server-process.test.ts`另以真实stdio child固定KASD内部App Server的protocol-only输出、同连接
-Runtime/History/App Control/credential client、EOF active model cleanup、SIGKILL/lease/reconciliation/resume no-replay与无global endpoint。
-同文件还让真实approved host-shell child记录PID，SIGKILL App Server后验证Runtime Host watchdog清理command group、successor显式reconcile且
-resume不重新启动command；当前release未启用local stdio MCP，因此不以测试专用port伪造该能力。
-`tests/release/app-server-client.test.ts`分别固定source checked-in entrypoint + worktree持久profile与installed launcher-pinned immutable
-candidate解析；两条路径都要求client/child build identity与initialize capability精确配对，不查PATH或running Service；两个真实client
-争用同一Session mutation时只有一个writer。
-`runtime-server-multi-workspace.test.ts`固定第二Server read-only不会取得或
-取消第一Server的Session generation。这仍不是TUI/candidate cutover证据。
+[未见 label-station 样本](isolated/unified-agent/evolution-unseen-sample.test.ts)由独立 owner 在公共接口固定后选择并实现，只有独立 manifest、资源、实现和测试。实际 manifest 构建到源外，以公共包消费真实通用 DOM 卡片→Client HTTP→无模型 Action→受控 Tool→自有 CAS 回执→Query→第二次明确操作；先等原 Execution 终态核 Action/Tool 两种拒绝零效果，两次允许效果与原 parent/rootWork 绑定，Model/Run为零。六文件 diff 和12个核心/公开基线 hash 未变支持本机有限 E01/E02/E03/E14，完整 Evolution Record 与未验证范围保留在[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-04mcp-冷原申请备份-v8-与未见扩展样本)。此处不是全部核心冻结、独立 npm 安装、实际浏览器布局或全部 E01–E14 通过；异常初始化/cleanup 由20秒所属 child kill/await 与临时根清理兜底，绿色运行不证明所有异常路径逐资源 close。
 
-`tests/tui-system/scenarios/app-server-multi-tui.test.ts`是KASD-03默认路径证据：两个同时存活的TUI拥有不同stdio child，第二个从同一
-source profile读取第一个的History；两边`/status`均无Service PID、Web URL或build drift。`startup`与`session-persistence`同时固定
-strict JSON可选字段、退出后facts保留与新TUI恢复。`file-rewind`还固定恢复目标先完成continuation准入：历史打开保持observer-only，
-第一次真实mutation才发送`resume_session`，连续rewind产生三个durable Session。
-TUI system harness 的最小Store codec保持与production storage port签名一致，包括event decode的可选持久sequence context；fixture本身
-仍只解析测试JSON，不实现第二套兼容或identity逻辑。
+新的 [Browser SDK](../packages/client/test/browser.test.ts)、[Web controller](../apps/web/test/controller.test.ts)与 [Service 配对](../apps/service/test/isolated/development-web.test.ts)分别验证网络合同、视图代次及实际 Core/SQLite 的只读生命周期。Desktop 输入的 [意图](../apps/desktop/test/input.test.ts)与[配对](isolated/unified-agent/desktop-input.test.ts)使用固定 Model/临时新 Store，不接触用户数据。大人工附件的 Client、UI DOM 和便携 Desktop 测试分别证明完整字节/hash、显示后的键盘答复门禁及跨视图证明失效，不能合并声称正式 Electron 或原生浏览器已通过。
 
-`tests/release/app-server-daemon.test.ts`固定显式daemon start/status/stop、同protocol跨build client、未知capability拒绝、双client History共享
-与普通disconnect不终止owner；`tests/tui-system/scenarios/app-server-daemon.test.ts`通过真实PTY固定显式`--server`连接以及active Turn stop/drain。
+[CSP 回归](../packages/client/test/isolated/csp.test.ts)将真实公共 BrowserClient bundle 放入真实 Node V8 的禁用代码生成环境，验证静态生成规则的 closed 请求、嵌套响应和新增字段保留；它不是浏览器布局证据。[Web 预览夹具](fixtures/unified-agent/web-preview.ts)先构建 `apps/web`，再显式启动临时 SQLite、固定 Model 和只读 Cookie Gateway，stdout 仅返回页面 endpoint/identity 与固定计数，不输出 Native token。stdin `append` 只添加一条预定消息，`stop` 结束并清理临时数据。macOS IAB 的实际选区、复制、滚动及诊断结果由 Web owner 和进度记录；没有外部 Provider 或用户 profile。
 
-Plan PTY使用Store内`plan_artifacts`的exact ref读取已保存版本；submit不得用空path/零byteLength伪造ref。Capability Artifact测试允许同一
-resumable invocation按不同evidence digest保存partial与terminal结果，同时保持相同`(invocation_id,evidence_digest)`冲突关闭。
+[独立开发 Web 启动测试](isolated/unified-agent/web-launcher.test.ts)固定已选 profile/配套 entry/API/capabilities 与校验过的资产，经公开 paired Service 和只读 Gateway 验证。有限参数、stdout 仅 endpoint、坏资产零新 profile、浏览器关闭后原 Model 继续，以及真实宿主 EOF/SIGTERM 后所属 PID 和 TCP listener 消失分别断言。隔离 fixture 使用无害固定 Model；不替代正式 daemon/TUI/Electron 或发行安装资格。
 
-## 稳定命令
+[Model Inspector Core](../packages/agent/test/isolated/model-input/inspector.test.ts)、[Client 完整流](../packages/client/test/isolated/model-input.test.ts)、[实际 Service/Gateway](isolated/unified-agent/model-input.test.ts)和[Web DOM](../apps/web/test/model-input.test.tsx)分别验证准确原调用、完整交接和展示。>200 目录压力通过具名 Store 建立 planned intents，不称发生了相同数量的 Provider 调用；实际17MiB内容经过原scope Artifact/固定Model与Native/Browser，成功EOF/hash前不发布正文。真实流在首块后停住仍能取消，非法metadata先释放body；UI确认前零正文GET，隐藏/关闭/切换清正文，缺失settings明确unavailable。IAB验收固定无害内容，关闭后Model计数保持，不将当前Context或Runtime logs导航等同该原请求入口。
 
-- `bun run test`
-- `bun run test:all`
-- `bun run test:runtime:fault`
-- `bun run test:runtime:soak`
-- `bun run test:e2e`
-- `bun run test:tui:harness`
-- `bun run test:tui:system`
-- `bun run test:sandbox:smoke:native`
+## 显式命令与 CI
 
-## Runtime Server V1 owner 与 transport 测试
+
+根默认和 `test:unified-agent` 共用[同一计划](../scripts/unified-test-plan.ts)：精确八 workspace、mini-review 独立扩展、新 root unified-agent 场景及有限脚本安全列表；不会发现整个旧 integration/qualification/release/e2e/golden/TUI 树。原测试机制的独立 HOME、exclusive、失败停止派发、运行者 drain 与 OS 并发上限保持。新增 source-free/真实 Native/TTY 场景按实际分类单独进程执行，不以历史排除规则丢失其断言。
+
+新 `test:tui:system` 由[当前 runner](../scripts/run-unified-tui-system-tests.ts)从新 UI TUI 与 CLI `tui*.test.ts` owner 动态发现，按当前文件清单分配四个 shard；`--list` 只读返回准确 inventory，只有所有 shard 成功才通过既有 `tui-system` check。根 runtime mock/e2e/fault/stdio/transport 与 Desktop aliases 已指向当前 owner 测试；旧 WebSocket/standalone/foundation/模型 live aliases 已退出，未将 paid Provider 测试重命名为 mock 通过。
+
+三平台 workflow 使用新实际 producer/SQLite/平台报告，保 Bun1.4.2、40位Action pin、PR源head、clean-source与失败上传。OS vault 只在 CI 双 gate执行随机 owned namespace；默认 gate关闭零vault调用。live MCP默认gate关闭零network，workflow明确开启后才真实官方 tools/list+Tool。ACL脚本按实际OS核private路径，Winx64走currentSID/DACL；ARM64明确unsupported，运行失败非skip。
+
+Windows transport的原Store/config测试加[五项Node后端案例](../apps/desktop/test/isolated/windows-node-access.test.ts)，release的Native build均先调用[有限预装工具准备](../scripts/release/prepare-windows-native-ci.ts)。准备只收固定x64 compiler/SDK事实和十个环境变量，原字节严格解码、清空CL参数注入；Windows缺编译器/addon/ABI实际失败，不依据availability跳过。CI guard核原head/repository、完整消费命令和准备顺序；[纯合同测试](isolated/unified-agent/windows-native-ci.test.ts)不能代替本机未执行的Windows编译/生命周期。
+
+完整平台与soak verifier继续拒绝缺资格：bounded source-free诊断不等于生产Shell/network/fork/resource边界，闭合v2固定七类CI不等于8外层/60分钟、每类warmup0+measured1—8原生资源和§33.3完整连续组合负载资格。旧ci-baseline/State测试保历史，不参与新默认执行；[当前CI守卫](integration/scripts/unified-ci.test.ts)核真实新调度与反例。最新执行、失败及平台范围见[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+当前命令以根 [package.json](../package.json) 为准。`test:mock` 使用固定模型配置；`test:runtime:fault`、`test:e2e`、`test:runtime:stdio`、`test:runtime:transport` 与 `test:desktop:native` 指向新 owner。`test:desktop:window` 验完整 Native lifecycle；`test:shell:native` 验实际 confined leaf。纯 version smoke 不能替代真实窗口/PTY/平台证据。
+
+`check:docs` 核可检查链接、active 元数据和当前 owner；`check:docs-impact` 提示实际 diff 的产品/技术核对范围，Markdown diff 不证明语义。`check:plan-evidence` 核保留历史证据与对应代码身份，不将旧 run 当新资格。文档同步 Skill 的 ready/blocked 只覆盖对应 action，不能扩大 Git 授权或表示完整 V1.3 完成。
+
+## 历史机制与原资格记录
+
+以下仅保留原测试职责、设计约束和已发生的证据。旧 package、State/App Server、standalone、默认发现或命令字样不构成当前执行入口；不得用这些记录替代新 public Runtime/Client/Store 的断言或当前三平台验收。
+
+### Runtime Server V1 owner 与 transport 测试
 
 默认workspace typecheck runner覆盖当前Runtime workspace集合。`packages/agent-api-contract/test/`验证Public snake_case DTO、closed request、
 forward-compatible response、bounded JSON/UTF-8 limits、Interaction/Run/resync invariants，以及OpenAPI/JSON Schema/wire/example/digest
@@ -165,7 +147,7 @@ isolated Workspace admission与nondefault `--checkpoints` path，不能打开man
 `macos-15`、`ubuntu-24.04`、`windows-2025` 上运行相应脚本。它们是 pending qualification checks：在对应 PR 的
 三平台结果实际返回前，测试文档不得称其 passed、不得以 workflow 定义代替 evidence。
 
-## KLSV1-06/07 当前 evidence 边界
+### KLSV1-06/07 当前 evidence 边界
 
 KLSV1/KCWW本地cutover Gate已执行：当前default runner的Service owner为1519 tests / 8428 expects，CLI owner为
 704 + 76 sandbox + 1 conformance，共781 tests；Web workspace为17 tests。Runtime transport为3 tests / 852 expects。
@@ -180,7 +162,7 @@ qualification metrics。Windows managed runner v2 marker、唯一 `active` point
 只已有本地定向测试；真实 Windows ACL/write-through 及 GitHub-hosted macOS 15、Ubuntu 24.04、Windows 2025 的当前实现 head
 process/transport/release evidence 在完整 matrix 成功前仍 pending，本地 POSIX、workflow 定义或单平台 artifact 不能升级平台结论。
 
-## 迁移期测试
+### 迁移期测试
 
 Parity/cutover 测试只有在每条独有断言映射到 owner 测试后才能删除。State 26 read-side compatibility、
 fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility 名称；schema 数字只出现在测试数据和断言中。
@@ -195,7 +177,7 @@ fail-closed 和历史恢复测试继续保留，但使用领域化 compatibility
 
 其余改名为 conformance 的测试继续验证真实跨 owner seam，不是同一实现的自比较。
 
-## 门禁
+### 门禁
 
 `bun run check:test-ownership` 验证目录、deep import、root 散落、isolated 分类和 test discovery。
 `bun run test` 验证默认执行，系统/qualification 使用各自显式命令。
@@ -208,7 +190,7 @@ owner，并显式拒绝旧 `apps/kite-cli/test/**` 路径。stateful TUI overlay
 避免把标题已渲染误作输入层已ready；mutation次数与最终disk/Session断言不放宽。fixture lifecycle owner test使用真实
 explicit Kite home/state absent组合，先验证manager stop fence，再验证其余server/workspace cleanup与聚合错误顺序。
 
-## 文档结构、影响与保留证据
+### 文档结构、影响与保留证据
 
 `bun run check:docs` 递归检查当前手册、内部文档和入口；`bun run check:docs-impact` 的 all/staged/range 输出需要核对的文档，不以 Markdown diff 证明语义正确。映射或路径错误仍失败。
 
@@ -216,7 +198,7 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 
 文档工具回归：`bun test tests/integration/docs-impact.test.ts tests/integration/docs-structure.test.ts tests/isolated/scripts/docs-impact-scopes.test.ts`。客户端行为分别使用 TUI/PTY 与 Web tests，不能互相代替。
 
-## 文档任务路由与完成动作
+### 文档任务路由与完成动作
 
 文档映射按 Web 视觉/路由/数据/诊断、TUI 输入/导航/审批/投影/终端、Storage 查询/事务/authority/Artifact 和 Host 职责定位。全部生产文件仍必须有唯一 source owner；新增路径不能通过重叠或漏映射满足检查。
 
@@ -227,7 +209,7 @@ explicit Kite home/state absent组合，先验证manager stop fence，再验证�
 根入口检查覆盖仓库根目录与 docs 根目录的全部 Markdown，而非仅固定 README 名单；新增客户端规则或产品入口的失效链接同样会失败。已归档的 Agent Notes 按历史材料处理，不以旧代码路径强制改写其正文；当前文档引用仍须链接有效。
 
 
-## 桌面客户端验证
+### 桌面客户端验证
 
 `apps/kite-desktop/test` 归属桌面 owner，已加入默认测试发现。页面与 client 测试验证累计文本、持久终态、导航、恢复与发送失败不重试；bridge/preload 测试固定具名方法和 channel，不暴露通用 `ipcRenderer`。Electron host 测试分别覆盖 IPC 来源与封闭参数、项目/Git/编辑器、Service 制品与进程、窗口生命周期，以及 renderer initialize 复用、旧代次隔离和订阅清理。
 

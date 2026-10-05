@@ -47,6 +47,13 @@ export function violatesVersionedProductionPath(relativePath: string): boolean {
 
 export function violatesHistoricalProductionEntity(relativePath: string, name: string): boolean {
   const withoutAlgorithmNames = name.replace(/IPv[46]|SHA(?:1|256|512)/giu, '');
+  // This exact factory names an external protocol, not a historical runtime branch.
+  if (
+    relativePath === 'packages/ai/src/sdk.ts' &&
+    name === 'createCompatibleModelBinding' &&
+    !versionedEntity.test(withoutAlgorithmNames)
+  )
+    return false;
   if (!versionedEntity.test(withoutAlgorithmNames) && !historicalEntity.test(name)) return false;
   return (
     !historicalSessionReadOwners.has(relativePath) &&

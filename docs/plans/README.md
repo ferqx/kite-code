@@ -4,6 +4,8 @@
 
 ## 正在实施
 
+[通用 Agent 一体化重构与持续演进方案](unified-agent-refactor-v1.md)：按 V1.3 逐段实施；外部工具、真实 SQLite Worker、唯一 Loop 和两进程重启读取已有最小闭环。实际调用者切换、完整 T/E 场景与发行资格按[进度证据](unified-agent-refactor-v1-progress.md)及[能力映射](unified-agent-refactor-v1-capabilities.tsv)核对；总体尚未完成。
+
 [客户端启动、服务生命周期与发布升级规范](daemon-upgrade-lifecycle.md)：阶段 1、2 已完成本机实现与验证，阶段 3 的发布门禁已接入；Linux/Windows hosted 资格仍待验证。覆盖默认 TUI/CLI 配套服务、共享 daemon 与 Web；未来桌面端仅规定接入边界。
 
 [桌面客户端日常体验与发布资格](desktop-client.md)：Electron 本机开发和内部测试持续进行；按[日常体验方向](desktop-client.md#首轮验证后的日常体验方向)逐项核对功能覆盖、交互体验与正式发布条件。迁移前 Tauri 的本机验证仅作历史证据。

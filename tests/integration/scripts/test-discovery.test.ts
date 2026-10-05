@@ -10,7 +10,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { analyzeTestOwnership } from '../../../scripts/check-test-ownership';
+import {
+  analyzeTestOwnership,
+  isExtensionFixtureTest,
+} from '../../../scripts/check-test-ownership';
 import { planSuiteTests, planTestSuites } from '../../../scripts/test-plan';
 import {
   collectTestFiles,
@@ -18,6 +21,8 @@ import {
   shardTestFiles,
   testParallelism,
 } from '../../../scripts/test-suite';
+
+import { UNIFIED_TEST_SUITES } from '../../../scripts/unified-test-plan';
 
 const repoRoot = join(import.meta.dir, '..', '..', '..');
 
@@ -41,7 +46,13 @@ describe('test discovery boundaries V2', () => {
     const paths = collectTestFiles(join(repoRoot, 'tests')).map((path) =>
       relative(join(repoRoot, 'tests'), path).replaceAll('\\', '/'),
     );
-    expect(paths.filter((path) => !allowed.has(path.split('/')[0]!))).toEqual([]);
+    expect(
+      paths.filter(
+        (path) =>
+          !allowed.has(path.split('/')[0]!) &&
+          !isExtensionFixtureTest(repoRoot, join(repoRoot, 'tests', path)),
+      ),
+    ).toEqual([]);
     expect(existsSync(join(repoRoot, 'tests', 'runtime'))).toBe(false);
   });
 
@@ -78,6 +89,7 @@ describe('test discovery boundaries V2', () => {
       writeFileSync(implicitExclusive, "Bun.spawn(['true']);\n");
       const integration = planSuiteTests(root, 'tests/integration', 4);
       const isolation = planSuiteTests(root, 'tests/isolated', 4);
+      expect(collectTestFiles(parallel[0]!)).toEqual([parallel[0]!]);
       const planned = [
         ...integration.concurrent,
         ...integration.exclusive,
@@ -107,31 +119,7 @@ describe('test discovery boundaries V2', () => {
   });
 
   test('covers the complete default Bun file inventory once across all suites', () => {
-    const suites = [
-      'packages/agent-api-contract/test',
-      'packages/agent-api-client/test',
-      'packages/runtime-contract/test',
-      'packages/runtime-protocol/test',
-      'packages/runtime-server/test',
-      'packages/runtime-client/test',
-      'packages/kite-app-contract/test',
-      'packages/kite-local-runtime/test',
-      'packages/agent-kernel/test',
-      'packages/runtime-spi/test',
-      'packages/runtime-host/test',
-      'packages/runtime-storage-sqlite/test',
-      'packages/builtin-runtime/test',
-      'apps/kite-cli/test',
-      'apps/kite-service/test',
-      'packages/kite-client-ui/test',
-      'apps/kite-desktop/test',
-      'tests/integration',
-      'tests/golden',
-      'tests/release',
-      'tests/e2e/local',
-      'tests/tui-system/harness',
-      'tests/isolated',
-    ];
+    const suites = UNIFIED_TEST_SUITES;
     const expected = suites.flatMap((suite) => collectTestFiles(join(repoRoot, suite))).sort();
     const plan = planTestSuites(repoRoot, suites, 4);
     const planned = [...plan.concurrent, ...plan.exclusive].flatMap((job) => job.files);
@@ -161,9 +149,7 @@ describe('test discovery boundaries V2', () => {
       const violations = analyzeTestOwnership(root);
       expect(violations.map((item) => item.code)).toEqual(['OWNER_TEST_REQUIRES_ISOLATION']);
       expect(violations.some((item) => item.path === files[0])).toBe(false);
-      expect(
-        existsSync(join(repoRoot, 'apps/kite-cli/test/tui-runtime-client-conformance.test.ts')),
-      ).toBe(true);
+      expect(existsSync(join(repoRoot, 'apps/cli/test/isolated/shared-cli.test.ts'))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -179,7 +165,7 @@ describe('test discovery boundaries V2', () => {
   });
 
   test('distributes parallel-safe files across bounded stable process shards', () => {
-    const files = collectTestFiles(join(repoRoot, 'packages', 'agent-kernel', 'test')).slice(0, 9);
+    const files = collectTestFiles(join(repoRoot, 'packages', 'agent', 'test')).slice(0, 9);
     const shards = shardTestFiles(files, 4);
     expect(shards).toHaveLength(4);
     expect(shards.flat().sort()).toEqual(files.sort());
@@ -192,11 +178,8 @@ describe('test discovery boundaries V2', () => {
     };
     const runner = readFileSync(join(repoRoot, 'scripts', 'run-default-tests.ts'), 'utf8');
     expect(pkg.scripts.test).toBe('bun run scripts/run-default-tests.ts');
-    expect(pkg.scripts['test:all']).toBe('bun run test && bun run test:tui:system');
-    expect(pkg.scripts['test:runtime:fault']).toContain('tests/qualification/runtime/');
-    expect(pkg.scripts['test:sandbox:smoke:native']).toContain('tests/qualification/');
     expect(runner).not.toContain('PROCESS_ISOLATED_TEST_FILES');
     expect(runner).not.toContain('path-ignore-patterns');
-    expect(runner).toContain('testParallelism');
+    expect(runner).toContain('runUnifiedTests');
   });
 });

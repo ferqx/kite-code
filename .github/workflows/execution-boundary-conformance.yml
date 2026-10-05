@@ -1,70 +1,75 @@
 name: Execution Boundary Artifact Conformance
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
-      - "apps/kite-service/src/config/execution-boundary.ts"
-      - "apps/kite-service/src/config/execution-qualification.ts"
-      - "apps/kite-service/src/config/release-*.ts"
-      - "packages/builtin-runtime/src/sandbox/**"
-      - "packages/builtin-runtime/src/planning/runtime-module.ts"
-      - "packages/runtime-host/src/process/**"
-      - "packages/runtime-spi/src/sandbox-execution-provider.ts"
-      - "apps/kite-service/src/sandbox/**"
-      - "packages/builtin-runtime/src/mcp/**"
-      - "apps/kite-service/src/release/**"
-      - "apps/kite-service/src/workspace/**"
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
       - "scripts/release/**"
-      - "release/platform-capabilities/**"
-      - "tests/release/**"
-      - "apps/kite-service/test/policies/protected-path.test.ts"
-      - "apps/kite-service/test/sandbox/network-boundary.test.ts"
-      - "apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts"
-      - "tests/qualification/sandbox/**"
-      - "tests/isolated/workspace/worktree-controller.test.ts"
-      - "tests/integration/builtin-runtime/mcp-transport-boundary.test.ts"
-      - "packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
+      - "package.json"
+      - "bun.lock"
       - ".github/workflows/execution-boundary-conformance.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   negative-artifact-conformance:
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [macos-15, ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     steps:
-      # Official refs/tags/v7, refs/tags/v2 and refs/tags/v7 commit objects,
-      # resolved through the GitHub API on 2026-09-06.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - name: Boundary and adversarial contracts
+      - name: Current Files, dispatch, confinement and immutable artifact contracts
         run: >-
-          bun test
-          apps/kite-service/test/policies/protected-path.test.ts
-          apps/kite-service/test/sandbox/network-boundary.test.ts
-          apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts
-          tests/qualification/sandbox/process-tree-limit.test.ts
-          apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
-          tests/isolated/workspace/worktree-controller.test.ts
-          tests/integration/builtin-runtime/mcp-transport-boundary.test.ts
-          packages/builtin-runtime/test/mcp-transport-boundary-concurrency.test.ts
-          tests/release/execution-boundary-smoke.test.ts
-      - run: bun run release:contract:build
-      - run: bun run release:contract:verify
-      - run: bun run release:smoke:execution
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          bun test --parallel=1 --max-concurrency=1
+          packages/agent/test/isolated/jobs/confined-shell.test.ts
+          packages/agent/test/isolated/files/runtime.test.ts
+          packages/agent/test/isolated/execution/authorization-review.test.ts
+          apps/service/test/isolated/runtime-assets.test.ts
+          tests/isolated/unified-agent/formal-optional-capabilities.test.ts
+          tests/isolated/unified-agent/native-runtime-protection.test.ts
+      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
+      - run: bun run release:build --directory dist/unified-terminal
+      - name: Actual relocated candidate Files, assets, default capability and lifetime probe
+        run: >-
+          bun run scripts/release/unified-platform-probe.ts
+          "--candidate=${{ github.workspace }}/dist/unified-terminal"
+          "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
+      - name: Check diagnostic evidence
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=diagnostic
+      - name: Require complete native execution qualification
+        if: always()
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=formal
+      - name: Preserve actual evidence and unsigned candidates
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: execution-boundary-negative-conformance-${{ matrix.os }}
-          path: |
-            dist/release-synthetic/
-            dist/execution-boundary-smoke.json
+          path: dist/unified-evidence/platform.json
           if-no-files-found: error
+          overwrite: false

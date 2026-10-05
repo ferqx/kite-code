@@ -2,10 +2,44 @@
 
 状态：active
 读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
-验证：`bun test apps/kite-service/test/isolated/mcp-config-catalog.test.ts apps/kite-service/test/isolated/mcp-config-repository.test.ts apps/kite-service/test/mcp-config-reconcile.test.ts apps/kite-service/test/isolated/mcp-project-approval.test.ts apps/kite-service/test/mcp-supervisor.test.ts packages/builtin-runtime/test/mcp-credential-store.test.ts apps/kite-service/test/mcp-oauth-integration.test.ts apps/kite-cli/test/mcp-panel.test.tsx apps/kite-cli/test/tui-slash-command.test.ts apps/kite-cli/test/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test packages/ui/test/tui/mcp.test.tsx packages/ui/test/tui/mcp-connection.test.tsx apps/cli/test/isolated/tui-mcp-host.test.ts apps/cli/test/isolated/tui-mcp-connection-host.test.ts apps/cli/test/isolated/tui-mcp-connection-restore.test.ts`、`bun run typecheck`、`bun run check:unified-agent-boundary`；默认来源、认证与实际平台资格分别按[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)与[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。下面旧owner测试只属于历史范围，不参与当前正式/default/CI调度。
 相关：[Agent Note 0019](../../.agents/notes/implemented/feature/2026-07-19-mcp-two-config-locations.md)、[Agent Note 0013](../../.agents/notes/implemented/feature/2026-07-16-mcp-credential-store-and-oauth-session.md)、[Agent Note 0014](../../.agents/notes/implemented/feature/2026-07-17-mcp-tool-visibility-and-policy.md)、[Agent Note 0018](../../.agents/notes/implemented/feature/2026-07-19-mcp-tui-select-management-center.md)、`apps/kite-service/src/config/mcp-config-repository.ts`、`apps/kite-service/src/config/mcp-config.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`apps/kite-cli/src/tui/mcp/`。
 
 ## 来源与优先级
+
+可见 Source Review、有限原决定读取、跨 Session 未确认冲突与离线 v10 资产已接入，当前合同见[项目来源决定与历史读取](#项目来源决定与历史读取)；本片源码外键盘和当前完整默认已验收，取舍与有限资格见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
+
+新正式/default/CI已使用通用Service。trusted programmatic registry 提供 `mcp.servers` Query、`mcp.server.select` 普通 Action，以及准确原 live connection 的 `mcp.catalogue.refresh`；六字段 read-set 和实际 Workspace identity 进入文件锁/HostMutation复核，不由通用patch注册原始Server。默认用户来源是选定Profile/mcp.json，项目来源是canonical Workspace/.kite-code/mcp.json；同名项目声明即使disabled/invalid/pending/rejected仍遮蔽用户来源，不读旧全局home或转换旧数据。raw原文留宿主私人源，目录只保安全ID/transport/source/digest/status；批准来源、绑定凭据和实际连接分别是普通Action/Job，不授Tool权限。当前实现与实际三段Ask、漂移前零vault/RPC、默认源码外stdio及nested source child证据归[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)和[scoped提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)。OAuth/续期、公开child冷恢复、完整UI/OSvault与平台仍待闭合。
+
+## 当前 TUI 的有限选择
+
+新 `/mcp` 通过共享UI的[MCP port/panel](../../packages/ui/src/tui/README.md#mcp-安全目录与原选择意图)和[CLI host](../../apps/cli/README.md#tui-mcp-目录与配置选择)接固定Query及普通Server选择Action。上下/Enter/Esc、可见刷新/原结果查询与独立user/project范围确认保原Select取舍；Query零Model/连接/凭据。准确Command受理仅pending，保存确认须原subject/Store/requestSHA、成功Execution binding及真实HostMutation applied/CAS receipt和原GET一致；发布后SQLreceipt故障继续unknown，不重POST。JSONC注释与未知字段保留，外部CAS冲突零修改，普通Ask批准前零修改。
+
+CLI host 现在独立持久保存 `ui/mcp-selection-intents.json@1`。成功 durable prepare 才允许当前首次 POST；原 body/request SHA、subject、Store/Session/Workspace/identity 与冲突判定在短写锁内核实，同 ID 或冷记录只查原 GET，128/16MiB 不淘汰 unknown。冷列表与详情提供全部同 Session 原 ID，空或失败目录也可用键盘选择；选择本身不查询，显式“查询原操作”才 GET。历史读取不要求 Server/物理 Workspace 仍存在，新修改继续核当前 identity 与完整 read-set。关闭/切 Session 只停读取，原结果不授予新的权限，成功 GET 不清 SSE stale。
+
+当前 Ink15项501断言和源码外真实 PTY1项21断言证明键盘可达、范围确认、原 active Run/审批/history/draft 保留；冷 Host 的物理 socket 丢失/SIGKILL 和历史查回、journal 边界另由[CLI owner](../../apps/cli/README.md#tui-mcp-目录与配置选择)记录。维护 closed v8 以独立 Agent codec 采集完整原字节；旧 v2–v7 白名单不扩大，换 Store 恢复不重绑身份、不自动 GET/POST，详见[维护 owner](../../packages/agent/src/maintenance/README.md#mcp-选择意图的独立离线资产)。[真实冷重开 TUI](../../apps/cli/test/isolated/tui-mcp-cold-pty.test.ts)当前1项44断言覆盖首轮真实两申请、正常 Ctrl+Q 与同 Profile/Store/subject/Session/Workspace 空目录逐键选择第二原 ID，再显式 GET-only；冷轮所有 POST/Model/Run/凭据/RPC/取消均零。它限 macOS paired 正常退出，独立于物理丢响应/SIGKILL 的 cold Host，未涵盖全部异常收尾。原工具详情已由不可变metadata和公共reader补齐；完整认证、强制重连、增删、正式安装及三平台仍未闭合。产品预期和当前可执行步骤见[MCP指南](../handbook/clients/tui/guides/mcp-and-skills.md)。
+
+公开 Service 的[冷后显式新连接](../../apps/service/test/isolated/mcp-cold-reconnect.test.ts)当前1项65断言通过：同 Profile/Store 的旧历史 GET 不连接，新 key 经新的独立 Action/Job Ask 后发现新目录并完成真实 Tool，旧 record 不被替换连接污染，source 漂移阻止派发。该本机 auth:none/loopback 正常 paired 关闭资格由[Service owner](../../apps/service/README.md)维护；它没有增加面板重连、认证或增删功能，也不证明崩溃接管和三平台。
+
+## 当前显式连接与原申请
+
+新面板的可见Request connection经独立确认，只申请普通 `builtin.mcp/mcp.connect@1`；准确selected/admitted/available来源与完整Workspace目录在Host复核，来源捕获与实际connection Job仍沿Service普通许可和最后派发检查。accepted不等ready，warm可复用原Job；原ready、当前live/currentGeneration和created/reused独立。有限只读 `mcp.connection@1` 核原Action/Job/parent/ref/inputDigest，完整envelope≤16KiB，不输出transport、凭据或定义正文。holder unavailable时generation为null，原ready不变。
+
+独立 `ui/mcp-connection-intents.json@1` 沿private/Profile/data-lock/CAS持久保存原request/subject/身份/摘要/phase。128条/16MiB与Store+Session+Server未知冲突在prepare前核实；冷或既有记录只有原GET，不恢复首次POST权。空/failed/removed目录仍可选择同Session原ID，选择零GET、明确Check才查询；换Store/subject在HTTP前拒绝。closed backup v9只在资产实际存在时创建，v8及所有旧白名单不扩大，恢复保原bytes和A身份。实际Host A→B已有list/lookup/duplicate submit全HTTP0、RPC0增量、原cursor/bytes保持资格。
+
+当前普通实际Host4/90、Query3/106（含stop pending/unknown）、journal5/174、维护4/37、UI与Select/Tools/preferences邻接38/699和源码外80×24当前PTY1/61分别保各自范围。当前候选暖新建/复用、同Store冷原GET与明确新申请、shared detach保持live和正常清理均已验证；中文固定文案与外部metadata保真由Ink单独核实，当前实际PTY为英文。异常cleanup、强制warm重连、完整认证/增删和三平台未由本片完成。精确合同及证据归[Agent](../../packages/agent/src/mcp/README.md#原连接申请的有限事实)、[CLI](../../apps/cli/README.md#tui-mcp-显式连接与原申请)、[TUI](../../packages/ui/src/tui/README.md#mcp-显式连接与原申请)与[maintenance](../../packages/agent/src/maintenance/README.md#mcp-连接申请的独立离线资产)。
+
+## 项目来源决定与历史读取
+
+安全 Source 目录独立于32项管理目录的 selection/admitted 条件。当前有效项目 source binding 与 transport 才允许 Review；普通 `builtin.mcp.sources/mcp.source.approve@1` 许可后仍要求准确原 Source Question 的显式 approved/rejected/cancel。确认页不预答，空 Enter 零 Answer。取消决定保存原八字段证明而不 begin mutation；批准/拒绝必须由真实 applied HostMutation 和原 Question/结果共同证明，不能从 Command.applied 或单独 mutation 推断 saved。
+
+Process host 只解析一次真实 subject，并同时交给配置 factory 和 `startService`；自定义 configure 收到冻结的第二参数。这个 observer 不来自 startup JSON、Query 或 JSONC。有限 GET-only `mcp.source.result@1` 只读原 Store/S/Command/Execution/Interaction/HostMutation，从原 readSet 和 Session.workspaceId 重建持久 scope，不读当前 Source、凭据、transport 或物理 Workspace。缺 observer、主体不符、部分发布、未知 finish 和任何不完整证明保持 unknown，不能释放新申请冲突；普通许可明确零 adapter 的失败/持久取消与 Source Question cancel 分别核证，不能互相补造证明。完整闭合 Query 和证明合同归[Service owner](../../apps/service/README.md#项目来源决定的有限历史事实)。
+
+CLI 新提交核当前完整 Workspace、physical identity 与完整同版本 Source 分页。独立 `ui/mcp-source-approval-intents.json@1` 私有 durable prepare 才赋予当前首次 POST 权；冲突域为 Store+Workspace+Server，不含 Session 或 source fingerprint。128条/16MiB不淘汰unknown；冷记录或重复只原GET，错Store/subject在任何HTTP前拒绝，历史不依赖当前物理目录。条件 backup v10保持旧v2–v9白名单及原bytes，恢复新Store不retag、不恢复热权利。当前事实分别归[CLI](../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)、[TUI](../../packages/ui/src/tui/README.md#mcp-项目来源与原决定申请)和[maintenance](../../packages/agent/src/maintenance/README.md#mcp-来源决定申请的独立离线资产)；它们不完成认证、强制重连、增删或三平台发行。
+
+## 历史实现与仍适用的约束
+
+下方记录旧Repository/Supervisor和App的历史实现，旧home路径、owner和测试不能作为新入口支持。原JSONC保未知字节、来源审批、secret隔离、generation和未知效果不重放等理由仍适用；已退役路径不因历史记录而重新参与正式调度。
 
 默认目录按以下顺序选择同名 effective Server：
 

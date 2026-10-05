@@ -22,6 +22,10 @@
 
 工具执行前拒绝与执行后失败必须区分。无输出或连接中断不等于未执行。需要重试时先核实是否安全重复。
 
+开发统一 caller 的普通申请与执行终态分开。start、steer、follow-up、原 Command cancel 和准确 Execution cancel 都在首次 POST 前保存完整原请求；单次 Plan/Workflow 不变成永久权限。崩溃或回执丢失后只读原 Command，未知不重投，详见[普通申请恢复](recovery.md#开发统一调用者的普通申请恢复)。`applied` Work 仍须读取实际 Run，`cancel_requested` 仍须读取准确 Job 状态；它们不能作为模型完成、工具效果成功或清理完成的证明。
+
+开发 CLI 的 JSON Work start/follow-up 核原 Command 与实际 Run 后，继续原审批、问题及输出生命周期，completed 才成功退出。排队期间只查询原关系，不借另一个活动 Run；EOF、未知原答案或结束本地观察保留未完成事实。共享连接结束只 detach，配对服务收尾可能中断仍活动的工作，不能把先前受理回执改称完成。Native 沿原 controller 观察执行，原申请面板的冷查回不重开业务；准确单 Job stop 先核原新鲜 Execution。当前双 Job 窗口证明的是明确配置的 `shell.launch`/`shell.command` policy 下父 Run 已完成后只停止一项，另一项未取消，不是默认所有 Shell 获授权或 Workflow verifier 资格。
+
 各客户端可采用不同展示：TUI 有活动过程与终端历史，Web 按页面读取快照及增量，CLI 输出事件。共享的是结果含义，而不是布局和刷新频率。
 
 后台执行目录按页传输，不因累计命令或子任务较多而超过单条消息容量。缺省 Runtime Client 查询会读完版本一致的全部页，显式页查询只返回请求页；跨页状态变化时重新读取，超时或取消不会把部分目录当作完整结果。停止和输出续读仍使用准确的执行身份。
@@ -47,7 +51,7 @@
 macOS 与 Linux 上的受管 Shell 不作为 login shell 启动，并移除 `BASH_ENV`、`ENV` 等非交互启动注入，不会在命令之外隐式执行用户的 shell profile、rc 或环境指定的启动文件。命令继承应用已经提供的受控工具链环境；启动文件的权限或内容不会污染本次命令输出，也不会绕过该次工具审批。
 这不妨碍已批准的开发期命令按普通文件读取规则显式或间接读取 `~/.bashrc`、`~/.gitconfig` 等文件；读取权限与自动执行启动文件是两件事。
 
-显式 service 可跨本宿主中的正常 Run 保留；`running` 不等于业务已经 ready。后台子 Agent 以稳定 task ID 返回：`task_wait` 对一个或多个互不重复的当前 owner task 执行一次事件驱动 wait-any；显式等待时长由调用给出，默认 30 秒，仍受有限子 Run 的剩余期限和当前 Run 取消约束，任一目标终态、超时、新引导或 Run 取消都会有界返回；超时和新引导不取消 child。`task_read` 按需读取当前状态或持久结果，`task_cancel` 精确取消。正常 required-only 路径仍由 Runtime 自动等待，不要求模型调用 `task_wait`。具名结果以低权限来源进入模型上下文，不视为人类授权。后台子 Agent 即使在发起它的父轮结束后仍使用同一套受管工具管线和会话持久化边界，不会因父轮执行作用域释放而把文件或 Shell 工具误报为不可用。只有结构化授权、准确预算预留和资金 Run 的期限规则都满足时，`after_turn` 结果才会至多触发一次新的汇报 Run；若用户已开始新的活动 Run，`human_start_preferred` 会抑制自动续轮，结果保持持久可读且不会注入这个新 Run。普通 Shell 完成不会触发该路径。
+显式 service 可跨本宿主中的正常 Run 保留；`running` 不等于业务已经 ready。后台子 Agent 以稳定 task ID 返回：`task_wait` 对一个或多个互不重复的当前 owner task 执行一次事件驱动 wait-any；显式等待时长由调用给出，默认 30 秒，仍受有限子 Run 的剩余期限和当前 Run 取消约束，任一目标终态、超时、新引导或 Run 取消都会有界返回；超时和新引导不取消 child。`task_read` 按需读取当前状态或持久结果，`task_cancel` 精确取消。正常 required-only 路径仍由 Runtime 自动等待，不要求模型调用 `task_wait`。具名结果以低权限来源进入模型上下文，不视为人类授权。后台子 Agent 即使在发起它的父轮结束后仍使用同一套受管工具管线和会话持久化边界，不会因父轮执行作用域释放而把文件或 Shell 工具误报为不可用。新统一链路中，只有可信宿主在实际 child/carrier 激活时封存的续轮授权、原配置与适用期限仍成立时，`after_turn` 结果才会至多触发一次新的汇报 Run；嵌套或后续 child 的汇报沿原 child 截止时间，不另加 30 分钟或递归自授权；若用户已开始新的活动 Run，`human_start_preferred` 会抑制自动续轮，结果保持持久可读且不会注入这个新 Run。普通 Shell 完成不会触发该路径。
 
 Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，并只允许对新鲜、仍运行的准确执行发起停止。所选会话的父 Run 正在等待多个子 Agent 时，已结算子 Agent 的卡片会更新为终态，其余卡片继续显示运行；父 Run 保持原身份与等待状态。重新进入会话时，历史中已持久化的后台子 Agent 结果会结束对应运行卡片；读取历史不会为了修正展示而写入新事件。TUI 支持运行中引导和准确停止；Web 只读展示后台摘要，不获得 mutation 权限。宿主退出、崩溃或升级后不承诺本地进程续跑；历史结果保留，无法确认的清理保持 unknown。当前进程树清理已在 macOS 验证，Linux 与 Windows 的本次平台资格尚未实跑。
 

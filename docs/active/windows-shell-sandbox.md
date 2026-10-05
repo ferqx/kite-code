@@ -6,7 +6,17 @@
 已审批网络 token、Shell runtime policy、Windows filesystem/network boundary、Platform Capability
 Probe，或 Windows Full/fallback UI 状态时。
 
-验证：`bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-runner.test.ts
+验证：`bun run check:pre-release-architecture`、`bun test packages/agent/test/isolated/windows-path-security/default.test.ts packages/agent/test/isolated/config/mcp-selection-windows.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run typecheck`、`bun run check:docs`；Windows native必须在实际win32执行，macOS types/POSIX结果不替代。
+
+## 当前新图与Windows资格
+
+新正式CLI/TUI与3OSplatform/execution/release workflow没有调用旧Rust sandbox runner或旧State投影。当前默认Shell在Provider/Job前unavailable，Windows private Profile/Store/config ACL实现不授Shell/network/fork资格；普通Workspace声明仍不可信，既有ACL不自动修复。
+
+下方V6/restricted-token/Schannel/Job、旧candidate与旧Gate资料保留历史机制、实际限制和安全经验。若后续将其中能力移入新宿主，仍须以新公共Execution/Job、准确封闭来源/许可、实际Windowsnative与完整制品证明；不能包装旧Host/writer，或凭旧pin/CI记录启用新的effectfulplatform。当前新平台formal verifier继续拒完整缺资格；三OS结果由[当前进度](../plans/unified-agent-refactor-v1-progress.md)核对。
+
+## 历史runner与仍适用的安全约束
+
+旧实现验证：`bun test apps/kite-service/test/tool-definitions.test.ts apps/kite-service/test/tool-runner.test.ts
 packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/windows-restricted-token.test.ts
 tests/qualification/sandbox/windows-network-setup.test.ts tests/qualification/sandbox/platform-capability-probe.test.ts
 tests/qualification/sandbox/platform-capability-verifier.test.ts tests/qualification/sandbox/process-tree-limit.test.ts

@@ -2,6 +2,45 @@
   "version": 2,
   "rules": [
     {
+      "id": "unified-service",
+      "sources": ["apps/service/src/**", "apps/service/package.json", "apps/service/generated/**"],
+      "authorities": ["apps/service/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-client",
+      "sources": ["packages/client/src/**", "packages/client/package.json"],
+      "authorities": ["packages/client/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-ui",
+      "sources": ["packages/ui/src/**", "packages/ui/package.json"],
+      "authorities": ["packages/ui/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-web",
+      "sources": ["apps/web/src/**", "apps/web/package.json"],
+      "authorities": ["apps/web/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-agent",
+      "sources": ["packages/agent/src/**", "packages/agent/package.json"],
+      "authorities": ["packages/agent/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-ai",
+      "sources": ["packages/ai/src/**", "packages/ai/package.json"],
+      "authorities": ["packages/ai/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
+      "id": "unified-agent-checks",
+      "sources": [
+        "scripts/check-unified-agent-boundary.ts",
+        "scripts/generate-unified-api.ts",
+        "scripts/run-unified-tests.ts"
+      ],
+      "authorities": ["tests/README.md", "docs/active/unified-agent-boundary.md"]
+    },
+    {
       "id": "documentation-governance",
       "sources": [
         "AGENTS.md",

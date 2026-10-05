@@ -2,86 +2,40 @@
 
 状态：active
 
-读取时机：修改release manifest、candidate构建/校验/安装、三平台workflow、rollback、release profile或发布状态时。
+读取时机：修改新 Terminal/Native manifest、构建、安装注册、SQLite selection、三平台 workflow、rollback 或发布状态时。
 
-验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、
-`bun run check:docs-impact`、`bun run check:docs`。
+验证：`bun run check:runtime-packages`、`bun run check:unified-agent-boundary`、`bun test tests/integration/scripts/unified-ci.test.ts tests/isolated/unified-agent/release-tools.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`、`bun run check:docs-impact`。具体平台范围见[实施证据](../plans/unified-agent-refactor-v1-progress.md)。
 
-相关：[Agent Note 0051](../../.agents/notes/implemented/process/2026-07-30-release-profile-monotonic-composition.md)、0052、0059、0065、0068、0069、0093、0166、`open-source-first-release.md`、
-`app-server-local-runtime.md`。
+## 当前发行与源身份
 
-## 首发权威
+根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
 
-G0验证本地正确性、安全、安装与回滚；G1要求GitHub-hosted macOS、Ubuntu、Windows真实build/install/process/PTY/candidate smoke。
-workflow定义、本机单平台结果或artifact上传都不能替代三平台通过。缺结果时必须标记pending/blocked，不得推断成功。
+`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。
 
-支持入口是本地TUI、foreground CLI和显式loopback Web daemon。默认TUI/CLI各自启动同candidate的parent-owned stdio App Server；
-多个进程共享durable Session facts，但同Session writer由Store generation fencing决定。Coordinator、Workspace Worker与独立Gateway
-无release executable；remote/LAN不在首发范围。
+候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.2。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。
 
-## Candidate
+Windows Native 构建与 transport 原生后端测试在消费编译器前调用[有限 CI 准备脚本](../../scripts/release/prepare-windows-native-ci.ts)。脚本只使用 runner 已安装的固定 vswhere/VsDevCmd、明确 x64 host/target、实际 canonical `cl.exe` 和对应 SDK header/library；缺项失败，不下载或从 PATH 查编译器。vswhere 按 UTF-8、CMD `SET` 按 `/u` 的 UTF-16LE 完整解码，坏字节拒绝；只向 `GITHUB_ENV` 保存十个构建变量、编译器及清空的 `CL`/`_CL_`，不打印原环境。transport 也固定原 PR head/repository 和完整历史。静态守卫核准备顺序及完整三文件 Windows 命令，`echo` 或过滤到零案例不能代替五项 Node 后端执行。本机18项80断言证明解码与调度负例，未运行 Windows 编译；准备成功不改变正式 Main 的加载前身份拒绝或平台完成条件。
 
-本次生命周期升级实现及待验收范围：[客户端启动与升级规范](../plans/daemon-upgrade-lifecycle.md)补充 TUI/CLI 新旧版本配套、Web 制品身份、共享数据兼容与显式 daemon restart 的发布验收。现有发布资格不自动覆盖这些新增要求。
+## 安装、登记与使用权
 
-`release:build`编译`kite`、`kite-tui`、`kite-service`和Web payload，并生成strict manifest、逐文件SHA-256、archive sidecar、
-release notes与known limitations。manifest中的CLI/TUI/Service/Web slot必须绑定exact identity；Coordinator/Worker/Gateway slot必须为null，
-archive不得出现对应executable/launcher。Web payload 的静态资源白名单包含当前共享 UI 使用的 WOFF2 字体；文件仍作为 manifest 条目逐一校验，不允许任意路径或类型。
+明确 archive/prefix、managed marker、独立安装 EX、不可变 releases 和两行 active/current/previous 约束保持。prefix 不能是根目录、用户 home、repo root、symlink/reparse 或未标记的内容。物化与指针发布经完整校验、fsync/rename；不原地覆盖已存在候选，不替换用户 Profile 或数据。四个 Node/Bun/Electron 注入环境键在固定入口清除。
 
-默认CLI/TUI connector从同一immutable candidate固定解析`kite-service app-server run-stdio`。source固定当前Bun与checkout entrypoint；
-installed固定launcher-pinned candidate。两者把同一个build ID交给client/child并在initialize校验exact server version/capabilities；
-不查PATH、不发现running process、不fallback。
+每个运行者持准确原 candidate SH，Service/daemon 独立保活。Node Native Main 同时持 outer/inner，继承 helper 仅关闭副本；清理失败保原事实/lease。更新只影响后续启动，回滚只交换代码指针。卸载完整枚举管理树并持所有候选 EX；任何 live lease 都 busy，不猜 PID 或强杀。未知条目、坏 active、坏候选和损坏登记均拒绝。
 
-显式`kite server start`解析同candidate的`app-server run-daemon`。daemon v2 status携带build诊断与stable `webOrigin`；
-compatibility只依据exact protocol/capabilities。status 不替换 owner；显式 stop/restart 通过独立 lifecycle v1 校验实例，identity 不确定时拒绝，`kite web` absent不spawn。
+Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。双方闭合 nonce/active 与完整物理树复核，standard 前门实际 spawn Native 内 Bun/CLI/TUI/Service；升级/回滚只更新原持有者登记，卸载以原 nonce CAS 撤销。独立前门恢复 Terminal；已缓存且删除的 Native-bin 路径需要父 shell 的 hash刷新/新 shell。详见[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
 
-## Build identity 与环境
+## SQLite 与可选能力
 
-source build identity覆盖CLI/TUI/Service、packages、release entrypoints、manifest inputs和有界untracked regular-file内容；实际build input变化
-必须改变identity。摘要不可用或越界时fail closed。
+Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建测量复制后 runtime，正式启动在首次数据库前选择并核包内 metadata，Worker 核同一 process-global 引擎。完全无选定资产的开发模式 unqualified；损坏/不完整资产拒绝，不查系统库 fallback。
 
-child环境只复制固定OS/runtime keys与内建Provider的explicit keys。unknown `*_API_KEY`、Workspace dotenv、ambient Kite home、
-NODE/BUN injection不得跨边界。profile、Workspace、build、Web asset root和daemon endpoint都由release composition显式提供。
+WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。
 
-## 安装、升级、回滚、卸载
+默认生产 Shell 当前 `shell_unavailable`，无 Provider/Job；可信进程组监督与 macOS confined 样本不冒称跨平台生产 sandbox。Files runtime assets 保护、原权限/read-set 和不盲重放仍强制。OS keyring 只有 CI 双 gate 的实际随机 namespace 才执行，普通测试不访问用户 vault；live MCP 只在明确 gate 开启时联网。
 
-开发中的 Electron 桌面端通过[服务准备脚本](../../scripts/release/prepare-desktop-service.ts)消费既有 verified candidate，仅把当前 macOS stdio Service 与 `desktop.json` 提取到 `apps/kite-desktop/service`。`build:electron` 要求清单存在，并把 candidate ID、服务摘要、expected server version 和环境变量名白名单编入 `main.cjs`；运行时不从可替换的资源清单选择版本。`build:desktop` 组合 Vite renderer、Electron main/preload 与官方 `@electron/packager`，当前 macOS arm64 输出为 `apps/kite-desktop/out/kite-darwin-arm64/kite.app`。这些脚本不改动安装器或 active pointer，不额外分发 CLI/TUI/Web；本机 `.app` 构建不等于正式签名、公证、升级或平台发布资格，相关限制见[桌面 owner](../../apps/kite-desktop/README.md)。
+## 平台与完成约束
 
-Desktop 的已知旧格式升级可用 `bun run --cwd apps/kite-desktop test:native:store-upgrade` 对打包 `.app` 与配套 Service 做隔离 Store 13→14/WAL 回归；该命令要求先准备 Service 并构建当前 Desktop 包。macOS release-candidate job 已加入准备、打包、ad-hoc 签名与该测试，失败将阻止该 job；GitHub-hosted runner 的首次执行结果仍待取得。它是 Desktop 原生资格检查，不代替本页 G1 的 CLI/TUI 三平台发行证据；本机执行范围见[桌面原生验收](../../apps/kite-desktop/docs/native-validation.md#electron-本机迁移验收)。
+G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX安装/继承使用锁只有本机macOS资格，Windows Profile/Store/配置原生场景已实现但未本机运行，Windows制品安装/maintenance仍有未实现边界。
 
-安装器只接受显式archive/prefix。prefix不能是filesystem root、用户home、repo root、symlink/reparse point或未标记的非空目录。
-每个candidate物化到immutable `releases/<candidateId>`；stable launcher、唯一`active` pointer、managed marker、`.candidate-id`
-与manifest/checksum交叉验证。
+平台 workflow 的当前源码外 Files/资产/SQLite/锁诊断通过，只证明报告所列范围；formal verifier 仍拒绝完整默认 effectful platform 缺资格。正式 soak 保固定8外层/≥60分钟/168分钟全局上界、必要混合场景、资源观测与后代身份要求；bounded diagnostic 不能冒充 formal。V1.3 D17 明确退役旧隐式累计预算账本，替代场景必须证明实际显式并发、取消和输出保留策略，不能重建旧资金账本作为运行前提。当前 runner 已使用闭合v2七类CI与正确显式策略场景，旧budget条件已删除；稳定资源点、持续组合负载及原生资格仍未闭合，见[韧性owner](runtime-resilience-qualification.md)。失败和不确定清理保原证据。
 
-upgrade/rollback只验证target candidate并原子切换pointer；已运行进程固定自己的candidate root，不重读pointer。安装器不discover、stop、
-replace或upgrade任何App Server，也不获取Runtime lifecycle fence。切换只影响下一次paired App Server或daemon start。
-
-uninstall先完整枚举并校验managed tree；unknown file/directory/link立即拒绝。POSIX 校验后只移除已拥有的发行内容，保留安装根、稳定选版锁及已有 Store 维护协议标记，防止卸载与重装复用不同锁 inode 或绕过旧候选限制；Windows 当前仍删除整个安装根且不具自动 Store 迁移资格。卸载不发送进程控制命令。
-运行中的daemon可能继续持有已加载代码，用户应在卸载前显式`kite server stop`；卸载器不会用旧`service *`命令猜测或强杀进程。
-
-## Stable launcher
-
-stable launcher验证active pointer、candidate identity和target executable后透明转发argv/env。Service executable只接受
-`app-server run-stdio|run-daemon`、MCP wrapper及process-tree private marker；旧`service run-single`与manager-owned readiness fd已删除。
-MCP wrapper仍保持authenticated framing与candidate pinning。
-
-## Platform qualification
-
-Windows candidate额外包含pinned sandbox runner、manifest和vendored runtime。build固定Rust toolchain、`rust-lld`与path remap；
-workflow在打包前验证committed runner evidence。Windows job在candidate build前运行owner-only endpoint lifecycle、
-`kite-session.sqlite` initialization/execution fencing/mutation和daemon真实process tests。
-Release installer contract test在Windows使用pinned Rust冷编译native CLI/launcher fixture；两个fixture并行构建，Windows test budget为120秒，
-只吸收hosted runner冷工具链成本，不减少manifest、install、upgrade、rollback或uninstall断言。
-
-`release:smoke`覆盖verify、install、CLI help/version、installed TUI PTY、paired App Server、显式daemon start/status/Web/stop、
-retired slot absence、Web payload、MCP wrapper、upgrade、active pointer、immutable roots、rollback与uninstall。单平台smoke不等于G1。
-
-KASD 在只有 macOS 本机证据时保持 pending。随后包含 implementation head
-`af7c7596c2e1b7b4aa6eccb12375aca017b45222`的
-[OSS RC run 33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)已在三平台完成build/verify/install/process/PTY/smoke，
-因此该 implementation head 的 KASD release qualification 为 completed；后续代码与新增门禁仍须另行核验。
-
-升级/回滚 CLI 明确提示运行中的客户端不受影响；macOS/Windows/Linux candidate smoke 增加独立编译旧业务协议 fixture 经 lifecycle v1 切换到 installed daemon 的验证。该 fixture 是首发机制证明，不冒充真实已发布 predecessor；第二次发布起须增加受支持 predecessor 制品。新增门禁的通过状态见实施计划，历史 qualification 不自动覆盖新增代码。
-
-macOS standalone 构建将已安装目标架构的 `@napi-rs/keyring` 原生模块嵌入 executable，不在运行时搜索包目录或环境指定的原生库。凭据仍由既有 NativeMcpCredentialStore 与共享 broker 管理；其他平台的 standalone 原生凭据资格未在本轮扩大。隔离编译 smoke 见[原生凭据验证](../../tests/qualification/mcp-keyring-platform-smoke.test.ts)，不替代桌面包签名、公证与最终运行验收。
-
-发布依赖补丁由 `package.json` 的 `patchedDependencies` 与 `bun.lock` 固定，安装不能绕过补丁。当前 `ink-virtual-list@0.2.3` 修正发布 dist 的开发 JSX 入口，编译版列表渲染由[候选包回归](../../tests/release/oss-candidate.test.ts)验证；不通过全局开启 React 开发模式修复生产制品。
+旧 KASD [三平台 run33659494358](https://github.com/ferqx/kite-code/actions/runs/33659494358)只绑定其历史 implementation head，不证明新八 workspace。旧来源/字段不再用于当前发行。依赖补丁仍由 manifest/lock固定，不能绕过安装补丁。完整 V1.3 的37能力、T001—T114/E01—E14及§35仍由[计划](../plans/unified-agent-refactor-v1.md)与实际能力映射核对，状态保持 implementing。

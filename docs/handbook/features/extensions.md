@@ -15,3 +15,13 @@ Skill Activation 和 Skill Workflow 默认受开关限制。手册不承诺默�
 [TUI 扩展指南](../clients/tui/guides/mcp-and-skills.md)说明管理与动态命令；CLI 可通过支持的 `--skill` 请求已可用的 Skill。Web 当前不配置或执行这些扩展。
 
 外部系统返回内容仍需核对，不能把工具描述或外部文档视为项目授权。
+
+通用开发入口提供同源 Skill 知识目录：不可用项显示局部原因，不阻止未选择该项的普通任务；明确选择不可用项仍会拒绝，子任务继承的原项失效也不能静默换项。默认知识读取不再附加固定项目数、正文或引用数额度，宿主明确设置的额度、配置文件字节边界、路径与格式检查仍有效。TUI `/skills` 只读发现与状态，并在宿主支持时显示独立的 Workflow 资格与命令名称，见[开发目录操作](../clients/tui/guides/mcp-and-skills.md#通用开发-tui-的-skill-目录)。
+
+通用 Service 的 Native API 支持显式 Workflow 激活，需在当前 profile 的 `skill-workflow.jsonc` 打开 `skillActivation` 与 `skillWorkflow`；缺文件默认关闭。`verification` 独立控制核验准入，关闭它仍要求输出符合原契约。请求由已支持 `run_extension_inputs` 的 Client 提交原激活意图，inline 使用原指令，fork 使用原子任务完整结果；失败或未知不能靠模型自行宣称成功。脚本核验需要宿主实际提供受监督进程能力，并继续经过原权限和必要审批。精确配置/API 由 [Service owner](../../../apps/service/README.md#有条件-skill-workflow) 维护。
+
+通用开发 CLI 以可重复的 `--activate-skill <名称或Skill ID>` 显式激活 Workflow，`--skill` 继续选择本次任务可按需使用的知识。TUI 使用 `/<Skill 名称> [任务]`，固定命令优先。两者要求宿主确认当前 Workflow 允许手动调用且接受空对象输入；任务文字作为普通任务内容，不自动填充结构化输入或打开开关。活动 Run 上的激活排为独立 follow-up，保持原 Run 的契约；提交结果未知时核实原命令，不重复创建任务。目录只是读取时的可用性，实际开始仍重新核对可信源、配置和权限。Web 保持只读范围。
+
+通用 Workflow 的 required 核验失败后，Agent 可在同一轮普通执行中修复并提交新尝试；原输出与失败保留，不自动重跑原核验 Job。宿主允许时，Agent 可通过普通问题请求用户选择 replan 或 waive，并要求非空修改指令或豁免理由。replan 建立新尝试；waive 只豁免准确原核验义务，历史仍区分 failed 与 waived，不显示为验证通过。来源、权限、取消或尝试已变化时，旧答案不能继续执行；未知外部效果不能靠用户决定解除。每个父工具、子任务和 verifier 仍分别遵守必要审批，前一个批准不能借给后一个调用。
+
+原 Skill 声明了 Workspace 内补偿脚本、宿主允许补偿且实际受限后端可用时，问题才提供 compensate。当前开发统一路径支持 macOS 下禁止子进程的 Bun 脚本：固定原声明与完整只读资产，在原 Workspace 执行，网络和受保护目录写入被拒绝，并单独请求 Job 审批。重复选择只查询原工作，不能再执行一次。补偿成功保留原 failed，仍需新尝试核验通过或用户准确豁免；无法确认停止时保留 unknown。Workflow 开关缺省关闭，其他平台和需要子进程的脚本当前不可用。

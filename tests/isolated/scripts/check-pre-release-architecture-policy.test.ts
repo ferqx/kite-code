@@ -57,6 +57,27 @@ describe('pre-release architecture historical format policy', () => {
     ).toBe(false);
   });
 
+  test('admits only the exact external protocol factory and preserves historical checks', () => {
+    expect(
+      violatesHistoricalProductionEntity('packages/ai/src/sdk.ts', 'createCompatibleModelBinding'),
+    ).toBe(false);
+    expect(
+      violatesHistoricalProductionEntity(
+        'packages/ai/src/other.ts',
+        'createCompatibleModelBinding',
+      ),
+    ).toBe(true);
+    expect(
+      violatesHistoricalProductionEntity('packages/ai/src/sdk.ts', 'createLegacyModelBinding'),
+    ).toBe(true);
+    expect(
+      violatesHistoricalProductionEntity(
+        'packages/ai/src/sdk.ts',
+        'createCompatibleModelBindingV2',
+      ),
+    ).toBe(true);
+  });
+
   test('keeps versioned paths and entities out of ordinary production owners', () => {
     expect(violatesVersionedProductionPath('apps/kite-service/src/runtime/store13-reader.ts')).toBe(
       true,

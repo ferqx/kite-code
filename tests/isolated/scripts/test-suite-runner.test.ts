@@ -206,3 +206,59 @@ test('exclusive', () => expect(existsSync(${JSON.stringify(marker)})).toBe(false
     expect(existsSync(marker)).toBe(false);
   });
 });
+
+test('default and unified list argv enumerate identical files without invoking suites', async () => {
+  const repository = join(import.meta.dir, '../../..');
+  const lists: string[] = [];
+  for (const runner of ['run-default-tests', 'run-unified-tests']) {
+    const child = Bun.spawn(
+      [process.execPath, join(repository, `scripts/${runner}.ts`), '--list'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    const text = await new Response(child.stdout).text();
+    expect(await child.exited).toBe(0);
+    lists.push(text);
+    const bad = Bun.spawn(
+      [process.execPath, join(repository, `scripts/${runner}.ts`), '--list', 'extra'],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    expect(await bad.exited).toBe(2);
+    expect(await new Response(bad.stdout).text()).toBe('');
+  }
+  expect(lists[0]).toBe(lists[1]);
+});
+
+test('workspace runner dispatches only the eight current packages in order and stops at failure', async () => {
+  const { runWorkspaceScript } = await import('../../../scripts/run-runtime-workspace-script');
+  const { UNIFIED_RUNTIME_WORKSPACES } = await import('../../../scripts/unified-test-plan');
+  const root = fixture();
+  const ledger = join(root, 'ledger.jsonl');
+  for (const [index, workspace] of UNIFIED_RUNTIME_WORKSPACES.entries()) {
+    const dir = join(root, workspace);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'run.ts'),
+      `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(ledger)}, ${JSON.stringify(`${workspace}\n`)}); process.exit(process.env.KITE_FIXTURE_FAIL === '${index}' ? 7 : 0);`,
+    );
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { build: 'bun run run.ts' } }),
+    );
+  }
+  expect(await runWorkspaceScript(root, ['build', 'extra'])).toBe(2);
+  expect(existsSync(ledger)).toBe(false);
+  expect(await runWorkspaceScript(root, ['build'])).toBe(0);
+  expect(readFileSync(ledger, 'utf8').trim().split('\n')).toEqual([...UNIFIED_RUNTIME_WORKSPACES]);
+  rmSync(ledger);
+  const original = process.env.KITE_FIXTURE_FAIL;
+  try {
+    process.env.KITE_FIXTURE_FAIL = '2';
+    expect(await runWorkspaceScript(root, ['build'])).toBe(7);
+    expect(readFileSync(ledger, 'utf8').trim().split('\n')).toEqual(
+      UNIFIED_RUNTIME_WORKSPACES.slice(0, 3),
+    );
+  } finally {
+    if (original === undefined) delete process.env.KITE_FIXTURE_FAIL;
+    else process.env.KITE_FIXTURE_FAIL = original;
+  }
+});

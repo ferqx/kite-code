@@ -21,4 +21,13 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run test:mcp:live
+      - run: mkdir -p dist/unified-evidence
+      - run: bun run scripts/runtime/unified-mcp-live-smoke.ts "--output=${{ github.workspace }}/dist/unified-evidence/mcp-live.json"
+      - name: Preserve actual evidence and unsigned candidates
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: unified-mcp-live-${{ github.run_id }}
+          path: dist/unified-evidence/mcp-live.json
+          if-no-files-found: error
+          overwrite: false

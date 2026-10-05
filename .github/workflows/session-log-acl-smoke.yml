@@ -3,9 +3,21 @@ name: Session Log ACL Smoke
 on:
   pull_request:
     paths:
-      - "apps/kite-service/src/session-logger/**"
-      - "apps/kite-service/src/config/paths.ts"
-      - "scripts/release/session-log-acl-smoke.ts"
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "scripts/release/**"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
+      - "package.json"
+      - "bun.lock"
       - ".github/workflows/session-log-acl-smoke.yml"
   workflow_dispatch:
 
@@ -30,9 +42,13 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run scripts/release/session-log-acl-smoke.ts session-log-acl-evidence.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
+      - run: bun run scripts/runtime/unified-session-log-acl.ts "--output=${{ github.workspace }}/dist/unified-evidence/session-log-acl.json"
+      - name: Preserve actual evidence and unsigned candidates
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: session-log-acl-${{ matrix.os }}
-          path: session-log-acl-evidence.json
+          path: dist/unified-evidence/session-log-acl.json
           if-no-files-found: error
+          overwrite: false

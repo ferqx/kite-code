@@ -24,17 +24,16 @@ Kite Code helps you understand codebases, modify files, run commands, and check 
 
 ## Quick Start
 
-Install [Bun](https://bun.sh/) first.
+Use Bun 1.4.2, install the locked dependencies, and build the new workspaces and Terminal candidate:
 
 ```bash
-bun install
+bun install --frozen-lockfile
+bun run build
+bun run release:build
 bun run tui
 ```
 
-`bun run tui` starts a same-build, parent-owned App Server over stdio; it does not build Web assets or
-discover a shared process. `/status` shows the transport, profile, build, App Server version, and
-verified pairing. Sessions remain durable across TUI exits.
-On first launch, follow the interface to configure a model provider.
+The formal TUI and CLI select the complete candidate in `dist/unified-terminal`. Each launcher starts its paired Service and uses the shared HTTP/SSE Client for business requests. The default profile is separate from the former implementation; this cutover does not migrate old user data. Model configuration and current client behavior are described in the [handbook](docs/handbook/README.md).
 
 Headless CLI:
 
@@ -45,25 +44,13 @@ bun run agent run \
   --task "Inspect and fix tests"
 ```
 
-For all options, run `bun run agent --help`.
+Use `bun run agent --help` for the current command syntax. V1.3 is still being implemented: the default production Shell is currently unavailable, and complete capability and platform qualification is pending. See the [implementation progress](docs/plans/unified-agent-refactor-v1-progress.md) for the exact evidence and limits.
 
-## Local Server and Web
+## Local Service and Web
 
-To start the Server without opening the TUI:
+`bun run server` explicitly starts the selected candidate's local daemon and prints its read-only Web address. `bun run agent server start|status|stop|restart` manages that explicit daemon; `bun run agent web` only discovers an existing one. The Browser uses the same public read-only API through its Cookie Gateway. Closing a Browser view does not cancel an active Run.
 
-```bash
-bun run server
-```
-
-This builds the Web assets, explicitly starts the local App Server daemon, and prints its stable
-loopback root URL. The same origin serves `/v1` and `/api-docs`. `bun run agent web` only discovers
-an already-running daemon and never starts or upgrades it.
-
-Default TUI/CLI each own a same-build stdio App Server and share durable `kite-session.sqlite` facts
-through per-Session writer fencing; they do not open Web ports. The explicit daemon owns one stable
-Web origin. Visiting `/` establishes an HttpOnly read-only session, then the Browser reads Workspace,
-Session, History and Checkpoint data from `/v1`. Use `bun run agent server start|status|stop` for the
-explicit daemon lifecycle. `bun run --cwd apps/kite-web dev` remains only a Vite asset server.
+For development, run `bun run build` and then `bun run web:dev`, `cli:dev`, or `tui:dev`. These entries use the explicit `development` profile. The Web launcher closes its owned Service when the foreground launcher exits. Current behavior is owned by the [Web](apps/web/README.md) and [CLI/TUI](apps/cli/README.md) workspaces; see [local development](docs/development/local-development.md) for profile and artifact selection.
 
 ## Documentation
 
@@ -72,3 +59,7 @@ explicit daemon lifecycle. `bun run --cwd apps/kite-web dev` remains only a Vite
 - [CLI](docs/handbook/cli/README.md) · [Server](docs/handbook/server/README.md) · [Client capabilities](docs/handbook/capabilities.md)
 - [Developer documentation (Chinese)](docs/development/README.md): architecture, module entrypoints, and verification.
 - [Current plans](docs/plans/README.md)
+
+## Unified Agent V1.3 implementation
+
+The root build, typecheck, default tests, CLI/TUI and release tools now select the eight new workspaces. Run `bun run build` and `bun run release:build` before the formal `agent` / `tui` entries; development entries keep their explicit development profile. Current behavior and qualification limits are recorded in the [implementation progress](docs/plans/unified-agent-refactor-v1-progress.md) and [release control](docs/active/release-control.md). Complete V1.3 and three-platform release qualification remain in progress.

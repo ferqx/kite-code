@@ -1,0 +1,17 @@
+{
+  "name": "@kite-ai/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./browser": "./src/browser.ts",
+    "./file-recovery-intent": "./src/file-recovery-intent.ts",
+    "./sse": "./src/sse.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/sse.ts ./src/browser.ts ./src/file-recovery-intent.ts --target=browser --packages=external --outdir=dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  }
+}

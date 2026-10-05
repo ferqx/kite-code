@@ -1,0 +1,15 @@
+{
+  "name": "@kite-test/upgrade-v2",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "peerDependencies": {
+    "@kite-ai/agent": "0.1.0"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=bun --packages=external --outdir=dist"
+  }
+}

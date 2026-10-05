@@ -45,3 +45,10 @@
 压缩阈值要求 warningRatio < compactRatio < hardRatio，maxSummaryTokens 不超过 maxNarrativeTokens。localDebug 输出可能包含敏感上下文，未经检查不要分享。`sessionLogging`、`telemetry` 和 `sandbox` 各有受限语义，不以项目配置任意放宽用户与发行限制。
 
 这些高级选项没有完整 TUI 设置面板。手工调整前核对对应能力说明；配置被接受也不证明所有条件已具备。
+
+
+## 开发统一入口差异
+
+`bun run tui:dev` 的 `/model`、`/effort` 使用专门的项目模型设置 API，作用域为当前实际 Workspace，不是按会话保存的模型偏好。`/effort` 的选项来自读取结果；compatible 适配器可提供 none、minimal、low、medium、high、xhigh、max，但这不是远端模型能力承诺。清除项目 effort 的最终值取决于现有配置层覆盖，保存后以重读事实为准。上面的旧配置字段表不能作为新 API 的任意写入入口；操作与快捷键见[模型与界面设置](../guides/models-and-settings.md#开发统一-tui-的模型设置)。
+
+开发统一 TUI 的 `/theme`、`/language` 保存到当前新 profile 的 `ui/preferences.jsonc`，字段分别为 `colorPreset` 和 `language`；基础 `theme` 可手工配置 dark/light。缺文件默认 teal/system/dark；非法或损坏文件不自动覆盖。每次保存使用读取时文件 revision，冲突需重读后再明确选择。该文件属于客户端显示偏好，随显式维护备份采集；不写服务模型配置，也不承接旧用户目录的数据。

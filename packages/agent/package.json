@@ -1,0 +1,52 @@
+{
+  "name": "@kite-ai/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./extensions": "./src/extensions/index.ts",
+    "./storage": "./src/storage/index.ts",
+    "./sqlite": "./src/sqlite.ts",
+    "./sources": "./src/sources.ts",
+    "./profile": "./src/profile.ts",
+    "./profile-access": "./src/profile-access.ts",
+    "./resources": "./src/resources.ts",
+    "./jobs/shell": "./src/jobs/shell.ts",
+    "./config": "./src/config/index.ts",
+    "./files": "./src/files.ts",
+    "./artifacts": "./src/artifacts.ts",
+    "./skills": "./src/skills/index.ts",
+    "./mcp": "./src/mcp/index.ts",
+    "./task": "./src/extensions/task/index.ts",
+    "./shell": "./src/tools/shell.ts",
+    "./planning": "./src/business/planning/index.ts",
+    "./web-fetch": "./src/tools/web-fetch/index.ts",
+    "./maintenance": "./src/maintenance/index.ts",
+    "./artifact-access": "./src/artifact-access.ts",
+    "./skill-workflow": "./src/business/skill-workflow/index.ts",
+    "./sqlite-engine": "./src/sqlite-engine.ts",
+    "./windows-path-security": "./src/platform/windows-path-security.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/extensions/index.ts ./src/storage/index.ts ./src/sqlite.ts ./src/sqlite-engine.ts ./src/platform/windows-path-security.ts ./src/sources.ts ./src/profile.ts ./src/profile-access.ts ./src/artifact-access.ts ./src/resources.ts ./src/jobs/shell.ts ./src/config/index.ts ./src/files.ts ./src/artifacts.ts ./src/skills/index.ts ./src/mcp/index.ts ./src/extensions/task/index.ts ./src/tools/shell.ts ./src/business/planning/index.ts ./src/business/skill-workflow/index.ts ./src/tools/web-fetch/index.ts ./src/maintenance/index.ts --target=bun --splitting --packages=external --root=./src --outdir=dist && bun src/storage/worker/build-assets.ts dist && bun src/jobs/build-assets.ts dist && bun src/mcp/build-assets.ts dist && bun src/tools/web-fetch/build-assets.ts dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
+  },
+  "dependencies": {
+    "@kite-ai/ai": "workspace:*",
+    "@napi-rs/keyring": "1.3.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "8.17.1",
+    "drizzle-orm": "0.44.7",
+    "jsonc-parser": "^3.3.1",
+    "jsdom": "29.1.1",
+    "@mozilla/readability": "0.6.0",
+    "turndown": "7.2.4",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "28.0.3",
+    "@types/turndown": "5.0.6"
+  }
+}

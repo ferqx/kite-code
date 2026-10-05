@@ -1,0 +1,30 @@
+{
+  "name": "@kite-ai/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./host/index.ts",
+    "./main": "./host/main.ts",
+    "./tui-host": "./host/tui.tsx",
+    "./tui-main": "./host/tui-main.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./host/index.ts ./host/main.ts ./host/tui.tsx ./host/tui-main.ts --target=bun --packages=external --root=. --outdir=dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@kite-ai/client": "workspace:*",
+    "@kite-ai/agent": "workspace:*",
+    "@kite-ai/service": "workspace:*",
+    "@kite-ai/ui": "workspace:*",
+    "ink": "^7.1.1",
+    "ignore": "5.3.2",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
+  }
+}

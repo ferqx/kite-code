@@ -297,3 +297,8 @@ TUI Footer 的当前 context 统计必须来自与普通请求相同的 `Context
 接受后替代：[Agent Note 0021](../feature/2026-07-23-context-compaction-checkpoint.md) 中关于结构化 summary、完整 fact/evidence coverage、chunk/merge repair、`overflow_recovery` 自动调度和 manual summary 精确预算准入的决定
 
 关联：`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`、`docs/active/tui-run-status-bar.md`
+
+
+## 统一 Agent 路径的后续适用范围
+
+2026-10-02 的[记录 Model 压缩决定](../architecture/2026-10-02-recorded-context-compression.md)已实现新 Loop/Store 路径。不可变历史、低信任摘要、准确来源与真实能力预检等仍适用理由由新记录明确保留；旧 State/effect、结构化摘要 schema、hard block 和累计冷却不能据本记录重新引入新路径。旧正式入口尚未全部切换，本记录保留其历史实现范围，当前资格以对应 owner 和[实施证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md)核对。

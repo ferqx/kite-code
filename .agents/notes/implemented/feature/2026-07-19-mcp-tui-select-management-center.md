@@ -98,6 +98,12 @@ Remove 确认成功后删除选中 source 的配置和该 Server/source/profile 
 ## 回滚
 可以把 Overlay 回滚到只读列表，但不得回滚项目 transport 前置审批、配置 revision 冲突、原子写入、Credential Store secret 边界、generation 失效或 Runtime binding fail-closed。回滚时独立认证和项目审批入口必须先恢复，避免产生不可达状态。
 
+## 当前适用范围
+
+本页原App/Supervisor/Repository实现属于历史路径，不能由implemented状态推导新V1.3已有全部管理功能。可见Select、明确范围/危险操作确认、secret不进UI、来源审批与Tool权限分别核对的理由仍适用。新TUI当前交付闭合安全Query、详情、用户/项目启停及原结果查询，独立持久意图在空/失败目录仍可键盘选择原ID后只GET；冷存储与v8备份保原身份、不授重POST权利，见[原MCP资产决定](../architecture/2026-10-04-original-mcp-selection-intent-assets.md)。原generation的完整Tools metadata查看另由[原metadata决定](../architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)补齐，不借当前目录替代原snapshot、不产生调用grant；其实际资格与限制归各owner。普通Action/CAS/unknown合同及尚未实现的认证、强制warm重连、增删见[新scoped MCP提案](../../proposed/architecture/2026-10-03-scoped-default-mcp-sources.md#当前-tui-的有限-server-选择)。此部分关系不删除或放宽本页仍适用的产品与安全理由。
+
+显式连接入口由[原连接申请决定](../architecture/2026-10-05-original-mcp-connection-intent-assets.md)补充：可见操作与独立确认继续沿本页取舍，普通Action和实际Job分别许可；warm复用、原ready及当前live分开，冷原ID只明确GET。独立journal/backup v9保原身份，不扩旧v8或借恢复取得POST权。当前已支持同Store冷后明确新申请；强制warm重连、完整认证/OAuth及增删仍未闭合，不能从本页历史Supervisor实现推导资格。新决定不删除本页仍适用的范围、确认和secret边界。
+
 ## Historical relationships
 
 决策者：@chenchao

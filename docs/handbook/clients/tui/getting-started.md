@@ -1,5 +1,7 @@
 # 开始使用 TUI
 
+当前根正式入口已使用通用 Agent V1.3 候选，旧参数、State/stdio 拓扑及旧桌面截图只作历史参考；新入口的实际参数与行为以本页“通用”段落和[当前进度](../../../plans/unified-agent-refactor-v1-progress.md)为准，未实现能力不能借旧描述启用。发行、安装与跨平台仍有未取得资格，详见[发布边界](../../../active/release-control.md)。
+
 
 TUI 适合在终端中发起任务、查看执行过程并处理审批。需要可交互终端、可用模型配置，以及对工作区的访问权限。它不会自动打开 Web。
 
@@ -22,3 +24,16 @@ TUI 适合在终端中发起任务、查看执行过程并处理审批。需要�
 继续阅读[界面导览](interface.md)、[输入与排队](guides/input-and-queue.md)和[命令参考](reference/commands.md)。
 
 安装升级只影响新打开的客户端；正在运行的 TUI 与服务仍固定原版本。配套服务缺失或版本不符时修复安装，不通过结束无关 daemon 绕过。
+
+## 通用开发 TUI 的共享连接
+
+`bun run tui:dev --data-root <绝对根路径> --server <本地socket>` 显式连接已经启动、使用同一 data root 的开发 daemon；启动方式见[通用 Agent 开发生命周期](../../server/lifecycle.md#通用-agent-开发生命周期)。省略 `--server` 仍启动本客户端拥有的配套 Service。正式 `bun run tui` 和安装入口尚未由此切换。
+
+共享连接固定原 daemon 的 profile、实例和工作区；省略 `--workspace` 沿用 daemon 工作区，显式不一致或选择其他工作区的会话会拒绝。连接缺席或不兼容时不启动替代服务，也不创建空 profile。`Ctrl+Q`、`/exit`、EOF 或宿主 SIGTERM 只保存未提交文本并断开此客户端；`Ctrl+C` 仍准确取消原工作。
+
+服务失联后保留最后确认的内容和未提交文本，显示失联；不会重新发现另一 daemon、改绑原意图或自动发送草稿。原实例的 SSE 缺口仍按读取基线重新读取，已确认事件之后才推进观察游标。UI 保留自己的数据使用锁直到退出，因此服务已经退出也不代表离线维护可以立即取得独占使用权。当前实际资格限本机 macOS，完整终端与三平台发行验证仍未完成。
+
+
+如果只有事件流失效而普通读取仍可用，手动刷新可以更新读到的内容，但界面会继续标记失联；单次读取成功不表示后续事件已恢复。只有原服务的事件观察重新确认就绪后，才清除此失联状态。
+
+新通用终端候选的 `<prefix>/bin/kite-tui` 已可在独立安装目录启动，并复用上述 paired/shared 行为。它自带 Bun，默认使用独立 `~/.kite-code/unified-agent` 的 `default` profile；原正式安装版与 `bun run tui` 尚未替换。构建、安装及当前本机验证范围见[终端制品说明](../../../../apps/cli/docs/terminal-release.md)。

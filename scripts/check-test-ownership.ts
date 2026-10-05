@@ -62,21 +62,42 @@ function isIsolated(path: string): boolean {
   return path.includes('/isolated/');
 }
 
+/** Independently built extension fixtures own tests through their explicit package manifest. */
+export function isExtensionFixtureTest(root: string, absolute: string): boolean {
+  const path = normalized(root, absolute);
+  const match = /^tests\/fixtures\/extensions\/([^/]+)\/test\//u.exec(path);
+  if (!match) return false;
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(root, 'tests/fixtures/extensions', match[1]!, 'package.json'), 'utf8'),
+    );
+    return (
+      typeof manifest.name === 'string' &&
+      typeof manifest.scripts?.test === 'string' &&
+      typeof manifest.exports?.['.'] === 'string'
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function analyzeTestOwnership(repositoryRoot: string): TestOwnershipViolation[] {
   const root = resolve(repositoryRoot);
   const violations: TestOwnershipViolation[] = [];
   const rootTests = collect(join(root, 'tests'));
+  const extensionTests = rootTests.filter((path) => isExtensionFixtureTest(root, path));
   const ownerTests = [
-    ...collect(join(root, 'apps', 'kite-cli', 'test')),
-    ...collect(join(root, 'apps', 'kite-service', 'test')),
-    ...collect(join(root, 'apps', 'kite-web', 'test')),
-    ...collect(join(root, 'apps', 'kite-desktop', 'test')),
+    ...readdirSync(join(root, 'apps'), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => collect(join(root, 'apps', entry.name, 'test'))),
     ...readdirSync(join(root, 'packages'), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => collect(join(root, 'packages', entry.name, 'test'))),
+    ...extensionTests,
   ];
 
   for (const absolute of rootTests) {
+    if (extensionTests.includes(absolute)) continue;
     const path = normalized(root, absolute);
     const suite = path.split('/')[1];
     if (!suite || !rootSuites.has(suite)) {

@@ -1,0 +1,29 @@
+{
+  "name": "@kite-test/label-station",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@kite-ai/agent": "0.1.0",
+    "@kite-ai/ai": "0.1.0",
+    "@kite-ai/client": "0.1.0",
+    "@kite-ai/service": "0.1.0",
+    "@kite-ai/ui": "0.1.0"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "19.2.7",
+    "jsdom": "^29.1.1"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/host.ts --target=bun --packages=external --outdir=dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "files": [
+    "dist",
+    "resources"
+  ]
+}

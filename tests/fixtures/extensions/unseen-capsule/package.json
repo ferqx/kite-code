@@ -1,0 +1,16 @@
+{
+  "name": "@kite-test/unseen-capsule",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@kite-ai/agent": "0.1.0"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/host.ts --target=bun --packages=external --outdir=dist && bun build ./src/worker.ts --target=node --outdir=dist/node",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

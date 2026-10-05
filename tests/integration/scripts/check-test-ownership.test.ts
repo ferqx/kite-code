@@ -73,4 +73,40 @@ describe('test ownership gate', () => {
       ]),
     );
   });
+
+  test('classifies explicit independent extension packages and all app owners without allowing scattered fixtures', () => {
+    const root = fixture();
+    write(
+      root,
+      'tests/fixtures/extensions/sample/package.json',
+      JSON.stringify({
+        name: '@fixture/sample',
+        exports: { '.': './src/index.ts' },
+        scripts: { test: 'bun test ./test' },
+      }),
+    );
+    write(root, 'tests/fixtures/extensions/sample/test/unit.test.ts');
+    write(root, 'tests/fixtures/extensions/sample/test/process.test.ts', 'Bun.spawn(["true"]);');
+    write(root, 'tests/fixtures/extensions/undeclared/test/unit.test.ts');
+    write(root, 'apps/service/test/process.test.ts', 'Bun.spawn(["true"]);');
+    expect(analyzeTestOwnership(root)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'OWNER_TEST_REQUIRES_ISOLATION',
+          path: 'tests/fixtures/extensions/sample/test/process.test.ts',
+        }),
+        expect.objectContaining({
+          code: 'ROOT_TEST_UNCLASSIFIED',
+          path: 'tests/fixtures/extensions/undeclared/test/unit.test.ts',
+        }),
+        expect.objectContaining({
+          code: 'OWNER_TEST_REQUIRES_ISOLATION',
+          path: 'apps/service/test/process.test.ts',
+        }),
+      ]),
+    );
+    expect(
+      analyzeTestOwnership(root).some((entry) => entry.path.endsWith('sample/test/unit.test.ts')),
+    ).toBe(false);
+  });
 });

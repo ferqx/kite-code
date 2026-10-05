@@ -5,7 +5,19 @@
 读取时机：修改 `ExecutionBoundary`、production composition root、sandbox capability
 projection、release-controlled execution policy 或对应 feature flag 时。
 
-验证：`bun test apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts apps/kite-service/test/sandbox/network-boundary.test.ts
+验证：`bun run check:pre-release-architecture`、`bun test packages/agent/test/isolated/files/files.test.ts packages/agent/test/isolated/jobs/confined-shell.test.ts tests/isolated/unified-agent/native-runtime-protection.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run typecheck`；对应owner与平台范围见[当前边界](unified-agent-boundary.md)。
+
+## 当前 V1.3 边界
+
+新正式/default/CI经八workspace的公共Runtime/Client/Store，旧`ExecutionBoundary`、State/Host writer和carrier不再被调度。原计划保留普通权限、取消/no-replay和实际资源责任，退役旧预算/State证明链；不能从旧实现推导当前新运行前提。
+
+当前默认Shell在Provider/Job前准确unavailable，Files仍在真实原scope/read-set与权限下执行并保护完整Terminal、Native outer/inner runtimeAssets。原附件完整读取不授副作用权限；坏身份、来源/控制漂移、未知效果不能用换ID/重新绑定来绕过。macOS confined与普通进程组监督分别保其实际范围，production跨平台隔离尚未取得资格。
+
+[当前platform/execution workflow](../../tests/integration/scripts/unified-ci.test.ts)核新owner paths、actualsourcefree probe与formal verifier；不再调用下方旧builtin/App测试。下文保留历史投影、威胁模型和仍适用的安全约束，未知/未完成范围继续拒绝；不能借历史runner支持宣称当前Shell已开放。
+
+## 历史实现与仍适用的安全约束
+
+旧实现验证：`bun test apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts apps/kite-service/test/sandbox/network-boundary.test.ts
 apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts apps/kite-service/test/isolated/runtime/tool-controller.test.ts
 apps/kite-service/test/config/features.test.ts apps/kite-service/test/sandbox/status-projection.test.ts
 tests/isolated/workspace/worktree-controller.test.ts tests/integration/builtin-runtime/mcp-transport-boundary.test.ts

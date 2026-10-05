@@ -4,14 +4,13 @@
 
 读取时机：修改发布脚本、安装器、候选版本 workflow、生产路线图、Task 状态或首发能力边界时。
 
-验证：`bun test packages/kite-local-runtime/test/isolated/service-state.test.ts tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
+验证：`bun run check:runtime-packages`、`bun test tests/integration/scripts/unified-ci.test.ts tests/isolated/unified-agent/release-tools.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`；平台结论按[当前进度](../plans/unified-agent-refactor-v1-progress.md)。
 
 相关：[Agent Note 0068](../../.agents/notes/implemented/process/2026-08-04-single-maintainer-open-source-first-release.md)、[Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)、[Agent Note 0093](../../.agents/notes/implemented/process/2026-08-09-opencode-go-release-provider-smoke.md)、`release/oss-first-release/task-status.json`、`.github/workflows/release-candidate.yml`。
 
-首发 Gate、候选构建命令和限制以本文件及 `release/oss-first-release/` 为权威，不要求在面向使用者的
-`README.md` 中重复维护。
+当前新发行入口与资格以[release control](release-control.md)、[V1.3](../plans/unified-agent-refactor-v1.md)及实际进度为准。下文旧 State/App Server/standalone 格式与 `release/oss-first-release/` 记录仅保留历史，不能用于新候选构建或放行；仍适用的安全/三平台/发布者认证约束没有撤销。面向使用者的 README 不重复发布门禁。
 
-## 首发 Gate
+## 保留的安全与平台约束
 
 `G0` 只判断本地正确性和安全：规范测试通过；Workspace 越界、secret、network、MCP write、
 destructive/unknown effect 与 Verification false pass 继续 fail closed；P0/P1 为零；安装、卸载与回滚
@@ -32,7 +31,7 @@ TUI/CLI smoke 通过；release notes 与已知限制和候选内容一致。
 
 任一测试失败或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成成功。
 
-项目采用未发布clean cutover。默认terminal fresh profile直接创建exact `kite-session.sqlite`；正式CLI/candidate不导入旧
+以下拓扑与数据格式属于历史候选。项目采用未发布clean cutover。默认terminal fresh profile直接创建exact `kite-session.sqlite`；正式CLI/candidate不导入旧
 `kite.sqlite`，不提供Store 7/8 migration或启动期source cleanup。旧Store原样保留但不是fallback。
 
 首发terminal拓扑已切到parent-owned App Server：每个本地TUI或foreground CLI通过stdio连接同build
@@ -112,3 +111,7 @@ Release/Security 人员或 production evaluator authority。旧 fail-closed cont
 ## 状态权威
 
 [Task 状态源](../../release/oss-first-release/task-status.json)是完成/取代数量与发布状态的权威，当前终态为 83 `completed`、25 `superseded`、0 optional。路线收敛原因见 [Agent Note 0069](../../.agents/notes/implemented/process/2026-08-04-first-release-terminal-scope.md)。各旧 Phase 计划只保留任务说明与历史证据，其 execution binding 与 milestone 不决定当前发布状态。
+
+## 新通用终端候选的独立资格
+
+V1.3 的 `release:terminal` 构建/归档/安装与原正式发布入口并存，已在 macOS 验证源码树外闭包、实际模型/Worker/TUI、升级固定旧实例、回滚和使用锁卸载。其清单为 unsigned integrity；Linux/Windows、生产 sandbox/exporter、签名、正式切换及完整交付资格继续独立验收，不继承本页历史 release 结果。命令与边界见[终端制品 owner](../../apps/cli/docs/terminal-release.md)。

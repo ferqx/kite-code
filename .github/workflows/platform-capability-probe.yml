@@ -1,40 +1,25 @@
 name: Platform Capability Probe
 
 on:
-  workflow_dispatch:
   pull_request:
     paths:
-      - "packages/builtin-runtime/src/sandbox/**"
-      - "packages/builtin-runtime/src/planning/runtime-module.ts"
-      - "packages/runtime-host/src/process/**"
-      - "packages/runtime-spi/src/sandbox-execution-provider.ts"
-      - "apps/kite-service/src/sandbox/**"
-      - "apps/kite-service/src/config/execution-boundary.ts"
-      - "apps/kite-service/src/config/execution-qualification.ts"
-      - "apps/kite-service/src/config/release-profile.ts"
-      - "apps/kite-service/src/config/index.ts"
-      - "apps/kite-cli/src/cli/index.ts"
-      - "apps/kite-cli/src/adapters/tui/**"
-      - "scripts/release/entrypoints/cli.ts"
-      - "scripts/release/entrypoints/tui.ts"
-      - "scripts/release/oss-candidate.ts"
-      - "scripts/release/platform-capability-probe.ts"
-      - "scripts/release/verify-platform-capability-evidence.ts"
-      - "scripts/release/windows-runner-evidence.ts"
-      - "native/windows-sandbox-runner/**"
-      - "vendor/isksh/**"
-      - "release/platform-capabilities/**"
-      - "apps/kite-cli/test/isolated/sandbox.test.ts"
-      - "tests/qualification/sandbox-executor.test.ts"
-      - "tests/qualification/sandbox-bwrap-executor.test.ts"
-      - "packages/builtin-runtime/test/sandbox/platform-backends.test.ts"
-      - "tests/qualification/sandbox/**"
-      - "apps/kite-service/test/sandbox/**"
-      - "apps/kite-service/test/isolated/sandbox/**"
-      - "apps/kite-service/test/execution/**"
-      - "apps/kite-service/test/isolated/execution/**"
-      - "tests/integration/execution/**"
+      - "packages/ai/**"
+      - "packages/agent/**"
+      - "packages/client/**"
+      - "packages/ui/**"
+      - "apps/service/**"
+      - "apps/cli/**"
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "scripts/release/**"
+      - "scripts/runtime/**"
+      - "tests/isolated/unified-agent/**"
+      - "tests/fixtures/unified-agent/**"
+      - "tests/fixtures/formal-optional-capabilities/**"
+      - "package.json"
+      - "bun.lock"
       - ".github/workflows/platform-capability-probe.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -65,68 +50,42 @@ jobs:
             runner_class: windows-2025-x64-github-hosted
     runs-on: ${{ matrix.os }}
     steps:
-      # Official refs/tags/v7 and refs/tags/v2 commit objects, resolved through
-      # the GitHub API on 2026-09-06.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes bubblewrap curl
-      - if: runner.os == 'Windows'
-        name: Select reproducible Windows GNU Rust toolchain
-        run: |
-          rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
-          rustup override set 1.97.1-x86_64-pc-windows-gnu
-      - name: Cross-platform exclusion contracts
-        timeout-minutes: 10
+      - name: Current public boundary and fail-closed contracts
         run: >-
-          bun test --max-concurrency=1
-          packages/builtin-runtime/test/sandbox/platform-backends.test.ts
-          tests/qualification/sandbox/cgroup-pids.test.ts
-          apps/kite-service/test/sandbox/app-sandbox-composition.test.ts
-          tests/qualification/sandbox/process-tree-limit.test.ts
-          tests/qualification/sandbox/platform-capability-probe.test.ts
-          tests/qualification/sandbox/platform-capability-verifier.test.ts
-          apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
-          tests/qualification/sandbox/windows-restricted-token.test.ts
-          apps/kite-service/test/isolated/exclusive/execution/sandbox-execution-provider.test.ts
-      - if: runner.os == 'macOS'
-        name: macOS Seatbelt profile and fail-closed contracts
-        run: bun test apps/kite-cli/test/isolated/sandbox.test.ts
-      - if: runner.os == 'macOS' || runner.os == 'Linux'
-        name: POSIX supervisor native negative and conformance
-        run: bun test --parallel=1 --max-concurrency=1 apps/kite-service/test/isolated/exclusive/execution/posix-supervisor.test.ts
-      - if: runner.os == 'Linux'
-        name: Linux native bubblewrap candidate
-        run: bun test apps/kite-cli/test/isolated/sandbox.test.ts tests/qualification/sandbox-bwrap-executor.test.ts
-      - if: runner.os == 'Windows'
-        name: Build Windows sandbox runner
-        run: bun run scripts/release/build-windows-runner.ts
-      - if: runner.os == 'Windows'
-        name: Test Windows sandbox runner
-        run: cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml
-      - if: runner.os == 'Windows'
-        run: bun run scripts/release/windows-runner-evidence.ts
-      - if: runner.os == 'Windows'
-        name: Verify committed Windows runner pin
-        run: git diff --exit-code -- release/platform-capabilities/windows-runner.json
-      - if: runner.os == 'Windows'
-        name: Windows restricted-token native fail-closed conformance
-        env:
-          KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E: '1'
-        run: bun test --max-concurrency=1 tests/qualification/sandbox/windows-restricted-token.test.ts
-      - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
-      - run: >-
-          bun run scripts/release/verify-platform-capability-evidence.ts
-          platform-capability-evidence.json
-          platform-capability-verification.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          bun test --parallel=1 --max-concurrency=1
+          packages/agent/test/isolated/jobs/confined-shell.test.ts
+          packages/agent/test/isolated/files/files.test.ts
+          packages/agent/test/isolated/execution/owner-handoff.test.ts
+          apps/service/test/isolated/shell-configuration.test.ts
+          tests/isolated/unified-agent/unified-platform.test.ts
+      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
+      - run: bun run release:build --directory dist/unified-terminal
+      - name: Actual relocated candidate Files, assets, default capability and lifetime probe
+        run: >-
+          bun run scripts/release/unified-platform-probe.ts
+          "--candidate=${{ github.workspace }}/dist/unified-terminal"
+          "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
+      - name: Check diagnostic evidence
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=diagnostic
+      - name: Require complete native execution qualification
+        if: always()
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=formal
+      - name: Preserve actual evidence and unsigned candidates
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: platform-capability-${{ matrix.os }}
-          path: |
-            platform-capability-evidence.json
-            platform-capability-verification.json
+          path: dist/unified-evidence/platform.json
           if-no-files-found: error
           overwrite: false

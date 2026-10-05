@@ -1,0 +1,32 @@
+{
+  "name": "@kite-ai/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.tsx --target=browser --packages=external --outdir=dist",
+    "build:native": "bun run scripts/build-native.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@kite-ai/agent": "workspace:*",
+    "@kite-ai/client": "workspace:*",
+    "@kite-ai/service": "workspace:*",
+    "@kite-ai/ui": "workspace:*",
+    "react-dom": "19.2.7"
+  },
+  "peerDependencies": {
+    "react": "^19"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "playwright": "1.63.0",
+    "react": "^19.2.6",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3"
+  }
+}

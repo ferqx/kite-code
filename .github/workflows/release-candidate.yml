@@ -38,61 +38,64 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - if: runner.os == 'Windows'
-        name: Select reproducible Windows GNU Rust toolchain
-        run: |
-          rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
-          rustup override set 1.97.1-x86_64-pc-windows-gnu
-      - if: runner.os == 'Windows'
-        name: Build pinned Windows sandbox runner
-        run: bun run scripts/release/build-windows-runner.ts
-      - if: runner.os == 'Windows'
-        name: Verify Windows runner manifest pin
-        run: |
-          bun run scripts/release/windows-runner-evidence.ts
-          git diff --exit-code -- release/platform-capabilities/windows-runner.json
-      - if: runner.os == 'Windows'
-        name: Verify Windows App Server endpoint and Session Store fencing
-        run: |
-          bun test --parallel=1 --max-concurrency=1 packages/kite-local-runtime/test/isolated/lifecycle-reservation.test.ts
-          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/isolated/kite-session-runtime-file.test.ts
-          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/isolated/kite-session-execution-authority.test.ts
-          bun test --parallel=1 --max-concurrency=1 packages/runtime-storage-sqlite/test/kite-session-mutation.test.ts
-          bun test --parallel=1 --max-concurrency=1 tests/release/app-server-daemon.test.ts
-      - name: Release contract tests
+      - name: Current immutable artifact and installer contracts
         run: >-
-          bun test
-          tests/release/oss-candidate.test.ts
-          tests/release/oss-install.test.ts
-          tests/release/supply-chain-workflow.test.ts
-      - name: Build native candidate
-        run: bun run release:build
-      - name: Verify manifest and checksums
-        run: bun run release:verify -- --require-clean-source
-      - name: Install, start, rollback, and uninstall smoke
-        run: bun run release:smoke
-      - name: TUI PTY startup smoke
-        run: bun run scripts/run-tui-system-tests.ts startup
+          bun test --parallel=1 --max-concurrency=1
+          tests/isolated/unified-agent/terminal-artifact.test.ts
+          tests/isolated/unified-agent/terminal-archive.test.ts
+          tests/isolated/unified-agent/terminal-install.test.ts
+          tests/isolated/unified-agent/native-archive.test.ts
+          tests/isolated/unified-agent/native-install.test.ts
+          tests/isolated/unified-agent/cli-registration.test.ts
+          tests/isolated/unified-agent/release-tools.test.ts
+      - name: Build source-bound Terminal candidate and archive
+        run: bun run release:build --directory dist/unified-terminal --archive dist/unified-terminal.tar.gz
+      - name: Verify exact source and selected SQLite identity
+        run: bun run release:verify --directory dist/unified-terminal --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
+      - name: Actual Terminal lifecycle and Web smoke
+        run: bun run release:smoke --directory dist/unified-terminal
+      - if: runner.os == 'Windows'
+        name: Prepare installed Windows x64 Native compiler
+        run: bun run scripts/release/prepare-windows-native-ci.ts
+      - name: Build complete Native candidate and archive
+        run: bun run release:build --product native --directory dist/unified-native --terminal dist/unified-terminal --archive dist/unified-native.tar.gz
+      - name: Verify complete Native source and physical closure
+        run: bun run release:verify --product native --directory dist/unified-native --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
+      - name: Verify embedded Electron and independent SQLite engine
+        run: bun run release:smoke --product native --directory dist/unified-native
       - if: runner.os == 'macOS'
-        name: Prepare paired Desktop Service
-        run: bun run scripts/release/prepare-desktop-service.ts dist/oss-candidate/kite-code-macos-arm64.tar.gz
-      - if: runner.os == 'macOS'
-        name: Build packaged Desktop
-        run: bun run --cwd apps/kite-desktop build:desktop
-      - if: runner.os == 'macOS'
-        name: Sign local Desktop test package
-        run: |
-          codesign --force --deep --sign - apps/kite-desktop/out/kite-darwin-arm64/kite.app
-          codesign --verify --strict apps/kite-desktop/out/kite-darwin-arm64/kite.app
-      - if: runner.os == 'macOS'
-        name: Qualify packaged Store upgrade
-        run: bun run --cwd apps/kite-desktop test:native:store-upgrade
-      - name: Upload unsigned candidate
+        name: Actual source-free Native Main, upgrade, rollback, installed CLI and TUI
+        run: >-
+          bun test --parallel=1 --max-concurrency=1
+          tests/isolated/unified-agent/native-install-lifecycle.test.ts
+          tests/isolated/unified-agent/cli-registration-lifecycle.test.ts
+      - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
+      - name: Actual relocated candidate Files, assets, default capability and lifetime probe
+        run: >-
+          bun run scripts/release/unified-platform-probe.ts
+          "--candidate=${{ github.workspace }}/dist/unified-terminal"
+          "--output=${{ github.workspace }}/dist/unified-evidence/platform.json"
+      - name: Check diagnostic evidence
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=diagnostic
+      - name: Require complete native execution qualification
+        if: always()
+        run: >-
+          bun run scripts/release/unified-platform-verify.ts
+          "--report=${{ github.workspace }}/dist/unified-evidence/platform.json"
+          --mode=formal
+      - name: Upload unsigned candidates and actual qualification evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: kite-code-${{ matrix.target }}
           path: |
-            dist/oss-candidate/kite-code-${{ matrix.target }}.tar.gz
-            dist/oss-candidate/kite-code-${{ matrix.target }}.tar.gz.sha256
+            dist/unified-terminal.tar.gz
+            dist/unified-native.tar.gz
+            dist/unified-terminal/terminal-manifest.json
+            dist/unified-native/native-manifest.json
+            dist/unified-evidence/
           if-no-files-found: error
           retention-days: 14

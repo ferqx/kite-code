@@ -5,7 +5,23 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-service/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
+验证：`bun run test:shell:native`、`bun test tests/isolated/unified-agent/formal-optional-capabilities.test.ts tests/isolated/unified-agent/native-runtime-protection.test.ts tests/isolated/unified-agent/unified-platform.test.ts`、`bun run scripts/release/unified-platform-probe.ts`、`bun run scripts/release/unified-platform-verify.ts`；三OS声明和formal verifier由[CI守卫](../../tests/integration/scripts/unified-ci.test.ts)核验，实际run仍必须另验。
+
+## 当前 V1.3 执行与发行
+
+CLI/TUI/Service和平台、execution、release workflow已选择新完整Terminal/Native闭包。正式默认Shell仍`unavailable`，在Provider/Job前拒绝；新Files可用并保护准确runtimeAssets，但不证明跨平台Shell、network/fork/资源隔离。可信普通Job监督和macOS confined样本各有其有限证据，不能据此扩大production support set。
+
+新[平台probe](../../scripts/release/unified-platform-probe.ts)真实运行Source之外的完整candidate，核Files、准确SQLite、实际PID、两个独立SH、原Run终态和cleanup。diagnostic通过只证明其报告；formal verifier仍明确拒`default_effectful_platform_not_qualified`。新3OSworkflow保actualproducer、源head/clean-source、固定Bun/actions与失败上传，未在对应OS执行不获qualification。
+
+Windows private Profile/Store/config native实现与普通Workspace scope的边界见[路径owner](../../packages/agent/src/platform/windows-path-security.README.md)；本机POSIX邻接不证明Windows。Windows ArtifactStore 已接入原生 x64 HANDLE 流读写、私有 temporary、protected FR 发布与完整 hash 校验，实际原生执行仍待资格，见[Artifact owner](../../packages/agent/src/artifacts/README.md)。Windows candidate public scope 的 root/parent 多ACE政策与祖先原HANDLE已实现，3个原生场景仍未本机执行。
+
+Node/Electron Main 的有限独立使用权后端已部分实施，见[原生owner](../../apps/desktop/native/windows-access/README.md)与[原锁提案](../../.agents/notes/proposed/architecture/2026-10-04-windows-node-owned-profile-and-artifact-leases.md)。固定Node-API factory与Bun Service各自取得LockFileEx SH；继承或DuplicateHandle不作授权。私有UI保原Profile/UI目录和主DB HANDLE及volume/FileID，数据库关闭后再释放；但Node hash到require之间仍无加载前原对象根证明。正式Windows candidate Main在应用addon/SQLite/factory/child之前拒绝native_windows_bootstrap_unqualified，无formal bypass；实际Node负例核四类计数全零。当前header/macOS邻接、类型及源码review不证明Windows MSVC、Electron ABI或原生文件生命周期，5个强制Windows场景尚未执行。Windows维护、安装与发布者信任仍有独立未完成范围。下面旧KASD/runner/candidate只保历史和安全经验，不作为新闭包或三平台通过依据；支持集合与安全准入没有放宽。
+
+[transport workflow](../../.github/workflows/runtime-transport-qualification.yml)已接入这五项强制后端案例，并与 release 共用[预装 MSVC/SDK 准备](../../scripts/release/prepare-windows-native-ci.ts)；准确 source head、固定 x64 编译器、环境字节及准备早于消费由[CI反例](../../tests/integration/scripts/unified-ci.test.ts)和[纯准备合同](../../tests/isolated/unified-agent/windows-native-ci.test.ts)核验。缺后端、编译器或 ABI 在 Windows 上失败，只有非 Windows 平台条件才跳过其原生案例。这是接线与本机负例证据，仍不宣称实际 Windows syscall、Native 启动或三平台资格。
+
+## 历史实现与仍适用的安全约束
+
+旧实现验证：`bun test packages/builtin-runtime/test/sandbox/platform-backends.test.ts tests/qualification/sandbox/cgroup-pids.test.ts apps/kite-service/test/sandbox/app-sandbox-composition.test.ts tests/qualification/sandbox/process-tree-limit.test.ts
 tests/qualification/sandbox/platform-capability-probe.test.ts tests/qualification/sandbox/platform-capability-verifier.test.ts apps/kite-service/test/isolated/sandbox/execution-boundary.test.ts
 apps/kite-service/test/sandbox/network-boundary.test.ts apps/kite-service/test/sandbox/network-boundary-concurrency.test.ts
 apps/kite-service/test/runtime/git-tool-controller.test.ts

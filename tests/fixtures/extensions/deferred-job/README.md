@@ -1,0 +1,21 @@
+# Deferred Job public consumer
+
+Disposable reference extension for the V1.3 §32.7 deferred-job recipe. It is not default assembly. The extension uses only `@kite-ai/agent/extensions`; the external Bun host uses public Agent, Store, SQLite, Artifact, Service and Client exports. Its real package build leaves those packages external and builds a separate Node worker. The harness builds the actual public package manifests into a directory outside the source tree, without TypeScript source fallback or Core/SQL edits.
+
+An ordinary Action ensures a detached original Job and persists its exact operation reference in an executable record. Action and Job each require an original SDK Interaction approval. The Job starts an owned independent Node process, returns its execution-bound token/PID reference, observes delayed complete output and EOF, and exposes a pure cached Query. The external ledger remains outside the tested profile. The complete inline result, byte hash, execution token and PID must match the original persisted reference; no output Artifact is required by this recipe.
+
+The seven actual scenarios cover these boundaries:
+
+- SIGKILL before external spawn, while the actual Job adapter is entered and SQLite is dispatching with no reference.
+- SIGKILL after the Node process writes its started identity but before Job.start returns and SQLite records that reference. Even a later complete external result cannot supply a missing original reference. Explicit Session interruption preserves unknown, and public reconciliation accurately refuses with `job_reconciliation_unavailable`.
+- SIGKILL after the real terminal SQLite commit but before its response returns to the producer and Host settlement callback. The transparent public Store decorator only delays the completion response after the original write; it never changes SQL or business facts. The independent readonly reader verifies the committed result, original reference and zero dispose calls. This does not claim that an independent Gateway poll cannot already read the committed change.
+- SIGKILL with a recorded running reference, followed by the original worker's complete EOF. Explicit public recovery and reconciliation verify only that same reference and complete bytes. A repeated reconciliation command returns the original receipt without observing or starting again.
+- Confirmed stop waits for the actual owned Node process exit and cancellation EOF. It becomes known cancelled.
+- Request-only stop leaves that actual process alive, yields unknown supervision and preserves outcome_unknown. Repeated cold Queries neither stop nor replace it; the test separately cleans up only its owned PID.
+- A real mismatched EOF refuses verification and persists an unresolved receipt. Restoring the external evidence does not retry that command. Only a new explicit reconciliation command can verify the restored matching EOF.
+
+Every cold reader opens the actual Store readonly, starts no process or Model, changes no cursor and reads the same original operation/result. Reconciliation has a separate explicit trusted fixture host authorization through the ordinary public recovery port; it does not reuse the original effect approval as a new grant. The fixture's identity/EOF protocol is local test evidence, not a general external exactly-once or arbitrary PID recovery mechanism.
+
+Barriers use owned files and observed persisted state rather than random sleeps. Existing bounds remain finite: 10-second worker/IPC windows, 5-second owned-PID exit checks, 20-second standalone host limit and 30-second complete test limit. The complete Store host is Bun; Node supplies the independent worker. No Node SQLite-host claim is made. Default product launchers, UI delivery and every E01–E14 recipe remain separate qualifications.
+
+Verification: `bun test tests/isolated/unified-agent/extension-deferred.test.ts`, fixture typecheck and focused harness typecheck. The final barrier qualification passed seven scenarios and 399 assertions in `/private/tmp/kite-deferred-job-public-fourth-barrier.log`. The first failed log preserves initial incorrect no-reference/SDK projection expectations; the third preserves a stale fixture snapshot captured before the physical barrier, fixed by observing a fresh actual snapshot after that barrier. Shared production was unchanged throughout.

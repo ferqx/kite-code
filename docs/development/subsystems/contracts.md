@@ -13,6 +13,7 @@
 - [Runtime 模块准入](../../active/core-entry-criteria.md)
 - [Production execution boundary contract](../../active/execution-boundary.md)
 - [Production execution platform support](../../active/execution-platform-support.md)
+- [通用 Agent 八 workspace 当前跨包边界](../../active/unified-agent-boundary.md)
 - [Failure classification](../../active/failure-classification.md)
 - [功能开关](../../active/feature-flags.md)
 - [Workspace 文件系统共享边界 — Provider 单入口](../../active/file-reading-shared-boundary.md)

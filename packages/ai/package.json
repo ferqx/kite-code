@@ -1,0 +1,20 @@
+{
+  "name": "@kite-ai/ai",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sdk": "./src/sdk.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts ./src/sdk.ts --outdir ./dist --target browser --packages external",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun run ../../scripts/run-owned-tests.ts ."
+  },
+  "dependencies": {
+    "ai": "^7.0.19",
+    "@ai-sdk/openai-compatible": "^3.0.7"
+  }
+}

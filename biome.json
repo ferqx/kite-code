@@ -13,6 +13,12 @@
   },
   "overrides": [
     {
+      "includes": ["tests/fixtures/extensions/unseen-compat-prior/counted-tool-v1.js"],
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false },
+      "linter": { "enabled": false }
+    },
+    {
       "includes": [
         "apps/kite-desktop/src/tailwind.css",
         "apps/kite-web/src/styles/globals.css",

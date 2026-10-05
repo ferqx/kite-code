@@ -75,3 +75,5 @@ Shell/Git classifier、文件工具策略、三模式测试与 active 文档；�
 相关：[Agent Note 0118](../feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0131](2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0133](../feature/2026-08-24-mode-aware-sensitive-external-authorization.md)、[Agent Note 0134](2026-08-24-closed-read-only-git-shell-grammar.md)、`docs/active/authorization.md`、
 
 `docs/active/tool-gated-autonomy.md`、`docs/active/execution-boundary.md`
+
+新统一 Agent 的持久模式/default/trust、准确父子策略交集与派发 controlReads 由[持久权限控制决定](../architecture/2026-10-02-persisted-permission-controls-and-dispatch-read-set.md)及其当前 owner 负责。本篇关于 Workspace 效果与外部 mutation/network 独立分类的理由仍适用，不将全部 Shell 都归为 Workspace write；旧 authority 路径不描述新统一链路。旧正式消费者退役状态见统一实施进度。

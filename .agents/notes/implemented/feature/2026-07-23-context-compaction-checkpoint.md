@@ -136,3 +136,8 @@ hard-limit 导致的压缩失败（`hard_limit`、`overflow_recovery_failed`）�
 修订：2026-07-20（补充信任边界、增量 checkpoint、持久 hard block、候选投影验证等决策）
 
 补充：[Agent Note 0001](../architecture/2026-07-02-runtime-kernel.md)、[Agent Note 0007](../architecture/2026-07-14-capability-bindings.md)、[Agent Note 0008](../testing/2026-07-14-verification-completion-semantics.md)
+
+
+## 统一 Agent 路径的后续适用范围
+
+2026-10-02 的[记录 Model 压缩决定](../architecture/2026-10-02-recorded-context-compression.md)已实现新 Loop/Store 路径。不可变历史、低信任摘要、准确来源与真实能力预检等仍适用理由由新记录明确保留；旧 State/effect、结构化摘要 schema、hard block 和累计冷却不能据本记录重新引入新路径。旧正式入口尚未全部切换，本记录保留其历史实现范围，当前资格以对应 owner 和[实施证据](../../../../docs/plans/unified-agent-refactor-v1-progress.md)核对。

@@ -1,0 +1,570 @@
+import { expect, test } from 'bun:test';
+import type { AgentClient } from '@kite-ai/client';
+import { canonicalCallerCommandRequest } from '@kite-ai/client';
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
+import { callerTextDigest } from '../electron/caller-journal';
+import { NativeCaller } from '../electron/native-caller';
+import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
+import { nativeChannel } from '../src/native-bridge';
+import { memoryPrivateData } from './private-data.fixture';
+
+function client() {
+  let writes = 0;
+  return {
+    get writes() {
+      return writes;
+    },
+    serverInfo: { storeId: 'store', subjectId: 'local-user', capabilities: [] },
+    connect: async () => ({}),
+    async observe({ signal }: { signal: AbortSignal }) {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async getView(id: string) {
+      return {
+        storeId: 'store',
+        snapshotCursor: '0',
+        session: {
+          id,
+          workspaceId: 'w',
+          rootSessionId: id,
+          parentSessionId: null,
+          title: id,
+          nextSeq: '0',
+          contextSelectionId: 'selection',
+          controlRevision: '0',
+          deletedAt: null,
+        },
+        runs: [],
+        executions: [],
+        messages: [],
+      };
+    },
+    listWorkspaces: async () => [],
+    listAllWorkspaces: async () => [],
+    listAllSessions: async () => [],
+    listSessions: async () => [],
+    disposeNetwork() {},
+    startRun: async () => {
+      writes++;
+    },
+  } as unknown as AgentClient & { writes: number };
+}
+function authority() {
+  const frame = { url: 'file:///private/tmp/native/index.html' };
+  const contents = { mainFrame: frame };
+  return {
+    window: { isDestroyed: () => false, webContents: contents } as unknown as BrowserWindow,
+    event: { sender: contents, senderFrame: frame } as unknown as IpcMainInvokeEvent,
+    frame,
+  };
+}
+test('Native history shrinks public response and IPC pages with the original cursor and high water; closing aborts only that read', async () => {
+  const connection = client();
+  const queries: { afterSeq?: string; upperSeq?: string; limit?: number }[] = [];
+  let readSignal: AbortSignal | undefined;
+  connection.listMessages = (async (_id, options) => {
+    queries.push({
+      afterSeq: options?.afterSeq,
+      upperSeq: options?.upperSeq,
+      limit: options?.limit,
+    });
+    readSignal = options?.signal;
+    if (options!.limit! > 50)
+      throw Object.assign(Error('oversized public response'), { code: 'response_too_large' });
+    return Array.from({ length: options!.limit! }, (_, index) => ({
+      id: `large-${index}`,
+      sessionId: 's',
+      seq: String(index + 1),
+      content: 'x'.repeat(100000),
+    }));
+  }) as AgentClient['listMessages'];
+  const originalView = connection.getView.bind(connection);
+  connection.getView = (async (id) => {
+    const view = await originalView(id);
+    return { ...view, session: { ...view.session, nextSeq: '100' } };
+  }) as AgentClient['getView'];
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    const page = await caller.invoke({
+      method: 'messages',
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      readId: 'large-history',
+      afterSeq: '0',
+      upperSeq: '100',
+      limit: 200,
+    });
+    expect(queries).toEqual(
+      [200, 100, 50, 25].map((limit) => ({ afterSeq: '0', upperSeq: '100', limit })),
+    );
+    expect(page).toMatchObject({ highWaterSeq: '100', nextAfterSeq: '25' });
+    expect(page && 'messages' in page ? page.messages.length : -1).toBe(25);
+    expect(readSignal?.aborted).toBe(false);
+    await caller.invoke({ method: 'messages.close', generation: 1, readId: 'large-history' });
+    expect(readSignal?.aborted).toBe(true);
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+async function code(promise: Promise<unknown>) {
+  try {
+    await promise;
+    return 'success';
+  } catch (error) {
+    return (error as { code?: string }).code ?? (error as Error).message;
+  }
+}
+test('main IPC denies foreign/subframe senders and closed or oversized requests before client/startup; oversize reply stays local', async () => {
+  const auth = authority();
+  expect(() => assertNativeSender(auth.event, auth.window, auth.frame.url)).not.toThrow();
+  expect(() =>
+    assertNativeSender(
+      { ...auth.event, senderFrame: { url: auth.frame.url } } as IpcMainInvokeEvent,
+      auth.window,
+      auth.frame.url,
+    ),
+  ).toThrow('native_sender_denied');
+  expect(() =>
+    assertNativeSender(auth.event, auth.window, 'file:///private/tmp/foreign.html'),
+  ).toThrow('native_sender_denied');
+  expect(() => decodeNativeRequest({ method: 'attach', token: 'hidden' })).toThrow(
+    'invalid_native_request',
+  );
+  expect(() =>
+    decodeNativeRequest({ method: 'messages', generation: 1, sessionId: 's', limit: 201 }),
+  ).toThrow('invalid_native_request');
+  expect(() =>
+    decodeNativeRequest({
+      method: 'submit',
+      generation: 1,
+      sessionId: 's',
+      intent: { kind: 'run.start', subjectId: 'intruder' },
+    }),
+  ).toThrow('invalid_native_request');
+  expect(() =>
+    decodeNativeRequest({
+      method: 'draft.write',
+      generation: 1,
+      sessionId: 's',
+      revision: 0,
+      content: 'x'.repeat(1048576),
+    }),
+  ).toThrow('native_request_too_large');
+  let handler!: (event: IpcMainInvokeEvent, value: unknown) => Promise<unknown>,
+    calls = 0;
+  const ipcMain = {
+    handle(channel: string, value: typeof handler) {
+      expect(channel).toBe(nativeChannel);
+      handler = value;
+    },
+    removeHandler() {},
+  } as unknown as IpcMain;
+  const host = {
+    invoke: async () => ({ content: 'x'.repeat(4 * 1048576), revision: 0 }),
+  } as unknown as NativeCaller;
+  registerNativeIpc({
+    ipcMain,
+    window: () => auth.window,
+    rendererUrl: auth.frame.url,
+    caller: async () => {
+      calls++;
+      return host;
+    },
+  });
+  expect(await handler(auth.event, { method: 'attach', token: 'bad' })).toEqual({
+    ok: false,
+    code: 'invalid_native_request',
+  });
+  expect(calls).toBe(0);
+  expect(await handler(auth.event, { method: 'attach' })).toEqual({
+    ok: false,
+    code: 'native_response_too_large',
+  });
+  expect(calls).toBe(1);
+});
+test('main-private drafts require exact selection/revision; detached or late generations cannot rebind; network disposal is not owned shutdown', async () => {
+  const port = client(),
+    events: number[] = [],
+    caller = new NativeCaller(port, (event) => events.push(event.generation), memoryPrivateData());
+  try {
+    const first = await caller.invoke({ method: 'attach' });
+    const generation = (first as { generation: number }).generation;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    expect(
+      await caller.invoke({
+        method: 'draft.write',
+        generation,
+        sessionId: 's',
+        content: 'private body',
+        revision: 0,
+      }),
+    ).toMatchObject({ content: 'private body', revision: 1 });
+    expect(
+      await code(
+        caller.invoke({
+          method: 'draft.write',
+          generation,
+          sessionId: 's',
+          content: 'overwrite',
+          revision: 0,
+        }),
+      ),
+    ).toBe('draft_revision_conflict');
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    expect(await code(caller.invoke({ method: 'draft.read', generation, sessionId: 's' }))).toBe(
+      'native_selection_changed',
+    );
+    expect(JSON.stringify(caller.state())).not.toContain('private body');
+    caller.detach();
+    expect(await code(caller.invoke({ method: 'state', generation }))).toBe(
+      'native_generation_changed',
+    );
+    const next = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    await caller.invoke({ method: 'select', generation: next.generation, sessionId: 's' });
+    expect(
+      await caller.invoke({ method: 'draft.read', generation: next.generation, sessionId: 's' }),
+    ).toMatchObject({ content: 'private body', revision: 1 });
+    await caller.disposeNetwork();
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('an unknown original input survives a view switch; lookup and same-ID retry cannot rebind or issue a second mutation', async () => {
+  const port = client();
+  let dispatched = 0;
+  const queried: string[] = [];
+  port.startRun = async () => {
+    dispatched++;
+    throw new Error('controlled_response_lost');
+  };
+  port.getCommand = async (commandId) => {
+    queried.push(commandId);
+    return {
+      id: commandId,
+      sessionId: 's',
+      originStoreId: 'store',
+      kind: 'run.start',
+      subjectId: 'local-user',
+      requestDigest: callerTextDigest(
+        canonicalCallerCommandRequest({
+          kind: 'run.start',
+          expectedStoreId: 'store',
+          commandId: 'original',
+          content: 'exact body',
+        }),
+      ),
+      status: 'accepted',
+      receipt: null,
+    } as Awaited<ReturnType<AgentClient['getCommand']>>;
+  };
+  const data = memoryPrivateData();
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    const intent = {
+      kind: 'run.start' as const,
+      expectedStoreId: 'store',
+      commandId: 'original',
+      content: 'exact body',
+    };
+    const first = await caller.invoke({ method: 'submit', generation, sessionId: 's', intent });
+    expect(first).toMatchObject({
+      phase: 'unknown',
+      sessionId: 's',
+      intent: {
+        kind: intent.kind,
+        expectedStoreId: intent.expectedStoreId,
+        commandId: intent.commandId,
+      },
+    });
+    expect(data.callers()[0]!.intent.request).toEqual(intent);
+    expect(JSON.stringify(caller.state())).not.toContain('exact body');
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    const reconciled = await caller.invoke({
+      method: 'lookupInput',
+      generation,
+      commandId: 'original',
+    });
+    expect(reconciled).toMatchObject({
+      phase: 'accepted',
+      sessionId: 's',
+      intent: {
+        kind: intent.kind,
+        expectedStoreId: intent.expectedStoreId,
+        commandId: intent.commandId,
+      },
+    });
+    expect(queried).toEqual(['original']);
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    expect(
+      await caller.invoke({ method: 'submit', generation, sessionId: 's', intent }),
+    ).toMatchObject({ phase: 'accepted' });
+    expect(dispatched).toBe(1);
+    expect(
+      await code(caller.invoke({ method: 'lookupInput', generation, commandId: 'another' })),
+    ).toBe('input_intent_missing');
+  } finally {
+    await caller.close();
+  }
+});
+
+test('Session creation freezes a durable original intent; unknown and wrong receipts never cause a second POST or overwrite drafts', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let posts = 0,
+    lookups = 0,
+    wrong = false;
+  Object.assign(port, {
+    async createSession() {
+      posts++;
+      throw Error('physical response lost');
+    },
+    async getCommand(id: string) {
+      lookups++;
+      return {
+        id,
+        sessionId: wrong ? 'wrong' : 'new',
+        kind: 'session.create',
+        receipt: { sessionId: 'new' },
+        status: 'applied',
+        originStoreId: 'store',
+      };
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'retained',
+    });
+    const intent = {
+      method: 'createSession' as const,
+      generation,
+      workspaceId: 'w',
+      expectedStoreId: 'store',
+      commandId: 'original-create',
+      sessionId: 'new',
+      title: 'new',
+    };
+    expect(await caller.invoke(intent)).toMatchObject({ phase: 'unknown' });
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    expect(await caller.invoke(intent)).toMatchObject({ phase: 'unknown' });
+    expect(posts).toBe(1);
+    expect(await code(caller.invoke({ ...intent, sessionId: 'wrong' }))).toBe(
+      'creation_intent_conflict',
+    );
+    wrong = true;
+    expect(
+      await code(
+        caller.invoke({ method: 'lookupCreation', generation, commandId: intent.commandId }),
+      ),
+    ).toBe('creation_identity_mismatch');
+    expect(caller.state().creationSubmissions[0]!.phase).toBe('unknown');
+    wrong = false;
+    expect(
+      await caller.invoke({ method: 'lookupCreation', generation, commandId: intent.commandId }),
+    ).toMatchObject({ phase: 'created' });
+    expect(posts).toBe(1);
+    expect(lookups).toBe(2);
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toMatchObject(
+      { content: 'retained', revision: 1 },
+    );
+  } finally {
+    await caller.close();
+  }
+});
+
+test('old Store and deleted Session draft associations preserve original text without rebinding; missing private storage is local', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const old = data.save(
+    { storeId: 'older-store', workspaceId: 'old-workspace', rootSessionId: 'old-session' },
+    0,
+    'old original',
+  );
+  const deleted = data.save(
+    { storeId: 'store', workspaceId: 'w', rootSessionId: 'gone' },
+    0,
+    'deleted original',
+  );
+  const readView = port.getView.bind(port);
+  Object.assign(port, {
+    async getView(id: string) {
+      if (id === 'gone') throw Error('session missing');
+      return readView(id);
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data),
+    unavailable = new NativeCaller(client(), () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    expect(
+      await caller.invoke({ method: 'draft.original', generation, draftId: old.id }),
+    ).toMatchObject({
+      association: 'unavailable',
+      content: 'old original',
+      storeId: 'older-store',
+    });
+    expect(
+      await caller.invoke({ method: 'draft.original', generation, draftId: deleted.id }),
+    ).toMatchObject({
+      association: 'unavailable',
+      content: 'deleted original',
+      rootSessionId: 'gone',
+    });
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toMatchObject(
+      { content: '', revision: 0 },
+    );
+    const attached = (await unavailable.invoke({ method: 'attach' })) as { generation: number };
+    await unavailable.invoke({ method: 'select', generation: attached.generation, sessionId: 's' });
+    expect(
+      await code(
+        unavailable.invoke({
+          method: 'draft.read',
+          generation: attached.generation,
+          sessionId: 's',
+        }),
+      ),
+    ).toBe('draft_storage_unavailable');
+    expect(
+      (
+        (await unavailable.invoke({ method: 'state', generation: attached.generation })) as {
+          selection: unknown;
+        }
+      ).selection,
+    ).toBeDefined();
+  } finally {
+    await caller.close();
+    await unavailable.close();
+  }
+});
+
+test('main shutdown and directory exhaust admitted SDK pages: activity beyond 200 is observed, query failure is not idle', async () => {
+  const port = client();
+  let reads = 0;
+  const view = port.getView.bind(port);
+  Object.assign(port, {
+    async listAllSessions() {
+      return Array.from({ length: 205 }, (_, i) => ({ id: `session-${i}` }));
+    },
+    async listAllWorkspaces() {
+      return Array.from({ length: 205 }, (_, i) => ({ id: `workspace-${i}` }));
+    },
+    async getView(id: string) {
+      reads++;
+      const value = await view(id);
+      return { ...value, runs: id === 'session-204' ? [{ isActive: true }] : [] };
+    },
+    async listSessions() {
+      throw Error('legacy first page forbidden');
+    },
+    async listWorkspaces() {
+      throw Error('legacy first page forbidden');
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    const directory = (await caller.invoke({ method: 'directory', generation })) as {
+      sessions: unknown[];
+      workspaces: unknown[];
+    };
+    expect(directory.sessions.length).toBe(205);
+    expect(directory.workspaces.length).toBe(205);
+    expect(await caller.hasActiveWork()).toBe(true);
+    expect(reads).toBe(205);
+    Object.assign(port, {
+      async listAllSessions() {
+        throw Error('query unavailable');
+      },
+    });
+    expect(await code(caller.hasActiveWork())).toBe('query unavailable');
+  } finally {
+    await caller.close();
+  }
+});
+
+test('same creation command shares one in-flight POST across view switches; cold pending intent only queries', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  let posts = 0,
+    release!: () => void;
+  const barrier = new Promise<void>((r) => {
+    release = r;
+  });
+  Object.assign(port, {
+    async createSession() {
+      posts++;
+      await barrier;
+      throw Error('lost response');
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    const intent = {
+      method: 'createSession' as const,
+      generation,
+      workspaceId: 'w',
+      expectedStoreId: 'store',
+      commandId: 'single',
+      sessionId: 'new',
+      title: 'new',
+    };
+    const first = caller.invoke(intent),
+      second = caller.invoke(intent);
+    await caller.invoke({ method: 'select', generation, sessionId: 'other' });
+    expect(posts).toBe(1);
+    release();
+    expect(await first).toMatchObject({ phase: 'unknown' });
+    expect(await second).toMatchObject({ phase: 'unknown' });
+    expect(posts).toBe(1);
+  } finally {
+    release();
+    await caller.close();
+  }
+  data.begin({
+    expectedStoreId: 'store',
+    workspaceId: 'w',
+    commandId: 'cold',
+    sessionId: 'cold-session',
+    title: 'new',
+  });
+  const cold = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await cold.invoke({ method: 'attach' })) as { generation: number };
+    expect(
+      cold.state().creationSubmissions.find((value) => value.input.commandId === 'cold')!.phase,
+    ).toBe('unknown');
+    expect(
+      await cold.invoke({
+        method: 'createSession',
+        generation,
+        expectedStoreId: 'store',
+        workspaceId: 'w',
+        commandId: 'cold',
+        sessionId: 'cold-session',
+        title: 'new',
+      }),
+    ).toMatchObject({ phase: 'unknown' });
+    expect(posts).toBe(1);
+  } finally {
+    await cold.close();
+  }
+});

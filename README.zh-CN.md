@@ -24,16 +24,16 @@ Kite Code 使用多种模型帮助你理解代码、修改文件、运行命令�
 
 ## 快速开始
 
-需要先安装 [Bun](https://bun.sh/)。
+使用 Bun 1.4.2，安装锁定依赖并构建新 workspace 与 Terminal 候选：
 
 ```bash
-bun install
+bun install --frozen-lockfile
+bun run build
+bun run release:build
 bun run tui
 ```
 
-源码开发命令会通过stdio启动同build、由TUI parent持有的App Server，不构建Web资产，也不发现共享进程。`/status`只显示transport、
-profile、build、App Server版本与已验证的配对状态；TUI退出后Session仍持久保留。
-首次启动时，按照界面引导配置模型Provider。
+正式 TUI/CLI 固定选择 `dist/unified-terminal` 的完整候选，启动其配套 Service，业务经同一 HTTP/SSE Client。默认 profile 与原实现分开；本次切换不迁移旧用户数据。模型配置和当前客户端行为见[产品手册](docs/handbook/README.md)。
 
 Headless CLI：
 
@@ -44,20 +44,13 @@ bun run agent run \
   --task "检查并修复测试"
 ```
 
-完整参数以 `bun run agent --help` 为准。
+当前参数以 `bun run agent --help` 为准。V1.3 仍在实施：默认生产 Shell 当前 unavailable，完整能力与平台资格尚未取得。准确证据与限制见[实施进度](docs/plans/unified-agent-refactor-v1-progress.md)。
 
 ## 本地 Service 与 Web
 
-不打开TUI时，可使用以下命令构建Web assets、显式启动App Server daemon并打印稳定的loopback根地址：
+`bun run server` 显式启动选定候选的本机 daemon 并打印只读 Web 地址。`bun run agent server start|status|stop|restart` 管理这个显式 daemon；`bun run agent web` 只发现已有实例。Browser 经 Cookie Gateway 使用同一公共只读 API；关闭视图不取消活动 Run。
 
-```bash
-bun run server
-```
-
-daemon根地址就是Web入口；同一origin提供`/v1`与`/api-docs`。默认TUI/CLI各有配套stdio App Server并共享durable
-`kite-session.sqlite` facts；它们不打开Web端口。访问daemon的`/`会建立HttpOnly只读Browser session。显式daemon生命周期为
-`bun run agent server start|status|stop`；`bun run agent web`只发现已运行daemon。
-`bun run --cwd apps/kite-web dev`仍只是前端开发用的Vite asset server。
+开发时先执行 `bun run build`，再使用 `web:dev`、`cli:dev` 或 `tui:dev`，它们固定明确的 `development` profile。Web 前台 launcher 退出时关闭其所属 Service。当前行为由[Web](apps/web/README.md)与[CLI/TUI](apps/cli/README.md)负责；profile 和制品选择见[本地开发](docs/development/local-development.md)。
 
 ## 文档
 
@@ -66,3 +59,7 @@ daemon根地址就是Web入口；同一origin提供`/v1`与`/api-docs`。默认T
 - [CLI](docs/handbook/cli/README.md) · [Server](docs/handbook/server/README.md) · [能力对照](docs/handbook/capabilities.md)
 - [开发文档](docs/development/README.md)：架构、模块入口和验证。
 - [有效计划](docs/plans/README.md)
+
+## 通用 Agent V1.3 当前入口
+
+根 build、typecheck、默认测试、CLI/TUI 和 release 工具已选择八个新 workspace。正式 `agent` / `tui` 前先运行 `bun run build` 与 `bun run release:build`；开发入口保持明确 development profile。当前行为及资格限制见[实施进度](docs/plans/unified-agent-refactor-v1-progress.md)与[release control](docs/active/release-control.md)。完整 V1.3 与三平台发布资格仍在实施。

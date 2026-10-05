@@ -11,3 +11,7 @@
 需要集成开发时，从开发文档进入 Public contract 与 typed client。不要复制旧版本规范推断当前可用行为。
 
 页面内返回会话使用浏览器历史导航，不要求重启服务。规范加载失败先检查当前服务资源是否完整，不切换到来源不明的外部规范。
+
+## 通用 Agent 开发页
+
+新 `web:dev` 与 `cli:dev server` 的 Web 页也提供导航中的 API Docs。`/api-docs` 显示本 Service 构建生成的全部路径与方法，并可展开完整 JSON 规范；原 JSON 地址为 `/openapi.json`。它不是表单或在线调用工具，不向浏览器提供 Native token。此开发实现与上面的旧正式发布页面分别验证，正式入口迁移尚未完成。
