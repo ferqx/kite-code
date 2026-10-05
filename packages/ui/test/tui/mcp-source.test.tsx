@@ -480,7 +480,7 @@ for (const [steps, decision] of [
       f.controller.dispose();
     }
   }, 5000);
-test('Source Question choice cannot cross revision or source/presentation identity; ordinary JSON Question and Ask unchanged', async () => {
+test('Source Question choice cannot cross revision or source/presentation identity; ordinary schema Question and Ask unchanged', async () => {
   const f = fixture();
   f.cards([question()]);
   await f.controller.select('a');
@@ -536,7 +536,9 @@ test('Source Question choice cannot cross revision or source/presentation identi
     await f.controller.select('a');
     await tick();
     expect(ui.lastFrame()).not.toContain('Up/Down explicit source decision:');
-    ui.stdin.write('{"decision":"rejected"}');
+    ui.stdin.write('\u001b[B');
+    await tick();
+    ui.stdin.write('\u001b[B');
     await tick();
     ui.stdin.write('\r');
     await tick();

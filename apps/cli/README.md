@@ -103,6 +103,14 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 [文件测试](test/isolated/tui-export.test.ts) 验证真实9MiB全文/reason尾部、0600、原Store/abort/写失败；共享 [纯serializer/controller测试](../../packages/ui/test/tui/export.test.ts) 验证准确loaded身份、未读正文0GET与late隔离。[实际标准80×24 PTY](test/isolated/tui-export-host.test.ts) 验证未读 preview、Ctrl+O 后9MiB完整正文及思考尾部、两次真实0600文件、新文件路径提示、固定模型精确2次调用和所属 Service 退出/冷重开。大正文投影复用后，草稿和notice不再重复解析正文。正式旧 CLI/TUI入口仍由完整迁移门禁负责。
 
+## TUI 普通问题步骤
+
+正式 Terminal 与 `tui:dev` 消费同一个 [TuiSession 问题面板](../../packages/ui/src/tui/README.md)，有限原 schema 可生成单题和多步骤选择/自由回答。请求、schema、内部 ID 与用户原文仍来自原 Interaction，不复用旧 Runtime 的 questions payload。返回上题保留后题草稿，最后一步才通过原 caller host 提交一次 Answer；回执未知仍只查询原命令。此 UI 变更不扩大 stdio 的有限 JSON 输入子集，也不注册新的默认 ask_user Tool。
+
+[源码外真实 PTY](test/isolated/tui-question-pty.test.ts)使用公共 Terminal candidate builder、固定无害 Model/Tool、真实 Service/SQLite/Client 和 80×24 键盘，验证逐选项标题与原 const ID、多题回退改选、Unicode/首尾空格/多行 paste、明确 Custom、各中间步骤零 Answer，以及最终原卡唯一答案、原 Tool/Run 完成、GET-only 观察、正常 Ctrl+Q 和所属 Service 清理。该 fixture 明确注入无害信息 Tool，不建立默认 ask_user、收费 Provider、正式安装或其他平台资格。
+
+[原 Workflow PTY](test/isolated/tui-workflow-question-host.test.ts)已改为真实 decision/detail 步骤键序；replan/waive 的丢 Answer 响应和首 GET 丢回执仍只查询原答案命令，取消仍准确作用原 Run。既有[配对](../../packages/ui/test/isolated/tui/paired.test.ts)与[子会话](../../packages/ui/test/isolated/tui/child-permissions.test.ts)保持完整正文、原卡身份、取消及 EOF 零批准断言，仅更新已支持问题的选择键序。实际范围、冻结版本与日志见[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
 ## 开发 CLI 离线维护
 
 Workflow 的独立开关文件 `skill-workflow.jsonc` 作为 `skillWorkflowConfiguration` 原字节资产采集。JSON coverage 明确列出该项，保留注释、未知字段及损坏 JSONC，不解析或启用特性；缺失保持 absent，恢复保原字节。它不改变 `profileComplete:false` 或凭据排除范围。

@@ -76,6 +76,8 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
     'items',
     'enum',
     'const',
+    'oneOf',
+    'anyOf',
     'minLength',
     'maxLength',
     'minimum',
@@ -94,16 +96,26 @@ function schema(value: Json): ReturnType<Ajv['compile']> {
       if (key === 'properties') {
         if (!child || typeof child !== 'object' || Array.isArray(child))
           throw new AgentError('question_schema_invalid');
+        if (Object.hasOwn(child, '__proto__')) throw new AgentError('question_schema_invalid');
         for (const entry of Object.values(child)) walk(entry, depth + 1);
+      } else if (key === 'required' && Array.isArray(child) && child.includes('__proto__')) {
+        throw new AgentError('question_schema_invalid');
+      } else if (key === 'oneOf' || key === 'anyOf') {
+        if (!Array.isArray(child) || child.length === 0)
+          throw new AgentError('question_schema_invalid');
+        for (const branch of child) walk(branch, depth + 1);
       } else if (key === 'items' || (key === 'additionalProperties' && typeof child !== 'boolean'))
         walk(child, depth + 1);
     }
   };
   walk(value, 0);
   try {
-    return new Ajv({ strict: false, allErrors: false, validateFormats: false }).compile(
-      value as object,
-    );
+    return new Ajv({
+      strict: false,
+      allErrors: false,
+      validateFormats: false,
+      ownProperties: true,
+    }).compile(value as object);
   } catch {
     throw new AgentError('question_schema_invalid');
   }

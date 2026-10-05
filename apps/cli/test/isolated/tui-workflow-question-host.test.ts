@@ -81,7 +81,7 @@ globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{
 },{preconnect:actual.preconnect});
 await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)},onLaunched:({pid})=>writeFileSync(${JSON.stringify(pidPath)},String(pid))});`,
       );
-      const answer = JSON.stringify({ decision, detail: 'original explicit user instruction' });
+      const detail = 'original explicit user instruction';
       const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
 def wait(text):
@@ -134,7 +134,8 @@ try:
   if time.monotonic()>deadline:raise RuntimeError('original Run cancellation not confirmed')
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
  key(b'\\x11')`
-     : `card('question');key(${JSON.stringify(answer)}.encode());wait(${JSON.stringify(answer)});key(b'\\r');wait('interaction.answer: unknown')
+     : `card('question');wait('Question 1/2: decision');key(b'\\x1b[B' * ${decision === 'replan' ? 1 : 2});wait('› ${decision}');key(b'\\r')
+ wait('Question 2/2: detail');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)});key(b'\\r');wait('interaction.answer: unknown')
  key(b'\\x0c');wait('interaction.answer: unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))})
  key(b'\\x0c');wait('interaction.answer: applied')
  ${decision === 'replan' ? "approve('complete_skill');approve('skill.workflow.verify')" : ''}

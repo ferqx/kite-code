@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
-import type { InteractionAnswer } from '../../../src/storage/types';
+import type { InteractionAnswer, Json } from '../../../src/storage/types';
 
 async function rejected(work: Promise<unknown>, code: string) {
   let error: unknown;
@@ -417,6 +417,266 @@ test('saved answer survives Worker loss, exact acceptance rejects changed params
     await f.cleanup();
   }
 });
+test('question unions preserve option IDs, titles and original multi-question answers without authorization', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('union');
+    await f.dispatch('union');
+    const schema: Json = {
+      type: 'object',
+      properties: {
+        choice: {
+          oneOf: [
+            { const: 'internal-a', title: '显示选项 A' },
+            { const: 'internal-b', title: '显示选项 B' },
+          ],
+        },
+        note: {
+          anyOf: [
+            { const: 'preset', title: '预设' },
+            { type: 'string', minLength: 1 },
+          ],
+        },
+      },
+      required: ['choice', 'note'],
+      additionalProperties: false,
+    };
+    await f.store.requestInteraction({
+      ...f.request('union', 'union', 'question'),
+      request: { schema },
+    });
+    const get = () =>
+      f.store.getInteraction({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        interactionId: 'union',
+      });
+    expect((await get())!.request).toEqual({ schema });
+    const invalidAnswers: Json[] = [
+      { choice: '显示选项 A', note: 'valid' },
+      { choice: 'invented', note: 'valid' },
+      { choice: 'internal-a', note: 42 },
+      { choice: 'internal-a', note: '' },
+      { choice: 'internal-a', note: 'valid', extra: true },
+    ];
+    for (const answers of invalidAnswers) {
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      await rejected(
+        f.store.answerInteraction(
+          f.answer('union', 'invalid-union', {
+            kind: 'question',
+            answers,
+          }),
+        ),
+        'interaction_answer_invalid',
+      );
+      expect(await f.store.getCommand('invalid-union')).toBeNull();
+      expect((await get())!.answer).toBeNull();
+      expect((await get())!.revision).toBe('1');
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    }
+    const answer: InteractionAnswer = {
+      kind: 'question',
+      answers: { choice: 'internal-b', note: '  自定义 Unicode 🪁 答案  ' },
+    };
+    await f.store.answerInteraction(f.answer('union', 'answer-union', answer));
+    expect((await get())!.answer).toEqual(answer);
+    await f.store.acceptInteractionDecision(f.accept('union'));
+    expect((await f.store.getExecution('union'))!.interactionBinding).toBeNull();
+    expect((await get())!.acceptedDecisionRevision).toBe('2');
+    await f.plan('other-union');
+    await rejected(f.dispatch('other-union', 'union', '2'), 'interaction_binding_changed');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('question oneOf rejects overlapping matches while anyOf accepts them', async () => {
+  const f = await fixture();
+  try {
+    for (const union of ['oneOf', 'anyOf']) {
+      await f.plan(union);
+      await f.dispatch(union);
+      await f.store.requestInteraction({
+        ...f.request(union, union, 'question'),
+        request: { schema: { [union]: [{ const: 'preset' }, { type: 'string' }] } },
+      });
+      const response = f.answer(union, `answer-${union}`, { kind: 'question', answers: 'preset' });
+      if (union === 'oneOf') {
+        const cursor = (await f.store.getMetadata()).lastChangeCursor;
+        await rejected(f.store.answerInteraction(response), 'interaction_answer_invalid');
+        expect(await f.store.getCommand(`answer-${union}`)).toBeNull();
+        expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+        expect(
+          (await f.store.getInteraction({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            interactionId: union,
+          }))!.answer,
+        ).toBeNull();
+      } else {
+        await f.store.answerInteraction(response);
+      }
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('question unions retain closed keywords and schema depth/node budgets with transactional rejection', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('schema-budget');
+    await f.dispatch('schema-budget');
+    const nested = (levels: number): Json => {
+      let result: Json = { type: 'string' };
+      for (let i = 0; i < levels; i++) result = { additionalProperties: result };
+      return { anyOf: [result] };
+    };
+    const invalid: Json[] = [
+      ...['oneOf', 'anyOf'].flatMap((union) => [
+        { [union]: [] },
+        { [union]: {} },
+        { [union]: null },
+        { [union]: [{ type: 'string' }, true] },
+        ...['$ref', 'pattern', 'format', 'unknown', 'allOf'].map((key) => ({
+          [union]: [{ [key]: key === 'allOf' ? [] : 'forbidden' }],
+        })),
+      ]),
+      nested(12),
+      { oneOf: Array.from({ length: 256 }, (_, i) => ({ const: i })) },
+    ];
+    for (const [index, schema] of invalid.entries()) {
+      const id = `invalid-schema-${index}`;
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      await rejected(
+        f.store.requestInteraction({
+          ...f.request(id, 'schema-budget', 'question'),
+          request: { schema },
+        }),
+        'question_schema_invalid',
+      );
+      expect(
+        await f.store.getInteraction({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          interactionId: id,
+        }),
+      ).toBeNull();
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect((await f.store.getRun(f.run.id))!.status).toBe('running');
+    }
+    for (const [id, schema, answers] of [
+      ['depth-limit', nested(11), 'valid'],
+      ['node-limit', { oneOf: Array.from({ length: 255 }, (_, i) => ({ const: i })) }, 254],
+    ] as const) {
+      await f.store.requestInteraction({
+        ...f.request(id, 'schema-budget', 'question'),
+        request: { schema: schema as Json },
+      });
+      await f.store.answerInteraction(f.answer(id, `answer-${id}`, { kind: 'question', answers }));
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('question schema required checks only own JSON fields and preserves explicitly declared prototype names', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('own-fields');
+    await f.dispatch('own-fields');
+    const cases: Array<[string, Json, Json]> = [
+      [
+        'required-own',
+        {
+          type: 'object',
+          required: ['toString'],
+          additionalProperties: true,
+        },
+        JSON.parse('{"toString":"  自定义  "}') as Json,
+      ],
+      [
+        'declared-own',
+        {
+          type: 'object',
+          properties: { toString: { const: 'wire-id' }, constructor: { type: 'string' } },
+          required: ['toString', 'constructor'],
+          additionalProperties: false,
+        },
+        JSON.parse('{"toString":"wire-id","constructor":"原值 🪁"}') as Json,
+      ],
+    ];
+    for (const [id, schema, answers] of cases) {
+      await f.store.requestInteraction({
+        ...f.request(id, 'own-fields', 'question'),
+        request: { schema: schema as Json },
+      });
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      await rejected(
+        f.store.answerInteraction(
+          f.answer(id, `missing-${id}`, {
+            kind: 'question',
+            answers: JSON.parse('{}'),
+          }),
+        ),
+        'interaction_answer_invalid',
+      );
+      expect(await f.store.getCommand(`missing-${id}`)).toBeNull();
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      const get = () =>
+        f.store.getInteraction({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          interactionId: id,
+        });
+      expect((await get())!.answer).toBeNull();
+      expect((await get())!.revision).toBe('1');
+      const answer: InteractionAnswer = { kind: 'question', answers };
+      await f.store.answerInteraction(f.answer(id, `answer-${id}`, answer));
+      expect((await get())!.answer).toEqual(answer);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('question schema rejects unrepresentable __proto__ properties or requirements before creating a card', async () => {
+  const f = await fixture();
+  try {
+    await f.plan('prototype-schema');
+    await f.dispatch('prototype-schema');
+    for (const [index, schema] of [
+      JSON.parse(
+        '{"type":"object","properties":{"__proto__":{"type":"string","enum":["wire-id"]}},"additionalProperties":false}',
+      ),
+      { type: 'object', required: ['__proto__'], additionalProperties: true },
+      { anyOf: [{ type: 'object', required: ['__proto__'] }] },
+    ].entries()) {
+      const interactionId = `prototype-${index}`;
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      await rejected(
+        f.store.requestInteraction({
+          ...f.request(interactionId, 'prototype-schema', 'question'),
+          request: { schema },
+        }),
+        'question_schema_invalid',
+      );
+      expect(
+        await f.store.getInteraction({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          interactionId,
+        }),
+      ).toBeNull();
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect((await f.store.getRun(f.run.id))!.status).toBe('running');
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('question schema rejects invalid answers and never becomes approval; plan modes retain immutable original binding', async () => {
   const f = await fixture();
   try {

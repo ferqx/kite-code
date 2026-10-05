@@ -24,7 +24,9 @@ Esc 拒绝当前审批，并结束当前轮的相关执行；当前目标应显�
 
 通用开发 TUI 同时存在多张待决卡时，Ctrl+B 打开完整目录，上下选择、Enter 返回原卡，Esc 关闭目录。目录保留打开时的原卡身份；后来新增卡片不会改变原行的目标。每张卡分别保留回答或授权草稿，卡片 revision 改变后要求重新核对。原卡带全文附件时，必须先完成原范围正文读取；关闭读取或切换卡片不会批准执行。
 
-Workflow 核验失败的问题可能要求 replan/waive 及非空 detail；合格 Workflow 声明补偿且宿主准入时，另提供 compensate。replan 是新的尝试，waive 保留原 failed；补偿启动独立 Job 并另需用户审批，不把核验改为通过。按当前通用 question 面板提示提交 JSON 答案；子审批与 verifier 审批仍需独立确认。
+通用 TUI 的普通问题按原请求显示单题或多步骤表单。上下键明确选择，Enter 进入下一题；最后一步才提交完整答案。初始没有默认选项，空白自由回答不提交。只有原问题明确允许自由输入时才提供自定义回答；封闭选项不能用自定义答案绕过。Esc 回上一题，已输入的后续草稿保留；可选题按 Tab 明确跳过。自由回答支持光标编辑、Shift+Enter 换行及多行粘贴，保留原空格和 Unicode；长度提示只阻止不合格答案，不截断原文。复杂或无法完整呈现的 schema 仍明确提示输入原 JSON。
+
+Workflow 核验失败的问题可能要求 replan/waive 及非空 detail；合格 Workflow 声明补偿且宿主准入时，另提供 compensate。replan 是新的尝试，waive 保留原 failed；补偿启动独立 Job 并另需用户审批，不把核验改为通过。普通步骤面板先选择原 decision，再填写 detail；子审批与 verifier 审批仍需独立确认。
 
 项目 MCP 来源的准确 Source Question 提供 approved、rejected、cancel 三个明确决定。初始不选答案，上下选择后 Enter 回答；空 Enter 不发送 Answer，Esc 清尚未提交的选择，Ctrl+C 关闭面板，均不代替 cancel 决定。此前独立 Review 确认和普通 Action 许可不预答这个问题；保存回答后还须原发布证明才能显示来源决定已保存，详见[项目来源与原决定](mcp-and-skills.md#项目来源与原决定)。其他问题继续按各自面板提示回答。
 

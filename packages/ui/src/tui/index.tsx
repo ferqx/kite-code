@@ -1,5 +1,5 @@
 import type { Interaction } from '@kite-ai/client';
-import { Box, useInput } from 'ink';
+import { Box, useInput, usePaste } from 'ink';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { interactionKey } from './cards';
 import { ComposerBuffer } from './composer';
@@ -14,6 +14,14 @@ import { TuiModelPanel } from './model-panel';
 import { TuiPermissionPanel } from './permission-panel';
 import { TuiPreferencePanel } from './preference-panel';
 import { TuiText as Text, TuiPresentationProvider, useTuiPresentation } from './presentation';
+import {
+  type QuestionDraft,
+  questionAnswer,
+  questionDraft,
+  questionForm,
+  questionValue,
+} from './question';
+import { QuestionPanel } from './question-panel';
 import { TuiRecoveryPanel } from './recovery-panel';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
@@ -64,6 +72,8 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   const [cardDrafts, setCardDrafts] = useState(new Map<string, string>());
   const [sourceChoices, setSourceChoices] = useState(new Map<string, number>());
   const [approvalChoices, setApprovalChoices] = useState(new Map<string, number>());
+  const questionDrafts = useRef(new Map<string, QuestionDraft>());
+  const [, renderQuestion] = useState(0);
   const [panelIndex, setPanelIndex] = useState(0);
   useEffect(() => {
     if (state.chooserRequested) {
@@ -88,6 +98,14 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   const approvalKey = card ? interactionKey(card) : '';
   const answer = cardDrafts.get(approvalKey) ?? '';
   const sourceQuestion = card && isMcpSourceQuestion(card);
+  const form =
+    card?.kind === 'question' && !sourceQuestion ? questionForm(card.request) : undefined;
+  let question = questionDrafts.current.get(approvalKey);
+  if (form && !question) {
+    question = questionDraft(form);
+    questionDrafts.current.set(approvalKey, question);
+  }
+  const questionActive = !!form && !!question && !state.panel && !chooser && !cardChooser;
   const selectedSource = sourceChoices.get(approvalKey);
   const selectedApproval = approvalChoices.get(approvalKey);
   const setAnswer = (value: string | ((previous: string) => string)) =>
@@ -116,6 +134,9 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         ? fresh.revision !== revision || fresh.state !== 'pending'
         : presentation === state.snapshot?.view.session.id;
     };
+    for (const key of questionDrafts.current.keys()) {
+      if (obsolete(key)) questionDrafts.current.delete(key);
+    }
     setCardDrafts((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
     setApprovalChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
     setSourceChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
@@ -127,6 +148,19 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   useEffect(() => {
     void controller.list();
   }, [controller]);
+  usePaste(
+    (text) => {
+      if (!questionActive || !form || !question) return;
+      const field = form.fields[question.step]!,
+        draft = question.fields[question.step]!;
+      if (field.text && (!field.choices.length || draft.selected === field.choices.length)) {
+        draft.buffer.insert(text, true);
+        draft.skipped = false;
+        renderQuestion((n) => n + 1);
+      }
+    },
+    { isActive: questionActive },
+  );
   useInput((input, key) => {
     if (state.panel === 'recovery') return;
     if (state.panel === 'executions') return;
@@ -266,6 +300,48 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       return;
     }
     if (card) {
+      if (form && question) {
+        const field = form.fields[question.step]!,
+          draft = question.fields[question.step]!;
+        const editing =
+          field.text && (!field.choices.length || draft.selected === field.choices.length);
+        if (key.ctrl || (key.meta && !key.return)) return;
+        if (key.escape) question.step = Math.max(0, question.step - 1);
+        else if (key.tab && !field.required) {
+          draft.skipped = !draft.skipped;
+        } else if (field.choices.length && (key.upArrow || key.downArrow)) {
+          const count = field.choices.length + (field.text ? 1 : 0);
+          draft.selected =
+            draft.selected === undefined
+              ? key.downArrow
+                ? 0
+                : count - 1
+              : (draft.selected + (key.downArrow ? 1 : count - 1)) % count;
+          draft.skipped = false;
+        } else if (key.return && !key.shift && !key.meta) {
+          if (!questionValue(field, draft)) return;
+          if (question.step < form.fields.length - 1) question.step++;
+          else {
+            const value = questionAnswer(form, question);
+            if (value !== undefined && !state.stale && !state.loading)
+              void controller.answer(card, value);
+          }
+        } else if (editing) {
+          if (key.leftArrow) draft.buffer.horizontal(-1);
+          else if (key.rightArrow) draft.buffer.horizontal(1);
+          else if (key.home) draft.buffer.boundary(false, 72);
+          else if (key.end) draft.buffer.boundary(true, 72);
+          else if (key.upArrow) draft.buffer.vertical(-1, 72);
+          else if (key.downArrow) draft.buffer.vertical(1, 72);
+          else if (key.backspace) draft.buffer.remove(true);
+          else if (key.delete) draft.buffer.remove(false);
+          else if (key.return) draft.buffer.insert('\n');
+          else if (input) draft.buffer.insert(input);
+          draft.skipped = false;
+        }
+        renderQuestion((n) => n + 1);
+        return;
+      }
       if (sourceQuestion && key.escape) {
         setSourceChoices((previous) => {
           const next = new Map(previous);
@@ -437,7 +513,18 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
             {t('] original Session')} {terminalText(card.sessionId)} {t('· revision')}{' '}
             {card.revision}
           </Text>
-          <Text>{terminalText(JSON.stringify(card.request, null, 2))}</Text>
+          {form &&
+            Object.entries(card.request as Record<string, unknown>)
+              .filter(
+                ([key, value]) =>
+                  ['title', 'question', 'description'].includes(key) && typeof value === 'string',
+              )
+              .map(([key, value]) => <Text key={key}>{terminalText(String(value))}</Text>)}
+          {form && question ? (
+            <QuestionPanel form={form} draft={question} />
+          ) : (
+            <Text>{terminalText(JSON.stringify(card.request, null, 2))}</Text>
+          )}
           {card.kind === 'approval' && (
             <Text>
               {t('Up/Down explicit approval selection:')}{' '}
@@ -467,12 +554,21 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           {state.attachments.get(approvalKey) && (
             <Text>{terminalText(state.attachments.get(approvalKey)!)}</Text>
           )}
-          <Text>
-            {t(
-              'Ctrl+A: read required attachment. Approval: approve (once), approve same_command only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
-            )}
-          </Text>
-          <Text>{terminalText(answer)}</Text>
+          {form && (
+            <Text>
+              {t(
+                'Ctrl+A: read required attachment. Question: choose or enter the original-schema answer above.',
+              )}
+            </Text>
+          )}
+          {!form && (
+            <Text>
+              {t(
+                'Ctrl+A: read required attachment. Approval: approve (once), approve same_command only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
+              )}
+            </Text>
+          )}
+          {!form && <Text>{terminalText(answer)}</Text>}
         </Box>
       )}
       {state.panel === 'rewind' && (

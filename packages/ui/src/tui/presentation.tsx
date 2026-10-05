@@ -4,6 +4,19 @@ import { defaultTuiPreferences } from './preferences';
 
 /** Only explicit UI-owned labels enter this catalog. Public machine values and body text do not. */
 export const tuiChinese: Readonly<Record<string, string>> = {
+  Question: '问题',
+  Answer: '回答',
+  'Custom answer': '自定义回答',
+  'Tab: skip optional answer': 'Tab：跳过可选回答',
+  'No selection (Enter has no answer)': '尚未选择（Enter 不提交回答）',
+  'Up/Down: choose · Enter: next/submit · Shift+Enter: newline · Esc: previous question':
+    '上下键：选择 · Enter：下一题或提交 · Shift+Enter：换行 · Esc：上一题',
+  'Answer needs at least': '回答至少需要',
+  'Answer allows at most': '回答最多允许',
+  characters: '个字符',
+  entered: '已输入',
+  'Ctrl+A: read required attachment. Question: choose or enter the original-schema answer above.':
+    'Ctrl+A：读取必要附件。问题：选择或输入上方原 schema 的回答。',
   Authentication: '认证',
   'Original authentication requests': '原认证申请',
   'MCP authentication': 'MCP 认证',

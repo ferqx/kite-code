@@ -10,11 +10,15 @@
 
 普通文本在真实可引导 active Run 上封存原 Store、Session、contextSelection 与 targetRunId 后调用 steer；idle 才创建新 Run。维护压缩/reset Run 由宿主提供真实 activeCommand 后使用原 Run/context selection 的 follow-up，不 steer 维护执行。收尾 Run 不发送。原 commandId 在提交前由宿主生成；响应不可核实时显示 unknown，lookup 只 GET 原 ID，不重发。晚回执显示其原 Session，而不是新选中目标。Ctrl+C 取消准确原 Run 的 originCommandId；尚未观测 Run 的新 start 仍使用已封存原 commandId，重复取消去重。回执 accepted/applied 不证明实际停止，只有新投影可显示 Cancelling/终态。
 
-审批输入 `approve` 缺省一次；只有原卡 request.grants 提供时可输入 `approve same_command`。Esc 只拒绝审批，Ctrl+C 是原 work 取消；question 输入实际 schema 的 JSON，内部 choice ID 保留，服务端仍完整校验；计划批准只接受原 offered auto/accept_edits，不创建工具授权。空答案、EOF 和关闭没有默认批准。原卡附件必须经宿主公共完整 hash/UTF-8 reader 读取后才可答复，Ctrl+A 显式读取；未知回答只允许核实原 Command。保存答案并不代表 Core 已接纳或工具派发成功。
+审批输入 `approve` 缺省一次；只有原卡 request.grants 提供时可输入 `approve same_command`。Esc 只拒绝审批，Ctrl+C 是原 work 取消；普通 question 使用下述原 schema 步骤面板，复杂输入仍明确使用原 JSON，内部 choice ID 保留，服务端仍完整校验；计划批准只接受原 offered auto/accept_edits，不创建工具授权。空答案、EOF 和关闭没有默认批准。原卡附件必须经宿主公共完整 hash/UTF-8 reader 读取后才可答复，Ctrl+A 显式读取；未知回答只允许核实原 Command。保存答案并不代表 Core 已接纳或工具派发成功。
+
+[questionForm](question.ts)只将完整可表达的标量 string、enum/const、互不重叠的 oneOf 选择及明确 anyOf string 自定义分支转为单题或浅 object 步骤。[QuestionPanel](question-panel.tsx)展示原 title/description；选择提交原值，字段键不重命名。封闭 enum 不添加 Custom；复杂、嵌套、重叠或无法完整保留约束的 schema 回退显式 JSON。required 核实际自身 properties，当前 Core 不支持的 `__proto__` 属性/必填键也不生成表单。字符串 min/maxLength 按 Unicode codepoint 核对，编辑仍沿 ComposerBuffer 字符簇、光标和多行 paste，不 trim 或截断原文。问题/选项正文与原答案不翻译，自有提示沿当前终端语言呈现。
+
+步骤草稿按完整 interactionKey 的 Store/source Session/presentation Session/id/revision 保留，Esc 返回上题并保留后题内容；卡版本变化清旧草稿。首选项未选、空白自由答案、尚无答案且未明确跳过的 optional 字段均不推进。最后一步才调用原 controller.answer；附件未读完、stale/loading、原答案 pending/unknown 或已经保存时不增加 Answer。后继卡或切会话不能重绑原未知回执。局部键盘覆盖见[questions.test.tsx](../../test/tui/questions.test.tsx)，当前真实多题、逐项标题/原 ID、自定义原文与正常退出资格由[CLI owner](../../../../apps/cli/README.md#tui-普通问题步骤)维护。
 
 所有 Model、Tool、标题和诊断正文的控制字符转为可读 `\\uXXXX`，保留完整字符而不执行 ANSI/OSC 或方向控制。`TerminalMarkdown` 使用实际 remark AST 展示段落、标题、列表、代码、引用和表格，图片/链接/HTML为文字。未知节点保留对应原文，不按字符数裁剪。Model output 只有 preview 时明确标记，Ctrl+O 调宿主已验证的完整 reader，复核原 Store/Session/Run/Execution 后显示完整 content；未完整前缀不伪造完整 Tool calls，reasoning 不默认显示。
 
-当前正式 Terminal 已消费本终端入口，具体面板与 composer 的已实施范围见下方 owner 记录；完整主屏 static scrollback、resize、全部设置/子目录/日志与复杂多题 UX 仍未由局部切片闭合。大 Tool/Job 附件输出需要宿主专门 reader；本组件不会把 Artifact 引用当作已展示全文。完整目录与 history 的分页资格由实际 port 与 Client 保证。Ink testing-library 是 React/Ink 键盘证据，不等于所有终端资格；POSIX PTY fixture仅证明当前 macOS、本地 Bun/固定模型/临时SQLite链，不冒称 Linux/Windows。
+当前正式 Terminal 已消费本终端入口，具体面板与 composer 的已实施范围见下方 owner 记录；完整主屏 static scrollback、resize、全部客户端能力与复杂 schema 呈现仍未由局部切片闭合。大 Tool/Job 附件输出需要宿主专门 reader；本组件不会把 Artifact 引用当作已展示全文。完整目录与 history 的分页资格由实际 port 与 Client 保证。Ink testing-library 是 React/Ink 键盘证据，不等于所有终端资格；POSIX PTY fixture仅证明当前 macOS、本地 Bun/固定模型/临时SQLite链，不冒称 Linux/Windows。
 
 验证：`bun test packages/ui/test/tui/controller.test.tsx`；实际配对与自有子进程 fixture 为 `packages/ui/test/isolated/tui/paired.test.ts`，需要本机 HTTP/PTY 权限。`bun run --cwd packages/ui typecheck` 与 build 同时产出独立 `dist/tui/index.js`，DOM产物不携带 Ink 入口。
 
