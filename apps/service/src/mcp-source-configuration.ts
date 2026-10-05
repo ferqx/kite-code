@@ -48,6 +48,7 @@ import type {
   WorkspaceRecord,
 } from '@kite-ai/agent/storage';
 import { createMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-http-port';
+import { createMcpSourceEntryMutations } from './mcp-source-entry-mutations';
 import { createMcpSourceResultQuery } from './mcp-source-result';
 import type { CapabilityDescription } from './permissions';
 
@@ -1508,6 +1509,36 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       return failure(code);
     }
   }
+  const entryMutations = createMcpSourceEntryMutations({
+    runtime,
+    profileAccessKey: profile.profileAccessKey,
+    observerSubjectId: options.observerSubjectId,
+    readSetSchema,
+    async scope(sessionId) {
+      const source = await scope(sessionId);
+      return {
+        workspaceId: source.workspace.id,
+        sourceOptions: () => ({ ...source.sourceOptions, variables: options.variables?.() ?? {} }),
+        validatePublication() {
+          const lexical = resolve(fileURLToPath(new URL(source.workspace.rootUri)));
+          const stat = lstatSync(lexical),
+            root = realpathSync(lexical),
+            canonical = lstatSync(root);
+          if (
+            !stat.isDirectory() ||
+            stat.isSymbolicLink() ||
+            !canonical.isDirectory() ||
+            canonical.isSymbolicLink() ||
+            stat.dev !== canonical.dev ||
+            stat.ino !== canonical.ino ||
+            root !== source.root ||
+            hash({ root, dev: stat.dev, ino: stat.ino }) !== source.identity
+          )
+            throw new AgentError('workspace_configuration_unavailable');
+        },
+      };
+    },
+  });
   const extension: Extension = {
     id: mcpSourcesExtensionId,
     version: '1',
@@ -1523,6 +1554,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       },
     ],
     queries: [
+      ...entryMutations.queries,
       createMcpSourceResultQuery({
         runtime,
         profileAccessKey: options.profile.profileAccessKey,
@@ -1574,6 +1606,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       },
     ],
     actions: [
+      ...entryMutations.actions,
       {
         id: 'mcp.source.approve',
         version: '1',
@@ -1645,6 +1678,8 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       [
         `${mcpSourcesExtensionId}/mcp.source.approve`,
         `${mcpSourcesExtensionId}/mcp.credential.bind`,
+        `${mcpSourcesExtensionId}/mcp.source.add`,
+        `${mcpSourcesExtensionId}/mcp.source.remove`,
       ].includes(request.definitionId) &&
       request.definitionVersion === '1'
     )

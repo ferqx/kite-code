@@ -38,6 +38,7 @@ export async function runSelectedMaintenance(input: {
       'mcp_connection_intents',
       'mcp_source_approval_intents',
       'mcp_reconnection_intents',
+      'mcp_source_mutation_intents',
       'tui_private_drafts',
       'tui_display_preferences',
       'skill_workflow_configuration',
@@ -58,6 +59,10 @@ export async function runSelectedMaintenance(input: {
     mcpConnectionIntents: { path: 'ui/mcp-connection-intents.json', format: { version: 1 } },
     mcpSourceApprovalIntents: {
       path: 'ui/mcp-source-approval-intents.json',
+      format: { version: 1 },
+    },
+    mcpSourceMutationIntents: {
+      path: 'ui/mcp-source-mutation-intents.json',
       format: { version: 1 },
     },
     mcpReconnectionIntents: { path: 'ui/mcp-reconnection-intents.json', format: { version: 1 } },

@@ -12,7 +12,7 @@ const closed = (v: Record<string, Json>, keys: string[]) =>
   Object.keys(v).length === keys.length && keys.every((k) => Object.hasOwn(v, k));
 const equal = (a: unknown, b: unknown) => mcpCanonical(a) === mcpCanonical(b);
 const hex = (v: Json | undefined) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
-function validReadSet(value: unknown): boolean {
+export function validMcpSourceReadSet(value: unknown): boolean {
   const v = object(value);
   const read = (x: unknown, kind: string) => {
     const r = object(x),
@@ -128,7 +128,7 @@ export function createMcpSourceResultQuery(options: {
         receipt = object(command.receipt);
       if (
         !closed(request, ['kind', 'extensionId', 'actionId', 'definitionVersion', 'input']) ||
-        !validReadSet(ownInput.expectedReadSet) ||
+        !validMcpSourceReadSet(ownInput.expectedReadSet) ||
         request.kind !== 'extension.invoke' ||
         request.extensionId !== 'builtin.mcp.sources' ||
         request.actionId !== 'mcp.source.approve' ||

@@ -23,6 +23,7 @@ export { TerminalMarkdown } from './markdown';
 export * from './mcp-connection';
 export * from './mcp-reconnection';
 export * from './mcp-source';
+export * from './mcp-source-mutation';
 
 /** Independent Ink renderer. Host owns admission, full readers and Service lifetime. */
 export function TuiSession({ controller }: { controller: TuiController }) {

@@ -2,6 +2,14 @@
 
 状态：implementing；总体重构尚未完成，已授权的实现继续推进。总体设计为 [V1.3](unified-agent-refactor-v1.md)，[能力映射](unified-agent-refactor-v1-capabilities.tsv)记录旧调用者、目标 owner 和退役条件。本页只登记实际交付和验证范围。
 
+## 执行目标与阶段边界
+
+2026-10-05 用户授权收紧执行目标，避免局部验收扩张而整体收敛不足。依照 V1.3，以完整用户能力迁移、统一公共边界、正式旧路径退役和阶段退出为交付主线，持续消除阻碍这些结果的真实缺口。每个切片完成必要实现、验证和受影响文档后按已授权阶段本地提交，再推进未闭合能力；单个操作、故障或 journal 不自动成为新的长期独立目标。
+
+新增机制须说明当前失败场景、最小替代方案和实际消费者；只有完成当前授权结果所必需的工作进入实施计划。验证按受影响行为和风险选择，输入不变且范围适用时复用已有证据，避免为同一事实重复建系统、写包装或登记。既有产品能力及 OAuth 等欠缺继续明确闭合；Source-entry saved 只证明声明发布，不能把认证或 owned credential 清理永久留作 stub。
+
+整体完成仍按 §35、适用 T001—T114/E01—E14、完整客户端能力、旧 carrier 退出、平台及持续负载证据判断；局部通过不等于整体完成。旧数据无需兼容，本地阶段提交授权保持，push/PR 授权不扩大；总体 Goal 保持 active。
+
 ## 实际基线与授权
 
 2026-10-01 在持久 checkout `/Users/chenchao/Code/ai/kite-code` 开始。实际分支 `el`、HEAD `2cab216568a468122ee579e5e01da06cc6c05d6a`；接手时只有方案及 plans/handbook/development 三个入口文档改动，均保留。实现尚未提交，commit pending。未 stage/push/merge、未发布、未调用付费模型、未读取用户旧 Kite 数据或安装系统依赖。
@@ -1140,3 +1148,30 @@ Native主任务实际107.104s通过；安装driver在53.193s输出success/finall
 完整默认之后只做文档与Note归位；新文档字节不冒称与旧冻结相同，复用资格仅覆盖仍保持的实际代码、测试、依赖和生成输入，归位后的docs/impact及Git门禁另据实际输出记录。当前37能力全部partial、Goal active；OAuth/续期、Source增删、持续Soak、真实OS Vault、三平台、全部T001—T114/E01—E14及完整§35仍未完成。本切片按已授权本地阶段提交，未扩大推送或PR授权。
 
 归位后的`check:docs`、`check:docs-impact --scope=all`和`git diff --check`实际0；docs log SHA `e6889a98c419d761a088096f60edf5c20e8b6b7bec2d6315b04a12762fe2fa3a`、impact log SHA `548cf3c5fcf020c38d6f8bf62dcedae5be1e95f5cfe2fb5997d9ffed37e0e6f5`。48个准确候选代码文件的只读Biome实际0、无格式改写，原3warning/1info保留（unsafe建议未应用），log SHA `0dc174f8898c29334e6a20d6b55f268a97a3fb9da1860135de5f6b3f17be2697`。初次归位后比较因将owner README混入“代码输入”而拒绝；实际唯一差异为已同步的MCP owner Markdown，重新按文档/非文档分类核验，未把比较拒绝作为代码回归或追改旧packet。`iteration_complete`只覆盖本切片的产品/技术归位与真实资格；本地stage/commit仍由准确当前范围和原hooks独立执行。
+
+
+## 2026-10-05：来源条目增删合同、实际恢复与发布边界
+
+本片持久基线为本地 `bedc903a6d3e349217282ad440f8fd7c6ba3e1d6`、`el-refactor`，原强制重连64文件提交及8个适用hook实际通过；没有push或PR。局部来源条目计划的design_complete实际docs/all-impact/diff-check为0，packet SHA `39139be585774a3fbf6306f981fb4c201f9b4bfc29fb7bd4b1ae97735ecf13ff`。Source-entry增删不把声明保存、项目批准、连接或owned OAuth清理合成一次成功；当前manual opaque Bearer引用保留，完整owned OAuth preflight/cleanup/partial仍归总体目标。本片实现合同分别进入手册、Source/Service/CLI/UI/Maintenance owner及MCP active，计划和Note在整合资格完成前保pending/proposed。
+
+普通mcp.source.add/remove两Action只收closed basic entry/准确移除digest与完整Source read-set。真实producer核原C/E/subject/request/full input/root-work及HostMutation，runless来自当前普通Action真实合同。Source leaf固定四canonical短锁、完整CAS和同步publication guard、准确JSONC编辑保未触及fields/env/comments/CRLF，trusted原E creation marker使同配置重加不能复活旧批准。历史mutation.result仅原SQL，saved要求原full finalization/result binding/Mutation applied/leaf old-newETag和marker/raw digest完整匹配；current Source/physical Workspace移除后仍只读，零Model/Vault/transport/补写。
+
+Caller/UI16路径作者冻结packet SHA `fb5c75529c4cd7bc3c4b53d8778bd9640d5959b738c93b441e2606feaf81c942`，9文件90pass/1029assert/0fail包含基本表单、独立Review/Confirm、原选择零GET、late/scope及旧Source/Select/Tools/Connection/Reconnection邻接。独立mutation journal闭合完整request/subject/body/CoreSHA/phase，128条/16MiB不淘汰unknown，只有本次完整durable prepare有首次POST权；与Source批准在同tui_private短锁核实际共享Source identities，不用Session绑定scopeDigest冒充跨Session文件身份。failed/cancelled不能只凭phase解除未知，Owner已补完整终态/零publication反例；旧transport/selection介质仍保各自guard。
+
+真实default Service的原增删测试作者17pass/622assert/0fail，packet SHA `8a8d774098e20252ecab85796a44a9892ebd815057bf691112afc4a8ac46491f`。Ask后六类freshness漂移均零声明发布；真正旧Source approval经remove/re-add后仍pending新批准；finish提交前失败/提交后丢回应、错误原result/finalization/C/E/M、错observer和removed Source/Workspace历史分别核验。第一次foreign Mutation读取实际403未有限归unknown，Root沿准确host_mutation_scope_denied修正；原红和作者错误日志保留，不以假SQL列或当前目录代替原proof。
+
+真实恢复新增单文件实际2pass/71assert/0fail、1.104s正常排空，packet SHA `2337b10bcfe038ff46ff340267e00ade179bcaea6c89cb5ff3e6dac904f14e78`。Add与Remove原Action真实durable成功后socket relay物理毁POST回复，再冷重开caller/journal/Profile lease并毁首Command GET回复；unknown原bytes保持，明确lookup得到saved，duplicate仅GET。每例原POST1/physicalDrops2/HostMutation1、cursor0、零Run/Model/connection/vault。Remove真实52来源三页与101 Workspace，目标准确非首页。该例是同进程caller冷重开，未宣称SIGKILL。前两作者错误关闭API的红及异常cleanup限制保留。
+
+条件backup v12的Agent独立codec保旧v2–v11准确字段与物理白名单，不读CLI/UI/Client。公共create/inspect/restore作者4/99及邻接36/620通过，packet SHA `e8fae54944a56ca517d689025a41e111a71cb0855ebfb7764ca`；A→B原8729字节、完整SHA/IDs/subject/request/phase保持，业务Session不改，ownerGeneration按恢复合同+1。错误expected-v5/v12及nullable fixture类型红保留；profileComplete:false、Source/Vault未由此资产采集。
+
+Root实际源码外80×24前三轮依次因sandbox loopback监听、fixture把mcp_project_approval_pending写错、审批终态帧尚未到达便输入而红；第四轮已完成两条实际Add/Remove及审批，但测试在旧Service已关、新Service未启动的transition错误调用observer而到原10s期限。只修准确code、等待实际原E succeeded完整帧与transition检查，原120s case/10s帧预算、两次独立确认/普通审批和业务断言保持。第五轮1pass/255assert/0fail、12.890s实际runner0、输入/HEAD/branch前后保持，completion SHA `ca0314c3086680a21cd7c922859ab5e4c4390a7f452679daa039e6a45a4c2a5a`、log SHA `8fef9713e5a4e6221ca573665c33d48f56855a2ef7e33ae8e99adc903dace4e8`。owned packet SHA `e50038d460eb2930c8e78749f4f0c3122b69f5585c14de0fff7b546a3b33380f`：真实Git/public builder candidate及selectedSQLite3.51.3、Add后project仍pending、Remove固定显示user fallback；暖两个UI Action POST，cold removed选择0GET/明确两原GET/POST0，公开v12恢复B后原HTTP0，3444journal bytes与两冷cursor16保持。3TUI和4Service正常exit0，lease及ownedroot释放；前三/四轮红不改写，正常窗口不代证其他locale/异常cleanup/三OS。
+
+最终只读评审另发现rename后directory sync/read-back失败、callback尚未调用时，finally中的release普通Error会覆盖publication_unknown，Service可误报确定零效果failed。真实leaf反例11pass/3fail/135assert，修复逐锁完整释放尝试、published后释放失败优先unknown，原new+neighbor27pass/280assert/0fail；packet SHA `3411659ff3f720b14995a61d77d0113d9c1dde9dc3f0c965d53f899709bc93a0`。四把真实OS锁各尝试释放并物理重取得，callback0/1和发布前conflict/bytes不变分别核。Service同步把可信leaf publication_unknown映射effectAttempted:true；独立真实Service故障测试与Root最新统一/完整默认仍待实际冻结后运行，第五PTY旧输入不自动覆盖此次生产修改。37能力保持partial、Goal active，完整V1.3/§35/T-E/OAuth/Soak/平台尚未完成。
+
+当前生产修复后的 Root 正常八 workspace typecheck/build 均实际0，原目标图28个任务全部执行并通过：233pass/4328assert/0fail；其中源码外 Add/Remove/cold removed/foreign restored 原 PTY 为1pass/255assert。真实 Service 发布故障新例1pass/32assert：rename 后目录 sync 和 lock close 故障使原 E/M 保 unknown、effectAttempted:true；duplicate 原请求仍仅一 rename，零 Model/Run/Vault/transport。该真实故障窗口补齐前述第五 PTY 未覆盖的生产修改。
+
+当前完整默认冻结3816个 regular 输入、0 links，554个唯一测试文件、447个唯一主任务全部 started/completed/passed，主 failed0/unrun0；实际 runner0、765.161s 正常 drain，输入、HEAD、branch和Git状态前后保持，owned HOME删除且log FD关闭。completion SHA `f99c82d65a39c513c680eca258a1664fa0e55b124b298c8987e5c548596561de`、log SHA `a6d1c9cb7977f436523276ef8f6b0ed721b92b7da692f6ca73d3f7885073b7ee`。独立只读重算 raw2611pass/3fail/17skip/0error/38737assert；三个故意失败属于 runner 自测，其主任务通过。同名 formal-terminal nested fixture 不替代实际22581ms主任务。Native 主任务108374ms通过，但 outer45s timer在54226ms实际触发，driver54077ms success/finally；本轮不证明45s墙钟预算满足、timer未触发或旧失败因果解决。wholeDefaultQualified:true，仅覆盖本轮实际输入和主任务；wholeV13Qualified:false、snapshotPolicyGateQualified:false，有限Soak测试不代持续负载资格。
+
+已按真实实现和本轮资格将[来源增删 Note](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-entry-mutation-intents.md)归位为implemented，保留共享凭据所有权、四锁/CAS、JSONC publication、原结果证明和有限恢复的取舍。准确归位前核验3816个冻结 regular 输入；该数包含文档，并非全为代码。新Note SHA `0f17344b3f8a4d02450aed7db3d5e0ae50387b9db8a1edd83e55a6e753eb2db6`、归位receipt SHA `6767f2328f4e0605ad38d9e14b0d6a06d73f1563d7d6e6ea37198a162f3dda5b`。局部计划七项验收由真实Source/Service/Caller/UI/维护与整合证据闭合，独有合同已进入手册/owner/active/Note后删除计划及入站入口；原计划私有原件SHA `3b920cc2a7e288e4512d2d6a8f347eaf413d87dcaadc8b3ee23759e1bbde9ed1`保留。归位后只改文档，复用代码资格另核非文档输入保持，并独立运行当前docs/impact与Git门禁。37项能力仍partial、总体Goal active；完整认证/OAuth、旧路径退役、持续Soak、平台及完整§35/T-E仍未完成。
+
+归位与收紧执行目标后的docs、all-impact、diff-check均实际0；产品手册、Source/Service/CLI/UI/Maintenance owner和MCP active按当前diff核对，统一公共边界与workspace入口未变并已复核。复用当前完整默认资格时，按原runner清单准确核3313个非文档代码/测试/依赖/生成输入，无新增、缺失或字节变化；最初两次只读比较分别误取packet层级和扩大清单范围而拒绝，未修改文件或旧验证packet。`iteration_complete`和`stage`为本切片ready，完整V1.3保持未完成；本地commit继续核准确staged范围并运行原hooks。

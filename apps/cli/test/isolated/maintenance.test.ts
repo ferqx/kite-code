@@ -266,6 +266,11 @@ test('built offline maintenance argv create/inspect/restore is independent of Se
       path: 'ui/mcp-selection-intents.json',
       format: { version: 1 },
     });
+    expect(result.coverage.included).toContain('mcp_source_mutation_intents');
+    expect(result.coverage.mcpSourceMutationIntents).toEqual({
+      path: 'ui/mcp-source-mutation-intents.json',
+      format: { version: 1 },
+    });
     expect(result.coverage.excluded).toContain('credentials');
     expect(result.backup.manifest.source.storeId).toBe(f.storeId);
     expect(result.backup.manifest.assets.desktopUi.present).toBe(true);

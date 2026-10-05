@@ -12,6 +12,7 @@ import type {
 import type { TuiMcpConnectionPort } from './mcp-connection';
 import type { TuiMcpReconnectionPort } from './mcp-reconnection';
 import type { TuiMcpSourceApprovalPort } from './mcp-source';
+import type { TuiMcpSourceMutationPort } from './mcp-source-mutation';
 
 export type TuiMcpReadSet = {
   userEtag: string;
@@ -69,6 +70,7 @@ export interface TuiMcpPort {
   connection?: TuiMcpConnectionPort;
   reconnection?: TuiMcpReconnectionPort;
   source?: TuiMcpSourceApprovalPort;
+  sourceMutation?: TuiMcpSourceMutationPort;
   readToolsSnapshots?(
     sessionId: string,
     signal: AbortSignal,

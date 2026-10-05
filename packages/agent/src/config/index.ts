@@ -31,12 +31,18 @@ export {
   type McpSourceCredentialBinding,
   type McpSourceDecisionProof,
   type McpSourceDocument,
+  type McpSourceEntryDeclaration,
+  type McpSourceEntryMutation,
+  type McpSourceEntryPreview,
+  type McpSourceEntryReceipt,
   type McpSourceIdentity,
   type McpSourceOptions,
   type McpSourceReadSet,
   type McpSourceScope,
   type McpSourceServer,
+  readMcpSourceEntryPreview,
   readMcpSources,
+  writeMcpSourceEntry,
   writeMcpSourceMetadata,
 } from './mcp-sources';
 export {

@@ -25,9 +25,11 @@ import {
 } from './mcp-selection-intents';
 import type { McpSelectionJournal } from './mcp-selection-journal';
 import type { McpSourceApprovalJournal } from './mcp-source-approval-journal';
+import type { McpSourceMutationJournal } from './mcp-source-mutation-journal';
 import { createTuiMcpConnectionPort } from './tui-mcp-connection';
 import { createTuiMcpReconnectionPort } from './tui-mcp-reconnection';
 import { createTuiMcpSourceApprovalPort } from './tui-mcp-source-approval';
+import { createTuiMcpSourceMutationPort } from './tui-mcp-source-mutation';
 
 const obj = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -68,6 +70,7 @@ export function createTuiMcpPort(
   connectionJournal?: McpConnectionJournal,
   sourceJournal?: McpSourceApprovalJournal,
   reconnectionJournal?: McpReconnectionJournal,
+  sourceMutationJournal?: McpSourceMutationJournal,
 ): TuiMcpPort {
   const currentSubject = () => client.serverInfo?.subjectId;
   function toolsAdmission(sessionId: string, signal: AbortSignal) {
@@ -250,6 +253,16 @@ export function createTuiMcpPort(
       : undefined;
   return {
     ...(source ? { source } : {}),
+    ...(source && fullClient && sourceMutationJournal
+      ? {
+          sourceMutation: createTuiMcpSourceMutationPort(
+            fullClient,
+            storeId,
+            sourceMutationJournal,
+            (sessionId, signal) => source.read(sessionId, signal),
+          ),
+        }
+      : {}),
     ...(connectionJournal && fullClient
       ? { connection: createTuiMcpConnectionPort(fullClient, storeId, connectionJournal) }
       : {}),

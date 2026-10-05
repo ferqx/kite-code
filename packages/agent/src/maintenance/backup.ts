@@ -106,7 +106,8 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
           manifest.assets.mcpSelectionIntents?.present ||
           manifest.assets.mcpConnectionIntents?.present ||
           manifest.assets.mcpSourceApprovalIntents?.present ||
-          manifest.assets.mcpReconnectionIntents?.present
+          manifest.assets.mcpReconnectionIntents?.present ||
+          manifest.assets.mcpSourceMutationIntents?.present
             ? ['ui']
             : []),
         ].includes(item.name)
@@ -128,7 +129,11 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
                         ? ['file-recovery-intents.json']
                         : []),
                       ...(manifest.assets.tuiPreferences.present ? ['preferences.jsonc'] : []),
-                      ...(manifest.assets.mcpReconnectionIntents?.present
+                      ...(manifest.assets.mcpSourceMutationIntents?.present
+                        ? ['mcp-source-mutation-intents.json']
+                        : []),
+                      ...(manifest.assets.mcpReconnectionIntents?.present ||
+                      manifest.assets.mcpSourceMutationIntents?.present
                         ? ['mcp-reconnection-intents.json']
                         : []),
                       ...(manifest.assets.mcpSourceApprovalIntents?.present
@@ -358,19 +363,21 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     }
     const assets = await captureAssets(access.profilePath, staging, input.signal);
     const manifest = parseManifest({
-      version: assets.mcpReconnectionIntents
-        ? 11
-        : assets.mcpSourceApprovalIntents
-          ? 10
-          : assets.mcpConnectionIntents
-            ? 9
-            : assets.mcpSelectionIntents
-              ? 8
-              : assets.desktopUi.format?.userVersion === 5
-                ? 7
-                : assets.fileRecoveryIntents
-                  ? 6
-                  : 5,
+      version: assets.mcpSourceMutationIntents
+        ? 12
+        : assets.mcpReconnectionIntents
+          ? 11
+          : assets.mcpSourceApprovalIntents
+            ? 10
+            : assets.mcpConnectionIntents
+              ? 9
+              : assets.mcpSelectionIntents
+                ? 8
+                : assets.desktopUi.format?.userVersion === 5
+                  ? 7
+                  : assets.fileRecoveryIntents
+                    ? 6
+                    : 5,
       kind: 'profile_backup',
       createdAt: new Date().toISOString(),
       source: { ...sourceCapture, profileAccessKey: access.profileAccessKey },

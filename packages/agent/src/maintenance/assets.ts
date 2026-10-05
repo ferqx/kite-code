@@ -24,6 +24,7 @@ import { verifyMcpConnectionIntentsDocument } from './mcp-connection-intents';
 import { verifyMcpReconnectionIntentsDocument } from './mcp-reconnection-intents';
 import { verifyMcpSelectionIntentsDocument } from './mcp-selection-intents';
 import { verifyMcpSourceApprovalIntentsDocument } from './mcp-source-approval-intents';
+import { verifyMcpSourceMutationIntentsDocument } from './mcp-source-mutation-intents';
 import { verifyTuiDocument } from './tui';
 import { type BackupManifest, type CapturedAsset, MaintenanceError } from './types';
 
@@ -356,6 +357,7 @@ export async function captureAssets(
   const tuiRecovery = await capture('ui/recovery.json', false);
   const callerIntents = await capture('ui/caller-intents.json', false);
   const fileRecoveryIntents = await capture('ui/file-recovery-intents.json', false);
+  const mcpSourceMutationIntents = await capture('ui/mcp-source-mutation-intents.json', false);
   const mcpReconnectionIntents = await capture('ui/mcp-reconnection-intents.json', false);
   const mcpSourceApprovalIntents = await capture('ui/mcp-source-approval-intents.json', false);
   const mcpConnectionIntents = await capture('ui/mcp-connection-intents.json', false);
@@ -386,6 +388,7 @@ export async function captureAssets(
     mcpConnectionIntents.present ||
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
+    mcpSourceMutationIntents.present ||
     uiVersion === 4 ||
     uiVersion === 5
       ? {
@@ -395,7 +398,9 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpSourceApprovalIntents.present || mcpReconnectionIntents.present
+    ...(mcpSourceApprovalIntents.present ||
+    mcpReconnectionIntents.present ||
+    mcpSourceMutationIntents.present
       ? {
           mcpSourceApprovalIntents: {
             ...mcpSourceApprovalIntents,
@@ -403,12 +408,18 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpReconnectionIntents.present
-      ? { mcpReconnectionIntents: { ...mcpReconnectionIntents, format: { version: 1 as const } } }
+    ...(mcpReconnectionIntents.present || mcpSourceMutationIntents.present
+      ? {
+          mcpReconnectionIntents: {
+            ...mcpReconnectionIntents,
+            format: mcpReconnectionIntents.present ? { version: 1 as const } : null,
+          },
+        }
       : {}),
     ...(mcpConnectionIntents.present ||
     mcpSourceApprovalIntents.present ||
-    mcpReconnectionIntents.present
+    mcpReconnectionIntents.present ||
+    mcpSourceMutationIntents.present
       ? {
           mcpConnectionIntents: {
             ...mcpConnectionIntents,
@@ -419,11 +430,20 @@ export async function captureAssets(
     ...(mcpSelectionIntents.present ||
     mcpConnectionIntents.present ||
     mcpSourceApprovalIntents.present ||
-    mcpReconnectionIntents.present
+    mcpReconnectionIntents.present ||
+    mcpSourceMutationIntents.present
       ? {
           mcpSelectionIntents: {
             ...mcpSelectionIntents,
             format: mcpSelectionIntents.present ? { version: 1 as const } : null,
+          },
+        }
+      : {}),
+    ...(mcpSourceMutationIntents.present
+      ? {
+          mcpSourceMutationIntents: {
+            ...mcpSourceMutationIntents,
+            format: { version: 1 as const },
           },
         }
       : {}),
@@ -450,6 +470,7 @@ export function verifyAssets(
     ...(assets.mcpConnectionIntents ? [assets.mcpConnectionIntents] : []),
     ...(assets.mcpSourceApprovalIntents ? [assets.mcpSourceApprovalIntents] : []),
     ...(assets.mcpReconnectionIntents ? [assets.mcpReconnectionIntents] : []),
+    ...(assets.mcpSourceMutationIntents ? [assets.mcpSourceMutationIntents] : []),
   ]) {
     const path = join(directory, asset.path);
     if (present(path) !== asset.present) throw new MaintenanceError('backup_asset_missing');
@@ -505,6 +526,14 @@ export function verifyAssets(
     )
       throw new MaintenanceError('backup_asset_mismatch');
   }
+  if (assets.mcpSourceMutationIntents?.present) {
+    verifyMcpSourceMutationIntentsDocument(join(directory, assets.mcpSourceMutationIntents.path));
+    if (
+      canonicalJson(fingerprint(join(directory, assets.mcpSourceMutationIntents.path), signal)) !==
+      canonicalJson(assets.mcpSourceMutationIntents.proof)
+    )
+      throw new MaintenanceError('backup_asset_mismatch');
+  }
   if (assets.mcpReconnectionIntents?.present) {
     verifyMcpReconnectionIntentsDocument(join(directory, assets.mcpReconnectionIntents.path));
     if (
@@ -547,7 +576,8 @@ export function verifyAssets(
     !assets.mcpSelectionIntents?.present &&
     !assets.mcpConnectionIntents?.present &&
     !assets.mcpSourceApprovalIntents?.present &&
-    !assets.mcpReconnectionIntents?.present
+    !assets.mcpReconnectionIntents?.present &&
+    !assets.mcpSourceMutationIntents?.present
   )
     throw new MaintenanceError('backup_unexpected_asset');
   const ui = join(directory, 'desktop-private');
@@ -573,6 +603,7 @@ export async function restoreAssets(
     ...(assets.mcpConnectionIntents ? [assets.mcpConnectionIntents] : []),
     ...(assets.mcpSourceApprovalIntents ? [assets.mcpSourceApprovalIntents] : []),
     ...(assets.mcpReconnectionIntents ? [assets.mcpReconnectionIntents] : []),
+    ...(assets.mcpSourceMutationIntents ? [assets.mcpSourceMutationIntents] : []),
   ])
     if (asset.present)
       await copyAssetFile(join(source, asset.path), join(target, asset.path), signal);

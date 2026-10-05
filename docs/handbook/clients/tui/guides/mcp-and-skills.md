@@ -8,7 +8,9 @@ MCP 提供外部工具和资源，Skills 提供可发现的任务指导或工作
 
 当前原目录工具快照与完整描述查看已接入通用 Terminal；暖读和同Profile冷重开后的实际键盘链已验证，准确范围仍按[总体进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
-完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、详情、用户或项目范围启停、显式申请连接、原申请查询和原工具描述查看；已接入准确原连接的强制重连与独立原申请；认证和增删 Server 尚未在该面板实现。下面保留完整管理预期，当前可执行步骤见[通用 TUI 的 MCP 目录与选择](#通用-tui-的-mcp-目录与选择)和[显式连接与原申请](#显式连接与原申请)，实际制品与平台范围按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、详情、用户或项目范围启停、显式申请连接、原申请查询和原工具描述查看；已接入准确原连接的强制重连、基本来源条目增删与各自独立原申请。认证、owned OAuth 凭据清理和完整管理仍须分别闭合。下面保留完整管理预期，当前可执行步骤见对应章节，实际制品与平台范围按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+
+保存配置、项目来源批准、实际连接和本地 owned OAuth 凭据清理各自核实，不由配置保存推断全部完成。
 
 输入 `/mcp` 打开管理面板。上下选择 Server，Enter 查看详情；按界面提供的操作进行连接、配置、认证或查看工具。Esc 返回上一层。操作失败时保留结果提示，不能因下一次状态刷新就假定配置已应用。
 
@@ -63,6 +65,18 @@ Esc 或 Ctrl+C 返回父 MCP 面板，再返回主界面；它们只结束所属
 结果未知时，先选择原申请，再选“Check original source decision”（查询原来源决定）。同一 Workspace 可看到其他 Session 的原申请；只选择零查询，明确 Check 才读取准确原 Session/Command。重开同一 Profile 不自动查询原结果或重复提交；移除来源文件、改名或删除工作区目录不妨碍读取已经保存的原决定。不能用新 Session、来源版本或新申请 ID 绕过同 Store、Workspace、Server 的未知决定。
 
 关闭来源面板、返回或切 Session 仅结束所属读取，原待决 Question 和已提交工作继续。离线恢复生成新 Store 后，旧申请保留原身份，不能成为新 Store 的查询或提交许可。实际操作和验证边界由[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-项目来源与原决定申请)、[CLI Host](../../../../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)及[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)维护。
+
+## 来源条目增删与原申请
+
+在 `/mcp` 中选择“Source entry changes”（来源条目变更）。选择“Add source entry”（新增来源条目），依次输入名称，选择 HTTP 或 STDIO，输入无凭据 HTTP URL 或绝对 STDIO command，再选择 Current project 或 All projects。名称须为最多 128 字符的字母、数字、点、下划线或连字符，首字符须为字母或数字；同一来源层已有名称时拒绝覆盖。基本表单不收集 args、env、headers、认证或工具策略；这些高级声明仍按[手工配置参考](#手工配置参考)维护。空值或非法值保留当前编辑内容和错误提示，不提交修改。
+
+Review 显示本次输入和目标范围，可上下滚动，Home/End 到首尾；Enter 进入独立 Confirm，再次 Enter 才申请普通 Action。若普通执行许可需要审批，回到主界面回答准确原卡片。等待、命令受理或回答审批都不表示文件已保存。新增项目声明仍需另行审查项目来源；保存不连接、不启动模型，也不授予工具权限。新增同名项目条目会遮蔽用户声明，尚未批准或不可用时仍然如此。
+
+移除时选择准确的“Remove source entry”（移除来源条目）行。Review 与 Confirm 均展示原来源、原条目摘要，以及移除项目条目后会显露的同名用户声明；没有 fallback 时明确显示。独立确认只删除该来源层的准确声明，旧执行与连接仍保原身份。当前手工 Bearer 引用可能与其他来源共享，移除声明会保留凭据，不停止已有连接，也不证明远端工具已经停止。完整 owned OAuth 清理、可用性预检和“配置已删但清理失败”的部分结果仍待认证生命周期接入，不能把 source-entry saved 当成完整 Server 移除。
+
+“Original source change”（原来源变更）行保留原申请 ID、Store 和 Session；只选择零查询。明确选择“Check original source change”才核原 Command 和有限结果。冷重开不自动查询或重新提交；来源文件或工作区目录被移除仍可查已经保存的原结果。未知时先查原申请，不能用新 ID、另一个 Session 或同文件其他名称绕过未确认修改；用户来源的未确认修改也会阻止其他工作区触及同源。来源批准与修改共享实际来源依赖的冲突检查。坏申请文件、容量满或保存失败均拒绝新修改，不删除 unknown 腾出空间。
+
+Esc 返回当前编辑步骤或父面板；Ctrl+C、关闭或切 Session 只结束所属读取，已提交工作和原待决审批继续。离线备份保完整原申请字节；恢复到新 Store 后仍显示原身份，原申请不能成为新 Store 的查询或提交许可。实现和实际资格由[CLI Host](../../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)、[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-来源条目增删与原申请)及[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
 ## 使用工具、资源与提示
 

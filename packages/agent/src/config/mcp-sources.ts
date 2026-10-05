@@ -15,7 +15,12 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { applyEdits, modify, type ParseError, parse, visit } from 'jsonc-parser';
-import { acquireFileLock, LockBusyError, type WindowsPathSecurity } from '../platform/locks';
+import {
+  acquireFileLock,
+  assertLiveLock,
+  LockBusyError,
+  type WindowsPathSecurity,
+} from '../platform/locks';
 import { defaultWindowsPathSecurity, privateDirectory } from '../platform/windows-path-security';
 import { mcpCanonical } from './mcp-selection';
 import { ConfigurationError, type Json, type JsonObject } from './types';
@@ -78,6 +83,41 @@ export interface McpSourceReadSet {
   approvalEtag: string | null;
   bindingEtag: string | null;
   variablesDigest: string;
+}
+
+export type McpSourceEntryMutation =
+  | {
+      kind: 'add';
+      scope: 'user' | 'workspace';
+      name: string;
+      entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+    }
+  | {
+      kind: 'remove';
+      scope: 'user' | 'workspace';
+      serverId: string;
+      expectedRawEntryDigest: string;
+    };
+
+export interface McpSourceEntryDeclaration {
+  serverId: string;
+  name: string;
+  source: McpSourceIdentity;
+  rawEntryDigest: string;
+  transport: 'http' | 'stdio' | null;
+  enabled: boolean;
+  reason: string | null;
+}
+export interface McpSourceEntryPreview {
+  target: McpSourceEntryDeclaration;
+  /** Revealed user declaration only; never connection, credential or Tool authority. */
+  fallback: McpSourceEntryDeclaration | null;
+}
+export interface McpSourceEntryReceipt extends McpSourceEntryPreview {
+  operationId: string;
+  kind: 'add' | 'remove';
+  oldEtag: string;
+  newEtag: string;
 }
 
 /** Host-only derivation after the caller has verified an actual child activation.
@@ -799,5 +839,303 @@ export function writeMcpSourceMetadata(
         /* preserve original */
       }
     for (const lock of locks.reverse()) lock.release();
+  }
+}
+
+function sourceEntryState(options: McpSourceOptions, expectedReadSet: McpSourceReadSet) {
+  const state = readMcpSources(options);
+  if (mcpCanonical(state.readSet) !== mcpCanonical(expectedReadSet)) fail('mcp_source_conflict');
+  if ([state.user, state.workspace, state.approvals, state.bindings].some((v) => v?.error))
+    fail('mcp_source_unavailable');
+  for (const document of [state.user, state.workspace]) {
+    if (document?.value?.mcpServers !== undefined && !record(document.value.mcpServers))
+      fail('mcp_source_invalid');
+  }
+  return state;
+}
+
+function entryDeclaration(
+  document: McpSourceDocument,
+  name: string,
+  raw: Json,
+  variables: Readonly<Record<string, string>>,
+): McpSourceEntryDeclaration {
+  let transport: 'http' | 'stdio' | null = null;
+  let reason: string | null = null;
+  try {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) fail('mcp_server_invalid');
+    transport = normalize(raw, variables).type as 'http' | 'stdio';
+  } catch (error) {
+    reason = error instanceof ConfigurationError ? error.message : 'mcp_server_invalid';
+  }
+  return {
+    serverId: `mcp-${hash({ name })}`,
+    name,
+    source: document.identity,
+    rawEntryDigest: hash({ version: 1, name, raw }),
+    transport,
+    enabled: record(raw) && raw.enabled !== false,
+    reason,
+  };
+}
+
+function sourceEntryPreview(
+  state: ReturnType<typeof readMcpSources>,
+  input: { scope: 'user' | 'workspace'; serverId: string },
+  variables: Readonly<Record<string, string>>,
+): McpSourceEntryPreview {
+  if (!['user', 'workspace'].includes(input.scope)) fail('mcp_source_scope_invalid');
+  const entry = state.entries.find((v) => v.server.id === input.serverId);
+  if (!entry || entry.server.source.kind !== input.scope) fail('mcp_source_entry_conflict');
+  const document = input.scope === 'workspace' ? state.workspace : state.user;
+  if (!document) fail('mcp_source_scope_invalid');
+  const originalName = originalEntryName(document, input.serverId);
+  const target = {
+    ...entryDeclaration(document, originalName, entry.raw, variables),
+    name: entry.server.name,
+    transport: entry.server.transport,
+    reason: entry.server.reason,
+  };
+  const users = state.user.value?.mcpServers;
+  const fallback =
+    input.scope === 'workspace' && record(users) && Object.hasOwn(users, originalName)
+      ? {
+          ...entryDeclaration(state.user, originalName, users[originalName]!, variables),
+          name: entry.server.name,
+        }
+      : null;
+  return { target, fallback };
+}
+
+function originalEntryName(document: McpSourceDocument, serverId: string): string {
+  const names = document.value?.mcpServers;
+  const matches = record(names)
+    ? Object.keys(names).filter((name) => `mcp-${hash({ name })}` === serverId)
+    : [];
+  if (matches.length !== 1) fail('mcp_source_entry_conflict');
+  return matches[0]!;
+}
+
+/** Safe removal impact only. No raw entry, filesystem path, credential or connection access. */
+export function readMcpSourceEntryPreview(
+  options: McpSourceOptions,
+  input: { scope: 'user' | 'workspace'; serverId: string; expectedReadSet: McpSourceReadSet },
+): McpSourceEntryPreview {
+  const state = sourceEntryState(options, input.expectedReadSet);
+  return freeze(sourceEntryPreview(state, input, options.variables ?? {}));
+}
+
+/** One source declaration, with complete original Source CAS. Never modifies approval or vault. */
+export function writeMcpSourceEntry(
+  options: McpSourceOptions & {
+    expectedReadSet: McpSourceReadSet;
+    mutation: McpSourceEntryMutation;
+    /** Trusted actual Action Execution ID; not a caller's declaration field. */
+    operationId: string;
+    validatePublication: () => void;
+    afterPublication?: (receipt: McpSourceEntryReceipt) => void;
+  },
+): McpSourceEntryReceipt {
+  options = {
+    ...options,
+    windowsPathSecurity: options.windowsPathSecurity ?? defaultWindowsPathSecurity(),
+  };
+  if (
+    typeof options.operationId !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(options.operationId)
+  )
+    fail('mcp_source_operation_invalid');
+  const mutation = freeze(structuredClone(options.mutation));
+  if (!record(mutation)) fail('mcp_source_mutation_invalid');
+  if (!['user', 'workspace'].includes(mutation.scope)) fail('mcp_source_scope_invalid');
+  const exact = (v: unknown, keys: string[]) => {
+    if (!record(v) || Object.keys(v).length !== keys.length || !closed(v, keys))
+      fail('mcp_source_mutation_invalid');
+  };
+  if (mutation.kind === 'add') {
+    exact(mutation, ['kind', 'scope', 'name', 'entry']);
+    if (
+      typeof mutation.name !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(mutation.name) ||
+      ['constructor', 'prototype'].includes(mutation.name)
+    )
+      fail('mcp_server_invalid');
+    if (!record(mutation.entry)) fail('mcp_source_mutation_invalid');
+    const basicText = (value: unknown, max: number, whitespace: boolean): value is string =>
+      typeof value === 'string' &&
+      value.length > 0 &&
+      value.length <= max &&
+      !value.includes('${') &&
+      !Array.from(value).some((character) => {
+        const point = character.codePointAt(0)!;
+        return point < (whitespace ? 33 : 32) || point === 127;
+      });
+    if (mutation.entry.type === 'http') {
+      exact(mutation.entry, ['type', 'url']);
+      const value = mutation.entry.url;
+      if (!basicText(value, 8192, true) || value.includes('?') || value.includes('#'))
+        fail('mcp_transport_unavailable');
+      try {
+        const url = new URL(value);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password)
+          fail('mcp_transport_unavailable');
+      } catch {
+        fail('mcp_transport_unavailable');
+      }
+    } else if (mutation.entry.type === 'stdio') {
+      exact(mutation.entry, ['type', 'command']);
+      if (
+        !basicText(mutation.entry.command, 4096, false) ||
+        !mutation.entry.command.startsWith('/')
+      )
+        fail('mcp_transport_unavailable');
+    } else fail('mcp_source_mutation_invalid');
+    try {
+      normalize(mutation.entry, {});
+    } catch (error) {
+      if (error instanceof ConfigurationError) throw error;
+      fail('mcp_server_invalid');
+    }
+  } else if (mutation.kind === 'remove') {
+    exact(mutation, ['kind', 'scope', 'serverId', 'expectedRawEntryDigest']);
+    if (
+      !/^mcp-[a-f0-9]{64}$/.test(mutation.serverId) ||
+      !digest.test(mutation.expectedRawEntryDigest)
+    )
+      fail('mcp_source_mutation_invalid');
+  } else fail('mcp_source_mutation_invalid');
+  const original = sourceEntryState(options, options.expectedReadSet);
+  const target = mutation.scope === 'user' ? original.user : original.workspace;
+  if (!target) fail('mcp_source_scope_invalid');
+  const added =
+    mutation.kind === 'add'
+      ? { ...mutation.entry, _kiteSourceCreation: { version: 1, operationId: options.operationId } }
+      : null;
+  const preview = (state: ReturnType<typeof readMcpSources>): McpSourceEntryPreview => {
+    const document = mutation.scope === 'user' ? state.user : state.workspace;
+    if (!document) fail('mcp_source_scope_invalid');
+    if (mutation.kind === 'remove') {
+      const impact = sourceEntryPreview(state, mutation, options.variables ?? {});
+      if (impact.target.rawEntryDigest !== mutation.expectedRawEntryDigest)
+        fail('mcp_source_entry_conflict');
+      return impact;
+    }
+    const entries = document.value?.mcpServers;
+    if (record(entries) && Object.hasOwn(entries, mutation.name)) fail('mcp_source_entry_exists');
+    return { target: entryDeclaration(document, mutation.name, added!, {}), fallback: null };
+  };
+  const originalPreview = preview(original);
+  // Original JSONC key stays private; sanitized display labels are never used to locate a write.
+  const editName =
+    mutation.kind === 'add' ? mutation.name : originalEntryName(target, mutation.serverId);
+  const paths = [
+    ...new Set(
+      [
+        original.user.path,
+        original.workspace?.path,
+        original.approvals.path,
+        original.bindings.path,
+      ].filter((v): v is string => !!v),
+    ),
+  ].sort();
+  const locks: ReturnType<typeof acquireFileLock>[] = [];
+  let temporary: string | undefined;
+  let published = false;
+  try {
+    for (const path of paths) {
+      if (
+        process.platform === 'win32' &&
+        path === original.workspace?.path &&
+        existsSync(dirname(path))
+      )
+        defaultWindowsPathSecurity()!.verifyScopeDirectory(dirname(path));
+      else privateDirectory(dirname(path), options.windowsPathSecurity);
+      if (realpathSync(dirname(path)) !== dirname(path)) fail('mcp_source_path_unsafe');
+      locks.push(acquireFileLock(`${path}.lock`, 'exclusive', options.windowsPathSecurity));
+    }
+    const current = sourceEntryState(options, options.expectedReadSet);
+    if (mcpCanonical(preview(current)) !== mcpCanonical(originalPreview))
+      fail('mcp_source_conflict');
+    const old = bytes(target.path, options, mutation.scope !== 'workspace');
+    if (old.text === null || old.etag !== target.etag) fail('mcp_source_conflict');
+    const text = applyEdits(
+      old.text,
+      modify(
+        old.text,
+        ['mcpServers', editName],
+        mutation.kind === 'add' ? added : undefined,
+        {}, // Minimal syntax edit: do not reformat unrelated declarations or their raw env.
+      ),
+    );
+    if (Buffer.byteLength(text) > (options.maxBytes ?? 1048576)) fail('mcp_source_limit');
+    json(text);
+    temporary = join(dirname(target.path), `.${basename(target.path)}.${randomUUID()}.tmp`);
+    if (process.platform === 'win32')
+      defaultWindowsPathSecurity()!.writePrivateFile(temporary, Buffer.from(text, 'utf8'));
+    else {
+      const fd = openSync(
+        temporary,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+        0o600,
+      );
+      try {
+        writeFileSync(fd, text, 'utf8');
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+    }
+    options.validatePublication();
+    sourceEntryState(options, options.expectedReadSet);
+    for (let i = 0; i < paths.length; i++)
+      assertLiveLock(locks[i]!, `${paths[i]!}.lock`, 'exclusive');
+    if (bytes(target.path, options, mutation.scope !== 'workspace').etag !== old.etag)
+      fail('mcp_source_conflict');
+    options.windowsPathSecurity?.secureFile(temporary);
+    renameSync(temporary, target.path);
+    published = true;
+    temporary = undefined;
+    if (process.platform !== 'win32') {
+      const directory = openSync(dirname(target.path), constants.O_RDONLY);
+      try {
+        fsyncSync(directory);
+      } finally {
+        closeSync(directory);
+      }
+    }
+    const actual = bytes(target.path, options, mutation.scope !== 'workspace');
+    const expectedEtag = createHash('sha256').update(text, 'utf8').digest('hex');
+    if (actual.etag !== expectedEtag) fail('mcp_source_publication_unknown');
+    const receipt: McpSourceEntryReceipt = freeze({
+      ...originalPreview,
+      operationId: options.operationId,
+      kind: mutation.kind,
+      oldEtag: old.etag,
+      newEtag: actual.etag,
+    });
+    options.afterPublication?.(receipt);
+    return receipt;
+  } catch (error) {
+    if (published) fail('mcp_source_publication_unknown');
+    if (error instanceof ConfigurationError) throw error;
+    if (error instanceof LockBusyError) fail('mcp_source_busy');
+    return fail('mcp_source_unavailable');
+  } finally {
+    if (temporary)
+      try {
+        unlinkSync(temporary);
+      } catch {
+        /* preserve original failure */
+      }
+    let releaseFailed = false;
+    for (const lock of locks.reverse())
+      try {
+        lock.release();
+      } catch {
+        releaseFailed = true;
+      }
+    // A release failure cannot turn a published declaration into a known zero-effect failure.
+    // Before publication the original finite error remains authoritative.
+    if (releaseFailed && published) fail('mcp_source_publication_unknown');
   }
 }

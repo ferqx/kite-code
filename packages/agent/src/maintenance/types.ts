@@ -23,13 +23,14 @@ export interface CapturedAsset {
     | 'ui/mcp-selection-intents.json'
     | 'ui/mcp-connection-intents.json'
     | 'ui/mcp-source-approval-intents.json'
-    | 'ui/mcp-reconnection-intents.json';
+    | 'ui/mcp-reconnection-intents.json'
+    | 'ui/mcp-source-mutation-intents.json';
   capturedAt: string;
   present: boolean;
   proof: { sha256: string; byteLength: string } | null;
 }
 export interface BackupManifest {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
   kind: 'profile_backup';
   createdAt: string;
   source: {
@@ -57,6 +58,7 @@ export interface BackupManifest {
     tuiUi: CapturedAsset & { format: { version: 1 } | null };
     tuiPreferences: CapturedAsset;
     callerIntents?: CapturedAsset & { format: { version: 1 } | null };
+    mcpSourceMutationIntents?: CapturedAsset & { format: { version: 1 } | null };
     mcpReconnectionIntents?: CapturedAsset & { format: { version: 1 } | null };
     mcpSourceApprovalIntents?: CapturedAsset & { format: { version: 1 } | null };
     mcpConnectionIntents?: CapturedAsset & { format: { version: 1 } | null };

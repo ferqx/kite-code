@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
 import type { TuiMcpSnapshot } from './mcp';
 import { TuiMcpReconnectionPanel } from './mcp-reconnection-panel';
+import { TuiMcpSourceMutationPanel } from './mcp-source-mutation-panel';
 import { TuiMcpSourcePanel } from './mcp-source-panel';
 import { TuiMcpToolsPanel } from './mcp-tools-panel';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -38,7 +39,8 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           | 'connectionLookup'
           | 'sources'
           | 'reconnections'
-          | 'reconnectReview';
+          | 'reconnectReview'
+          | 'sourceMutations';
       };
   const actions: Choice[] = server
     ? [
@@ -79,6 +81,7 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           .filter((row) => row.intent.sessionId === state.sessionId)
           .map((row) => ({ kind: 'connectionSaved' as const, id: row.intent.request.commandId })),
       ];
+  if (controller.port.mcp?.sourceMutation) actions.push({ kind: 'sourceMutations' });
   if (controller.port.mcp?.reconnection) {
     actions.push({ kind: 'reconnections' });
     if (controller.canReviewMcpReconnection('connection'))
@@ -132,6 +135,10 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
         }
         if (action.kind === 'reconnectReview') {
           void controller.reviewMcpReconnection('connection');
+          return;
+        }
+        if (action.kind === 'sourceMutations') {
+          void controller.openMcpSourceMutations();
           return;
         }
         if (action.kind === 'sources') {
@@ -195,8 +202,15 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
           });
       }
     },
-    { isActive: !state.mcpTools && !state.mcpSourceOpen && !state.mcpReconnectionOpen },
+    {
+      isActive:
+        !state.mcpTools &&
+        !state.mcpSourceOpen &&
+        !state.mcpReconnectionOpen &&
+        !state.mcpMutationOpen,
+    },
   );
+  if (state.mcpMutationOpen) return <TuiMcpSourceMutationPanel controller={controller} />;
   if (state.mcpReconnectionOpen) return <TuiMcpReconnectionPanel controller={controller} />;
   if (state.mcpSourceOpen) return <TuiMcpSourcePanel controller={controller} />;
   if (state.mcpTools) return <TuiMcpToolsPanel controller={controller} />;
@@ -212,6 +226,7 @@ export function TuiMcpPanel({ controller }: { controller: TuiController }) {
     if (action.kind === 'refresh') return t('Refresh servers');
     if (action.kind === 'lookup') return t('Check original change');
     if (action.kind === 'back') return t('Back');
+    if (action.kind === 'sourceMutations') return t('Source entry changes');
     if (action.kind === 'reconnections') return t('Forced reconnects');
     if (action.kind === 'reconnectReview') return t('Review forced reconnect');
     if (action.kind === 'sources') return t('Project sources');

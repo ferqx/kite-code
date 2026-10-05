@@ -23,6 +23,8 @@ import {
   mcpSourceApprovalRecordIdentity,
   parseMcpSourceApprovalRecord,
 } from './mcp-source-approval-intents';
+import { assertMcpSourceJournalAvailable, readMcpSourceJournal } from './mcp-source-journal-files';
+import { parseMcpSourceMutationRecord } from './mcp-source-mutation-intents';
 export interface McpSourceApprovalJournal {
   prepare(record: McpSourceApprovalRecord): boolean;
   record(record: McpSourceApprovalRecord, phase: McpSourceApprovalRecord['phase']): void;
@@ -209,6 +211,16 @@ export function openMcpSourceApprovalJournal(input: {
             )
           )
             throw Error('mcp_source_approval_original_outcome_required');
+          assertMcpSourceJournalAvailable(
+            readMcpSourceJournal(
+              input.access,
+              'mcp-source-mutation-intents.json',
+              parseMcpSourceMutationRecord,
+              unavailable,
+            ).records,
+            record,
+            () => Error('mcp_source_approval_original_outcome_required'),
+          );
           rows.push({ ...record, phase: 'submitting' });
           return { result: true, changed: true };
         }),

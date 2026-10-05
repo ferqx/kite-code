@@ -45,6 +45,20 @@ CLI 新提交核当前完整 Workspace、physical identity 与完整同版本 So
 
 原重连Query闭合有限事实≤16KiB，历史零Source/Workspace文件/vault/transport/Model/补写。Caller独立原intent journal与ordinary journal同短锁核Store+S+Server未确认冲突；只有本次durable prepare可首次POST，cold/duplicate仅原GET，foreign身份全部HTTP前拒绝。条件v11保存原bytes/subject/SHA/phase，旧v2–v10白名单不扩大，新Store不retag或授热权利。操作归[TUI手册](../handbook/clients/tui/guides/mcp-and-skills.md#强制重连与原申请)，Caller与维护归[CLI](../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[maintenance](../../packages/agent/src/maintenance/README.md#mcp-重连申请的独立离线资产)。当前有限真实范围、失败和未验证窗口沿[进度](../plans/unified-agent-refactor-v1-progress.md)记录，OAuth/续期、增删、持续Soak及三平台另验。
 
+## 来源条目增删的发布与原结果边界
+
+普通 `builtin.mcp.sources/mcp.source.add@1` 与 `mcp.source.remove@1`只变更准确来源条目。Add 为闭合 basic name/无凭据 HTTP URL/绝对 STDIO command；同层已有名称拒绝，trusted 原 E 的 creation marker 参与 raw fingerprint，旧批准不能在同配置重新新增时复活。Remove 核准确 effective source/serverId/raw digest/read-set，current preview 把 project 移除后显露的安全 user 声明单列。项目新增仍需独立 Source 批准，UI Confirm 和普通 Action 审批不授来源或 Tool 权限。
+
+[Source leaf](../../packages/agent/src/config/README.md#private-mcp-sources-and-approval-metadata)持固定排序的 user/project/approval/binding 短 OS 锁重读完整六字段 read-set，真实 publication callback 复核 canonical root/entity/variables/abort，准确 JSONC 语法编辑保未触及 fields/env/comments/CRLF。临时文件 fsync、rename、directory sync/read-back 与 SQL Mutation 分属非原子介质；发布后错误保 outcome_unknown，不能重 POST、改 key 或用当前文件修造成功。非合作外部编辑者的最后检查至 rename race 和移根 scratch 限制保留。
+
+[Service owner](../../apps/service/README.md#来源条目增删与原文件回执)从实际 Session/Workspace/Store、原 C/subject/requestDigest、真实 root-work E/definition/input/dispatch 和准确 HostMutation scope 证明 producer。历史 `mcp.source.mutation.result@1 {commandId}`只读原持久 SQL，saved 须完整 finalization、原 result binding、applied Mutation 与准确 leaf old/new ETag、marker/raw digest 全部一致；phase、C applied 或当前文件单独不证明发布。历史 Query ≤16KiB、actions/artifactRefs 空，零当前 Source/physical Workspace 文件、Vault、transport、Model 或补写。
+
+[Caller Source 文件边界](../../apps/cli/host/mcp-source-journal-files.ts)在同一 `tui_private` 短锁内核来源修改与批准的实际 Source identity 依赖。同源文件 unknown 跨 Session 阻挡，user 跨 Workspace；坏 sibling、跨 journal 重复原 C 或满额均零新 POST，不淘汰记录。独立 mutation journal 只有当前首次完整 durable prepare 才有一次 POST 权，cold/duplicate 仅查原 C；选择零 GET，明确 Check 才查，foreign Store/subject 在原 HTTP 前拒绝。selection 介质和 ordinary/forced transport unknown guard 继续各自保护效果，raw edit 不停止或重绑旧连接。
+
+条件 [backup v12](../../packages/agent/src/maintenance/README.md#mcp-来源条目变更申请的独立离线资产)保完整原 bytes、subject、Store/S/请求摘要/phase，新 Store 不改标、不授热权利；旧 v2–v11 的准确白名单不扩大。产品操作归[来源条目增删](../handbook/clients/tui/guides/mcp-and-skills.md#来源条目增删与原申请)，源码外真实键盘、物理 POST/GET 丢回复、当前统一与完整默认的准确输入和限制归[进度](../plans/unified-agent-refactor-v1-progress.md)。
+
+此片零 Vault/credential revocation，当前手工 opaque Bearer 引用不证明 server-owned secret，移除声明保共享凭据。完整 owned OAuth cleanup、availability preflight 和配置已删而清理失败的 partial 原结果仍按产品认证生命周期闭合；source-entry saved 不替代这项要求。持续 Soak、真实 OS Vault、完整 T/E 与三平台资格继续各自核验。
+
 ## 历史实现与仍适用的约束
 
 下方记录旧Repository/Supervisor和App的历史实现，旧home路径、owner和测试不能作为新入口支持。原JSONC保未知字节、来源审批、secret隔离、generation和未知效果不重放等理由仍适用；已退役路径不因历史记录而重新参与正式调度。

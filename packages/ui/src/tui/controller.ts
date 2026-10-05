@@ -55,10 +55,17 @@ import {
   sameReconnectionValue,
 } from './mcp-reconnection-state';
 import type {
+  TuiMcpSourceSnapshot as MutationSnapshot,
   TuiMcpSourceApprovalIntent,
   TuiMcpSourceApprovalOutcome,
   TuiMcpSourceSnapshot,
 } from './mcp-source';
+import type {
+  TuiMcpSourceEntryPreview,
+  TuiMcpSourceMutationInput,
+  TuiMcpSourceMutationIntent,
+  TuiMcpSourceMutationOutcome,
+} from './mcp-source-mutation';
 import { reviewableMcpSource } from './mcp-source-question';
 import { sameMcpToolsOrigin, type TuiMcpToolsState } from './mcp-tools';
 import type { TuiModelIntent, TuiModelOutcome, TuiModelPort } from './models';
@@ -226,6 +233,12 @@ export interface TuiState {
   mcpReconnectionReading?: boolean;
   mcpReconnectionObserving?: boolean;
   mcpReconnectionUnavailable?: string;
+  mcpMutationOpen?: boolean;
+  mcpMutationFacts?: MutationSnapshot;
+  mcpMutationSaved?: readonly TuiMcpSourceMutationOutcome[];
+  mcpMutationOutcome?: TuiMcpSourceMutationOutcome;
+  mcpMutationError?: string;
+  mcpMutationReading?: boolean;
   mcpSourceOpen?: boolean;
   mcpSource?: { facts?: TuiMcpSourceSnapshot; read: 'reading' | 'ready' | 'failed' };
   mcpSourceOutcome?: TuiMcpSourceApprovalOutcome;
@@ -372,6 +385,9 @@ export class TuiController {
   private mcpReconnectionRead?: AbortController;
   private mcpReconnectionIntents = new Map<string, TuiMcpReconnectionOutcome>();
   private mcpReconnectionBusy = false;
+  private mcpMutationRead?: AbortController;
+  private mcpMutationBusy = false;
+  private mcpMutationIntents = new Map<string, TuiMcpSourceMutationOutcome>();
   private mcpSourceRead?: AbortController;
   private mcpSourceLookupRead?: AbortController;
   private mcpSourceBusy = false;
@@ -821,6 +837,10 @@ export class TuiController {
       mcpReconnectionObservation: undefined,
       mcpReconnectionReading: false,
       mcpReconnectionObserving: false,
+      mcpMutationOpen: same ? this.value.mcpMutationOpen : false,
+      mcpMutationFacts: same ? this.value.mcpMutationFacts : undefined,
+      mcpMutationOutcome: same ? this.value.mcpMutationOutcome : undefined,
+      mcpMutationReading: false,
       mcpSourceOpen: same ? this.value.mcpSourceOpen : false,
       mcpSource: same ? this.value.mcpSource : undefined,
       mcpSourceOutcome: same ? this.value.mcpSourceOutcome : undefined,
@@ -2411,6 +2431,227 @@ export class TuiController {
     )
       this.publish({ mcpReconnection: outcome, mcpReconnectionReading: false });
   }
+  async openMcpSourceMutations() {
+    const port = this.port.mcp?.sourceMutation,
+      sessionId = this.value.sessionId;
+    if (!port || !sessionId || this.value.panel !== 'mcp') return;
+    this.closeMcpSources();
+    this.closeMcpReconnections();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpMutationRead = read;
+    this.publish({
+      mcpMutationOpen: true,
+      mcpMutationFacts: undefined,
+      mcpMutationError: undefined,
+      mcpMutationReading: true,
+    });
+    try {
+      const rows = await port.list();
+      if (rows.length > 128) throw Error('mcp_source_mutation_intent_limit');
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const id = row.intent.request.commandId;
+        if (seen.has(id)) throw Error('mcp_source_mutation_restore_conflict');
+        seen.add(id);
+        const prior = this.mcpMutationIntents.get(id);
+        if (prior && JSON.stringify(prior.intent) !== JSON.stringify(row.intent))
+          throw Error('mcp_source_mutation_restore_conflict');
+        this.mcpMutationIntents.set(id, prior ?? freezeIntent(structuredClone(row)));
+      }
+      if (this.mcpMutationIntents.size > 128) throw Error('mcp_source_mutation_intent_limit');
+      if (!read.signal.aborted && generation === this.generation && this.value.mcpMutationOpen)
+        this.publish({ mcpMutationSaved: [...this.mcpMutationIntents.values()] });
+      const facts = await port.read(sessionId, read.signal);
+      if (
+        !read.signal.aborted &&
+        generation === this.generation &&
+        sessionId === this.value.sessionId &&
+        this.value.mcpMutationOpen
+      )
+        this.publish({
+          mcpMutationFacts: freezeIntent(structuredClone(facts)),
+          mcpMutationReading: false,
+        });
+    } catch {
+      if (!read.signal.aborted && generation === this.generation && this.value.mcpMutationOpen)
+        this.publish({
+          mcpMutationError: 'Source directory unavailable',
+          mcpMutationReading: false,
+        });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
+  closeMcpSourceMutations() {
+    this.mcpMutationRead?.abort();
+    this.publish({ mcpMutationOpen: false, mcpMutationReading: false });
+  }
+  selectMcpSourceMutation(id: string) {
+    const row = this.mcpMutationIntents.get(id);
+    if (row && this.value.panel === 'mcp' && this.value.mcpMutationOpen) {
+      this.mcpMutationRead?.abort();
+      this.publish({ mcpMutationOutcome: row, mcpMutationReading: false });
+    }
+  }
+  async previewMcpSourceRemoval(
+    serverId: string,
+    scope: 'user' | 'workspace',
+    observed: MutationSnapshot,
+  ): Promise<TuiMcpSourceEntryPreview | undefined> {
+    const port = this.port.mcp?.sourceMutation;
+    if (
+      !port ||
+      !observed.readSet ||
+      this.value.mcpMutationFacts !== observed ||
+      !this.value.mcpMutationOpen
+    )
+      return;
+    this.mcpMutationRead?.abort();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpMutationRead = read;
+    try {
+      const preview = await port.preview(
+        observed.sessionId,
+        { serverId, scope, expectedReadSet: observed.readSet },
+        read.signal,
+      );
+      if (
+        !read.signal.aborted &&
+        generation === this.generation &&
+        this.value.mcpMutationOpen &&
+        this.value.mcpMutationFacts === observed
+      )
+        return preview;
+    } catch {
+      if (!read.signal.aborted && generation === this.generation)
+        this.publish({ mcpMutationError: 'Source removal preview unavailable' });
+    } finally {
+      this.reads.delete(read);
+    }
+    return undefined;
+  }
+  async submitMcpSourceMutation(
+    actionId: 'mcp.source.add' | 'mcp.source.remove',
+    input: TuiMcpSourceMutationInput,
+    observed: MutationSnapshot,
+  ) {
+    const port = this.port.mcp?.sourceMutation,
+      session = this.value.snapshot?.view.session;
+    if (
+      !port ||
+      !session ||
+      this.disposed ||
+      this.mcpMutationBusy ||
+      this.value.stale ||
+      this.value.snapshotStale ||
+      !this.value.mcpMutationOpen ||
+      this.value.panel !== 'mcp' ||
+      this.value.mcpMutationFacts !== observed ||
+      session.id !== observed.sessionId ||
+      session.workspaceId !== observed.workspaceId ||
+      observed.storeId !== this.port.storeId ||
+      !observed.readSet
+    )
+      return;
+    if (this.mcpMutationIntents.size >= 128) {
+      this.publish({ mcpMutationError: 'Source mutation intent capacity reached' });
+      return;
+    }
+    const intent: TuiMcpSourceMutationIntent = freezeIntent({
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+      workspaceIdentity: observed.workspaceIdentity,
+      request: {
+        expectedStoreId: this.port.storeId,
+        commandId: this.port.nextCommandId(),
+        kind: 'extension.invoke',
+        extensionId: 'builtin.mcp.sources',
+        actionId,
+        definitionVersion: '1',
+        input,
+      },
+    });
+    this.mcpMutationBusy = true;
+    const generation = this.generation;
+    let outcome: TuiMcpSourceMutationOutcome = { intent, phase: 'outcome_unknown' };
+    this.mcpMutationIntents.set(intent.request.commandId, outcome);
+    this.publish({
+      mcpMutationOutcome: outcome,
+      mcpMutationSaved: [...this.mcpMutationIntents.values()],
+      mcpMutationError: undefined,
+    });
+    try {
+      const reply = await port.submit(intent, observed);
+      if (JSON.stringify(reply.intent) !== JSON.stringify(intent))
+        throw Error('mcp_source_mutation_reply_mismatch');
+      outcome = freezeIntent(structuredClone(reply));
+    } catch {
+      if (generation === this.generation && this.value.mcpMutationOpen)
+        this.publish({
+          mcpMutationError: 'Source mutation unavailable; check original before retry',
+        });
+    } finally {
+      this.mcpMutationBusy = false;
+    }
+    this.mcpMutationIntents.set(intent.request.commandId, outcome);
+    if (!this.disposed) this.publish({ mcpMutationSaved: [...this.mcpMutationIntents.values()] });
+    if (
+      !this.disposed &&
+      generation === this.generation &&
+      this.value.mcpMutationOpen &&
+      this.value.mcpMutationOutcome?.intent.request.commandId === intent.request.commandId
+    )
+      this.publish({ mcpMutationOutcome: outcome });
+  }
+  async lookupMcpSourceMutation() {
+    const original = this.value.mcpMutationOutcome,
+      port = this.port.mcp?.sourceMutation;
+    if (
+      !original ||
+      !port ||
+      this.disposed ||
+      !this.value.mcpMutationOpen ||
+      this.value.panel !== 'mcp'
+    )
+      return;
+    this.mcpMutationRead?.abort();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpMutationRead = read;
+    this.publish({ mcpMutationReading: true });
+    try {
+      const reply = await port.lookup(original.intent, read.signal);
+      if (JSON.stringify(reply.intent) !== JSON.stringify(original.intent))
+        throw Error('mcp_source_mutation_reply_mismatch');
+      if (read.signal.aborted || this.disposed) return;
+      const outcome = freezeIntent(structuredClone(reply));
+      this.mcpMutationIntents.set(original.intent.request.commandId, outcome);
+      this.publish({ mcpMutationSaved: [...this.mcpMutationIntents.values()] });
+      if (
+        generation === this.generation &&
+        this.value.mcpMutationOpen &&
+        this.value.mcpMutationOutcome?.intent.request.commandId ===
+          original.intent.request.commandId
+      )
+        this.publish({ mcpMutationOutcome: outcome, mcpMutationReading: false });
+    } catch {
+      if (
+        !read.signal.aborted &&
+        generation === this.generation &&
+        this.value.mcpMutationOpen &&
+        this.value.mcpMutationOutcome?.intent.request.commandId ===
+          original.intent.request.commandId
+      )
+        this.publish({
+          mcpMutationError: 'Original source mutation unavailable',
+          mcpMutationReading: false,
+        });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
   private async restoreMcpSources() {
     const port = this.port.mcp?.source;
     if (!port) return false;
@@ -2500,6 +2741,7 @@ export class TuiController {
     }
   }
   closeMcpSources() {
+    this.closeMcpSourceMutations();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
     this.publish({ mcpSourceOpen: false, mcpSourceReading: false });

@@ -39,6 +39,7 @@ import { openMcpConnectionJournal } from './mcp-connection-journal';
 import { openMcpReconnectionJournal } from './mcp-reconnection-journal';
 import { openMcpSelectionJournal } from './mcp-selection-journal';
 import { openMcpSourceApprovalJournal } from './mcp-source-approval-journal';
+import { openMcpSourceMutationJournal } from './mcp-source-mutation-journal';
 import { openRecoveryJournal } from './recovery-journal';
 import { connectSharedService } from './shared-service';
 import { createTuiDraftPort } from './tui-draft-port';
@@ -208,6 +209,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
   let mcpOwner: ReturnType<typeof openMcpSelectionJournal> | undefined;
   let mcpConnectionOwner: ReturnType<typeof openMcpConnectionJournal> | undefined;
   let mcpReconnectionOwner: ReturnType<typeof openMcpReconnectionJournal> | undefined;
+  let mcpSourceMutationOwner: ReturnType<typeof openMcpSourceMutationJournal> | undefined;
   let mcpSourceApprovalOwner: ReturnType<typeof openMcpSourceApprovalJournal> | undefined;
   let callerOwner: ReturnType<typeof openCallerJournal> | undefined;
   let recoveryOwner: ReturnType<typeof openRecoveryJournal> | undefined;
@@ -323,6 +325,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       access: profileAccess,
       acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
     });
+    mcpSourceMutationOwner = openMcpSourceMutationJournal({
+      access: profileAccess,
+      acquireWriteLock: () => acquireProfileDataLock(profileAccess, 'tui_private'),
+    });
     const port: TuiPort = {
       preferences: {
         async read() {
@@ -379,6 +385,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         mcpConnectionOwner,
         mcpSourceApprovalOwner,
         mcpReconnectionOwner,
+        mcpSourceMutationOwner,
       ),
       exportLoadedText: createTuiExporter(profile.profilePath, storeId),
       recovery: {
@@ -766,6 +773,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       mcpOwner?.close();
       mcpConnectionOwner?.close();
       mcpReconnectionOwner?.close();
+      mcpSourceMutationOwner?.close();
       mcpSourceApprovalOwner?.close();
       callerOwner?.close();
       fileRecoveryOwner?.close();

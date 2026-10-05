@@ -147,3 +147,13 @@ controller按原scope、selected ID、Abort和generation隔离读取，热submit
 未知原申请阻同Store+S+Server冲突，不淘汰128条或换key绕过。Esc/Ctrl+C关闭重连子面板后返回父MCP，再关闭父面板回Main；待决卡继续，完成普通回答前不要求New Run composer出现。physical Workspace移除后父面板标题为unavailable，原结果读取仍可用。Scope关闭不取消R/Run/Job或原审批，固定文案沿presentation三locale，metadata和原身份保持。
 
 [Ink/controller测试](../../test/tui/mcp-reconnection.test.tsx)实际16项123断言覆盖独立确认、select零GET、冷/foreign/scope/late/unknown和ready/currentGeneration反例。真实Host、journal、源码外80×24和收尾资格分别归[CLI owner](../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不由UI fixture推导HTTP、完整默认或三平台。
+
+## MCP 来源条目增删与原申请
+
+[独立 DTO/port](mcp-source-mutation.ts)与[panel](mcp-source-mutation-panel.tsx)通过 `TuiMcpPort.sourceMutation`接固定 Source 操作。父面板“Source entry changes”在空目录或目录失败时仍可进入。Add 逐步编辑自己的 name/value buffer，选择 HTTP/STDIO 与 user/workspace；不调用 Composer、Workflow、模型或通用 raw patch。空 Enter、非法 URL/command 保原 draft；Review 可上下/Home/End 滚动，Enter 进入独立 Confirm，第二个 Enter 才 submit。普通 Action 审批和 project Source 批准仍分别走原交互。
+
+Remove 先让 Host 以原 scope/serverId/raw digest/read-set读取准确安全 preview，再在 Review 和 Confirm 固定显示 user fallback 或无 fallback。确认只变更来源声明；凭据保留和现有连接未停止在可见提示中说明。UI 不持文件、Vault、token、OS 锁、Mutation authority 或热 POST 权，也不把 saved 解释成完整 owned OAuth 清理。
+
+controller 隔离原 scope/generation/Abort/selected Command。原 ID 列表包含跨 Session 的相关 user/project来源意图；选择只切本地记录，明确 Check 才 lookup。cold/foreign 和不完整原事实保持 outcome_unknown；late submit 只回原 Map，不覆盖后来 Session 或所选原 ID。Esc 回表单步骤或父面板，Ctrl+C 只结束所属读取，已提交工作与普通审批继续。原 phase、ID、reason、来源 JSON、URL 和 command 保持原文；固定自有提示沿 [presentation catalog](presentation.tsx)提供三 locale。
+
+[真实 Ink/controller 测试](../../test/tui/mcp-source-mutation.test.tsx)覆盖逐键编辑、空值零 submit、独立 Review/Confirm、fallback、原选择零 lookup、late/scope 和已关闭读取；HTTP、持久 journal、物理丢回复、源码外 PTY 与正常资源关闭分别由[CLI owner](../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)和[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)提供实际证据。本地 UI 断言不代替 Service publication、OS vault、异常 cleanup、完整管理或三平台资格。
