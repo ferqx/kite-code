@@ -1,41 +1,64 @@
-import { Box } from 'ink';
+import { Box, useStdout } from 'ink';
+import stringWidth from 'string-width';
 import { composerDisplay } from './composer';
 import { terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 import { type QuestionDraft, type QuestionForm, questionLengthError } from './question';
 
-/** Input is handled by the session's single card listener. */
-export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: QuestionDraft }) {
+export const questionInputWidth = (columns: number | undefined, answerLabel: string) =>
+  Math.max(24, (columns ?? 80) - stringWidth(`${answerLabel} > `) - 1);
+
+/** Original question material is fixed for one displayed step. */
+export function QuestionMaterial({ form, step }: { form: QuestionForm; step: number }) {
   const { t } = useTuiPresentation();
-  const field = form.fields[draft.step]!,
-    current = draft.fields[draft.step]!;
-  const editing =
-    field.text && (!field.choices.length || current.selected === field.choices.length);
-  const lengthError = questionLengthError(field, current.buffer.text);
+  const field = form.fields[step]!;
   return (
     <Box flexDirection="column">
       {form.title && <Text bold>{terminalText(form.title)}</Text>}
       {form.description && <Text>{terminalText(form.description)}</Text>}
       <Text bold>
-        {t('Question')} {draft.step + 1}/{form.fields.length}:{' '}
+        {t('Question')} {step + 1}/{form.fields.length}:{' '}
         {field.title === undefined ? t('Answer') : terminalText(field.title)}
       </Text>
       {field.description && <Text>{terminalText(field.description)}</Text>}
       {field.choices.map((choice, i) => (
         <Box key={i} flexDirection="column">
           <Text>
-            {current.selected === i ? '› ' : '  '}
-            {terminalText(choice.title)}
+            {i + 1}. {terminalText(choice.title)}
           </Text>
           {choice.description && <Text>{terminalText(choice.description)}</Text>}
         </Box>
       ))}
       {field.text && field.choices.length > 0 && (
         <Text>
-          {current.selected === field.choices.length ? '› ' : '  '}
-          {t('Custom answer')}
+          {field.choices.length + 1}. {t('Custom answer')}
         </Text>
       )}
+    </Box>
+  );
+}
+
+/** Input is handled by the session's single card listener. */
+export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: QuestionDraft }) {
+  const { t } = useTuiPresentation();
+  const { stdout } = useStdout();
+  const field = form.fields[draft.step]!,
+    current = draft.fields[draft.step]!;
+  const editing =
+    field.text && (!field.choices.length || current.selected === field.choices.length);
+  const lengthError = questionLengthError(field, current.buffer.text);
+  const prefix = `${t('Answer')} > `;
+  const width = questionInputWidth(stdout.columns, t('Answer'));
+  const { lines, index } = current.buffer.row(width),
+    start = Math.max(0, index - 2),
+    visible = lines.slice(start, start + 5);
+  return (
+    <Box flexDirection="column">
+      <Text>
+        {t('Question')} {draft.step + 1}/{form.fields.length}
+        {field.choices.length > 0 &&
+          ` · ${t('Selection')}: ${current.selected === undefined ? t('No selection (Enter has no answer)') : `${current.selected + 1}${current.selected === field.choices.length ? ` · ${t('Custom answer')}` : ''}`}`}
+      </Text>
       {!field.required && (
         <Text>
           {current.skipped ? '› ' : '  '}
@@ -43,15 +66,24 @@ export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: Ques
         </Text>
       )}
       {editing && (
-        <Text>
-          {t('Answer')} &gt;{' '}
-          {current.buffer.parts.map((part, i) => (
-            <Text key={i} inverse={current.buffer.cursor === i}>
-              {composerDisplay(part)}
+        <Box flexDirection="column">
+          {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
+          {visible.map((line, n) => (
+            <Text key={start + n}>
+              {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
+              {current.buffer.parts.slice(line.start, line.end).map((part, i) => (
+                <Text
+                  key={line.start + i}
+                  inverse={start + n === index && current.buffer.cursor === line.start + i}
+                >
+                  {composerDisplay(part)}
+                </Text>
+              ))}
+              {start + n === index && current.buffer.cursor === line.end && <Text inverse> </Text>}
             </Text>
           ))}
-          {current.buffer.cursor === current.buffer.parts.length && <Text inverse> </Text>}
-        </Text>
+          {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
+        </Box>
       )}
       {editing && lengthError && (
         <Text color="yellow">
@@ -62,9 +94,6 @@ export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: Ques
       <Text>
         {t('Up/Down: choose · Enter: next/submit · Shift+Enter: newline · Esc: previous question')}
       </Text>
-      {field.choices.length > 0 && current.selected === undefined && !current.skipped && (
-        <Text>{t('No selection (Enter has no answer)')}</Text>
-      )}
     </Box>
   );
 }

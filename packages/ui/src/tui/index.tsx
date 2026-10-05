@@ -1,6 +1,7 @@
 import type { Interaction, Message, SessionView } from '@kite-ai/client';
 import { Box, Static, useInput, usePaste, useStdout } from 'ink';
 import {
+  type ReactNode,
   useCallback,
   useEffect,
   useInsertionEffect,
@@ -29,7 +30,7 @@ import {
   questionForm,
   questionValue,
 } from './question';
-import { QuestionPanel } from './question-panel';
+import { QuestionMaterial, QuestionPanel, questionInputWidth } from './question-panel';
 import { TuiRecoveryPanel } from './recovery-panel';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
@@ -47,28 +48,28 @@ export function TuiSession({ controller }: { controller: TuiController }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   return (
     <TuiPresentationProvider value={{ preferences: state.preferences }}>
-      <TuiHistory controller={controller} />
       <TuiSessionView controller={controller} />
     </TuiPresentationProvider>
   );
 }
 type Execution = SessionView['executions'][number];
-const endedExecution = (execution: Execution) =>
-  ['succeeded', 'failed', 'cancelled'].includes(execution.status);
-const settledMessage = (message: Message, runs: SessionView['runs'] | undefined) =>
-  message.status === 'complete' || !runs?.some((run) => run.id === message.runId && run.isActive);
-const prefixLength = <T,>(items: readonly T[], settled: (item: T) => boolean) => {
-  const index = items.findIndex((item) => !settled(item));
-  return index < 0 ? items.length : index;
-};
-type HistoryItem =
-  | { key: string; version: string; message: Message }
-  | { key: string; version: string; execution: Execution };
+type HistoryItem = { key: string; version: string; node: ReactNode };
 
 /** Ink owns the emitted bytes; these are only the current immutable render items. */
-function TuiHistory({ controller }: { controller: TuiController }) {
+function TuiHistory({
+  controller,
+  card,
+  form,
+  step,
+}: {
+  controller: TuiController;
+  card?: Interaction;
+  form?: ReturnType<typeof questionForm>;
+  step?: number;
+}) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { stdout, write } = useStdout();
+  const { t } = useTuiPresentation();
   const scope = JSON.stringify([
     state.snapshot?.storeId,
     state.snapshot?.view.session.workspaceId,
@@ -80,14 +81,9 @@ function TuiHistory({ controller }: { controller: TuiController }) {
   const messages = controller.visibleMessages;
   const executions = controller.visibleExecutions;
   const items: HistoryItem[] = useMemo(() => {
-    const messageCount = prefixLength(messages, (message) =>
-      settledMessage(message, state.snapshot?.view.runs),
-    );
     const results = executions.filter((execution) => execution.kind !== 'model');
-    const executionCount =
-      messageCount === messages.length ? prefixLength(results, endedExecution) : 0;
     return [
-      ...messages.slice(0, messageCount).map((message) => ({
+      ...messages.map((message) => ({
         key: `message:${message.id}`,
         version: JSON.stringify([
           message.seq,
@@ -98,9 +94,15 @@ function TuiHistory({ controller }: { controller: TuiController }) {
           message.outputBody,
           state.fullOutputs.get(message.id),
         ]),
-        message,
+        node: (
+          <TuiMessage
+            message={message}
+            controller={controller}
+            fullOutput={state.fullOutputs.get(message.id)}
+          />
+        ),
       })),
-      ...results.slice(0, executionCount).map((execution) => ({
+      ...results.map((execution) => ({
         key: `execution:${execution.id}`,
         version: JSON.stringify([
           execution.definitionId,
@@ -108,10 +110,48 @@ function TuiHistory({ controller }: { controller: TuiController }) {
           execution.resultRevision,
           execution.result,
         ]),
-        execution,
+        node: <TuiExecution execution={execution} />,
       })),
+      ...(card
+        ? [
+            {
+              key: `card:${interactionKey(card)}`,
+              version: JSON.stringify([
+                card,
+                form,
+                step,
+                state.attachments.get(interactionKey(card)),
+              ]),
+              node: (
+                <Box flexDirection="column">
+                  <Text bold>
+                    {card.kind} [{terminalText(card.id)}
+                    {t('] original Session')} {terminalText(card.sessionId)} {t('· revision')}{' '}
+                    {card.revision}
+                  </Text>
+                  {form &&
+                    Object.entries(card.request as Record<string, unknown>)
+                      .filter(
+                        ([key, value]) =>
+                          ['title', 'question', 'description'].includes(key) &&
+                          typeof value === 'string',
+                      )
+                      .map(([key, value]) => <Text key={key}>{terminalText(String(value))}</Text>)}
+                  {form && step !== undefined ? (
+                    <QuestionMaterial form={form} step={step} />
+                  ) : (
+                    <Text>{terminalText(JSON.stringify(card.request, null, 2))}</Text>
+                  )}
+                  {state.attachments.get(interactionKey(card)) && (
+                    <Text>{terminalText(state.attachments.get(interactionKey(card))!)}</Text>
+                  )}
+                </Box>
+              ),
+            },
+          ]
+        : []),
     ];
-  }, [messages, executions, state.fullOutputs, state.snapshot?.view.runs]);
+  }, [messages, executions, state.fullOutputs, state.attachments, card, form, step, controller, t]);
   const [committed, setCommitted] = useState({ scope, items, epoch: 0 });
   const replace =
     committed.scope !== scope ||
@@ -135,19 +175,24 @@ function TuiHistory({ controller }: { controller: TuiController }) {
   }, [history.epoch, stdout, write]);
   return (
     <Static key={history.epoch} items={history.items}>
-      {(item) =>
-        'message' in item ? (
-          <TuiMessage key={item.key} message={item.message} controller={controller} />
-        ) : (
-          <TuiExecution key={item.key} execution={item.execution} />
-        )
-      }
+      {(item) => (
+        <Box key={item.key} flexDirection="column">
+          {item.node}
+        </Box>
+      )}
     </Static>
   );
 }
-function TuiMessage({ message, controller }: { message: Message; controller: TuiController }) {
+function TuiMessage({
+  message,
+  controller,
+  fullOutput,
+}: {
+  message: Message;
+  controller: TuiController;
+  fullOutput?: string;
+}) {
   const { t } = useTuiPresentation();
-  const state = controller.state;
   return (
     <Box flexDirection="column">
       <Text bold>
@@ -155,8 +200,8 @@ function TuiMessage({ message, controller }: { message: Message; controller: Tui
         {terminalText(message.id)}
         {']'} {message.status}
       </Text>
-      <TerminalMarkdown content={state.fullOutputs.get(message.id) ?? message.content} />
-      {message.outputBody && !state.fullOutputs.has(message.id) && (
+      <TerminalMarkdown content={fullOutput ?? message.content} />
+      {message.outputBody && fullOutput === undefined && (
         <Text>
           {t('Recorded Model output preview only;')}{' '}
           {message.outputBody.readAvailability === 'unsupported' ||
@@ -188,6 +233,7 @@ function TuiExecution({ execution }: { execution: Execution }) {
 }
 
 function TuiSessionView({ controller }: { controller: TuiController }) {
+  const { stdout } = useStdout();
   const fileQuery = useCallback(
     (token?: FileToken) => {
       void controller.readFileCandidates(token);
@@ -471,12 +517,13 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
               void controller.answer(card, value);
           }
         } else if (editing) {
+          const width = questionInputWidth(stdout.columns, t('Answer'));
           if (key.leftArrow) draft.buffer.horizontal(-1);
           else if (key.rightArrow) draft.buffer.horizontal(1);
-          else if (key.home) draft.buffer.boundary(false, 72);
-          else if (key.end) draft.buffer.boundary(true, 72);
-          else if (key.upArrow) draft.buffer.vertical(-1, 72);
-          else if (key.downArrow) draft.buffer.vertical(1, 72);
+          else if (key.home) draft.buffer.boundary(false, width);
+          else if (key.end) draft.buffer.boundary(true, width);
+          else if (key.upArrow) draft.buffer.vertical(-1, width);
+          else if (key.downArrow) draft.buffer.vertical(1, width);
           else if (key.backspace) draft.buffer.remove(true);
           else if (key.delete) draft.buffer.remove(false);
           else if (key.return) draft.buffer.insert('\n');
@@ -559,24 +606,29 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       return;
     }
   });
-  const messages = controller.visibleMessages;
-  const executions = controller.visibleExecutions.filter((execution) => execution.kind !== 'model');
-  const messageCount = prefixLength(messages, (message) =>
-    settledMessage(message, state.snapshot?.view.runs),
+  const history = (
+    <TuiHistory controller={controller} card={card} form={form} step={question?.step} />
   );
-  const executionCount =
-    messageCount === messages.length ? prefixLength(executions, endedExecution) : 0;
-  if (state.panel === 'executions') return <TuiExecutionPanel controller={controller} />;
-  if (state.panel === 'mcp') return <TuiMcpPanel key={state.sessionId} controller={controller} />;
+  const withHistory = (panel: ReactNode) => (
+    <Box flexDirection="column">
+      {history}
+      {panel}
+    </Box>
+  );
+  if (state.panel === 'executions')
+    return withHistory(<TuiExecutionPanel controller={controller} />);
+  if (state.panel === 'mcp')
+    return withHistory(<TuiMcpPanel key={state.sessionId} controller={controller} />);
   if (state.panel === 'theme' || state.panel === 'language')
-    return <TuiPreferencePanel key={state.panel} controller={controller} />;
-  if (state.panel === 'status') return <TuiStatusPanel controller={controller} />;
+    return withHistory(<TuiPreferencePanel key={state.panel} controller={controller} />);
+  if (state.panel === 'status') return withHistory(<TuiStatusPanel controller={controller} />);
   if (state.panel === 'recovery')
-    return <TuiRecoveryPanel key={state.sessionId} controller={controller} />;
+    return withHistory(<TuiRecoveryPanel key={state.sessionId} controller={controller} />);
   if (state.panel === 'skills')
-    return <TuiSkillsPanel key={state.sessionId} controller={controller} />;
+    return withHistory(<TuiSkillsPanel key={state.sessionId} controller={controller} />);
   return (
     <Box flexDirection="column">
+      {history}
       <Text bold>
         {t('Session')} {terminalText(state.sessionId ?? t('not selected'))} {'·'}{' '}
         {t(activity(state.snapshot))}
@@ -602,12 +654,6 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           ))}
         </Box>
       )}
-      {messages.slice(messageCount).map((message) => (
-        <TuiMessage key={message.id} message={message} controller={controller} />
-      ))}
-      {executions.slice(executionCount).map((execution) => (
-        <TuiExecution key={execution.id} execution={execution} />
-      ))}
       {cardChooser && (
         <Box flexDirection="column">
           <Text bold>
@@ -627,24 +673,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       )}
       {card && !cardChooser && (
         <Box flexDirection="column">
-          <Text bold>
-            {card.kind} {'['}
-            {terminalText(card.id)}
-            {t('] original Session')} {terminalText(card.sessionId)} {t('· revision')}{' '}
-            {card.revision}
-          </Text>
-          {form &&
-            Object.entries(card.request as Record<string, unknown>)
-              .filter(
-                ([key, value]) =>
-                  ['title', 'question', 'description'].includes(key) && typeof value === 'string',
-              )
-              .map(([key, value]) => <Text key={key}>{terminalText(String(value))}</Text>)}
-          {form && question ? (
-            <QuestionPanel form={form} draft={question} />
-          ) : (
-            <Text>{terminalText(JSON.stringify(card.request, null, 2))}</Text>
-          )}
+          {form && question && <QuestionPanel form={form} draft={question} />}
           {card.kind === 'approval' && (
             <Text>
               {t('Up/Down explicit approval selection:')}{' '}
@@ -670,9 +699,6 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
                 ? t('none (Enter has no answer)')
                 : t(sourceDecisions[selectedSource]!)}
             </Text>
-          )}
-          {state.attachments.get(approvalKey) && (
-            <Text>{terminalText(state.attachments.get(approvalKey)!)}</Text>
           )}
           {form && (
             <Text>

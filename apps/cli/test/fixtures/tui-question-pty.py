@@ -25,10 +25,11 @@ normal_ctrl_q = False
 exit_code = None
 
 
-def normalized():
+def normalized(material=False):
     frames = buffer.split('\x1b[?2026h')
-    frame = next((part.split('\x1b[?2026l')[0] for part in reversed(frames[1:])
-                  if '\x1b[?2026l' in part), '')
+    complete = [part.split('\x1b[?2026l')[0] for part in frames[1:]
+                if '\x1b[?2026l' in part]
+    frame = ''.join(complete) if material else (complete[-1] if complete else '')
     return re.sub(r'\s+', ' ', re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', frame))
 
 
@@ -55,12 +56,12 @@ def drain(deadline=None):
     raise RuntimeError('owned_question_drain_limit')
 
 
-def wait(text):
+def wait(text, material=False, ready=False):
     deadline = time.monotonic() + 10
     while True:
         drain(deadline)
-        if text in normalized():
-            note('matched', text=text, frame=normalized())
+        if text in normalized(material) and (not ready or '· Loading' not in normalized()):
+            note('matched', text=text, material=material, frame=normalized())
             return
         if time.monotonic() > deadline:
             raise RuntimeError('owned_question_frame_deadline:' + text)
@@ -121,57 +122,65 @@ try:
     key(b'Ask the production default question')
     wait('New Run > Ask the production default question')
     key(b'\r')
-    wait('Choose original route')
-    wait('First original route')
-    wait('Second original route')
-    wait('First original route (Recommended)')
-    assert 'q1-o1' not in normalized() and 'q1-o2' not in normalized()
+    wait('Choose original route', material=True)
+    wait('First original route', material=True)
+    wait('Second original route', material=True)
+    wait('First original route (Recommended)', material=True)
+    assert 'q1-o1' not in normalized(True) and 'q1-o2' not in normalized(True)
+    wait('Question 1/3', ready=True)
     check('initial')
     key(b'\r', retain=True)
-    wait('Choose original route')
+    wait('Question 1/3', ready=True)
+    wait('No selection (Enter has no answer)', ready=True)
     check('blank')
     key(b'\x1b[B')
-    wait('› First original route')
+    wait('Selection: 1', ready=True)
     key(b'\r')
-    wait('Write original detail')
+    wait('Write original detail', material=True)
+    wait('Question 2/3', ready=True)
     check('route')
     key(b'\x1b[B')
-    wait('› Brief detail')
+    wait('Selection: 1', ready=True)
     key(b'\x1b[B')
     key(b'\x1b[B')
-    wait('› Custom answer')
+    wait('Selection: 3 · Custom answer', ready=True)
     # Bracketed paste is a real terminal key stream and keeps multiple lines in one draft.
     key(b'\x1b[200~' + detail.encode('utf-8') + b'\x1b[201~')
     wait('[Pasted ' + str(len(detail)) + ' characters]')
     check('text')
     key(b'\r')
-    wait('Choose final delivery')
+    wait('Choose final delivery', material=True)
+    wait('Question 3/3', ready=True)
     check('text')
     key(b'\x1b')
-    wait('Write original detail')
+    wait('Write original detail', material=True)
+    wait('Question 2/3', ready=True)
     wait('[Pasted ' + str(len(detail)) + ' characters]')
     check('back')
     key(b'\x1b')
-    wait('Choose original route')
+    wait('Choose original route', material=True)
+    wait('Question 1/3', ready=True)
     key(b'\x1b[B')
-    wait('› Second original route')
+    wait('Selection: 2', ready=True)
     key(b'\r')
-    wait('Write original detail')
+    wait('Write original detail', material=True)
+    wait('Question 2/3', ready=True)
     wait('[Pasted ' + str(len(detail)) + ' characters]')
     check('retained')
     key(b'\r')
-    wait('Choose final delivery')
+    wait('Choose final delivery', material=True)
+    wait('Question 3/3', ready=True)
     key(b'\x1b[B')
-    wait('› Original delivery option')
+    wait('Selection: 1', ready=True)
     key(b'\x1b[B')
     key(b'\x1b[B')
-    wait('› Custom answer')
+    wait('Selection: 3 · Custom answer', ready=True)
     key(custom.encode('utf-8'))
     wait('q3-o1')
     check('custom')
     key(b'\r')
     check('finish')
-    wait('OWNED_QUESTION_COMPLETE')
+    wait('OWNED_QUESTION_COMPLETE', material=True)
     wait('New Run >')
     key(b'\x11')
     exit_code = wait_exit(6)

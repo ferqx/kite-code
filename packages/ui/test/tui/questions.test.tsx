@@ -194,6 +194,55 @@ test('empty free answer does not submit, original whitespace and Unicode survive
   app.unmount();
 });
 
+test('question Home/End and vertical editing follow the visible 80-column wrap for ASCII and wide Unicode', async () => {
+  for (const { text, boundary, language, narrow } of [
+    { text: 'a'.repeat(150), boundary: 70, language: 'en-US', narrow: false },
+    { text: '界'.repeat(80), boundary: 35, language: 'en-US', narrow: false },
+    { text: 'b'.repeat(70), boundary: 32, language: 'zh-CN', narrow: true },
+  ] as const) {
+    const f = fixture({ type: 'string' });
+    f.port.preferences = {
+      read: async () => ({
+        revision: 'a'.repeat(64),
+        language,
+        resolvedLanguage: language,
+        colorPreset: 'teal',
+        theme: 'dark',
+      }),
+      save: async () => {
+        throw Error('unexpected preference write');
+      },
+    };
+    await f.controller.refreshPreferences();
+    await f.controller.select('a');
+    const app = render(<TuiSession controller={f.controller} />);
+    Object.defineProperty(app.stdout, 'columns', { value: 80, configurable: true });
+    try {
+      await tick();
+      app.stdin.write(text);
+      await tick();
+      if (narrow) Object.defineProperty(app.stdout, 'columns', { value: 40, configurable: true });
+      for (const key of ['\u001b[H', '\u001b[A', '\u001b[A', '\u001b[F']) {
+        app.stdin.write(key);
+        await tick();
+      }
+      app.stdin.write('X');
+      await tick();
+      app.stdin.write('\r');
+      await tick();
+      expect(f.answers).toHaveLength(1);
+      expect(f.answers[0]!.answer).toEqual({
+        kind: 'question',
+        answers: `${text.slice(0, boundary)}X${text.slice(boundary)}`,
+      });
+    } finally {
+      app.unmount();
+      app.cleanup();
+      f.controller.dispose();
+    }
+  }
+});
+
 test('drafts stay with card and revision, session switch preserves original draft', async () => {
   const schema = { type: 'string' };
   const f = fixture(schema);
@@ -670,6 +719,7 @@ test('question language refresh translates owned labels and length hints while p
   expect(app.lastFrame()).toContain('自定义回答');
   expect(app.lastFrame()).toContain('Tab：跳过可选回答');
   expect(app.lastFrame()).toContain('尚未选择（Enter 不提交回答）');
+  expect(app.lastFrame()).toContain('选择:');
   expect(app.lastFrame()).toContain('Custom answer');
   expect(app.lastFrame()).toContain('No selection (Enter has no answer)');
   expect(app.lastFrame()).toContain('Question Answer Custom answer EXACT_MODEL_BODY');

@@ -6,6 +6,8 @@ import { defaultTuiPreferences } from './preferences';
 export const tuiChinese: Readonly<Record<string, string>> = {
   Question: '问题',
   Answer: '回答',
+  '↑ Earlier input': '↑ 前面的输入',
+  '↓ Later input': '↓ 后面的输入',
   'Custom answer': '自定义回答',
   'Tab: skip optional answer': 'Tab：跳过可选回答',
   'No selection (Enter has no answer)': '尚未选择（Enter 不提交回答）',

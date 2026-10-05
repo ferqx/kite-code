@@ -1256,3 +1256,22 @@ UI沿原schema支持闭合单个required string属性的Custom，Core/消费者�
 Root未参与UI源码编写，以原顺序和真实清屏反例完成独立审查；新Agent建立受系统thread限制，未用同上下文冒称新审查者。最终Native/默认问题输入未因export fixture修改而变化，复用上述已核字节范围，不重复拼作全图通过。手册 terminal-behavior/history-and-export 仍是预期，核对未放宽承诺；active公共边界不变，owner与能力证据按实际diff同步。
 
 活动/待决动态长尾超过视口仍可能触发Ink清屏和静态重放；GUI终端、Linux/Windows、异常退出、正式安装、native stdin、默认可信Shell、完整当前默认图、§35/适用T-E、持续Soak及正式旧路径退役未在本片闭合。37项保持partial，Goal active；无关AGENTS保持独立，继续按实际diff执行文档与本地提交门禁，不push/PR。
+
+
+## 2026-10-06：当前 TUI 材料与底部控件的原生滚动
+
+完成正文切片已本地提交 `4e85585b543f9352e742873ad25623365826162c`，准确12路径与七项正常hooks通过，日志 `/private/tmp/kite-scrollback-phase-commit-20261006.log`、SHA `7dc9cee5575a9f913c6b763834df431354e714d00b28bb3fc05cd05e25ac6603`。本片在同一持久checkout继续闭合长活动/待决材料的状态重绘：所有当前正文、非Model执行及原卡材料按原顺序保留在Ink Static，底部维护题号、选择序号和有限编辑窗口；原版本改变仍语义重绘。当前实现归[TUI owner](../../packages/ui/src/tui/README.md)，实际消费者归[CLI](../../apps/cli/README.md#tui-原生滚动与清屏)，持久取舍由[当前材料决定](../../.agents/notes/implemented/bug-fix/2026-10-06-current-tui-materials-scrollback.md)部分替代旧连续前缀，旧writer/snapshot理由保留。公共port、API、Core/Service及执行权威不变，UI入口和active边界核对后无需制造diff；手册终端滚动承诺未放宽。
+
+独立只读实际反例在 `/private/tmp/kite-tail-recon-0s3toywf/`：准确 waiting_interaction 原Run/running Tool、resultRevision0及35行问题，三轮完成正文后上滚viewportY290/baseY390。连接状态更新25850bytes、编辑25862bytes，均有3J和完成正文重发，viewportY变为0；原问题末行仍在，不能描述成材料丢失或准确拉到底部。owned Popen80982正常exit0、业务mutation0。实际producer在64KiB后会切换artifact preview，不能假定公开活动content单调追加；该事实是源码核对，不是本次Service流式压力资格。
+
+独立审查发现两处真实光标问题：显示70列而移动固定72列，及软换行边界画双光标。原键盘红 `/private/tmp/kite-question-visible-wrap-red-20261006.log` 为19pass/1fail/117断言；Root接管补修，共用实际当前列宽/本地化前缀并沿row/endAffinity画当前行。原作者续修和新最终复核均受系统Agent线程数限制，不能冒称独立最终复审；最初独立审查和Root实际验证分开记录。最终全TUI220/1911、17.73s，日志 `/private/tmp/kite-materials-ui-root-final-20261006.log`，含ASCII、宽Unicode、中文80→40列键盘原答案。生产冻结SHA：index `0e5253b07fb6c664377e68b38b7ab43bfe83a31812f757b1c9c3cce8847fb91f`，question-panel `ac2de3fbdeea764680992cfba61fa3af2b9086488c0dc1bf25dd40d9e421ab93`，presentation `8378a92501661697a9e2afd89a1e3ec05655da89fb9a5b07cd6b5b608d7f79f8`；UI/CLI types、UI build与owned格式检查通过。
+
+最终原生PTY1/133、13.22s，日志 `/private/tmp/kite-materials-consumers-root-final-20261006.log`，packet `/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-tui-scrollback-7VZKKN-evidence/`。Root核7个记录输入SHA一致；90完成/40活动/35问题/60选项描述完整各一次，状态/编辑/改选保上滚viewportY且零3J/材料重发。179字符paste核原折叠显示，另实际键入12行；软换行End只第79列空格光标，下一行亲和只第9列a光标。held Popen7485正常exit0、mutationCalls0、cleanupConfirmed、成功root删除。有限public port/实际POSIX PTY/headless VT资格不代表Service/Provider。首次Native错误地期待折叠paste的原末行直接可见，0pass/1fail/109断言保在 `/private/tmp/kite-tui-material-native-first-20261006.log` 和 `kite-tui-scrollback-V79gRI-evidence`；这是夹具观察口径错误，未增加20秒预算或削弱完整材料断言。
+
+上述consumers日志第二job曾0pass/1fail/15断言：旧默认问题driver在最新动态帧等待不应重发的静态题目。失败packet `/private/tmp/kite-tui-question-evidence-de1bcc7a-db0d-4fe7-b380-11a38bb0c7e0/` 中owned Popen7740经SIGTERM退出-15、Service7752没有returnedAfterCleanup证明，cleanupErrors保留owned_service_exit_unconfirmed，root `/private/tmp/kite-tui-question-yjuPbr` 保留；不能改称正常清理或控制历史PID。修正原driver按实际发出的该步骤材料核题目/完整原label，按最新完整动态帧核题号/选择/Loading就绪；原步骤、observer与测试预算不变，原八次零Answer、最后唯一原卡答案和正常退出断言保持。
+
+修正后的源码外默认问题1/125、9.81s，日志 `/private/tmp/kite-materials-question-export-final-20261006.log`，packet `/private/tmp/kite-tui-question-evidence-ed51fa7a-c06f-470a-b212-bec05049b37a/`，candidate digest `cf34d8bcf54d605f4b4c7c299838f9e4f8d2702646e918d4cb69cf8e00a0df53`。Root核15个输入SHA一致；两次Provider、27次GET-only observer，八个中间状态零Answer，最后一次准确原Store/S/card/revision答案，card1→2/acceptedDecisionRevision2、Tool succeeded/Run completed；原label、Unicode/首尾空格/多行和同字自由ID保持。held Popen12920正常Ctrl+Q/exit0、Service12933 returnedAfterCleanup/exit0、cleanupConfirmed无errors且root删除。实际默认Process/ask_user/Service/SQLite/Client及compatible Provider由源码外开发candidate消费；临时credential backend不证明OS vault、收费Provider、正式安装或其他平台。
+
+同日志9MiB全文/导出1/13、15.65s：当前源码开发宿主、built Service与compatible Provider保未读preview、Ctrl+O实际全文/思考尾部、两次0600完整文件、准确两次Provider/一次Tool、零额外效果、正常owned退出及同profile冷重开；不是源码外安装或9MiB原生上滚压力。复用前片已修正的reader观察点，未重复要求退出重印全文。最终Native7输入未包含随后唯一变化的默认问题Python，故不重复运行已核Native；未把三个消费者拼成完整当前默认图。
+
+真实正文连续变化时仍替换代次；长诊断、notice/回执、复杂JSON回答及其他管理面板的动态高度尚未全面闭合。GUI终端、Linux/Windows、正式安装/native stdin、异常退出、默认可信Shell、完整§35/适用T-E/持续Soak和正式旧路径退役保持未完成；37项partial、Goal active。无关AGENTS保持独立，仅本任务按文档与本地提交门禁交付，无push/PR。

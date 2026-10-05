@@ -2,6 +2,8 @@
 
 Status: implemented
 
+本记录的连续稳定前缀和活动动态尾部已由[当前材料决定](2026-10-06-current-tui-materials-scrollback.md)部分替代；Ink 自有 writer、完整 snapshot、显示基线与零新增执行权威的取舍仍适用。下文保留该阶段的决定与反例，当前全部材料机制见新记录及 owner。
+
 ## Problem
 
 [终端手册](../../../../docs/handbook/clients/tui/guides/terminal-behavior.md)承诺完成输出保留在原生历史，状态更新不重复正文或拉回上滚位置。原 renderer 将完整历史放在动态帧中；真实80×24 PTY 的状态更新清除原生历史并重放90段正文，上滚100行的读者回到底部。`/clear` 又须仅隐藏显示基线，保留历史、全文和业务状态。
@@ -23,4 +25,4 @@ Status: implemented
 
 状态与编辑不再重发已完成前缀；正文替换、全文读取、清屏、切会话和偏好变化仍允许语义重绘。原顺序和输入栏成为明确回归约束，见[Ink测试](../../../../packages/ui/test/tui/scrollback.test.tsx)和[真实PTY/headless VT测试](../../../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)。默认问题与实际9MiB全文/导出消费者另核原答案、文件及正常退出；当前运行与原红证据归[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
-本决定只闭合完成前缀造成的状态重绘。活动或待决动态尾部超过视口仍可能触发Ink全屏清理并重放静态字节，与手册预期的剩余差异继续保留；GUI终端、其他平台、完整持续负载及发布资格不由本机有限port或局部PTY通过推导。
+本阶段只闭合完成前缀造成的状态重绘；其活动/待决动态尾部反例及当前修复归后续[当前材料决定](2026-10-06-current-tui-materials-scrollback.md)。GUI终端、其他平台、完整持续负载及发布资格仍不由本机有限port或局部PTY通过推导。

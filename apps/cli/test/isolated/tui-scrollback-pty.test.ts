@@ -13,7 +13,7 @@ const repository = resolve(import.meta.dir, '../../../..');
 const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
 
 nativeTest(
-  '80x24 completed native history preserves an up-scrolled reader across status/edit and survives semantic reflows once',
+  '80x24 current material versions preserve native history through status/input, active bodies and long pending questions',
   async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-tui-scrollback-'));
     const evidence = `${root}-evidence`;
@@ -29,6 +29,8 @@ nativeTest(
     const sourcePaths = [
       'packages/ui/src/tui/index.tsx',
       'packages/ui/src/tui/controller.ts',
+      'packages/ui/src/tui/question-panel.tsx',
+      'packages/ui/src/tui/presentation.tsx',
       'apps/cli/test/fixtures/tui-scrollback-pty.tsx',
       'apps/cli/test/fixtures/tui-scrollback-pty.py',
       'apps/cli/test/isolated/tui-scrollback-pty.test.ts',
@@ -57,6 +59,14 @@ nativeTest(
       footerPresent: boolean;
       changedCount: number;
       editingPresent: boolean;
+      activeCounts: number[];
+      questionCounts: number[];
+      choiceCounts: number[];
+      emitsMaterial: boolean;
+      toolBeforeQuestion: boolean;
+      lastAnswerLinePresent: boolean;
+      collapsedPastePresent: boolean;
+      cursorCells: { column: number; text: string }[];
     }[] = [];
     try {
       child = Bun.spawn(
@@ -102,11 +112,21 @@ nativeTest(
         } else if (event.kind === 'resize') {
           terminal.resize(event.cols, event.rows);
         } else {
-          if (event.name === 'round3') terminal.scrollLines(-100);
+          if (['round3', 'active', 'pending', 'pending-choices'].includes(event.name))
+            terminal.scrollLines(-100);
           const buffer = terminal.buffer.active;
           const text = Array.from({ length: buffer.length }, (_, index) =>
             buffer.getLine(index)?.translateToString(true),
           ).join('\n');
+          const cursorCells = Array.from({ length: 24 }, (_, row) => {
+            const line = buffer.getLine(buffer.baseY + row);
+            return Array.from({ length: 80 }, (_, column) => ({
+              column,
+              cell: line?.getCell(column),
+            }))
+              .filter(({ cell }) => cell?.isInverse())
+              .map(({ column, cell }) => ({ column, text: cell!.getChars() }));
+          }).flat();
           checkpoints.push({
             name: event.name,
             position: { viewportY: buffer.viewportY, baseY: buffer.baseY },
@@ -117,6 +137,29 @@ nativeTest(
             footerPresent: text.includes('Session a'),
             changedCount: text.split('SEMANTIC_CHANGED_BODY').length - 1,
             editingPresent: text.includes('editing-safe'),
+            activeCounts: Array.from(
+              { length: 40 },
+              (_, i) => text.split(`ACTIVE_LINE_${String(i + 1).padStart(2, '0')}`).length - 1,
+            ),
+            questionCounts: Array.from(
+              { length: 35 },
+              (_, i) => text.split(`QUESTION_LINE_${String(i + 1).padStart(2, '0')}`).length - 1,
+            ),
+            choiceCounts: Array.from({ length: 2 }, (_, choice) =>
+              Array.from(
+                { length: 30 },
+                (_, line) =>
+                  text.split(`CHOICE_${choice + 1}_LINE_${String(line + 1).padStart(2, '0')}`)
+                    .length - 1,
+              ),
+            ).flat(),
+            emitsMaterial: /ROUND_|ACTIVE_LINE_|QUESTION_LINE_|CHOICE_\d_LINE_/.test(bytes),
+            toolBeforeQuestion:
+              text.indexOf('OWNED_LONG_QUESTION_TOOL') >= 0 &&
+              text.indexOf('OWNED_LONG_QUESTION_TOOL') < text.indexOf('QUESTION_LINE_01'),
+            lastAnswerLinePresent: text.includes('ANSWER_LINE_12'),
+            collapsedPastePresent: text.includes('[Pasted 179 characters]'),
+            cursorCells,
           });
           if (event.ack) expect(event.ack.mutationCalls).toBe(0);
           if (['cleared', 'refreshed', 'changed'].includes(event.name))
@@ -156,6 +199,44 @@ nativeTest(
       expect(at('body-replaced').footerPresent).toBe(true);
       for (const name of ['body-replaced', 'changed', 'session-b', 'session-a'])
         expect(at(name).changedCount).toBe(1);
+      for (const [baseline, updates] of [
+        ['active', ['active-status', 'active-edited']],
+        [
+          'pending',
+          [
+            'pending-status',
+            'pending-edited',
+            'pending-pasted',
+            'pending-long-input',
+            'pending-visible-end',
+            'pending-wrap-next',
+          ],
+        ],
+        ['pending-choices', ['choices-status', 'choices-selected']],
+      ] as const) {
+        expect(at(baseline).position.viewportY).toBeLessThan(at(baseline).position.baseY);
+        for (const name of [baseline, ...updates]) {
+          expect(at(name).counts).toEqual(allOnce);
+          if (baseline === 'active') expect(at(name).activeCounts).toEqual(Array(40).fill(1));
+          else {
+            expect(at(name).questionCounts).toEqual(Array(35).fill(1));
+            expect(at(name).toolBeforeQuestion).toBe(true);
+          }
+        }
+        for (const name of updates) {
+          expect(at(name).position.viewportY).toBe(at(baseline).position.viewportY);
+          expect(at(name).clearsHistory).toBe(false);
+          expect(at(name).emitsMaterial).toBe(false);
+        }
+      }
+      expect(at('active-edited').editingPresent).toBe(true);
+      expect(at('pending-edited').editingPresent).toBe(true);
+      expect(at('pending-long-input').lastAnswerLinePresent).toBe(true);
+      expect(at('pending-pasted').collapsedPastePresent).toBe(true);
+      expect(at('pending-visible-end').cursorCells).toEqual([{ column: 79, text: ' ' }]);
+      expect(at('pending-wrap-next').cursorCells).toEqual([{ column: 9, text: 'a' }]);
+      for (const name of ['pending-choices', 'choices-status', 'choices-selected'])
+        expect(at(name).choiceCounts).toEqual(Array(60).fill(1));
       success = true;
     } finally {
       if (child && child.exitCode === null) {
