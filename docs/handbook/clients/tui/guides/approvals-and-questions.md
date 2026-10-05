@@ -30,6 +30,8 @@ Esc 拒绝当前审批，并结束当前轮的相关执行；当前目标应显�
 
 题目和完整选项文案按序号保留在终端原生历史中，可用终端自身滚动阅读；底部显示当前题号和所选序号，自定义项同时标明 Custom。自由输入只显示光标附近最多五行，前后还有内容时给出提示；上下移动或 Home/End 可查看并编辑对应位置。多行粘贴仍可折叠显示，其完整原文保留在答案中；窗口未显示的行不会被删除。
 
+复杂问题的原 JSON 输入使用同样的编辑窗口和折叠粘贴。方向键及 Home/End 移动光标，Shift+Enter 换行，Enter 才提交完整 JSON 值；空输入或无法解析的 JSON 不发送答案。切换卡片或会话保留各自草稿，原卡 revision 改变后从空草稿重新核对。
+
 Workflow 核验失败的问题可能要求 replan/waive 及非空 detail；合格 Workflow 声明补偿且宿主准入时，另提供 compensate。replan 是新的尝试，waive 保留原 failed；补偿启动独立 Job 并另需用户审批，不把核验改为通过。普通步骤面板先选择原 decision，再填写 detail；子审批与 verifier 审批仍需独立确认。
 
 项目 MCP 来源的准确 Source Question 提供 approved、rejected、cancel 三个明确决定。初始不选答案，上下选择后 Enter 回答；空 Enter 不发送 Answer，Esc 清尚未提交的选择，Ctrl+C 关闭面板，均不代替 cancel 决定。此前独立 Review 确认和普通 Action 许可不预答这个问题；保存回答后还须原发布证明才能显示来源决定已保存，详见[项目来源与原决定](mcp-and-skills.md#项目来源与原决定)。其他问题继续按各自面板提示回答。

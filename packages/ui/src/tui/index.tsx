@@ -30,7 +30,12 @@ import {
   questionForm,
   questionValue,
 } from './question';
-import { QuestionMaterial, QuestionPanel, questionInputWidth } from './question-panel';
+import {
+  QuestionMaterial,
+  QuestionPanel,
+  questionInputWidth,
+  TuiAnswerInput,
+} from './question-panel';
 import { TuiRecoveryPanel } from './recovery-panel';
 import { TuiSkillsPanel } from './skills-panel';
 import { TuiStatusPanel } from './status-panel';
@@ -259,7 +264,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   const [cardIndex, setCardIndex] = useState(0);
   const [cardOptions, setCardOptions] = useState<readonly Interaction[]>([]);
   const [selectedCard, setSelectedCard] = useState<string>();
-  const [cardDrafts, setCardDrafts] = useState(new Map<string, string>());
+  const cardDrafts = useRef(new Map<string, ComposerBuffer>());
   const [sourceChoices, setSourceChoices] = useState(new Map<string, number>());
   const [approvalChoices, setApprovalChoices] = useState(new Map<string, number>());
   const questionDrafts = useRef(new Map<string, QuestionDraft>());
@@ -286,7 +291,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     ) ??
     cards[0];
   const approvalKey = card ? interactionKey(card) : '';
-  const answer = cardDrafts.get(approvalKey) ?? '';
+  const answerBuffer = cardDrafts.current.get(approvalKey) ?? new ComposerBuffer();
+  if (card && !cardDrafts.current.has(approvalKey))
+    cardDrafts.current.set(approvalKey, answerBuffer);
+  const answer = answerBuffer.text;
   const sourceQuestion = card && isMcpSourceQuestion(card);
   const form =
     card?.kind === 'question' && !sourceQuestion ? questionForm(card.request) : undefined;
@@ -296,17 +304,14 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     questionDrafts.current.set(approvalKey, question);
   }
   const questionActive = !!form && !!question && !state.panel && !chooser && !cardChooser;
+  const jsonQuestion = card?.kind === 'question' && !sourceQuestion && !form;
+  const jsonActive = jsonQuestion && !state.panel && !chooser && !cardChooser;
   const selectedSource = sourceChoices.get(approvalKey);
   const selectedApproval = approvalChoices.get(approvalKey);
-  const setAnswer = (value: string | ((previous: string) => string)) =>
-    setCardDrafts((previous) => {
-      const next = new Map(previous);
-      next.set(
-        approvalKey,
-        typeof value === 'function' ? value(previous.get(approvalKey) ?? '') : value,
-      );
-      return next;
-    });
+  const setAnswer = (value: string | ((previous: string) => string)) => {
+    answerBuffer.sync(typeof value === 'function' ? value(answerBuffer.text) : value);
+    renderQuestion((n) => n + 1);
+  };
   // New revision cannot inherit the old answer or grant selection; other cards retain their drafts.
   useEffect(() => {
     const current = state.snapshot?.interactions;
@@ -327,7 +332,9 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     for (const key of questionDrafts.current.keys()) {
       if (obsolete(key)) questionDrafts.current.delete(key);
     }
-    setCardDrafts((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
+    for (const key of cardDrafts.current.keys()) {
+      if (obsolete(key)) cardDrafts.current.delete(key);
+    }
     setApprovalChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
     setSourceChoices((previous) => new Map([...previous].filter(([key]) => !obsolete(key))));
   }, [state.snapshot]);
@@ -340,6 +347,11 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   }, [controller]);
   usePaste(
     (text) => {
+      if (jsonActive) {
+        answerBuffer.insert(text, true);
+        renderQuestion((n) => n + 1);
+        return;
+      }
       if (!questionActive || !form || !question) return;
       const field = form.fields[question.step]!,
         draft = question.fields[question.step]!;
@@ -349,7 +361,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         renderQuestion((n) => n + 1);
       }
     },
-    { isActive: questionActive },
+    { isActive: questionActive || jsonActive },
   );
   useInput((input, key) => {
     if (state.panel === 'recovery') return;
@@ -585,20 +597,37 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         void controller.answer(card, 'deny');
         return;
       }
-      if (key.return) {
-        if (answer.trim().startsWith('/')) {
-          void controller.routeCommand(answer);
+      if (key.return && (!jsonQuestion || (!key.shift && !key.meta))) {
+        const currentAnswer = answerBuffer.text;
+        if (currentAnswer.trim().startsWith('/')) {
+          void controller.routeCommand(currentAnswer);
           setAnswer('');
         } else
           void controller.answer(
             card,
             (sourceQuestion && selectedSource !== undefined
               ? JSON.stringify({ decision: sourceDecisions[selectedSource] })
-              : answer) ||
+              : currentAnswer) ||
               (card.kind === 'approval' && selectedApproval !== undefined
                 ? choices[selectedApproval]!
                 : ''),
           );
+        return;
+      }
+      if (jsonQuestion) {
+        if (key.ctrl || (key.meta && !key.return)) return;
+        const width = questionInputWidth(stdout.columns, t('Answer'));
+        if (key.leftArrow) answerBuffer.horizontal(-1);
+        else if (key.rightArrow) answerBuffer.horizontal(1);
+        else if (key.home) answerBuffer.boundary(false, width);
+        else if (key.end) answerBuffer.boundary(true, width);
+        else if (key.upArrow) answerBuffer.vertical(-1, width);
+        else if (key.downArrow) answerBuffer.vertical(1, width);
+        else if (key.backspace) answerBuffer.remove(true);
+        else if (key.delete) answerBuffer.remove(false);
+        else if (key.return) answerBuffer.insert('\n');
+        else if (input) answerBuffer.insert(input);
+        renderQuestion((n) => n + 1);
         return;
       }
       if (key.backspace || key.delete) setAnswer((t) => t.slice(0, -1));
@@ -707,14 +736,21 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
               )}
             </Text>
           )}
-          {!form && (
+          {jsonQuestion && (
+            <>
+              <Text>{t('Ctrl+A: read required attachment. Question: original-schema JSON.')}</Text>
+              <TuiAnswerInput buffer={answerBuffer} />
+              <Text>{t('Arrows/Home/End: edit JSON · Enter: submit · Shift+Enter: newline')}</Text>
+            </>
+          )}
+          {!form && !jsonQuestion && (
             <Text>
               {t(
                 'Ctrl+A: read required attachment. Approval: approve (once), approve same_command only if offered, deny. Question: original-schema JSON. Plan: approve offered mode / revise feedback / deny.',
               )}
             </Text>
           )}
-          {!form && <Text>{terminalText(answer)}</Text>}
+          {!form && !jsonQuestion && <Text>{terminalText(answer)}</Text>}
         </Box>
       )}
       {state.panel === 'rewind' && (

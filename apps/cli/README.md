@@ -105,7 +105,7 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 ## TUI 原生滚动与清屏
 
-[原生滚动 PTY](test/isolated/tui-scrollback-pty.test.ts)通过当前公共 TUI 源码、有限 UI port 和实际80×24 PTY字节驱动已安装 headless VT。三轮90个完成正文标记、40个活动正文、35行待决问题与60行选项描述各出现一次；上滚后状态更新、键盘编辑及改选不重发原材料、不清原生历史且保留阅读位置。折叠的179字符 paste、显式12行自由输入及150字符软换行分别核显示与单光标；40→80列重排、同会话正文替换、`/clear`、同会话刷新与跨会话切换核原正文、输入栏和显示基线，原 snapshot 及零业务 mutation 同时核对；held Popen 正常退出。该有限 port 资格不代表默认 Service、安装制品、GUI终端或其他平台。
+[原生滚动 PTY](test/isolated/tui-scrollback-pty.test.ts)通过当前公共 TUI 源码、有限 UI port 和实际80×24 PTY字节驱动已安装 headless VT。三轮90个完成正文标记、40个活动正文、35行待决问题与60行选项描述各出现一次；各场景明确从底部上滚100行，状态更新、键盘编辑及改选不重发原材料、不清原生历史且保留阅读位置。折叠的179字符 paste、显式12行自由输入及150字符软换行分别核显示与单光标；复杂 question 再核完整30项Unicode JSON paste与显式12行JSON编辑。40→80列重排、同会话正文替换、`/clear`、同会话刷新与跨会话切换核原正文、输入栏和显示基线，原 snapshot 及零业务 mutation 同时核对；held Popen 正常退出。该有限 port 资格不代表默认 Service、安装制品、GUI终端或其他平台。
 
 共享 UI 的当前材料版本、原顺序与剩余动态长尾限制由[TUI owner](../../packages/ui/src/tui/README.md)维护。当前源码外[默认问题 PTY](test/isolated/tui-question-pty.test.ts)另核真实默认 Tool/Service/Provider 与原答案；题目和完整选项核该步骤实际发出的原材料，题号/选择/可交互状态核最新动态帧，不把留在原生历史的正文当成当前控件，也不要求每次按键重印正文。上方大正文 PTY 使用开发宿主与 built Service，保留实际 Ctrl+O 全文尾部、两次导出及正常退出/冷重开。输入需等待实际可交互提示或命令回显；全文观察在 reader 展示时核对，不要求后续导出或退出重复打印已完成正文。业务预算、原卡版本、完整文件与零额外工具效果断言保持。具体当前运行范围与未闭合资格归[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 

@@ -1275,3 +1275,19 @@ Root未参与UI源码编写，以原顺序和真实清屏反例完成独立审�
 同日志9MiB全文/导出1/13、15.65s：当前源码开发宿主、built Service与compatible Provider保未读preview、Ctrl+O实际全文/思考尾部、两次0600完整文件、准确两次Provider/一次Tool、零额外效果、正常owned退出及同profile冷重开；不是源码外安装或9MiB原生上滚压力。复用前片已修正的reader观察点，未重复要求退出重印全文。最终Native7输入未包含随后唯一变化的默认问题Python，故不重复运行已核Native；未把三个消费者拼成完整当前默认图。
 
 真实正文连续变化时仍替换代次；长诊断、notice/回执、复杂JSON回答及其他管理面板的动态高度尚未全面闭合。GUI终端、Linux/Windows、正式安装/native stdin、异常退出、默认可信Shell、完整§35/适用T-E/持续Soak和正式旧路径退役保持未完成；37项partial、Goal active。无关AGENTS保持独立，仅本任务按文档与本地提交门禁交付，无push/PR。
+
+## 2026-10-06：复杂 TUI 问题的完整原 JSON 编辑窗口
+
+当前材料切片已本地提交 `1902e48d0f5ec55a0f39b5bba450b646686a4667`，准确16路径、七项正常hooks，日志 `/private/tmp/kite-materials-phase-commit-20261006.log`、SHA `c184705d419906ac714f109bee7dcef0f842698614e43031c2e63050bb08020d`；index空且仅原无关AGENTS dirty。本片在同一持久checkout继续闭合复杂 question 的原JSON长草稿：单一原卡草稿map复用ComposerBuffer，共享私有TuiAnswerInput，保留完整原值与原身份/revision，支持字符簇编辑、换行及折叠paste。Enter仍沿原controller解析原JSON值，附件/未知原命令及审批/Source/方案规则保持。机制和消费者归[TUI](../../packages/ui/src/tui/README.md)、[CLI](../../apps/cli/README.md#tui-原生滚动与清屏)及[现有材料决定](../../.agents/notes/implemented/bug-fix/2026-10-06-current-tui-materials-scrollback.md)，手册问题操作同步；公共API/port、Core/Service与执行权威核对后无变化。
+
+实际PTY原红 `/private/tmp/kite-question-json-native-red-actual-20261006.log` 为0pass/1fail/141断言、14.67s，packet `/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-tui-scrollback-W6Od4i-evidence/`。30项Unicode JSON paste、状态及编辑分别输出28082/28081/28082bytes，均有3J/材料重发；当时基线viewportY0，不能声称该红已实查100行阅读位置或从非零位置拉回。held Popen27063正常exit0、mutationCalls0，result因断言失败保留success/cleanupConfirmed false与原root。最早runner漏repositoryRoot参数而TypeError、未执行测试，保在 `/private/tmp/kite-question-json-native-red-20261006.log`，不计产品红。实际键盘原红1pass/2fail/11断言保在 `/private/tmp/kite-question-json-input-red-20261006.log`；最终本文件23/137、5.71s通过，日志 `/private/tmp/kite-question-json-keys-green-20261006.log`，核完整原JSON唯一原Store/revision答案、换行/字符簇编辑、中间零Answer及草稿切换/新revision空草稿。
+
+最终全TUI223/1926、18.66s，日志 `/private/tmp/kite-question-json-ui-final-20261006.log`；UI/CLI类型、UIbuild及owned格式/driver语法通过。生产冻结SHA：index `d25f2ea1fa0e739730f65b5330ace6a2d4eefa093c8dc1dbfb722217ac3b18f7`，question-panel `d297495953697c3682a8ff9188a83eed00c233837dcd61e0c9e6a296a64d30b3`，presentation `1e0556817d65cdb10c5edda791b4139c96b5f58c5b9bf3e11b50f378d3c56697`。三个实际消费者沿原runTestJob/max1/no-orphans串行验证，日志 `/private/tmp/kite-question-json-consumers-final-20261006.log`；原生20秒、默认问题和导出90秒预算未扩。
+
+最终原生PTY1/169、16.82s，packet `/var/folders/m2/2brbc_757mn1yvqp09gdyz6c0000gn/T/kite-tui-scrollback-HyoKcO-evidence/`，Root核8输入SHA匹配，含ComposerBuffer。各基线先scrollToBottom再上滚100行并核准确baseY-100；全部90完成/40活动/35问题/60选项材料与原替换/clear/resize/单光标保留，另验30项原JSONpaste及12行逐行JSON。JSON基线288/388，paste/status/edit均288/388、typed288/391，更新零3J/材料重发且末行可见。held Popen35674正常exit0、mutationCalls0、success/cleanupConfirmed、root删除；有限port/POSIX80×24/headless VT不证明Service/Provider、安装或其他平台。
+
+源码外默认问题1/125、9.88s，packet `/private/tmp/kite-tui-question-evidence-fd4942f5-cd4b-49ab-9383-1a26fc9782be/`，candidate digest `c571c1c58d822fa6147ec046403f2c5e0bcfeac4a678776cd1891679fa13b5dc`。Root核15输入SHA匹配、两次Provider/29次GET-only observer、八次中间零Answer，最后唯一原Store/S/card/revision答案、卡1→2/acceptedDecisionRevision2、Tool succeeded/Run completed，原label/Unicode首尾空格多行及同字自由ID保持。held Popen36161正常Ctrl+Q/exit0、所属Service36198 returnedAfterCleanup/exit0、cleanupConfirmed无errors、root删除。实际默认Process/ask_user/Service/SQLite/Client由源码外开发candidate消费；临时credential backend不证明OSvault/收费Provider/安装/其他平台。
+
+9MiB全文/导出1/13、14.87s同日志：当前源码开发宿主+built Service/compatible Provider保原Ctrl+O全文/思考尾部、双完整0600文件、准确两Provider/一Tool、零额外效果、normal owned退出与同profile冷重开；不证明源码外安装或9MiB原生上滚压力。新recon Agent受系统thread数量限制，Root完成本片实现/核查，未宣称新增独立最终审查。后续仅文档变化复用冻结字节证据，不拼成完整默认图。
+
+持续正文版本变化、长诊断/notice/回执、审批/方案及其他面板动态高度仍未全面闭合；GUI、Linux/Windows、安装/native stdin、异常退出、默认可信Shell、§35/适用T-E/完整当前默认图/持续Soak及正式旧路径退役保持未完成。37项仍partial、Goal active，仅本任务本地阶段交付，无push/PR，无关AGENTS保持独立。

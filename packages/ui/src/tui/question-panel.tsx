@@ -1,6 +1,6 @@
 import { Box, useStdout } from 'ink';
 import stringWidth from 'string-width';
-import { composerDisplay } from './composer';
+import { type ComposerBuffer, composerDisplay } from './composer';
 import { terminalText } from './controller';
 import { TuiText as Text, useTuiPresentation } from './presentation';
 import { type QuestionDraft, type QuestionForm, questionLengthError } from './question';
@@ -38,20 +38,45 @@ export function QuestionMaterial({ form, step }: { form: QuestionForm; step: num
   );
 }
 
+/** The session owns input and the original draft; this renders its finite window. */
+export function TuiAnswerInput({ buffer }: { buffer: ComposerBuffer }) {
+  const { t } = useTuiPresentation();
+  const { stdout } = useStdout();
+  const prefix = `${t('Answer')} > `;
+  const width = questionInputWidth(stdout.columns, t('Answer'));
+  const { lines, index } = buffer.row(width),
+    start = Math.max(0, index - 2),
+    visible = lines.slice(start, start + 5);
+  return (
+    <Box flexDirection="column">
+      {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
+      {visible.map((line, n) => (
+        <Text key={start + n}>
+          {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
+          {buffer.parts.slice(line.start, line.end).map((part, i) => (
+            <Text
+              key={line.start + i}
+              inverse={start + n === index && buffer.cursor === line.start + i}
+            >
+              {composerDisplay(part)}
+            </Text>
+          ))}
+          {start + n === index && buffer.cursor === line.end && <Text inverse> </Text>}
+        </Text>
+      ))}
+      {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
+    </Box>
+  );
+}
+
 /** Input is handled by the session's single card listener. */
 export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: QuestionDraft }) {
   const { t } = useTuiPresentation();
-  const { stdout } = useStdout();
   const field = form.fields[draft.step]!,
     current = draft.fields[draft.step]!;
   const editing =
     field.text && (!field.choices.length || current.selected === field.choices.length);
   const lengthError = questionLengthError(field, current.buffer.text);
-  const prefix = `${t('Answer')} > `;
-  const width = questionInputWidth(stdout.columns, t('Answer'));
-  const { lines, index } = current.buffer.row(width),
-    start = Math.max(0, index - 2),
-    visible = lines.slice(start, start + 5);
   return (
     <Box flexDirection="column">
       <Text>
@@ -65,26 +90,7 @@ export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: Ques
           {t('Tab: skip optional answer')}
         </Text>
       )}
-      {editing && (
-        <Box flexDirection="column">
-          {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
-          {visible.map((line, n) => (
-            <Text key={start + n}>
-              {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
-              {current.buffer.parts.slice(line.start, line.end).map((part, i) => (
-                <Text
-                  key={line.start + i}
-                  inverse={start + n === index && current.buffer.cursor === line.start + i}
-                >
-                  {composerDisplay(part)}
-                </Text>
-              ))}
-              {start + n === index && current.buffer.cursor === line.end && <Text inverse> </Text>}
-            </Text>
-          ))}
-          {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
-        </Box>
-      )}
+      {editing && <TuiAnswerInput buffer={current.buffer} />}
       {editing && lengthError && (
         <Text color="yellow">
           {t(lengthError.kind === 'minimum' ? 'Answer needs at least' : 'Answer allows at most')}{' '}

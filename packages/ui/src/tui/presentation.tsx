@@ -8,6 +8,10 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   Answer: '回答',
   '↑ Earlier input': '↑ 前面的输入',
   '↓ Later input': '↓ 后面的输入',
+  'Ctrl+A: read required attachment. Question: original-schema JSON.':
+    'Ctrl+A：读取原附件。问题：按原 schema 输入 JSON。',
+  'Arrows/Home/End: edit JSON · Enter: submit · Shift+Enter: newline':
+    '方向键/Home/End：编辑 JSON · Enter：提交 · Shift+Enter：换行',
   'Custom answer': '自定义回答',
   'Tab: skip optional answer': 'Tab：跳过可选回答',
   'No selection (Enter has no answer)': '尚未选择（Enter 不提交回答）',

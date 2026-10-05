@@ -442,6 +442,94 @@ test('unsupported schema retains explicit original-schema JSON input', async () 
   app.unmount();
 });
 
+test('complex JSON paste retains the complete Unicode value and submits only the original card', async () => {
+  const f = fixture({ type: 'array', items: { type: 'string' } });
+  const original = Array.from({ length: 30 }, (_, i) => `  原文 ${i} / @ café é 🧭  `);
+  const raw = JSON.stringify(original, null, 2);
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  await tick();
+  app.stdin.write('\r');
+  await tick();
+  expect(f.answers).toHaveLength(0);
+  app.stdin.write(`\u001b[200~${raw}\u001b[201~`);
+  await tick();
+  expect(app.lastFrame()).toContain(`[Pasted ${Array.from(raw).length} characters]`);
+  expect(f.answers).toHaveLength(0);
+  app.stdin.write('\r');
+  await tick();
+  expect(f.answers).toEqual([
+    {
+      expectedStoreId: 'store',
+      expectedRevision: '1',
+      commandId: 'answer-1',
+      answer: { kind: 'question', answers: original },
+    },
+  ]);
+  expect(f.commandCount()).toBe(1);
+  app.unmount();
+});
+
+test('complex JSON supports newline and grapheme cursor editing without an intermediate Answer', async () => {
+  const f = fixture({ type: 'array', items: { type: 'string' } });
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  await tick();
+  for (const key of ['[', '\u001b[13;2u', '"🧭"]', '\u001b[D', '\u001b[D', '\u007f', '原文']) {
+    app.stdin.write(key);
+    await tick();
+  }
+  expect(f.answers).toHaveLength(0);
+  expect(app.lastFrame()).toContain('原文');
+  expect(app.lastFrame()).not.toContain('🧭');
+  app.stdin.write('\r');
+  await tick();
+  expect(f.answers[0]?.answer).toEqual({ kind: 'question', answers: ['原文'] });
+  app.unmount();
+});
+
+test('complex JSON drafts retain original card/session scope and a new revision starts empty', async () => {
+  const schema = { type: 'array', items: { type: 'string' } };
+  const f = fixture(schema);
+  f.cards([question(schema), question(schema, 'other')]);
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  await tick();
+  for (const key of [
+    '["first original"]',
+    '\u0002',
+    '\u001b[B',
+    '\r',
+    '["second original"]',
+    '\u0002',
+    '\u001b[A',
+    '\r',
+  ]) {
+    app.stdin.write(key);
+    await tick();
+  }
+  expect(app.lastFrame()).toContain('first original');
+  await f.controller.select('b');
+  await tick();
+  await f.controller.select('a');
+  await tick();
+  expect(app.lastFrame()).toContain('first original');
+  f.cards([question(schema, 'q', '2'), question(schema, 'other')]);
+  await f.controller.select('a');
+  await tick();
+  expect(app.lastFrame()).not.toContain('first original');
+  app.stdin.write('\r');
+  await tick();
+  expect(f.answers).toHaveLength(0);
+  app.stdin.write('["fresh original"]');
+  await tick();
+  app.stdin.write('\r');
+  await tick();
+  expect(f.answers[0]?.expectedRevision).toBe('2');
+  expect(f.answers[0]?.answer).toEqual({ kind: 'question', answers: ['fresh original'] });
+  app.unmount();
+});
+
 test('required original attachment blocks question Answer until original verified reader finishes', async () => {
   const f = fixture({ enum: ['wire-id'] });
   const card = question({ enum: ['wire-id'] });

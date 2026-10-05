@@ -9,7 +9,7 @@ const root = process.argv[2]!;
 let rounds = 1;
 let changedVersion = 0;
 let mutationCalls = 0;
-let tail: 'none' | 'active' | 'pending' | 'choices' = 'none';
+let tail: 'none' | 'active' | 'pending' | 'choices' | 'json' = 'none';
 let statusVersion = 0;
 const snapshot = (sessionId: string): TuiSnapshot => ({
   storeId: 'owned-render-store',
@@ -98,11 +98,16 @@ const snapshot = (sessionId: string): TuiSnapshot => ({
       : []),
   ],
   interactions:
-    tail !== 'pending' && tail !== 'choices'
+    tail !== 'pending' && tail !== 'choices' && tail !== 'json'
       ? []
       : [
           {
-            id: tail === 'choices' ? 'owned-long-choices' : 'owned-long-question',
+            id:
+              tail === 'choices'
+                ? 'owned-long-choices'
+                : tail === 'json'
+                  ? 'owned-json-question'
+                  : 'owned-long-question',
             originStoreId: 'owned-render-store',
             sessionId,
             presentationSessionId: sessionId,
@@ -140,7 +145,9 @@ const snapshot = (sessionId: string): TuiSnapshot => ({
                         ).join('\n'),
                       })),
                     }
-                  : { type: 'string', title: 'OWNED_LONG_ANSWER', minLength: 1 },
+                  : tail === 'json'
+                    ? { type: 'array', items: { type: 'string' } }
+                    : { type: 'string', title: 'OWNED_LONG_ANSWER', minLength: 1 },
             },
           },
         ],
@@ -211,7 +218,11 @@ timer = setInterval(async () => {
       await controller.select('a');
     } else if (control.action === 'status') {
       controller.observationUnavailable(`bounded-probe-${++statusVersion}`);
-    } else if (control.action === 'active' || control.action === 'pending') {
+    } else if (
+      control.action === 'active' ||
+      control.action === 'pending' ||
+      control.action === 'json'
+    ) {
       tail = control.action;
       await controller.select('a');
     } else if (control.action === 'pending-choices') {

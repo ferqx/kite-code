@@ -30,6 +30,7 @@ nativeTest(
       'packages/ui/src/tui/index.tsx',
       'packages/ui/src/tui/controller.ts',
       'packages/ui/src/tui/question-panel.tsx',
+      'packages/ui/src/tui/composer.ts',
       'packages/ui/src/tui/presentation.tsx',
       'apps/cli/test/fixtures/tui-scrollback-pty.tsx',
       'apps/cli/test/fixtures/tui-scrollback-pty.py',
@@ -66,6 +67,8 @@ nativeTest(
       toolBeforeQuestion: boolean;
       lastAnswerLinePresent: boolean;
       collapsedPastePresent: boolean;
+      jsonPastePresent: boolean;
+      jsonTailPresent: boolean;
       cursorCells: { column: number; text: string }[];
     }[] = [];
     try {
@@ -112,8 +115,10 @@ nativeTest(
         } else if (event.kind === 'resize') {
           terminal.resize(event.cols, event.rows);
         } else {
-          if (['round3', 'active', 'pending', 'pending-choices'].includes(event.name))
+          if (['round3', 'active', 'pending', 'pending-choices', 'json'].includes(event.name)) {
+            terminal.scrollToBottom();
             terminal.scrollLines(-100);
+          }
           const buffer = terminal.buffer.active;
           const text = Array.from({ length: buffer.length }, (_, index) =>
             buffer.getLine(index)?.translateToString(true),
@@ -159,6 +164,22 @@ nativeTest(
               text.indexOf('OWNED_LONG_QUESTION_TOOL') < text.indexOf('QUESTION_LINE_01'),
             lastAnswerLinePresent: text.includes('ANSWER_LINE_12'),
             collapsedPastePresent: text.includes('[Pasted 179 characters]'),
+            jsonPastePresent: text.includes(
+              `[Pasted ${
+                Array.from(
+                  JSON.stringify(
+                    Array.from(
+                      { length: 30 },
+                      (_, i) =>
+                        `JSON_DRAFT_LINE_${String(i + 1).padStart(2, '0')} 原文 / @ café é 🧭`,
+                    ),
+                    null,
+                    2,
+                  ),
+                ).length
+              } characters]`,
+            ),
+            jsonTailPresent: text.includes('JSON_TYPED_12 原文'),
             cursorCells,
           });
           if (event.ack) expect(event.ack.mutationCalls).toBe(0);
@@ -213,8 +234,12 @@ nativeTest(
           ],
         ],
         ['pending-choices', ['choices-status', 'choices-selected']],
+        ['json', ['json-pasted', 'json-status', 'json-edited', 'json-long-input']],
       ] as const) {
         expect(at(baseline).position.viewportY).toBeLessThan(at(baseline).position.baseY);
+        expect(at(baseline).position.viewportY).toBe(
+          Math.max(0, at(baseline).position.baseY - 100),
+        );
         for (const name of [baseline, ...updates]) {
           expect(at(name).counts).toEqual(allOnce);
           if (baseline === 'active') expect(at(name).activeCounts).toEqual(Array(40).fill(1));
@@ -235,6 +260,8 @@ nativeTest(
       expect(at('pending-pasted').collapsedPastePresent).toBe(true);
       expect(at('pending-visible-end').cursorCells).toEqual([{ column: 79, text: ' ' }]);
       expect(at('pending-wrap-next').cursorCells).toEqual([{ column: 9, text: 'a' }]);
+      expect(at('json-pasted').jsonPastePresent).toBe(true);
+      expect(at('json-long-input').jsonTailPresent).toBe(true);
       for (const name of ['pending-choices', 'choices-status', 'choices-selected'])
         expect(at(name).choiceCounts).toEqual(Array(60).fill(1));
       success = true;
