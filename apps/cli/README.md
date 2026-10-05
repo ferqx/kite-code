@@ -250,17 +250,17 @@ Offline maintenance v4 的 `assets.callerIntents` 与 CLI `caller_intents` 覆�
 
 ### 普通 CLI caller 的持久原申请
 
-通用 CLI 的 `run/resume`、显式 Workflow 激活，以及有限 JSON 入口共用 [caller port](host/caller-port.ts) 和 `ui/caller-intents.json` v1。该文件保存完整五类请求、原 Store/Session/Workspace/subject/Command ID、准确 target、完整 body SHA 与公共 canonical request SHA；普通 CLI 不伪造 UI draft。首次 POST 必须在 journal write/fsync/etag CAS/rename/目录 fsync 后，已有 ID（包括 prepared 且查不到回执）只能 GET 原 Command，不换 ID 补发。128 槽、16 MiB 是该私有整文件的明确容量；未知记录不驱逐，正文不截断，满额/坏文件/硬链失败零 POST。存储格式、profile-use 锁、维护 v4 资产与 TUI 共用，没有新增服务端任务 quota。
+通用 CLI 的 `run/resume`、显式 Workflow 激活，以及有限 JSON 入口共用 [caller port](host/caller-port.ts) 和 `ui/caller-intents.json` v1。该文件保存原五类请求与四种固定Auth invoke、原 Store/Session/Workspace/subject/Command ID、准确 target、完整 body SHA 与公共 canonical request SHA；普通 CLI 不伪造 UI draft。首次 POST 必须在 journal write/fsync/etag CAS/rename/目录 fsync 后，已有 ID（包括 prepared 且查不到回执）只能 GET 原 Command，不换 ID 补发。128 槽、16 MiB 是该私有整文件的明确容量；未知记录不驱逐，正文不截断，满额/坏文件/硬链失败零 POST。存储格式、profile-use 锁和 Caller 维护资产与 TUI 共用；实际含固定 Auth 时采用闭合 v13，旧 v4–v12 请求文法保持，没有新增服务端任务 quota。
 
 有限词法如下，均支持原 `--data-root`/`--kite-home` 与显式 `--server`：
 
 ```sh
-kite work <sessionId> --input '<闭合五类 DTO JSON>'
+kite work <sessionId> --input '<闭合 Caller DTO JSON：原五类或四固定 Auth>'
 kite caller list <sessionId> --input '{"expectedStoreId":"原Store","workspaceId":"原Workspace"}'
 kite caller lookup <sessionId> --input '<directory 中的完整原 intent JSON>'
 ```
 
-`work` 仅接受既有 `run.start`、`input.steer`、`input.follow_up`、`command.cancel`、`execution.cancel` DTO。没有 URL、任意 action、私有 owner/generation 或通用 HTTP 转发。`lookup` 在资产/profile I/O 前检查闭合 intent 与摘要，随后要求本地完整原记录相等；缺记录、改正文/Store/Workspace/subject、原 GET 缺失或无法核实都保 unknown，永不补 POST。`list` 只返回原 Store/Session/Workspace 的本地申请；不是 Command/报告目录。读取关闭或 Ctrl+C 不清记录。`work run.start/input.follow_up` 依次输出完整 `caller.intent`、原 `caller.receipt`、只观察原 Command 的 `work.event` 与 `work.outcome` JSON；原申请得到实际 Run 后继续原审批、question 和完整输出生命周期，准确 Run completed 才成功退出。queued follow-up 持续查原 Command 与其实际 Run，不借当前 active Run。其他三类 work 和 caller 查询输出有限 receipt/directory JSON；它们的 applied 只证明原回执，`cancel_requested` 不称目标已 cancelled。生命周期提示与原卡输入提示留给 stderr。退出 1 表示原失败或明确 prepare 未发 POST 的局部失败，2 表示尚未完成/unknown；非交互 EOF 或信号结束观察保留原记录。shared 仅 detach；paired 明确提示所属 Service 收尾可能中断仍活动的工作。
+`work` 接受原五类DTO及四个固定Auth invoke：builtin.mcp.sources、definitionVersion1、mcp.auth.login/refresh/clear/revoke，input恰serverId/full expectedReadSet。没有 URL、任意 action、私有 owner/generation 或通用 HTTP 转发。`lookup` 在资产/profile I/O 前检查闭合 intent 与摘要，随后要求本地完整原记录相等；缺记录、改正文/Store/Workspace/subject、原 GET 缺失或无法核实都保 unknown，永不补 POST。`list` 只返回原 Store/Session/Workspace 的本地申请；不是 Command/报告目录。读取关闭或 Ctrl+C 不清记录。`work run.start/input.follow_up` 依次输出完整 `caller.intent`、原 `caller.receipt`、只观察原 Command 的 `work.event` 与 `work.outcome` JSON；原申请得到实际 Run 后继续原审批、question 和完整输出生命周期，准确 Run completed 才成功退出。queued follow-up 持续查原 Command 与其实际 Run，不借当前 active Run。其他取消及Auth work和caller查询输出有限receipt/directory JSON；Auth applied仅是原Command结果，须另核mcp.auth.result，不能宣称Token保存；它们的 applied 只证明原回执，`cancel_requested` 不称目标已 cancelled。生命周期提示与原卡输入提示留给 stderr。退出 1 表示原失败或明确 prepare 未发 POST 的局部失败，2 表示尚未完成/unknown；非交互 EOF 或信号结束观察保留原记录。shared 仅 detach；paired 明确提示所属 Service 收尾可能中断仍活动的工作。
 
 普通 `run/resume` 继续原实际分支：resume 选择 Session 后发起新 Work，并非冷恢复；普通路径构造 `run.start`，显式 Workflow 激活遇到实际 active Run 才构造冻结原 Run/context 的 follow-up。本片不改变活动处理。完整 Workflow/Plan `extensionInputs` 随原请求保存。Ctrl+C 取消是新的持久 `command.cancel` 申请，目标固定原 Work Command；paired 后续观察仍通过原 caller port，不跳过摘要/subject 检查。`runNonInteractive` 的 run/work 需要宿主提供 durable caller port；裸 Client 不具有本地持久申请权限，其他旧查询/管理语义保持。
 
@@ -359,4 +359,13 @@ saved 必须同时核准确原 Command/subject/requestDigest、原 E 的 definit
 
 [codec/journal 测试](test/mcp-source-mutation.test.ts)、[有限 Host 反例](test/tui-mcp-source-mutation.test.ts)、[真实默认 Service 恢复测试](test/isolated/tui-mcp-source-mutation-recovery.test.ts)分别覆盖本地冲突/容量、closed 原事实和物理 socket 丢 POST/首 GET 回复。恢复测试实际 Add/Remove 各只有一个 POST，冷 caller 明确 lookup 得到原 saved 后 duplicate 仍仅 GET，游标、来源字节与唯一 Mutation 保持；Remove 读取 52 个来源的三页及 101 个 Workspace，目标不在首页。它证明同进程 caller/journal/Profile lease 冷重开，不声明 SIGKILL。
 
-[源码外 80×24 PTY](test/isolated/tui-mcp-source-mutation-pty.test.ts)沿真实 public terminal builder、Git、完整 candidate 和首 DB 前 selected SQLite 3.51.3，逐键 Add、Remove、Review/Confirm 与独立普通审批。移除 project 前明确显示 user fallback；新 project 保存仍 pending 独立来源批准。Source 与 physical Workspace 移除后的原选择零 GET、明确 Check 两原 GET、POST 0；公开 v12 create/inspect/restore 至新 Store 后保原 journal bytes/IDs，明确查回零原 HTTP。准确冻结、原失败、最新复验、正常退出和当前完整默认由[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)记录。source-entry saved 只证明声明发布；owned OAuth 清理、真实 OS vault、持续 Soak 与三平台分别保未完成范围。
+[源码外 80×24 PTY](test/isolated/tui-mcp-source-mutation-pty.test.ts)沿真实 public terminal builder、Git、完整 candidate 和首 DB 前 selected SQLite 3.51.3，逐键 Add、Remove、Review/Confirm 与独立普通审批。移除 project 前明确显示 user fallback；新 project 保存仍 pending 独立来源批准。Source 与 physical Workspace 移除后的原选择零 GET、明确 Check 两原 GET、POST 0；公开 v12 create/inspect/restore 至新 Store 后保原 journal bytes/IDs，明确查回零原 HTTP。准确冻结、原失败、最新复验、正常退出和当前完整默认由[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)记录。source-entry saved只证明声明发布，当前可选credentialCleanup单独表示owned本地清理；真实OS浏览器、OAuth PTY、持续Soak与三平台仍按各实际证据核验。
+
+
+## TUI MCP HTTP 认证与原申请
+
+[Auth host](host/tui-mcp-auth.ts)以当前完整Source snapshot/read-set核四个固定普通Action，prepare/submit复用同一[caller port](host/caller-port.ts)和ui/caller-intents.json，没有新Auth journal。首次POST仍需当前durable prepare；cold/duplicate只原GET，Store/subject在HTTP前实核。canonical Caller只闭合这四种Auth，不成为任意invoke转发；原五类请求类型继续供旧Desktop语法。
+
+status只当前safe policy/backend/presence。lookup核原Caller C/subject/request digest/receipt Execution，再核mcp.auth.result的完整binding/input digest/phase/authStatus/effectAttempted；Command applied单独不显示认证成功。history无当前Source/W/Vault读取，新Clear/Revoke仍需fresh Source/read-set，不能借历史越域。pending/unknown阻同scope冲突，cancel用同一execution.cancel普通申请。
+
+TUI先Review再独立Enter确认，成功提示凭据保存和另行连接；冷选择零GET，明确Check才查原Caller/Query，关闭/切S只停Reader。现有asset实际含Auth才选v13，旧manifest/请求语法不扩大，A→B保原bytes/身份且不授新HTTP许可。[Host](test/isolated/tui-mcp-auth.test.ts)、[Caller契约](test/isolated/caller-auth-contract.test.ts)和[Ink](../../packages/ui/test/tui/mcp-auth.test.tsx)各保实际范围；当前默认图与历史红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。真实OAuth PTY/系统浏览器/平台不由有限fixture证明。

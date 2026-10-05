@@ -1,6 +1,7 @@
 import { Box, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 import { type TuiController, terminalText } from './controller';
+import { TuiMcpAuthPanel } from './mcp-auth-panel';
 import type { TuiMcpSourceSnapshot } from './mcp-source';
 import { reviewableMcpSource } from './mcp-source-question';
 import { TuiText as Text, useTuiPresentation } from './presentation';
@@ -21,7 +22,18 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
   );
   type Choice =
     | { kind: 'server' | 'saved'; id: string }
-    | { kind: 'review' | 'lookup' | 'refresh' | 'next' | 'previous' | 'back' | 'main' };
+    | {
+        kind:
+          | 'auth'
+          | 'authHistory'
+          | 'review'
+          | 'lookup'
+          | 'refresh'
+          | 'next'
+          | 'previous'
+          | 'back'
+          | 'main';
+      };
   const actions: Choice[] = [
     ...(server
       ? facts && state.mcpSource?.read === 'ready' && reviewableMcpSource(server, facts)
@@ -30,6 +42,8 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
       : rows
           .slice(page * 25, (page + 1) * 25)
           .map((row) => ({ kind: 'server' as const, id: row.id }))),
+    ...(controller.hasMcpAuth && server?.transport === 'http' ? [{ kind: 'auth' as const }] : []),
+    ...(!server && controller.hasMcpAuth ? [{ kind: 'authHistory' as const }] : []),
     ...(state.mcpSourceOutcome ? [{ kind: 'lookup' as const }] : []),
     ...originals.map((row) => ({ kind: 'saved' as const, id: row.intent.request.commandId })),
     ...(!server && page > 0 ? [{ kind: 'previous' as const }] : []),
@@ -46,6 +60,7 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
     setPending(undefined);
   }, [facts]);
   useInput((input, key) => {
+    if (state.mcpAuthOpen) return;
     if (key.ctrl && input === 'c') {
       controller.closePanel();
       return;
@@ -71,7 +86,9 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
     else if (key.return) {
       const choice = actions[index];
       if (!choice) return;
-      if (choice.kind === 'server') {
+      if (choice.kind === 'auth') void controller.openMcpAuth(server?.id);
+      else if (choice.kind === 'authHistory') void controller.openMcpAuth();
+      else if (choice.kind === 'server') {
         setDetail(choice.id);
         setIndex(0);
       } else if (choice.kind === 'saved') controller.selectMcpSourceOriginal(choice.id);
@@ -100,6 +117,8 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
     return t(
       (
         {
+          auth: 'Authentication',
+          authHistory: 'Original authentication requests',
           review: 'Review project source',
           lookup: 'Check original source decision',
           refresh: 'Refresh project sources',
@@ -137,6 +156,7 @@ export function TuiMcpSourcePanel({ controller }: { controller: TuiController })
           : outcome?.phase === 'cancelled' && fact?.phase === 'cancelled'
             ? 'Source request cancelled'
             : 'Source outcome unknown; check original';
+  if (state.mcpAuthOpen) return <TuiMcpAuthPanel controller={controller} />;
   return (
     <Box flexDirection="column">
       <Text bold>

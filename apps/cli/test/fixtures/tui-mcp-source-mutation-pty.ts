@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { CLIServiceArtifact } from '../../host';
 
@@ -20,6 +21,7 @@ const log = (name: string, value: object) =>
 if (!process.stdin.isTTY) {
   const { createDefaultProcessConfiguration } = await import('@kite-ai/service/configuration');
   const { runServiceProcess } = await import('@kite-ai/service/main');
+  const credentials = createTemporaryCredentialBackend();
   await runServiceProcess({
     configure(startup, context) {
       return createDefaultProcessConfiguration({
@@ -45,13 +47,17 @@ if (!process.stdin.isTTY) {
         },
         credentialBackend: {
           kind: 'temporary',
+          async status() {
+            log('credentials.jsonl', { operation: 'status' });
+            return 'available';
+          },
           async put() {
             log('credentials.jsonl', { operation: 'put' });
             throw Error('owned_source_mutation_vault_forbidden');
           },
-          async resolve() {
+          async resolve(id) {
             log('credentials.jsonl', { operation: 'resolve' });
-            throw Error('owned_source_mutation_vault_forbidden');
+            return credentials.resolve(id);
           },
           async remove() {
             log('credentials.jsonl', { operation: 'remove' });

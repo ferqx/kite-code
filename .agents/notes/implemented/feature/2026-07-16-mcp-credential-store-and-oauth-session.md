@@ -2,6 +2,8 @@
 
 Status: implemented
 
+当前适用范围：native 系统保险库、无 fallback、秘密隔离、loopback/state 和不重放旧 Tool 的理由继续有效。新装配由[owned OAuth 与原认证 Action](../architecture/2026-10-05-owned-mcp-oauth-and-original-auth-actions.md)部分替代旧 Manager/独立 Store、持久 verifier、callback 自动连接与只读 `/mcp` route；下文保留原阶段决定及其历史资格，不作为当前调用链或三平台证明。
+
 ## Problem
 HTTP MCP Server 可以通过静态 Bearer/API key 或 OAuth 2.1 认证。token、client secret、PKCE verifier 和 discovery state 不能进入普通 JSONC、control snapshot、Runtime Event、session log 或命令行参数。Phase 2 后 `/mcp` 曾收敛为只读连接列表，因此认证恢复不能重新引入 `/mcp` 详情或管理 route。
 

@@ -13,7 +13,7 @@ import {
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient, requiresInteractionAttachment } from '@kite-ai/client';
+import { ClientError, createClient, requiresInteractionAttachment } from '@kite-ai/client';
 import { bootstrapSchema } from '@kite-ai/service/daemon';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
@@ -320,7 +320,20 @@ test('80x24 TUI explicitly requests cold connections and checks original warm/co
             throw Error('owned_connection_duplicate_submission');
           const latest = requests.at(-1)!;
           const client = await connected();
-          const command = await client.getCommand(latest.body.commandId);
+          let command: Awaited<ReturnType<typeof client.getCommand>>;
+          try {
+            command = await client.getCommand(latest.body.commandId);
+          } catch (error) {
+            // The UI ledger records the exact attempted POST before Service persists it.
+            // Wait only for that original ID's real 404, within the existing submission deadline.
+            if (
+              error instanceof ClientError &&
+              error.code === 'command_not_found' &&
+              error.status === 404
+            )
+              return undefined;
+            throw error;
+          }
           return command.status === 'applied'
             ? { client, command, input: latest.body.input }
             : undefined;

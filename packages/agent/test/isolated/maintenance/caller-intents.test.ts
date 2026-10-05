@@ -445,3 +445,131 @@ test('closed old v2/v3 restore keeps actual configuration/UI preference bytes un
     }
   }
 });
+
+function authRow(storeId: string, actionId = 'mcp.auth.login', index = 0) {
+  const read = (kind: string) => ({
+    identity: { kind, pathDigest: hash(kind), rootIdentity: hash(`${kind}-root`) },
+    etag: null,
+    error: null,
+  });
+  const request = {
+    expectedStoreId: storeId,
+    commandId: `auth_${index}`,
+    kind: 'extension.invoke',
+    extensionId: 'builtin.mcp.sources',
+    actionId,
+    definitionVersion: '1',
+    input: {
+      serverId: 'mcp-server',
+      expectedReadSet: {
+        scopeDigest: hash('scope'),
+        user: read('user'),
+        workspace: read('workspace'),
+        approvalEtag: null,
+        bindingEtag: null,
+        variablesDigest: hash('variables'),
+      },
+    },
+  };
+  const { expectedStoreId: _store, commandId: _command, ...publicRequest } = request;
+  return {
+    intent: {
+      scope: { storeId, sessionId: 'original_session', workspaceId: 'original_workspace' },
+      request,
+      target: { kind: 'session', id: 'original_session' },
+      subjectId: 'original_subject',
+      bodyDigest: hash(canonicalJson(request as Json)),
+      requestDigest: hash(canonicalJson(publicRequest as Json)),
+    },
+    phase: 'unknown',
+  };
+}
+
+test('fixed auth caller v1 selects v13 and restores original full bytes without retagging or authority', async () => {
+  const f = await fixture();
+  try {
+    const records = ['login', 'refresh', 'clear', 'revoke'].map((action, i) =>
+      authRow(f.storeId, `mcp.auth.${action}`, i),
+    );
+    const bytes = Buffer.from(`${JSON.stringify({ version: 1, records }, null, 2)}\n`);
+    writeFileSync(f.path, bytes, { mode: 0o600 });
+    const backup = await createProfileBackup(f);
+    expect(backup.manifest.version).toBe(13);
+    expect(backup.manifest.assets.callerIntents?.proof).toEqual({
+      sha256: hash(bytes.toString()),
+      byteLength: String(bytes.length),
+    });
+    expect(backup.manifest.assets.mcpSourceMutationIntents?.present).toBe(false);
+    expect(backup.manifest.assets.mcpReconnectionIntents?.present).toBe(false);
+    expect((await inspectProfileBackup(backup)).manifest).toEqual(backup.manifest);
+    for (const version of [4, 5, 6, 7, 8, 9, 10, 11, 12] as const) {
+      const downgraded = structuredClone(backup.manifest);
+      downgraded.version = version;
+      if (version < 12) delete downgraded.assets.mcpSourceMutationIntents;
+      if (version < 11) delete downgraded.assets.mcpReconnectionIntents;
+      if (version < 10) delete downgraded.assets.mcpSourceApprovalIntents;
+      if (version < 9) delete downgraded.assets.mcpConnectionIntents;
+      if (version < 8) delete downgraded.assets.mcpSelectionIntents;
+      if (version < 6) delete downgraded.assets.fileRecoveryIntents;
+      writeFileSync(join(backup.directory, 'ready.json'), JSON.stringify(downgraded), {
+        mode: 0o600,
+      });
+      await reject(inspectProfileBackup(backup), 'backup_caller_intents_invalid');
+    }
+    writeFileSync(join(backup.directory, 'ready.json'), JSON.stringify(backup.manifest), {
+      mode: 0o600,
+    });
+    const result = await restoreProfileBackup({
+      profile: f.profile,
+      expectedStoreId: f.storeId,
+      backup,
+      intent: 'replace_with_selected_backup',
+    });
+    expect(result.storeId).not.toBe(f.storeId);
+    expect(readFileSync(f.path)).toEqual(bytes);
+    expect(JSON.parse(readFileSync(f.path, 'utf8')).records).toEqual(records);
+  } finally {
+    f.close();
+  }
+}, 30000);
+
+test('auth grammar is independent and closed; recomputed digests cannot admit arbitrary invokes, malformed reads or Work drafts', async () => {
+  const { verifyCallerIntentRecords } = await import('../../../src/maintenance/caller-intents');
+  const original = authRow('store');
+  expect(() => verifyCallerIntentRecords([original])).toThrow(); // Desktop and legacy default.
+  expect(verifyCallerIntentRecords([original], true)).toBe(true);
+  const faults = [
+    (r: typeof original) => {
+      r.intent.request.extensionId = 'other';
+    },
+    (r: typeof original) => {
+      r.intent.request.actionId = 'mcp.source.approve';
+    },
+    (r: typeof original) => {
+      r.intent.request.definitionVersion = '2';
+    },
+    (r: typeof original) => {
+      r.intent.request.input.expectedReadSet.user.identity.kind = 'workspace';
+    },
+    (r: typeof original) => {
+      r.intent.request.input.expectedReadSet.variablesDigest = 'wrong';
+    },
+    (r: typeof original) => {
+      Object.assign(r.intent.request.input, { credential: 'forbidden' });
+    },
+    (r: typeof original) => {
+      Object.assign(r.intent, { draft: { id: hash('d'), revision: '1', textDigest: hash('d') } });
+    },
+  ];
+  for (const fault of faults) {
+    const r = structuredClone(original);
+    fault(r);
+    const { expectedStoreId: _s, commandId: _c, ...publicRequest } = r.intent.request;
+    r.intent.bodyDigest = hash(canonicalJson(r.intent.request as Json));
+    r.intent.requestDigest = hash(canonicalJson(publicRequest as Json));
+    expect(() => verifyCallerIntentRecords([r], true)).toThrow();
+  }
+  const changed = structuredClone(original);
+  changed.intent.request.input.expectedReadSet.scopeDigest = hash('changed');
+  expect(() => verifyCallerIntentRecords([changed], true)).toThrow();
+}, 5000);

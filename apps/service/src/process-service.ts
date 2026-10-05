@@ -126,6 +126,7 @@ export async function assembleProcessService(
     permissionManagement,
     diagnosticSource,
     skillCatalogue,
+    bindWorkspaceSerialLocks,
     ...runtimeConfiguration
   } = configuration;
   let runtime: ReturnType<typeof createRuntime> | undefined;
@@ -152,6 +153,9 @@ export async function assembleProcessService(
       }
       if (!runtimeConfiguration.workspaceSerialLocks)
         workspaceSerialLocks = createWorkspaceSerialLocks(selected);
+      bindWorkspaceSerialLocks?.(
+        (runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks)!,
+      );
       runtime = createRuntime({
         ...runtimeConfiguration,
         workspaceSerialLocks: runtimeConfiguration.workspaceSerialLocks ?? workspaceSerialLocks,

@@ -2,7 +2,7 @@
 
 原目录工具描述查看已完成 connect/refresh、[公共 Client](../../../client/README.md)与[暖/冷 TUI](../../../ui/src/tui/README.md)的有限实际链路，普通 Model Tool refresh 与公共备份恢复 A→B 后的原 metadata 读取均已实际验证；整体 V1.3 继续实施。查看不授予执行能力或完整管理中心资格。
 
-强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。本机23个目标主任务、源码外80×24整例及当前动态完整默认545文件/441主任务分别通过；真实冻结输入、结果提交故障、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；OAuth/续期、增删、持续Soak、三平台和完整V1.3继续分别验收。
+强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。本机23个目标主任务、源码外80×24整例及当前动态完整默认545文件/441主任务分别通过；真实冻结输入、结果提交故障、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；当前 OAuth/续期与来源增删边界见下文。持续 Soak、真实系统浏览器、OAuth PTY、三平台和完整 V1.3 继续分别验收。
 
 [createMcpAdapter](index.ts) 是显式可选协议适配器，没有第二 Runtime。import/factory 不 spawn、连接或读取旧配置；配置选择一个稳定 server ID 和 stdio（绝对 command/cwd、明确 args/env）或 HTTP URL/headers。凭据由宿主显式注入，adapter 不发现全局凭据、打开认证浏览器或打印远端错误正文。
 
@@ -20,6 +20,14 @@
 
 [完整包制品回归](../../../../tests/isolated/unified-agent/built-package.test.ts)按 Agent manifest 全部入口在同一次 build 构建，生成 Worker/guardian 资产后，从源码树外逐一导入并实际执行 SQLite、Shell、Skills 与 MCP。AI 也独立构建，不链接 workspace source alias；外部 npm 依赖复用已安装模块。该证据验证当前制品布局与执行定位，不代替独立安装、签名或跨平台发行资格。
 
+
+## 当前 HTTP OAuth 与原申请
+
+[OAuth provider](oauth-provider.ts) 复用 host 的一个 CredentialVault owned scope，持久 tokens/client information/discovery state 及新 tokenRevision；PKCE/state 仅在当前 flow。保存与冷读取沿 SDK schema 验证，并限定可消费的 Bearer ASCII grammar/8000字符；原生保存开始后的取消/失败保 publication unknown。现有 [Broker](credentials.ts) 的 `issueOwned` 仅接可信 private resolver，实际 header 前复核原连接全部 identity 与 tokenRevision；旧 handle 不因新登录而取得新材料。
+
+显式 Login/Refresh/Clear/Revoke、callback、真实网络策略和 OS opener 归 [Service owner](../../../../apps/service/README.md)与[认证 active](../../../../docs/active/mcp-authentication.md)。Adapter 不获得 SDK authProvider/finishAuth 或自动401重试；恢复已有凭据与临近过期 refresh 不打开浏览器或注册，认证成功与新连接独立申请，旧 Tool/Task 不重放。Source Remove 保声明发布与准确 owned cleanup 两个结果，manual共享引用不删除。
+
+普通失败 connect 的 quarantine 仅在原 parent/Job 完整身份、严格 stopped/unopened 终态和同一 Entry ended 后可解除，await后再核原 ticket/epoch/ref/digest；stop未知、迟到handle、reconnection持久化及发布隔离保持。[lifecycle](../../test/isolated/mcp/lifecycle.test.ts)新增真实 child terminal 提交屏障、stop unknown、坏 parent 和另一 Session 隔离；[reconnection](../../test/isolated/mcp/reconnection.test.ts)继续核 stop/late-handle/CAS/final-publication fence。完整默认与平台证明按[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不从旧测试的不覆盖范围推导当前缺失或资格。
 
 ## 纯缓存与最终准入
 
@@ -174,7 +182,7 @@ Service 的显式 host 工厂 [createMcpManagement](../../../../apps/service/src
 
 取消在 wire 前返回已知 cancelled，派发后的取消、超时或异常保持 unknown，零重试、无成功刷新记录。成功刷新单独保存 `refresh/<actualExecutionId>`，绑定原 input digest、原 Store/Session/Run、connection operation ref、原 connection record revision、前后 generation 和有限定义 projection；原 connection record 不覆盖。持久记录失败使本目录失效并保持 unknown。`mcp.catalogue` 的原历史 projection 与可选 `currentCatalogue` 分别展示，冷读取没有 current live catalogue，也不依据历史自动连接；同 Session/server 后来的新连接只附着其自身 operation ref，不把新目录投影到旧连接 record。
 
-[Service 实际管理资格](../../../../apps/service/test/isolated/mcp-management.test.ts)通过公共 Client Query/Action HTTP 通道、真实 SQLite/JSONC、临时 Bearer vault、固定 compatible SDK、本机 pinned HTTP 和 owned stdio，核对完整来源 CAS、独立 deny/Ask、错误原连接 ID、Model Tool 与普通 Action 刷新、新下一 Step schema、其他 Session 保持、取消前后、原 pending mutation unknown 和冷历史零 IO。[选择锁内 race](../../test/isolated/mcp/selection.test.ts)及[旧 capture 拒绝](../../test/isolated/mcp/reads.test.ts)分别验证文件 publication 与 adapter 最后 wire 边界。默认 Service 已由 owner 接线本管理 Extension 与可信 host registry，真实默认 registered/empty 两分支经 Client 验证；默认 process 的原始来源装配由 Service source owner 接线；OAuth/续期、正式管理 UI 与跨平台资格仍分别待实现。
+[Service 实际管理资格](../../../../apps/service/test/isolated/mcp-management.test.ts)通过公共 Client Query/Action HTTP 通道、真实 SQLite/JSONC、临时 Bearer vault、固定 compatible SDK、本机 pinned HTTP 和 owned stdio，核对完整来源 CAS、独立 deny/Ask、错误原连接 ID、Model Tool 与普通 Action 刷新、新下一 Step schema、其他 Session 保持、取消前后、原 pending mutation unknown 和冷历史零 IO。[选择锁内 race](../../test/isolated/mcp/selection.test.ts)及[旧 capture 拒绝](../../test/isolated/mcp/reads.test.ts)分别验证文件 publication 与 adapter 最后 wire 边界。默认 Service 已由 owner 接线本管理 Extension 与可信 host registry，真实默认 registered/empty 两分支经 Client 验证；默认 process 的原始来源装配由 Service source owner 接线；当前 OAuth/续期和正式 TUI 管理入口由各 owner 实施并独立验收；这组较早管理测试不证明它们，真实系统浏览器、OAuth PTY 与跨平台资格仍待取得。
 
 
 ## Scoped raw source connections

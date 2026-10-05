@@ -712,8 +712,8 @@ def drain(deadline=None):
   if reads>=16:raise RuntimeError('owned_frame_drain_limit')
   if deadline is not None and time.monotonic()>deadline:raise RuntimeError('owned_frame_drain_deadline')
   receive(0);reads+=1
-def wait(text,compact=False):
- deadline=time.monotonic()+10
+def wait(text,compact=False,deadline=None):
+ if deadline is None:deadline=time.monotonic()+10
  while True:
   drain(deadline)
   if text in (normalized().replace(' ','') if compact else normalized()):
@@ -727,6 +727,21 @@ def key(value,preserveSelectedFrame=False):
  note('key',hex=value.hex(),preserveSelectedFrame=preserveSelectedFrame,frame=normalized()[-32768:])
  if not preserveSelectedFrame:buffer=''
  os.write(master,value)
+def choose_source(label):
+ # Select the exact visible menu row in a fresh complete Ink frame, not a fixed offset.
+ deadline=time.monotonic()+10
+ for step in range(16):
+  drain(deadline)
+  frame=normalized().replace(' ','');target=label.replace(' ','')
+  if '›'+target in frame:
+   note('source-choice',label=label,frame=normalized()[-32768:]);return
+  selected_at=frame.find('›');target_at=frame.find(target)
+  if selected_at<0:raise RuntimeError('owned_source_selection_absent')
+  # Long original IDs can push the earlier lookup row outside this 80x24 frame.
+  # The actual panel puts lookup before originals; move toward it, then require its visible selection.
+  if target_at<0 and label!='Check original source decision':raise RuntimeError('owned_source_choice_absent:'+label)
+  key(b'\\x1b[A' if target_at<0 or target_at<selected_at else b'\\x1b[B');wait('Project sources',deadline=deadline)
+ raise RuntimeError('owned_source_choice_unavailable:'+label)
 def selected(command_id):
  # Only the outcome detail has the original Session suffix; list labels do not.
  detail='Originalsourcedecision:'+command_id+'·OriginalStore:'+${JSON.stringify(storeId)}+'·Sessiona'
@@ -757,18 +772,18 @@ try:
  ids=[]
  for n,decision in enumerate(['approved','rejected','cancel'],1):
   sources();wait('Source list ready');key(b'\\r');wait('› Review project source');key(b'\\r');wait('Confirm project source review:');control('before-confirm/'+str(n));key(b'\\r');wait('Original source decision:');key(b'\\x03');ordinary=control('ordinary/'+str(n));wait('approval['+ordinary['id']+']originalSessiona',True)
-  key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True);wait('Up/Down explicit source decision: none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n));key(b'\\x1b[B'*n);wait('Up/Down explicit source decision: '+decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');key(b'\\x1b[B');wait('› Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
+  key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True);wait('Up/Down explicit source decision: none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n));key(b'\\x1b[B'*n);wait('Up/Down explicit source decision: '+decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
  control('warm-complete');close('warm')
  for cold in ['cold-removed','cold-missing']:
   control(cold);start(cold);sources();wait('Source list ready' if cold=='cold-removed' else 'Source list unknown; original decisions remain available')
   for n,command_id in enumerate(ids,1):
-   control('selection-baseline');key(b'\\x1b[B'*n);wait('›Originalsourcedecision:'+command_id,True);
+   control('selection-baseline');choose_source('Original source decision: '+command_id)
    if n==1:selected(command_id)
-   key(b'\\r',preserveSelectedFrame=(n==1));selected(command_id);control('cold-selected');key(b'\\x1b[A'*n);wait('› Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('cold-lookup/'+str(n))
+   key(b'\\r',preserveSelectedFrame=True);selected(command_id);control('cold-selected');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('cold-lookup/'+str(n))
   key(b'\\x03');wait('New Run >');control('check');close(cold)
  control('cold-foreign');start('cold-foreign');sources();wait('Source list unknown; original decisions remain available')
  for n,command_id in enumerate(ids,1):
-  control('selection-baseline');key(b'\\x1b[B'*(n-1 if n==1 else n));wait('›Originalsourcedecision:'+command_id,True);key(b'\\r');selected(command_id);wait('Source outcome unknown; check original');control('foreign-selected/'+str(n));key(b'\\x1b[A'*(0 if n==1 else n));wait('› Check original source decision');note('foreign-check-key',commandId=command_id,observation='retained identical known detail; no new frame or public receipt');key(b'\\r',preserveSelectedFrame=True);selected(command_id);wait('Source outcome unknown; check original');control('foreign-lookup/'+str(n))
+  control('selection-baseline');choose_source('Original source decision: '+command_id);key(b'\\r',preserveSelectedFrame=True);selected(command_id);wait('Source outcome unknown; check original');control('foreign-selected/'+str(n));choose_source('Check original source decision');note('foreign-check-key',commandId=command_id,observation='retained identical known detail; no new frame or public receipt');key(b'\\r',preserveSelectedFrame=True);selected(command_id);wait('Source outcome unknown; check original');control('foreign-lookup/'+str(n))
  key(b'\\x03');wait('New Run >');control('check');close('cold-foreign')
  cleanup=True;print('SOURCE_APPROVAL_WARM_COLD_COMPLETE')
 except BaseException as error:

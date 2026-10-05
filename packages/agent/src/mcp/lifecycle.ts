@@ -295,6 +295,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     ensureAttempted?: boolean;
     completed?: boolean;
     safeTerminal?: boolean;
+    releaseAfterStoppedOpening?: boolean;
     openAllowed: ReturnType<typeof deferred<void>>;
     onRef?: (ref: OperationRef) => Promise<void>;
     verifyUnopened?: (sessionId: string, executionId: string, input: Json) => Promise<boolean>;
@@ -779,6 +780,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       const n = await context.getExecution(ticket.ref.executionId);
       return (
         !!n &&
+        n.id === ticket.ref.executionId &&
         n.kind === 'job' &&
         n.parentExecutionId === ticket.executionId &&
         n.originCommandId === ticket.ref.commandId &&
@@ -794,6 +796,81 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     } catch {
       return false;
     }
+  }
+  async function releaseStoppedOpening(
+    context: ActionContext,
+    storeId: string,
+    sessionId: string,
+    serverId: string,
+  ) {
+    const scope = scopeKey(storeId, sessionId, serverId);
+    const ticket = tickets.get(scope);
+    if (
+      !ticket?.releaseAfterStoppedOpening ||
+      ticket.mode !== 'quarantined' ||
+      ticket.completed ||
+      !ticket.ref?.executionId ||
+      closed ||
+      context.signal.aborted
+    )
+      return;
+    const identity = () =>
+      proofHash({
+        scope: ticket.scope,
+        epoch: ticket.epoch,
+        executionId: ticket.executionId,
+        inputDigest: ticket.inputDigest,
+        ref: ticket.ref as unknown as Json,
+        bootstrapId: ticket.bootstrapId ?? null,
+        bootstrapExecutionId: ticket.bootstrapExecutionId ?? null,
+        jobInputDigest: ticket.jobInputDigest ?? null,
+        jobDefinitionId: ticket.jobDefinitionId ?? null,
+        jobDefinitionVersion: ticket.jobDefinitionVersion ?? null,
+        rootWorkCommandId: ticket.rootWorkCommandId ?? null,
+        rootWorkSeq: ticket.rootWorkSeq ?? null,
+      });
+    const originalIdentity = identity();
+    const entry = ticket.newEntry;
+    const entryStopped = () =>
+      entry
+        ? ticket.newEntry === entry &&
+          entries.get(ticket.ref!.executionId!) === entry &&
+          live.get(scope) === entry &&
+          entry.terminal === 'ended'
+        : !ticket.newEntry &&
+          !entries.has(ticket.ref!.executionId!) &&
+          live.get(scope) === ticket.holder;
+    if (!entryStopped()) return;
+    const parent = await context.getExecution(ticket.executionId);
+    if (
+      !parent ||
+      parent.id !== ticket.executionId ||
+      parent.originStoreId !== storeId ||
+      parent.sessionId !== sessionId ||
+      parent.inputDigest !== ticket.inputDigest ||
+      !['tool', 'job'].includes(parent.kind) ||
+      !['mcp.connect', `${mcpLifecycleExtensionId}/mcp.connect`].includes(
+        parent.definitionId ?? '',
+      ) ||
+      parent.definitionVersion !== '1' ||
+      !['failed', 'cancelled', 'outcome_unknown'].includes(parent.status) ||
+      !(await safeJobTerminal(context, ticket))
+    )
+      return;
+    if (
+      closed ||
+      context.signal.aborted ||
+      tickets.get(scope) !== ticket ||
+      ticket.mode !== 'quarantined' ||
+      !ticket.releaseAfterStoppedOpening ||
+      ticket.completed ||
+      identity() !== originalIdentity ||
+      !entryStopped()
+    )
+      return;
+    tickets.delete(scope);
+    if (ticket.bootstrapId && admitted.get(ticket.bootstrapId)?.ticket === ticket)
+      admitted.delete(ticket.bootstrapId);
   }
   async function connect(input: Json, context: ActionContext): Promise<ToolResult> {
     const request = input as { serverId: string; key: string };
@@ -815,6 +892,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     let ticket: Ticket;
     try {
       await confirmScopePublication(own.originStoreId, context.sessionId, request.serverId);
+      await releaseStoppedOpening(context, own.originStoreId, context.sessionId, request.serverId);
       ticket = claim(
         own.originStoreId,
         context.sessionId,
@@ -837,8 +915,10 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     } finally {
       if (tickets.get(ticket.scope) === ticket) {
         const settled = await safeJobTerminal(context, ticket);
-        if (ticket.ensureAttempted && !ticket.completed && !settled) ticket.mode = 'quarantined';
-        else {
+        if (ticket.ensureAttempted && !ticket.completed && !settled) {
+          ticket.mode = 'quarantined';
+          ticket.releaseAfterStoppedOpening = true;
+        } else {
           tickets.delete(ticket.scope);
           if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
         }

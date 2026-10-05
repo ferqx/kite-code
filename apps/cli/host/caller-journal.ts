@@ -90,7 +90,9 @@ function finite<T>(action: () => T): T {
     throw unavailable();
   }
 }
-/** Caller metadata only; held public profile-use lease and data lock protect publication. */
+/** Caller v1 retains the closed Work/Cancel and fixed auth request grammar.
+ * applied is a Command phase, never an authentication-effect receipt.
+ * Held public profile-use lease and data lock protect publication. */
 export function openCallerJournal(input: {
   access: ProfileAccess;
   acquireWriteLock: () => FileLock;

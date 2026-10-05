@@ -9,7 +9,9 @@
 
 正式/default/CI已使用八workspace通用Agent与Service。当前MCP生命周期、原catalogue、Source、强制重连与最终wire准入由[Agent MCP owner](../../packages/agent/src/mcp/README.md)承担，可信来源/transport装配归[Service](../../apps/service/README.md)，共享TUI与薄Caller分别归[UI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md)。原Query不恢复transport或许可，独立Action/Job沿同一Execution；恢复与发布不变量见[当前跨包合同](mcp-config-management.md#强制重连的来源发布与恢复边界)。
 
-下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
+当前HTTP OAuth由[认证边界](mcp-authentication.md)维护：四个普通Auth Action与原结果Query复用一个Vault/Broker和实际Workspace协调器，认证成功与connect/reconnect分别证明；401不自动打开浏览器或重放。Source Remove的声明发布与owned credentialCleanup分别保存。原Caller资产条件v13保身份与字节，不引入第二管理Runtime。
+
+下列Manager/Supervisor/provider/control snapshot名称与旧workspace路径记录历史装配和仍需核对的理由，不能作为当前owner、正式运行或测试调度入口。认证的系统浏览器/OAuth PTY、旧policy替代、远端取消、持续Soak与三平台尚有未闭合范围，按[总体进度](../plans/unified-agent-refactor-v1-progress.md)核对，不从旧Note implemented状态推定新功能已交付。
 
 ## 权威与依赖
 

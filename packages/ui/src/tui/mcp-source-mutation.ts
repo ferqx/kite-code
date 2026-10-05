@@ -88,6 +88,11 @@ export interface TuiMcpSourceMutationFact {
       })
     | null;
   reason: string | null;
+  /** Source saved proves only declaration publication. OAuth cleanup has its own result. */
+  credentialCleanup?: {
+    status: 'not_attempted' | 'not_needed' | 'completed' | 'failed' | 'outcome_unknown';
+    attempted: boolean;
+  };
 }
 export interface TuiMcpSourceMutationOutcome {
   intent: TuiMcpSourceMutationIntent;

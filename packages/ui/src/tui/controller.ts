@@ -47,6 +47,13 @@ import type {
   TuiManagementPort,
 } from './management';
 import type { TuiMcpIntent, TuiMcpOutcome, TuiMcpPort, TuiMcpSnapshot } from './mcp';
+import {
+  mcpAuthRequest,
+  type TuiMcpAuthAction,
+  type TuiMcpAuthOutcome,
+  type TuiMcpAuthPort,
+  type TuiMcpAuthStatus,
+} from './mcp-auth';
 import type { TuiMcpConnectionIntent, TuiMcpConnectionOutcome } from './mcp-connection';
 import type { TuiMcpReconnectionObservation, TuiMcpReconnectionOutcome } from './mcp-reconnection';
 import {
@@ -98,6 +105,7 @@ export * from './export';
 export * from './file-candidates';
 export * from './management';
 export * from './mcp';
+export * from './mcp-auth';
 export * from './models';
 export * from './permissions';
 export * from './preferences';
@@ -125,6 +133,7 @@ export interface TuiPort {
   preferences?: TuiPreferencePort;
   models?: TuiModelPort;
   mcp?: TuiMcpPort;
+  mcpAuth?: TuiMcpAuthPort;
   drafts?: TuiDraftPort;
   fileCandidates?: TuiFileCandidatesPort;
   callers?: TuiCallerPort;
@@ -239,6 +248,12 @@ export interface TuiState {
   mcpMutationOutcome?: TuiMcpSourceMutationOutcome;
   mcpMutationError?: string;
   mcpMutationReading?: boolean;
+  mcpAuthOpen?: boolean;
+  mcpAuthServerId?: string;
+  mcpAuthStatus?: TuiMcpAuthStatus;
+  mcpAuthOutcome?: TuiMcpAuthOutcome;
+  mcpAuthReading?: boolean;
+  mcpAuthError?: string;
   mcpSourceOpen?: boolean;
   mcpSource?: { facts?: TuiMcpSourceSnapshot; read: 'reading' | 'ready' | 'failed' };
   mcpSourceOutcome?: TuiMcpSourceApprovalOutcome;
@@ -388,6 +403,10 @@ export class TuiController {
   private mcpMutationRead?: AbortController;
   private mcpMutationBusy = false;
   private mcpMutationIntents = new Map<string, TuiMcpSourceMutationOutcome>();
+  private mcpAuthRead?: AbortController;
+  private mcpAuthBusy = false;
+  private mcpAuthView = 0;
+  private mcpAuthOutcomes = new Map<string, TuiMcpAuthOutcome>();
   private mcpSourceRead?: AbortController;
   private mcpSourceLookupRead?: AbortController;
   private mcpSourceBusy = false;
@@ -841,6 +860,12 @@ export class TuiController {
       mcpMutationFacts: same ? this.value.mcpMutationFacts : undefined,
       mcpMutationOutcome: same ? this.value.mcpMutationOutcome : undefined,
       mcpMutationReading: false,
+      mcpAuthOpen: same ? this.value.mcpAuthOpen : false,
+      mcpAuthServerId: same ? this.value.mcpAuthServerId : undefined,
+      mcpAuthStatus: same ? this.value.mcpAuthStatus : undefined,
+      mcpAuthOutcome: same ? this.value.mcpAuthOutcome : undefined,
+      mcpAuthReading: false,
+      mcpAuthError: undefined,
       mcpSourceOpen: same ? this.value.mcpSourceOpen : false,
       mcpSource: same ? this.value.mcpSource : undefined,
       mcpSourceOutcome: same ? this.value.mcpSourceOutcome : undefined,
@@ -884,6 +909,7 @@ export class TuiController {
         this.mcpToolsRead?.abort();
         this.mcpConnectionRead?.abort();
         this.mcpReconnectionRead?.abort();
+        this.mcpAuthRead?.abort();
         this.mcpSourceRead?.abort();
         this.mcpSourceLookupRead?.abort();
         this.publish({
@@ -1158,6 +1184,7 @@ export class TuiController {
     this.mcpToolsRead?.abort();
     this.mcpConnectionRead?.abort();
     this.mcpReconnectionRead?.abort();
+    this.mcpAuthRead?.abort();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
     this.permissionRead?.abort();
@@ -1169,6 +1196,8 @@ export class TuiController {
       mcpReconnectionObservation: undefined,
       mcpReconnectionReading: false,
       mcpReconnectionObserving: false,
+      mcpAuthOpen: false,
+      mcpAuthReading: false,
       mcpSourceOpen: false,
       mcpSourceReading: false,
     });
@@ -2688,6 +2717,7 @@ export class TuiController {
     const session = this.value.snapshot?.view.session,
       port = this.port.mcp?.source;
     if (!session || !port || this.disposed) return;
+    this.mcpAuthRead?.abort();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
     const read = this.reading(),
@@ -2740,8 +2770,257 @@ export class TuiController {
       this.reads.delete(read);
     }
   }
+  get hasMcpAuth() {
+    return Boolean(this.port.mcpAuth && this.port.callers);
+  }
+  async openMcpAuth(serverId?: string) {
+    const session = this.value.snapshot?.view.session,
+      port = this.port.mcpAuth,
+      observed = this.value.mcpSource?.facts;
+    if (!session || !port || !this.value.mcpSourceOpen || this.disposed) return;
+    if (
+      serverId &&
+      (!observed ||
+        this.value.mcpSource?.read !== 'ready' ||
+        !observed.items.some((x) => x.id === serverId && x.transport === 'http'))
+    )
+      return;
+    this.mcpAuthView++;
+    this.mcpAuthRead?.abort();
+    const read = this.reading(),
+      generation = this.generation;
+    this.mcpAuthRead = read;
+    this.publish({
+      mcpAuthOpen: true,
+      mcpAuthServerId: serverId,
+      mcpAuthStatus: undefined,
+      mcpAuthOutcome: undefined,
+      mcpAuthReading: Boolean(serverId),
+      mcpAuthError: undefined,
+    });
+    try {
+      await this.restoreCallers();
+      for (const key of this.mcpAuthOutcomes.keys())
+        if (!this.value.callers.has(key)) this.mcpAuthOutcomes.delete(key);
+      if (!serverId || !observed) return;
+      const status = await port.read(observed, serverId, read.signal);
+      if (
+        this.disposed ||
+        read.signal.aborted ||
+        this.mcpAuthRead !== read ||
+        generation !== this.generation ||
+        !this.value.mcpAuthOpen ||
+        this.value.sessionId !== session.id ||
+        this.value.snapshot?.view.session.workspaceId !== session.workspaceId
+      )
+        return;
+      if (
+        status.serverId !== serverId ||
+        status.workspaceId !== session.workspaceId ||
+        !['oauth', 'auto'].includes(status.policy) ||
+        !['available', 'locked', 'unavailable'].includes(status.status) ||
+        typeof status.credentialPresent !== 'boolean' ||
+        typeof status.loginAllowed !== 'boolean'
+      )
+        throw Error('mcp_auth_status_invalid');
+      this.publish({ mcpAuthStatus: freezeIntent(structuredClone(status)), mcpAuthReading: false });
+    } catch {
+      if (!read.signal.aborted && this.mcpAuthRead === read && this.value.mcpAuthOpen)
+        this.publish({ mcpAuthReading: false, mcpAuthError: 'mcp_auth_status_unavailable' });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
+  closeMcpAuth() {
+    this.mcpAuthView++;
+    this.mcpAuthRead?.abort();
+    this.publish({ mcpAuthOpen: false, mcpAuthReading: false, mcpAuthError: undefined });
+  }
+  selectMcpAuthOriginal(key: string) {
+    const row = this.value.callers.get(key);
+    if (!row || !mcpAuthRequest(row.intent) || !this.value.mcpAuthOpen) return;
+    this.mcpAuthRead?.abort();
+    this.mcpAuthView++;
+    this.publish({
+      mcpAuthOutcome: this.mcpAuthOutcomes.get(key) ?? {
+        intent: row.intent,
+        phase: 'outcome_unknown',
+      },
+      mcpAuthReading: false,
+      mcpAuthError: undefined,
+    });
+  }
+  async requestMcpAuth(action: TuiMcpAuthAction, observed = this.value.mcpSource?.facts) {
+    const session = this.value.snapshot?.view.session,
+      status = this.value.mcpAuthStatus,
+      port = this.port.mcpAuth;
+    if (
+      this.disposed ||
+      this.mcpAuthBusy ||
+      !session ||
+      !port ||
+      !this.port.callers ||
+      !this.value.mcpAuthOpen ||
+      !observed ||
+      observed !== this.value.mcpSource?.facts ||
+      observed.sessionId !== session.id ||
+      observed.workspaceId !== session.workspaceId ||
+      observed.storeId !== this.port.storeId ||
+      !observed.readSet ||
+      !status ||
+      status.serverId !== this.value.mcpAuthServerId ||
+      status.status !== 'available' ||
+      (action === 'mcp.auth.login' && !status.loginAllowed) ||
+      !['mcp.auth.login', 'mcp.auth.refresh', 'mcp.auth.clear', 'mcp.auth.revoke'].includes(action)
+    )
+      return;
+    this.mcpAuthBusy = true;
+    const request: TuiCallerRequest = {
+      expectedStoreId: this.port.storeId,
+      commandId: this.port.nextCommandId(),
+      kind: 'extension.invoke',
+      extensionId: 'builtin.mcp.sources',
+      actionId: action,
+      definitionVersion: '1',
+      input: JSON.parse(
+        JSON.stringify({ serverId: status.serverId, expectedReadSet: observed.readSet }),
+      ),
+    };
+    const generation = this.generation,
+      view = this.mcpAuthView;
+    let intent: TuiCallerIntent | undefined;
+    try {
+      intent = freezeIntent(await port.prepare(request, observed));
+      if (
+        intent.scope.storeId !== observed.storeId ||
+        intent.scope.sessionId !== observed.sessionId ||
+        intent.scope.workspaceId !== observed.workspaceId ||
+        JSON.stringify(intent.request) !== JSON.stringify(request)
+      )
+        throw Error('mcp_auth_intent_invalid');
+      const key = callerKey(intent);
+      this.publish({
+        callers: new Map(this.value.callers).set(key, { intent, phase: 'submitting' }),
+      });
+      const result = await port.submit(intent);
+      if (JSON.stringify(result.intent) !== JSON.stringify(intent))
+        throw Error('mcp_auth_intent_invalid');
+      const outcome: TuiMcpAuthOutcome = {
+        intent,
+        phase:
+          result.phase === 'accepted' || result.phase === 'applied' ? 'pending' : 'outcome_unknown',
+        caller: result,
+      };
+      this.mcpAuthOutcomes.set(key, outcome);
+      if (this.disposed) return;
+      this.publish({ callers: new Map(this.value.callers).set(key, result) });
+      if (
+        generation === this.generation &&
+        view === this.mcpAuthView &&
+        this.value.mcpAuthOpen &&
+        this.value.sessionId === session.id &&
+        this.value.snapshot?.view.session.workspaceId === session.workspaceId
+      )
+        this.publish({ mcpAuthOutcome: outcome, mcpAuthError: undefined });
+    } catch {
+      if (intent) {
+        const key = callerKey(intent),
+          outcome: TuiMcpAuthOutcome = { intent, phase: 'outcome_unknown' };
+        this.mcpAuthOutcomes.set(key, outcome);
+        if (!this.disposed)
+          this.publish({
+            callers: new Map(this.value.callers).set(key, { intent, phase: 'unknown' }),
+          });
+      }
+      if (
+        !this.disposed &&
+        generation === this.generation &&
+        view === this.mcpAuthView &&
+        this.value.mcpAuthOpen
+      )
+        this.publish({ mcpAuthError: 'mcp_auth_request_unavailable' });
+    } finally {
+      this.mcpAuthBusy = false;
+    }
+  }
+  async lookupMcpAuth() {
+    const original = this.value.mcpAuthOutcome,
+      port = this.port.mcpAuth;
+    if (!original || !port || !this.value.mcpAuthOpen || this.disposed) return;
+    this.mcpAuthRead?.abort();
+    const read = this.reading(),
+      generation = this.generation,
+      key = callerKey(original.intent);
+    this.mcpAuthRead = read;
+    this.publish({ mcpAuthReading: true, mcpAuthError: undefined });
+    try {
+      const outcome = await port.lookup(original.intent, read.signal);
+      if (JSON.stringify(outcome.intent) !== JSON.stringify(original.intent))
+        throw Error('mcp_auth_intent_invalid');
+      if (!read.signal.aborted)
+        this.mcpAuthOutcomes.set(key, freezeIntent(structuredClone(outcome)));
+      if (
+        this.disposed ||
+        read.signal.aborted ||
+        generation !== this.generation ||
+        this.mcpAuthRead !== read ||
+        !this.value.mcpAuthOpen ||
+        !this.value.mcpAuthOutcome ||
+        callerKey(this.value.mcpAuthOutcome.intent) !== key
+      )
+        return;
+      this.publish({
+        mcpAuthOutcome: outcome,
+        mcpAuthReading: false,
+        ...(outcome.caller
+          ? { callers: new Map(this.value.callers).set(key, outcome.caller) }
+          : {}),
+      });
+    } catch {
+      if (!read.signal.aborted && this.mcpAuthRead === read && this.value.mcpAuthOpen)
+        this.publish({ mcpAuthReading: false, mcpAuthError: 'mcp_auth_original_unavailable' });
+    } finally {
+      this.reads.delete(read);
+    }
+  }
+  async cancelMcpAuth() {
+    const original = this.value.mcpAuthOutcome,
+      e = original?.fact?.execution;
+    if (
+      !original ||
+      !e ||
+      original.phase !== 'pending' ||
+      !['planned', 'dispatching', 'running'].includes(e.status) ||
+      original.intent.scope.storeId !== this.port.storeId ||
+      original.intent.scope.sessionId !== this.value.sessionId ||
+      e.originStoreId !== original.intent.scope.storeId ||
+      e.sessionId !== original.intent.scope.sessionId ||
+      e.originCommandId !== original.intent.request.commandId ||
+      original.fact?.phase !== 'pending' ||
+      original.fact?.binding?.executionId !== e.id ||
+      original.fact.binding.originalStoreId !== original.intent.scope.storeId ||
+      original.fact.binding.sessionId !== original.intent.scope.sessionId ||
+      original.fact.command?.subjectId !== original.intent.subjectId ||
+      original.fact.command?.id !== original.intent.request.commandId ||
+      original.fact.command.requestDigest !== original.intent.requestDigest ||
+      !this.port.callers
+    )
+      return;
+    try {
+      await this.submitCaller(original.intent.scope, {
+        expectedStoreId: this.port.storeId,
+        commandId: this.port.nextCommandId(),
+        kind: 'execution.cancel',
+        executionId: e.id,
+      });
+    } catch {
+      if (this.value.mcpAuthOpen) this.publish({ mcpAuthError: 'mcp_auth_cancel_unknown' });
+    }
+  }
   closeMcpSources() {
+    this.closeMcpAuth();
     this.closeMcpSourceMutations();
+    this.mcpAuthRead?.abort();
     this.mcpSourceRead?.abort();
     this.mcpSourceLookupRead?.abort();
     this.publish({ mcpSourceOpen: false, mcpSourceReading: false });

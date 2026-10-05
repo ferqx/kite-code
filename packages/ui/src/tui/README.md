@@ -97,7 +97,7 @@ Ink usePaste 独立消费真正 bracketed paste，原换行不会成为 Enter；
 
 普通 Work 与准确取消另外消费 [TuiCallerPort](caller.ts)：原 Store/Workspace/Session/subject/Command/request/digest/target 和独立原 draft proof 由 host 冻结并在 POST 前持久发布。UI 的 caller map 与答案、显式 Run/report/interrupt、管理意图分开；冷 unknown 阻断新 Work/Job Stop，原 GET 不依赖有限 view 猜目录。提交及查回的完整 intent 必须保持同一冻结身份，missing/mismatch 不发布成功。只有 host 能授一次新 POST；同 ID 的 prepared/submitting 也只读。
 
-`/recovery` 支持只提供 caller port 的有限宿主，所有保存记录可选择，Ctrl+L 原 GET、Ctrl+V 完整请求、Ctrl+D 只清已核实终态。Ctrl+C/close 只停读取；accepted/applied Work 与实际 Run 状态分离，execution.cancel 显示 cancel requested 而非 Job 已清理。冷查回不清新 draft/Plan toggle，原 Work/steer/follow_up envelope 与 Job target 不漂移；局部 prepare 失败零 POST、保原文并明确拒绝，不假造 unknown 回执。CLI host 负责 version 1、128 槽/16 MiB、私有 profile-use/锁、fsync/CAS 的 `ui/caller-intents.json`，维护 v4 只归档原字节；组件没有 FS、profile/token 或私有 lease。
+`/recovery` 支持只提供 caller port 的有限宿主，所有保存记录可选择，Ctrl+L 原 GET、Ctrl+V 完整请求、Ctrl+D 只清已核实终态。Ctrl+C/close 只停读取；accepted/applied Work 与实际 Run 状态分离，execution.cancel 显示 cancel requested 而非 Job 已清理。冷查回不清新 draft/Plan toggle，原 Work/steer/follow_up envelope 与 Job target 不漂移；局部 prepare 失败零 POST、保原文并明确拒绝，不假造 unknown 回执。CLI host 负责 version 1、128 槽/16 MiB、私有 profile-use/锁、fsync/CAS 的 `ui/caller-intents.json`，维护只归档原字节，实际含固定 Auth 请求时使用 v13，旧 v4–v12 请求文法保持；组件没有 FS、profile/token 或私有 lease。
 
 [CLI owner](../../../../apps/cli/README.md#tui-普通-caller-的持久原意图) 给出真实 80×24 强杀、原 POST/首 GET 物理丢回执、五种 caller、公有 identity/digest 缺失反例、大正文与容量/坏文件范围。普通 Work PTY、配置 Shell Job 窗口、三种 compiled paired 原请求分别验证各自断言；不将这些切片替代 §35 完整 TUI、正式旧入口或其他平台资格。
 
@@ -138,6 +138,14 @@ controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID�
 
 [新connection controller/Ink](../../test/tui/mcp-connection.test.tsx)、原15Select、7Tools与7preferences组合当前38项699断言通过，覆盖确认、原ID零GET、明确查回、空失败目录、迟到及读取隔离。MCP与Tools固定提示沿[presentation catalog](presentation.tsx)翻译；Server ID、availability/reason、工具名称、描述及完整Schema JSON保持原文。[Tools中文键盘测试](../../test/tui/mcp-tools.test.tsx)实际切换语言、跨工具页及End至Unicode尾部，保持原metadata字节与已发布对象，切语言无新增reader或业务调用；英文源码外PTY不作为中文现场证明。真实普通审批、journal及源码外80×24暖/冷/共享detach资格归[CLI](../../../../apps/cli/README.md#tui-mcp-显式连接与原申请)。此切片提供显式新申请与warm复用，认证、强制重连、完整增删和三平台仍按整体进度核对。
 
+## MCP HTTP 认证与原申请
+
+[Auth DTO](mcp-auth.ts)与[panel](mcp-auth-panel.tsx)通过可选TuiPort.mcpAuth接当前HTTP Source和原Caller。完整fresh Source/read-set只用于新Review/独立Enter确认，Login/Refresh/Clear/Revoke均普通申请；UI不持Vault、网络、callback或热POST权。仅显示safe backend/presence/有限状态及原IDs，authenticated提示另行重连，不将Command.applied显示成功。
+
+复用原Caller map/journal和execution.cancel。冷原ID/选择零GET，明确Check才caller.lookup+原结果Query；空/failed/removed Source仍保历史。unknown阻同scope冲突，不淘汰记录。Abort/generation/原Store/S/W/selected ID隔离Reader，迟到提交只保存原记录；关闭/Ctrl+C/切S不取消业务，取消需核准确原Execution再独立确认。
+
+[Auth Ink](../../test/tui/mcp-auth.test.tsx)实际英文/中文Review/Confirm、冷第二ID→Check、语言切换零新增prepare/submit及原机器ID保真。邻接与准确结果见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，Host原证明归[CLI](../../../../apps/cli/README.md)。Ink不代替OAuth PTY、真实浏览器或OS Vault资格。
+
 ## MCP 强制重连与原申请
 
 [独立 DTO](mcp-reconnection.ts)、[state](mcp-reconnection-state.ts)与[panel](mcp-reconnection-panel.tsx)通过可选 `TuiMcpPort.reconnection`接线。准确原 connection/R有限fact确认live后，Review调用host重新观察完整target和当前replacement；确认页独立Enter才产生本次原Command/key。UI不持Core ticket、transport、文件、vault或热POST权，原Action和新Job仍分别使用普通审批。
@@ -152,7 +160,7 @@ controller按原scope、selected ID、Abort和generation隔离读取，热submit
 
 [独立 DTO/port](mcp-source-mutation.ts)与[panel](mcp-source-mutation-panel.tsx)通过 `TuiMcpPort.sourceMutation`接固定 Source 操作。父面板“Source entry changes”在空目录或目录失败时仍可进入。Add 逐步编辑自己的 name/value buffer，选择 HTTP/STDIO 与 user/workspace；不调用 Composer、Workflow、模型或通用 raw patch。空 Enter、非法 URL/command 保原 draft；Review 可上下/Home/End 滚动，Enter 进入独立 Confirm，第二个 Enter 才 submit。普通 Action 审批和 project Source 批准仍分别走原交互。
 
-Remove 先让 Host 以原 scope/serverId/raw digest/read-set读取准确安全 preview，再在 Review 和 Confirm 固定显示 user fallback 或无 fallback。确认只变更来源声明；凭据保留和现有连接未停止在可见提示中说明。UI 不持文件、Vault、token、OS 锁、Mutation authority 或热 POST 权，也不把 saved 解释成完整 owned OAuth 清理。
+Remove 先让Host以原scope/serverId/raw digest/read-set读取安全preview，Review/Confirm显示user fallback或无fallback。确认变更准确声明；自有OAuth本地清理、共享凭据保留和原连接未停止分别提示。UI不持文件、Vault、token、OS锁、Mutation authority或热POST权；saved只证明声明发布，可选credentialCleanup单独显示not-needed/completed/failed/unknown。
 
 controller 隔离原 scope/generation/Abort/selected Command。原 ID 列表包含跨 Session 的相关 user/project来源意图；选择只切本地记录，明确 Check 才 lookup。cold/foreign 和不完整原事实保持 outcome_unknown；late submit 只回原 Map，不覆盖后来 Session 或所选原 ID。Esc 回表单步骤或父面板，Ctrl+C 只结束所属读取，已提交工作与普通审批继续。原 phase、ID、reason、来源 JSON、URL 和 command 保持原文；固定自有提示沿 [presentation catalog](presentation.tsx)提供三 locale。
 

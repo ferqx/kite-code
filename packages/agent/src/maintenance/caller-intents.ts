@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, readSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { canonicalJson } from '../json';
+import type { Json } from '../storage/types';
 import { openPrivate, privateDirectory } from './files';
 import { MaintenanceError } from './types';
 
@@ -55,7 +58,7 @@ function selection(request: Record<string, unknown>) {
     }
   }
 }
-function requestTarget(value: unknown, sessionId: unknown) {
+function requestTarget(value: unknown, sessionId: unknown, allowAuth: boolean) {
   const kind = object(
     value,
     ['kind'],
@@ -71,6 +74,7 @@ function requestTarget(value: unknown, sessionId: unknown) {
       'afterRunId',
       'targetCommandId',
       'executionId',
+      ...(allowAuth ? ['extensionId', 'actionId', 'definitionVersion', 'input'] : []),
     ],
   ).kind;
   const common = ['kind', 'expectedStoreId', 'commandId'];
@@ -106,12 +110,56 @@ function requestTarget(value: unknown, sessionId: unknown) {
     request = object(value, [...common, key]);
     if (!id(request[key])) throw invalid();
     target = { kind: kind === 'command.cancel' ? 'command' : 'execution', id: request[key] };
+  } else if (kind === 'extension.invoke' && allowAuth) {
+    request = object(value, [...common, 'extensionId', 'actionId', 'definitionVersion', 'input']);
+    if (
+      request.extensionId !== 'builtin.mcp.sources' ||
+      request.definitionVersion !== '1' ||
+      !['mcp.auth.login', 'mcp.auth.refresh', 'mcp.auth.clear', 'mcp.auth.revoke'].includes(
+        String(request.actionId),
+      )
+    )
+      throw invalid();
+    const input = object(request.input, ['serverId', 'expectedReadSet']);
+    if (!id(input.serverId)) throw invalid();
+    const readSet = object(input.expectedReadSet, [
+      'scopeDigest',
+      'user',
+      'workspace',
+      'approvalEtag',
+      'bindingEtag',
+      'variablesDigest',
+    ]);
+    const nullableHash = (value: unknown) => value === null || hash(value);
+    if (
+      !hash(readSet.scopeDigest) ||
+      !hash(readSet.variablesDigest) ||
+      !nullableHash(readSet.approvalEtag) ||
+      !nullableHash(readSet.bindingEtag)
+    )
+      throw invalid();
+    const verifyRead = (value: unknown, kind: string) => {
+      const read = object(value, ['identity', 'etag', 'error']);
+      const identity = object(read.identity, ['kind', 'pathDigest', 'rootIdentity']);
+      if (
+        identity.kind !== kind ||
+        !hash(identity.pathDigest) ||
+        !hash(identity.rootIdentity) ||
+        !nullableHash(read.etag) ||
+        (read.error !== null && typeof read.error !== 'string')
+      )
+        throw invalid();
+    };
+    verifyRead(readSet.user, 'user');
+    if (readSet.workspace !== null) verifyRead(readSet.workspace, 'workspace');
+    target = { kind: 'session', id: sessionId };
   } else throw invalid();
   if (!id(request.expectedStoreId) || !id(request.commandId)) throw invalid();
   return { request, target };
 }
 /** Closed metadata rows, shared by the two explicitly captured private caller assets. */
-export function verifyCallerIntentRecords(records: unknown): void {
+export function verifyCallerIntentRecords(records: unknown, allowAuth = false): boolean {
+  let hasAuth = false;
   if (!Array.isArray(records) || records.length > 128) throw invalid();
   const commands = new Set<string>();
   for (const raw of records) {
@@ -136,10 +184,24 @@ export function verifyCallerIntentRecords(records: unknown): void {
       !hash(intent.requestDigest)
     )
       throw invalid();
-    const { request, target } = requestTarget(intent.request, scope.sessionId);
+    const { request, target } = requestTarget(intent.request, scope.sessionId, allowAuth);
     if (request.expectedStoreId !== scope.storeId || commands.has(String(request.commandId)))
       throw invalid();
     commands.add(String(request.commandId));
+    if (request.kind === 'extension.invoke') {
+      hasAuth = true;
+      const sha = (value: unknown) =>
+        createHash('sha256')
+          .update(canonicalJson(value as Json))
+          .digest('hex');
+      const { expectedStoreId: _store, commandId: _command, ...publicRequest } = request;
+      if (
+        intent.bodyDigest !== sha(request) ||
+        intent.requestDigest !== sha(publicRequest) ||
+        Object.hasOwn(intent, 'draft')
+      )
+        throw invalid();
+    }
     const actualTarget = object(intent.target, Object.keys(target));
     if (Object.keys(target).some((key) => actualTarget[key] !== target[key])) throw invalid();
     if (Object.hasOwn(intent, 'draft')) {
@@ -154,9 +216,10 @@ export function verifyCallerIntentRecords(records: unknown): void {
         throw invalid();
     }
   }
+  return hasAuth;
 }
 /** Caller metadata bytes only. Digests are retained, never interpreted as a receipt or grant. */
-export function verifyCallerIntentsDocument(path: string): void {
+export function verifyCallerIntentsDocument(path: string, allowAuth = false): boolean {
   if (typeof constants.O_NOFOLLOW !== 'number' || constants.O_NOFOLLOW === 0)
     throw new MaintenanceError('maintenance_platform_unsupported');
   privateDirectory(dirname(path));
@@ -194,7 +257,7 @@ export function verifyCallerIntentsDocument(path: string): void {
     ]);
     if (document.version !== 1 || !Array.isArray(document.records) || document.records.length > 128)
       throw invalid();
-    verifyCallerIntentRecords(document.records);
+    return verifyCallerIntentRecords(document.records, allowAuth);
   } catch (error) {
     if (error instanceof MaintenanceError) throw error;
     throw invalid();

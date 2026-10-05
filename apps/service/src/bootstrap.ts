@@ -53,6 +53,8 @@ export interface ProcessHostConfiguration {
   extensions?: RuntimeOptions['extensions'];
   sources?: RuntimeOptions['sources'];
   workspaceSerialLocks?: RuntimeOptions['workspaceSerialLocks'];
+  /** Share the actual host coordinator with private network/credential operations. No new owner. */
+  bindWorkspaceSerialLocks?(locks: NonNullable<RuntimeOptions['workspaceSerialLocks']>): void;
   supportsSelectedSkills?: RuntimeOptions['supportsSelectedSkills'];
   supportsExtensionInputs?: RuntimeOptions['supportsExtensionInputs'];
   resolveRunConfiguration?: RuntimeOptions['resolveRunConfiguration'];

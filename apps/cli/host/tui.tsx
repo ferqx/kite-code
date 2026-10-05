@@ -46,6 +46,7 @@ import { createTuiDraftPort } from './tui-draft-port';
 import { openTuiDraftFile } from './tui-drafts';
 import { createTuiExporter } from './tui-export';
 import { createTuiMcpPort } from './tui-mcp';
+import { createTuiMcpAuthPort } from './tui-mcp-auth';
 import { prepareTuiObservationStart } from './tui-observation';
 import { openTuiPreferenceFile } from './tui-preferences';
 
@@ -573,6 +574,13 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         return command;
       },
     };
+    if (port.callers && port.mcp?.source)
+      port.mcpAuth = createTuiMcpAuthPort({
+        client,
+        storeId,
+        callers: port.callers,
+        sources: port.mcp.source,
+      });
     controller = new TuiController(port);
     await controller.restoreCallers();
     await controller.select(initial.session.id);

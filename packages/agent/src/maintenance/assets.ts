@@ -285,7 +285,7 @@ export async function captureAssets(
     if (!ui) {
       if (path === 'ui/tui.json') verifyTuiDocument(original);
       if (path === 'ui/recovery.json') verifyRecoveryDocument(original);
-      if (path === 'ui/caller-intents.json') verifyCallerIntentsDocument(original);
+      if (path === 'ui/caller-intents.json') verifyCallerIntentsDocument(original, true);
       if (path === 'ui/file-recovery-intents.json') verifyFileRecoveryIntentsDocument(original);
       if (path === 'ui/mcp-selection-intents.json') verifyMcpSelectionIntentsDocument(original);
       if (path === 'ui/mcp-connection-intents.json') verifyMcpConnectionIntentsDocument(original);
@@ -301,7 +301,7 @@ export async function captureAssets(
       };
       if (path === 'ui/tui.json') verifyTuiDocument(destination);
       if (path === 'ui/recovery.json') verifyRecoveryDocument(destination);
-      if (path === 'ui/caller-intents.json') verifyCallerIntentsDocument(destination);
+      if (path === 'ui/caller-intents.json') verifyCallerIntentsDocument(destination, true);
       if (path === 'ui/file-recovery-intents.json') verifyFileRecoveryIntentsDocument(destination);
       if (path === 'ui/mcp-selection-intents.json') verifyMcpSelectionIntentsDocument(destination);
       if (path === 'ui/mcp-connection-intents.json')
@@ -356,6 +356,8 @@ export async function captureAssets(
   const tuiUi = await capture('ui/tui.json', false);
   const tuiRecovery = await capture('ui/recovery.json', false);
   const callerIntents = await capture('ui/caller-intents.json', false);
+  const authCaller =
+    callerIntents.present && verifyCallerIntentsDocument(join(target, callerIntents.path), true);
   const fileRecoveryIntents = await capture('ui/file-recovery-intents.json', false);
   const mcpSourceMutationIntents = await capture('ui/mcp-source-mutation-intents.json', false);
   const mcpReconnectionIntents = await capture('ui/mcp-reconnection-intents.json', false);
@@ -389,6 +391,7 @@ export async function captureAssets(
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
+    authCaller ||
     uiVersion === 4 ||
     uiVersion === 5
       ? {
@@ -400,7 +403,8 @@ export async function captureAssets(
       : {}),
     ...(mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
-    mcpSourceMutationIntents.present
+    mcpSourceMutationIntents.present ||
+    authCaller
       ? {
           mcpSourceApprovalIntents: {
             ...mcpSourceApprovalIntents,
@@ -408,7 +412,7 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpReconnectionIntents.present || mcpSourceMutationIntents.present
+    ...(mcpReconnectionIntents.present || mcpSourceMutationIntents.present || authCaller
       ? {
           mcpReconnectionIntents: {
             ...mcpReconnectionIntents,
@@ -419,7 +423,8 @@ export async function captureAssets(
     ...(mcpConnectionIntents.present ||
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
-    mcpSourceMutationIntents.present
+    mcpSourceMutationIntents.present ||
+    authCaller
       ? {
           mcpConnectionIntents: {
             ...mcpConnectionIntents,
@@ -431,7 +436,8 @@ export async function captureAssets(
     mcpConnectionIntents.present ||
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
-    mcpSourceMutationIntents.present
+    mcpSourceMutationIntents.present ||
+    authCaller
       ? {
           mcpSelectionIntents: {
             ...mcpSelectionIntents,
@@ -439,11 +445,11 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpSourceMutationIntents.present
+    ...(mcpSourceMutationIntents.present || authCaller
       ? {
           mcpSourceMutationIntents: {
             ...mcpSourceMutationIntents,
-            format: { version: 1 as const },
+            format: mcpSourceMutationIntents.present ? { version: 1 as const } : null,
           },
         }
       : {}),
@@ -456,6 +462,7 @@ export function verifyAssets(
   directory: string,
   assets: BackupManifest['assets'],
   signal?: AbortSignal,
+  allowAuth = false,
 ) {
   for (const asset of [
     assets.configuration,
@@ -511,7 +518,7 @@ export function verifyAssets(
       throw new MaintenanceError('backup_asset_mismatch');
   }
   if (assets.callerIntents?.present) {
-    verifyCallerIntentsDocument(join(directory, assets.callerIntents.path));
+    verifyCallerIntentsDocument(join(directory, assets.callerIntents.path), allowAuth);
     if (
       canonicalJson(fingerprint(join(directory, assets.callerIntents.path), signal)) !==
       canonicalJson(assets.callerIntents.proof)
@@ -607,5 +614,6 @@ export async function restoreAssets(
   ])
     if (asset.present)
       await copyAssetFile(join(source, asset.path), join(target, asset.path), signal);
-  verifyAssets(target, assets, signal);
+  // The original backup was admitted by inspect with its version-specific grammar.
+  verifyAssets(target, assets, signal, true);
 }

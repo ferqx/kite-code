@@ -24,17 +24,36 @@ export function createOsCredentialBackend(options: {
       const { AsyncEntry } = await import('@napi-rs/keyring');
       return new AsyncEntry(service, account);
     });
-  const entry = async (id: string) => {
-    if (!/^credential:[0-9a-f-]{36}$/.test(id))
+  const rawEntry = async (id: string) => {
+    if (!/^credential:[0-9a-f-]{36}$/.test(id) && !/^owned-credential:[a-f0-9]{64}$/.test(id))
       throw new ConfigurationError('credential_unavailable');
+    return factory(options.service, `${options.accountNamespace}/${id}`);
+  };
+  const entry = async (id: string) => {
     try {
-      return await factory(options.service, `${options.accountNamespace}/${id}`);
+      return await rawEntry(id);
     } catch {
       throw new ConfigurationError('credential_unavailable');
     }
   };
   return {
     kind: 'os',
+    async status(id) {
+      // Read-only availability probe of the same account; never writes probe material.
+      try {
+        await (await rawEntry(id)).getPassword();
+        return 'available';
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : null;
+        return code === 'locked' ||
+          code === 'LOCKED' ||
+          code === 'EACCES' ||
+          code === 'EPERM' ||
+          code === -25308
+          ? 'locked'
+          : 'unavailable';
+      }
+    },
     async put(id, secret) {
       try {
         await (await entry(id)).setPassword(secret);
@@ -44,8 +63,7 @@ export function createOsCredentialBackend(options: {
     },
     async resolve(id) {
       try {
-        const value = await (await entry(id)).getPassword();
-        return value ?? null;
+        return (await (await entry(id)).getPassword()) ?? null;
       } catch {
         throw new ConfigurationError('credential_unavailable');
       }

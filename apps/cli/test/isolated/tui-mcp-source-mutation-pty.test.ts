@@ -114,6 +114,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     journalHash = '',
     cursorBaseline = '',
     selectionBaseline = 0;
+  let credentialChecks = 0;
   const ledger = (name: string): Record<string, unknown>[] =>
     existsSync(join(root, name))
       ? readFileSync(join(root, name), 'utf8')
@@ -337,7 +338,12 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         ),
       ).toBe(true);
       expect(modelCalls).toBe(0);
-      expect(ledger('credentials.jsonl')).toHaveLength(0);
+      expect(ledger('credentials.jsonl')).toHaveLength(credentialChecks);
+      expect(
+        ledger('credentials.jsonl').every((row) =>
+          ['status', 'resolve'].includes(String(row.operation)),
+        ),
+      ).toBe(true);
       expect(ledger('resolutions.jsonl')).toHaveLength(0);
       expect(wire().filter((row) => row.body?.kind === 'command.cancel')).toHaveLength(0);
       facts.push({
@@ -459,6 +465,13 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         interactionId: card.id,
         fact,
       });
+      if (expectedAction === 'mcp.source.remove') {
+        expect(ledger('credentials.jsonl').map((row) => row.operation)).toEqual([
+          'status',
+          'resolve',
+        ]);
+        credentialChecks = 2;
+      }
       await safeWindow(expectedAction);
       return { commandId: command.id, executionId, fact };
     }
@@ -603,7 +616,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
           );
         if (path === '/cold-removed' || path === '/cold-foreign') {
           expect(modelCalls).toBe(0);
-          expect(ledger('credentials.jsonl')).toHaveLength(0);
+          expect(ledger('credentials.jsonl')).toHaveLength(credentialChecks);
           expect(ledger('resolutions.jsonl')).toHaveLength(0);
           facts.push({
             stage: path,
@@ -670,7 +683,7 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
     expect(ledger('service-exits.jsonl')).toHaveLength(4);
     expect(modelCalls).toBe(0);
     expect(ledger('resolutions.jsonl')).toHaveLength(0);
-    expect(ledger('credentials.jsonl')).toHaveLength(0);
+    expect(ledger('credentials.jsonl').map((row) => row.operation)).toEqual(['status', 'resolve']);
     success = true;
   } catch (error) {
     failure = error;

@@ -243,7 +243,9 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
     <Box flexDirection="column">
       <Text bold>{t('Source entry changes')}</Text>
       <Text>
-        {t('Source entry only; credentials are not revoked and connections are not stopped.')}
+        {t(
+          'Removal clears owned OAuth credentials locally; shared credentials are retained. Connection status is separate.',
+        )}
       </Text>
       {review?.action === 'mcp.source.remove' && (step === 'review' || step === 'confirm') ? (
         <Text>
@@ -324,6 +326,20 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
             {terminalText(state.mcpMutationOutcome.intent.sessionId)}
           </Text>
           <Text>{terminalText(state.mcpMutationOutcome.phase)}</Text>
+          {state.mcpMutationOutcome.fact?.credentialCleanup && (
+            <Text>
+              {t('Credential cleanup:')}{' '}
+              {t(
+                {
+                  not_attempted: 'Credential cleanup not attempted',
+                  not_needed: 'No owned OAuth credentials to clear',
+                  completed: 'Owned OAuth credentials cleared',
+                  failed: 'Source removed; credential cleanup failed',
+                  outcome_unknown: 'Source removed; credential cleanup unknown',
+                }[state.mcpMutationOutcome.fact.credentialCleanup.status],
+              )}
+            </Text>
+          )}
         </>
       ) : null}
       {error || state.mcpMutationError ? (

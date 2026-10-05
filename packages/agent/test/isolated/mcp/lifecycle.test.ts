@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,7 @@ import {
   type McpLifecycleTransportPort,
   mcpLifecycleExtensionId,
 } from '../../../src/mcp';
+import { selectProfile } from '../../../src/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -24,6 +26,7 @@ async function fixture(withPort = true, beforeOpen?: () => Promise<void>) {
   const modelRequests: Record<string, unknown>[] = [];
   const stops: string[] = [];
   let confirmStop = true;
+  let rejectInitialize = false;
   const network = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -34,6 +37,12 @@ async function fixture(withPort = true, beforeOpen?: () => Promise<void>) {
       let result: unknown;
       if (rpc.method === 'initialize') {
         connections++;
+        if (rejectInitialize)
+          return Response.json({
+            jsonrpc: '2.0',
+            id: rpc.id,
+            error: { code: -32000, message: 'owned initialize failure' },
+          });
         result = {
           protocolVersion: '2024-11-05',
           serverInfo: { name: 'local', version: '1' },
@@ -204,6 +213,9 @@ async function fixture(withPort = true, beforeOpen?: () => Promise<void>) {
     expectedStoreId,
     modelRequests,
     stops,
+    rejectInitialize(value: boolean) {
+      rejectInitialize = value;
+    },
     get confirmStop() {
       return confirmStop;
     },
@@ -685,3 +697,122 @@ test('close during actual dispatched Job open collects the late owned handle wit
     }
   }
 }, 15000);
+
+for (const corruptParent of [false, true])
+  test(`ordinary failed opening releases only its committed stopped Job proof (${corruptParent ? 'corrupt original parent refused' : 'exact original identity'})`, async () => {
+    const f = await fixture();
+    const finish = f.store.finishExecution.bind(f.store);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let heldId: string | undefined;
+    const until = async <T>(read: () => Promise<T | null>): Promise<T> => {
+      const deadline = Date.now() + 5000;
+      for (;;) {
+        const result = await read();
+        if (result !== null) return result;
+        if (Date.now() > deadline) throw Error('owned_stopped_opening_deadline');
+        await Bun.sleep(5);
+      }
+    };
+    const invoke = async (id: string, sessionId = 'a') => {
+      await f.runtime.submitCommand({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'user',
+        sessionId,
+        commandId: id,
+        request: {
+          kind: 'extension.invoke',
+          extensionId: 'builtin.mcp',
+          actionId: 'mcp.connect',
+          definitionVersion: '1',
+          input: { serverId: 'local', key: id },
+        },
+      });
+      return until(async () => {
+        const command = await f.store.getCommand(id);
+        const receipt = command?.receipt as { executionId?: string } | null;
+        const e = receipt?.executionId ? await f.store.getExecution(receipt.executionId) : null;
+        return e && ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(e.status)
+          ? e
+          : null;
+      });
+    };
+    f.store.finishExecution = async (input) => {
+      const own = await f.store.getExecution(input.executionId);
+      if (!heldId && own?.definitionId === 'mcp.connection.local' && own.sessionId === 'a') {
+        heldId = own.id;
+        await gate; // Real transport has stopped; deliberately delay only its original SQL terminal commit.
+      }
+      return finish(input);
+    };
+    let corruption: Database | undefined;
+    try {
+      f.rejectInitialize(true);
+      f.confirmStop = false;
+      const original = await invoke('failed-opening');
+      expect(original.status).toBe('failed');
+      const child = (await f.store.listExecutions('a')).find(
+        (e) => e.parentExecutionId === original.id,
+      )!;
+      expect(child.definitionId).toBe('mcp.connection.local');
+      expect(child.status).toBe('running');
+      const initialOpens = f.opens;
+      const blockedUnknown = await invoke('unknown-stop');
+      expect(blockedUnknown.status).toBe('failed');
+      expect(f.opens).toBe(initialOpens);
+      f.confirmStop = true;
+      await f.runtime.cancelExecution({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'user',
+        sessionId: 'a',
+        commandId: 'stop-original',
+        executionId: child.id,
+      });
+      await until(async () => (heldId === child.id ? child.id : null));
+      const pending = await f.store.getExecution(child.id);
+      expect(['dispatching', 'running']).toContain(pending!.status);
+      expect(pending!.result).toBeNull();
+      const blockedCommit = await invoke('before-terminal-commit');
+      expect(blockedCommit.status).toBe('failed');
+      expect(f.opens).toBe(initialOpens);
+      f.rejectInitialize(false);
+      const independent = await invoke('independent-session', 'b');
+      expect(independent.status).toBe('succeeded');
+      expect(f.opens).toBe(initialOpens + 1);
+      release();
+      const terminal = await until(async () => {
+        const e = await f.store.getExecution(child.id);
+        return e && ['failed', 'cancelled', 'succeeded'].includes(e.status) ? e : null;
+      });
+      expect(terminal.result).toMatchObject({
+        details: { transportStopped: true, remoteToolStopConfirmed: false },
+      });
+      expect(terminal.parentExecutionId).toBe(original.id);
+      if (corruptParent) {
+        // Explicit owned-SQLite corruption: preserve the real stopped result but break original parent identity.
+        corruption = new Database(selectProfile(f.profile).databasePath);
+        corruption
+          .query('UPDATE execution SET parent_execution_id = ? WHERE id = ?')
+          .run(independent.id, child.id);
+        expect((await f.store.getExecution(child.id))!.parentExecutionId).toBe(independent.id);
+        const refused = await invoke('corrupt-proof');
+        expect(refused.status).toBe('failed');
+        expect(f.opens).toBe(initialOpens + 1);
+        corruption
+          .query('UPDATE execution SET parent_execution_id = ? WHERE id = ?')
+          .run(original.id, child.id);
+      }
+      const next = await invoke('exact-stopped-new-key');
+      expect(next.status).toBe('succeeded');
+      expect(f.opens).toBe(initialOpens + 2);
+      expect(f.calls).toBe(0);
+    } finally {
+      release();
+      f.confirmStop = true;
+      f.store.finishExecution = finish;
+      corruption?.close();
+      await f.close();
+    }
+  }, 30000);

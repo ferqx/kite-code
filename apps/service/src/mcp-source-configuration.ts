@@ -14,6 +14,7 @@ import {
   type McpSourceServer,
   mcpCanonical,
   type NamedConfiguration,
+  type OwnedCredentialScope,
   readMcpSources,
   writeMcpSourceMetadata,
 } from '@kite-ai/agent/config';
@@ -28,10 +29,12 @@ import type {
 import {
   createMcpAdapter,
   createMcpCredentialBroker,
+  createMcpOAuthProvider,
   createMcpStdioTransportPort,
   McpAdapterError,
   type McpCredentialIdentity,
   type McpLifecycleTransportPort,
+  type McpOAuthVault,
   type McpScopedSourcePort,
   type McpScopedSourceResolution,
   type McpStdioPortOptions,
@@ -39,6 +42,7 @@ import {
   mcpSourceConnectionJobId,
 } from '@kite-ai/agent/mcp';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
+import type { WorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import type { ContextSources } from '@kite-ai/agent/sources';
 import type {
   CommandRecord,
@@ -48,6 +52,13 @@ import type {
   WorkspaceRecord,
 } from '@kite-ai/agent/storage';
 import { createMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-http-port';
+import { createMcpOAuthActions, type McpOAuthTarget } from './mcp-oauth-actions';
+import { openMcpOAuthBrowser } from './mcp-oauth-browser';
+import {
+  createMcpOAuthSession,
+  McpOAuthSessionError,
+  type McpOAuthSessionOptions,
+} from './mcp-oauth-session';
 import { createMcpSourceEntryMutations } from './mcp-source-entry-mutations';
 import { createMcpSourceResultQuery } from './mcp-source-result';
 import type { CapabilityDescription } from './permissions';
@@ -168,7 +179,7 @@ export interface McpSourceConfigurationOptions {
   observerSubjectId?: string;
   profile: ProfileSelection;
   runtime: () => Host;
-  credentialVault: { resolve(ref: string): Promise<string> };
+  credentialVault: { resolve(ref: string): Promise<string> } & Partial<McpOAuthVault>;
   variables?: () => Readonly<Record<string, string>>;
   /** Current general JSONC overlay; absent defaults to enabled raw source set, empty selects none. */
   selection?: (scope: Readonly<McpSourceScope>, workspacePath: string) => McpSourceSelectionInput;
@@ -176,6 +187,12 @@ export interface McpSourceConfigurationOptions {
   http?: Pick<McpHttpPortOptions, 'resolveAddresses' | 'allowLoopbackForTests' | 'limits'>;
   /** Trusted packaged manifest assets supplied by the host; never source fallback. */
   stdio?: Pick<McpStdioPortOptions, 'guardianPath' | 'bunExecutable' | 'limits'>;
+  oauth?: Partial<
+    Pick<McpOAuthSessionOptions, 'openBrowser' | 'network' | 'callbackTimeoutMs' | 'now'>
+  > & {
+    /** Actual host coordinator, shared with Agent resources; never selected by raw JSON. */
+    serialLocks?: () => WorkspaceSerialLocks | undefined;
+  };
 }
 const pageSchema = {
   type: 'object',
@@ -222,7 +239,10 @@ const readSetSchema = {
 export function createMcpSourceConfiguration(options: McpSourceConfigurationOptions) {
   const runtime = options.runtime;
   const profile = Object.freeze({ ...options.profile });
-  const broker = createMcpCredentialBroker({ vault: options.credentialVault });
+  const broker = createMcpCredentialBroker({
+    vault: options.credentialVault,
+    ...(options.oauth?.now ? { now: options.oauth.now } : {}),
+  });
   const programmatic = new Set(options.programmaticServerIds ?? []);
   // A finite trusted resolution association, not an execution/approval permit. Pending
   // bindings are never evicted; a new factory is required after the bound is reached.
@@ -360,6 +380,169 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       servers,
     });
     return { state, capture };
+  }
+  // Real 401 observations only. Cold resume reads the owned material and never opens a browser.
+  const oauthChallenges = new Map<
+    string,
+    {
+      status: 'login_required' | 'reauth_required';
+      resourceMetadataUrl?: string;
+      scopes?: readonly string[];
+    }
+  >();
+  const oauthPolicy = (entry: ReturnType<typeof readMcpSources>['entries'][number]) =>
+    entry.transport?.type === 'http' &&
+    (object(entry.transport.auth).type === 'oauth' || !Object.hasOwn(object(entry.raw), 'auth'))
+      ? object(entry.transport.auth).type === 'oauth'
+        ? ('oauth' as const)
+        : ('auto' as const)
+      : null;
+  function oauthTarget(
+    source: Awaited<ReturnType<typeof scope>>,
+    entry: ReturnType<typeof readMcpSources>['entries'][number],
+    readSet: McpSourceReadSet,
+  ): McpOAuthTarget & {
+    ownedScope: OwnedCredentialScope;
+    provider(signal: AbortSignal): ReturnType<typeof createMcpOAuthProvider>;
+  } {
+    const policy = oauthPolicy(entry),
+      auth = object(entry.transport?.auth);
+    if (!policy || !entry.transport || typeof entry.transport.url !== 'string')
+      throw new McpOAuthSessionError('mcp_oauth_not_available');
+    const selectedVault = options.credentialVault;
+    if (
+      ['readOwned', 'writeOwned', 'removeOwned', 'statusOwned'].some(
+        (key) => typeof selectedVault[key as keyof McpOAuthVault] !== 'function',
+      )
+    )
+      throw new McpOAuthSessionError('mcp_credential_store_unavailable');
+    const vault = selectedVault as McpOAuthVault;
+    const ownedScope: OwnedCredentialScope = Object.freeze({
+      namespace: 'mcp.oauth',
+      ownerDigest: hash({
+        domain: 'kite-mcp-oauth-owner-v1',
+        profile: profile.profileAccessKey,
+        originalStoreId: source.sourceScope.storeId,
+        workspaceId: source.workspace.id,
+        workspaceIdentity: source.identity,
+        source: entry.server.source,
+        serverId: entry.server.id,
+        rawEntryDigest: entry.server.rawEntryDigest,
+        transportDigest: entry.server.transportDigest,
+        authProfile: auth.profile ?? 'oauth',
+      }),
+    });
+    const assertFresh = (signal: AbortSignal) => {
+      signal.throwIfAborted();
+      const lexical = resolve(fileURLToPath(new URL(source.workspace.rootUri))),
+        stat = lstatSync(lexical),
+        root = realpathSync(lexical),
+        canonical = lstatSync(root);
+      if (
+        !stat.isDirectory() ||
+        stat.isSymbolicLink() ||
+        !canonical.isDirectory() ||
+        canonical.isSymbolicLink() ||
+        stat.dev !== canonical.dev ||
+        stat.ino !== canonical.ino ||
+        hash({ root, dev: stat.dev, ino: stat.ino }) !== source.identity
+      )
+        throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+      const current = observe(source),
+        actual = current.state.entries.find((value) => value.server.id === entry.server.id);
+      if (
+        mcpCanonical(current.capture.readSet) !== mcpCanonical(readSet) ||
+        !actual ||
+        mcpCanonical(actual.binding) !== mcpCanonical(entry.binding) ||
+        oauthPolicy(actual) !== policy
+      )
+        throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+    };
+    const provider = (signal: AbortSignal) =>
+      createMcpOAuthProvider({
+        vault,
+        scope: ownedScope,
+        redirectUrl: new URL('http://127.0.0.1/oauth/callback'),
+        signal,
+        assertFresh: () => assertFresh(signal),
+        ...(typeof auth.clientId === 'string' ? { clientId: auth.clientId } : {}),
+        ...(typeof auth.clientSecretRef === 'string'
+          ? { clientSecretRef: auth.clientSecretRef }
+          : {}),
+        ...(Array.isArray(auth.scopes) && auth.scopes.length
+          ? { scopes: auth.scopes as string[] }
+          : {}),
+        ...(options.oauth?.now ? { now: options.oauth.now } : {}),
+      });
+    return {
+      workspaceId: source.workspace.id,
+      ownedScope,
+      provider,
+      loginAllowed:
+        entry.server.enabled &&
+        entry.server.admitted &&
+        (policy === 'oauth' || oauthChallenges.has(ownedScope.ownerDigest)),
+      assertFresh,
+      async acquire(signal) {
+        assertFresh(signal);
+        const locks = options.oauth?.serialLocks?.();
+        if (!locks) throw new McpOAuthSessionError('mcp_oauth_serial_unavailable');
+        const release = await locks.acquire(
+          { workspaceId: source.workspace.id, key: `mcp.oauth:${ownedScope.ownerDigest}` },
+          signal,
+        );
+        try {
+          assertFresh(signal);
+          return release;
+        } catch (error) {
+          release();
+          throw error;
+        }
+      },
+      session(signal) {
+        const challenge = oauthChallenges.get(ownedScope.ownerDigest);
+        return createMcpOAuthSession({
+          vault,
+          scope: ownedScope,
+          serverUrl: String(entry.transport!.url),
+          signal,
+          assertFresh: () => assertFresh(signal),
+          openBrowser: options.oauth?.openBrowser ?? openMcpOAuthBrowser,
+          ...(Array.isArray(auth.scopes) && auth.scopes.length
+            ? { scopes: auth.scopes as string[] }
+            : challenge?.scopes
+              ? { scopes: challenge.scopes }
+              : {}),
+          ...(challenge?.resourceMetadataUrl
+            ? { resourceMetadataUrl: challenge.resourceMetadataUrl }
+            : {}),
+          ...(typeof auth.clientId === 'string' ? { clientId: auth.clientId } : {}),
+          ...(typeof auth.clientSecretRef === 'string'
+            ? { clientSecretRef: auth.clientSecretRef }
+            : {}),
+          ...(options.oauth?.network ? { network: options.oauth.network } : {}),
+          ...(options.oauth?.callbackTimeoutMs
+            ? { callbackTimeoutMs: options.oauth.callbackTimeoutMs }
+            : {}),
+          ...(options.oauth?.now ? { now: options.oauth.now } : {}),
+        });
+      },
+      async status(signal) {
+        assertFresh(signal);
+        const status = await vault.statusOwned(ownedScope);
+        assertFresh(signal);
+        let credentialPresent = false;
+        if (status === 'available') {
+          const current = provider(signal);
+          try {
+            credentialPresent = (await current.getTokenState()).present;
+          } finally {
+            current.cancel();
+          }
+        }
+        return { policy, status, credentialPresent };
+      },
+    };
   }
   const selection = (sourceScope: McpSourceScope, workspacePath: string) =>
     options.selection?.(sourceScope, workspacePath) ?? { present: false, configurations: [] };
@@ -711,8 +894,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     const saved = selectedSourceSnapshot(run.configuration);
     if (saved?.inheritance) return inherited(source, run, saved);
     if (
-      !saved ||
-      saved.version !== 1 ||
+      saved?.version !== 1 ||
       saved.scopeDigest !== current.capture.scopeDigest ||
       !Array.isArray(saved.servers) ||
       !Array.isArray(saved.selection?.serverIds)
@@ -1049,8 +1231,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       signal.throwIfAborted();
       const job = await source.host.getExecution(binding.executionId);
       if (
-        !job ||
-        job.kind !== 'job' ||
+        job?.kind !== 'job' ||
         job.definitionId !== mcpSourceConnectionJobId ||
         job.definitionVersion !== '1' ||
         job.originStoreId !== source.sourceScope.storeId ||
@@ -1106,6 +1287,12 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     let port: McpLifecycleTransportPort;
     if (transport.type === 'http') {
       const savedBinding = entry.credentialBinding;
+      const policy = oauthPolicy(entry);
+      // A temporary/manual-only host cannot silently become an OAuth authority.
+      const oauth =
+        policy && typeof options.credentialVault.readOwned === 'function'
+          ? oauthTarget(source, entry, expected.readSet!)
+          : null;
       port = createMcpHttpTransportPort({
         ...options.http,
         servers: [
@@ -1146,6 +1333,108 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
                       fresh({ signal });
                       return { ref: issued, identity, revocationRevision: 0 };
                     },
+                  },
+                }
+              : oauth
+                ? {
+                    credential: {
+                      broker,
+                      canWriteOwned: true,
+                      async bind(binding, { signal }) {
+                        await admit(binding, { signal });
+                        fresh({ signal });
+                        const status = await oauth.status(signal);
+                        // An absent-auth server can still be unauthenticated. An unavailable vault is not permission to use a token.
+                        if (status.status !== 'available') {
+                          if (policy === 'auto') return null;
+                          throw new McpAdapterError(
+                            status.status === 'locked'
+                              ? 'mcp_credential_store_locked'
+                              : 'mcp_credential_store_unavailable',
+                          );
+                        }
+                        if (!status.credentialPresent) return null;
+                        const release = await oauth.acquire(signal);
+                        let credential: Awaited<
+                          ReturnType<ReturnType<typeof createMcpOAuthSession>['credential']>
+                        > = null;
+                        let failed = false;
+                        let failure: unknown;
+                        try {
+                          credential = await oauth.session(signal).credential();
+                        } catch (error) {
+                          failed = true;
+                          failure = error;
+                        } finally {
+                          try {
+                            release();
+                          } catch {
+                            failed = true;
+                            failure = new McpAdapterError('mcp_oauth_cleanup_unknown');
+                          }
+                        }
+                        if (failed) throw failure;
+                        if (!credential) return null;
+                        fresh({ signal });
+                        const identity: McpCredentialIdentity = {
+                          profileId: profile.profileAccessKey,
+                          originalStoreId: source.sourceScope.storeId,
+                          workspaceId: source.workspace.id,
+                          workspaceIdentity: source.identity,
+                          sessionId: source.session.id,
+                          connectionExecutionId: binding.executionId,
+                          source: {
+                            kind: entry.server.source.kind,
+                            id: entry.server.source.pathDigest,
+                            revision: entry.server.rawEntryDigest,
+                          },
+                          serverId: input.serverId,
+                          configDigest,
+                          authProfileId: String(object(entry.transport?.auth).profile ?? 'oauth'),
+                          policyRevision: hash({
+                            ownerDigest: oauth.ownedScope.ownerDigest,
+                            tokenRevision: credential.tokenRevision,
+                          }),
+                        };
+                        const originalRevision = credential.tokenRevision;
+                        const issued = broker.issueOwned({
+                          identity,
+                          purpose: 'mcp.http',
+                          expiresAt:
+                            credential.expiresAt ??
+                            (options.oauth?.now?.() ?? Date.now()) + 3600000,
+                          revocationRevision: 0,
+                          async resolve(signal) {
+                            fresh({ signal });
+                            const current = oauth.provider(signal);
+                            try {
+                              const token = await current.readAccessToken(originalRevision);
+                              fresh({ signal });
+                              return token;
+                            } finally {
+                              current.cancel();
+                            }
+                          },
+                        });
+                        return { ref: issued, identity, revocationRevision: 0 };
+                      },
+                    },
+                  }
+                : {}),
+            ...(oauth
+              ? {
+                  onUnauthorized(_binding, { signal, authenticated, resourceMetadataUrl, scopes }) {
+                    fresh({ signal });
+                    if (
+                      !oauthChallenges.has(oauth.ownedScope.ownerDigest) &&
+                      oauthChallenges.size >= 512
+                    )
+                      throw new McpAdapterError('mcp_scope_limit');
+                    oauthChallenges.set(oauth.ownedScope.ownerDigest, {
+                      status: authenticated ? 'reauth_required' : 'login_required',
+                      ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
+                      ...(scopes ? { scopes: [...scopes] } : {}),
+                    });
                   },
                 }
               : {}),
@@ -1343,8 +1632,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
         interactionId: accepted.interactionId,
       });
       if (
-        !actual ||
-        actual.kind !== 'question' ||
+        actual?.kind !== 'question' ||
         actual.state !== 'answered' ||
         actual.originStoreId !== source.sourceScope.storeId ||
         actual.sessionId !== context.sessionId ||
@@ -1519,6 +1807,80 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       return {
         workspaceId: source.workspace.id,
         sourceOptions: () => ({ ...source.sourceOptions, variables: options.variables?.() ?? {} }),
+        async prepareRemoval(serverId, readSet, signal) {
+          const current = observe(source),
+            entry = current.state.entries.find((value) => value.server.id === serverId);
+          if (!entry || mcpCanonical(current.capture.readSet) !== mcpCanonical(readSet))
+            throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+          if (!oauthPolicy(entry)) return null;
+          if (
+            typeof options.credentialVault.readOwned !== 'function' &&
+            oauthPolicy(entry) === 'auto'
+          )
+            return null;
+          const target = oauthTarget(source, entry, readSet),
+            release = await target.acquire(signal),
+            vault = options.credentialVault as McpOAuthVault;
+          return {
+            release,
+            async present() {
+              target.assertFresh(signal);
+              const status = await vault.statusOwned(target.ownedScope);
+              target.assertFresh(signal);
+              if (status !== 'available')
+                throw new McpOAuthSessionError(
+                  status === 'locked'
+                    ? 'mcp_credential_store_locked'
+                    : 'mcp_credential_store_unavailable',
+                );
+              const present = (await vault.readOwned(target.ownedScope)) !== null;
+              target.assertFresh(signal);
+              return present;
+            },
+            async clear(receipt) {
+              const expected: McpSourceReadSet = {
+                ...readSet,
+                ...(receipt.target.source.kind === 'user'
+                  ? { user: { ...readSet.user, etag: receipt.newEtag } }
+                  : { workspace: { ...readSet.workspace!, etag: receipt.newEtag } }),
+              };
+              const afterFresh = () => {
+                signal.throwIfAborted();
+                const lexical = resolve(fileURLToPath(new URL(source.workspace.rootUri))),
+                  stat = lstatSync(lexical),
+                  root = realpathSync(lexical),
+                  canonical = lstatSync(root);
+                if (
+                  !stat.isDirectory() ||
+                  stat.isSymbolicLink() ||
+                  !canonical.isDirectory() ||
+                  canonical.isSymbolicLink() ||
+                  stat.dev !== canonical.dev ||
+                  stat.ino !== canonical.ino ||
+                  hash({ root, dev: stat.dev, ino: stat.ino }) !== source.identity ||
+                  mcpCanonical(observe(source).capture.readSet) !== mcpCanonical(expected)
+                )
+                  throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+              };
+              if (
+                receipt.kind !== 'remove' ||
+                receipt.target.serverId !== serverId ||
+                receipt.target.rawEntryDigest !== entry.server.rawEntryDigest ||
+                mcpCanonical(receipt.target.source) !== mcpCanonical(entry.server.source)
+              )
+                throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+              const session = createMcpOAuthSession({
+                vault,
+                scope: target.ownedScope,
+                serverUrl: String(entry.transport!.url),
+                signal,
+                assertFresh: afterFresh,
+                openBrowser: options.oauth?.openBrowser ?? openMcpOAuthBrowser,
+              });
+              await session.clear();
+            },
+          };
+        },
         validatePublication() {
           const lexical = resolve(fileURLToPath(new URL(source.workspace.rootUri)));
           const stat = lstatSync(lexical),
@@ -1539,6 +1901,23 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       };
     },
   });
+  const oauthActions = createMcpOAuthActions({
+    runtime,
+    observerSubjectId: options.observerSubjectId,
+    readSetSchema,
+    async resolve(sessionId, serverId, readSet) {
+      const source = await scope(sessionId),
+        current = observe(source);
+      if (mcpCanonical(current.capture.readSet) !== mcpCanonical(readSet))
+        throw new McpOAuthSessionError('mcp_oauth_scope_changed');
+      const entry = current.state.entries.find((value) => value.server.id === serverId);
+      if (!entry) throw new McpOAuthSessionError('mcp_oauth_not_available');
+      await acceptedMetadata(source, current.state, entry);
+      const target = oauthTarget(source, entry, readSet);
+      target.assertFresh(new AbortController().signal);
+      return target;
+    },
+  });
   const extension: Extension = {
     id: mcpSourcesExtensionId,
     version: '1',
@@ -1555,6 +1934,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     ],
     queries: [
       ...entryMutations.queries,
+      ...oauthActions.queries,
       createMcpSourceResultQuery({
         runtime,
         profileAccessKey: options.profile.profileAccessKey,
@@ -1607,6 +1987,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     ],
     actions: [
       ...entryMutations.actions,
+      ...oauthActions.actions,
       {
         id: 'mcp.source.approve',
         version: '1',
@@ -1645,6 +2026,24 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     ],
   };
   const describe = (request: AuthorizationRequest): CapabilityDescription | null => {
+    if (
+      request.kind === 'job' &&
+      ['login', 'refresh', 'clear', 'revoke'].some(
+        (action) => request.definitionId === `${mcpSourcesExtensionId}/mcp.auth.${action}`,
+      ) &&
+      request.definitionVersion === '1'
+    )
+      return {
+        kind: 'job',
+        definitionId: request.definitionId,
+        definitionVersion: '1',
+        revision: 'builtin.mcp.sources:1',
+        effects: request.definitionId.endsWith('/mcp.auth.clear')
+          ? ['external']
+          : ['network', 'external'],
+        hardAllowed: true,
+        safeRead: false,
+      };
     if (
       request.kind === 'tool' &&
       request.definitionId === mcpSourcesDirectoryToolId &&
@@ -1688,7 +2087,9 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
         definitionId: request.definitionId,
         definitionVersion: '1',
         revision: 'builtin.mcp.sources:1',
-        effects: ['workspace_write'],
+        effects: request.definitionId.endsWith('/mcp.source.remove')
+          ? ['workspace_write', 'external']
+          : ['workspace_write'],
         hardAllowed: true,
         safeRead: false,
       };

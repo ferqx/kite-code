@@ -89,7 +89,13 @@ export function createMcpCredentialBroker(options: {
     fail('mcp_credential_configuration_invalid');
   const handles = new Map<
     string,
-    { key: string; credentialRef: string; expiresAt: number; revision: number; revoked: boolean }
+    {
+      key: string;
+      source: { credentialRef: string } | { resolve(signal: AbortSignal): Promise<string | null> };
+      expiresAt: number;
+      revision: number;
+      revoked: boolean;
+    }
   >();
   const check = (ref: McpCredentialRef, input: McpCredentialUse) => {
     if (input.signal.aborted) fail('mcp_credential_aborted');
@@ -101,6 +107,37 @@ export function createMcpCredentialBroker(options: {
     if (identityKey(input.identity) !== item.key) fail('mcp_credential_scope_mismatch');
     return item;
   };
+  const issue = (
+    input: {
+      identity: McpCredentialIdentity;
+      purpose: 'mcp.http';
+      expiresAt: number;
+      revocationRevision: number;
+    },
+    source: { credentialRef: string } | { resolve(signal: AbortSignal): Promise<string | null> },
+  ): McpCredentialRef => {
+    if (input.purpose !== 'mcp.http') fail('mcp_credential_purpose_invalid');
+    if (
+      !Number.isSafeInteger(input.expiresAt) ||
+      input.expiresAt <= now() ||
+      !Number.isSafeInteger(input.revocationRevision) ||
+      input.revocationRevision < 0
+    )
+      fail('mcp_credential_configuration_invalid');
+    const key = identityKey(input.identity);
+    for (const [id, item] of handles)
+      if (item.revoked || now() >= item.expiresAt) handles.delete(id);
+    if (handles.size >= maximum) fail('mcp_credential_capacity');
+    const id = `mcp-credential:${crypto.randomUUID()}`;
+    handles.set(id, {
+      key,
+      source,
+      expiresAt: input.expiresAt,
+      revision: input.revocationRevision,
+      revoked: false,
+    });
+    return Object.freeze({ id });
+  };
   return {
     issue(input: {
       credentialRef: string;
@@ -110,27 +147,20 @@ export function createMcpCredentialBroker(options: {
       revocationRevision: number;
     }): McpCredentialRef {
       if (input.purpose !== 'mcp.http') fail('mcp_credential_purpose_invalid');
-      if (
-        !/^credential:[0-9a-f-]{36}$/.test(input.credentialRef) ||
-        !Number.isSafeInteger(input.expiresAt) ||
-        input.expiresAt <= now() ||
-        !Number.isSafeInteger(input.revocationRevision) ||
-        input.revocationRevision < 0
-      )
+      if (!/^credential:[0-9a-f-]{36}$/.test(input.credentialRef))
         fail('mcp_credential_configuration_invalid');
-      const key = identityKey(input.identity);
-      for (const [id, item] of handles)
-        if (item.revoked || now() >= item.expiresAt) handles.delete(id);
-      if (handles.size >= maximum) fail('mcp_credential_capacity');
-      const id = `mcp-credential:${crypto.randomUUID()}`;
-      handles.set(id, {
-        key,
-        credentialRef: input.credentialRef,
-        expiresAt: input.expiresAt,
-        revision: input.revocationRevision,
-        revoked: false,
-      });
-      return Object.freeze({ id });
+      return issue(input, { credentialRef: input.credentialRef });
+    },
+    /** Trusted host-only material reader. Never accepted from configuration or Action input. */
+    issueOwned(input: {
+      identity: McpCredentialIdentity;
+      purpose: 'mcp.http';
+      expiresAt: number;
+      revocationRevision: number;
+      resolve(signal: AbortSignal): Promise<string | null>;
+    }): McpCredentialRef {
+      if (typeof input.resolve !== 'function') fail('mcp_credential_configuration_invalid');
+      return issue(input, { resolve: input.resolve });
     },
     revoke(ref: McpCredentialRef): void {
       const item = handles.get(ref?.id);
@@ -146,10 +176,12 @@ export function createMcpCredentialBroker(options: {
       const captured: McpCredentialUse = { ...input, identity: structuredClone(input.identity) };
       const item = check(capturedRef, captured);
       let abort!: () => void;
-      let secret: string;
+      let secret: string | null;
       try {
         secret = await Promise.race([
-          vault.resolve(item.credentialRef),
+          'resolve' in item.source
+            ? item.source.resolve(captured.signal)
+            : vault.resolve(item.source.credentialRef),
           new Promise<never>((_resolve, reject) => {
             abort = () => reject(new McpCredentialError('mcp_credential_aborted'));
             captured.signal.addEventListener('abort', abort, { once: true });
@@ -163,6 +195,7 @@ export function createMcpCredentialBroker(options: {
         if (abort) captured.signal.removeEventListener('abort', abort);
       }
       check(capturedRef, captured);
+      if (secret === null) fail('mcp_credential_unavailable');
       if (typeof secret !== 'string' || !secret || secret.length > 8000 || hasControl(secret))
         fail('mcp_credential_material_invalid');
       // No await between final checks and the trusted socket callback.

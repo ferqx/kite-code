@@ -30,7 +30,7 @@ export interface CapturedAsset {
   proof: { sha256: string; byteLength: string } | null;
 }
 export interface BackupManifest {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
   kind: 'profile_backup';
   createdAt: string;
   source: {

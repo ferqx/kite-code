@@ -8,7 +8,7 @@ MCP 提供外部工具和资源，Skills 提供可发现的任务指导或工作
 
 当前原目录工具快照与完整描述查看已接入通用 Terminal；暖读和同Profile冷重开后的实际键盘链已验证，准确范围仍按[总体进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
-完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、详情、用户或项目范围启停、显式申请连接、原申请查询和原工具描述查看；已接入准确原连接的强制重连、基本来源条目增删与各自独立原申请。认证、owned OAuth 凭据清理和完整管理仍须分别闭合。下面保留完整管理预期，当前可执行步骤见对应章节，实际制品与平台范围按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+完整管理的产品预期包括配置、认证、连接重试和工具查看。当前新正式 Terminal 的 `/mcp` 已提供安全目录、范围启停、显式连接、强制重连、基本来源条目增删、HTTP Source 认证与各自原申请查询。owned OAuth 本地清理与声明发布分别显示；实际制品、系统浏览器、OAuth PTY 和平台资格按[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
 保存配置、项目来源批准、实际连接和本地 owned OAuth 凭据清理各自核实，不由配置保存推断全部完成。
 
@@ -72,11 +72,21 @@ Esc 或 Ctrl+C 返回父 MCP 面板，再返回主界面；它们只结束所属
 
 Review 显示本次输入和目标范围，可上下滚动，Home/End 到首尾；Enter 进入独立 Confirm，再次 Enter 才申请普通 Action。若普通执行许可需要审批，回到主界面回答准确原卡片。等待、命令受理或回答审批都不表示文件已保存。新增项目声明仍需另行审查项目来源；保存不连接、不启动模型，也不授予工具权限。新增同名项目条目会遮蔽用户声明，尚未批准或不可用时仍然如此。
 
-移除时选择准确的“Remove source entry”（移除来源条目）行。Review 与 Confirm 均展示原来源、原条目摘要，以及移除项目条目后会显露的同名用户声明；没有 fallback 时明确显示。独立确认只删除该来源层的准确声明，旧执行与连接仍保原身份。当前手工 Bearer 引用可能与其他来源共享，移除声明会保留凭据，不停止已有连接，也不证明远端工具已经停止。完整 owned OAuth 清理、可用性预检和“配置已删但清理失败”的部分结果仍待认证生命周期接入，不能把 source-entry saved 当成完整 Server 移除。
+移除时选择准确的“Remove source entry”（移除来源条目）行。Review 与 Confirm 均展示原来源、原条目摘要和同名用户 fallback。对该来源自有 OAuth 凭据，先检查后端可用性，再删除声明并清理准确本地凭据；后端 locked/unavailable 时拒绝发布。声明已删而清理失败或未知时，分别保留“来源已删除”与凭据清理提示，不回滚声明、不默认撤销远端 Token。手工共享 Bearer 引用保留。旧执行与连接仍保原身份，移除不停止已有连接，也不证明远端工具已停止；source-entry saved 只证明声明发布。
 
 “Original source change”（原来源变更）行保留原申请 ID、Store 和 Session；只选择零查询。明确选择“Check original source change”才核原 Command 和有限结果。冷重开不自动查询或重新提交；来源文件或工作区目录被移除仍可查已经保存的原结果。未知时先查原申请，不能用新 ID、另一个 Session 或同文件其他名称绕过未确认修改；用户来源的未确认修改也会阻止其他工作区触及同源。来源批准与修改共享实际来源依赖的冲突检查。坏申请文件、容量满或保存失败均拒绝新修改，不删除 unknown 腾出空间。
 
 Esc 返回当前编辑步骤或父面板；Ctrl+C、关闭或切 Session 只结束所属读取，已提交工作和原待决审批继续。离线备份保完整原申请字节；恢复到新 Store 后仍显示原身份，原申请不能成为新 Store 的查询或提交许可。实现和实际资格由[CLI Host](../../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)、[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-来源条目增删与原申请)及[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+
+## HTTP 认证与原申请
+
+HTTP Source 详情提供“Authentication”（认证）。读取当前状态显示凭据后端与是否已有凭据，不打开浏览器、不连接 Server。显式 OAuth 来源经批准且启用后可申请 Login；省略 auth 的来源须先由真实连接遇到 401，显式 none 或手工 credential 不升级。来源批准、普通执行审批和工具权限分别处理。
+
+Login、Refresh credentials、Clear local credentials、Revoke remote credentials 均先进入 Review，再独立 Enter 确认；Esc 放弃尚未提交的申请。Login 需要系统浏览器及可用的原生凭据后端；回到终端后核原结果。Refresh 只用已有材料，不重新注册或打开浏览器；失效时需另行 Login。Clear 仅清准确本地自有材料；远端不支持 Revoke 时凭据保留并明确提示。成功登录只证明凭据已保存，连接需另行申请，不重放旧工具。
+
+“Original authentication requests”（原认证申请）在来源移除、空目录或冷重开后仍可选择。选择原 ID 零查询，明确“Check original authentication”才查原 Caller 与结果；Command 受理不等于认证完成，unknown 先查原申请，不重复提交。恢复到新 Store 后保原身份，不把旧记录改成新提交许可。
+
+关闭、Esc、Ctrl+C 或切 Session 只停止所属读取，已提交认证与待决审批继续。需要终止业务时明确选择“Cancel original authentication”，核准确原请求并独立确认；取消不能证明已经开始的凭据写入没有生效。页面不显示 Token、code、PKCE、scope、完整授权 URL 或原始错误正文。实际 Host/Ink 与协议证据分别由 [CLI owner](../../../../../apps/cli/README.md)、[共享 TUI](../../../../../packages/ui/src/tui/README.md)和[认证边界](../../../../active/mcp-authentication.md)维护。
 
 ## 使用工具、资源与提示
 
@@ -116,4 +126,4 @@ CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式
 
 认证参数与敏感值优先通过提供的管理动作维护。项目声明改变后，旧批准不能自动适用于新命令、地址或环境。添加后先查看连接和工具清单，再执行具体任务。
 
-表中保留完整配置语义；当前默认源的认证最小接线只接受 none 或已绑定的有限 Bearer credential，旧 credentialRef、OAuth 和续期仍会明确不可用，不能靠配置字段自动登录。当前安全来源与实际支持范围见[MCP 配置边界](../../../../active/mcp-config-management.md)。
+当前默认源接受 none、已独立绑定的有限 Bearer credential 和 OAuth metadata。OAuth 的 credentialRef 是 profile label，clientSecretRef 必须是 opaque credential:<uuid>；命名手工 secret、inline secret 或其他 header/scheme 不因此可用。省略 auth 的 HTTP 只有观察到当前准确来源的真实 401 后才允许显式 Login；none/manual 不升级。配置字段不会自动打开浏览器。当前安全来源与支持范围见[MCP 配置边界](../../../../active/mcp-config-management.md)。

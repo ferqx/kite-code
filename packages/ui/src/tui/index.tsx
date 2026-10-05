@@ -20,6 +20,7 @@ import { TuiStatusPanel } from './status-panel';
 
 export * from './controller';
 export { TerminalMarkdown } from './markdown';
+export * from './mcp-auth';
 export * from './mcp-connection';
 export * from './mcp-reconnection';
 export * from './mcp-source';

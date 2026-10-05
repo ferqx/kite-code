@@ -306,13 +306,28 @@ test('auth refs are not grants; exact opaque Bearer binding, expiry/revocation, 
       'mcp_credential_binding_revoked',
     );
     for (const auth of [
-      { type: 'oauth' },
+      { type: 'oauth', clientSecretRef: 'named-profile' },
       { type: 'credential', credentialRef: 'named-profile' },
       { type: 'credential', credentialRef: ref, header: 'X-Key' },
     ]) {
       f.put(f.user, { mcpServers: { local: { ...source, auth } } });
       expect(readMcpSources(f.options).registry.servers[0]!.admitted).toBe(false);
     }
+    f.put(f.user, {
+      mcpServers: {
+        local: {
+          ...source,
+          auth: { type: 'oauth', clientId: 'fixed-client', scopes: ['tools.read'] },
+        },
+      },
+    });
+    expect(readMcpSources(f.options).registry.servers[0]!.admitted).toBe(true);
+    expect(readMcpSources(f.options).entries[0]!.transport!.auth).toEqual({
+      type: 'oauth',
+      profile: 'oauth',
+      clientId: 'fixed-client',
+      scopes: ['tools.read'],
+    });
     state = readMcpSources(f.options);
     expect(state.registry.errors.binding).toBeNull();
     const path = join(f.options.profilePath, 'mcp-auth-bindings.json');

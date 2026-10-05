@@ -505,6 +505,10 @@ function normalize(raw: Json, variables: Readonly<Record<string, string>>) {
     transport = { type, command, args, env, ...(cwd ? { cwd } : {}) };
   } else fail('mcp_transport_unavailable');
   const auth = raw.auth ?? { type: 'none' };
+  const authText = (value: unknown, maximum: number): value is string =>
+    string(value) &&
+    value.length <= maximum &&
+    !Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127);
   if (!record(auth)) fail('mcp_auth_unavailable');
   if (auth.type === 'none' && closed(auth, ['type'])) transport.auth = { type: 'none' };
   else if (
@@ -522,7 +526,33 @@ function normalize(raw: Json, variables: Readonly<Record<string, string>>) {
       credentialRef: auth.credentialRef,
       profile: auth.profile ?? 'default',
     };
-  } else fail(auth.type === 'oauth' ? 'mcp_oauth_unavailable' : 'mcp_auth_unavailable');
+  } else if (
+    type === 'http' &&
+    auth.type === 'oauth' &&
+    closed(auth, ['type', 'credentialRef', 'scopes', 'clientId', 'clientSecretRef']) &&
+    (auth.credentialRef === undefined || authText(auth.credentialRef, 128)) &&
+    (auth.clientId === undefined || authText(auth.clientId, 2048)) &&
+    (auth.clientSecretRef === undefined ||
+      (typeof auth.clientSecretRef === 'string' && credential.test(auth.clientSecretRef))) &&
+    (auth.scopes === undefined ||
+      (Array.isArray(auth.scopes) &&
+        auth.scopes.length <= 128 &&
+        auth.scopes.every(
+          (scope) =>
+            typeof scope === 'string' &&
+            scope.length > 0 &&
+            scope.length <= 256 &&
+            /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(scope),
+        )))
+  ) {
+    transport.auth = {
+      type: 'oauth',
+      profile: auth.credentialRef ?? 'oauth',
+      scopes: auth.scopes ?? [],
+      ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+      ...(auth.clientSecretRef === undefined ? {} : { clientSecretRef: auth.clientSecretRef }),
+    };
+  } else fail('mcp_auth_unavailable');
   if (raw.timeout !== undefined) transport.timeout = raw.timeout;
   // No declaration may self-assert Tool effects, annotation trust or retry authority.
   for (const key of ['trust', 'enabledTools', 'disabledTools', 'tools'])

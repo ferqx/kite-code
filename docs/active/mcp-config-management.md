@@ -9,7 +9,7 @@
 
 可见 Source Review、有限原决定读取、跨 Session 未确认冲突与离线 v10 资产已接入，当前合同见[项目来源决定与历史读取](#项目来源决定与历史读取)；本片源码外键盘和当前完整默认已验收，取舍与有限资格见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
-新正式/default/CI已使用通用Service。trusted programmatic registry 提供 `mcp.servers` Query、`mcp.server.select` 普通 Action，以及准确原 live connection 的 `mcp.catalogue.refresh`；六字段 read-set 和实际 Workspace identity 进入文件锁/HostMutation复核，不由通用patch注册原始Server。默认用户来源是选定Profile/mcp.json，项目来源是canonical Workspace/.kite-code/mcp.json；同名项目声明即使disabled/invalid/pending/rejected仍遮蔽用户来源，不读旧全局home或转换旧数据。raw原文留宿主私人源，目录只保安全ID/transport/source/digest/status；批准来源、绑定凭据和实际连接分别是普通Action/Job，不授Tool权限。当前实现与实际三段Ask、漂移前零vault/RPC、默认源码外stdio及nested source child证据归[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)和[scoped提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)。OAuth/续期、公开child冷恢复、完整UI/OSvault与平台仍待闭合。
+新正式/default/CI已使用通用Service。trusted programmatic registry 提供 `mcp.servers` Query、`mcp.server.select` 普通 Action，以及准确原 live connection 的 `mcp.catalogue.refresh`；六字段 read-set 和实际 Workspace identity 进入文件锁/HostMutation复核，不由通用patch注册原始Server。默认用户来源是选定Profile/mcp.json，项目来源是canonical Workspace/.kite-code/mcp.json；同名项目声明即使disabled/invalid/pending/rejected仍遮蔽用户来源，不读旧全局home或转换旧数据。raw原文留宿主私人源，目录只保安全ID/transport/source/digest/status；批准来源、绑定凭据和实际连接分别是普通Action/Job，不授Tool权限。当前实现与实际三段Ask、漂移前零vault/RPC、默认源码外stdio及nested source child证据归[Service owner](../../apps/service/README.md)、[MCP owner](../../packages/agent/src/mcp/README.md)和[scoped提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)。OAuth/续期与四个普通认证Action已接入同一Vault，原申请及owned清理合同见[认证边界](mcp-authentication.md)。公开child冷恢复、系统浏览器/OAuth PTY及完整平台资格仍按实际证据核验。
 
 ## 当前 TUI 的有限选择
 
@@ -57,7 +57,13 @@ CLI 新提交核当前完整 Workspace、physical identity 与完整同版本 So
 
 条件 [backup v12](../../packages/agent/src/maintenance/README.md#mcp-来源条目变更申请的独立离线资产)保完整原 bytes、subject、Store/S/请求摘要/phase，新 Store 不改标、不授热权利；旧 v2–v11 的准确白名单不扩大。产品操作归[来源条目增删](../handbook/clients/tui/guides/mcp-and-skills.md#来源条目增删与原申请)，源码外真实键盘、物理 POST/GET 丢回复、当前统一与完整默认的准确输入和限制归[进度](../plans/unified-agent-refactor-v1-progress.md)。
 
-此片零 Vault/credential revocation，当前手工 opaque Bearer 引用不证明 server-owned secret，移除声明保共享凭据。完整 owned OAuth cleanup、availability preflight 和配置已删而清理失败的 partial 原结果仍按产品认证生命周期闭合；source-entry saved 不替代这项要求。持续 Soak、真实 OS Vault、完整 T/E 与三平台资格继续各自核验。
+当前 Remove 在原身份/read-set与同一个实际协调器下预检准确 owned OAuth 后端，再发布声明，最后本地清理。共享手工 Bearer 保留；disable、shadow或手工声明修改不清凭据，也不停止原连接。credentialCleanup 独立记录not_attempted/not_needed/completed/failed/outcome_unknown；实际声明已发布但清理失败时，原Mutation仍applied、Execution保unknown，有限历史phase saved只证明声明发布，reason与cleanup明确部分结果。历史只原SQL、零Source/W/Vault，不能补清理、回滚或重POST。持续Soak、完整T/E与三平台仍按[当前进度](../plans/unified-agent-refactor-v1-progress.md)核验。
+
+## 当前 OAuth 配置与普通认证
+
+[认证owner](mcp-authentication.md)使用同一个CredentialVault的owned域：显式oauth只携有限profile/scopes/clientId/opaque clientSecretRef，省略HTTP auth的auto资格只来自当前进程同域真实401；none/manual不升级。认证metadata与原始来源留host private，列表与历史不公开URL/secret/body。项目批准、普通Auth Action许可、实际连接Job和Tool权限分开。恢复/提前refresh只消费已存材料，不打开callback/browser或DCR，401不自动重放。
+
+四个Auth Action输入闭合serverId/full expectedReadSet，原C/E即持久意图与效果回执；status只当前安全presence，result只原SQL证明。TUI复用caller-intents资产，Review/独立Confirm、cold选择零GET、明确Check原查询、显式execution.cancel，成功后连接另行申请。只在实际caller文件含Auth时选v13，旧v2–v12及其他独立Source journal不扩大；恢复保原身份与字节，不恢复热POST权。
 
 ## 历史实现与仍适用的约束
 

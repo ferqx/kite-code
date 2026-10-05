@@ -232,7 +232,7 @@ export function createDefaultProcessConfiguration(options: {
   /** Trusted server/transport admission only; JSONC selects allowlisted IDs. */
   mcp?: McpLifecycleOptions | McpHostFactory;
   /** Trusted source transport assets and network policy; raw JSON never supplies these ports. */
-  mcpSources?: Pick<McpSourceConfigurationOptions, 'variables' | 'http' | 'stdio'>;
+  mcpSources?: Pick<McpSourceConfigurationOptions, 'variables' | 'http' | 'stdio' | 'oauth'>;
   /** Trusted finite child roles, never supplied by JSONC. */
   child?: readonly ChildRole[];
   /** Trusted explicit continuation authority. JSONC never registers an authorizer or enables it. */
@@ -371,6 +371,7 @@ export function createDefaultProcessConfiguration(options: {
   });
   const fileTools = new Map(files.tools.map((tool) => [tool.id, tool]));
   const sourceOptions = options.mcpSources;
+  let oauthSerialLocks: NonNullable<RuntimeOptions['workspaceSerialLocks']> | undefined;
   const mcpSources = createMcpSourceConfiguration({
     ...(options.observerSubjectId === undefined
       ? {}
@@ -384,6 +385,7 @@ export function createDefaultProcessConfiguration(options: {
     ...(sourceOptions?.variables ? { variables: sourceOptions.variables.bind(sourceOptions) } : {}),
     ...(sourceOptions?.http ? { http: sourceOptions.http } : {}),
     ...(sourceOptions?.stdio ? { stdio: sourceOptions.stdio } : {}),
+    oauth: { ...sourceOptions?.oauth, serialLocks: () => oauthSerialLocks },
     programmaticServerIds: (mcpOptions?.servers ?? []).map((server) => server.id),
     selection: (_scope, workspaceRoot) => {
       const user = readConfigurationFile({
@@ -1684,6 +1686,11 @@ export function createDefaultProcessConfiguration(options: {
       mcpManagement.extension,
       mcpSources.extension,
     ],
+    bindWorkspaceSerialLocks(locks) {
+      if (oauthSerialLocks && oauthSerialLocks !== locks)
+        throw new AgentError('resource_host_already_bound');
+      oauthSerialLocks = locks;
+    },
     ...(options.authorizationReview ? { authorizationReview: options.authorizationReview } : {}),
     resolveRunConfiguration,
     resolveRecoveryRunConfiguration,

@@ -21,6 +21,7 @@ async function checked(
   command: Command,
   client: AgentClient,
   signal?: AbortSignal,
+  admit: () => void = () => {},
 ): Promise<TuiCallerOutcome> {
   const facts = command as Command & { requestDigest?: string; subjectId?: string | null };
   if (
@@ -33,6 +34,7 @@ async function checked(
   )
     throw Error('caller_receipt_unavailable');
   if (facts.subjectId !== intent.subjectId) throw Error('caller_receipt_identity_mismatch');
+  admit();
   const view = await client.getView(intent.scope.sessionId, { signal });
   if (
     view.storeId !== intent.scope.storeId ||
@@ -60,8 +62,26 @@ async function checked(
       receipt.outcome !== 'cancel_requested')
   )
     throw Error('caller_receipt_identity_mismatch');
+  if (intent.request.kind === 'extension.invoke') {
+    if (typeof receipt.executionId !== 'string' || receipt.preparingNextAttempt !== false)
+      throw Error('caller_receipt_unavailable');
+    admit();
+    const execution = await client.getExecution(receipt.executionId, { signal });
+    if (
+      execution.id !== receipt.executionId ||
+      execution.originStoreId !== intent.scope.storeId ||
+      execution.sessionId !== intent.scope.sessionId ||
+      execution.runId !== null ||
+      execution.kind !== 'job' ||
+      execution.definitionId !== `${intent.request.extensionId}/${intent.request.actionId}` ||
+      execution.definitionVersion !== intent.request.definitionVersion
+    )
+      throw Error('caller_receipt_identity_mismatch');
+    // Command applied is not a credential/result proof, even for a terminal Execution.
+  }
   if (['run.start', 'input.steer', 'input.follow_up'].includes(intent.request.kind)) {
     if (typeof receipt.runId !== 'string') throw Error('caller_receipt_identity_mismatch');
+    admit();
     const run = await client.getRun(receipt.runId, { signal });
     if (
       run.id !== receipt.runId ||
@@ -88,18 +108,32 @@ export function createTuiCallerPort(input: {
   signal?: AbortSignal;
 }): TuiCallerPort {
   const first = new WeakSet<TuiCallerIntent>();
+  const admit = (intent: TuiCallerIntent) => {
+    const info = input.client.serverInfo;
+    if (
+      !info ||
+      info.storeId !== input.storeId ||
+      intent.scope.storeId !== info.storeId ||
+      intent.request.expectedStoreId !== info.storeId ||
+      info.subjectId !== intent.subjectId
+    )
+      throw Error('caller_receipt_identity_mismatch');
+  };
   const lookup = async (
     intent: TuiCallerIntent,
     signal?: AbortSignal,
   ): Promise<TuiCallerOutcome> => {
     const original = freezeCaller(parseCallerIntent(intent));
     try {
+      admit(original);
       const result = await checked(
         original,
         await input.client.getCommand(original.request.commandId, { signal }),
         input.client,
         signal,
+        () => admit(original),
       );
+      admit(original);
       signal?.throwIfAborted();
       input.journal.record(original, result.phase);
       return result;
@@ -128,6 +162,7 @@ export function createTuiCallerPort(input: {
           requestDigest,
         }),
       );
+      admit(candidate);
       const existing = input.journal
         .list()
         .find((row) => row.intent.request.commandId === request.commandId);
@@ -162,6 +197,7 @@ export function createTuiCallerPort(input: {
           );
         }
       }
+      admit(intent);
       const view = await input.client.getView(scope.sessionId, { signal: input.signal });
       if (
         scope.storeId !== input.storeId ||
@@ -202,6 +238,7 @@ export function createTuiCallerPort(input: {
       if (!first.has(intent)) return lookup(original);
       first.delete(intent);
       try {
+        admit(original);
         const r = original.request,
           s = original.scope.sessionId;
         const command =
@@ -213,8 +250,13 @@ export function createTuiCallerPort(input: {
                 ? await input.client.followUp(s, r, { signal: input.signal })
                 : r.kind === 'command.cancel'
                   ? await input.client.cancelCommand(s, r, { signal: input.signal })
-                  : await input.client.cancelExecution(s, r, { signal: input.signal });
-        const result = await checked(original, command, input.client, input.signal);
+                  : r.kind === 'execution.cancel'
+                    ? await input.client.cancelExecution(s, r, { signal: input.signal })
+                    : await input.client.invokeExtension(s, r, { signal: input.signal });
+        const result = await checked(original, command, input.client, input.signal, () =>
+          admit(original),
+        );
+        admit(original);
         input.signal?.throwIfAborted();
         input.journal.record(original, result.phase);
         return result;

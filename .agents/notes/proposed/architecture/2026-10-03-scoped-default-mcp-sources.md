@@ -2,6 +2,8 @@
 
 Status: proposed
 
+当前实施范围：默认Source、原批准、选择、普通/强制连接与来源增删已由各owner和对应implemented Note负责；本轮[owned OAuth与原认证Action](../../implemented/architecture/2026-10-05-owned-mcp-oauth-and-original-auth-actions.md)接入共享Vault、普通C/E及来源删除部分清理。完整平台、持续Soak和V1.3资格仍未完成，因此本提案整体保proposed；不得从状态推导已交付子能力不存在或全目标完成。
+
 ## Problem
 
 新 MCP 已通过 programmatic registry、普通连接 Job、Tool/资源/提示和 live-only refresh 的资格，但默认 process 不读取用户与 Workspace 的原始 Server 声明。把原始 URL、command、env 或认证材料放进通用配置 snapshot 会泄露私人输入；在启动时扫描全局 home 或借当前配置替换旧 Run 会破坏 Profile 与原执行身份。
@@ -16,7 +18,7 @@ Status: proposed
 
 项目 source approval 独立于 Tool grant、Workspace trust 和 credential use。普通用户决定必须绑定原 source/raw/transport/read-set；宽权限也不能代替该决定。批准通过既有 ordinary Interaction/Action 与 HostMutation 保存，等待后和最后 socket/spawn 前重核准确来源、Workspace identity、取消、approval 与 credential binding revision。源、审批与绑定写入按 canonical 顺序持有短锁；文件发布和 SQLite 回执非原子时保原 mutation unknown，只查原 ID。
 
-认证最小接线仅接受明确 none 或已由可信私人元数据绑定的 opaque Bearer credential。绑定包括 Profile、Workspace、source、server、auth profile 和 purpose；配置写出 vaultRef 本身不授予读取权。旧命名 credentialRef、任意 scheme/header、OAuth 与续期在尚未实现时分别明确 unavailable；不能静默转换、回退或登录。它们仍属于完整 V1.3 后续必须闭合的范围。
+最初认证接线只接 none 与可信私人元数据绑定的 opaque Bearer credential；其 Profile/Workspace/source/server/auth profile/purpose绑定和配置引用本身不授读取权的理由继续适用。当前HTTP另接有限OAuth profile metadata，四个固定普通Auth Action、已有Token恢复/主动续期、精确owned Broker和Remove preflight/partial已实施，准确行为及有限资格见上述认证决定与当前owner。旧命名credentialRef、任意scheme/header及inline secret仍拒绝，显式none/manual不自动升级；401不隐式登录或重放。真实外部AS/系统浏览器、OAuth PTY、三平台及完整V1.3继续验收。
 
 持久 approval/auth binding 作用于准确 Profile、Store、canonical Workspace、source/server/auth profile/purpose，不加入 Session，使同一已批准 Workspace 的后续 Session 可重用来源事实。原用户决定的 Store/Session/Interaction/主体与接受 revision 永久保留，不能重标或成为后续 Session 的 Tool grant。每次执行和 registry read-set 仍独立绑定实际 Session/Run/Execution；恢复为新 Store 不自动重绑旧批准或凭据。
 

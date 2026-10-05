@@ -17,6 +17,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type AgentClient, createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
@@ -65,6 +66,7 @@ async function fixture(many: boolean) {
   let approvalJournal = openMcpSourceApprovalJournal(journalOptions());
   let callerOpen = true;
   let vault = 0;
+  const vaultCalls = { availability: 0, presence: 0, put: 0, remove: 0 };
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
     profile,
@@ -73,14 +75,26 @@ async function fixture(many: boolean) {
       kind: backend.kind,
       async put(id, secret) {
         vault++;
+        vaultCalls.put++;
         await backend.put(id, secret);
+      },
+      async status(id) {
+        vault++;
+        vaultCalls.availability++;
+        expect(id).toMatch(/^owned-credential:[a-f0-9]{64}$/);
+        // Actual temporary backend availability probe, with no credential creation.
+        await backend.resolve(id);
+        return 'available' as const;
       },
       async resolve(id) {
         vault++;
+        vaultCalls.presence++;
+        expect(id).toMatch(/^owned-credential:[a-f0-9]{64}$/);
         return backend.resolve(id);
       },
       async remove(id) {
         vault++;
+        vaultCalls.remove++;
         await backend.remove(id);
       },
     },
@@ -101,8 +115,11 @@ async function fixture(many: boolean) {
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const storeId = (await store.getMetadata()).storeId;
+  const coordinator = createWorkspaceSerialLocks(profile);
+  host.bindWorkspaceSerialLocks!(coordinator);
   const runtime = createRuntime({
     store,
+    workspaceSerialLocks: coordinator,
     permissions: host.permissions!,
     extensions: host.extensions,
     conditions: host.conditions,
@@ -256,10 +273,24 @@ async function fixture(many: boolean) {
     get vault() {
       return vault;
     },
+    vaultCalls: () => ({ ...vaultCalls }),
     async close() {
       if (callerOpen) offline();
-      await service.close();
-      await store.close();
+      const errors: unknown[] = [];
+      for (const close of [
+        () => service.close(),
+        () => runtime.close(),
+        () => coordinator.close(),
+        () => store.close(),
+      ]) {
+        try {
+          await close();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length)
+        throw new AggregateError(errors, 'owned_source_recovery_cleanup_unconfirmed');
       rmSync(root, { recursive: true, force: true });
     },
   };
@@ -416,6 +447,14 @@ for (const operation of ['add', 'remove'] as const)
           JSON.parse(sourceBytes.toString()).mcpServers['new-source']._kiteSourceCreation,
         ).toEqual({ version: 1, operationId: execution.id });
       else expect(Object.keys(JSON.parse(sourceBytes.toString()).mcpServers)).toHaveLength(51);
+      const publicationVault = f.vaultCalls();
+      expect(publicationVault).toEqual({
+        availability: operation === 'remove' ? 1 : 0,
+        presence: operation === 'remove' ? 1 : 0,
+        put: 0,
+        remove: 0,
+      });
+      expect(f.vault).toBe(operation === 'remove' ? 2 : 0);
       f.offline();
       await f.reopen();
       expect(f.client.serverInfo?.storeId).toBe(f.storeId);
@@ -457,7 +496,8 @@ for (const operation of ['add', 'remove'] as const)
       ).toBe(true);
       expect(readFileSync(operation === 'add' ? f.projectPath : f.userPath)).toEqual(sourceBytes);
       expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect(f.vault).toBe(0);
+      expect(f.vaultCalls()).toEqual(publicationVault);
+      expect(f.vault).toBe(operation === 'remove' ? 2 : 0);
       const db = new Database(f.profile.databasePath, { readonly: true });
       try {
         expect(db.query('SELECT COUNT(*) AS n FROM run').get()).toEqual({ n: 0 });
@@ -492,6 +532,7 @@ for (const operation of ['add', 'remove'] as const)
           mutationId: recovered.fact!.mutation!.id,
           cursorBeforeRead: cursor,
           cursorAfterRead: (await f.store.getMetadata()).lastChangeCursor,
+          vaultCalls: f.vaultCalls(),
           ...r.counts(),
         }),
       );

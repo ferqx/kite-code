@@ -95,7 +95,10 @@ function preview(v: unknown): TuiMcpSourceEntryPreview {
   };
 }
 export function decodeMcpSourceMutationFact(result: QueryResponse): TuiMcpSourceMutationFact {
-  const x = sourceClosed(envelope(result, 'builtin.mcp.source.mutation.result'), [
+  const value = envelope(result, 'builtin.mcp.source.mutation.result');
+  const hasCleanup =
+    !!value && typeof value === 'object' && Object.hasOwn(value, 'credentialCleanup');
+  const x = sourceClosed(value, [
     'storeId',
     'sessionId',
     'workspaceId',
@@ -106,7 +109,20 @@ export function decodeMcpSourceMutationFact(result: QueryResponse): TuiMcpSource
     'mutation',
     'receipt',
     'reason',
+    ...(hasCleanup ? ['credentialCleanup'] : []),
   ]);
+  if (hasCleanup) {
+    const cleanup = sourceClosed(x.credentialCleanup, ['status', 'attempted']);
+    if (
+      x.operation !== 'remove' ||
+      !['not_attempted', 'not_needed', 'completed', 'failed', 'outcome_unknown'].includes(
+        String(cleanup.status),
+      ) ||
+      typeof cleanup.attempted !== 'boolean' ||
+      (['completed', 'failed'].includes(String(cleanup.status)) && cleanup.attempted !== true)
+    )
+      throw invalid();
+  }
   if (
     !sourceId(x.storeId) ||
     !sourceId(x.sessionId) ||
@@ -473,7 +489,22 @@ export function createTuiMcpSourceMutationPort(
             throw invalid();
         }
         if (['saved', 'failed', 'cancelled'].includes(fact.phase)) {
-          const status = fact.phase === 'saved' ? 'succeeded' : fact.phase;
+          const partial =
+            fact.phase === 'saved' &&
+            fact.operation === 'remove' &&
+            ((fact.credentialCleanup?.status === 'failed' &&
+              fact.reason === 'mcp_source_removed_credential_cleanup_failed') ||
+              (fact.credentialCleanup?.status === 'outcome_unknown' &&
+                fact.reason === 'mcp_source_removed_credential_cleanup_unknown'));
+          const status =
+            fact.phase === 'saved' ? (partial ? 'outcome_unknown' : 'succeeded') : fact.phase;
+          if (
+            fact.phase === 'saved' &&
+            fact.credentialCleanup &&
+            !partial &&
+            !['not_needed', 'completed'].includes(fact.credentialCleanup.status)
+          )
+            throw invalid();
           if (
             fact.workspaceId !== intent.workspaceId ||
             c.status !== 'applied' ||

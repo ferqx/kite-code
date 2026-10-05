@@ -1,18 +1,6 @@
-import type {
-  CancelCommandRequest,
-  CancelExecutionRequest,
-  Command,
-  FollowUpCommandRequest,
-  StartCommandRequest,
-  SteerCommandRequest,
-} from '@kite-ai/client';
+import type { Command, canonicalCallerCommandRequest } from '@kite-ai/client';
 import type { TuiDraftScope } from './drafts';
-export type TuiCallerRequest =
-  | StartCommandRequest
-  | SteerCommandRequest
-  | FollowUpCommandRequest
-  | CancelCommandRequest
-  | CancelExecutionRequest;
+export type TuiCallerRequest = Parameters<typeof canonicalCallerCommandRequest>[0];
 export type TuiCallerIntent = Readonly<{
   scope: TuiDraftScope;
   request: TuiCallerRequest;
@@ -30,7 +18,8 @@ export type TuiCallerRecord = Readonly<{
   intent: TuiCallerIntent;
   phase: 'submitting' | 'unknown' | 'accepted' | 'applied' | 'rejected';
 }>;
-/** Host owns bytes, profile lease, durable publication and original HTTP request. */
+/** Host owns bytes, profile lease, durable publication and original HTTP request.
+ * applied confirms the Command only; it does not confirm an authentication effect. */
 export type TuiCallerOutcome = TuiCallerRecord & Readonly<{ command?: Command; error?: string }>;
 export interface TuiCallerPort {
   list(): Promise<readonly TuiCallerRecord[]>;
@@ -44,6 +33,7 @@ export function callerTarget(
   request: TuiCallerRequest,
 ): TuiCallerIntent['target'] {
   switch (request.kind) {
+    case 'extension.invoke':
     case 'run.start':
       return { kind: 'session', id: scope.sessionId };
     case 'input.steer':

@@ -66,6 +66,15 @@ export interface McpSourceEntryMutationScope {
   sourceOptions(): McpSourceOptions;
   /** Synchronous original canonical Workspace root/device/inode and signal check. */
   validatePublication(): void;
+  prepareRemoval?(
+    serverId: string,
+    readSet: McpSourceReadSet,
+    signal: AbortSignal,
+  ): Promise<{
+    present(): Promise<boolean>;
+    clear(receipt: McpSourceEntryReceipt): Promise<void>;
+    release(): void;
+  } | null>;
 }
 interface Binding {
   version: 1;
@@ -364,6 +373,15 @@ export function createMcpSourceEntryMutations(options: {
       record: HostMutationRecord | null = null;
     let created = false,
       published = false;
+    let removal: Awaited<ReturnType<NonNullable<McpSourceEntryMutationScope['prepareRemoval']>>> =
+      null;
+    const releaseRemoval = () => removal?.release();
+    let credentialCleanup:
+      | {
+          status: 'not_attempted' | 'not_needed' | 'completed' | 'failed' | 'outcome_unknown';
+          attempted: boolean;
+        }
+      | undefined;
     const result = (outcome: ToolResult['outcome'], reason: string): ToolResult => ({
       outcome,
       content: reason,
@@ -374,149 +392,195 @@ export function createMcpSourceEntryMutations(options: {
         code: reason,
         effectAttempted: published,
         connectionAttempted: false,
-        credentialLookupAttempted: false,
-        credentialRevocationAttempted: false,
+        credentialLookupAttempted: credentialCleanup !== undefined,
+        credentialRevocationAttempted: credentialCleanup?.attempted ?? false,
+        ...(credentialCleanup ? { credentialCleanup } : {}),
         modelAttempted: false,
       },
     });
-    try {
-      const host = options.runtime(),
-        metadata = await host.getMetadata();
-      const own = await host.getExecution(context.executionId);
-      const command = own ? await host.getCommand(own.originCommandId) : null;
-      const original = command && originalInput(command);
-      const current = await host.getSession(context.sessionId);
-      if (
-        !subjectId ||
-        !current ||
-        current.deletedAt !== null ||
-        !own ||
-        !command ||
-        !original ||
-        original.operation !== operation ||
-        command.originStoreId !== metadata.storeId ||
-        command.subjectId !== subjectId ||
-        command.sessionId !== context.sessionId ||
-        object(command.receipt).executionId !== own.id ||
-        !originalExecution(command, own, operation) ||
-        !['dispatching', 'running'].includes(own.status) ||
-        !equal(input, own.input)
-      )
-        return result('failed', 'operation_unverifiable');
-      identity = binding(own, current.workspaceId, operation);
-      context.signal.throwIfAborted();
-      const source = await options.scope(context.sessionId),
-        sourceOptions = source.sourceOptions();
-      if (
-        source.workspaceId !== current.workspaceId ||
-        sourceOptions.scope.storeId !== metadata.storeId ||
-        sourceOptions.scope.sessionId !== context.sessionId ||
-        sourceOptions.scope.workspaceId !== current.workspaceId
-      )
-        throw new AgentError('mcp_source_scope_invalid');
-      source.validatePublication();
-      const observed = readMcpSources(sourceOptions);
-      if (!equal(observed.readSet, original.readSet)) throw new AgentError('mcp_source_conflict');
-      if (
-        Object.values(observed.registry.errors).some((error) => error !== null) ||
-        !hex(sourceRead(original.readSet, original.mutation.scope)?.etag)
-      )
-        throw new AgentError('mcp_source_unavailable');
-      mutationIdentity = {
-        commandId: `mcp-entry-${own.id}`,
-        expectedStoreId: metadata.storeId,
-        subjectId,
-        requestDigest: hash(identity),
-      };
-      const begun = await host.beginHostMutation({
-        ...mutationIdentity,
-        kind: original.mutation.scope === 'user' ? 'config.user.write' : 'config.workspace.write',
-        scope: original.mutation.scope === 'user' ? 'user' : current.workspaceId,
-        safeRequest: safeRequest(original.mutation, original.readSet, current.workspaceId),
-      });
-      record = begun.record;
-      if (
-        !begun.created ||
-        !matchesMutation(record, identity, original.mutation, original.readSet, subjectId)
-      )
-        return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
-      created = true;
-      context.signal.throwIfAborted();
-      const fresh = await host.getSession(context.sessionId);
-      if (!fresh || fresh.deletedAt !== null || fresh.workspaceId !== current.workspaceId)
-        throw new AgentError('mcp_source_scope_invalid');
-      const actual = await host.getExecution(own.id),
-        actualCommand = await host.getCommand(command.id);
-      if (
-        !actual ||
-        !actualCommand ||
-        !originalExecution(actualCommand, actual, operation) ||
-        !equal(actualCommand.request, command.request) ||
-        actualCommand.requestDigest !== command.requestDigest ||
-        actualCommand.subjectId !== subjectId ||
-        object(actualCommand.receipt).executionId !== own.id ||
-        !['dispatching', 'running'].includes(actual.status) ||
-        actual.cancelRequestedAt !== null ||
-        actualCommand.cancelRequestedAt !== null
-      )
-        throw new AgentError('operation_unverifiable');
-      receipt = writeMcpSourceEntry({
-        ...source.sourceOptions(),
-        expectedReadSet: original.readSet,
-        mutation: original.mutation,
-        operationId: own.id,
-        validatePublication() {
-          context.signal.throwIfAborted();
-          source.validatePublication();
-          if (!equal(readMcpSources(source.sourceOptions()).readSet, original.readSet))
-            throw new AgentError('mcp_source_conflict');
-        },
-        afterPublication() {
-          published = true;
-        },
-      });
-      if (!validReceipt(receipt, identity, original.mutation, original.readSet))
-        throw new AgentError('mcp_source_publication_unknown');
-      record = await host.finishHostMutation({
-        ...mutationIdentity,
-        state: 'applied',
-        receipt: { status: 'applied', etag: receipt.newEtag },
-      });
-      if (
-        !matchesMutation(record, identity, original.mutation, original.readSet, subjectId) ||
-        record.state !== 'applied' ||
-        !equal(record.receipt, { status: 'applied', etag: receipt.newEtag })
-      )
-        return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
-      return result('succeeded', 'mcp_source_entry_saved');
-    } catch (error) {
-      const reason =
-        error instanceof AgentError || error instanceof ConfigurationError
-          ? code(error.code)
-            ? error.code
-            : 'mcp_source_unavailable'
-          : 'mcp_source_unavailable';
-      // The leaf emits this code only after rename, including failure before its callback.
-      if (reason === 'mcp_source_publication_unknown') published = true;
-      const uncertain = published;
-      if (mutationIdentity && !created)
-        return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
-      if (mutationIdentity && created) {
-        try {
-          record = await options.runtime().finishHostMutation({
-            ...mutationIdentity,
-            state: uncertain ? 'outcome_unknown' : 'failed',
-            receipt: { status: uncertain ? 'outcome_unknown' : 'failed', code: reason },
-          });
-        } catch {
-          return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
+    const perform = async () => {
+      try {
+        const host = options.runtime(),
+          metadata = await host.getMetadata();
+        const own = await host.getExecution(context.executionId);
+        const command = own ? await host.getCommand(own.originCommandId) : null;
+        const original = command && originalInput(command);
+        const current = await host.getSession(context.sessionId);
+        if (
+          !subjectId ||
+          !current ||
+          current.deletedAt !== null ||
+          !own ||
+          !command ||
+          !original ||
+          original.operation !== operation ||
+          command.originStoreId !== metadata.storeId ||
+          command.subjectId !== subjectId ||
+          command.sessionId !== context.sessionId ||
+          object(command.receipt).executionId !== own.id ||
+          !originalExecution(command, own, operation) ||
+          !['dispatching', 'running'].includes(own.status) ||
+          !equal(input, own.input)
+        )
+          return result('failed', 'operation_unverifiable');
+        identity = binding(own, current.workspaceId, operation);
+        context.signal.throwIfAborted();
+        const source = await options.scope(context.sessionId),
+          sourceOptions = source.sourceOptions();
+        if (
+          source.workspaceId !== current.workspaceId ||
+          sourceOptions.scope.storeId !== metadata.storeId ||
+          sourceOptions.scope.sessionId !== context.sessionId ||
+          sourceOptions.scope.workspaceId !== current.workspaceId
+        )
+          throw new AgentError('mcp_source_scope_invalid');
+        source.validatePublication();
+        const observed = readMcpSources(sourceOptions);
+        if (!equal(observed.readSet, original.readSet)) throw new AgentError('mcp_source_conflict');
+        if (
+          Object.values(observed.registry.errors).some((error) => error !== null) ||
+          !hex(sourceRead(original.readSet, original.mutation.scope)?.etag)
+        )
+          throw new AgentError('mcp_source_unavailable');
+        if (operation === 'remove' && source.prepareRemoval) {
+          removal = await source.prepareRemoval(
+            String(object(input).serverId),
+            original.readSet,
+            context.signal,
+          );
+          if (removal) {
+            credentialCleanup = { status: 'not_attempted', attempted: false };
+            if (!(await removal.present())) credentialCleanup.status = 'not_needed';
+          }
         }
+        mutationIdentity = {
+          commandId: `mcp-entry-${own.id}`,
+          expectedStoreId: metadata.storeId,
+          subjectId,
+          requestDigest: hash(identity),
+        };
+        const begun = await host.beginHostMutation({
+          ...mutationIdentity,
+          kind: original.mutation.scope === 'user' ? 'config.user.write' : 'config.workspace.write',
+          scope: original.mutation.scope === 'user' ? 'user' : current.workspaceId,
+          safeRequest: safeRequest(original.mutation, original.readSet, current.workspaceId),
+        });
+        record = begun.record;
+        if (
+          !begun.created ||
+          !matchesMutation(record, identity, original.mutation, original.readSet, subjectId)
+        )
+          return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
+        created = true;
+        context.signal.throwIfAborted();
+        const fresh = await host.getSession(context.sessionId);
+        if (!fresh || fresh.deletedAt !== null || fresh.workspaceId !== current.workspaceId)
+          throw new AgentError('mcp_source_scope_invalid');
+        const actual = await host.getExecution(own.id),
+          actualCommand = await host.getCommand(command.id);
+        if (
+          !actual ||
+          !actualCommand ||
+          !originalExecution(actualCommand, actual, operation) ||
+          !equal(actualCommand.request, command.request) ||
+          actualCommand.requestDigest !== command.requestDigest ||
+          actualCommand.subjectId !== subjectId ||
+          object(actualCommand.receipt).executionId !== own.id ||
+          !['dispatching', 'running'].includes(actual.status) ||
+          actual.cancelRequestedAt !== null ||
+          actualCommand.cancelRequestedAt !== null
+        )
+          throw new AgentError('operation_unverifiable');
+        receipt = writeMcpSourceEntry({
+          ...source.sourceOptions(),
+          expectedReadSet: original.readSet,
+          mutation: original.mutation,
+          operationId: own.id,
+          validatePublication() {
+            context.signal.throwIfAborted();
+            source.validatePublication();
+            if (!equal(readMcpSources(source.sourceOptions()).readSet, original.readSet))
+              throw new AgentError('mcp_source_conflict');
+          },
+          afterPublication() {
+            published = true;
+          },
+        });
+        if (!validReceipt(receipt, identity, original.mutation, original.readSet))
+          throw new AgentError('mcp_source_publication_unknown');
+        record = await host.finishHostMutation({
+          ...mutationIdentity,
+          state: 'applied',
+          receipt: { status: 'applied', etag: receipt.newEtag },
+        });
+        if (
+          !matchesMutation(record, identity, original.mutation, original.readSet, subjectId) ||
+          record.state !== 'applied' ||
+          !equal(record.receipt, { status: 'applied', etag: receipt.newEtag })
+        )
+          return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
+        if (removal && credentialCleanup?.status === 'not_attempted') {
+          credentialCleanup.attempted = true;
+          try {
+            await removal.clear(receipt);
+            credentialCleanup.status = 'completed';
+          } catch (error) {
+            const uncertain =
+              error instanceof Error && 'code' in error && String(error.code).endsWith('_unknown');
+            credentialCleanup.status = uncertain ? 'outcome_unknown' : 'failed';
+            return result(
+              'outcome_unknown',
+              uncertain
+                ? 'mcp_source_removed_credential_cleanup_unknown'
+                : 'mcp_source_removed_credential_cleanup_failed',
+            );
+          }
+        }
+        return result('succeeded', 'mcp_source_entry_saved');
+      } catch (error) {
+        const reason =
+          error instanceof AgentError || error instanceof ConfigurationError
+            ? code(error.code)
+              ? error.code
+              : 'mcp_source_unavailable'
+            : 'mcp_source_unavailable';
+        // The leaf emits this code only after rename, including failure before its callback.
+        if (reason === 'mcp_source_publication_unknown') published = true;
+        const uncertain = published;
+        if (mutationIdentity && !created)
+          return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
+        if (mutationIdentity && created) {
+          try {
+            record = await options.runtime().finishHostMutation({
+              ...mutationIdentity,
+              state: uncertain ? 'outcome_unknown' : 'failed',
+              receipt: { status: uncertain ? 'outcome_unknown' : 'failed', code: reason },
+            });
+          } catch {
+            return result('outcome_unknown', 'mcp_source_mutation_unverifiable');
+          }
+        }
+        return result(
+          uncertain ? 'outcome_unknown' : context.signal.aborted ? 'cancelled' : 'failed',
+          reason,
+        );
       }
-      return result(
-        uncertain ? 'outcome_unknown' : context.signal.aborted ? 'cancelled' : 'failed',
-        reason,
-      );
+    };
+    let response: ToolResult;
+    let cleanupFailed = false;
+    try {
+      response = await perform();
+    } finally {
+      try {
+        releaseRemoval();
+      } catch {
+        if (credentialCleanup) credentialCleanup.status = 'outcome_unknown';
+        cleanupFailed = true;
+      }
     }
+    return cleanupFailed
+      ? result('outcome_unknown', 'mcp_source_removed_credential_cleanup_unknown')
+      : response;
   }
   const schemaBase = {
     scope: { type: 'string', enum: ['user', 'workspace'] },
@@ -821,6 +885,21 @@ export function createMcpSourceEntryMutations(options: {
         return output();
       }
       payload.reason = 'mutation_result_unverifiable';
+      const cleanup = object(details.credentialCleanup),
+        hasCleanup = Object.hasOwn(details, 'credentialCleanup');
+      if (
+        hasCleanup &&
+        (!closed(cleanup, ['status', 'attempted']) ||
+          original.operation !== 'remove' ||
+          !['not_attempted', 'not_needed', 'completed', 'failed', 'outcome_unknown'].includes(
+            String(cleanup.status),
+          ) ||
+          typeof cleanup.attempted !== 'boolean' ||
+          details.credentialLookupAttempted !== true ||
+          details.credentialRevocationAttempted !== cleanup.attempted ||
+          (['completed', 'failed'].includes(String(cleanup.status)) && cleanup.attempted !== true))
+      )
+        return output();
       if (
         !closed(result, ['outcome', 'content', 'details']) ||
         !closed(details, [
@@ -833,20 +912,21 @@ export function createMcpSourceEntryMutations(options: {
           'credentialLookupAttempted',
           'credentialRevocationAttempted',
           'modelAttempted',
+          ...(hasCleanup ? ['credentialCleanup'] : []),
         ]) ||
         result.outcome !== execution.status ||
         result.content !== details.code ||
         !code(details.code) ||
         ![
           'connectionAttempted',
-          'credentialLookupAttempted',
-          'credentialRevocationAttempted',
+          ...(!hasCleanup ? ['credentialLookupAttempted', 'credentialRevocationAttempted'] : []),
           'modelAttempted',
         ].every((key) => details[key] === false) ||
         ![false, true].includes(details.effectAttempted as boolean) ||
         (details.binding !== null && !equal(details.binding, identity))
       )
         return output();
+      if (hasCleanup) payload.credentialCleanup = cleanup;
       if (
         ['failed', 'cancelled'].includes(execution.status) &&
         details.effectAttempted === false &&
@@ -863,8 +943,18 @@ export function createMcpSourceEntryMutations(options: {
         return output();
       }
       if (
-        execution.status !== 'succeeded' ||
-        details.code !== 'mcp_source_entry_saved' ||
+        !(
+          (execution.status === 'succeeded' &&
+            details.code === 'mcp_source_entry_saved' &&
+            (!hasCleanup || ['not_needed', 'completed'].includes(String(cleanup.status)))) ||
+          (original.operation === 'remove' &&
+            execution.status === 'outcome_unknown' &&
+            hasCleanup &&
+            ((cleanup.status === 'failed' &&
+              details.code === 'mcp_source_removed_credential_cleanup_failed') ||
+              (cleanup.status === 'outcome_unknown' &&
+                details.code === 'mcp_source_removed_credential_cleanup_unknown')))
+        ) ||
         details.effectAttempted !== true ||
         !equal(details.binding, identity) ||
         !mutation ||
@@ -876,7 +966,7 @@ export function createMcpSourceEntryMutations(options: {
         return output();
       payload.phase = 'saved';
       payload.receipt = details.receipt!;
-      payload.reason = null;
+      payload.reason = execution.status === 'succeeded' ? null : details.code!;
       return output();
     },
   };

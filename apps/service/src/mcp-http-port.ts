@@ -4,11 +4,14 @@ import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { isIP, type Socket } from 'node:net';
 import {
   createMcpAdapter,
+  McpAdapterError,
   type McpCredentialBroker,
+  McpCredentialError,
   type McpCredentialIdentity,
   type McpCredentialRef,
   type McpLifecycleTransportPort,
 } from '@kite-ai/agent/mcp';
+import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 
@@ -29,6 +32,8 @@ export interface McpHttpPortOptions {
     /** Host resolves from the admitted SQL Job and canonical Workspace/source, never HTTP payload. */
     credential?: {
       broker: McpCredentialBroker;
+      /** Private owned OAuth resume may publish tokens; never detach it on a read timeout. */
+      canWriteOwned?: true;
       bind(
         binding: Binding,
         options: { signal: AbortSignal },
@@ -36,8 +41,18 @@ export interface McpHttpPortOptions {
         ref: McpCredentialRef;
         identity: McpCredentialIdentity;
         revocationRevision: number;
-      }>;
+      } | null>;
     };
+    /** Actual 401 only; observes the failed request and never grants a retry. */
+    onUnauthorized?(
+      binding: Binding,
+      options: {
+        signal: AbortSignal;
+        authenticated: boolean;
+        resourceMetadataUrl?: string;
+        scopes?: readonly string[];
+      },
+    ): void;
   }[];
   /** Actual host checks the original durable Job/Store identity; never remote self-report. */
   admit(binding: Binding, options: { signal: AbortSignal }): Promise<void>;
@@ -163,8 +178,13 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
           headers,
           configDigest,
           credential: server.credential
-            ? { broker: server.credential.broker, bind: server.credential.bind }
+            ? {
+                broker: server.credential.broker,
+                bind: server.credential.bind,
+                canWriteOwned: server.credential.canWriteOwned,
+              }
             : undefined,
+          onUnauthorized: server.onUnauthorized,
         },
       ];
     }),
@@ -238,29 +258,72 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
       if (signal.aborted) throw new McpHttpPortError('mcp_http_request_aborted');
       assertFresh?.(binding, { signal });
       let credential:
-        | Awaited<ReturnType<NonNullable<typeof server.credential>['bind']>>
+        | Exclude<Awaited<ReturnType<NonNullable<typeof server.credential>['bind']>>, null>
         | undefined;
       if (server.credential) {
         try {
-          credential = await bounded(() => server.credential!.bind(binding, { signal }), signal);
-        } catch {
+          if (server.credential.canWriteOwned) {
+            const deadline = new AbortController(),
+              ownedSignal = AbortSignal.any([signal, deadline.signal]);
+            let timedOut = false;
+            const timer = setTimeout(() => {
+              timedOut = true;
+              deadline.abort();
+            }, timeout);
+            try {
+              // A native write already in progress cannot be atomically cancelled. Its lease stays owned until it settles.
+              credential =
+                (await server.credential.bind(binding, { signal: ownedSignal })) ?? undefined;
+              if (timedOut) throw new McpAdapterError('mcp_oauth_publication_unknown');
+            } catch (error) {
+              if (
+                timedOut &&
+                !(
+                  (error instanceof McpCredentialError || error instanceof McpAdapterError) &&
+                  error.code.endsWith('_unknown')
+                )
+              )
+                throw new McpAdapterError('mcp_oauth_publication_unknown');
+              throw error;
+            } finally {
+              clearTimeout(timer);
+            }
+          } else
+            credential =
+              (await bounded(() => server.credential!.bind(binding, { signal }), signal)) ??
+              undefined;
+        } catch (error) {
+          if (
+            (error instanceof McpAdapterError || error instanceof McpCredentialError) &&
+            [
+              'mcp_credential_store_locked',
+              'mcp_credential_store_unavailable',
+              'mcp_oauth_reauth_required',
+              'mcp_oauth_scope_changed',
+              'mcp_oauth_publication_unknown',
+              'mcp_oauth_cleanup_unknown',
+            ].includes(error.code)
+          )
+            throw new McpAdapterError(error.code);
           throw new McpHttpPortError('mcp_http_credential_unavailable');
         }
-        const identity = credential.identity;
-        if (
-          identity.originalStoreId !== binding.originalStoreId ||
-          identity.sessionId !== binding.sessionId ||
-          identity.connectionExecutionId !== binding.executionId ||
-          identity.serverId !== binding.serverId ||
-          identity.configDigest !== binding.configDigest
-        )
-          throw new McpHttpPortError('mcp_http_credential_binding_invalid');
-        if (signal.aborted) throw new McpHttpPortError('mcp_http_request_aborted');
-        credential = {
-          ref: Object.freeze({ ...credential.ref }),
-          identity: structuredClone(identity),
-          revocationRevision: credential.revocationRevision,
-        };
+        if (credential) {
+          const identity = credential.identity;
+          if (
+            identity.originalStoreId !== binding.originalStoreId ||
+            identity.sessionId !== binding.sessionId ||
+            identity.connectionExecutionId !== binding.executionId ||
+            identity.serverId !== binding.serverId ||
+            identity.configDigest !== binding.configDigest
+          )
+            throw new McpHttpPortError('mcp_http_credential_binding_invalid');
+          if (signal.aborted) throw new McpHttpPortError('mcp_http_request_aborted');
+          credential = {
+            ref: Object.freeze({ ...credential.ref }),
+            identity: structuredClone(identity),
+            revocationRevision: credential.revocationRevision,
+          };
+        }
       }
       const hostname = server.url.hostname.replace(/^\[|\]$/g, '');
       let addresses: readonly { address: string; family: 4 | 6 }[];
@@ -332,6 +395,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
           headers.delete(name);
         for (const [name, value] of server.headers) headers.set(name, value);
         headers.set('host', server.url.host);
+        let authorizationFailure: string | undefined;
         const send = () =>
           new Promise<Response>((resolve, reject) => {
             assertFresh?.(binding, { signal: requestSignal });
@@ -355,6 +419,44 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                 },
               },
               (incoming) => {
+                if (incoming.statusCode === 401 && server.onUnauthorized) {
+                  let code = credential ? 'mcp_oauth_reauth_required' : 'mcp_oauth_login_required';
+                  try {
+                    assertFresh?.(binding, { signal: requestSignal });
+                    const header = String(incoming.headers['www-authenticate'] ?? '');
+                    const challenge = extractWWWAuthenticateParams(
+                      new Response(null, {
+                        status: 401,
+                        headers: header.length <= 8192 ? { 'www-authenticate': header } : {},
+                      }),
+                    );
+                    const scopes = challenge.scope?.split(' ');
+                    const validScopes =
+                      scopes &&
+                      scopes.length <= 128 &&
+                      scopes.every(
+                        (scope) =>
+                          scope.length > 0 &&
+                          scope.length <= 256 &&
+                          /^[\x21\x23-\x5b\x5d-\x7e]+$/.test(scope),
+                      );
+                    server.onUnauthorized(binding, {
+                      signal: requestSignal,
+                      authenticated: !!credential,
+                      ...(challenge.resourceMetadataUrl
+                        ? { resourceMetadataUrl: challenge.resourceMetadataUrl.href }
+                        : {}),
+                      ...(validScopes ? { scopes } : {}),
+                    });
+                  } catch {
+                    code = 'mcp_oauth_scope_changed';
+                  }
+                  authorizationFailure = code;
+                  reject(new McpAdapterError(code));
+                  incoming.destroy();
+                  request.destroy();
+                  return;
+                }
                 if ((incoming.statusCode ?? 500) >= 300 && (incoming.statusCode ?? 500) < 400) {
                   incoming.destroy();
                   request.destroy();
@@ -461,6 +563,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
               },
             );
           } catch {
+            if (authorizationFailure) throw new McpAdapterError(authorizationFailure);
             throw new McpHttpPortError('mcp_http_credential_unavailable');
           }
         }

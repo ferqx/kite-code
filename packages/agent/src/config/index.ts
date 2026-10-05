@@ -5,6 +5,8 @@ export {
   type CredentialReference,
   createCredentialVault,
   createTemporaryCredentialBackend,
+  type OwnedCredentialScope,
+  type OwnedCredentialStatus,
 } from './credentials';
 export { createConfigurationSnapshot, resolveConfiguration } from './effective';
 export {

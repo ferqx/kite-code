@@ -223,12 +223,25 @@ export function createMcpAdapter(options: McpAdapterOptions) {
         if (closed || !leases.size || generation !== ticket)
           throw new McpAdapterError('mcp_scope_released');
         return client;
-      } catch {
+      } catch (error) {
         await client.close().catch(() => {});
         if (generation === ticket) {
           clientTask = undefined;
           current = undefined;
         }
+        if (
+          error instanceof McpAdapterError &&
+          [
+            'mcp_oauth_login_required',
+            'mcp_oauth_reauth_required',
+            'mcp_oauth_scope_changed',
+            'mcp_credential_store_locked',
+            'mcp_credential_store_unavailable',
+            'mcp_oauth_publication_unknown',
+            'mcp_oauth_cleanup_unknown',
+          ].includes(error.code)
+        )
+          throw error;
         throw new McpAdapterError('mcp_connection_failed');
       }
     })();
@@ -887,6 +900,13 @@ export {
   mcpReadToolIds,
   mcpSourceConnectionJobId,
 } from './lifecycle';
+export {
+  createMcpOAuthProvider,
+  McpOAuthError,
+  type McpOAuthProvider,
+  type McpOAuthProviderOptions,
+  type McpOAuthVault,
+} from './oauth-provider';
 export type {
   McpReconnectionInput,
   McpReconnectionReplacement,

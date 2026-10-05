@@ -18,6 +18,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createTemporaryCredentialBackend, mcpCanonical } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
@@ -51,23 +52,29 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
   writeFileSync(user, originalUser, { mode: 0o600 });
   writeFileSync(project, '{"mcpServers":{}}\n', { mode: 0o600 });
   let variables: Record<string, string> = { KEPT: 'original' };
-  let vaultCalls = 0;
+  const vaultCalls: string[] = [];
   const backend = createTemporaryCredentialBackend();
   const host = createDefaultProcessConfiguration({
     profile,
     observerSubjectId: options.observer ?? 'owner',
     credentialBackend: {
       kind: backend.kind,
+      async status(id) {
+        vaultCalls.push('status');
+        expect(id).toMatch(/^owned-credential:[a-f0-9]{64}$/);
+        await backend.resolve(id);
+        return 'available';
+      },
       async put(id, secret) {
-        vaultCalls++;
+        vaultCalls.push('put');
         await backend.put(id, secret);
       },
       async resolve(id) {
-        vaultCalls++;
+        vaultCalls.push('resolve');
         return backend.resolve(id);
       },
       async remove(id) {
-        vaultCalls++;
+        vaultCalls.push('remove');
         await backend.remove(id);
       },
     },
@@ -99,8 +106,11 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const storeId = (await store.getMetadata()).storeId;
+  const coordinator = createWorkspaceSerialLocks(profile);
+  host.bindWorkspaceSerialLocks!(coordinator);
   const runtime = createRuntime({
     store,
+    workspaceSerialLocks: coordinator,
     artifacts: createArtifactStore({
       profile: { dataRoot: profile.dataRoot, profile: profile.profile },
       store,
@@ -157,7 +167,7 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
     return obj(envelopes[0]!.payload);
   }
   const directory = () => query('mcp.sources', {});
-  const history = async (commandId: string) => {
+  const history = async (commandId: string, credentialPreflight = false) => {
     const result = await query('mcp.source.mutation.result', { commandId });
     expect(Object.keys(result).sort()).toEqual(
       [
@@ -171,10 +181,13 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
         'mutation',
         'receipt',
         'reason',
+        ...(credentialPreflight ? ['credentialCleanup'] : []),
       ].sort(),
     );
     expect(JSON.stringify(result)).not.toContain('controlled.invalid');
     expect(JSON.stringify(result)).not.toContain(placeholder);
+    if (credentialPreflight)
+      expect(result.credentialCleanup).toEqual({ status: 'not_needed', attempted: false });
     return result;
   };
   async function invoke(commandId: string, actionId: string, input: Json) {
@@ -240,8 +253,8 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
     });
     return interaction;
   }
-  async function noExecutionSideEffects(allowSourceQuestion = false) {
-    expect(vaultCalls).toBe(0);
+  async function noExecutionSideEffects(allowSourceQuestion = false, credentialPreflight = false) {
+    expect(vaultCalls).toEqual(credentialPreflight ? ['status', 'resolve'] : []);
     const db = new Database(profile.databasePath, { readonly: true });
     try {
       expect(db.query('SELECT COUNT(*) AS n FROM run').get()).toEqual({ n: 0 });
@@ -288,6 +301,8 @@ async function fixture(options: { mode?: 'full' | 'ask' | 'deny'; observer?: str
     async close() {
       client.disposeNetwork();
       await service.close();
+      await runtime.close();
+      await coordinator.close();
       await store.close();
       rmSync(root, { recursive: true, force: true });
     },
@@ -332,14 +347,14 @@ test('default ordinary Add and Remove have independent Ask and exact shadow prev
     expect((await f.card()).id).not.toBe(approval.id);
     await f.answer('approve_once');
     expect((await f.terminal('remove')).status).toBe('succeeded');
-    expect((await f.history('remove')).phase).toBe('saved');
+    expect((await f.history('remove', true)).phase).toBe('saved');
     expect(JSON.parse(readFileSync(f.project, 'utf8')).mcpServers).toEqual({});
     expect(readFileSync(f.user, 'utf8')).toBe(f.originalUser);
     const remaining = obj(
       ((await f.directory()).items as Json[]).find((value) => obj(value).name === 'shared'),
     );
     expect(obj(remaining.source).kind).toBe('user');
-    await f.noExecutionSideEffects();
+    await f.noExecutionSideEffects(false, true);
   } finally {
     await f.close();
   }
@@ -550,7 +565,7 @@ test('project re-add cannot reuse a real old source approval and has no extra Qu
       await f.store.listInteractions({ expectedStoreId: f.storeId, sessionId: 's' })
     ).interactions.filter((interaction) => interaction.kind === 'question');
     expect(questions.map((interaction) => interaction.id)).toEqual([question.id]);
-    await f.noExecutionSideEffects(true);
+    await f.noExecutionSideEffects(true, true);
   } finally {
     await f.close();
   }

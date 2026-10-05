@@ -8,6 +8,7 @@ export function callerTarget(
   request: TuiCallerRequest,
 ): TuiCallerIntent['target'] {
   switch (request.kind) {
+    case 'extension.invoke':
     case 'run.start':
       return { kind: 'session', id: scope.sessionId };
     case 'input.steer':
@@ -82,8 +83,13 @@ export function parseCallerIntent(raw: unknown): TuiCallerIntent {
   if (!raw.request || typeof raw.request !== 'object' || Array.isArray(raw.request))
     throw Error('caller_intent_invalid');
   const request = raw.request as TuiCallerRequest;
-  if (!(request.kind in schemas)) throw Error('caller_intent_invalid');
-  validateRequest(schemas[request.kind], request);
+  if (request.kind === 'extension.invoke') {
+    canonicalCallerCommandRequest(request);
+    if (hasDraft) throw Error('caller_intent_invalid');
+  } else {
+    if (!(request.kind in schemas)) throw Error('caller_intent_invalid');
+    validateRequest(schemas[request.kind], request);
+  }
   if (
     request.expectedStoreId !== raw.scope.storeId ||
     raw.bodyDigest !== callerDigest(request) ||
