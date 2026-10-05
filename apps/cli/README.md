@@ -368,4 +368,8 @@ saved 必须同时核准确原 Command/subject/requestDigest、原 E 的 definit
 
 status只当前safe policy/backend/presence。lookup核原Caller C/subject/request digest/receipt Execution，再核mcp.auth.result的完整binding/input digest/phase/authStatus/effectAttempted；Command applied单独不显示认证成功。history无当前Source/W/Vault读取，新Clear/Revoke仍需fresh Source/read-set，不能借历史越域。pending/unknown阻同scope冲突，cancel用同一execution.cancel普通申请。
 
-TUI先Review再独立Enter确认，成功提示凭据保存和另行连接；冷选择零GET，明确Check才查原Caller/Query，关闭/切S只停Reader。现有asset实际含Auth才选v13，旧manifest/请求语法不扩大，A→B保原bytes/身份且不授新HTTP许可。[Host](test/isolated/tui-mcp-auth.test.ts)、[Caller契约](test/isolated/caller-auth-contract.test.ts)和[Ink](../../packages/ui/test/tui/mcp-auth.test.tsx)各保实际范围；当前默认图与历史红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。真实OAuth PTY/系统浏览器/平台不由有限fixture证明。
+TUI先Review再独立Enter确认，成功提示凭据保存和另行连接；冷选择零GET，明确Check才查原Caller/Query，关闭/切S只停Reader。现有asset实际含Auth才选v13，旧manifest/请求语法不扩大，A→B保原bytes/身份且不授新HTTP许可。[Host](test/isolated/tui-mcp-auth.test.ts)、[Caller契约](test/isolated/caller-auth-contract.test.ts)和[Ink](../../packages/ui/test/tui/mcp-auth.test.tsx)各保实际范围；当前默认图与历史红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+[源码外80×24 Auth PTY](test/isolated/tui-mcp-auth-pty.test.ts)经公开 terminal builder、实际 paired Service/Runtime/SQLite 与 Client，真实键盘依次完成 Login、Refresh、Revoke、Login、Clear 的 Review 与独立 Enter Confirm。五个原 Command/Execution 唯一，UI仅五次 Auth POST；每次普通 Ask 核准确原 Execution/definition/revision，由 observer SDK 回答 approve_once，不能称为键盘审批。受控 AS 实际经过 discovery、两次 DCR/PKCE/callback、token、refresh 和 revoke，MCP RPC/Model均零，没有自动连接。
+
+同Profile/Store/subject/Session冷重开前实际移除Source与physical Workspace；选择准确第二原ID零原结果GET，明确Check后该次实际仅原Command与mcp.auth.result两GET、POST零，AS与Vault操作数保持。最新完整Ink帧的可见目标用于导航，保原10s步骤、12s control及180s测试预算。暖/冷TUI和seed/warm/cold Service均有正常退出与所属清理确认。该本机资格使用临时Vault和fetch callback opener，系统浏览器、原生OAuth Vault组合、异常cleanup、cursor不变、A→B及Linux/Windows仍须各自实际证据。

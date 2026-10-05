@@ -44,6 +44,6 @@ Remove 对准确 owned 域先检查后端可用性，声明发布后才本地清
 
 ## 资格范围
 
-本轮本机受控 AS/MCP 真实 wire、SQLite/默认 Service、临时 Vault、取消/发布未知和 Ink/Host 验证不等于真实外部 AS、系统浏览器、OAuth PTY 或三平台资格。实际 macOS synthetic native owned CRUD 与 fresh-Vault 删除确认有独立进度证据；Windows/Linux owned 路径仍需实际验证。
+本机[源码外 Auth PTY](../../apps/cli/test/isolated/tui-mcp-auth-pty.test.ts)已核真实键盘五次 Review/Confirm、受控 AS 的实际 OAuth wire，以及移除 Source/physical Workspace 后的冷原结果读取；普通 Ask 由 observer SDK 回答。完整范围归[CLI owner](../../apps/cli/README.md#tui-mcp-http-认证与原申请)。受控 AS、fetch callback opener、临时 Vault 与 Ink/Host 不建立真实外部 AS、系统浏览器、原生 OAuth Vault 组合、异常 PTY 清理或三平台资格。实际 macOS synthetic native owned CRUD 与 fresh-Vault 删除确认有独立进度证据；Windows/Linux owned 路径仍需实际验证。
 
 现行 [workflow](../../.github/workflows/mcp-native-keyring-smoke.yml)以 CI-only [native credential test](../../tests/isolated/unified-agent/native-credential-platform.test.ts)检查新正式候选的普通凭据，不能从其存在推导本轮 OAuth 资格。旧 Phase 3 的[历史证据](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-07-16-mcp-auth-phase3.md)只属旧 Manager/Store/TUI，不承接为当前实现证明。

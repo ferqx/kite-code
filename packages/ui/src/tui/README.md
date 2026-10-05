@@ -144,7 +144,7 @@ controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID�
 
 复用原Caller map/journal和execution.cancel。冷原ID/选择零GET，明确Check才caller.lookup+原结果Query；空/failed/removed Source仍保历史。unknown阻同scope冲突，不淘汰记录。Abort/generation/原Store/S/W/selected ID隔离Reader，迟到提交只保存原记录；关闭/Ctrl+C/切S不取消业务，取消需核准确原Execution再独立确认。
 
-[Auth Ink](../../test/tui/mcp-auth.test.tsx)实际英文/中文Review/Confirm、冷第二ID→Check、语言切换零新增prepare/submit及原机器ID保真。邻接与准确结果见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，Host原证明归[CLI](../../../../apps/cli/README.md)。Ink不代替OAuth PTY、真实浏览器或OS Vault资格。
+[Auth Ink](../../test/tui/mcp-auth.test.tsx)实际英文/中文Review/Confirm、冷第二ID→Check、语言切换零新增prepare/submit及原机器ID保真。[源码外80×24 Auth PTY](../../../../apps/cli/test/isolated/tui-mcp-auth-pty.test.ts)另核五次真实键盘Review/Confirm及Source/physical Workspace移除后的冷第二原ID→明确Check；普通Ask由observer SDK回答。Host、实际wire与资格范围归[CLI](../../../../apps/cli/README.md#tui-mcp-http-认证与原申请)，准确结果见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。Ink和受控PTY不代替真实浏览器或OS Vault资格。
 
 ## MCP 强制重连与原申请
 
