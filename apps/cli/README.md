@@ -103,6 +103,12 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 [文件测试](test/isolated/tui-export.test.ts) 验证真实9MiB全文/reason尾部、0600、原Store/abort/写失败；共享 [纯serializer/controller测试](../../packages/ui/test/tui/export.test.ts) 验证准确loaded身份、未读正文0GET与late隔离。[实际标准80×24 PTY](test/isolated/tui-export-host.test.ts) 验证未读 preview、Ctrl+O 后9MiB完整正文及思考尾部、两次真实0600文件、新文件路径提示、固定模型精确2次调用和所属 Service 退出/冷重开。大正文投影复用后，草稿和notice不再重复解析正文。正式旧 CLI/TUI入口仍由完整迁移门禁负责。
 
+## TUI 原生滚动与清屏
+
+[原生滚动 PTY](test/isolated/tui-scrollback-pty.test.ts)通过当前公共 TUI 源码、有限 UI port 和实际80×24 PTY字节驱动已安装 headless VT。三轮90个正文标记在原生历史各出现一次；上滚后状态更新和键盘编辑不重发正文、不清原生历史且保留阅读位置。40→80列重排、同会话正文替换、`/clear`、同会话刷新与跨会话切换核原正文、输入栏和显示基线，原 snapshot 及零业务 mutation 同时核对；held Popen 正常退出。该有限 port 资格不代表默认 Service、安装制品、GUI终端或其他平台。
+
+共享 UI 的静态前缀与剩余动态长尾限制由[TUI owner](../../packages/ui/src/tui/README.md)维护。当前源码外[默认问题 PTY](test/isolated/tui-question-pty.test.ts)另核真实默认 Tool/Service/Provider 与原答案；上方大正文 PTY 使用开发宿主与 built Service，保留实际 Ctrl+O 全文尾部、两次导出及正常退出/冷重开。输入需等待实际可交互提示或命令回显；全文观察在 reader 展示时核对，不要求后续导出或退出重复打印已完成正文。业务预算、原卡版本、完整文件与零额外工具效果断言保持。具体当前运行范围与未闭合资格归[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
 [默认 ask_user stdio 测试](test/isolated/ask-user-stdio.test.ts)沿真实默认 Process configuration、compatible Provider、Service/SQLite、公开 Client/CLI 与注入 Readable 回答 canonical 三题。纯空白先保持原卡 pending、零 Answer；合法输入随后一次提交，持久原选项 ID 和闭合自由对象，第二 Provider 与历史收到文案及原 Unicode、多行和空格。自由原文与选项 ID 同字时仍保留自由输入。EOF、未知 schema 和重复观察不建立新的回答权。该测试使用公开源码入口和有限 Readable；源码外安装制品的原生 stdin 资格另按整体门禁判断。
 
 ## TUI 普通问题步骤

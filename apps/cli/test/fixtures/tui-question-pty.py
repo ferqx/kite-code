@@ -110,6 +110,8 @@ try:
     wait('Confirm original')
     key(b'\r')
     wait('workspace.trust: applied')
+    wait('trusted, revision 1')
+    wait('D toggle · Enter review mode choice')
     key(b'\r')
     wait('Confirm original')
     key(b'\r')

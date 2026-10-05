@@ -18,7 +18,9 @@
 
 所有 Model、Tool、标题和诊断正文的控制字符转为可读 `\\uXXXX`，保留完整字符而不执行 ANSI/OSC 或方向控制。`TerminalMarkdown` 使用实际 remark AST 展示段落、标题、列表、代码、引用和表格，图片/链接/HTML为文字。未知节点保留对应原文，不按字符数裁剪。Model output 只有 preview 时明确标记，Ctrl+O 调宿主已验证的完整 reader，复核原 Store/Session/Run/Execution 后显示完整 content；未完整前缀不伪造完整 Tool calls，reasoning 不默认显示。
 
-当前正式 Terminal 已消费本终端入口，具体面板与 composer 的已实施范围见下方 owner 记录；完整主屏 static scrollback、resize、全部客户端能力与复杂 schema 呈现仍未由局部切片闭合。大 Tool/Job 附件输出需要宿主专门 reader；本组件不会把 Artifact 引用当作已展示全文。完整目录与 history 的分页资格由实际 port 与 Client 保证。Ink testing-library 是 React/Ink 键盘证据，不等于所有终端资格；POSIX PTY fixture仅证明当前 macOS、本地 Bun/固定模型/临时SQLite链，不冒称 Linux/Windows。
+当前正式 Terminal 已消费本终端入口。[TuiHistory](index.tsx) 将原展示顺序中连续已稳定的消息前缀交给 Ink `Static`；只有消息全部稳定后，才继续提交连续已结束的非 Model 执行前缀。活动消息及其后续消息、待决或未结束执行继续动态呈现，不把较晚完成项移到较早活动正文前。状态与输入更新保留同一 Static 实例，不重发已完成正文；resize 使用 Ink 自有重排。原 Store/Workspace/Session、语言/主题，或已提交正文、全文与执行结果版本改变时，替换展示代次并清理旧原生历史；`/clear` 沿已有显示基线隐藏原项。清理使用 Ink 自有 stdout writer，恢复当前输入栏和光标，不建立第二份历史缓存、公共 DTO 或执行权威。取舍见[完成正文的原生滚动决定](../../../../.agents/notes/implemented/bug-fix/2026-10-06-completed-tui-scrollback.md)。
+
+[scrollback Ink 测试](../../test/tui/scrollback.test.tsx)核静态前缀、原顺序、替换、清屏及保留输入栏；[实际80×24 PTY](../../../../apps/cli/test/isolated/tui-scrollback-pty.test.ts)核上滚位置、90个完整正文标记、状态/输入零正文重发、resize、正文版本变化与切会话。该 PTY 使用有限公共 UI port 和实际 headless VT，未经过 Service/Provider；源码外默认问题及9MiB全文/导出另由[CLI owner](../../../../apps/cli/README.md#tui-原生滚动与清屏)维护。活动或待决动态尾部超过视口时仍可能触发 Ink 整体清屏并重放静态前缀；这是与手册预期仍有差异的展示缺口，不属于已闭合范围。GUI终端、Linux/Windows、完整持续负载和全部客户端能力仍按整体进度核验。大 Tool/Job 附件需要宿主专门 reader，完整目录/history分页由实际 port 与 Client 保证；局部 Ink 或 POSIX PTY 通过不建立其他范围资格。
 
 验证：`bun test packages/ui/test/tui/controller.test.tsx`；实际配对与自有子进程 fixture 为 `packages/ui/test/isolated/tui/paired.test.ts`，需要本机 HTTP/PTY 权限。`bun run --cwd packages/ui typecheck` 与 build 同时产出独立 `dist/tui/index.js`，DOM产物不携带 Ink 入口。
 

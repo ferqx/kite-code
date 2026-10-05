@@ -153,7 +153,7 @@ for (const mode of ['complete'] as readonly string[]) {
 master,slave=pty.openpty()
 fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0))
 p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))},'--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-os.close(slave);buffer=b''
+os.close(slave);buffer=b'';full_tail_observed=False
 def wait(text):
  global buffer
  deadline=time.monotonic()+30
@@ -166,11 +166,11 @@ try:
  wait('New Run');owned=[int(line.split()[0]) for line in subprocess.check_output(['ps','-axo','pid,ppid'],text=True).splitlines()[1:] if len(line.split())==2 and line.split()[1]==str(p.pid)];assert owned;os.write(master,b'owned task');time.sleep(.1);os.write(master,b'\\r')
  ${
    mode === 'complete'
-     ? `wait('9000025 bytes, complete');os.write(master,b'/export');time.sleep(.1);os.write(master,b'\\r');wait('Exported loaded conversation:');import glob;files=glob.glob(${JSON.stringify(join(profile.profilePath, 'session-*.md'))});assert len(files)==1, ('first export paths',files);preview=open(files[0],encoding='utf8').read();assert 'Loaded preview only' in preview, ('missing preview marker',preview[-1000:]);assert '${tail}' not in preview, 'unread full tail unexpectedly exported';assert 'ACTUAL_LOADED_REASON_TAIL' not in preview, 'unread reasoning unexpectedly exported';buffer=b'';time.sleep(.1);os.write(master,b'\\x0f');time.sleep(.4);
+     ? `wait('9000025 bytes, complete');os.write(master,b'/export');wait('New Run > /export');os.write(master,b'\\r');wait('Exported loaded conversation:');import glob;files=glob.glob(${JSON.stringify(join(profile.profilePath, 'session-*.md'))});assert len(files)==1, ('first export paths',files);preview=open(files[0],encoding='utf8').read();assert 'Loaded preview only' in preview, ('missing preview marker',preview[-1000:]);assert '${tail}' not in preview, 'unread full tail unexpectedly exported';assert 'ACTUAL_LOADED_REASON_TAIL' not in preview, 'unread reasoning unexpectedly exported';buffer=b'';time.sleep(.1);os.write(master,b'\\x0f');time.sleep(.4);
  for_drain=time.monotonic()+1
  while time.monotonic()<for_drain:
   if select.select([master],[],[],.05)[0]: buffer=(buffer+os.read(master,65536))[-131072:]
- wait('${tail}');buffer=b'';os.write(master,b'/export');wait('New Run > /export');buffer=b'';os.write(master,b'\\r');export_deadline=time.monotonic()+30
+ wait('${tail}');full_tail_observed=True;buffer=b'';os.write(master,b'/export');wait('New Run > /export');buffer=b'';os.write(master,b'\\r');export_deadline=time.monotonic()+30
  while len(glob.glob(${JSON.stringify(join(profile.profilePath, 'session-*.md'))}))<2:
   if time.monotonic()>export_deadline: raise RuntimeError('second export missing tail='+buffer[-2000:].decode(errors='replace'))
   if select.select([master],[],[],.1)[0]: buffer=(buffer+os.read(master,65536))[-131072:]
@@ -190,7 +190,7 @@ try:
   except ProcessLookupError: pass
  print('OWNED_SERVICE_STOPPED')
  print('HOST_EXIT '+str(p.returncode))
- print('FULL_TAIL '+str('${tail}' in buffer.decode(errors='replace')))
+ print('FULL_TAIL_OBSERVED '+str(full_tail_observed))
 finally:
  if p.poll() is None: os.killpg(p.pid,signal.SIGKILL);p.wait()
  if master>=0: os.close(master)
@@ -223,7 +223,7 @@ finally:
             .get(),
         ).toEqual({ n: mode === 'complete' ? 1 : 0 });
         if (mode === 'complete') {
-          expect(out).toContain('FULL_TAIL True');
+          expect(out).toContain('FULL_TAIL_OBSERVED True');
           expect(out).toContain('EXPORT_FULL_TAIL_REASON_0600');
           expect(completeSource).toBe(true);
           expect(database.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 1 });

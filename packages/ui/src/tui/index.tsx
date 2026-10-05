@@ -1,6 +1,14 @@
-import type { Interaction } from '@kite-ai/client';
-import { Box, useInput, usePaste } from 'ink';
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { Interaction, Message, SessionView } from '@kite-ai/client';
+import { Box, Static, useInput, usePaste, useStdout } from 'ink';
+import {
+  useCallback,
+  useEffect,
+  useInsertionEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { interactionKey } from './cards';
 import { ComposerBuffer } from './composer';
 import { TuiComposer } from './composer-input';
@@ -39,10 +47,146 @@ export function TuiSession({ controller }: { controller: TuiController }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   return (
     <TuiPresentationProvider value={{ preferences: state.preferences }}>
+      <TuiHistory controller={controller} />
       <TuiSessionView controller={controller} />
     </TuiPresentationProvider>
   );
 }
+type Execution = SessionView['executions'][number];
+const endedExecution = (execution: Execution) =>
+  ['succeeded', 'failed', 'cancelled'].includes(execution.status);
+const settledMessage = (message: Message, runs: SessionView['runs'] | undefined) =>
+  message.status === 'complete' || !runs?.some((run) => run.id === message.runId && run.isActive);
+const prefixLength = <T,>(items: readonly T[], settled: (item: T) => boolean) => {
+  const index = items.findIndex((item) => !settled(item));
+  return index < 0 ? items.length : index;
+};
+type HistoryItem =
+  | { key: string; version: string; message: Message }
+  | { key: string; version: string; execution: Execution };
+
+/** Ink owns the emitted bytes; these are only the current immutable render items. */
+function TuiHistory({ controller }: { controller: TuiController }) {
+  const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const { stdout, write } = useStdout();
+  const scope = JSON.stringify([
+    state.snapshot?.storeId,
+    state.snapshot?.view.session.workspaceId,
+    state.sessionId,
+    state.preferences.resolvedLanguage,
+    state.preferences.theme,
+    state.preferences.colorPreset,
+  ]);
+  const messages = controller.visibleMessages;
+  const executions = controller.visibleExecutions;
+  const items: HistoryItem[] = useMemo(() => {
+    const messageCount = prefixLength(messages, (message) =>
+      settledMessage(message, state.snapshot?.view.runs),
+    );
+    const results = executions.filter((execution) => execution.kind !== 'model');
+    const executionCount =
+      messageCount === messages.length ? prefixLength(results, endedExecution) : 0;
+    return [
+      ...messages.slice(0, messageCount).map((message) => ({
+        key: `message:${message.id}`,
+        version: JSON.stringify([
+          message.seq,
+          message.role,
+          message.status,
+          message.content,
+          message.contentFormat,
+          message.outputBody,
+          state.fullOutputs.get(message.id),
+        ]),
+        message,
+      })),
+      ...results.slice(0, executionCount).map((execution) => ({
+        key: `execution:${execution.id}`,
+        version: JSON.stringify([
+          execution.definitionId,
+          execution.status,
+          execution.resultRevision,
+          execution.result,
+        ]),
+        execution,
+      })),
+    ];
+  }, [messages, executions, state.fullOutputs, state.snapshot?.view.runs]);
+  const [committed, setCommitted] = useState({ scope, items, epoch: 0 });
+  const replace =
+    committed.scope !== scope ||
+    committed.items.some(
+      (item, index) => items[index]?.key !== item.key || items[index]?.version !== item.version,
+    );
+  let history = committed;
+  if (replace) {
+    history = { scope, items, epoch: committed.epoch + 1 };
+    setCommitted(history);
+  } else if (items.length !== committed.items.length) {
+    history = { ...committed, items };
+    setCommitted(history);
+  }
+  // A semantic replacement must erase the old prefix before Ink emits the new
+  // Static instance. Ordinary state/input updates keep that instance untouched.
+  // Ink's Static identity hook also resets its replay buffer for future reflows.
+  // Use Ink's writer to restore an unchanged live footer after the erase.
+  useInsertionEffect(() => {
+    if (history.epoch && stdout.isTTY) write('\u001b[2J\u001b[3J\u001b[H');
+  }, [history.epoch, stdout, write]);
+  return (
+    <Static key={history.epoch} items={history.items}>
+      {(item) =>
+        'message' in item ? (
+          <TuiMessage key={item.key} message={item.message} controller={controller} />
+        ) : (
+          <TuiExecution key={item.key} execution={item.execution} />
+        )
+      }
+    </Static>
+  );
+}
+function TuiMessage({ message, controller }: { message: Message; controller: TuiController }) {
+  const { t } = useTuiPresentation();
+  const state = controller.state;
+  return (
+    <Box flexDirection="column">
+      <Text bold>
+        {message.role} {'['}
+        {terminalText(message.id)}
+        {']'} {message.status}
+      </Text>
+      <TerminalMarkdown content={state.fullOutputs.get(message.id) ?? message.content} />
+      {message.outputBody && !state.fullOutputs.has(message.id) && (
+        <Text>
+          {t('Recorded Model output preview only;')}{' '}
+          {message.outputBody.readAvailability === 'unsupported' ||
+          message.contentFormat === 'unsupported'
+            ? t('full read unsupported')
+            : controller.port.readModelOutput
+              ? t('Ctrl+O reads verified full body')
+              : t('full reader unavailable')}{' '}
+          {'('}
+          {message.outputBody.contentBytes} {t('bytes,')}{' '}
+          {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
+          {').'}
+        </Text>
+      )}
+    </Box>
+  );
+}
+function TuiExecution({ execution }: { execution: Execution }) {
+  return (
+    <Box flexDirection="column">
+      <Text>
+        {terminalText(execution.definitionId)} {'['}
+        {terminalText(execution.id)}
+        {']'} {execution.status}
+      </Text>
+      <Text>{terminalText(JSON.stringify(execution.result, null, 2))}</Text>
+    </Box>
+  );
+}
+
 function TuiSessionView({ controller }: { controller: TuiController }) {
   const fileQuery = useCallback(
     (token?: FileToken) => {
@@ -415,6 +559,13 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       return;
     }
   });
+  const messages = controller.visibleMessages;
+  const executions = controller.visibleExecutions.filter((execution) => execution.kind !== 'model');
+  const messageCount = prefixLength(messages, (message) =>
+    settledMessage(message, state.snapshot?.view.runs),
+  );
+  const executionCount =
+    messageCount === messages.length ? prefixLength(executions, endedExecution) : 0;
   if (state.panel === 'executions') return <TuiExecutionPanel controller={controller} />;
   if (state.panel === 'mcp') return <TuiMcpPanel key={state.sessionId} controller={controller} />;
   if (state.panel === 'theme' || state.panel === 'language')
@@ -451,43 +602,12 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           ))}
         </Box>
       )}
-      {controller.visibleMessages.map((message) => (
-        <Box key={message.id} flexDirection="column">
-          <Text bold>
-            {message.role} {'['}
-            {terminalText(message.id)}
-            {']'} {message.status}
-          </Text>
-          <TerminalMarkdown content={state.fullOutputs.get(message.id) ?? message.content} />
-          {message.outputBody && !state.fullOutputs.has(message.id) && (
-            <Text>
-              {t('Recorded Model output preview only;')}{' '}
-              {message.outputBody.readAvailability === 'unsupported' ||
-              message.contentFormat === 'unsupported'
-                ? t('full read unsupported')
-                : controller.port.readModelOutput
-                  ? t('Ctrl+O reads verified full body')
-                  : t('full reader unavailable')}{' '}
-              {'('}
-              {message.outputBody.contentBytes} {t('bytes,')}{' '}
-              {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
-              {').'}
-            </Text>
-          )}
-        </Box>
+      {messages.slice(messageCount).map((message) => (
+        <TuiMessage key={message.id} message={message} controller={controller} />
       ))}
-      {controller.visibleExecutions
-        .filter((e) => e.kind !== 'model')
-        .map((execution) => (
-          <Box key={execution.id} flexDirection="column">
-            <Text>
-              {terminalText(execution.definitionId)} {'['}
-              {terminalText(execution.id)}
-              {']'} {execution.status}
-            </Text>
-            <Text>{terminalText(JSON.stringify(execution.result, null, 2))}</Text>
-          </Box>
-        ))}
+      {executions.slice(executionCount).map((execution) => (
+        <TuiExecution key={execution.id} execution={execution} />
+      ))}
       {cardChooser && (
         <Box flexDirection="column">
           <Text bold>
