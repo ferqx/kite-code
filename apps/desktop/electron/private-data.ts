@@ -34,6 +34,13 @@ import {
   parseFileRecoveryRow,
 } from './file-recovery-journal';
 import {
+  finishNativeMcpRecord,
+  type NativeMcpData,
+  type NativeMcpRecord,
+  nativeMcpIdentity,
+  parseNativeMcpRecord,
+} from './mcp-journal';
+import {
   attachDesktopProfileAccess,
   type DesktopProfileAccess,
   prepareWindowsPrivateUi,
@@ -63,7 +70,8 @@ export type PrivateData = NativeFileRecoveryJournal &
     finishCaller(commandId: string, phase: NativeCallerRecord['phase']): NativeCallerRecord;
     clearCaller(commandId: string): void;
     close(): void;
-  } & NativeConfigurationData;
+  } & NativeConfigurationData &
+  NativeMcpData;
 const require = createRequire(import.meta.url);
 const identity = (scope: DraftScope) =>
   createHash('sha256').update(JSON.stringify(scope)).digest('hex');
@@ -137,7 +145,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 3 &&
       version !== 4 &&
       version !== 5 &&
-      version !== 6
+      version !== 6 &&
+      version !== 7
     )
       failure();
     if (
@@ -174,6 +183,10 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       db.exec(
         'PRAGMA synchronous=FULL; BEGIN IMMEDIATE; CREATE TABLE configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id)); PRAGMA user_version=6; COMMIT;',
       );
+    if (version < 7)
+      db.exec(
+        'PRAGMA synchronous=FULL; BEGIN IMMEDIATE; CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); PRAGMA user_version=7; COMMIT;',
+      );
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all()
@@ -187,6 +200,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'creations',
         'drafts',
         'file_recovery_intents',
+        'mcp_intents',
         'model_routes',
         'recovery_intents',
       ])
@@ -219,6 +233,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     )
       failure();
     db.prepare('SELECT command_id,state FROM recovery_intents LIMIT 0').all();
+    if (
+      db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()
+        ?.sql !== 'CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)'
+    )
+      failure();
     db.prepare(
       'SELECT id,store_id,workspace_id,root_session_id,revision,content FROM drafts LIMIT 0',
     ).all();
@@ -231,6 +250,32 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     releaseAccess();
   }
   const database = () => db ?? failure();
+  function mcpRows(): NativeMcpRecord[] {
+    const result: NativeMcpRecord[] = [];
+    let bytes = 0;
+    for (const row of database()
+      .prepare(
+        'SELECT command_id,state,hex(CAST(state AS BLOB)) AS state_hex FROM mcp_intents ORDER BY command_id',
+      )
+      .iterate()) {
+      if (typeof row.state !== 'string' || typeof row.state_hex !== 'string')
+        throw Error('mcp_storage_unavailable');
+      const original = Buffer.from(row.state_hex, 'hex');
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(original);
+      bytes += original.byteLength;
+      if (
+        text !== row.state ||
+        Buffer.byteLength(text) !== original.byteLength ||
+        bytes > 16777216 ||
+        result.length >= 128
+      )
+        throw Error('mcp_storage_unavailable');
+      const value = parseNativeMcpRecord(JSON.parse(text));
+      if (value.request.commandId !== row.command_id) throw Error('mcp_storage_unavailable');
+      result.push(value);
+    }
+    return result;
+  }
   function configurationRows(): NativeConfigurationRecord[] {
     const result: NativeConfigurationRecord[] = [];
     let bytes = 0;
@@ -675,6 +720,68 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     callers() {
       return callerRows();
     },
+    mcps() {
+      return mcpRows();
+    },
+    beginMcp(input) {
+      const value = parseNativeMcpRecord(input);
+      if (value.phase !== 'submitting') throw Error('mcp_intent_conflict');
+      return transaction(() => {
+        const rows = mcpRows(),
+          old = rows.find((row) => row.request.commandId === value.request.commandId);
+        if (old) {
+          if (nativeMcpIdentity(old) !== nativeMcpIdentity(value))
+            throw Error('mcp_intent_conflict');
+          return { created: false, value: old };
+        }
+        const bytes = database()
+          .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
+          .get()?.total;
+        if (
+          rows.length >= 128 ||
+          typeof bytes !== 'number' ||
+          bytes + Buffer.byteLength(JSON.stringify(value)) > 16777216
+        )
+          throw Error('mcp_capacity_exceeded');
+        database()
+          .prepare('INSERT INTO mcp_intents VALUES(?,?)')
+          .run(value.request.commandId, JSON.stringify(value));
+        return { created: true, value };
+      });
+    },
+    finishMcp(commandId, phase) {
+      return transaction(() => {
+        const old = mcpRows().find((row) => row.request.commandId === commandId);
+        if (!old) throw Error('mcp_intent_missing');
+        const value = finishNativeMcpRecord(old, phase);
+        const size = database()
+          .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
+          .get()?.total;
+        const previousSize = database()
+          .prepare(
+            'SELECT length(CAST(state AS BLOB)) AS bytes FROM mcp_intents WHERE command_id=?',
+          )
+          .get(commandId)?.bytes;
+        if (
+          typeof size !== 'number' ||
+          typeof previousSize !== 'number' ||
+          size - previousSize + Buffer.byteLength(JSON.stringify(value)) > 16777216
+        )
+          throw Error('mcp_capacity_exceeded');
+        database()
+          .prepare('UPDATE mcp_intents SET state=? WHERE command_id=?')
+          .run(JSON.stringify(value), commandId);
+        return value;
+      });
+    },
+    clearMcp(commandId) {
+      transaction(() => {
+        const old = mcpRows().find((row) => row.request.commandId === commandId);
+        if (!old || !['completed', 'failed', 'cancelled'].includes(old.phase))
+          throw Error('mcp_clear_unconfirmed');
+        database().prepare('DELETE FROM mcp_intents WHERE command_id=?').run(commandId);
+      });
+    },
     beginCaller(input) {
       const value = validateCallerRecord(input);
       if (value.phase !== 'submitting') throw Error('caller_intent_conflict');
@@ -817,6 +924,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     },
   };
   const localCodes = new Set([
+    'mcp_storage_unavailable',
+    'mcp_capacity_exceeded',
+    'mcp_intent_conflict',
+    'mcp_intent_missing',
+    'mcp_clear_unconfirmed',
     'configuration_storage_unavailable',
     'file_recovery_intent_invalid',
     'file_recovery_storage_unavailable',

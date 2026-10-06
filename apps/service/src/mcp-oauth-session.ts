@@ -36,7 +36,7 @@ export interface McpOAuthSessionOptions {
   readonly openBrowser: (url: URL, signal: AbortSignal) => Promise<void>;
   readonly network?: Pick<
     McpOAuthNetworkOptions,
-    'resolveAddresses' | 'allowLoopbackForTests' | 'limits'
+    'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
   >;
   readonly callbackTimeoutMs?: number;
   readonly now?: () => number;

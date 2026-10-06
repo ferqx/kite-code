@@ -36,6 +36,14 @@ const acquire = () =>
     helperSha256: helperSha256!,
   });
 const open = async () => openPrivateData(profile, await acquire());
+const assertEmptyMcpTable = (db: DatabaseSync) => {
+  assert.equal(
+    db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()
+      ?.sql,
+    'CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+  );
+  assert.equal(db.prepare('SELECT count(*) AS count FROM mcp_intents').get()!.count, 0);
+};
 if (mode === 'denied') {
   await assert.rejects(acquire(), new RegExp(process.argv[8]!));
   console.log('private-lease-denied');
@@ -242,8 +250,9 @@ if (mode === 'denied') {
     data.close();
     const privatePath = join(profile, 'desktop-private/data.sqlite');
     const legacy = new DatabaseSync(privatePath);
+    assertEmptyMcpTable(legacy);
     legacy.exec(
-      'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; DROP TABLE recovery_intents; PRAGMA user_version=1',
+      'DROP TABLE mcp_intents; DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; DROP TABLE recovery_intents; PRAGMA user_version=1',
     );
     legacy.close();
     data = await open();
@@ -252,8 +261,9 @@ if (mode === 'denied') {
     assert.equal(data.beginRecovery(recovery).created, true);
     data.close();
     const version2 = new DatabaseSync(privatePath);
+    assertEmptyMcpTable(version2);
     version2.exec(
-      'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; PRAGMA user_version=2',
+      'DROP TABLE mcp_intents; DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; PRAGMA user_version=2',
     );
     version2.close();
     data = await open();
@@ -450,7 +460,8 @@ if (mode === 'denied') {
     data.saveConfiguration(providerOriginal);
     data.close();
     let configurationDb = new DatabaseSync(privatePath);
-    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 6);
+    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 7);
+    assertEmptyMcpTable(configurationDb);
     const originalConfiguration = configurationDb
       .prepare('SELECT state FROM configuration_intents WHERE command_id=?')
       .get('provider-original')!.state as string;
@@ -489,8 +500,9 @@ if (mode === 'denied') {
     const oldRows = oldTables.map((table) =>
       configurationDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
     );
+    assertEmptyMcpTable(configurationDb);
     configurationDb.exec(
-      'DROP TABLE configuration_intents; DROP TABLE model_routes; PRAGMA user_version=5',
+      'DROP TABLE mcp_intents; DROP TABLE configuration_intents; DROP TABLE model_routes; PRAGMA user_version=5',
     );
     configurationDb.close();
     data = await open();
@@ -499,7 +511,8 @@ if (mode === 'denied') {
     assert.deepEqual(data.callers()[0]!.intent, caller.intent);
     data.close();
     configurationDb = new DatabaseSync(privatePath);
-    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 6);
+    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 7);
+    assertEmptyMcpTable(configurationDb);
     assert.deepEqual(
       oldTables.map((table) =>
         configurationDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
@@ -538,7 +551,7 @@ if (mode === 'denied') {
     data.close();
     assert.deepEqual(readFileSync(privatePath), unknownBytes);
     raw = new DatabaseSync(privatePath);
-    raw.exec('PRAGMA user_version=6');
+    raw.exec('PRAGMA user_version=7');
     raw.prepare('UPDATE drafts SET content=? WHERE id=?').run('{}', draft.id);
     raw.close();
     const damagedRowBytes = readFileSync(privatePath);

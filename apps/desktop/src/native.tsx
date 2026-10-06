@@ -19,6 +19,7 @@ import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
+import { NativeMcpSettings } from './native-mcp-settings';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { type NativeModelChoice, NativeModelPicker } from './native-model-picker';
@@ -51,7 +52,7 @@ export function NativeDesktop() {
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<'models' | 'providers'>('models');
+  const [settingsPage, setSettingsPage] = useState<'models' | 'providers' | 'mcp'>('models');
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
   const modelChoices = useRef(new Map<string, NativeModelChoice>());
@@ -365,8 +366,22 @@ export function NativeDesktop() {
             >
               模型
             </button>
+            <button
+              type="button"
+              aria-pressed={settingsPage === 'mcp'}
+              onClick={() => setSettingsPage('mcp')}
+            >
+              MCP
+            </button>
           </nav>
-          {settingsPage === 'providers' ? (
+          {settingsPage === 'mcp' ? (
+            <NativeMcpSettings
+              bridge={bridge}
+              generation={generation.current}
+              selection={selection}
+              submissions={state?.mcpSubmissions ?? []}
+            />
+          ) : settingsPage === 'providers' ? (
             <NativeProviderSettings
               bridge={bridge}
               generation={generation.current}

@@ -200,7 +200,7 @@ Native 普通 Work 与准确单 Job 停止现在通过 [main caller journal](ele
 
 [Main caller](electron/file-recovery.ts)通过有限的 `fileRecovery.*` 桥读取真实 checkpoint 目录、完整 preview 与恢复状态，观察绑定当前连接 generation、选择、Store/Session/Workspace/contextSelectionId 和输入 revision。Renderer 不能提交任意 Action、请求、Command ID、授权、Profile 或 token。仅会话、仅代码、代码与会话分别使用公共 SDK 的原意图；所有适用 Command/restore/newSession IDs 在第一次 POST 前一次性保存。代码恢复仍经原普通 Action 和独立的人类审批，保存成功回执不代表其他工具已获授权。
 
-Files journal 在 [PrivateData](electron/private-data.ts) 的 DB4 引入准确的 `file_recovery_intents(intent_id TEXT PRIMARY KEY,state TEXT NOT NULL)`；当前 DB6 保留此表，旧版本 0–5 沿各次闭合迁移升级，原四表与 Files 记录保持。整行是完整 `FileRecoveryIntent@1`，主键取首腿 Command ID。异步闭合解析与 SHA 校验不持有同步事务；事务重新核实际已附着 Profile 的 live 数据库、原不可变 canonical 身份、两腿 phase CAS 和单调转换。全部适用 code/Fork Command IDs 跨行唯一；原 UTF-8 损坏、错误 digest/主键/表结构、冲突与容量不足均拒绝，原坏行不删除。目录最多保留 128 行、16MiB 原 UTF-8，不驱逐 unknown。它保存用户申请和核对状态，不保存执行授权。
+Files journal 在 [PrivateData](electron/private-data.ts) 的 DB4 引入准确的 `file_recovery_intents(intent_id TEXT PRIMARY KEY,state TEXT NOT NULL)`；当前 DB7 保留此表，旧版本 0–6 沿各次闭合迁移升级，原四表与 Files 记录保持。整行是完整 `FileRecoveryIntent@1`，主键取首腿 Command ID。异步闭合解析与 SHA 校验不持有同步事务；事务重新核实际已附着 Profile 的 live 数据库、原不可变 canonical 身份、两腿 phase CAS 和单调转换。全部适用 code/Fork Command IDs 跨行唯一；原 UTF-8 损坏、错误 digest/主键/表结构、冲突与容量不足均拒绝，原坏行不删除。目录最多保留 128 行、16MiB 原 UTF-8，不驱逐 unknown。它保存用户申请和核对状态，不保存执行授权。
 
 prepared/submitting/pending/unknown 重开后只能查询原 Command 和准确原 restore ID，不取得热许可、不重新 POST，也不自动继续第二腿。代码成功与 Fork 尚未完成分别显示，关闭、编辑或切换观察不会撤回原申请；迟到结果只更新原保存意图，不能切换新视图。恢复到不同 Store 的旧意图保留原 Store 身份，只读展示，不重新绑定或获得热许可。both 必须明确继续，重读原 Command/status 与原 point 的完整当前 preview，核当前作用域、selector、原 checkpoint 身份和每个文件均为 unchanged。外部编辑或后续合法 Files Run 使它拒绝继续，保留 code succeeded/fork not_started，不重写代码或更换 ID。这里没有全局工作区锁，也不声称消除最后读取与 Fork 之间不合作编辑器的竞态。
 
@@ -233,7 +233,7 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 [Provider 面板](src/native-provider-settings.tsx)和[模型选择器](src/native-model-picker.tsx)是正式 Native renderer 消费者；Main 的[Provider manager](electron/provider-settings.ts)沿公共 Client/Service 管理接口固定原 Store/generation、用户观察 readSet 和五字段操作。renderer 只持安全连接/模型事实，不取得路径、credentialRef 或 opaque revoke authority。四类明确 family，手动名称直接保存、留空才显式发现；切换/关闭清未保存密钥与字段，局部必填/URL 错误聚焦，提交后密钥清空，等待/未知跨关闭保留。凭据与配置结果分别显示；已发布后的刷新失败保原结果，原 GET 的 applied 刷新输入选择器，不重绑定迟到面板。新模型 disabled，默认禁用门禁和开关失败恢复保留。
 
-[配置原意图](electron/configuration-journal.ts)在首次热 POST 前 FULL 保存非秘密原 input 与 safe state。[PrivateData](electron/private-data.ts) 当前 DB6 从 DB0–5 保留原六表，新增准确 configuration_intents(command_id,state) 与 model_routes(store_id,session_id,model_id)；前者最多128行/16MiB、原 input 不可替换、终结才删除，坏行保字节并拒绝写。Provider 与模型设置共用原 Store 未决门禁。冷行只允许显式原 ID GET，不持有 secret、不自动 GET/POST。已存未发布的 opaque reference 只留 Service/认证 SDK，Main 不投影它到 renderer。
+[配置原意图](electron/configuration-journal.ts)在首次热 POST 前 FULL 保存非秘密原 input 与 safe state。[PrivateData](electron/private-data.ts) 的 DB6 从 DB0–5 保留原六表，新增准确 configuration_intents(command_id,state) 与 model_routes(store_id,session_id,model_id)；当前 DB7 保留这八表并增加下文独立 MCP 记录；前者最多128行/16MiB、原 input 不可替换、终结才删除，坏行保字节并拒绝写。Provider 与模型设置共用原 Store 未决门禁。冷行只允许显式原 ID GET，不持有 secret、不自动 GET/POST。已存未发布的 opaque reference 只留 Service/认证 SDK，Main 不投影它到 renderer。
 
 模型选择按 Store/Session 保存，首条原 start/follow-up intent FULL 保存后才记本次模型 ID；打开新 Session 或读设置本身不绑定 route。输入只从 enabled/configured 的完整目录选择；缺失原显式 route 不回退全局默认。临时 effort 只在当前页面会话状态中，换模型/刷新后清除，不进入 model_routes 或配置 journal。[主输入](src/native-input.ts)冻结实际下一次 model/effort 到 start 与 active follow-up；普通 active steer 保原文本/target，不改活动 Run。ModelInput 和实际 wire 使用同一原设置。
 
@@ -244,3 +244,17 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 DB6 离线备份使用专属 manifest v14，原设置 input、Session route 和完整含 effort 的原 caller 请求在新 Core Store 下保旧身份；冷读不发送请求。旧 v2–v13/DB1–5 仍按各自闭合格式，维护 codec 不依赖 Desktop/Client，见[维护 owner](../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。
 
 原意图、两个介质结果和临时选择的长期取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。
+
+## Native MCP 完整设置
+
+已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；本轮原完整默认595文件/474任务通过，四个 Auth Action 的实际系统浏览器/default OS vault 组合资格仍待人工验收。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责安全目录/来源操作/四项认证/连接与重连/原工具详情的完整用户旅程和验收；自动回归通过不能代替实际浏览器组合或完整客户端资格。
+
+Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。
+
+[私有 MCP codec](electron/mcp-journal.ts)在 DB7 的 `mcp_intents(command_id,state)` FULL 保存完整非秘密原申请，独立128行/16MiB原字节上界，坏行保字节并拒绝写，未知不淘汰。首次提交前保存，冷/foreign 行不获得热 POST 许可；明确 Check 只查询原 ID，取消需准确原 Execution 的普通持久 caller 申请。已确认终态不被后来 pending/unknown GET 降级。来源发表成功但独立凭据清理失败/未知时保声明已保存与总体未确认，不能清除为成功。[DB7/manifest15 维护](../../packages/agent/src/maintenance/README.md#desktop-db7-与-manifest-v15)保独立 codec、历史 DB/manifest 白名单及原 Store 身份，恢复不自动 GET/POST。
+
+[真实 Main/HTTP](test/isolated/native-mcp-main.test.ts)当前1项61断言；[源码外 Native 窗口](test/isolated/native-mcp-bundle.test.ts)1项18条Bun断言，driver另核实际UI与协议：两范围 Add/Remove/Select、项目批准、真实默认OS引用的bind/revoke、stdio/HTTP独立审批与ready、248180字节Unicode descriptor及零新增RPC、refresh、reconnect oldStop、下一Model schema/独立Tool Ask/一次效果、DB7冷原GET一次/POST零。两个Service PID正常退出，准确测试凭据fresh backend absence及所属进程无残留均核实。候选使用构建前固定的测试loopback网络，不冒充生产网络、OAuth、外部账号或三平台资格。
+
+窗口Host只在已验证候选的shared lease内，使用packaged runtime/config的默认OS backend准备准确自有引用；helper沿正式paired Service的有限PATH/LANG环境，父测试与Native driver仍保隔离HOME。引用ID在put前保存，失败也可准确remove；独立新helper/backend核absence后才释放shared lease并复核exclusive权。不发现用户Kite配置、枚举其他Ref或修改系统keychain设置。
+
+[人工浏览器资格](scripts/qualify-native-mcp-browser.ts)用独立临时Profile、自有HTTPS AS/MCP和构建前固定的公开证书，保持实际默认Chrome、默认OS backend与普通Ask。先让用户处理浏览器生成的证书提示，再启动原120秒OAuth callback期限；脚本不绕过提示或修改系统信任。四项Auth、原cancel、真实document导航/PKCE、fresh Service复用与清理后absence必须全部通过最终 `qualification.json` 才成立；`candidate_ready`只描述装配，尚未完成的窗口不能作资格。这个显式人工入口不放入自动默认调度。

@@ -184,7 +184,10 @@ export interface McpSourceConfigurationOptions {
   /** Current general JSONC overlay; absent defaults to enabled raw source set, empty selects none. */
   selection?: (scope: Readonly<McpSourceScope>, workspacePath: string) => McpSourceSelectionInput;
   programmaticServerIds?: readonly string[];
-  http?: Pick<McpHttpPortOptions, 'resolveAddresses' | 'allowLoopbackForTests' | 'limits'>;
+  http?: Pick<
+    McpHttpPortOptions,
+    'resolveAddresses' | 'allowLoopbackForTests' | 'trustedTestCertificate' | 'limits'
+  >;
   /** Trusted packaged manifest assets supplied by the host; never source fallback. */
   stdio?: Pick<McpStdioPortOptions, 'guardianPath' | 'bunExecutable' | 'limits'>;
   oauth?: Partial<

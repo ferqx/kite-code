@@ -1,5 +1,10 @@
 # Client
 
+[MCP 管理协议 leaf](src/mcp-management.ts)公开正式 Native 设置/来源/连接/认证消费者所需的纯 DTO 与闭合 decoder：`mcp.servers`、分页 `mcp.sources`、原 connection/reconnection、source approve、source mutation、auth status/result。完整 Display envelope 有界（management 512KiB、sources 64KiB、其他 16KiB），固定 namespace/version、空 actions/artifactRefs、字段类型及原 Store/Session/Command/Execution 关系严格核验，不裁剪或接受额外秘密字段。来源六字段 `McpSourceReadSet` 与配置选择 `McpSelectionReadSet` 分离；Source/Auth 原结果不重绑跨 Store。
+
+`McpCommandRequest`、`validateMcpCommandRequest` 与 `canonicalMcpCommandRequest` 只接受固定 select/connect/catalogue.refresh/reconnect/source.approve/credential.bind/source.add/remove 和四类 Auth Action。canonical 仅去除 expectedStoreId/commandId，复用 `canonicalModelBody`；manual bind 只有 serverId、expectedReadSet、expiresAt，不接受秘密正文。解码与规范化只证明协议事实，不授予 POST、凭据、连接或 Tool 权限；没有另造 binding Query，也不递归保存此前 reconnect intent。既有 `canonicalCallerCommandRequest` 与 TUI 消费者保持独立。[纯契约测试](test/mcp-management.test.ts)核固定申请、有限真实 DTO、原身份和秘密字段反例；实际 Main/IPC、HTTP、持久恢复与 Native 入口由其 owner 验证。
+
+
 MCP 原工具 metadata 的 [公共 decoder/reader](src/mcp-tools.ts)使用既有 `readArtifact`，不引入 Agent/SDK 依赖或新的 HTTP schema。`decodeMcpToolsSnapshots(QueryResponse)` 与 `decodeMcpToolsPage(QueryResponse)` 闭合两种version1 DTO及完整32KiB envelope：Session/原origin、固定scope/MIME/hash/Decimal64、连续index/nextIndex/complete互相一致，actions/artifactRefs为空。Server过滤的空页可以向前；跨请求的cursor必须由Host/消费者与原afterKey核对。
 
 `readMcpToolDescriptor({currentStoreId,sessionId,binding,entry,signal?,readArtifact})` 接公共 Client 方法的绑定 callback，当前Store只用于admission，原originStore用于expectedReference核实际元数据。manifest≤256KiB且只读取一次，绑定原publisher/connection/generation/definition/index；按原refs顺序读所有64KiB chunks，核逐块及全文EOF/size/SHA、fatal UTF-8和JSON/schema sanity后才返回完整 `McpToolMetadata`。已接受的SDK Tool字段及原省略保留，有限label不是全文。关闭所属signal不提交业务取消或推进SSE cursor。

@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess } from '@kite-ai/agent/profile-access';
 
-test('actual Node DB5 validates all leg digests, original PK/UTF8, monotone CAS, capacity and cold unknown without reissuing', async () => {
+test('actual Node DB7 validates all leg digests, original PK/UTF8, monotone CAS, capacity and cold unknown without reissuing', async () => {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-native-files-private-'));
   try {
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });

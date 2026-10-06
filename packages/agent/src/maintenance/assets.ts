@@ -8,6 +8,7 @@ import { verifyCallerIntentsDocument } from './caller-intents';
 import { verifyDesktopAnswerRows } from './desktop-answers';
 import { verifyDesktopCallerRows } from './desktop-callers';
 import { verifyDesktopConfigurationRows } from './desktop-configurations';
+import { verifyDesktopMcpRows } from './desktop-mcp';
 import {
   verifyDesktopFileRecoveryRows,
   verifyFileRecoveryIntentsDocument,
@@ -58,6 +59,10 @@ const answerSchema = [
 const configurationSchema = [
   'configuration_intents',
   'CREATE TABLE configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+] as const;
+const mcpSchema = [
+  'mcp_intents',
+  'CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
 ] as const;
 const routeSchema = [
   'model_routes',
@@ -163,13 +168,14 @@ export function openUiDatabase(path: string): Database {
       .query<{ user_version: number }, []>('PRAGMA user_version')
       .get()?.user_version;
     const schema =
-      version === 6
+      version === 6 || version === 7
         ? [
             answerSchema,
             callerSchema,
             configurationSchema,
             ...uiSchema,
             fileRecoverySchema,
+            ...(version === 7 ? [mcpSchema] : []),
             routeSchema,
             recoverySchema,
           ]
@@ -190,7 +196,8 @@ export function openUiDatabase(path: string): Database {
         version !== 3 &&
         version !== 4 &&
         version !== 5 &&
-        version !== 6) ||
+        version !== 6 &&
+        version !== 7) ||
       actual.length !== schema.length ||
       actual.some(
         (row, i) =>
@@ -206,13 +213,22 @@ export function openUiDatabase(path: string): Database {
       db.query('SELECT * FROM pragma_foreign_key_check LIMIT 1').get()
     )
       throw new MaintenanceError('backup_ui_invalid');
-    if (version === 2 || version === 3 || version === 4 || version === 5 || version === 6)
+    if (
+      version === 2 ||
+      version === 3 ||
+      version === 4 ||
+      version === 5 ||
+      version === 6 ||
+      version === 7
+    )
       verifyRecoveryRows(db);
-    if (version === 3 || version === 4 || version === 5 || version === 6)
-      verifyDesktopCallerRows(db, version === 6);
-    if (version === 4 || version === 5 || version === 6) verifyDesktopFileRecoveryRows(db);
-    if (version === 5 || version === 6) verifyDesktopAnswerRows(db);
-    if (version === 6) verifyDesktopConfigurationRows(db);
+    if (version === 3 || version === 4 || version === 5 || version === 6 || version === 7)
+      verifyDesktopCallerRows(db, version === 6 || version === 7);
+    if (version === 4 || version === 5 || version === 6 || version === 7)
+      verifyDesktopFileRecoveryRows(db);
+    if (version === 5 || version === 6 || version === 7) verifyDesktopAnswerRows(db);
+    if (version === 6 || version === 7) verifyDesktopConfigurationRows(db);
+    if (version === 7) verifyDesktopMcpRows(db);
     return db;
   } catch (error) {
     db.close(true);
@@ -391,18 +407,18 @@ export async function captureAssets(
   const mcpSourceApprovalIntents = await capture('ui/mcp-source-approval-intents.json', false);
   const mcpConnectionIntents = await capture('ui/mcp-connection-intents.json', false);
   const mcpSelectionIntents = await capture('ui/mcp-selection-intents.json', false);
-  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | undefined;
+  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | undefined;
   if (desktopUi.present) {
     const db = openUiDatabase(join(target, desktopUi.path));
     try {
       uiVersion = db
-        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 }, []>('PRAGMA user_version')
+        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 | 7 }, []>('PRAGMA user_version')
         .get()!.user_version;
     } finally {
       db.close(true);
     }
   }
-  const currentDesktop = uiVersion === 6;
+  const currentDesktop = uiVersion === 6 || uiVersion === 7;
   return {
     configuration: await capture('config.jsonc', false),
     skillWorkflowConfiguration: await capture('skill-workflow.jsonc', false),

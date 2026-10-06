@@ -3,6 +3,7 @@ import { type ClientRequest, Agent as HttpAgent, request as httpRequest } from '
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { isIP, type Socket } from 'node:net';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { mcpTestCertificate } from './mcp-test-certificate';
 
 export class McpOAuthNetworkError extends Error {
   readonly code: string;
@@ -18,6 +19,8 @@ export interface McpOAuthNetworkOptions {
   resolveAddresses?(hostname: string): Promise<readonly { address: string; family: number }[]>;
   /** Trusted fixture option only; never sourced from JSONC or ambient environment. */
   allowLoopbackForTests?: boolean;
+  /** Baked trusted local fixture certificate, never configuration/environment. */
+  trustedTestCertificate?: string;
   limits?: { requestBytes?: number; responseBytes?: number; requests?: number; timeoutMs?: number };
 }
 const fail = (code: string) => new McpOAuthNetworkError(`mcp_oauth_${code}`);
@@ -70,6 +73,10 @@ export function createMcpOAuthNetwork(options: McpOAuthNetworkOptions): {
   fetch: FetchLike;
   close(): Promise<void>;
 } {
+  const testCertificate = mcpTestCertificate(
+    options.trustedTestCertificate,
+    options.allowLoopbackForTests === true,
+  );
   const requestBytes = options.limits?.requestBytes ?? 65536,
     responseBytes = options.limits?.responseBytes ?? 1024 * 1024;
   const maxRequests = options.limits?.requests ?? 64,
@@ -224,7 +231,7 @@ export function createMcpOAuthNetwork(options: McpOAuthNetworkOptions): {
       const pinned = { ...addresses[0]! };
       agent =
         url.protocol === 'https:'
-          ? new HttpsAgent({ keepAlive: false, maxSockets: 1, proxyEnv: {} })
+          ? new HttpsAgent({ keepAlive: false, maxSockets: 1, proxyEnv: {}, ca: testCertificate })
           : new HttpAgent({ keepAlive: false, maxSockets: 1, proxyEnv: {} });
       agents.add(agent);
       const activeAgent = agent;
@@ -237,7 +244,7 @@ export function createMcpOAuthNetwork(options: McpOAuthNetworkOptions): {
             agent: activeAgent,
             method,
             headers: Object.fromEntries(headers),
-            servername: hostname,
+            servername: isIP(hostname) ? undefined : hostname,
             rejectUnauthorized: true,
             maxHeaderSize: 16384,
             lookup: (_host, lookupOptions, callback) => {

@@ -36,7 +36,7 @@ QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完
 
 可信 `readStepCapabilities` 在安全 Step 只选择缓存定义，Model 的实际工具版本与非秘密目录事实独立保存。旧未派发调用在目录变化后失效，下一模型请求同时更新 schema；已派发任务保留原 scope 和 lease。新版本 Tool 的自有 namespace 从准确成功 Model 的实际请求/绑定与原工作身份核实，不能靠调用者声明或替换旧 Run manifest 获得；真正执行仍走独立权限和最终派发事务。
 
-MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/Action，绑定准确原 connection Job/key/configDigest/generation，read/get 再核成功目录 Execution 与 descriptor digest。刷新不冷连接、不变更原 connection 记录；新 schema 在下一安全 Step 生效。runless 调用从真实 Session/Workspace 核当前 selected-server 后才委托外部权限，宽权限不能跳过来源范围。独立 `builtin.mcp.management` 的 `mcp.servers` Query 与 `mcp.server.select` Action 只管理 trusted programmatic registry 的选择；真实六字段 read-set/Workspace identity 与 HostMutation 保原未知回执。默认原始来源、项目批准与认证绑定按[来源提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)继续实施，OAuth/完整管理和平台资格仍未由该切片完成。
+MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/Action，绑定准确原 connection Job/key/configDigest/generation，read/get 再核成功目录 Execution 与 descriptor digest。刷新不冷连接、不变更原 connection 记录；新 schema 在下一安全 Step 生效。runless 调用从真实 Session/Workspace 核当前 selected-server 后才委托外部权限，宽权限不能跳过来源范围。独立 `builtin.mcp.management` 的 `mcp.servers` Query 与 `mcp.server.select` Action 只管理 trusted programmatic registry 的选择；真实六字段 read-set/Workspace identity 与 HostMutation 保原未知回执。默认原始来源、项目批准与认证绑定按[来源提案](../../.agents/notes/proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)继续实施，OAuth原认证合同归[认证边界](mcp-authentication.md)，Native完整设置由[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)维护；完整浏览器/vault和平台资格仍按实际验收核对。
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
 
@@ -202,3 +202,6 @@ Terminal 与 Native 分别固定真实 Bun/Node SQLite，包内 selection 在 St
 
 
 Native Provider/Model 的完整设置消费者由 Main 冻结原观察，热秘密只传一次公共 Provider POST；原非秘密申请先落 Desktop DB6，再允许本次提交，冷记录只显式原 GET。Service/Core composite marker 固定原 readSet/operation/身份，vault保存与JSONC发布分别保留已知/未知结果；stored-unpublished 的原 revoke handle 只向认证SDK开放，renderer不获该authority。新模型disabled，其他连接保留，完整目录不按512项裁切。输入区每Session的下一次model/页面临时effort经真实HTTP原命令进入冻结root快照和实际wire，active steer保持文本语义、child自选preset。DB6离线资产用专属manifest14，旧版本grammar不扩大，详见[Service owner](../../apps/service/README.md#native-provider-与下一次模型绑定)、[维护 owner](../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。macOS默认OSvault/受控loopback真实Native窗口已验，尚不外推生产远端、MCP窗口或其他平台。
+
+
+Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观察、完整Source read-set和原Store/subject/Session/Workspace身份。来源、认证、连接与Tool授权分别核实；原非秘密申请在第一次POST前FULL保存，冷/foreign只读不重发，迟到GET不能把已确认终态降级。DB7/manifest15独立codec和原字节上界归[maintenance](../../packages/agent/src/maintenance/README.md#desktop-db7-与-manifest-v15)；UI保存的意图不成为Core或Host权威。可信loopback/公开证书测试装配须在制品构建前固定并入摘要，不进入普通配置/环境，不放宽默认浏览器、Vault或权限。

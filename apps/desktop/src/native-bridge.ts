@@ -27,6 +27,9 @@ import type {
   PermissionSubmission,
 } from './controller';
 import type { InputMetadata, InputRequest } from './input';
+import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+
+export type * from './mcp-bridge';
 
 export type NativeAnswerMetadata = {
   scope: { storeId: string; sessionId: string; workspaceId: string; contextSelectionId: string };
@@ -286,6 +289,8 @@ export type NativeState = {
   readonly sessionSubmissions?: readonly NativeSessionSubmission[];
   readonly modelSettingsSubmissions?: readonly NativeModelSettingsSubmission[];
   readonly providerSettingsSubmissions?: readonly NativeProviderSubmission[];
+  readonly mcpSubmissions?: readonly NativeMcpSubmission[];
+  readonly mcpUnavailable?: boolean;
   readonly permissionSubmissions: readonly PermissionSubmission[];
   readonly interactionSubmissions: readonly InteractionAnswerSubmission[];
   readonly answerSubmissions?: readonly NativeAnswerMetadata[];
@@ -333,6 +338,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
   | { method: 'settings.models.read'; generation: number; scope: 'user' | 'workspace' }
@@ -580,6 +586,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeMcpResult
   | FileCheckpointPage
   | FileCheckpointDetail
   | FileCheckpointRecoveryBoundary

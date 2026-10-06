@@ -347,6 +347,7 @@ try {
       try {
         return {
           version: db.prepare('PRAGMA user_version').get()!.user_version,
+          mcpRows: db.prepare('SELECT COUNT(*) AS count FROM mcp_intents').get()!.count,
           row: db
             .prepare('SELECT state FROM configuration_intents WHERE command_id=?')
             .get(commandId)?.state,
@@ -357,7 +358,8 @@ try {
     },
     { home, commandId: original.commandId },
   );
-  assert.equal(persisted.version, 6);
+  assert.equal(persisted.version, 7);
+  assert.equal(persisted.mcpRows, 0);
   assert.equal(typeof persisted.row, 'string');
   const safeRow = JSON.parse(persisted.row as string);
   assert.equal(safeRow.input.commandId, original.commandId);

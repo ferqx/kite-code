@@ -282,13 +282,13 @@ test('SIGKILL after journal removal still holds exclusive lock until exit and le
       expect(readFileSync(join(f.selected.profilePath, 'skill-workflow.jsonc'))).toEqual(
         workflowBytes,
       );
-      expect((await nodeAssets(f.directory, f.profile, f.storeId, 'read')).count).toBe(133);
       const tui = JSON.parse(readFileSync(join(f.selected.profilePath, 'ui', 'tui.json'), 'utf8'));
       expect(tui.drafts[0].storeId).toBe(f.storeId);
       expect(tui.drafts[0].text).toBe(tuiText);
     } finally {
       await opened.close();
     }
+    expect((await nodeAssets(f.directory, f.profile, f.storeId, 'read')).count).toBe(133);
   } finally {
     if (child.exitCode === null) {
       child.kill('SIGKILL');

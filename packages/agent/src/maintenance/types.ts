@@ -30,7 +30,7 @@ export interface CapturedAsset {
   proof: { sha256: string; byteLength: string } | null;
 }
 export interface BackupManifest {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
   kind: 'profile_backup';
   createdAt: string;
   source: {
@@ -53,7 +53,7 @@ export interface BackupManifest {
     configuration: CapturedAsset;
     skillWorkflowConfiguration: CapturedAsset;
     desktopUi: CapturedAsset & {
-      format: { applicationId: 1263888689; userVersion: 1 | 2 | 3 | 4 | 5 | 6 } | null;
+      format: { applicationId: 1263888689; userVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 } | null;
     };
     tuiUi: CapturedAsset & { format: { version: 1 } | null };
     tuiPreferences: CapturedAsset;

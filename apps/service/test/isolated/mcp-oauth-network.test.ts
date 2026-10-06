@@ -1,14 +1,17 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
+import { createMcpAdapter } from '@kite-ai/agent/mcp';
 import {
   discoverAuthorizationServerMetadata,
   exchangeAuthorization,
   refreshAuthorization,
   registerClient,
 } from '@modelcontextprotocol/sdk/client/auth.js';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpOAuthNetwork } from '../../src/mcp-oauth-network';
 
 async function fixture() {
@@ -365,8 +368,9 @@ test('real pinned TLS uses original servername and rejects an untrusted certific
 const options={key:fs.readFileSync(process.argv[1]),cert:fs.readFileSync(process.argv[2])}, context=tls.createSecureContext(options), sockets=new Set();let http=0,tlsErrors=0;
 const emit=value=>process.stdout.write(JSON.stringify(value)+'\\n');
 const server=https.createServer({...options,SNICallback(name,cb){emit({sni:name});cb(null,context)}},(q,r)=>{http++;r.end('{}')});
-server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket))});server.on('tlsClientError',()=>tlsErrors++);
-server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdin.resume();process.stdin.once('end',()=>{for(const socket of sockets)socket.destroy();server.close(()=>emit({closed:{http,tlsErrors,sockets:sockets.size}}))});`;
+let stopped=false,reported=false;const finish=()=>{if(stopped&&!sockets.size&&!reported){reported=true;emit({closed:{http,tlsErrors,sockets:sockets.size}})}};
+server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>{sockets.delete(socket);finish()})});server.on('tlsClientError',()=>tlsErrors++);
+server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdin.resume();process.stdin.once('end',()=>{for(const socket of sockets)socket.destroy();server.close(()=>{stopped=true;finish()})});`;
     child = Bun.spawn([node, '-e', source, key, cert], {
       stdin: 'pipe',
       stdout: 'pipe',
@@ -404,6 +408,16 @@ server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdi
     expect(failure.code).toBe('mcp_oauth_request_failed');
     expect(failure.cause).toEqual({ code: 'DEPTH_ZERO_SELF_SIGNED_CERT' });
     await network.close();
+    network = createMcpOAuthNetwork({
+      ...options(),
+      trustedTestCertificate: readFileSync(cert, 'utf8'),
+    });
+    const literalFailure = await network
+      .fetch(`https://127.0.0.1:${port}/metadata`)
+      .catch((error) => error);
+    expect(literalFailure.code).toBe('mcp_oauth_request_failed');
+    expect(literalFailure.cause).toEqual({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    await network.close();
     (child.stdin as import('bun').FileSink).end();
     await until(() => closed !== undefined && child!.exitCode !== null);
     await reader;
@@ -426,6 +440,166 @@ server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdi
       await certificate.exited;
       rmSync(root, { recursive: true, force: true });
     }
+  }
+}, 10000);
+
+test('baked fixture certificate permits actual OAuth and MCP TLS while retaining hostname verification and owned shutdown', async () => {
+  const root = mkdtempSync('/private/tmp/kite-mcp-trusted-fixture-tls-');
+  const key = join(root, 'key.pem'),
+    cert = join(root, 'cert.pem'),
+    config = join(root, 'certificate.cnf');
+  writeFileSync(
+    config,
+    '[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=ext\n[dn]\nCN=owned.invalid\n[ext]\nsubjectAltName=DNS:owned.invalid,IP:127.0.0.1\n',
+  );
+  const certificate = Bun.spawn(
+    [
+      '/usr/bin/openssl',
+      'req',
+      '-x509',
+      '-newkey',
+      'rsa:2048',
+      '-nodes',
+      '-keyout',
+      key,
+      '-out',
+      cert,
+      '-days',
+      '1',
+      '-config',
+      config,
+    ],
+    { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' },
+  );
+  let child: ReturnType<typeof Bun.spawn> | undefined,
+    reader: Promise<void> | undefined,
+    network: ReturnType<typeof createMcpOAuthNetwork> | undefined,
+    owned: Awaited<ReturnType<ReturnType<typeof createMcpHttpTransportPort>['open']>> | undefined;
+  let port: number | undefined, closed: { sockets: number } | undefined;
+  const requests: string[] = [];
+  try {
+    const certificateOutput = new Response(certificate.stderr).text();
+    expect(await certificate.exited).toBe(0);
+    await certificateOutput;
+    const trustedTestCertificate = readFileSync(cert, 'utf8');
+    expect(() =>
+      createMcpOAuthNetwork({
+        signal: new AbortController().signal,
+        assertFresh() {},
+        trustedTestCertificate,
+      }),
+    ).toThrow('mcp_test_certificate_invalid');
+    expect(() =>
+      createMcpHttpTransportPort({ servers: [], admit: async () => {}, trustedTestCertificate }),
+    ).toThrow('mcp_test_certificate_invalid');
+    const node = Bun.which('node');
+    if (!node) throw Error('owned_node_tls_fixture_unavailable');
+    const source = `const fs=require('node:fs'),https=require('node:https'),sockets=new Set();
+const emit=value=>process.stdout.write(JSON.stringify(value)+'\\n');
+const server=https.createServer({key:fs.readFileSync(process.argv[1]),cert:fs.readFileSync(process.argv[2])},async(q,r)=>{
+if(q.url==='/metadata'){emit({request:'metadata'});r.writeHead(200,{'content-type':'application/json'}).end('{"owned":true}');return}
+if(q.url!=='/mcp'||q.method!=='POST'){r.writeHead(405).end();return}
+const parts=[];for await(const part of q)parts.push(part);const rpc=JSON.parse(Buffer.concat(parts).toString());emit({request:rpc.method});
+if(rpc.id===undefined){r.writeHead(202).end();return}
+const result=rpc.method==='initialize'?{protocolVersion:rpc.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'owned-tls',version:'1'}}:{tools:[{name:'owned_tls_tool',inputSchema:{type:'object',properties:{value:{type:'string'}},required:['value']}}]};
+r.writeHead(200,{'content-type':'application/json'}).end(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result}))});
+let stopped=false,reported=false;const finish=()=>{if(stopped&&!sockets.size&&!reported){reported=true;emit({closed:{sockets:sockets.size}})}};
+server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>{sockets.delete(socket);finish()})});server.on('tlsClientError',()=>{});
+server.listen(0,'127.0.0.1',()=>emit({port:server.address().port}));process.stdin.resume();process.stdin.once('end',()=>{for(const socket of sockets)socket.destroy();server.close(()=>{stopped=true;finish()})});`;
+    child = Bun.spawn([node, '-e', source, key, cert], {
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const processOutput = new Response(child.stderr as ReadableStream<Uint8Array>).text();
+    reader = (async () => {
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      let pending = '';
+      for await (const chunk of child!.stdout as ReadableStream<Uint8Array>) {
+        pending += decoder.decode(chunk, { stream: true });
+        let end = pending.indexOf('\n');
+        while (end >= 0) {
+          const fact = JSON.parse(pending.slice(0, end));
+          pending = pending.slice(end + 1);
+          if (fact.port !== undefined) port = fact.port;
+          if (fact.request !== undefined) requests.push(fact.request);
+          if (fact.closed !== undefined) closed = fact.closed;
+          end = pending.indexOf('\n');
+        }
+        if (pending.length > 4096) throw Error('owned_tls_fixture_frame_limit');
+      }
+      pending += decoder.decode();
+      if (pending) throw Error('owned_tls_fixture_partial_frame');
+    })();
+    await until(() => port !== undefined);
+    const resolveAddresses = async () => [{ address: '127.0.0.1', family: 4 as const }];
+    network = createMcpOAuthNetwork({ ...options(), trustedTestCertificate, resolveAddresses });
+    const response = await network.fetch(`https://owned.invalid:${port}/metadata`);
+    expect(await response.json()).toEqual({ owned: true });
+    await until(() => requests.length === 1);
+    const literal = await network.fetch(`https://127.0.0.1:${port}/metadata`);
+    expect(await literal.json()).toEqual({ owned: true });
+    await until(() => requests.length === 2);
+    const mismatch = await network
+      .fetch(`https://wrong.invalid:${port}/metadata`)
+      .catch((error) => error);
+    expect(mismatch.code).toBe('mcp_oauth_request_failed');
+    expect(mismatch.cause).toEqual({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' });
+    expect(requests).toEqual(['metadata', 'metadata']);
+    const url = `https://127.0.0.1:${port}/mcp`;
+    const transport = createMcpHttpTransportPort({
+      servers: [{ id: 'owned', url }],
+      allowLoopbackForTests: true,
+      trustedTestCertificate,
+      resolveAddresses,
+      admit: async () => {},
+    });
+    owned = await transport.open(
+      {
+        serverId: 'owned',
+        scopeId: JSON.stringify(['store', 's', 'owned']),
+        sessionId: 's',
+        executionId: 'owned-connection',
+        originalStoreId: 'store',
+        configuration: { type: 'http', url },
+        configDigest: createMcpAdapter({
+          id: 'owned',
+          transport: { type: 'http', url },
+        }).getCatalogue().configDigest,
+      },
+      { signal: new AbortController().signal },
+    );
+    expect(requests).toEqual(['metadata', 'metadata']);
+    const client = new Client({ name: 'owned', version: '1' });
+    await client.connect(owned.transport);
+    expect((await client.listTools()).tools[0]?.inputSchema.required).toEqual(['value']);
+    expect(await owned.stop()).toEqual({ status: 'stopped' });
+    expect(await owned.stopped).toEqual({ supervision: 'ended' });
+    await network.close();
+    (child.stdin as import('bun').FileSink).end();
+    await until(() => closed !== undefined && child!.exitCode !== null);
+    await reader;
+    await processOutput;
+    expect(requests).toEqual([
+      'metadata',
+      'metadata',
+      'initialize',
+      'notifications/initialized',
+      'tools/list',
+    ]);
+    expect(closed!.sockets).toBe(0);
+    expect(child.exitCode).toBe(0);
+  } finally {
+    await owned?.stop();
+    await network?.close();
+    if (child) {
+      if (child.exitCode === null) child.kill();
+      await child.exited;
+      await reader;
+    }
+    if (certificate.exitCode === null) certificate.kill();
+    await certificate.exited;
+    rmSync(root, { recursive: true, force: true });
   }
 }, 10000);
 

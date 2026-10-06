@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '../../../src/platform/profile';
+import { retainLegacyDb6Fixture } from './assets-fixture';
 import { nodeCallerAssets } from './desktop-callers-fixture';
 
 const repository = new URL('../../../../../', import.meta.url).pathname;
-/** Current writer stays at DB6; unlike the historical fixtures this never removes its new tables. */
+/** DB6 qualification retains all DB6 assets; only proven empty DB7 additions are removed after owner close. */
 export async function nodeConfigurationAssets(
   root: string,
   profile: { dataRoot: string; profile: string },
@@ -93,6 +94,7 @@ try {data=openPrivateData(input.profilePath,lease);
     new Response(child.stderr).text(),
   ]);
   if (exit !== 0) throw Error('owned_node_db6_configuration_failed:' + stderr);
+  retainLegacyDb6Fixture(profile);
   return JSON.parse(stdout) as {
     configurations: {
       kind: string;

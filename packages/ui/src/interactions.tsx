@@ -7,6 +7,7 @@ import {
   requiresInteractionAttachment,
 } from './attachments';
 import { ActionInputForm } from './index';
+import { isMcpSourceReview, McpSourceReview } from './mcp-source-review';
 import { type PlanReviewDraft, PlanReviewPanel } from './plan-review';
 import { questionForm } from './question';
 import { type QuestionAnswerDraft, Questionnaire, questionDraftKey } from './questionnaire';
@@ -95,7 +96,7 @@ function PlainInteractionCard({
           {submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.
         </p>
       )}
-      {interaction.kind === 'approval' && (
+      {interaction.kind === 'approval' && !isMcpSourceReview(interaction) && (
         <div>
           <button
             type="button"
@@ -160,17 +161,27 @@ function PlainInteractionCard({
           </button>
         </div>
       )}
-      {interaction.kind === 'question' && onAnswer && (
-        <QuestionAnswerForm
-          key={questionDraftKey(interaction)}
+      {isMcpSourceReview(interaction) ? (
+        <McpSourceReview
+          key={`${interaction.id}/${interaction.revision}`}
           interaction={interaction}
           disabled={disabled}
           onAnswer={onAnswer}
-          initialDraft={initialQuestionDraft}
-          onDraftChange={onQuestionDraftChange}
         />
+      ) : (
+        interaction.kind === 'question' &&
+        onAnswer && (
+          <QuestionAnswerForm
+            key={questionDraftKey(interaction)}
+            interaction={interaction}
+            disabled={disabled}
+            onAnswer={onAnswer}
+            initialDraft={initialQuestionDraft}
+            onDraftChange={onQuestionDraftChange}
+          />
+        )
       )}
-      {interaction.kind === 'plan_review' && (
+      {interaction.kind === 'plan_review' && !isMcpSourceReview(interaction) && (
         <PlanReviewPanel
           interaction={interaction}
           disabled={disabled}

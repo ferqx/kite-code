@@ -7,11 +7,26 @@ import {
   type NativeResult,
   nativeChannel,
 } from '../src/native-bridge';
+import { parseNativeMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
 
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'settings.mcp.read': [],
+  'settings.mcp.close': [],
+  'settings.mcp.sources': ['observationId', 'afterId'],
+  'settings.mcp.snapshots': ['observationId', 'afterKey'],
+  'settings.mcp.auth': ['observationId', 'serverId'],
+  'settings.mcp.removePreview': ['observationId', 'serverId', 'scope'],
+  'settings.mcp.submit': ['observationId', 'operation'],
+  'settings.mcp.lookup': ['commandId'],
+  'settings.mcp.cancel': ['commandId'],
+  'settings.mcp.clear': ['commandId'],
+  'settings.mcp.tools': ['observationId', 'recordKey', 'startIndex'],
+  'settings.mcp.descriptor': ['observationId', 'recordKey', 'index', 'readId'],
+  'settings.mcp.descriptor.read': ['readId', 'offset', 'limit'],
+  'settings.mcp.descriptor.close': ['readId'],
   'interactions.next': ['viewGeneration', 'afterId'],
   'interactions.close': ['viewGeneration'],
   'settings.models.read': ['scope'],
@@ -122,6 +137,43 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (method.startsWith('settings.mcp.')) {
+    if (method === 'settings.mcp.submit') parseNativeMcpOperation(input.operation);
+    if (method === 'settings.mcp.removePreview')
+      parseNativeMcpOperation({ kind: 'remove', serverId: input.serverId, scope: input.scope });
+    if (
+      method === 'settings.mcp.sources' &&
+      (typeof input.afterId !== 'string' || !/^mcp-[a-f0-9]{64}$/.test(input.afterId))
+    )
+      throw Error('invalid_native_request');
+    for (const key of ['recordKey', 'afterKey'])
+      if (
+        fields[method as NativeRequest['method']].includes(key) &&
+        (typeof input[key] !== 'string' || !/^tools\/[a-f0-9]{64}$/.test(input[key] as string))
+      )
+        throw Error('invalid_native_request');
+    if (
+      method === 'settings.mcp.auth' &&
+      (typeof input.serverId !== 'string' || !/^mcp-[a-f0-9]{64}$/.test(input.serverId))
+    )
+      throw Error('invalid_native_request');
+    for (const key of ['startIndex', 'index'])
+      if (
+        fields[method as NativeRequest['method']].includes(key) &&
+        (!Number.isSafeInteger(input[key]) || Number(input[key]) < 0 || Number(input[key]) > 16383)
+      )
+        throw Error('invalid_native_request');
+    if (
+      method === 'settings.mcp.descriptor.read' &&
+      (!Number.isSafeInteger(input.offset) ||
+        Number(input.offset) < 0 ||
+        Number(input.offset) > 134217728 ||
+        !Number.isSafeInteger(input.limit) ||
+        Number(input.limit) < 1 ||
+        Number(input.limit) > 65536)
+    )
+      throw Error('invalid_native_request');
+  }
   if (
     (method === 'settings.models.enabled' || method === 'settings.models.default') &&
     (typeof input.modelId !== 'string' || !input.modelId.length || input.modelId.length > 128)

@@ -10,7 +10,7 @@
 
 根 workspaces 精确为 AI、Agent、Client、UI、Service、CLI、Desktop、Web。正式 CLI/TUI 固定完整 Terminal，Desktop 固定完整 Native；独立 source/development 显式入口不发现旧发布包或旧用户数据。业务通过唯一 HTTP/SSE Client；私有 bootstrap/发现只负责配套进程，不是第二业务 carrier。
 
-`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。
+`release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
 
 候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.2。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。
 
@@ -32,7 +32,7 @@ Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manife
 
 WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。
 
-默认生产 Shell 当前 `shell_unavailable`，无 Provider/Job；可信进程组监督与 macOS confined 样本不冒称跨平台生产 sandbox。Files runtime assets 保护、原权限/read-set 和不盲重放仍强制。OS keyring 只有 CI 双 gate 的实际随机 namespace 才执行，普通测试不访问用户 vault；live MCP 只在明确 gate 开启时联网。
+默认生产 Shell 当前 `shell_unavailable`，无 Provider/Job；可信进程组监督与 macOS confined 样本不冒称跨平台生产 sandbox。Files runtime assets 保护、原权限/read-set 和不盲重放仍强制。通用OS keyring平台smoke保CI双gate和实际随机namespace；Native本机资格只使用自有临时Profile派生的准确独立account，保存后准确revoke/remove，再由fresh backend核absence，不读取或清理其他用户账户。实际MCP外部联网仍只在明确live gate开启时执行；自有loopback测试资格与限制归[Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。
 
 ## 平台与完成约束
 

@@ -26,6 +26,7 @@ HTTP raw auth 接受 none、有限手工 Bearer credential 或 oauth。OAuth 只
 `builtin.mcp.sources` 注册 `mcp.auth.login/refresh/clear/revoke@1`，输入恰 `{serverId,expectedReadSet}`。每次核真实 Command、subject、Store、Session、原 runless Execution、完整 input digest、当前 Source 和 Workspace；普通执行许可与来源批准分别检查。四动作与后台恢复/刷新共享实际 Service 的 WorkspaceSerialLocks，lease 保持到原 owned 操作结算。
 
 - Login 先确认 Vault 可用，再在 127.0.0.1 随机端口创建 callback。低层 SDK discovery、可选 Login-only DCR 与 PKCE 后，才以固定 argv 调用系统 opener。callback 只接受精确 GET/host/path、两个唯一 code/state、当前 constant-time state 及仍有效 Source。成功只证明 tokens 已保存。
+- TLS保持原URL身份与证书验证；IP literal不发送IP-valued SNI，域名保原SNI。单张公开测试证书只在可信host显式loopback选项下接纳，不进入source配置/环境或系统证书库；该测试网络必须在制品构建前固定并计入摘要。
 - 连接凭据恢复只读取已有材料；临近过期才主动 refresh。无 callback、browser 或 DCR fallback，失效 refresh 返回有限 reauth required。显式 Refresh 不升级为 Login。
 - Clear 只删除准确本地 owned account。Revoke 仅在明确请求且 AS 有 revocation endpoint 时以 POST body 撤销，再本地清理；不支持时保留 tokens/client information 并报告 not supported。
 - timeout/cancel 清当前 verifier、listener、owned network sockets 和 opener helper，不重试。native put/remove、远端 revoke 请求已开始，或 helper/lock/network 清理未确认时保留原 outcome unknown；取消不能反推零效果。
@@ -34,11 +35,13 @@ HTTP raw auth 接受 none、有限手工 Bearer credential 或 oauth。OAuth 只
 
 `mcp.auth.status@1` 读当前安全 policy、backend status 和 presence，零 OAuth network/browser。`mcp.auth.result@1 {commandId}` 只读原 SQL Command/Execution/Session 与完整最终回执，保原 binding、authStatus、effectAttempted 和有限 reason；零当前 Source、physical Workspace、Vault、transport、Model 或补写。Command applied 单独不足以证明认证成功。
 
-## 来源删除与 TUI
+## 来源删除与客户端
 
 Remove 对准确 owned 域先检查后端可用性，声明发布后才本地清理。文件发布与删除凭据不是事务：`mcp.source.mutation.result` 的 saved 只证明声明发布，独立 credentialCleanup 区分未尝试、无需清理、completed、failed 和 outcome unknown。清理失败保留已删声明与原证明，不回滚文件、不默认 remote revoke。manual shared Bearer 保留；disable、shadow、手工改配置不删除凭据，已有请求和已解析 header 无法撤回。
 
 共享 TUI 的 HTTP Source 详情提供 Authentication；四动作先 Review，再独立 Enter Confirm。只显示安全状态和原 IDs，成功提示另行申请重连。原申请复用 `ui/caller-intents.json`，冷列表和选择零 GET，明确 Check 才查原 Caller 与有限结果；未知先核原申请，不重 POST。关闭、Esc、Ctrl+C 和切 Session 仅结束 Reader，取消业务需准确原 execution.cancel 独立申请。
+
+Native MCP 设置通过有限 Main manager封存完整非秘密原申请；四Auth先Review/Confirm再走独立普通Job Ask，原结果沿正式Query核C/E/binding，连接另行申请。冷列表零GET/POST、明确Check只查原ID；未知在当前Store阻止另一次写入。Native来源发表已确认但cleanup失败/未知时保原声明证据和总体unknown。[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)负责实际窗口资格，DB7/manifest15原字节备份恢复由独立maintenance codec验证。
 
 现有 Caller 资产实际含 Auth 请求时选择 closed backup v13，没有新增认证 journal。旧 v2–v12 请求语法和物理白名单保持；恢复保原字节、Store/subject/Session/phase，不能授予新 POST、审批或 Vault 权限。[维护 owner](../../packages/agent/src/maintenance/README.md)负责准确格式。
 
@@ -47,3 +50,6 @@ Remove 对准确 owned 域先检查后端可用性，声明发布后才本地清
 本机[源码外 Auth PTY](../../apps/cli/test/isolated/tui-mcp-auth-pty.test.ts)已核真实键盘五次 Review/Confirm、受控 AS 的实际 OAuth wire，以及移除 Source/physical Workspace 后的冷原结果读取；普通 Ask 由 observer SDK 回答。完整范围归[CLI owner](../../apps/cli/README.md#tui-mcp-http-认证与原申请)。受控 AS、fetch callback opener、临时 Vault 与 Ink/Host 不建立真实外部 AS、系统浏览器、原生 OAuth Vault 组合、异常 PTY 清理或三平台资格。实际 macOS synthetic native owned CRUD 与 fresh-Vault 删除确认有独立进度证据；Windows/Linux owned 路径仍需实际验证。
 
 现行 [workflow](../../.github/workflows/mcp-native-keyring-smoke.yml)以 CI-only [native credential test](../../tests/isolated/unified-agent/native-credential-platform.test.ts)检查新正式候选的普通凭据，不能从其存在推导本轮 OAuth 资格。旧 Phase 3 的[历史证据](https://github.com/ferqx/kite-code/blob/8aa02d4ca07350f37d3805c17ac9f10bf828e6a9/docs/space/execution/completed/2026-07-16-mcp-auth-phase3.md)只属旧 Manager/Store/TUI，不承接为当前实现证明。
+
+
+[Native人工系统浏览器入口](../../apps/desktop/scripts/qualify-native-mcp-browser.ts)正在验收本机默认Chrome与默认OS vault组合。自有HTTPS准备页先由用户处理浏览器证书提示，原Login仍用默认opener与120秒callback；没有fetch callback替代或系统信任修改。最终passed及原wire/report才建立Auth资格；来源/transport窗口和普通synthetic credential cleanup不能代替OAuth材料证据。

@@ -123,7 +123,12 @@ assert.deepEqual(
 );
 const sql = () => new DatabaseSync(join(path, 'desktop-private/data.sqlite'));
 let raw = sql();
-assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 6);
+assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 7);
+assert.equal(
+  raw.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()?.sql,
+  'CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+);
+assert.equal(raw.prepare('SELECT count(*) AS count FROM mcp_intents').get()!.count, 0);
 assert.deepEqual(
   raw
     .prepare('PRAGMA table_info(file_recovery_intents)')
@@ -186,8 +191,13 @@ raw = sql();
 raw
   .prepare('UPDATE file_recovery_intents SET intent_id=? WHERE intent_id=?')
   .run('code-2', 'wrong-primary');
+assert.equal(
+  raw.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='mcp_intents'").get()?.sql,
+  'CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+);
+assert.equal(raw.prepare('SELECT count(*) AS count FROM mcp_intents').get()!.count, 0);
 raw.exec(
-  'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; PRAGMA user_version=3;',
+  'DROP TABLE mcp_intents; DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; PRAGMA user_version=3;',
 );
 raw.close();
 access = await acquire();

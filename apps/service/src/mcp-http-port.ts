@@ -14,6 +14,7 @@ import {
 import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { mcpTestCertificate } from './mcp-test-certificate';
 
 export class McpHttpPortError extends Error {
   readonly code: string;
@@ -61,6 +62,8 @@ export interface McpHttpPortOptions {
   resolveAddresses?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>;
   /** Explicit localhost test qualification, never read from configuration/environment. */
   allowLoopbackForTests?: boolean;
+  /** Baked trusted fixture certificate; unavailable to source files and ordinary callers. */
+  trustedTestCertificate?: string;
   limits?: {
     requestBytes?: number;
     responseBytes?: number;
@@ -200,6 +203,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
       })));
   const admit = options.admit,
     allowLoopback = options.allowLoopbackForTests === true;
+  const testCertificate = mcpTestCertificate(options.trustedTestCertificate, allowLoopback);
   async function bounded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
     if (signal.aborted) throw new McpHttpPortError('mcp_http_request_aborted');
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -348,7 +352,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
       const pinned = Object.freeze({ ...addresses[0]! }),
         agent =
           server.url.protocol === 'https:'
-            ? new HttpsAgent(agentOptions)
+            ? new HttpsAgent({ ...agentOptions, ca: testCertificate })
             : new HttpAgent(agentOptions);
       const sockets = new Set<Socket>(),
         requests = new Set<ClientRequest>();
@@ -405,7 +409,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                 agent,
                 method: init?.method ?? 'GET',
                 headers: Object.fromEntries(headers),
-                servername: hostname,
+                servername: isIP(hostname) ? undefined : hostname,
                 rejectUnauthorized: true,
                 lookup: (_host, lookupOptions, callback) => {
                   if (lookupOptions.all)

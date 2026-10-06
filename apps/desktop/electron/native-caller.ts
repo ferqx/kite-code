@@ -31,6 +31,8 @@ import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
+import { NativeMcpSettings } from './mcp-settings';
+import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
@@ -64,6 +66,7 @@ export class NativeCaller {
   private readonly configuration: NativeConfiguration;
   private readonly inputConfiguration: NativeConfiguration;
   private readonly providers: NativeProviderSettings;
+  private readonly mcp: NativeMcpSettings;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -175,6 +178,43 @@ export class NativeCaller {
       () => this.changed(),
       privateData,
     );
+    this.mcp = new NativeMcpSettings(
+      client,
+      current,
+      () => this.changed(),
+      privateData,
+      async (row, executionId) => {
+        if (
+          client.serverInfo?.storeId !== row.request.expectedStoreId ||
+          client.serverInfo.subjectId !== row.subjectId
+        )
+          throw new ClientError('mcp_cancel_scope_unavailable');
+        const journal = this.requireCaller();
+        const prior = journal
+          .records()
+          .find(
+            (record) =>
+              record.intent.request.kind === 'execution.cancel' &&
+              record.intent.request.executionId === executionId &&
+              record.intent.scope.storeId === row.request.expectedStoreId &&
+              record.intent.scope.sessionId === row.sessionId &&
+              record.intent.subjectId === row.subjectId,
+          );
+        const commandId =
+          prior?.intent.request.commandId ??
+          this.cancellations.get(`mcp:${executionId}`) ??
+          crypto.randomUUID();
+        this.cancellations.set(`mcp:${executionId}`, commandId);
+        if (!prior)
+          await journal.prepare(row.sessionId, {
+            kind: 'execution.cancel',
+            commandId,
+            expectedStoreId: row.request.expectedStoreId,
+            executionId,
+          });
+        await journal.submit(commandId);
+      },
+    );
     this.fileRecovery = new NativeFileRecovery(client, current, () => this.changed(), privateData);
     this.recovery = new NativeRecovery(client, current, () => this.changed(), privateData);
     this.sessions = new NativeSessionManagement(client, current, () => this.changed());
@@ -251,6 +291,7 @@ export class NativeCaller {
     this.configuration.release();
     this.inputConfiguration.release();
     this.providers.release();
+    this.mcp.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -465,6 +506,8 @@ export class NativeCaller {
       sessionSubmissions: this.sessions.submissions,
       modelSettingsSubmissions: this.configuration.submissions,
       providerSettingsSubmissions: this.providers.submissions,
+      mcpSubmissions: this.mcp.submissions,
+      mcpUnavailable: this.mcp.storageUnavailable,
       inputSubmissions: this.input.submissions.map(inputMetadata),
       ...this.callerState(),
       permissionSubmissions: this.controller.permissionSubmissions,
@@ -595,6 +638,60 @@ export class NativeCaller {
     const generation = request.generation;
     let result: NativeResult;
     switch (request.method) {
+      case 'settings.mcp.read':
+        result = await this.mcp.read();
+        break;
+      case 'settings.mcp.close':
+        this.mcp.release();
+        result = null;
+        break;
+      case 'settings.mcp.sources':
+        result = await this.mcp.sources(request.observationId, request.afterId);
+        break;
+      case 'settings.mcp.snapshots':
+        result = await this.mcp.snapshots(request.observationId, request.afterKey);
+        break;
+      case 'settings.mcp.auth':
+        result = await this.mcp.auth(request.observationId, request.serverId);
+        break;
+      case 'settings.mcp.removePreview':
+        result = await this.mcp.removePreview(
+          request.observationId,
+          request.serverId,
+          request.scope,
+        );
+        break;
+      case 'settings.mcp.submit':
+        result = await this.mcp.submit(request.observationId, request.operation);
+        break;
+      case 'settings.mcp.lookup':
+        result = await this.mcp.lookup(request.commandId);
+        break;
+      case 'settings.mcp.cancel':
+        result = await this.mcp.cancel(request.commandId);
+        break;
+      case 'settings.mcp.clear':
+        this.mcp.clear(request.commandId);
+        result = null;
+        break;
+      case 'settings.mcp.tools':
+        result = await this.mcp.tools(request.observationId, request.recordKey, request.startIndex);
+        break;
+      case 'settings.mcp.descriptor':
+        result = await this.mcp.descriptor(
+          request.observationId,
+          request.recordKey,
+          request.index,
+          request.readId,
+        );
+        break;
+      case 'settings.mcp.descriptor.read':
+        result = this.mcp.descriptorRead(request.readId, request.offset, request.limit);
+        break;
+      case 'settings.mcp.descriptor.close':
+        this.mcp.descriptorClose(request.readId);
+        result = null;
+        break;
       case 'interactions.next': {
         this.selectScope(this.selected ?? '');
         await this.controller.nextInteractionPage(request.viewGeneration, request.afterId);
@@ -1224,6 +1321,7 @@ export class NativeCaller {
           (card) => card.id === request.interactionId && card.revision === request.revision,
         );
         if (!card) throw new ClientError('interaction_observation_changed');
+        verifyNativeMcpSourceAnswer(card, request.answer, this.client.serverInfo!.storeId!);
         if (requiresInteractionAttachment(card)) {
           const attachment = interactionAttachment(card);
           if (!attachment || !this.attachmentReads.hasLoaded(attachment.key))

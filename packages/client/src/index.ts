@@ -2862,3 +2862,5 @@ export function decodeSessionRecoveryCommand(value: unknown): RecoverSessionResp
 export function decodeJobReconcileCommand(value: unknown): JobReconcileCommand {
   return decodeResponse('JobReconcileCommand', value);
 }
+
+export * from './mcp-management';

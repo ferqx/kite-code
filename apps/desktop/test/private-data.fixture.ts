@@ -17,6 +17,12 @@ import {
   assertFileRecoveryTransition,
   fileRecoveryIntentId,
 } from '../electron/file-recovery-journal';
+import {
+  finishNativeMcpRecord,
+  type NativeMcpRecord,
+  nativeMcpIdentity,
+  parseNativeMcpRecord,
+} from '../electron/mcp-journal';
 import type { DraftScope, PrivateData } from '../electron/private-data';
 import type {
   NativeCallerRecord,
@@ -27,6 +33,7 @@ import type {
 /** Explicit unit port. Production main always opens the Node private file. */
 export function memoryPrivateData(): PrivateData {
   const files = new Map<string, FileRecoveryIntent>();
+  const mcps = new Map<string, NativeMcpRecord>();
   const configurations = new Map<string, NativeConfigurationRecord>();
   const routes = new Map<string, string>();
   const answers = new Map<string, NativeAnswerRecord>();
@@ -42,6 +49,31 @@ export function memoryPrivateData(): PrivateData {
       revision: 0,
     };
   return {
+    mcps: () => [...mcps.values()].map((row) => structuredClone(row)),
+    beginMcp(raw) {
+      const value = parseNativeMcpRecord(raw),
+        old = mcps.get(value.request.commandId);
+      if (old) {
+        if (nativeMcpIdentity(old) !== nativeMcpIdentity(value)) throw Error('mcp_intent_conflict');
+        return { created: false, value: structuredClone(old) };
+      }
+      if (value.phase !== 'submitting' || mcps.size >= 128) throw Error('mcp_intent_conflict');
+      mcps.set(value.request.commandId, value);
+      return { created: true, value: structuredClone(value) };
+    },
+    finishMcp(commandId, phase) {
+      const old = mcps.get(commandId);
+      if (!old) throw Error('mcp_intent_missing');
+      const value = finishNativeMcpRecord(old, phase);
+      mcps.set(commandId, value);
+      return structuredClone(value);
+    },
+    clearMcp(commandId) {
+      const old = mcps.get(commandId);
+      if (!old || !['completed', 'failed', 'cancelled'].includes(old.phase))
+        throw Error('mcp_clear_unconfirmed');
+      mcps.delete(commandId);
+    },
     configurations: () => [...configurations.values()].map((row) => structuredClone(row)),
     saveConfiguration(raw) {
       const record = parseConfigurationRecord(raw);
