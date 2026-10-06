@@ -1450,3 +1450,11 @@ Root完成实现与自核，未新增独立审查。本片 iteration_complete/st
 仅将 fixture 选择改为准确 `mcp.local.*`，前后两次实际 Model 目录明确保留默认 Ask User、connect 与准确原 remote schema。原五例当前5pass/0fail/54断言、3.20s，日志 `/private/tmp/kite-mcp-configuration-catalogue-current-20261006.log`；原15秒测试/5秒业务预算保持，connect Tool/connection Job/remote Tool 独立审批、只关闭 A 连接后 B 继续、unqualified transport与其他Server scope零网络反例未缩减。Service完整typecheck、owned Biome、diff及文档门禁通过。[MCP手册](../handbook/features/extensions.md)、[Service owner](../../apps/service/README.md)和[MCP leaf owner](../../packages/agent/src/mcp/README.md)核对后无生产行为或合同变化，不另建 Note。
 
 Root自核；iteration_complete/stage/commit ready仅覆盖本片测试与进度两路径。这是完整原入口之前的实际相邻消费者修正，不追认第十七轮失败或拼接完整默认资格；后续仍运行当前原完整图。37partial、Goal active及前述Native stdin、真实OAuth、默认可信Shell/持续Soak、安装、其他平台、§35/T-E和正式旧路径退役缺口保持，本地授权不扩大push/PR，无关AGENTS独立。
+
+## 2026-10-06：默认原始 MCP 来源消费准确远端描述
+
+第十八轮原完整默认在 HEAD b71376969a8907ac1475b9ddd203c3c9ce3c378b、574文件/464主任务/并发4运行，实际 exit1；180个主任务全部排空、179通过，默认原始来源配置主任务失败，无 plan abort。已运行290文件、284任务未调度；3978 tracked regular SHA与Git前后保持。日志 `/private/tmp/kite-current-default-eighteenth-20261006.log`、SHA `161b6003f2cc838eea1fdc1f1c2058b21f2ef667b5d58796a3153044960314f1`，同前缀 plan/inputs/result 保存。原恢复、Source备份和默认凭据主任务通过；本轮完整默认资格 false。
+
+来源 fixture 从“不在 connect/list/Files 中的工具”选远端，实际误选默认 `ask_user`。原三例1pass/2fail：远端独立审批等不到、后续原绑定恢复前的效果计数为零。最小修正仅正向选择当前安全原始来源的 `mcp.mcp-*` 远端描述；完整默认工具目录保持，三次独立 Tool/Job/remote 批准、完整八字段源 Job 与脱敏、原快照重开、来源原字节改变前零 Model 凭据查询以及坏/禁用来源下普通 Files 断言不变。[MCP手册](../handbook/features/extensions.md)、[Service owner](../../apps/service/README.md)和[MCP leaf owner](../../packages/agent/src/mcp/README.md)核对后生产行为及合同无变化，不另建 Note。
+
+当前原 isolated runTestJob/no-orphans 单并发三例3pass/0fail/54断言、2.91s，日志 `/private/tmp/kite-mcp-source-default-catalogue-current-20261006.log`；原测试与业务预算保持，Service完整typecheck、owned Biome、diff和文档门禁通过。Root自核，未新增独立审查；iteration_complete/stage/commit ready仅覆盖测试与进度两路径。第十八轮失败保留，后续仍须当前原完整图；37partial、Goal active及Native stdin、真实OAuth组合、默认可信Shell/持续Soak、安装、其他平台、§35/T-E和正式旧路径退役缺口保持，本地授权不扩大push/PR，无关AGENTS独立。

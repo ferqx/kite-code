@@ -102,9 +102,7 @@ async function fixture(options: { ask?: boolean; broken?: boolean; disabled?: bo
         expect(safeId).toBeDefined();
         call = { name: 'mcp.connect', input: { serverId: safeId!, key: `owned-${workId}` } };
       } else if (actualStep === 2) {
-        const tool = tools.find(
-          (tool) => !['mcp.connect', 'mcp.sources.list', 'files.read'].includes(tool.function.name),
-        );
+        const tool = tools.find((tool) => tool.function.name.startsWith('mcp.mcp-'));
         expect(tool).toBeDefined();
         call = { name: tool!.function.name, input: { value: 'exact' } };
       }
