@@ -8,7 +8,19 @@ renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定
 
 [页面 DOM](test/native-questionnaire-dom.test.tsx)核会话隔离、遗漏页／读取失败、未知一次答复、准确回执只清原草稿，以及 question 隐藏主输入并在终态恢复原文；[实际完整 Native 候选](test/isolated/native-questionnaire-bundle.test.ts)与 [Electron driver](test/native-questionnaire-electron.fixture.ts)核搬迁、删除构建源后的默认 Service／compatible Provider 窗口流程，末页主动提交前零 HTTP Answer、原 ID／文案和自由原文、问卷取消后原 Run 继续，以及所属 Service 真正退出后的冷 Store。该 fixture 仅暂存各原 Run 的首个 Provider 响应，沿既有“保留草稿”准备并读取准确主草稿后释放；实测答复／取消均隐藏主输入再恢复原文，没有新增 Model 或重答。首次发送等待实际 Renderer 权限与历史就绪，并核一次真实 form submit；[原 Native bundle driver](test/native-bundle-electron.fixture.ts)复用这项界面观察，原制品、独立审批与退出断言保持。实际运行结果与限制归 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由组件或单个窗口测试推导全部 P5、三平台或签名发行资格。
 
-公共入口同时导出 [DesktopInput](src/input.README.md)：调用者在发起意图时固定准确 Session/Store/Run/context/command，start、steer、follow-up 和精确取消不随选择视图漂移；未知回执只查原命令。所属 observer 的释放只停止查询与 callback，已有执行继续。意图单元测试与实际配对子 Service 合计 7 项、57 条断言通过；正式 controller 输入流程与 Electron 窗口切换仍待完成。
+## Native 计划入口与完整审核
+
+根 `desktop` 的主输入以“先审核计划”明确选择本次任务，选择本身零业务 POST。idle 保存原 `run.start`，活动任务保存准确 `afterRunId/contextSelectionId` 的 `input.follow_up`；两者只带闭合 `builtin.planning@1 {mode:'plan'}`，不改变当前原 Run。选择按原 Store/Workspace/Session 隔离，已知正回执后复位，失败或未知保留。默认 Service 负责装配原 Run 计划义务与必要条件，调用者不自报只读定义或批准权。
+
+共享 Plan 面板显示准确当前版本的完整正文、步骤和原材料，Auto/Accept Edits 只取实际 offered modes 且不默认选择。修改要求作为原反馈由真实 `planning.review` ToolResult 交给下一 Model，新版继续独立审核。拒绝本版不是取消原任务；明确原申请取消仍走原 Command。所选会话出现 pending approval/question/plan_review 时隐藏主输入，终态恢复原主草稿；Plan/approval 保留原任务停止入口。取消原 Run 不撤销已有事实，已派发 review 的未知结果及退出提示继续保留。
+
+页面 Plan Map 保存 Store/source/presentation Session/id/revision/inputDigest 的模式和反馈，与 Question、主草稿各自独立。准确 Main accepted answer_saved、实际同原卡替换或非 pending、以及精确原 Run 已观察 cancelled 才清对应原键；遗漏 bounded pending 页、读取失败、Promise resolve 不清草稿。完整页面刷新或退出不保证未提交 Plan 草稿恢复。
+
+[Main 原附件 reader](electron/interaction-attachment-reads.ts)只打开当前视图实际 offered card 的公开原身份，复用 controller 与 SDK 的完整 Artifact/hash/UTF-8 证明。renderer 经 [64KiB reader](src/native-interaction-attachment.ts)核 scope、原 size、完整 EOF、SHA 和 fatal UTF-8；Main 在原视图完整传输至 EOF 前另拒绝回答。close 只释放读取，当前完整证明保留；选择或网络释放清证明，迟到正文不改绑。Native `viewSelection` 区分同 Session 重选，`historyEpoch` 隔离观察流 reset，renderer 同时撤销旧正文资格。普通同作用域刷新中止旧在途读取，保留已经完成且仍实际 offered 的准确 key；失败期间拒绝操作，恢复后重新核原卡，不清反馈草稿。无任意 Artifact、路径或 Runtime 端口。
+
+[页面 DOM](test/native-plan-review-dom.test.tsx)、[读取边界](test/native-interaction-attachment.test.ts)与 [显式输入](test/native-input.test.ts)核草稿、主输入独占、原取消清理、未读取/部分读取不得回答和闭合 Plan 意图。[实际候选](test/isolated/native-plan-review-bundle.test.ts)与 [Electron driver](test/native-plan-review-electron.fixture.ts)已在本机 macOS 核搬迁并删除构建源的默认 Service/compatible Provider、真实两种执行方式、原反馈 v2、独立管理/File 许可、拒绝/取消、正常所属 PID 退出与冷 Store。普通 Plan Model 保 Planning 目录；Auto 专用 reviewer 按实际 `authorization_review` 用途及原 Store/Run/Files Execution 核空工具目录，不借计划批准跳过独立人工审批。实际结果与原失败保留见 [进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。退出 unknown 提示的明确选择由严格一次性的测试 dialog 端口返回，不代表 macOS 原生 modal 点击资格，生产 guard 不被替换。该窗口不推导全部视觉、设置、平台或 P5 退出。
+
+公共入口同时导出 [DesktopInput](src/input.README.md)：调用者在发起意图时固定准确 Session/Store/Run/context/command，start、steer、follow-up 和精确取消不随选择视图漂移；未知回执只查原命令。所属 observer 的释放只停止查询与 callback，已有执行继续。意图单元测试与实际配对子 Service 合计 7 项、57 条断言通过；Native Plan 上述入口另核实际窗口，完整 controller 输入与其余窗口范围继续按阶段验收。
 
 可移植公共入口只依赖 Client、UI 与 React；新增显式原生入口在 main 侧使用 Agent profile 与 Service paired。根 `desktop` 已选择新完整 Native 候选，旧 kite-desktop 不参与正式/default/CI 调度。完整视觉保真、跨平台与发布资格仍按实际证据核对。
 
@@ -22,7 +34,7 @@ renderer 的页面 Map 分别保存步骤与 JSON fallback 草稿，身份固定
 
 P3 `DesktopSnapshot.interactions` 读取根 Session 的实际 pending 页（最多 20，`interactionsAfterId` 显式保留后页指针）。`answerInteraction` 在点击时封存 Interaction 原 Store、presentationSessionId、ID、revision、answer 与新 commandId；重复调用共享同一在途 Promise，视图切换不能改绑。一次回答最多发送一次，错误保留原 pending 请求与已保存意图，未知回执用 `lookupInteractionAnswer` 查询原 command，不自动重放。当前 controller 最多保留 128 个回答 intent，超过范围明确拒绝，而不丢弃未决身份。
 
-`interactionSubmissions` 与 `DesktopAnswerSubmissions` 可在选择区外保留回答面板；宿主应在视图切换时仍渲染该面板。接受命令与 `acceptedDecisionRevision`/实际执行结果分别显示。`DesktopInteractions` 的 callback 缺席时只读，不向 UI 传 token、Owner 或 server 类型。真实 SQLite/HTTP 测试位于 [CLI Interaction integration](../cli/test/interactions.test.ts)，覆盖 opt-in 批准与 question、非交互等待、重复提交和切换视图；controller 测试另覆盖丢失回答回执只查原 command。尚未替换正式 Electron 窗口或完成其 DOM/键盘/P5 资格。
+`interactionSubmissions` 与 `DesktopAnswerSubmissions` 可在选择区外保留回答面板；宿主应在视图切换时仍渲染该面板。接受命令与 `acceptedDecisionRevision`/实际执行结果分别显示。`DesktopInteractions` 的 callback 缺席时只读，不向 UI 传 token、Owner 或 server 类型。真实 SQLite/HTTP 测试位于 [CLI Interaction integration](../cli/test/interactions.test.ts)，覆盖 opt-in 批准与 question、非交互等待、重复提交和切换视图；controller 测试另覆盖丢失回答回执只查原 command。上述便携 HTTP 证据不单独建立 Native 窗口或完整 P5 资格；本页问卷与计划专题分别记录已交付的实际 Native 消费范围。
 
 便携 Context controller 在 capability 可用时读取第一页 `snapshot.context`，`loadContextPage()` 固定原 selection、highWaterSeq 并独立推进消息与来源两个 cursor；一个流结束后不会从头重复，消息结束固定 afterSeq=highWaterSeq。`rewindContext(boundary)` 只接受本代次已读取有界页中的实际 complete 消息的精确 ID/seq 或 null，Service 最终核对完整 Tool 配对。`includeHistoricalResult(execution, scope?)` 绑定当前实际历史 Job 的原 ID/resultRevision；活动 include 必须提供点击时封存的 Store/Session/selection/targetRunId envelope，缺准确原 Run、出处或 revision 时本地拒绝；这两项保存原 Session/Store/selection/commandId，不自动创建 Run。Rewind 的活动或 outcome_unknown 执行仍在本地明确 input_busy；include 在准确活动 Run 上只排队，原 accepted/result_queued 显示 queued，checkpoint 后原 Command applied 才显示已纳入。最终 Store 仍核原目标，视图切换和未知恢复不改绑。
 

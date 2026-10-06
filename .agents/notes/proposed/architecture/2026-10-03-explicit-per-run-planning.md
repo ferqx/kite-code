@@ -35,12 +35,16 @@ SourceRequest 维持现有公共契约。上下文贡献保完整当前计划；
 
 当前真实证据为 Planning/Artifact及关联业务三文件50/454（原49/447与历史receipt1/7）、默认Task/Planning相关九文件48/747（含全部默认报告11例）、TUI文件/Plan十九文件119/1063（四个80×24 Plan窗口、约143KB原Artifact、排队/跨Session草稿、原answer POST/firstGET损失）。各 owner维护实际路径与边界。Root原SQL报告继承独立Store测试12/102，当前关联恢复组合另验。proposed保留：客户端强杀后的普通Work/Planning申请intent持久查回、全部正式消费者与平台资格未完整交付；本片进程内unknown原GET不代替这些接受标准。早期report initializer/null-parent权限/head漂移调用Provider/历史来源失配及中途装配失败日志分别保留。
 
+Native 正式入口现沿同一闭合意图提供“先审核计划”：空闲 start 与 active follow-up 各固定原身份，选择本身零 POST。共享面板显示准确版本全文与步骤，原反馈由真实 ToolResult 进入下一 Model，新版重新审核；Auto/Accept Edits 仍各受独立 Tool 权限约束。页面草稿按原六元身份保存，只在准确回执、原卡替换/终态或实际原 Run cancelled 时清对应键；不把 bounded 页遗漏、Promise resolve 或读失败当作清理证明。
+
+Native 完整附件复用公开 SDK 原 scope/EOF/SHA/UTF-8 证明，Main 另核完整传输才允许回答。单靠 renderer 自报已读不足以保护真实入口；普通同作用域刷新保仍 offered 的已完成证明，在途读取仍中止，真正 selection/reset 则撤销证明和旧正文资格，反馈草稿保留。当前 [Native owner](../../../../apps/desktop/README.md#native-计划入口与完整审核)与 [当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)记录实际页面/边界反例、独立审查、搬迁无构建源候选及正常 Service 退出后的原 Store 冷读。该本机窗口已核原反馈 v2、两种方式、独立许可、拒绝与原 Run 取消；已尝试 review 的未知结果保持，测试 dialog 响应不证明系统 modal 点击。提案仍为 proposed：完整普通 Work/Planning 跨进程 intent 查回、全部正式消费者与平台标准未全交付。
+
 ## Acceptance criteria
 
 真实 SQLite/固定 Model/默认 Service/公共Client核单次初始化先于首个Model、准确只读分析、批准前写/Job/child零效果、Full不能绕过、旧Run批准/错版本/摘要/来源不复用。实际批准后按选择方式执行独立审批，真实 step/required evidence 完成。审批与最终条件之间的 head/record/control 变化零旧派发；冷 snapshot不等零vault/Model。无意图普通对话保持。真实80×24 TUI `/plan`/Shift+Tab、原完整plan review/修改、unknown原GET、切换与取消读取零额外POST，之后才能记录客户端资格。
 
 ## Risks
 
-完整大计划 Artifact 链已取得上述原 scope/hash/UTF8/seal 实测；单消息和实际 Worker/存储资源边界仍须成立，不能靠此提案新增旧字数或步骤 quota、删除产品全文承诺。current Permissions 与选择模式组合不能丢 control read-set、hard denial 或独立 review/approval。公共贡献是信息，最终实际事务 proof 才负责执行资格。本设计未完成 TUI 默认入口切换、Shell/MCP自动验证或平台资格。
+完整大计划 Artifact 链已取得上述原 scope/hash/UTF8/seal 实测；单消息和实际 Worker/存储资源边界仍须成立，不能靠此提案新增旧字数或步骤 quota、删除产品全文承诺。current Permissions 与选择模式组合不能丢 control read-set、hard denial 或独立 review/approval。公共贡献是信息，最终实际事务 proof 才负责执行资格。正式 TUI 与 Native 已沿新入口消费上述单次意图；完整跨进程申请查回、Shell/MCP 自动验证及其他平台资格仍未全验收。
 
 当前业务合同归 [Planning owner](../../../../packages/agent/src/business/planning/README.md)，宿主接线归 [Service owner](../../../../apps/service/README.md)，产品预期归 [TUI 计划](../../../../docs/handbook/clients/tui/guides/planning.md)与[共享计划语义](../../../../docs/handbook/features/planning-and-tasks.md)。

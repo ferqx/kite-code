@@ -6,6 +6,7 @@ import {
   PermissionGrantsPanel,
   PermissionPanel,
   PermissionSubmissionStatus,
+  type PlanReviewDraft,
   type QuestionAnswerDraft,
   questionDraftKey,
 } from '@kite-ai/ui';
@@ -17,6 +18,7 @@ import { NativeContextView } from './native-context';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
+import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
 import { NativeModelSettings } from './native-model-settings';
@@ -46,9 +48,12 @@ export function NativeDesktop() {
   const [originalDraft, setOriginalDraft] = useState<NativeDraft>();
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
+  const [planMode, setPlanMode] = useState(false);
+  const planModes = useRef(new Map<string, boolean>());
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const generation = useRef(0),
+    historyEpoch = useRef<number | undefined>(undefined),
     viewIntent = useRef(0),
     draftRevision = useRef(0),
     writing = useRef(false);
@@ -65,25 +70,64 @@ export function NativeDesktop() {
       }
     >(),
   );
+  const planDrafts = useRef(
+    new Map<
+      string,
+      {
+        storeId: string;
+        sourceSessionId: string;
+        presentationSessionId: string;
+        cardId: string;
+        draft: PlanReviewDraft;
+        runId: string | null;
+      }
+    >(),
+  );
   function apply(value: NativeResult) {
     if (value && 'generation' in value && value.generation === generation.current) {
+      historyEpoch.current = value.historyEpoch;
       // Main has verified the exact answer_saved receipt. Promise resolution and
       // omission from a bounded pending page are not confirmation of an answer.
-      for (const submission of value.interactionSubmissions)
-        if (submission.phase === 'accepted' && submission.receipt)
-          questionDrafts.current.delete(questionDraftKey(submission.interaction));
-      for (const card of value.selection?.interactions ?? []) {
-        const currentKey = questionDraftKey(card);
-        for (const [key, saved] of questionDrafts.current)
-          if (
-            saved.storeId === card.originStoreId &&
-            saved.sourceSessionId === card.sessionId &&
-            saved.presentationSessionId === card.presentationSessionId &&
-            saved.cardId === card.id &&
-            (key !== currentKey || card.state !== 'pending')
-          )
-            questionDrafts.current.delete(key);
+      for (const drafts of [questionDrafts.current, planDrafts.current]) {
+        for (const submission of value.interactionSubmissions)
+          if (submission.phase === 'accepted' && submission.receipt)
+            drafts.delete(questionDraftKey(submission.interaction));
+        for (const card of value.selection?.interactions ?? []) {
+          const currentKey = questionDraftKey(card);
+          for (const [key, saved] of drafts)
+            if (
+              saved.storeId === card.originStoreId &&
+              saved.sourceSessionId === card.sessionId &&
+              saved.presentationSessionId === card.presentationSessionId &&
+              saved.cardId === card.id &&
+              (key !== currentKey || card.state !== 'pending')
+            )
+              drafts.delete(key);
+        }
       }
+      for (const [key, saved] of planDrafts.current)
+        if (
+          saved.storeId === value.selection?.storeId &&
+          saved.sourceSessionId === value.selection.session.id &&
+          value.selection.runs.some(
+            (run) =>
+              run.id === saved.runId &&
+              run.originStoreId === saved.storeId &&
+              run.status === 'cancelled' &&
+              !run.isActive,
+          )
+        )
+          planDrafts.current.delete(key);
+      if (value.selection)
+        setPlanMode(
+          planModes.current.get(
+            JSON.stringify([
+              value.selection.storeId,
+              value.selection.session.workspaceId,
+              value.selection.session.id,
+            ]),
+          ) ?? false,
+        );
       setState(value);
     }
   }
@@ -202,6 +246,34 @@ export function NativeDesktop() {
         permissions: historyState.phase === 'complete' ? state.selection.permissions : undefined,
       }
     : undefined;
+  const attachmentGeneration = state?.generation,
+    attachmentSessionId = selection?.session.id,
+    attachmentView = selection?.viewSelection,
+    attachmentEpoch = state?.historyEpoch;
+  const attachmentReader = useMemo(() => {
+    if (!bridge || !attachmentGeneration || !attachmentSessionId || !attachmentView)
+      return undefined;
+    const current = attachmentGeneration,
+      nonce = viewIntent.current,
+      sessionId = attachmentSessionId,
+      epoch = attachmentEpoch;
+    return (
+      attachment: import('@kite-ai/client').InteractionAttachment,
+      options: { signal: AbortSignal },
+    ) =>
+      readNativeInteractionAttachment({
+        bridge,
+        generation: current,
+        viewSelection: attachmentView,
+        attachment,
+        signal: options.signal,
+        isCurrent: () =>
+          current === generation.current &&
+          epoch === historyEpoch.current &&
+          nonce === viewIntent.current &&
+          selected.current === sessionId,
+      });
+  }, [attachmentGeneration, attachmentSessionId, attachmentView, attachmentEpoch]);
   useEffect(() => {
     if (selection?.permissionUnavailable && !selection.viewLoading) setGrantFacts(undefined);
   }, [selection?.permissionUnavailable, selection?.viewLoading]);
@@ -549,7 +621,9 @@ export function NativeDesktop() {
           </section>
           {!selection.session.parentSessionId &&
             !selection.interactions.some(
-              (card) => card.kind === 'question' && card.state === 'pending',
+              (card) =>
+                ['approval', 'question', 'plan_review'].includes(card.kind) &&
+                card.state === 'pending',
             ) && (
               <form
                 onSubmit={(event) => {
@@ -565,7 +639,7 @@ export function NativeDesktop() {
                       method: 'submit',
                       generation: current,
                       sessionId,
-                      intent: nativeTextIntent(selection, commandId, draft),
+                      intent: nativeTextIntent(selection, commandId, draft, planMode),
                     });
                     if (
                       nonce === viewIntent.current &&
@@ -574,8 +648,17 @@ export function NativeDesktop() {
                       value &&
                       'phase' in value &&
                       !['unknown', 'failed', 'rejected'].includes(value.phase)
-                    )
+                    ) {
                       setDraft((current) => (current === submittedText ? '' : current));
+                      setPlanMode(false);
+                      planModes.current.delete(
+                        JSON.stringify([
+                          selection.storeId,
+                          selection.session.workspaceId,
+                          sessionId,
+                        ]),
+                      );
+                    }
                   });
                 }}
               >
@@ -586,6 +669,26 @@ export function NativeDesktop() {
                     disabled={pending}
                     onChange={(event) => setDraft(event.target.value)}
                   />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    aria-label="先审核计划"
+                    checked={planMode}
+                    disabled={pending}
+                    onChange={(event) => {
+                      setPlanMode(event.target.checked);
+                      planModes.current.set(
+                        JSON.stringify([
+                          selection.storeId,
+                          selection.session.workspaceId,
+                          selection.session.id,
+                        ]),
+                        event.target.checked,
+                      );
+                    }}
+                  />
+                  先审核计划
                 </label>
                 <button
                   type="button"
@@ -627,12 +730,16 @@ export function NativeDesktop() {
                   }
                 >
                   {selection.runs.some((run) => run.isActive)
-                    ? ['context.compress', 'context.compression.reset'].includes(
-                        selection.activeCommand?.kind ?? '',
-                      )
-                      ? '排队压缩后的输入'
-                      : '引导当前轮次'
-                    : '发送明确的新轮次'}
+                    ? planMode
+                      ? '排队新的计划任务'
+                      : ['context.compress', 'context.compression.reset'].includes(
+                            selection.activeCommand?.kind ?? '',
+                          )
+                        ? '排队压缩后的输入'
+                        : '引导当前轮次'
+                    : planMode
+                      ? '发送计划任务'
+                      : '发送明确的新轮次'}
                 </button>
               </form>
             )}
@@ -652,6 +759,7 @@ export function NativeDesktop() {
               <InteractionCard
                 key={draftKey}
                 interaction={interaction}
+                onReadAttachment={attachmentReader}
                 submission={
                   saved
                     ? { phase: saved.phase, commandId: saved.request.commandId }
@@ -670,6 +778,17 @@ export function NativeDesktop() {
                     sourceSessionId: interaction.sessionId,
                     presentationSessionId: interaction.presentationSessionId,
                     cardId: interaction.id,
+                    draft,
+                  })
+                }
+                initialPlanDraft={planDrafts.current.get(draftKey)?.draft}
+                onPlanDraftChange={(draft) =>
+                  planDrafts.current.set(draftKey, {
+                    storeId: interaction.originStoreId,
+                    sourceSessionId: interaction.sessionId,
+                    presentationSessionId: interaction.presentationSessionId,
+                    cardId: interaction.id,
+                    runId: interaction.runId,
                     draft,
                   })
                 }

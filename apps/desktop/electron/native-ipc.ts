@@ -56,6 +56,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'modelOutput.open': ['readId', 'expectedStoreId', 'sessionId', 'executionId', 'messageId'],
   'modelOutput.read': ['readId', 'offset', 'limit'],
   'modelOutput.close': ['readId'],
+  'interactionAttachment.open': ['readId', 'key'],
+  'interactionAttachment.read': ['readId', 'offset', 'limit'],
+  'interactionAttachment.close': ['readId'],
   attach: [],
   state: [],
   directory: [],
@@ -247,7 +250,9 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   )
     throw Error('invalid_native_request');
   if (
-    (method === 'modelOutput.read' || method === 'modelInput.read') &&
+    (method === 'modelOutput.read' ||
+      method === 'modelInput.read' ||
+      method === 'interactionAttachment.read') &&
     (!Number.isSafeInteger(input.offset) ||
       Number(input.offset) < 0 ||
       !Number.isInteger(input.limit) ||
@@ -313,6 +318,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       Number(input.limit) < 1 ||
       Number(input.limit) > 65536)
   )
+    throw Error('invalid_native_request');
+  if (method === 'interactionAttachment.open' && (typeof input.key !== 'string' || !input.key))
     throw Error('invalid_native_request');
   if (method === 'interaction.answer') {
     if (

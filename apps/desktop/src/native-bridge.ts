@@ -8,6 +8,7 @@ import type {
   FileCheckpointRecoveryBoundary,
   FileRestoreStatus,
   Interaction,
+  InteractionAttachment,
   Message,
   ModelInputPage,
   PermissionGrantPage,
@@ -262,6 +263,22 @@ export type NativeModelBodyChunk<K extends 'modelOutput' | 'modelInput'> = {
 };
 export type NativeModelOutputOpen = NativeModelBodyOpen<'modelOutput'>;
 export type NativeModelOutputChunk = NativeModelBodyChunk<'modelOutput'>;
+export type NativeAttachmentOpen = {
+  kind: 'interactionAttachment.opened';
+  readId: string;
+  viewGeneration: number;
+  viewSelection: number;
+  identity: string;
+  reference: InteractionAttachment['reference'] & { hash: string };
+};
+export type NativeAttachmentChunk = {
+  kind: 'interactionAttachment.chunk';
+  readId: string;
+  offset: number;
+  nextOffset: number;
+  eof: boolean;
+  data: string;
+};
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
@@ -407,6 +424,15 @@ export type NativeRequest =
       limit: number;
     }
   | { method: 'modelOutput.close'; generation: number; readId: string }
+  | { method: 'interactionAttachment.open'; generation: number; readId: string; key: string }
+  | {
+      method: 'interactionAttachment.read';
+      generation: number;
+      readId: string;
+      offset: number;
+      limit: number;
+    }
+  | { method: 'interactionAttachment.close'; generation: number; readId: string }
   | { method: 'attach' }
   | { method: 'state' | 'directory' | 'detach' | 'workspace.pick'; generation: number }
   | { method: 'select'; generation: number; sessionId: string }
@@ -512,6 +538,8 @@ export type NativeResult =
   | NativeModelInputChunk
   | NativeModelOutputOpen
   | NativeModelOutputChunk
+  | NativeAttachmentOpen
+  | NativeAttachmentChunk
   | { workspaces: Workspace[]; sessions: Session[]; storeId: string }
   | { messages: Message[]; nextAfterSeq: string | null; highWaterSeq: string }
   | NativeDraft

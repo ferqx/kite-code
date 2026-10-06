@@ -47,3 +47,44 @@ test('Native text during compression/reset binds follow-up to the original Run a
     nativeTextIntent({ ...selection, permissionUnavailable: true }, 'new-command', 'stale'),
   ).toThrow('session_view_unavailable');
 });
+
+test('Native explicit Plan freezes a new Run or queued follow-up with the closed original planning input', () => {
+  const selection = {
+    storeId: 'original-store',
+    session: { id: 'original-session', contextSelectionId: 'original-selection' },
+    runs: [],
+  } as unknown as NativeSelection;
+  const extensionInputs = [
+    { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } },
+  ];
+  expect(nativeTextIntent(selection, 'plan-command', '  original plan\n雪🙂 ', true)).toEqual({
+    kind: 'run.start',
+    expectedStoreId: 'original-store',
+    commandId: 'plan-command',
+    content: '  original plan\n雪🙂 ',
+    extensionInputs,
+  });
+  const active = {
+    ...selection,
+    runs: [{ id: 'original-run', isActive: true, originCommandId: 'original-command' }],
+    activeCommand: {
+      id: 'original-command',
+      sessionId: 'original-session',
+      originStoreId: 'original-store',
+      kind: 'run.start',
+    },
+  } as unknown as NativeSelection;
+  const queued = nativeTextIntent(active, 'queued-plan', 'next plan', true);
+  expect(queued).toEqual({
+    kind: 'input.follow_up',
+    expectedStoreId: 'original-store',
+    commandId: 'queued-plan',
+    content: 'next plan',
+    afterRunId: 'original-run',
+    contextSelectionId: 'original-selection',
+    extensionInputs,
+  });
+  selection.session.contextSelectionId = 'later-selection';
+  expect(queued.kind === 'input.follow_up' && queued.contextSelectionId).toBe('original-selection');
+  expect(nativeTextIntent(active, 'ordinary', 'ordinary text').kind).toBe('input.steer');
+});

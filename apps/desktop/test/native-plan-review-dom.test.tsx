@@ -1,0 +1,313 @@
+import { expect, test } from 'bun:test';
+import type { Command, Interaction, Session } from '@kite-ai/client';
+import { JSDOM } from 'jsdom';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { verifyInteractionAnswerReceipt } from '../src/controller';
+import { NativeDesktop } from '../src/native';
+import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
+
+test('Native page keeps exact plan drafts across sessions, missing pages and read failure; accepted answers or observed original Run cancellation clear only that draft', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
+      .IS_REACT_ACT_ENVIRONMENT,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const sessions = ['a', 'b'].map((id) => ({
+    id,
+    workspaceId: 'w',
+    rootSessionId: id,
+    parentSessionId: null,
+    title: `Plan ${id.toUpperCase()}`,
+    nextSeq: '0',
+    deletedAt: null,
+  })) as Session[];
+  const cards: Record<string, Interaction> = Object.fromEntries(
+    sessions.map((session) => [
+      session.id,
+      {
+        id: `plan-${session.id}`,
+        originStoreId: 'store',
+        sessionId: session.id,
+        presentationSessionId: session.id,
+        ancestry: [session.id],
+        runId: `run-${session.id}`,
+        executionId: `execution-${session.id}`,
+        attempt: 1,
+        kind: 'plan_review',
+        definitionId: 'planning.review',
+        definitionVersion: '1',
+        inputDigest: `input-${session.id}`,
+        policyRevision: 'information-1',
+        requiredRefs: [],
+        answer: null,
+        revision: '1',
+        acceptedDecisionRevision: null,
+        state: 'pending',
+        request: {
+          planId: `plan-${session.id}`,
+          version: '1',
+          digest: `plan-digest-${session.id}`,
+          content: 'Full original plan\n1. first step\n2. second step',
+          allowedModes: ['auto', 'accept_edits'],
+        },
+      } satisfies Interaction,
+    ]),
+  );
+  let selected = 'a',
+    omitted = false,
+    unavailable = false,
+    posts = 0;
+  let watcher: ((event: NativeEvent) => void) | undefined;
+  let submissions: NativeState['interactionSubmissions'] = [];
+  let observedRuns: NonNullable<NativeState['selection']>['runs'] = [];
+  const state = (): NativeState => ({
+    generation: 1,
+    creationSubmissions: [],
+    inputSubmissions: [],
+    permissionSubmissions: [],
+    interactionSubmissions: submissions,
+    selection: {
+      viewGeneration: 1,
+      canReadModelOutput: false,
+      storeId: 'store',
+      session: sessions.find((session) => session.id === selected)!,
+      runs: observedRuns,
+      executions: [
+        {
+          id: 'parallel-job',
+          sessionId: selected,
+          runId: 'original-run',
+          kind: 'job',
+          definitionId: 'ordinary-job',
+          definitionVersion: '1',
+          status: 'running',
+          result: null,
+          resultRevision: '0',
+          cancelRequestedAt: null,
+        },
+      ],
+      interactions: omitted ? [] : [cards[selected]!],
+      interactionsAfterId: null,
+    },
+  });
+  const bridge: NativeBridge = {
+    watch(callback) {
+      watcher = callback;
+      return () => {
+        watcher = undefined;
+      };
+    },
+    async request(input) {
+      if (input.method === 'attach') return state();
+      if (input.method === 'state') {
+        if (unavailable) throw new Error('read_unavailable');
+        return state();
+      }
+      if (input.method === 'directory')
+        return {
+          storeId: 'store',
+          workspaces: [{ id: 'w', name: 'Plans', rootUri: 'file:///workspace' }],
+          sessions,
+        };
+      if (input.method === 'select') {
+        selected = input.sessionId;
+        return state();
+      }
+      if (input.method === 'messages')
+        return { messages: [], nextAfterSeq: null, highWaterSeq: '0' };
+      if (input.method === 'draft.read')
+        return {
+          id: input.sessionId,
+          storeId: 'store',
+          workspaceId: 'w',
+          rootSessionId: input.sessionId,
+          revision: 1,
+          content: `  main ${input.sessionId}\n雪🙂  `,
+        } satisfies NativeDraft;
+      if (input.method === 'interaction.answer') {
+        posts++;
+        const card = cards[selected]!;
+        submissions = [
+          {
+            interaction: card,
+            intent: {
+              expectedStoreId: 'store',
+              commandId: 'original-answer',
+              expectedRevision: card.revision,
+              answer: input.answer,
+            },
+            phase: 'unknown',
+          },
+        ];
+        return null;
+      }
+      return null;
+    },
+  };
+  Object.defineProperty(dom.window, 'kiteNative', { value: bridge });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const host = dom.window.document;
+  const click = async (name: string) =>
+    act(async () => {
+      const button = [...host.querySelectorAll('button')].find(
+        (value) => value.textContent === name,
+      )!;
+      expect(button).toBeDefined();
+      button.click();
+    });
+  const text = () =>
+    host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
+  const mainInput = () =>
+    [...host.querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('当前会话私有草稿'))
+      ?.querySelector('textarea') ?? null;
+  const edit = async (value: string) =>
+    act(async () => {
+      text().value = value;
+      text().dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+  const refresh = async () => act(async () => watcher?.({ generation: 1, kind: 'changed' }));
+  try {
+    await act(async () => root.render(<NativeDesktop />));
+    await click('Plan A');
+    expect(mainInput() === null).toBe(true);
+    await edit('  original A\n雪🙂  ');
+    await act(async () => {
+      const choice = host.querySelector<HTMLSelectElement>(
+        'select[aria-label="Plan review mode"]',
+      )!;
+      choice.value = 'accept_edits';
+      choice.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    });
+    // Plan denial and the explicit original-work cancellation are separate choices.
+    expect(
+      [...host.querySelectorAll('button')].some((button) =>
+        button.textContent?.startsWith('停止原 Job'),
+      ),
+    ).toBe(true);
+    await click('Plan B');
+    expect(text().value).toBe('');
+    await edit('other B');
+    await click('Plan A');
+    expect(text().value).toBe('  original A\n雪🙂  ');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
+    ).toBe('accept_edits');
+    omitted = true;
+    await refresh();
+    expect(text()).toBeNull();
+    expect(mainInput()?.value).toBe('  main a\n雪🙂  ');
+    unavailable = true;
+    await refresh();
+    omitted = unavailable = false;
+    await refresh();
+    expect(text().value).toBe('  original A\n雪🙂  ');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
+    ).toBe('accept_edits');
+    await click('Request revision');
+    expect(posts).toBe(1);
+    expect(mainInput() === null).toBe(true);
+    expect(submissions[0]!.intent.answer).toEqual({
+      kind: 'plan_review',
+      decision: 'revise',
+      feedback: '  original A\n雪🙂  ',
+    });
+    await click('Plan B');
+    expect(text().value).toBe('other B');
+    await click('Plan A');
+    expect(text().value).toBe('  original A\n雪🙂  ');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
+    ).toBe('accept_edits');
+    expect(
+      [...host.querySelectorAll('button')].find(
+        (button) => button.textContent === 'Request revision',
+      )!.disabled,
+    ).toBe(true);
+    expect(posts).toBe(1);
+    await click('Plan B');
+    const original = submissions[0]!;
+    const receipt = {
+      id: original.intent.commandId,
+      originStoreId: 'store',
+      sessionId: 'a',
+      kind: 'interaction.answer',
+      status: 'applied',
+      cancelRequestedAt: null,
+      receipt: {
+        outcome: 'answer_saved',
+        interactionId: cards.a!.id,
+        decisionRevision: '2',
+        cancelled: false,
+      },
+    } as Command;
+    submissions = [
+      {
+        ...original,
+        receipt,
+        phase: verifyInteractionAnswerReceipt(cards.a!, original.intent, receipt),
+      },
+    ];
+    await refresh();
+    expect(text().value).toBe('other B');
+    await click('Plan A');
+    expect(text().value).toBe('');
+    expect(
+      host.querySelector<HTMLSelectElement>('select[aria-label="Plan review mode"]')!.value,
+    ).toBe('');
+    await click('Plan B');
+    expect(text().value).toBe('other B');
+    cards.b = { ...cards.b!, revision: '2', inputDigest: 'replacement-input' };
+    await refresh();
+    expect(text().value).toBe('');
+    expect(posts).toBe(1);
+    await edit('original cancelled B feedback');
+    omitted = true;
+    observedRuns = [
+      { id: cards.b!.runId, originStoreId: 'store', status: 'cancelled', isActive: false },
+    ] as unknown as typeof observedRuns;
+    await refresh();
+    expect(mainInput()?.value).toBe('  main b\n雪🙂  ');
+    omitted = false;
+    await refresh();
+    expect(text().value).toBe('');
+    expect(posts).toBe(1);
+    cards.a = {
+      ...cards.a!,
+      state: 'answered',
+      revision: '2',
+      acceptedDecisionRevision: '2',
+      answer: original.intent.answer,
+    };
+    await click('Plan A');
+    expect(mainInput()?.value).toBe('  main a\n雪🙂  ');
+    expect(posts).toBe(1);
+    cards.a = {
+      ...cards.a!,
+      kind: 'approval',
+      state: 'pending',
+      revision: '3',
+      acceptedDecisionRevision: null,
+      answer: null,
+      request: { grants: ['approve_once'] },
+    };
+    await refresh();
+    expect(mainInput() === null).toBe(true);
+    expect(posts).toBe(1);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    Object.assign(globalThis, prior);
+  }
+});

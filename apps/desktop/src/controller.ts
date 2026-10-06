@@ -211,13 +211,18 @@ export class DesktopController {
   /** Event refresh re-reads the visible bounded window using fresh observation facts. */
   async refreshSession(sessionId: string): Promise<DesktopSnapshot | undefined> {
     const original = this.current;
-    if (!original || original.sessionId !== sessionId || !this.selected)
+    if (
+      !this.selected ||
+      this.selected.sessionId !== sessionId ||
+      (original && original.sessionId !== sessionId)
+    )
       return this.selectSession(sessionId);
-    const previous = this.interactionPageStartId
-      ? { afterId: this.interactionPageStartId, scope: original.view }
-      : undefined;
+    const previous =
+      this.interactionPageStartId && original
+        ? { afterId: this.interactionPageStartId, scope: original.view }
+        : undefined;
     this.cancelInteractionRead();
-    this.clearAttachmentReads();
+    this.clearAttachmentReads(true);
     const generation = ++this.generation;
     this.current = undefined;
     return this.readSelection(this.selected, generation, previous);
@@ -551,10 +556,10 @@ export class DesktopController {
   private publishAnswer(state: InteractionAnswerSubmission): void {
     this.options.onInteractionSubmission?.(structuredClone(state));
   }
-  private clearAttachmentReads() {
+  private clearAttachmentReads(preserveVerified = false) {
     for (const read of this.attachmentReads) read.abort();
     this.attachmentReads.clear();
-    this.verifiedAttachments.clear();
+    if (!preserveVerified) this.verifiedAttachments.clear();
   }
   async readInteractionAttachment(
     attachment: InteractionAttachment,

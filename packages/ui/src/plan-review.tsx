@@ -1,8 +1,11 @@
 import type { Interaction, Json } from '@kite-ai/client';
 import { useRef, useState } from 'react';
 import type { InteractionAnswer } from './interactions';
+import { SafeMessageMarkdown } from './markdown';
+import { questionDraftKey } from './questionnaire';
 
 export type PlanMode = 'auto' | 'accept_edits';
+export type PlanReviewDraft = { mode: string; feedback: string };
 export type PlanDescription =
   | {
       kind: 'supported';
@@ -67,10 +70,16 @@ export function PlanReviewPanel({
   interaction,
   disabled,
   onAnswer,
+  initialDraft,
+  onDraftChange,
+  completeContent,
 }: {
   interaction: Interaction;
   disabled: boolean;
   onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
+  initialDraft?: PlanReviewDraft;
+  onDraftChange?: (draft: PlanReviewDraft) => void;
+  completeContent?: string;
 }) {
   const plan = describePlanReview(interaction.request);
   const request =
@@ -86,7 +95,10 @@ export function PlanReviewPanel({
         {typeof request.version === 'string' ? request.version : 'unknown'} · digest{' '}
         {typeof request.digest === 'string' ? request.digest : 'unknown'}
       </p>
-      <pre>{typeof request.content === 'string' ? request.content : 'Plan body unavailable'}</pre>
+      <PlanBody
+        content={completeContent ?? (typeof request.content === 'string' ? request.content : '')}
+        request={request}
+      />
       <p>
         This answer records review information. It does not grant tool permissions or prove plan
         execution/completion.
@@ -95,14 +107,61 @@ export function PlanReviewPanel({
         <p>Read only: {plan.reason}</p>
       ) : onAnswer ? (
         <PlanReviewForm
+          key={questionDraftKey(interaction)}
           interaction={interaction}
           plan={plan}
           disabled={disabled}
           onAnswer={onAnswer}
+          initialDraft={initialDraft}
+          onDraftChange={onDraftChange}
         />
       ) : (
         <p>Read only</p>
       )}
+    </section>
+  );
+}
+function PlanBody({ content, request }: { content: string; request: Record<string, Json> }) {
+  let plan: Record<string, unknown> | undefined;
+  try {
+    const value = JSON.parse(content);
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      value.kind === 'plan_document' &&
+      value.planId === request.planId &&
+      String(value.version) === request.version &&
+      value.digest === request.digest &&
+      typeof value.title === 'string' &&
+      typeof value.body === 'string' &&
+      Array.isArray(value.steps) &&
+      value.steps.every(
+        (step: unknown) =>
+          step &&
+          typeof step === 'object' &&
+          'id' in step &&
+          typeof step.id === 'string' &&
+          'title' in step &&
+          typeof step.title === 'string',
+      )
+    )
+      plan = value;
+  } catch {
+    /* Unknown formats retain their full original body. */
+  }
+  if (!plan) return <pre>{content || 'Plan body unavailable'}</pre>;
+  return (
+    <section aria-label="完整计划正文">
+      <h4>{plan.title as string}</h4>
+      <SafeMessageMarkdown content={plan.body as string} />
+      <ol aria-label="计划步骤">
+        {(plan.steps as { id: string; title: string }[]).map((step, index) => (
+          <li key={`${index}:${step.id}`}>
+            {step.title} · {step.id}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
@@ -111,14 +170,26 @@ function PlanReviewForm({
   plan,
   disabled,
   onAnswer,
+  initialDraft,
+  onDraftChange,
 }: {
   interaction: Interaction;
   plan: Extract<PlanDescription, { kind: 'supported' }>;
   disabled: boolean;
   onAnswer: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
+  initialDraft?: PlanReviewDraft;
+  onDraftChange?: (draft: PlanReviewDraft) => void;
 }) {
-  const [mode, setMode] = useState('');
-  const [feedback, setFeedback] = useState('');
+  const [draft, setDraft] = useState<PlanReviewDraft>(() => ({
+    mode: plan.allowedModes.includes(initialDraft?.mode as PlanMode) ? initialDraft!.mode : '',
+    feedback: initialDraft?.feedback ?? '',
+  }));
+  const current = useRef(draft);
+  function change(next: PlanReviewDraft) {
+    current.current = next;
+    setDraft(next);
+    onDraftChange?.(next);
+  }
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const busy = useRef(false);
@@ -130,7 +201,12 @@ function PlanReviewForm({
     try {
       await onAnswer(
         interaction,
-        serializePlanReviewAnswer(interaction.request, decision, feedback, mode),
+        serializePlanReviewAnswer(
+          interaction.request,
+          decision,
+          current.current.feedback,
+          current.current.mode,
+        ),
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Plan review answer failed');
@@ -150,9 +226,9 @@ function PlanReviewForm({
         Explicit mode
         <select
           aria-label="Plan review mode"
-          value={mode}
+          value={draft.mode}
           disabled={disabled || submitting}
-          onChange={(event) => setMode(event.target.value)}
+          onChange={(event) => change({ ...current.current, mode: event.target.value })}
         >
           <option value="">Select a mode explicitly</option>
           {plan.allowedModes.map((value) => (
@@ -167,13 +243,13 @@ function PlanReviewForm({
         <textarea
           aria-label="Plan review feedback"
           maxLength={8192}
-          value={feedback}
+          value={draft.feedback}
           disabled={disabled || submitting}
-          onChange={(event) => setFeedback(event.target.value)}
+          onInput={(event) => change({ ...current.current, feedback: event.currentTarget.value })}
         />
       </label>
       {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={disabled || submitting || !mode}>
+      <button type="submit" disabled={disabled || submitting || !draft.mode}>
         Approve this exact plan
       </button>
       <button type="button" disabled={disabled || submitting} onClick={() => void answer('deny')}>

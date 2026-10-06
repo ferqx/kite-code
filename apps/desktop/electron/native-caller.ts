@@ -3,7 +3,9 @@ import {
   type AppliedCursor,
   ClientError,
   type CreateWorkspaceRequest,
+  interactionAttachment,
   type Message,
+  requiresInteractionAttachment,
 } from '@kite-ai/client';
 import {
   createDesktopController,
@@ -28,6 +30,7 @@ import {
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeFileRecovery } from './file-recovery';
+import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
 import { NativeModelOutputReads } from './model-output-reads';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
@@ -51,6 +54,7 @@ export class NativeCaller {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly outputReads: NativeModelOutputReads;
   private readonly inputReads: NativeModelOutputReads<'modelInput'>;
+  private readonly attachmentReads: NativeInteractionAttachmentReads;
   private readonly grants: NativePermissionGrants;
   private readonly context: NativeContext;
   private readonly recovery: NativeRecovery;
@@ -128,6 +132,16 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    this.attachmentReads = new NativeInteractionAttachmentReads(
+      this.controller.readInteractionAttachment.bind(this.controller),
+      () => {
+        const scope = current(),
+          snapshot = this.controller.snapshot;
+        return scope && snapshot?.sessionId === scope.sessionId
+          ? { ...scope, interactions: snapshot.interactions }
+          : undefined;
+      },
+    );
     this.configuration = new NativeConfiguration(
       client,
       () =>
@@ -221,6 +235,7 @@ export class NativeCaller {
     this.messageRead = undefined;
     this.outputReads.release();
     this.inputReads.release();
+    this.attachmentReads.release();
     this.inputDirectory?.abort.abort();
     this.grants.release();
     this.context.release();
@@ -275,6 +290,7 @@ export class NativeCaller {
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
       this.historyEpoch++;
+      this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
       this.context.release();
@@ -545,6 +561,7 @@ export class NativeCaller {
         'modelInputs.close',
         'modelOutput.close',
         'modelInput.close',
+        'interactionAttachment.close',
         'recovery.close',
         'fileRecovery.close',
         'interactions.close',
@@ -1123,12 +1140,28 @@ export class NativeCaller {
         result = this.state();
         break;
       }
+      case 'interactionAttachment.open':
+        this.selectScope(this.selected ?? '');
+        result = await this.attachmentReads.open(request);
+        break;
+      case 'interactionAttachment.read':
+        result = this.attachmentReads.read(request);
+        break;
+      case 'interactionAttachment.close':
+        this.attachmentReads.close(request.readId);
+        result = null;
+        break;
       case 'interaction.answer': {
         const snapshot = this.selectScope(this.selected ?? '');
         const card = snapshot.interactions.find(
           (card) => card.id === request.interactionId && card.revision === request.revision,
         );
         if (!card) throw new ClientError('interaction_observation_changed');
+        if (requiresInteractionAttachment(card)) {
+          const attachment = interactionAttachment(card);
+          if (!attachment || !this.attachmentReads.hasLoaded(attachment.key))
+            throw new ClientError('attachment_not_loaded');
+        }
         if (!this.controller.interactionSubmission(card) && this.requireAnswers().saved(card))
           throw new ClientError('interaction_answer_already_saved');
         result = await this.controller.answerInteraction(card, request.answer);

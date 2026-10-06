@@ -22,6 +22,8 @@
 
 `planning.update@1` 要求准确当前 ID/version/digest、Run、step 与 progress revision。完成步骤必须引用该 Run 真实成功 Tool/Job 的原 Store、attempt、定义版本、input digest、result revision，并匹配该执行真正捕获的当前计划来源 ID/digest。Model 文本、计划/验证管理 Tool、旧 Run 或旧计划成功回执不能替代。完成候选需要全部 step 完成、当前批准和独立 required 验证/准确 waiver；Core 最终仍重新读取相关记录并事务复核。compensated 保存原 receipt 与补偿 receipt，不成为 passed 或完整计划完成。用户 `planning.write/review/update` Actions 共用业务函数但有独立 Command 身份；活跃 Run 的同 Session Action 按当前串行队列等待，不能假装它已并发修改当前工作。
 
+`planning.review` 的实际 ToolResult 保留 `status`，并把合法原 `approve/revise/deny` 的 `decision` 与存在时的完整原 `feedback` 交给下一次 Model 请求；批准另带原执行方式。修改或拒绝仍为 `not_approved`，不保存批准、不自动增加版本或取消原 Run。Model 根据原修改要求另调用 `planning.write`，新版本仍须独立准确审核，旧批准不随之移动。[实际 SQLite/Model 回归](../../../test/isolated/business/planning.test.ts)核原反馈驱动 v2、两版本批准前零写入、deny/空 revise 原值、非法 mode 不授予批准，以及原 Run 证明和最终 CAS。已派发适配器在取消后没有可核结果时继续遵守 Core 的 `outcome_unknown` 合同，不因这条信息反馈路径改报 cancelled。
+
 ## 确定性验证与 waiver
 
 `validation.define@1` 在准确当前 Run 保存不可变检查 spec。`requiredReceiptDefinitions` 是可信宿主选定的定义 ID/version 集合，封存在 Run 义务中；模型可以增加检查，不能删掉或改成其他定义。receipt check 只证明准确调用已有成功回执，不证明代码、文件或任务语义正确。在 plan 工作中，检查目标还须匹配当前计划真实来源。`validation.check@1` 保存不可变 attempt 及 CAS current pointer；最后条件再次核对实际 Execution，拒绝 missing、failed、inconclusive、unknown、范围/attempt/定义/input digest/result revision 不符。

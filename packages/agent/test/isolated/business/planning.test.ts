@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
+import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { interactionAttachment } from '@kite-ai/client';
 import { createRuntime } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -66,12 +66,14 @@ async function fixture(
     store,
   });
   const evaluations: Awaited<ReturnType<NecessaryConditions['evaluate']>>[] = [];
+  const modelRequests: ModelRequest[] = [];
   let steps = 0,
     effects = 0,
     jobStarts = 0;
   const model: ModelAdapter = {
-    async *stream(_request, { signal }) {
+    async *stream(request, { signal }) {
       signal.throwIfAborted();
+      modelRequests.push(request);
       for (const event of await script(steps++, f)) yield event;
     },
   };
@@ -212,6 +214,7 @@ async function fixture(
     runtime,
     business,
     evaluations,
+    modelRequests,
     base,
     get jobStarts() {
       return jobStarts;
@@ -506,6 +509,141 @@ test('future verification pointer content is shown readonly with unavailable res
     await f.close();
   }
 });
+
+test('actual plan review feedback reaches the next Model input and revised v2 needs exact new approval before effects', async () => {
+  const feedback = '  请调整方案 🪁\n保留组合字符 e\u0301 与原换行\n  ';
+  const approvalFeedback = '批准新版 ✅\n请按这个方案执行 e\u0301';
+  const f = await fixture({ requirePlan: true }, async (step, f) => {
+    if (step === 0) return call('planning.write', plan(null));
+    if (step === 1 || step === 5) {
+      const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+      return call('planning.review', {
+        planId: current.planId!,
+        version: current.version!,
+        digest: current.digest!,
+      });
+    }
+    if (step === 2 || step === 4 || step === 6) return call('fixture.effect');
+    if (step === 3) return call('planning.write', { ...plan(1), body: feedback });
+    if (step === 7) {
+      const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+      const effect = (await f.store.listExecutions('s')).find(
+        (execution) =>
+          execution.definitionId === 'fixture.effect' && execution.status === 'succeeded',
+      )!;
+      return call('planning.update', {
+        runId: await f.runId(),
+        planId: current.planId!,
+        version: current.version!,
+        digest: current.digest!,
+        expectedProgressRevision: null,
+        stepId: 'a',
+        status: 'completed',
+        executionId: effect.id,
+        completePlan: true,
+      });
+    }
+    return [finish];
+  });
+  const lastResult = (step: number) =>
+    JSON.parse(
+      f.modelRequests[step]!.messages.filter((message) => message.role === 'tool').at(-1)!.content,
+    );
+  try {
+    await f.submit();
+    const original = await f.answer({ kind: 'plan_review', decision: 'revise', feedback });
+    const revised = await f.pending();
+    // This is the actual next Model adapter input, after the accepted SQLite receipt.
+    expect(lastResult(2)).toEqual({ status: 'not_approved', decision: 'revise', feedback });
+    expect(
+      (await f.runtime.getInteraction({ ...f.base, interactionId: original.id }))!.answer,
+    ).toEqual({ kind: 'plan_review', decision: 'revise', feedback });
+    expect(f.effects).toBe(0);
+    expect(await f.record(`run/${await f.runId()}/approval/p/1`)).toBeNull();
+    expect(await f.record(`run/${await f.runId()}/approval/p/2`)).toBeNull();
+    expect(revised.request).toMatchObject({ version: '2' });
+    expect(JSON.parse((revised.request as { content: string }).content).body).toBe(feedback);
+    await f.answer({
+      kind: 'plan_review',
+      decision: 'approve',
+      mode: 'auto',
+      feedback: approvalFeedback,
+    });
+    const run = await f.done();
+    expect(lastResult(6)).toEqual({
+      status: 'approved',
+      mode: 'auto',
+      decision: 'approve',
+      feedback: approvalFeedback,
+    });
+    expect(run!.status).toBe('completed');
+    expect(f.effects).toBe(1);
+    expect((await f.record('progress/p/2'))!.value).toMatchObject({ completePlan: true });
+    expect((await f.record(`run/${run!.id}/approval/p/2`))!.value).toMatchObject({
+      proof: {
+        interactionId: revised.id,
+        answer: { decision: 'approve', feedback: approvalFeedback },
+      },
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+test('actual plan review denial and empty revision preserve feedback without approval; invalid answers cannot grant effects', async () => {
+  for (const answer of [
+    { kind: 'plan_review', decision: 'deny', feedback: '拒绝当前方案\n e\u0301' },
+    { kind: 'plan_review', decision: 'revise', feedback: '' },
+    { kind: 'plan_review', decision: 'approve', mode: 'unknown', feedback: '不能授权' },
+  ] as const) {
+    const f = await fixture({ requirePlan: true }, async (step, f) => {
+      if (step === 0) return call('planning.write', plan(null));
+      if (step === 1) {
+        const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+        return call('planning.review', {
+          planId: current.planId!,
+          version: current.version!,
+          digest: current.digest!,
+        });
+      }
+      return step === 2 ? call('fixture.effect') : [finish];
+    });
+    try {
+      await f.submit();
+      const pending = await f.pending();
+      let invalidAnswer: unknown;
+      try {
+        await f.runtime.answerInteraction({
+          ...f.base,
+          commandId: 'invalid-kind',
+          presentationSessionId: 's',
+          interactionId: pending.id,
+          expectedRevision: pending.revision,
+          answer: { kind: 'approval', decision: 'approve' },
+        });
+      } catch (error) {
+        invalidAnswer = error;
+      }
+      await f.answer(answer);
+      const run = await f.done();
+      expect((invalidAnswer as { code?: string })?.code).toBe('interaction_answer_invalid');
+      const reviewResult = JSON.parse(
+        f.modelRequests[2]!.messages.filter((message) => message.role === 'tool').at(-1)!.content,
+      );
+      expect(reviewResult).toEqual(
+        answer.decision === 'approve'
+          ? { status: 'not_approved' }
+          : { status: 'not_approved', decision: answer.decision, feedback: answer.feedback },
+      );
+      expect(run!.status).toBe('failed');
+      expect(f.effects).toBe(0);
+      expect(await f.record(`run/${run!.id}/approval/p/1`)).toBeNull();
+      expect((await f.record('plan.current'))!.value).toMatchObject({ version: 1 });
+    } finally {
+      await f.close();
+    }
+  }
+}, 20000);
 
 test('actual plan review binds mode/current digest; v2 invalidates v1 and only fresh user review permits the second effect', async () => {
   for (const scenario of ['no-review', 'new-receipt', 'old-receipt'] as const) {

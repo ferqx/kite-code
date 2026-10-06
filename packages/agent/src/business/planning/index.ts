@@ -747,10 +747,16 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const proof = await accepted(context, 'plan_review', request);
         if (
           proof.answer.kind !== 'plan_review' ||
-          proof.answer.decision !== 'approve' ||
-          !modes.includes(proof.answer.mode ?? '')
+          !['approve', 'revise', 'deny'].includes(proof.answer.decision) ||
+          (proof.answer.decision === 'approve' && !modes.includes(proof.answer.mode ?? ''))
         )
           return result({ status: 'not_approved' });
+        const review = {
+          decision: proof.answer.decision,
+          ...(proof.answer.feedback !== undefined ? { feedback: proof.answer.feedback } : {}),
+        };
+        if (proof.answer.decision !== 'approve')
+          return result({ status: 'not_approved', ...review });
         if (bodyReference) await verifyReviewBody(context, bodyReference, plan);
         const latest = decode(await context.records.get('plan.current'));
         if (!latest || ['planId', 'version', 'digest'].some((k) => latest[k] !== requested[k]))
@@ -790,7 +796,7 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const legacyKey = `approval/${encodeURIComponent(string(current.planId))}/${current.version}`;
         if (!(await context.records.get(legacyKey)))
           await write(context, legacyKey, approval, true);
-        return result({ status: 'approved', mode: proof.answer.mode! });
+        return result({ status: 'approved', mode: proof.answer.mode!, ...review });
       },
     },
     'planning.update': {

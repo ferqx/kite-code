@@ -232,6 +232,7 @@ export {
 export {
   describePlanReview,
   type PlanMode,
+  type PlanReviewDraft,
   PlanReviewPanel,
   serializePlanReviewAnswer,
 } from './plan-review';

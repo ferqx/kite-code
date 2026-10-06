@@ -7,7 +7,7 @@ import {
   requiresInteractionAttachment,
 } from './attachments';
 import { ActionInputForm } from './index';
-import { PlanReviewPanel } from './plan-review';
+import { type PlanReviewDraft, PlanReviewPanel } from './plan-review';
 import { questionForm } from './question';
 import { type QuestionAnswerDraft, Questionnaire, questionDraftKey } from './questionnaire';
 
@@ -24,6 +24,9 @@ type InteractionCardProps = {
   onReadAttachment?: AttachmentReader;
   initialQuestionDraft?: QuestionAnswerDraft;
   onQuestionDraftChange?: (draft: QuestionAnswerDraft) => void;
+  initialPlanDraft?: PlanReviewDraft;
+  onPlanDraftChange?: (draft: PlanReviewDraft) => void;
+  completeContent?: string;
 };
 
 /** Only public persisted facts cross this component boundary. */
@@ -33,6 +36,9 @@ function PlainInteractionCard({
   onAnswer,
   initialQuestionDraft,
   onQuestionDraftChange,
+  initialPlanDraft,
+  onPlanDraftChange,
+  completeContent,
 }: InteractionCardProps) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
   const request = interaction.request;
@@ -74,7 +80,8 @@ function PlainInteractionCard({
       <h3>
         {interaction.kind} · {interaction.state}
       </h3>
-      {interaction.kind === 'question' && onAnswer && questionForm(request) ? (
+      {(interaction.kind === 'question' && onAnswer && questionForm(request)) ||
+      interaction.kind === 'plan_review' ? (
         <details>
           <summary>原请求与身份</summary>
           {materials}
@@ -164,7 +171,14 @@ function PlainInteractionCard({
         />
       )}
       {interaction.kind === 'plan_review' && (
-        <PlanReviewPanel interaction={interaction} disabled={disabled} onAnswer={onAnswer} />
+        <PlanReviewPanel
+          interaction={interaction}
+          disabled={disabled}
+          onAnswer={onAnswer}
+          initialDraft={initialPlanDraft}
+          onDraftChange={onPlanDraftChange}
+          completeContent={completeContent}
+        />
       )}
       {!onAnswer && <p>Read only</p>}
     </article>
@@ -278,6 +292,7 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
     <section aria-label="Complete interaction attachment">
       {PlainInteractionCard({
         ...props,
+        completeContent: verified ? body.text : undefined,
         onAnswer:
           verified && props.onAnswer
             ? async (interaction, answer) => {
@@ -319,7 +334,15 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
           Cancel attachment loading
         </button>
       )}
-      {verified && <pre data-complete-attachment="verified">{body.text}</pre>}
+      {verified &&
+        (props.interaction.kind === 'plan_review' ? (
+          <details>
+            <summary>完整原附件</summary>
+            <pre data-complete-attachment="verified">{body.text}</pre>
+          </details>
+        ) : (
+          <pre data-complete-attachment="verified">{body.text}</pre>
+        ))}
     </section>
   );
 }
