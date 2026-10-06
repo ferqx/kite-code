@@ -1442,3 +1442,11 @@ Root完成实现与自核，未新增独立审查。本片 iteration_complete/st
 凭据 fixture 的兼容 Provider 用第一个非 `mcp.connect` 描述选择远端 Tool，实际默认目录的 `ask_user` 被误选，第一次断言得到零远端 RPC，第二例等待 credential lookup 超时。最小修改仅选实际 `mcp.local.*` 描述；保留默认 Ask User、原两个 Session 凭据、准确连接审批、批准等待零 secret/socket、A 撤销与 B 隔离、lookup 中撤销及 views/回执脱敏。无生产配置、Vault、网络或公共权限变化。[MCP手册](../handbook/features/extensions.md)、[Service owner](../../apps/service/README.md)和[MCP leaf owner](../../packages/agent/src/mcp/README.md)核对后仍适用，不另建 Note 或合同 diff。
 
 当前原 isolated runTestJob/no-orphans 单并发两例2pass/0fail/35断言、2.72s，日志 `/private/tmp/kite-default-mcp-credentials-current-20261006.log`；原15秒预算不变，Service完整typecheck、owned Biome、diff及文档门禁通过。Root自核，未新增独立审查；iteration_complete/stage/commit ready只覆盖测试与进度两路径。第十七轮失败保留，下一轮仍须当前原完整图；37partial、Goal active和真实Native stdin、OS browser/nativeVault OAuth组合、默认可信Shell/持续Soak、安装、其他平台、§35/T-E及正式旧路径退役缺口保持。本地授权不扩大push/PR，无关AGENTS独立。
+
+## 2026-10-06：同类 MCP 配置消费者保留当前默认目录
+
+凭据消费者已本地提交 0155ac16f34f9266651f0b09cb617071b582c3f4，正常七项 hooks 通过。继续只读核对同类选择后，原 `mcp-configuration.test.ts` 独立实际复现1pass/4fail/26断言、7.47s，日志 `/private/tmp/kite-mcp-configuration-catalogue-red-20261006.log`：同一非connect选择误调用 `ask_user`，造成零远端效果、独立审批等待超时与 scope 拒绝后额外 Provider；目录断言也仍只列旧工具。
+
+仅将 fixture 选择改为准确 `mcp.local.*`，前后两次实际 Model 目录明确保留默认 Ask User、connect 与准确原 remote schema。原五例当前5pass/0fail/54断言、3.20s，日志 `/private/tmp/kite-mcp-configuration-catalogue-current-20261006.log`；原15秒测试/5秒业务预算保持，connect Tool/connection Job/remote Tool 独立审批、只关闭 A 连接后 B 继续、unqualified transport与其他Server scope零网络反例未缩减。Service完整typecheck、owned Biome、diff及文档门禁通过。[MCP手册](../handbook/features/extensions.md)、[Service owner](../../apps/service/README.md)和[MCP leaf owner](../../packages/agent/src/mcp/README.md)核对后无生产行为或合同变化，不另建 Note。
+
+Root自核；iteration_complete/stage/commit ready仅覆盖本片测试与进度两路径。这是完整原入口之前的实际相邻消费者修正，不追认第十七轮失败或拼接完整默认资格；后续仍运行当前原完整图。37partial、Goal active及前述Native stdin、真实OAuth、默认可信Shell/持续Soak、安装、其他平台、§35/T-E和正式旧路径退役缺口保持，本地授权不扩大push/PR，无关AGENTS独立。

@@ -104,7 +104,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       const step = steps.get(route) ?? 0;
       steps.set(route, step + 1);
       const tools = (body.tools ?? []) as { function: { name: string; parameters: unknown } }[];
-      const remote = tools.find((x) => x.function.name !== 'mcp.connect');
+      const remote = tools.find((x) => x.function.name.startsWith('mcp.local.'));
       const call =
         step === 0 && route !== 'remote-b'
           ? { name: 'mcp.connect', input: { serverId: connectServer, key: 'first' } }
@@ -260,8 +260,12 @@ test('default MCP has no network before dispatched Job; next actual Model sees e
     expect(f.opens).toBe(0);
     await f.run();
     await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
-    expect(f.requests[0]!.tools).toMatchObject([{ function: { name: 'mcp.connect' } }]);
+    expect(f.requests[0]!.tools).toMatchObject([
+      { function: { name: 'ask_user' } },
+      { function: { name: 'mcp.connect' } },
+    ]);
     expect(f.requests[1]!.tools).toMatchObject([
+      { function: { name: 'ask_user' } },
       { function: { name: 'mcp.connect' } },
       {
         function: {
