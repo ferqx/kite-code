@@ -75,8 +75,34 @@ try {
       trusted: true,
     });
   });
+  // Wait for the actual rendered original scope, not merely the Main reply.
+  await page.getByText('当前模式：ask；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
+  await page
+    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .waitFor();
+  await page.evaluate(() => {
+    const events: { type: string; focused: boolean }[] = [];
+    Object.defineProperty(window, '__bundleInputEvents', { value: events });
+    document.addEventListener(
+      'submit',
+      (event) => {
+        if ((event.target as HTMLFormElement).textContent?.includes('当前会话私有草稿'))
+          events.push({ type: event.type, focused: document.hasFocus() });
+      },
+      { capture: true },
+    );
+  });
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('write one real bundled file');
+  assert.equal(
+    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    'write one real bundled file',
+  );
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
+  assert.equal(
+    await page.evaluate(() => (Reflect.get(window, '__bundleInputEvents') as unknown[]).length),
+    1,
+  );
   console.log('native_driver_stage: submitted');
   const approvals: string[] = [],
     deadline = Date.now() + 10000;
@@ -125,6 +151,13 @@ try {
             definitionId: value.definitionId,
           })),
           selection: state.selection?.session.id,
+          runs: state.selection?.runs.map((run) => ({ id: run.id, status: run.status })),
+          inputs: state.inputSubmissions.map((row) => ({
+            commandId: row.intent.commandId,
+            phase: row.phase,
+            error: row.error,
+          })),
+          events: Reflect.get(window, '__bundleInputEvents'),
         };
       }),
     ),

@@ -34,6 +34,14 @@ export function QuestionMaterial({ form, step }: { form: QuestionForm; step: num
           {field.choices.length + 1}. {t('Custom answer')}
         </Text>
       )}
+      {form.alternative && (
+        <Box flexDirection="column">
+          <Text>Alt+A: {terminalText(form.alternative.title)}</Text>
+          {form.alternative.description && (
+            <Text>{terminalText(form.alternative.description)}</Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -84,6 +92,7 @@ export function QuestionPanel({ form, draft }: { form: QuestionForm; draft: Ques
         {field.choices.length > 0 &&
           ` · ${t('Selection')}: ${current.selected === undefined ? t('No selection (Enter has no answer)') : `${current.selected + 1}${current.selected === field.choices.length ? ` · ${t('Custom answer')}` : ''}`}`}
       </Text>
+      {form.alternative && <Text>Alt+A: {terminalText(form.alternative.title)}</Text>}
       {!field.required && (
         <Text>
           {current.skipped ? '› ' : '  '}

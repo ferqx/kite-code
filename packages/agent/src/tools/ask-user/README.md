@@ -1,5 +1,7 @@
 # 普通 ask_user Tool
 
+整份请求的原 schema 是 `oneOf`：闭合题目 object 或明确的 `const:null` 取消选项。客户端可在未填完问题时提交这个原 null 值；Core 仍保存普通 question answer，公开 `answer_saved.cancelled:false`，不取消 Run。leaf 将 null 解释为成功取得的取消信息 `{cancelled:true}`，交给同一 Run 的后续 Model 请求，不自动重问。该信息取消与原工作 signal 取消分别保留，不增加专用 DTO、Interaction kind 或恢复入口。
+
 公开 `@kite-ai/agent/ask-user` 的 `createAskUserExtension()` 纯工厂登记 `builtin.ask-user@1` 与 `ask_user@1`，import 和工厂不打开资源。执行只调用当前普通 `ToolContext.requestInput`，没有旧 Runtime 依赖、专用 Loop、数据库迁移或回答端口。
 
 模型输入是闭合 `{questions}`：1–3 题，每题闭合 `{question,options}`，2–3 个闭合 `{label,description,recommended?}` 选项。题文和文案 trim 后须非空，每题至多一项 `recommended:true`；模型不能指定内部 ID、自由输入开关或旧单题顶层字段。自有解析失败在发出信息请求前返回已知失败，不把未发生的效果记为未知。

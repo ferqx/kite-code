@@ -8,6 +8,8 @@ import {
 } from './attachments';
 import { ActionInputForm } from './index';
 import { PlanReviewPanel } from './plan-review';
+import { questionForm } from './question';
+import { type QuestionAnswerDraft, Questionnaire, questionDraftKey } from './questionnaire';
 
 export type InteractionAnswer = NonNullable<Interaction['answer']>;
 export interface InteractionSubmission {
@@ -15,17 +17,23 @@ export interface InteractionSubmission {
   readonly commandId: string;
   readonly error?: string;
 }
+type InteractionCardProps = {
+  interaction: Interaction;
+  submission?: InteractionSubmission;
+  onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
+  onReadAttachment?: AttachmentReader;
+  initialQuestionDraft?: QuestionAnswerDraft;
+  onQuestionDraftChange?: (draft: QuestionAnswerDraft) => void;
+};
 
 /** Only public persisted facts cross this component boundary. */
 function PlainInteractionCard({
   interaction,
   submission,
   onAnswer,
-}: {
-  interaction: Interaction;
-  submission?: InteractionSubmission;
-  onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
-}) {
+  initialQuestionDraft,
+  onQuestionDraftChange,
+}: InteractionCardProps) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
   const request = interaction.request;
   const sameCommand =
@@ -34,11 +42,8 @@ function PlainInteractionCard({
     !Array.isArray(request) &&
     Array.isArray(request.grants) &&
     request.grants.includes('same_command');
-  return (
-    <article aria-label={`${interaction.kind} ${interaction.id}`}>
-      <h3>
-        {interaction.kind} · {interaction.state}
-      </h3>
+  const materials = (
+    <>
       <p>
         Source Session: {interaction.sessionId} · Presentation Session:{' '}
         {interaction.presentationSessionId}
@@ -62,6 +67,21 @@ function PlainInteractionCard({
         <p>Decision accepted revision: {interaction.acceptedDecisionRevision}</p>
       )}
       {interaction.answer && <pre>{JSON.stringify(interaction.answer, null, 2)}</pre>}
+    </>
+  );
+  return (
+    <article aria-label={`${interaction.kind} ${interaction.id}`}>
+      <h3>
+        {interaction.kind} · {interaction.state}
+      </h3>
+      {interaction.kind === 'question' && onAnswer && questionForm(request) ? (
+        <details>
+          <summary>原请求与身份</summary>
+          {materials}
+        </details>
+      ) : (
+        materials
+      )}
       {submission && (
         <p role="status">
           Answer {submission.phase} · command {submission.commandId}
@@ -134,7 +154,14 @@ function PlainInteractionCard({
         </div>
       )}
       {interaction.kind === 'question' && onAnswer && (
-        <QuestionAnswerForm interaction={interaction} disabled={disabled} onAnswer={onAnswer} />
+        <QuestionAnswerForm
+          key={questionDraftKey(interaction)}
+          interaction={interaction}
+          disabled={disabled}
+          onAnswer={onAnswer}
+          initialDraft={initialQuestionDraft}
+          onDraftChange={onQuestionDraftChange}
+        />
       )}
       {interaction.kind === 'plan_review' && (
         <PlanReviewPanel interaction={interaction} disabled={disabled} onAnswer={onAnswer} />
@@ -147,40 +174,53 @@ function QuestionAnswerForm({
   interaction,
   disabled,
   onAnswer,
+  initialDraft,
+  onDraftChange,
 }: {
   interaction: Interaction;
   disabled: boolean;
   onAnswer: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
+  initialDraft?: QuestionAnswerDraft;
+  onDraftChange?: (draft: QuestionAnswerDraft) => void;
 }) {
   const request = interaction.request;
   const schema =
     request && typeof request === 'object' && !Array.isArray(request) ? request.schema : undefined;
   // Lock synchronously: repeated Enter events in the same React render cannot send twice.
   const busy = useRef(false);
+  const form = questionForm(request);
+  async function submit(answers: unknown) {
+    if (busy.current) return;
+    busy.current = true;
+    try {
+      await onAnswer(interaction, { kind: 'question', answers: answers as Json });
+    } finally {
+      busy.current = false;
+    }
+  }
+  if (form)
+    return (
+      <Questionnaire
+        form={form}
+        initialDraft={initialDraft}
+        onDraftChange={onDraftChange}
+        disabled={disabled}
+        onSubmit={submit}
+      />
+    );
   return (
     <ActionInputForm
       schema={schema}
       disabled={disabled}
       submitLabel="Submit answer"
-      onSubmit={async (answers) => {
-        if (busy.current) return;
-        busy.current = true;
-        try {
-          await onAnswer(interaction, { kind: 'question', answers: answers as Json });
-        } finally {
-          busy.current = false;
-        }
-      }}
+      initialDraft={initialDraft?.kind === 'input' ? initialDraft.input : undefined}
+      onDraftChange={(input) => onDraftChange?.({ kind: 'input', input })}
+      onSubmit={submit}
     />
   );
 }
 
-export function InteractionCard(props: {
-  interaction: Interaction;
-  submission?: InteractionSubmission;
-  onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
-  onReadAttachment?: AttachmentReader;
-}) {
+export function InteractionCard(props: InteractionCardProps) {
   if (requiresInteractionAttachment(props.interaction))
     return <AttachmentInteractionCard {...props} />;
   return PlainInteractionCard(props);

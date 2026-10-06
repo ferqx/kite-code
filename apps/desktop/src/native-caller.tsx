@@ -131,11 +131,18 @@ export function NativeCallerView({
           <button type="button" onClick={() => void read(row)}>
             原完整请求 · {row.request.commandId}
           </button>
-          {['run.start', 'input.steer', 'input.follow_up'].includes(row.request.kind) && (
-            <button type="button" disabled={busy} onClick={() => void action('cancelInput', row)}>
-              取消原申请 · {row.request.commandId}
-            </button>
-          )}
+          {['run.start', 'input.steer', 'input.follow_up'].includes(row.request.kind) &&
+            !(
+              state.selection?.storeId === row.scope.storeId &&
+              state.selection.session.id === row.scope.sessionId &&
+              state.selection.interactions.some(
+                (card) => card.kind === 'question' && card.state === 'pending',
+              )
+            ) && (
+              <button type="button" disabled={busy} onClick={() => void action('cancelInput', row)}>
+                取消原申请 · {row.request.commandId}
+              </button>
+            )}
           {['applied', 'rejected'].includes(row.phase) && (
             <button type="button" disabled={busy} onClick={() => void action('caller.clear', row)}>
               清除已核实申请 · {row.request.commandId}

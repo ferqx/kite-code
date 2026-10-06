@@ -66,9 +66,12 @@ export function ConnectionNotice({ state }: { state: ConnectionState }) {
 }
 
 /** Rendering owns drafts only. The host provides the admitted, authorized submission callback. */
+export type ActionInputDraft = { values: Record<string, string | boolean>; raw: string };
 export function ActionInputForm({
   schema,
   initial = {},
+  initialDraft,
+  onDraftChange,
   disabled = false,
   onSubmit,
   submitLabel = 'Run action',
@@ -76,12 +79,15 @@ export function ActionInputForm({
   schema: unknown;
   submitLabel?: string;
   initial?: Readonly<Record<string, unknown>>;
+  initialDraft?: ActionInputDraft;
+  onDraftChange?: (draft: ActionInputDraft) => void;
   disabled?: boolean;
   onSubmit: (input: unknown) => void | Promise<void>;
 }) {
   const formId = useId();
   const form = describeInput(schema);
   const [values, setValues] = useState<Record<string, string | boolean>>(() => {
+    if (initialDraft) return { ...initialDraft.values };
     const draft: Record<string, string | boolean> = Object.fromEntries(
       Object.entries(initial).map(([key, value]) => [
         key,
@@ -98,7 +104,14 @@ export function ActionInputForm({
           draft[field.name] = false;
     return draft;
   });
-  const [raw, setRaw] = useState(() => JSON.stringify(initial, null, 2));
+  const [raw, setRaw] = useState(() => initialDraft?.raw ?? JSON.stringify(initial, null, 2));
+  const draft = useRef<ActionInputDraft>({ values, raw });
+  function changeValues(name: string, value: string | boolean) {
+    const next = { ...draft.current.values, [name]: value };
+    draft.current = { ...draft.current, values: next };
+    setValues(next);
+    onDraftChange?.(draft.current);
+  }
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const busy = useRef(false);
@@ -128,7 +141,12 @@ export function ActionInputForm({
             aria-label="Raw JSON input"
             value={raw}
             disabled={disabled || submitting}
-            onChange={(event) => setRaw(event.target.value)}
+            onInput={(event) => {
+              const next = event.currentTarget.value;
+              draft.current = { ...draft.current, raw: next };
+              setRaw(next);
+              onDraftChange?.(draft.current);
+            }}
           />
         </label>
       ) : (
@@ -141,9 +159,7 @@ export function ActionInputForm({
                 type="checkbox"
                 checked={values[field.name] === true}
                 disabled={disabled || submitting}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [field.name]: event.target.checked }))
-                }
+                onChange={(event) => changeValues(field.name, event.target.checked)}
               />
             ) : field.kind === 'enum' ? (
               <select
@@ -151,9 +167,7 @@ export function ActionInputForm({
                 value={String(values[field.name] ?? '')}
                 required={field.required}
                 disabled={disabled || submitting}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [field.name]: event.target.value }))
-                }
+                onChange={(event) => changeValues(field.name, event.target.value)}
               >
                 <option value="">Select</option>
                 {field.choices?.map((choice) => (
@@ -170,9 +184,7 @@ export function ActionInputForm({
                 value={String(values[field.name] ?? '')}
                 required={field.required}
                 disabled={disabled || submitting}
-                onChange={(event) =>
-                  setValues((previous) => ({ ...previous, [field.name]: event.target.value }))
-                }
+                onInput={(event) => changeValues(field.name, event.currentTarget.value)}
               />
             )}
           </label>
@@ -223,3 +235,4 @@ export {
   PlanReviewPanel,
   serializePlanReviewAnswer,
 } from './plan-review';
+export { type QuestionAnswerDraft, questionDraftKey } from './questionnaire';

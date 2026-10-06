@@ -65,6 +65,8 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 安装 Native 的 `kite run/work --server <原socket>` 也按上述状态处理实际 stdin：无效纯空白和 EOF 保留原问题；重开 CLI 后使用完整原 Work 申请回答，选项按原 ID、自由输入按闭合 `{text}` 原对象提交。重复输入与查询已完成 Work 不自动开始新任务。当前真实安装范围见 [CLI owner](../../../apps/cli/README.md#cli-普通问题-stdin)。
 
+默认 ask_user 的原问题提供 `null` 取消选项时，一行 JSON `null` 只取消这份问卷，原任务继续；空白行和 EOF 仍保持等待，Ctrl+C 仍取消原工作。其他问题以实际 schema 为准，不能用 null 绕过未提供的选项。
+
 普通 CLI 邻接实测为 30 项、589 条断言；独立实际 main argv 正例为 3 项、83 条断言，使用一次原 Tool 审批、一次真实文件效果和三次本机 Provider 请求核原 Run completed 后才关闭配对服务。完整 Workflow queued/accepted 强杀例只证明原完整申请与冷查回，尚未证明 queued follow-up 全等待至终态，不称 Workflow 业务执行成功。对应源码、测试与 source-free shared 范围见 [CLI owner](../../../apps/cli/README.md#普通-cli-caller-的持久原申请)。这些资格不切换正式旧入口，也不代表三平台或完整 §35。
 
 ## 通用开发入口离线维护

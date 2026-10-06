@@ -261,11 +261,9 @@ test.skipIf(process.platform !== 'darwin')(
         answer: null,
         acceptedDecisionRevision: null,
       });
-      expect((card.request as { schema: { required: unknown } }).schema.required).toEqual([
-        'q1',
-        'q2',
-        'q3',
-      ]);
+      expect(
+        (card.request as { schema: { oneOf: { required: unknown }[] } }).schema.oneOf[0]!.required,
+      ).toEqual(['q1', 'q2', 'q3']);
       const work = [
         'work',
         original.sessionId,

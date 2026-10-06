@@ -89,7 +89,7 @@ export function createAskUserExtension(): Extension {
     id: 'ask_user',
     version: '1',
     description:
-      'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call using the canonical questions array, each with two to three label/description options. Put the preferred option first; at most one option per question may be recommended=true. Every question also permits free input. User cancellation is terminal for this interaction; do not automatically retry.',
+      'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call using the canonical questions array, each with two to three label/description options. Put the preferred option first; at most one option per question may be recommended=true. Every question also permits free input. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',
     inputSchema,
     async execute(input, context) {
       let parsed: ReturnType<typeof questions>;
@@ -125,10 +125,19 @@ export function createAskUserExtension(): Extension {
       try {
         accepted = await context.requestInput({
           schema: {
-            type: 'object',
-            properties,
-            required: parsed.map((question) => question.id),
-            additionalProperties: false,
+            oneOf: [
+              {
+                type: 'object',
+                properties,
+                required: parsed.map((question) => question.id),
+                additionalProperties: false,
+              },
+              {
+                const: null,
+                title: 'Cancel answering',
+                description: 'Leave these questions unanswered and continue the current task.',
+              },
+            ],
           },
         });
       } catch (error) {
@@ -142,6 +151,10 @@ export function createAskUserExtension(): Extension {
         )
           return { outcome: 'cancelled', content: 'cancel_requested' };
         throw error;
+      }
+      if (accepted === null) {
+        const details = { cancelled: true };
+        return { outcome: 'succeeded', content: canonicalJson(details), details };
       }
       const raw = object(
         accepted,

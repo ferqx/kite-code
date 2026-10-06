@@ -260,6 +260,42 @@ const card: Interaction = {
   acceptedDecisionRevision: null,
   state: 'pending',
 };
+for (const surface of ['approval', 'composer'] as const) {
+  test(`native Ctrl+C batch cancels only the original work once on ${surface}; literal paste stays text`, async () => {
+    const f = fixture();
+    f.port.readSession = async (id) => ({
+      ...snapshot(id),
+      interactions: surface === 'approval' ? [card] : [],
+    });
+    const c = new TuiController(f.port);
+    await c.select('a');
+    c.setDraft('kept main');
+    const app = render(<TuiSession controller={c} />);
+    try {
+      await Bun.sleep(20);
+      app.stdin.write('\u001b[200~\u0003\u0003\u001b[201~');
+      await Bun.sleep(20);
+      expect(f.cancels).toHaveLength(0);
+      expect(f.writes).toHaveLength(0);
+      const pastedDraft = surface === 'composer' ? 'kept main\u0003\u0003' : 'kept main';
+      expect(c.state.draft).toBe(pastedDraft);
+      app.stdin.write('\u0003\u0003');
+      await Bun.sleep(20);
+      expect(f.cancels).toHaveLength(1);
+      expect(f.cancels[0]).toMatchObject({ id: 'a', intent: { targetCommandId: 'original' } });
+      expect(c.state.draft).toBe(pastedDraft);
+      expect(app.lastFrame()).not.toContain('\\u0003\\u0003\\u0003\\u0003');
+      app.stdin.write('\u0003');
+      await Bun.sleep(20);
+      expect(f.cancels).toHaveLength(1);
+      expect(f.writes).toHaveLength(0);
+    } finally {
+      app.unmount();
+      app.cleanup();
+      c.dispose();
+    }
+  });
+}
 test('only original offered approval grants, EOF/blank and question never default approve; saved receipt is not success', async () => {
   expect(interactionAnswer(card, '')).toBeUndefined();
   expect(interactionAnswer(card, 'approve')).toEqual({

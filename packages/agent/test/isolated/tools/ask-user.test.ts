@@ -222,23 +222,32 @@ test('real Core/SQLite asks all questions in one original interaction and return
     expect(record.kind).toBe('question');
     expect(record.request).toMatchObject({
       schema: {
-        required: ['q1', 'q2', 'q3'],
-        additionalProperties: false,
-        properties: {
-          q1: {
-            title: 'Which approach?',
-            anyOf: [
-              { const: 'q1-o1', title: 'First', description: 'First explanation' },
-              { const: 'q1-o2', title: 'Second (Recommended)', description: 'Second explanation' },
-              {
-                type: 'object',
-                properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
-                required: ['text'],
-                additionalProperties: false,
+        oneOf: [
+          {
+            required: ['q1', 'q2', 'q3'],
+            additionalProperties: false,
+            properties: {
+              q1: {
+                title: 'Which approach?',
+                anyOf: [
+                  { const: 'q1-o1', title: 'First', description: 'First explanation' },
+                  {
+                    const: 'q1-o2',
+                    title: 'Second (Recommended)',
+                    description: 'Second explanation',
+                  },
+                  {
+                    type: 'object',
+                    properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+                    required: ['text'],
+                    additionalProperties: false,
+                  },
+                ],
               },
-            ],
+            },
           },
-        },
+          { const: null, title: 'Cancel answering' },
+        ],
       },
     });
     for (const [index, answers] of (
@@ -281,6 +290,50 @@ test('real Core/SQLite asks all questions in one original interaction and return
     expect(JSON.parse(result!.content)).toEqual(result!.details);
     expect((await f.interactions()).interactions).toHaveLength(1);
     expect(f.model.requests).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+}, 10000);
+
+test('cancelling only the original questionnaire saves null and lets the same Run continue to the next Model response', async () => {
+  const f = await fixture();
+  try {
+    const card = await f.pending();
+    const receipt = await f.answer(card, null);
+    expect(receipt.status).toBe('applied');
+    expect(receipt.receipt).toMatchObject({
+      outcome: 'answer_saved',
+      interactionId: card.id,
+      cancelled: false,
+    });
+    await f.runtime.waitForCommand('work');
+    const result = (await f.store.getExecution(card.executionId))?.result as unknown as ToolResult;
+    expect(result).toEqual({
+      outcome: 'succeeded',
+      content: '{"cancelled":true}',
+      details: { cancelled: true },
+    });
+    const original = (await f.interactions()).interactions;
+    expect(original).toHaveLength(1);
+    expect(original[0]).toMatchObject({
+      id: card.id,
+      runId: card.runId,
+      state: 'answered',
+      acceptedDecisionRevision: '2',
+      answer: { kind: 'question', answers: null },
+    });
+    expect((await f.store.getRun(card.runId!))?.status).toBe('completed');
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      f.model.requests[1]!.messages.filter((message) => message.role === 'tool').map(
+        (message) => message.content,
+      ),
+    ).toContain('{"cancelled":true}');
+    expect(
+      (await f.store.listExecutions('s'))
+        .filter((execution) => execution.kind === 'model')
+        .every((execution) => execution.runId === card.runId),
+    ).toBe(true);
   } finally {
     await f.close();
   }
@@ -363,24 +416,33 @@ test('no explicit recommendation marks only the first option without selecting a
   );
   expect(request).toEqual({
     schema: {
-      type: 'object',
-      properties: {
-        q1: {
-          title: 'Choice?',
-          anyOf: [
-            { const: 'q1-o1', title: 'A (Recommended)', description: 'a' },
-            { const: 'q1-o2', title: 'B', description: 'b' },
-            {
-              type: 'object',
-              properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
-              required: ['text'],
-              additionalProperties: false,
+      oneOf: [
+        {
+          type: 'object',
+          properties: {
+            q1: {
+              title: 'Choice?',
+              anyOf: [
+                { const: 'q1-o1', title: 'A (Recommended)', description: 'a' },
+                { const: 'q1-o2', title: 'B', description: 'b' },
+                {
+                  type: 'object',
+                  properties: { text: { type: 'string', minLength: 1, pattern: '\\S' } },
+                  required: ['text'],
+                  additionalProperties: false,
+                },
+              ],
             },
-          ],
+          },
+          required: ['q1'],
+          additionalProperties: false,
         },
-      },
-      required: ['q1'],
-      additionalProperties: false,
+        {
+          const: null,
+          title: 'Cancel answering',
+          description: 'Leave these questions unanswered and continue the current task.',
+        },
+      ],
     },
   });
   expect(response.details).toEqual({ answer: 'B', answers: { q1: 'B' } });

@@ -198,6 +198,23 @@ test('stdio accepts the canonical schema emitted by the public default ask_user 
   expect(card).toBeDefined();
   expect(execution.outcome).toBe('succeeded');
 });
+test('stdio literal null selects the original information alternative without cancelling the Run signal', async () => {
+  const signal = new AbortController().signal;
+  const result = await createAskUserExtension().tools![0]!.execute(questions, {
+    signal,
+    async requestInput(request) {
+      const answer = await read({ kind: 'question', request } as Interaction, 'null\n');
+      expect(answer).toEqual({ kind: 'question', answers: null });
+      return answer!.kind === 'question' ? answer!.answers : null;
+    },
+  } as ToolContext);
+  expect(result).toEqual({
+    outcome: 'succeeded',
+    content: '{"cancelled":true}',
+    details: { cancelled: true },
+  });
+  expect(signal.aborted).toBe(false);
+});
 
 test('real default Service and CLI stdio retain invalid pending then deliver exact three answers to Provider and history', async () => {
   const f = await fixture();
@@ -241,11 +258,9 @@ test('real default Service and CLI stdio retain invalid pending then deliver exa
     expect(card.definitionId).toBe('ask_user');
     expect(card.answer).toBeNull();
     expect(card.state).toBe('pending');
-    expect((card.request as { schema: { required: unknown } }).schema.required).toEqual([
-      'q1',
-      'q2',
-      'q3',
-    ]);
+    expect(
+      (card.request as { schema: { oneOf: { required: unknown }[] } }).schema.oneOf[0]!.required,
+    ).toEqual(['q1', 'q2', 'q3']);
     expect(
       await read(
         {

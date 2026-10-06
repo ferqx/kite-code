@@ -111,6 +111,8 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 ## CLI 普通问题 stdin
 
+默认 ask_user 的根 schema 提供闭合题目 object 或 `const:null`。stdio 输入完整一行 `null` 是原 question 的普通信息答案，leaf 返回 `{cancelled:true}` 而不 abort 原 signal；空行／EOF 仍等待，显式 Ctrl+C 仍精确取消原 work。该区别由默认工厂 stdio 用例核对，完整 Native 正常答复与源外 TUI 的原资格仍按下文范围保留。
+
 [默认 ask_user stdio 测试](test/isolated/ask-user-stdio.test.ts)沿真实默认 Process configuration、compatible Provider、Service/SQLite、公开 Client/CLI 与注入 Readable 回答 canonical 三题。纯空白先保持原卡 pending、零 Answer；合法输入随后一次提交，持久原选项 ID 和闭合自由对象，第二 Provider 与历史收到文案及原 Unicode、多行和空格。自由原文与选项 ID 同字时仍保留自由输入。EOF、未知 schema 和重复观察不建立新的回答权。该测试使用公开源码入口和有限 Readable。
 
 [完整 Native 安装 stdin](../../tests/isolated/unified-agent/native-stdin.test.ts)另沿真实包内 `bin/kite`、共享 Daemon 与系统 pipe 验证。无效纯空白和 EOF 退出3并保原卡，随后新 CLI 进程以原 Work 身份提交唯一答案；内部选项 ID 与文案分离，自由原文即使等于 ID 也保持原对象，Provider 与历史保 Unicode、多行和首尾空格。重复行及已完成原 Work 不增 Answer/Run/Provider；共享 Daemon 独立持原候选使用锁，明确停止并确认 absent 后才卸载。此安装证据限 macOS arm64、新 CLI 进程和普通停止，不外推 Daemon 冷重启、丢回复、窗口或其他平台。

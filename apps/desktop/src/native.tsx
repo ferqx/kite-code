@@ -6,6 +6,8 @@ import {
   PermissionGrantsPanel,
   PermissionPanel,
   PermissionSubmissionStatus,
+  type QuestionAnswerDraft,
+  questionDraftKey,
 } from '@kite-ai/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -51,8 +53,39 @@ export function NativeDesktop() {
     draftRevision = useRef(0),
     writing = useRef(false);
   const selected = useRef<string | undefined>(undefined);
+  const questionDrafts = useRef(
+    new Map<
+      string,
+      {
+        storeId: string;
+        sourceSessionId: string;
+        presentationSessionId: string;
+        cardId: string;
+        draft: QuestionAnswerDraft;
+      }
+    >(),
+  );
   function apply(value: NativeResult) {
-    if (value && 'generation' in value && value.generation === generation.current) setState(value);
+    if (value && 'generation' in value && value.generation === generation.current) {
+      // Main has verified the exact answer_saved receipt. Promise resolution and
+      // omission from a bounded pending page are not confirmation of an answer.
+      for (const submission of value.interactionSubmissions)
+        if (submission.phase === 'accepted' && submission.receipt)
+          questionDrafts.current.delete(questionDraftKey(submission.interaction));
+      for (const card of value.selection?.interactions ?? []) {
+        const currentKey = questionDraftKey(card);
+        for (const [key, saved] of questionDrafts.current)
+          if (
+            saved.storeId === card.originStoreId &&
+            saved.sourceSessionId === card.sessionId &&
+            saved.presentationSessionId === card.presentationSessionId &&
+            saved.cardId === card.id &&
+            (key !== currentKey || card.state !== 'pending')
+          )
+            questionDrafts.current.delete(key);
+      }
+      setState(value);
+    }
   }
   async function report(action: () => Promise<unknown>) {
     try {
@@ -477,6 +510,9 @@ export function NativeDesktop() {
                 )}
                 {execution.kind === 'job' &&
                   !selection.session.parentSessionId &&
+                  !selection.interactions.some(
+                    (card) => card.kind === 'question' && card.state === 'pending',
+                  ) &&
                   ['planned', 'dispatching', 'running'].includes(execution.status) && (
                     <button
                       type="button"
@@ -511,93 +547,97 @@ export function NativeDesktop() {
               </details>
             ))}
           </section>
-          {!selection.session.parentSessionId && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void write(async () => {
-                  const current = state?.generation ?? 0,
-                    nonce = viewIntent.current,
-                    sessionId = selection.session.id,
-                    commandId = crypto.randomUUID(),
-                    submittedText = draft,
-                    submittedRevision = draftRevision.current;
-                  const value = await bridge.request({
-                    method: 'submit',
-                    generation: current,
-                    sessionId,
-                    intent: nativeTextIntent(selection, commandId, draft),
-                  });
-                  if (
-                    nonce === viewIntent.current &&
-                    current === generation.current &&
-                    draftRevision.current === submittedRevision &&
-                    value &&
-                    'phase' in value &&
-                    !['unknown', 'failed', 'rejected'].includes(value.phase)
-                  )
-                    setDraft((current) => (current === submittedText ? '' : current));
-                });
-              }}
-            >
-              <label>
-                当前会话私有草稿
-                <textarea
-                  value={draft}
-                  disabled={pending}
-                  onChange={(event) => setDraft(event.target.value)}
-                />
-              </label>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
+          {!selection.session.parentSessionId &&
+            !selection.interactions.some(
+              (card) => card.kind === 'question' && card.state === 'pending',
+            ) && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
                   void write(async () => {
-                    const original = {
-                      generation: generation.current,
-                      view: viewIntent.current,
-                      sessionId: selection.session.id,
-                    };
-                    const saved = await bridge.request({
-                      method: 'draft.write',
-                      generation: original.generation,
-                      sessionId: original.sessionId,
-                      revision: draftRevision.current,
-                      content: draft,
+                    const current = state?.generation ?? 0,
+                      nonce = viewIntent.current,
+                      sessionId = selection.session.id,
+                      commandId = crypto.randomUUID(),
+                      submittedText = draft,
+                      submittedRevision = draftRevision.current;
+                    const value = await bridge.request({
+                      method: 'submit',
+                      generation: current,
+                      sessionId,
+                      intent: nativeTextIntent(selection, commandId, draft),
                     });
                     if (
-                      saved &&
-                      'content' in saved &&
-                      generation.current === original.generation &&
-                      viewIntent.current === original.view &&
-                      selected.current === original.sessionId
+                      nonce === viewIntent.current &&
+                      current === generation.current &&
+                      draftRevision.current === submittedRevision &&
+                      value &&
+                      'phase' in value &&
+                      !['unknown', 'failed', 'rejected'].includes(value.phase)
                     )
-                      draftRevision.current = saved.revision;
-                  })
-                }
+                      setDraft((current) => (current === submittedText ? '' : current));
+                  });
+                }}
               >
-                保留草稿
-              </button>
-              <button
-                type="submit"
-                disabled={
-                  pending ||
-                  !draft.trim() ||
-                  historyState.phase !== 'complete' ||
-                  selection.permissionUnavailable
-                }
-              >
-                {selection.runs.some((run) => run.isActive)
-                  ? ['context.compress', 'context.compression.reset'].includes(
-                      selection.activeCommand?.kind ?? '',
-                    )
-                    ? '排队压缩后的输入'
-                    : '引导当前轮次'
-                  : '发送明确的新轮次'}
-              </button>
-            </form>
-          )}
+                <label>
+                  当前会话私有草稿
+                  <textarea
+                    value={draft}
+                    disabled={pending}
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() =>
+                    void write(async () => {
+                      const original = {
+                        generation: generation.current,
+                        view: viewIntent.current,
+                        sessionId: selection.session.id,
+                      };
+                      const saved = await bridge.request({
+                        method: 'draft.write',
+                        generation: original.generation,
+                        sessionId: original.sessionId,
+                        revision: draftRevision.current,
+                        content: draft,
+                      });
+                      if (
+                        saved &&
+                        'content' in saved &&
+                        generation.current === original.generation &&
+                        viewIntent.current === original.view &&
+                        selected.current === original.sessionId
+                      )
+                        draftRevision.current = saved.revision;
+                    })
+                  }
+                >
+                  保留草稿
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    pending ||
+                    !draft.trim() ||
+                    historyState.phase !== 'complete' ||
+                    selection.permissionUnavailable
+                  }
+                >
+                  {selection.runs.some((run) => run.isActive)
+                    ? ['context.compress', 'context.compression.reset'].includes(
+                        selection.activeCommand?.kind ?? '',
+                      )
+                      ? '排队压缩后的输入'
+                      : '引导当前轮次'
+                    : '发送明确的新轮次'}
+                </button>
+              </form>
+            )}
           {selection.interactions.map((interaction) => {
+            const draftKey = questionDraftKey(interaction);
             const saved = state?.answerSubmissions?.find(
               (row) =>
                 row.scope.storeId === interaction.originStoreId &&
@@ -605,12 +645,33 @@ export function NativeDesktop() {
                 row.interaction.id === interaction.id &&
                 row.interaction.revision === interaction.revision,
             );
+            const currentSubmission = state?.interactionSubmissions.find(
+              (row) => questionDraftKey(row.interaction) === draftKey,
+            );
             return (
               <InteractionCard
-                key={`${interaction.id}:${interaction.revision}`}
+                key={draftKey}
                 interaction={interaction}
                 submission={
-                  saved ? { phase: saved.phase, commandId: saved.request.commandId } : undefined
+                  saved
+                    ? { phase: saved.phase, commandId: saved.request.commandId }
+                    : currentSubmission
+                      ? {
+                          phase: currentSubmission.phase,
+                          commandId: currentSubmission.intent.commandId,
+                          error: currentSubmission.error,
+                        }
+                      : undefined
+                }
+                initialQuestionDraft={questionDrafts.current.get(draftKey)?.draft}
+                onQuestionDraftChange={(draft) =>
+                  questionDrafts.current.set(draftKey, {
+                    storeId: interaction.originStoreId,
+                    sourceSessionId: interaction.sessionId,
+                    presentationSessionId: interaction.presentationSessionId,
+                    cardId: interaction.id,
+                    draft,
+                  })
                 }
                 onAnswer={async (_card, answer) => {
                   await bridge.request({
@@ -819,23 +880,30 @@ export function NativeDesktop() {
           >
             查询原命令
           </button>
-          {submission.intent.kind !== 'command.cancel' && (
-            <button
-              type="button"
-              onClick={() =>
-                void report(async () => {
-                  await bridge.request({
-                    method: 'cancelInput',
-                    generation: generation.current,
-                    commandId: submission.intent.commandId,
-                  });
-                  await refresh();
-                })
-              }
-            >
-              停止原命令
-            </button>
-          )}
+          {submission.intent.kind !== 'command.cancel' &&
+            !(
+              selection?.storeId === submission.intent.expectedStoreId &&
+              selection.session.id === submission.sessionId &&
+              selection.interactions.some(
+                (card) => card.kind === 'question' && card.state === 'pending',
+              )
+            ) && (
+              <button
+                type="button"
+                onClick={() =>
+                  void report(async () => {
+                    await bridge.request({
+                      method: 'cancelInput',
+                      generation: generation.current,
+                      commandId: submission.intent.commandId,
+                    });
+                    await refresh();
+                  })
+                }
+              >
+                停止原命令
+              </button>
+            )}
         </div>
       ))}
       {state?.answerUnavailable && <p role="status">原答复私有记录不可用；不发送新的答复。</p>}

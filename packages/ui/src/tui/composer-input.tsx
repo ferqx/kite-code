@@ -4,6 +4,9 @@ import stringWidth from 'string-width';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import type { TuiState } from './controller';
 import type { FileToken } from './file-candidates';
+export function isCtrlCBatch(input: string): boolean {
+  return input.length > 1 && [...input].every((control) => control === '\u0003');
+}
 export function TuiComposer({
   buffer,
   value,
@@ -57,7 +60,7 @@ export function TuiComposer({
   );
   useInput(
     (input, key) => {
-      if (key.ctrl || (key.meta && !key.return)) return;
+      if (key.ctrl || isCtrlCBatch(input) || (key.meta && !key.return)) return;
       const candidates = filePaths.length ? filePaths : buffer.candidates;
       if (key.escape) {
         buffer.dismissed = true;

@@ -5,6 +5,46 @@ import { TuiController, type TuiPort, type TuiPreferences, TuiSession } from '..
 import { questionForm } from '../../src/tui/question';
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+test('a closed questionnaire keeps Alt+Enter newline and offers its exact null alternative only through explicit Alt+A', async () => {
+  const schema = {
+    oneOf: [
+      {
+        type: 'object',
+        properties: { q1: { type: 'string', pattern: '\\S' } },
+        required: ['q1'],
+        additionalProperties: false,
+      },
+      { const: null, title: 'Cancel answering', description: 'Keep the current Run.' },
+    ],
+  };
+  const f = fixture(schema);
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('Alt+A: Cancel answering');
+    app.stdin.write('\u001b\r');
+    await tick();
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('original');
+    await tick();
+    app.stdin.write('\u001ba');
+    app.stdin.write('\u001ba');
+    await tick();
+    expect(f.answers.map((answer) => answer.answer)).toEqual([{ kind: 'question', answers: null }]);
+    expect(f.commandCount()).toBe(1);
+  } finally {
+    app.unmount();
+  }
+  for (const rejected of [
+    { ...schema, maxProperties: 1 },
+    { oneOf: [...schema.oneOf, { const: true }] },
+    { oneOf: [{ type: 'object', properties: { q1: { type: 'string' } } }, schema.oneOf[1]] },
+  ])
+    expect(questionForm({ schema: rejected })).toBeUndefined();
+});
+
 function fixture(schema: Record<string, unknown>) {
   let cards = [question(schema)];
   const answers: Parameters<TuiPort['answer']>[2][] = [];

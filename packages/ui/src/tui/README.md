@@ -1,5 +1,7 @@
 # 独立终端消费者
 
+普通 question 的有限原 schema grammar 由 [中立解析器](../question.ts)与 DOM 共用，[TUI adapter](question.ts)只负责 ComposerBuffer 编辑草稿。闭合浅问卷加明确 `const:null` 的根 oneOf 保留原整份替代决定；仅原 schema 提供该项时，Alt+A 提交这个 null 信息答案。默认 ask_user 将它解释为取消问卷，原任务继续；Ctrl+C 仍是准确原 work 取消，Ctrl+A 仍读取附件，Alt+Enter／Shift+Enter 仍插入换行。未知 schema 不生成替代项，不把 Escape 或空白当取消答案。
+
 安全项目来源目录、独立 Review、明确 Source Question 选择与原申请读取已接入；共享接口与当前交互见[Source owner](#mcp-项目来源与原决定申请)，已完成的源码外键盘和当前完整默认验收及取舍见[Source 决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
 `@kite-ai/ui/tui` 提供 Ink 的 `TuiSession`、`TuiController` 和中立 `TuiPort`。终端没有复用 DOM renderer，也不导入旧 State、Runtime、SQL 或服务器。宿主先完成 Client identity 准入，再注入固定 Store 的 port；宿主负责连接、观察和配套 Service 生命周期，组件卸载或 controller.dispose 只释放视图读取。
@@ -10,9 +12,11 @@
 
 普通文本在真实可引导 active Run 上封存原 Store、Session、contextSelection 与 targetRunId 后调用 steer；idle 才创建新 Run。维护压缩/reset Run 由宿主提供真实 activeCommand 后使用原 Run/context selection 的 follow-up，不 steer 维护执行。收尾 Run 不发送。原 commandId 在提交前由宿主生成；响应不可核实时显示 unknown，lookup 只 GET 原 ID，不重发。晚回执显示其原 Session，而不是新选中目标。Ctrl+C 取消准确原 Run 的 originCommandId；尚未观测 Run 的新 start 仍使用已封存原 commandId，重复取消去重。回执 accepted/applied 不证明实际停止，只有新投影可显示 Cancelling/终态。
 
+普通主区识别同一输入块内仅由多个真实 Ctrl+C 组成的批次，继续走已有取消分支和原 controller 的准确目标／去重；辅助面板的取消域不变。主区始终保有独立 paste listener，普通审批／计划／JSON 卡片把 literal paste 保存到原 answerBuffer，问卷仍写原步骤草稿，Composer 沿自己的 paste channel 保原文字；Chooser 与 Source Question 消费但不解释粘贴为按键。原生纯 C 批次在 [Composer](composer-input.tsx) 编辑前拒绝，不污染主草稿；未引入其他控制组合的通用路由。[controller 测试](../../test/tui/controller.test.tsx)核审批／Composer 的 literal paste 零取消、批次准确取消一次及后续单 C 去重，原 [TUI host](../../../../apps/cli/test/isolated/tui-host.test.ts) 的真实 PTY 保持期限与全部断言，实际阶段证据见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
 审批输入 `approve` 缺省一次；只有原卡 request.grants 提供时可输入 `approve same_command`。Esc 只拒绝审批，Ctrl+C 是原 work 取消；普通 question 使用下述原 schema 步骤面板，复杂输入仍明确使用原 JSON，内部 choice ID 保留，服务端仍完整校验；计划批准只接受原 offered auto/accept_edits，不创建工具授权。空答案、EOF 和关闭没有默认批准。原卡附件必须经宿主公共完整 hash/UTF-8 reader 读取后才可答复，Ctrl+A 显式读取；未知回答只允许核实原 Command。保存答案并不代表 Core 已接纳或工具派发成功。
 
-[questionForm](question.ts)只将完整可表达的标量 string、enum/const、互不重叠的 oneOf 选择及明确 anyOf 自定义分支转为单题或浅 object 步骤。Custom 可保原 string，或保一个 required 字符串属性且 additionalProperties:false 的闭合原对象；后者用于默认 ask_user，使同字自由文本与选项 ID 不混淆。[QuestionPanel](question-panel.tsx)展示原 title/description；选择提交原值，字段键不重命名。封闭 enum 不添加 Custom；其他复杂、嵌套、重叠或无法完整保留约束的 schema 回退显式 JSON。required 核实际自身 properties，当前 Core 不支持的 `__proto__` 属性/必填键也不生成表单。字符串 min/maxLength 按 Unicode codepoint 核对，仅准确 pattern `\\S` 表达非空白；其他正则仍回退。编辑沿 ComposerBuffer 字符簇、光标和多行 paste，不 trim 或截断原文。问题/选项正文与原答案不翻译，自有提示沿当前终端语言呈现。
+[questionForm](../question.ts)只将完整可表达的标量 string、enum/const、互不重叠的 oneOf 选择及明确 anyOf 自定义分支转为单题或浅 object 步骤。Custom 可保原 string，或保一个 required 字符串属性且 additionalProperties:false 的闭合原对象；后者用于默认 ask_user，使同字自由文本与选项 ID 不混淆。[QuestionPanel](question-panel.tsx)展示原 title/description；选择提交原值，字段键不重命名。封闭 enum 不添加 Custom；其他复杂、嵌套、重叠或无法完整保留约束的 schema 回退显式 JSON。required 核实际自身 properties，当前 Core 不支持的 `__proto__` 属性/必填键也不生成表单。字符串 min/maxLength 按 Unicode codepoint 核对，仅准确 pattern `\\S` 表达非空白；其他正则仍回退。编辑沿 ComposerBuffer 字符簇、光标和多行 paste，不 trim 或截断原文。问题/选项正文与原答案不翻译，自有提示沿当前终端语言呈现。
 
 步骤草稿按完整 interactionKey 的 Store/source Session/presentation Session/id/revision 保留，Esc 返回上题并保留后题内容；卡版本变化清旧草稿。首选项未选、空白自由答案、尚无答案且未明确跳过的 optional 字段均不推进。最后一步才调用原 controller.answer；附件未读完、stale/loading、原答案 pending/unknown 或已经保存时不增加 Answer。后继卡或切会话不能重绑原未知回执。局部键盘覆盖见[questions.test.tsx](../../test/tui/questions.test.tsx)，当前真实多题、逐项标题/原 ID、自定义原文与正常退出资格由[CLI owner](../../../../apps/cli/README.md#tui-普通问题步骤)维护。
 

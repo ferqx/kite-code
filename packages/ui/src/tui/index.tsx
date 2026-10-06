@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { interactionKey } from './cards';
 import { ComposerBuffer } from './composer';
-import { TuiComposer } from './composer-input';
+import { isCtrlCBatch, TuiComposer } from './composer-input';
 import { activity, type TuiController, terminalText } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
 import type { FileToken } from './file-candidates';
@@ -305,7 +305,8 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   }
   const questionActive = !!form && !!question && !state.panel && !chooser && !cardChooser;
   const jsonQuestion = card?.kind === 'question' && !sourceQuestion && !form;
-  const jsonActive = jsonQuestion && !state.panel && !chooser && !cardChooser;
+  const plainAnswerActive =
+    !!card && !sourceQuestion && !form && !state.panel && !chooser && !cardChooser;
   const selectedSource = sourceChoices.get(approvalKey);
   const selectedApproval = approvalChoices.get(approvalKey);
   const setAnswer = (value: string | ((previous: string) => string)) => {
@@ -347,7 +348,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   }, [controller]);
   usePaste(
     (text) => {
-      if (jsonActive) {
+      if (plainAnswerActive) {
         answerBuffer.insert(text, true);
         renderQuestion((n) => n + 1);
         return;
@@ -361,19 +362,22 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         renderQuestion((n) => n + 1);
       }
     },
-    { isActive: questionActive || jsonActive },
+    // Keep literal paste on this channel even when a card chooser ignores it.
+    // With no listener Ink otherwise forwards paste as native keyboard input.
+    { isActive: !state.panel },
   );
   useInput((input, key) => {
+    const cancelKey = (key.ctrl && input === 'c') || (!state.panel && isCtrlCBatch(input));
     if (state.panel === 'recovery') return;
     if (state.panel === 'executions') return;
     if (state.panel === 'mcp') return;
     if (state.panel === 'skills' || state.panel === 'theme' || state.panel === 'language') return;
     if (state.panel === 'status') {
-      if (key.escape || (key.ctrl && input === 'c')) controller.closePanel();
+      if (key.escape || cancelKey) controller.closePanel();
       else if (input.toLowerCase() === 'r') void controller.openStatus();
       return;
     }
-    if (key.ctrl && input === 'c') {
+    if (cancelKey) {
       if (sourceQuestion) {
         setSourceChoices((previous) => {
           const next = new Map(previous);
@@ -503,6 +507,11 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     }
     if (card) {
       if (form && question) {
+        if (key.meta && input === 'a' && form.alternative) {
+          if (!state.stale && !state.loading)
+            void controller.answer(card, JSON.stringify(form.alternative.value));
+          return;
+        }
         const field = form.fields[question.step]!,
           draft = question.fields[question.step]!;
         const editing =
