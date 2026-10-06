@@ -303,11 +303,22 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     expect(
       JSON.stringify(current.runs.find((run) => run.originCommandId === 'run')!.configuration),
     ).toBe(original);
+    const future = current.runs.find((run) => run.originCommandId === 'future')!;
+    expect(future.configuration).toMatchObject({
+      tools: [{ id: 'ask_user', version: '1' }],
+    });
     expect(
-      JSON.stringify(current.runs.find((run) => run.originCommandId === 'future')!.configuration),
-    ).toContain('"tools":[]');
+      current.executions.filter(
+        (execution) => execution.runId === future.id && execution.kind === 'tool',
+      ),
+    ).toHaveLength(0);
     expect(provider.requests).toHaveLength(3);
-    expect(provider.requests[2]!.tools ?? []).toEqual([]);
+    expect(provider.requests[2]!.tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({ name: 'ask_user' }),
+      }),
+    ]);
     expect(JSON.stringify(provider.requests[0]!.tools)).toContain('files.write');
   } finally {
     writeFileSync(join(f.profile.profilePath, 'permission-release'), 'release');

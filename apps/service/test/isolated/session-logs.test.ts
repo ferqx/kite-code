@@ -457,7 +457,13 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     const model = view.executions.find((execution) => execution.kind === 'model')!;
     expect(model.status).toBe('succeeded');
     expect(requests).toHaveLength(1);
-    expect(requests[0]!.tools ?? []).toEqual([]);
+    expect(requests[0]!.tools).toEqual([
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({ name: 'ask_user' }),
+      }),
+    ]);
+    expect(view.executions.filter((execution) => execution.kind === 'tool')).toHaveLength(0);
     web = await browserFor(client);
     db = new Database(profile.databasePath, { readonly: true });
     const before = counts(db);
@@ -477,6 +483,12 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     const snapshot = await web.browser.getModelInput('s', nav.modelExecutionId!);
     expect(snapshot.executionId).toBe(model.id);
     expect(snapshot.sessionId).toBe('s');
+    expect(
+      snapshot.request.tools?.map((tool) => ({
+        id: tool.id,
+        definitionVersion: tool.definitionVersion,
+      })),
+    ).toEqual([{ id: 'ask_user', definitionVersion: '1' }]);
     expect(BigInt(snapshot.bodyBytes)).toBeGreaterThan(65536n);
     expect(snapshot.request.messages.some((message) => message.content === original)).toBe(true);
     expect(snapshot.metadata.context?.transformationId).toBe('kite.model-request');

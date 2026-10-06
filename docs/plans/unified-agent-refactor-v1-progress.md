@@ -1342,3 +1342,6 @@ Root对新异步候选独立制作私有延迟probe：离线→ready、显式同
 第七轮原完整默认按当前574文件/464唯一主任务、并发4运行；freeze覆盖3977个tracked及owned新增测试输入。实际exit1，99主任务全部排空、98通过，无plan abort；已运行206文件，365任务未调度。3977 SHA和Git前后保持。Capture主任务在真实默认负载下19/255通过、17.942s；新失败为未改动的Service session-logs测试仍期待Provider tools为空，但实际默认登记含ask_user（:460）。日志 `/private/tmp/kite-current-default-seventh-20261006.log`、SHA `aa8b96ec70f67c18a03cc9d51c9ca664c2941461ea2c93f5f6c8db09bf8ebadb`，同前缀plan/inputs/result保留。当前全图仍失败，下一项需按默认问题能力合同核对该消费者；不拼接局部结果作为全图通过。
 
 当前范围只证明macOS/Bun的路径寿命修复与列明消费者。iteration_complete及stage/commit ready仅覆盖本片七个owned路径；原恢复规则和手册承诺保持，Session logs完整默认失败保留为Goal后续未闭合项。37项继续partial，Goal active，完整§35/T/E、安装、Linux/Windows、60min Soak及正式旧路径退役继续未闭合；本片按已有本地阶段提交授权交付，不扩大push/PR，无关AGENTS保持独立。
+
+
+同一默认目录合同的两个实际 Service 消费者已核对并同步：Session logs 首次 Provider 请求准确只有 ask_user、实际 Run 零 Tool Execution，原 >64KiB sealed input 保存 ask_user@1，Browser/Native读原完整输入、原来源与foreign拒绝，冷读仍零Provider/SQL增写；该文件3/80通过。相邻 assembly-http 原断言也实际复现为空目录失败；修正后后续 Run 仅保默认 ask_user，已等待 Run 保原配置，禁用 Files 后零Tool与零文件效果，文件4/33通过。两文件当前合计7/113，原isolated日志 `/private/tmp/kite-session-logs-adjacent-catalogue-20261006.log` 和 `/private/tmp/kite-assembly-default-catalogue-current-20261006.log` 保留；Service完整typecheck和两owned Biome均exit0（旧SSE拼接仅info）。源码默认注册/merge-by-id、DTO及产品行为无变化，Service owner默认ask_user条目和手册核对后无diff。新修正不追认第七轮全图失败；后续仍需当前原完整图验证，37partial与Goal active保持。
