@@ -1,5 +1,13 @@
 # Store 边界
 
+## 当前会话视图
+
+`getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。
+
+这个投影不是全部 Run/Execution 历史。旧记录仍可按准确 ID 独立读取；完整 Message 历史和输出沿各自固定上界的分页，不从当前视图数量推导 EOF。消息首屏、公共 DTO、执行/授权/恢复事务与读取预算保持各自原合同。
+
+[真实长会话回归](../../../../tests/isolated/unified-agent/active-view.test.ts)通过公开 Runtime/HTTP/Client 完成205轮实际模型执行，第206轮已派发时保留当前 Run、当前 Model及最早的真实 detached Job，并核便携 Desktop controller、只读游标不增长、准确取消当前 Run不停止旧 Job。它不证明跨会话后台总览、所有历史Execution分页或实际三平台窗口；准确执行结果见[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07长会话当前工作投影)。
+
 [显式中断 history owner](sqlite/recovery/README.md) 负责原取消 Tool 的准确 Model call 绑定、完整封存输出读取和最终恢复事务消息 CAS；它不恢复派发，也不改变 SDK 的配对要求，真实 unknown 沿原收束与阻挡条件保留。
 
 ## 正常 owner 空闲交接

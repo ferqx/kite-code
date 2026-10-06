@@ -310,6 +310,11 @@ try {
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
+  // This inspection replaces the reader's observation; let the picker finish its own GET first.
+  await page
+    .getByRole('region', { name: '下一轮模型选择', exact: true })
+    .getByRole('button', { name: /^模型：model-a/ })
+    .waitFor();
   const unbound = await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'input.models.read', generation: 1 }),
   );

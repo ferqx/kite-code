@@ -1608,12 +1608,26 @@ export class SqliteOperations {
           const meta = this.metadata();
           const value = {
             session: this.session(session),
+            // A bounded history must not hide current work after a long conversation.
+            // Union identities once, then preserve chronological display order.
             runs: this.rows(
-              'SELECT * FROM run WHERE session_id=? ORDER BY rowid LIMIT 200',
+              `SELECT * FROM run WHERE rowid IN (
+                SELECT rowid FROM run WHERE session_id=? AND is_active=1
+                UNION SELECT rowid FROM (
+                  SELECT rowid FROM run WHERE session_id=? ORDER BY rowid DESC LIMIT 200
+                )
+              ) ORDER BY rowid`,
+              id,
               id,
             ).map((row) => this.runRecord(row)),
             executions: this.rows(
-              'SELECT * FROM execution WHERE session_id=? ORDER BY rowid LIMIT 200',
+              `SELECT * FROM execution WHERE rowid IN (
+                SELECT rowid FROM execution WHERE session_id=? AND state IN ('planned','dispatching','running','outcome_unknown')
+                UNION SELECT rowid FROM (
+                  SELECT rowid FROM execution WHERE session_id=? ORDER BY rowid DESC LIMIT 200
+                )
+              ) ORDER BY rowid`,
+              id,
               id,
             ).map((row) => this.execution(row)),
             messages: this.rows(

@@ -2,6 +2,8 @@
 
 `@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI；完整客户端迁移和正式旧路径退役仍按门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
+公共当前会话视图保留最近的有限 Run/Execution 历史及原未结束／未知工作，长会话不会因最早200项投影而丢失当前 Run或较早的 live Job。查询只反映原事实，不改变取消和恢复资格；精确范围与真实长会话验收由[Store owner](src/storage/README.md#当前会话视图)维护。
+
 ## 入口与职责
 
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
