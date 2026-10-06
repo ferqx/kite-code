@@ -126,7 +126,7 @@ async function fixture() {
       const step = steps.get(marker) ?? 0;
       steps.set(marker, step + 1);
       const connecting = marker.includes('connect');
-      const remote = body.tools.find((tool) => tool.function.name !== 'mcp.connect');
+      const remote = body.tools.find((tool) => tool.function.name.startsWith('mcp.local.'));
       const call =
         connecting && step === 0
           ? {

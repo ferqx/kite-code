@@ -1434,3 +1434,11 @@ Root完成实现与自核，未新增独立审查。本片 iteration_complete/st
 失败用例仍把已支持的 manifest v13 当作未来版本，实际 Reader 正确接受 v13 内原 v12 Source 变更资产。最小修改只在原测试明确核对 v13 保留准确资产描述，并将未来版本拒绝改为 v14。无日志时创建 v5、有 Source 日志时创建 v12、旧 v2–11 物理资产白名单、坏格式/路径/额外 authority 字段、重算外层 proof 后的坏内层记录拒绝及原字节/Store 保留断言不变。[维护 owner](../../packages/agent/src/maintenance/README.md)与[离线维护手册](../handbook/cli/commands.md#通用开发入口离线维护)核对后，生产行为、格式合同和公共边界无变化，不另建 Note。
 
 当前原 isolated runTestJob/no-orphans 单并发完整四例4pass/0fail/101断言、2.95s，日志 `/private/tmp/kite-source-manifest-current-isolated-20261006.log`；实际 qualified SQLite 选择、原备份/检查/恢复与 owned root/引擎清理均核实，Agent完整typecheck和owned Biome通过。Root自核，未新增独立审查；iteration_complete/stage/commit ready仅覆盖测试与进度两路径。第十六轮失败保留，后续仍需当前完整原图；37partial、Goal active及Native stdin、真实OAuth组合、默认可信Shell/Soak、安装、其他平台、§35/T-E与正式旧路径退役缺口保持。本地授权不扩大push/PR，无关AGENTS独立。
+
+## 2026-10-06：默认 MCP 凭据消费者选择准确远端工具
+
+第十七轮原完整默认在本地 HEAD 512553790f58b296cf430b000069b3582fbcf75e、574文件/464主任务/并发4运行，实际 exit1；165个主任务全部排空、164通过，default-mcp-credentials 主任务失败，无 plan abort。已运行275文件、299任务未调度；3978 tracked regular SHA与Git前后保持。日志 `/private/tmp/kite-current-default-seventeenth-20261006.log`、SHA `313c1c7e7ccc59a11ade33b48647599bf9f1fbef285c681159967267b471938d`，同前缀 plan/inputs/result 保存。Source 备份原主任务与实际 Native 登记生命周期原主任务通过；完整默认资格仍 false。
+
+凭据 fixture 的兼容 Provider 用第一个非 `mcp.connect` 描述选择远端 Tool，实际默认目录的 `ask_user` 被误选，第一次断言得到零远端 RPC，第二例等待 credential lookup 超时。最小修改仅选实际 `mcp.local.*` 描述；保留默认 Ask User、原两个 Session 凭据、准确连接审批、批准等待零 secret/socket、A 撤销与 B 隔离、lookup 中撤销及 views/回执脱敏。无生产配置、Vault、网络或公共权限变化。[MCP手册](../handbook/features/extensions.md)、[Service owner](../../apps/service/README.md)和[MCP leaf owner](../../packages/agent/src/mcp/README.md)核对后仍适用，不另建 Note 或合同 diff。
+
+当前原 isolated runTestJob/no-orphans 单并发两例2pass/0fail/35断言、2.72s，日志 `/private/tmp/kite-default-mcp-credentials-current-20261006.log`；原15秒预算不变，Service完整typecheck、owned Biome、diff及文档门禁通过。Root自核，未新增独立审查；iteration_complete/stage/commit ready只覆盖测试与进度两路径。第十七轮失败保留，下一轮仍须当前原完整图；37partial、Goal active和真实Native stdin、OS browser/nativeVault OAuth组合、默认可信Shell/持续Soak、安装、其他平台、§35/T-E及正式旧路径退役缺口保持。本地授权不扩大push/PR，无关AGENTS独立。
