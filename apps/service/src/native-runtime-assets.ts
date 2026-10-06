@@ -373,8 +373,9 @@ export function verifyNativeRuntimeProtection(
   if (
     bundle.digest !== selected.manifestSha256 ||
     actual.buildId !== `native-${bundle.digest}` ||
-    realpathSync(actual.entrypoint) !==
-      join(bundle.terminal.root, bundle.terminal.manifest.entries.service) ||
+    ![bundle.terminal.manifest.entries.service, bundle.terminal.manifest.entries.daemon].some(
+      (entry) => realpathSync(actual.entrypoint) === join(bundle.terminal.root, entry),
+    ) ||
     realpathSync(actual.executable) !==
       join(bundle.terminal.root, bundle.terminal.manifest.entries.runtime)
   )

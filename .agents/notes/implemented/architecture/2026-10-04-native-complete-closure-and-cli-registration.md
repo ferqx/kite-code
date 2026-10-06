@@ -10,7 +10,7 @@ Desktop 安装需要让标准 `kite` / `kite-tui` 选择它自己的 CLI、Bun �
 
 ## Decision
 
-Native 包含真实 Electron、main/preload/renderer 和完整新 Terminal。outer 与 inner 独立完整核验、分别持 SH；Main 与 Service 各自保留两 root 使用权。Node 传给 Bun 的 inherited descriptor 副本只 close，不执行共享描述的 UNLOCK，原 owner 与最后持有者退出分别验证。
+Native 包含真实 Electron、main/preload/renderer 和完整新 Terminal。outer 与 inner 独立完整核验、分别持 SH；Main、配对 Service 与共享 Daemon 各自保留两 root 使用权。服务私有 proof 只接受已核 inner 清单的 service/daemon，均固定包内 Bun、Native build 和 outer digest；遗漏 daemon 会使正确 Native 共享启动被拒绝，接受任意入口则破坏准确进程身份。2026-10-06 已补齐该 daemon 校验，不去掉 proof 或改用仅保护 inner 的 Terminal 身份。Node 传给 Bun 的 inherited descriptor 副本只 close，不执行共享描述的 UNLOCK，原 owner 与最后持有者退出分别验证。
 
 Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以固定顺序持 EX，封闭 0600 metadata 保存双方 prefix、candidateId 与 nonce。标准前门先持原 Terminal SH，再核双方 nonce、Native active、manifest 和双 root SH，实际执行 Native 包内 Bun 与固定 CLI/TUI；同一闭包提供 Service。坏登记直接拒绝，不发现其他候选或源码 fallback。
 
@@ -27,6 +27,8 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 ## Consequences
 
 实际 fresh 组合核两种 PATH CLI 与真正 80×24 TUI，三个原 Command→Run 均 completed、Provider 三次；公共 Store、原 scope/bytes/cursor、busy 卸载、坏 nonce 与撤销后独立前门恢复分别核实。完整 Native archive/install 还在源码外删除原候选后启动 Electron Main 与所属 Service，核在途旧版本、cold 零调用、双锁故障、回滚/卸载及原数据 hash。
+
+2026-10-06 完整 Native 源外安装 stdin 实测1项39断言核共享Daemon、无效答案/EOF保持原卡、新CLI以原Work回答一次、Provider/历史完整语义及重复零新Run/Answer。启动CLI退出与原Run完成后卸载仍busy，实际stop/status absent后卸载成功；producer原校验3项35断言分别拒绝CLI/错runtime/build/proof。该补充不包含Daemon冷重启或Electron窗口。
 
 父 shell 缓存 Native-bin-first 路径并删除安装后，原缓存返回 127；独立前门本身缓存仍可按登记撤销恢复。安装器不修改 PATH/RC，不控制用户进程或数据。Windows 安装、Linux/Windows Native lifecycle、新的 signal fault、真实已发布 predecessor、signing/公证/发布者认证仍缺对应资格。manifest/archive SHA 只证明完整性，不证明 publisher。
 

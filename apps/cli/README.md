@@ -109,7 +109,11 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 共享 UI 的当前材料版本、原顺序与剩余动态长尾限制由[TUI owner](../../packages/ui/src/tui/README.md)维护。当前源码外[默认问题 PTY](test/isolated/tui-question-pty.test.ts)另核真实默认 Tool/Service/Provider 与原答案；题目和完整选项核该步骤实际发出的原材料，题号/选择/可交互状态核最新动态帧，不把留在原生历史的正文当成当前控件，也不要求每次按键重印正文。上方大正文 PTY 使用开发宿主与 built Service，保留实际 Ctrl+O 全文尾部、两次导出及正常退出/冷重开。输入需等待实际可交互提示或命令回显；全文观察在 reader 展示时核对，不要求后续导出或退出重复打印已完成正文。业务预算、原卡版本、完整文件与零额外工具效果断言保持。具体当前运行范围与未闭合资格归[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
-[默认 ask_user stdio 测试](test/isolated/ask-user-stdio.test.ts)沿真实默认 Process configuration、compatible Provider、Service/SQLite、公开 Client/CLI 与注入 Readable 回答 canonical 三题。纯空白先保持原卡 pending、零 Answer；合法输入随后一次提交，持久原选项 ID 和闭合自由对象，第二 Provider 与历史收到文案及原 Unicode、多行和空格。自由原文与选项 ID 同字时仍保留自由输入。EOF、未知 schema 和重复观察不建立新的回答权。该测试使用公开源码入口和有限 Readable；源码外安装制品的原生 stdin 资格另按整体门禁判断。
+## CLI 普通问题 stdin
+
+[默认 ask_user stdio 测试](test/isolated/ask-user-stdio.test.ts)沿真实默认 Process configuration、compatible Provider、Service/SQLite、公开 Client/CLI 与注入 Readable 回答 canonical 三题。纯空白先保持原卡 pending、零 Answer；合法输入随后一次提交，持久原选项 ID 和闭合自由对象，第二 Provider 与历史收到文案及原 Unicode、多行和空格。自由原文与选项 ID 同字时仍保留自由输入。EOF、未知 schema 和重复观察不建立新的回答权。该测试使用公开源码入口和有限 Readable。
+
+[完整 Native 安装 stdin](../../tests/isolated/unified-agent/native-stdin.test.ts)另沿真实包内 `bin/kite`、共享 Daemon 与系统 pipe 验证。无效纯空白和 EOF 退出3并保原卡，随后新 CLI 进程以原 Work 身份提交唯一答案；内部选项 ID 与文案分离，自由原文即使等于 ID 也保持原对象，Provider 与历史保 Unicode、多行和首尾空格。重复行及已完成原 Work 不增 Answer/Run/Provider；共享 Daemon 独立持原候选使用锁，明确停止并确认 absent 后才卸载。此安装证据限 macOS arm64、新 CLI 进程和普通停止，不外推 Daemon 冷重启、丢回复、窗口或其他平台。
 
 ## TUI 普通问题步骤
 

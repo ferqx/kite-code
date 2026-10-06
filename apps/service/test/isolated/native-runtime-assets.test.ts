@@ -125,6 +125,23 @@ test('Node-safe full Native closure relocates with exact inner proof, fixed coor
         buildId: `native-${actual.digest}`,
       }).root,
     ).toBe(moved);
+    const daemon = {
+      entrypoint: join(actual.terminal.root, actual.terminal.manifest.entries.daemon),
+      executable: join(actual.terminal.root, actual.terminal.manifest.entries.runtime),
+      buildId: `native-${actual.digest}`,
+    };
+    expect(verifyNativeRuntimeProtection(proof, daemon).root).toBe(moved);
+    for (const identity of [
+      { ...daemon, entrypoint: join(actual.terminal.root, actual.terminal.manifest.entries.cli) },
+      { ...daemon, executable: join(moved, actual.manifest.entries.electron) },
+      { ...daemon, buildId: `terminal-${actual.terminal.digest}` },
+    ])
+      expect(() => verifyNativeRuntimeProtection(proof, identity)).toThrow(
+        'native_protection_identity_mismatch',
+      );
+    expect(() =>
+      verifyNativeRuntimeProtection({ ...proof, manifestSha256: '0'.repeat(64) }, daemon),
+    ).toThrow('native_protection_identity_mismatch');
     expect(() =>
       verifyNativeRuntimeProtection(proof, {
         entrypoint: join(moved, 'app/main.cjs'),

@@ -41,7 +41,7 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 
 ## 通用 Agent 开发生命周期
 
-通用 Agent 开发入口已支持 `bun run cli:dev server start/status/stop/restart` 与 `bun run cli:dev web`。启动前显式构建新 Service 和 Web；默认使用独立开发 profile。正式 `kite`、根 `server` 与安装发布入口尚未切换，不能混用两条入口推断同一实例。
+通用 Agent 开发入口已支持 `bun run cli:dev server start/status/stop/restart` 与 `bun run cli:dev web`。启动前显式构建新 Service 和 Web；默认使用独立开发 profile。正式 `kite`、根 `server` 与安装发布入口选择完整候选，开发入口独立选择已构建的 Service 和 profile；不能混用两条入口推断同一实例。
 
 开发命令保留上面的复用、固定工作区、空闲重启和明确取消语义。默认地址按原 profile 选择当前用户私有 Unix socket；`--server` 指定准确本地 socket，不接受 HTTP URL。status/stop/web 在没有实例时不创建目录或启动 Service；web 缺席返回错误。已有兼容实例的 start 复用不要求目标构建存在；真正启动或重启才验证目标文件。普通 start 在 Store 损坏时仍启动安全诊断服务，状态明确为数据不可用，业务读取返回错误而非空列表；restart 则先只读检查目标 Store 格式，失败保留旧实例。
 
@@ -55,4 +55,4 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 
 实现、隔离进程验证与当前平台范围见[Service owner](../../../apps/service/README.md)和[V1.3 实施进度](../../plans/unified-agent-refactor-v1-progress.md)。
 
-通用终端候选安装后，可用明确 `<prefix>/bin/kite server start|status|stop` 操作新 profile 的服务；参数仍按本节通用入口规定。升级/回滚只影响后续启动，原 daemon 保持原实例和制品，其使用锁会阻止卸载；停止须使用公开生命周期命令，不强杀无关进程。安装与平台限制见[终端制品说明](../../../apps/cli/docs/terminal-release.md)。
+通用 Terminal 或完整 Native 安装后，可用明确 `<prefix>/bin/kite server start|status|stop` 操作新 profile 的服务；Native 使用自身候选内的 Daemon 和 Bun，并保持完整候选的使用锁。参数仍按本节通用入口规定。升级/回滚只影响后续启动，原 daemon 保持原实例和制品，其使用锁会阻止卸载；停止须使用公开生命周期命令，不强杀无关进程。安装与平台限制见[终端制品说明](../../../apps/cli/docs/terminal-release.md)。

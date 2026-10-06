@@ -61,7 +61,9 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 首次 POST 前的持久保存失败会明确返回 `not_submitted`，零 POST。同一 ID 已存在时，即使尚未收到服务端回执，也只查原 Command，不自动补发。`caller lookup` 要求完整原本地记录、正文摘要、subject、Store/Workspace/Session 和准确目标一致；缺记录、改正文、错 scope 或原 GET 无法核实都保 unknown。关闭读取或进程重开不会清除原申请；容量与冷恢复边界见[普通申请恢复](../features/recovery.md#开发统一调用者的普通申请恢复)。
 
-`work run.start/input.follow_up` 的 stdout 依次输出 `caller.intent`、`caller.receipt`、`work.event` 和 `work.outcome` JSON。回执核实后，只沿原 Command 取得的实际 Run 继续观察原审批、问题和输出，准确 completed 才成功退出；排队 follow-up 继续查询原 Command/Run 关系，不借当前 active Run。等待输入、EOF 或结束观察不能称为完成；失败/明确未提交为退出 1，未完成或 unknown 为 2，信号结束按原取消/退出语义保留申请。Ctrl+C 的业务取消是另一项持久申请，目标固定原 Work Command；共享服务只 detach，配对服务会明确提示所属服务收尾可能中断仍活动的工作。steer、两类取消及 caller 查询输出各自原回执或目录；取消请求已应用不表示 Job 已停止。Run/report 的显式 recovery 观察仍按[恢复说明](../features/recovery.md)处理，Ctrl+C 不另发普通业务取消。
+`work run.start/input.follow_up` 的 stdout 依次输出 `caller.intent`、`caller.receipt`、`work.event` 和 `work.outcome` JSON。回执核实后，只沿原 Command 取得的实际 Run 继续观察原审批、问题和输出，准确 completed 才成功退出；排队 follow-up 继续查询原 Command/Run 关系，不借当前 active Run。等待输入、EOF 或结束观察不能称为完成；失败/明确未提交为退出 1，未完成或 unknown 为 2，等待审批或问题（包括 EOF 和无效答案）为 3，信号结束按原取消/退出语义保留申请。Ctrl+C 的业务取消是另一项持久申请，目标固定原 Work Command；共享服务只 detach，配对服务会明确提示所属服务收尾可能中断仍活动的工作。steer、两类取消及 caller 查询输出各自原回执或目录；取消请求已应用不表示 Job 已停止。Run/report 的显式 recovery 观察仍按[恢复说明](../features/recovery.md)处理，Ctrl+C 不另发普通业务取消。
+
+安装 Native 的 `kite run/work --server <原socket>` 也按上述状态处理实际 stdin：无效纯空白和 EOF 保留原问题；重开 CLI 后使用完整原 Work 申请回答，选项按原 ID、自由输入按闭合 `{text}` 原对象提交。重复输入与查询已完成 Work 不自动开始新任务。当前真实安装范围见 [CLI owner](../../../apps/cli/README.md#cli-普通问题-stdin)。
 
 普通 CLI 邻接实测为 30 项、589 条断言；独立实际 main argv 正例为 3 项、83 条断言，使用一次原 Tool 审批、一次真实文件效果和三次本机 Provider 请求核原 Run completed 后才关闭配对服务。完整 Workflow queued/accepted 强杀例只证明原完整申请与冷查回，尚未证明 queued follow-up 全等待至终态，不称 Workflow 业务执行成功。对应源码、测试与 source-free shared 范围见 [CLI owner](../../../apps/cli/README.md#普通-cli-caller-的持久原申请)。这些资格不切换正式旧入口，也不代表三平台或完整 §35。
 
