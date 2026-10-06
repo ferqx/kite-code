@@ -1371,3 +1371,12 @@ Source reader 修复已在本地提交 db93378f230842425f966d66f19ade214d288df6�
 当前原 isolated runTestJob/no-orphans 单并发三例3pass/0fail/70断言、13.34s，日志 `/private/tmp/kite-workflow-question-original-get-loss-current-20261006.log`。replan/waive 各1 Answer POST、准确2原 GET、原完整 decision/detail、首GET物理丢回执记录与原Run completed保持；cancel零Answer POST、原Run cancelled且无原答案查询。三份 stages 的 tui-finally Exit 均0，所属 Service 消失断言保持。CLI typecheck、owned Biome与diff检查通过。UI生产输入未变，已有240/2008与当前 Source 窗口证据只复用其原范围；[手册](../handbook/clients/tui/guides/approvals-and-questions.md)、[UI owner](../../packages/ui/src/tui/README.md)与[CLI owner](../../apps/cli/README.md)核对后无行为或边界文档diff，不新建Note。
 
 Root自检支持本片两路径，新的独立只读排查仍受system thread limit限制。局部通过不追认第十轮失败，下一轮仍须当前原完整图。真实OS浏览器与原生Vault完整OAuth组合尚缺可实际访问的受控HTTPS MCP/AS，正在询问测试服务信息；现有loopback fixture、原生owned CRUD及CI双gate各保其范围，不假造CI authority。默认可信Shell与formal持续Soak、安装、其他平台、§35/适用T-E和正式旧路径退役仍未闭合；37partial、Goal active保持。iteration_complete/stage/commit ready仅限本片已验证消费者与进度，按既有授权本地提交，不扩大push/PR或吸收无关AGENTS。
+
+
+## 2026-10-06：权限配置消费者保留默认问题工具
+
+Workflow 消费者修正在本地提交 0bf4ae35bf57296b61bfbb6c8b1ea8f959df8eeb，正常七 hooks 通过、13.60s，日志 `/private/tmp/kite-workflow-question-phase-commit-20261006.log`、SHA `33f45d192c3ff2fa4043f8b08dad23b383384069643ac2329d0b80f4cf8d692c`。第十一轮原完整默认在该 HEAD、574文件/464主任务/并发4运行，实际 exit1；137主任务全部排空、136通过、permission-configuration失败，无 plan abort。已运行246文件，327任务未调度；3977 tracked regular SHA 与 Git 前后保持。日志 `/private/tmp/kite-current-default-eleventh-20261006.log`、SHA `08179534b92d1d9c407268c2aa1dc7d2e2bb41b3dde85e175f45542d2af40312`，同前缀 plan/inputs/result 保留；当前 Source mutation、Workflow Question 与 Session logs 主任务通过，不能拼为全图资格。
+
+准确失败在原旧 Run 配置断言：当前真实选择含默认 ask_user@1 与 files.write@2，原测试只期待 Files；后续 tools:[] 的零目录断言也与 [Service owner](../../apps/service/README.md) 的 merge-by-id 合同冲突。消费者现在明确核旧两项原定义、新 Run 仅默认 ask_user@1、Provider 准确 function/name，以及新 Run 零 Tool Execution。旧审批是否接纳仍由当前 programmatic Workspace trust 决定，保 original card revision、旧 Run 选择和文件效果断言；没有改权限或工具装配实现。两个邻接压缩零工具断言对应专门 summary Model，核对后保持原范围。
+
+当前原 isolated runTestJob/no-orphans 单并发整文件6pass/0fail/64断言、4.78s，日志 `/private/tmp/kite-permission-catalogue-current-20261006.log`；Service完整typecheck、owned Biome与diff检查通过。产品、默认工具 owner 与原权限收窄合同核对后无变化，不制造手册、owner或Note diff。Root自检，独立Agent仍受thread limit限制；iteration_complete/stage/commit ready仅限本片测试与进度两路径。第十一轮仍失败，后续需当前完整原图；真实原生stdin、受控HTTPS下OS浏览器/nativeVault OAuth组合、默认可信Shell、formal持续Soak、安装、其他平台、§35/适用T-E及正式旧路径退役仍未闭合。37partial、Goal active保持，本地阶段授权不扩大push/PR，无关AGENTS保持独立。

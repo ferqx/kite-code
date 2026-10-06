@@ -302,13 +302,27 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
       ).toBe(revoke);
       const oldRun = (await f.store.getView('s')).runs[0]!;
       expect(oldRun.configuration).toMatchObject({
-        tools: [{ id: 'files.write', version: '2', extensionId: 'builtin.files' }],
+        tools: [
+          { id: 'ask_user', version: '1', extensionId: 'builtin.ask-user' },
+          { id: 'files.write', version: '2', extensionId: 'builtin.files' },
+        ],
       });
       await f.run('new-work');
       await f.runtime.waitForCommand('new-work', { timeoutMs: 5000 });
       const request = f.requests.at(-1)!;
-      expect(request.tools ?? []).toHaveLength(0);
-      expect((await f.client.getView('s')).runs.at(-1)!.status).toBe('completed');
+      const tools = request.tools as { type: string; function: { name: string } }[];
+      expect(tools.map((tool) => ({ type: tool.type, name: tool.function.name }))).toEqual([
+        { type: 'function', name: 'ask_user' },
+      ]);
+      const view = await f.client.getView('s'),
+        newRun = view.runs.at(-1)!;
+      expect(newRun.status).toBe('completed');
+      expect(newRun.configuration).toMatchObject({
+        tools: [{ id: 'ask_user', version: '1', extensionId: 'builtin.ask-user' }],
+      });
+      expect(
+        view.executions.filter((row) => row.kind === 'tool' && row.runId === newRun.id),
+      ).toHaveLength(0);
     } finally {
       await f.close();
     }
