@@ -218,18 +218,22 @@ for (const mode of ['paired', 'shared'] as const)
       if (client) await seedModel(client, storeId);
       const runner = join(repo, 'apps/cli/test/fixtures/tui-preferences-runner.ts');
       const preferencePath = join(profile.profilePath, 'ui', 'preferences.jsonc');
+      const transcript = `/private/tmp/kite-tui-preferences-${mode}-${randomUUID()}.pty.log`;
       const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
-settings=${JSON.stringify(JSON.stringify({ root, dataRoot: profile.dataRoot, workspace, ...(mode === 'paired' ? { artifact } : { server: socket }) }))};pref=${JSON.stringify(preferencePath)};p=None;master=None;buffer=b'';all_output=b''
+settings=${JSON.stringify(JSON.stringify({ root, dataRoot: profile.dataRoot, workspace, ...(mode === 'paired' ? { artifact } : { server: socket }) }))};pref=${JSON.stringify(preferencePath)};p=None;master=None;buffer=b'';all_output=b'';window_output=b''
 def spawn():
- global p,master,buffer
- master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));env=dict(os.environ);env['TUI_PREFERENCES_SETTINGS']=settings;env['TERM']='xterm-256color';env['FORCE_COLOR']='3';p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b''
-def wait(text):
- global buffer,all_output
+ global p,master,buffer,window_output
+ master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));env=dict(os.environ);env['TUI_PREFERENCES_SETTINGS']=settings;env['TERM']='xterm-256color';env['FORCE_COLOR']='3';p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],env=env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';window_output=b''
+def current_frame():
+ text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
+ return frames[-1] if frames else text
+def wait(text,material=False):
+ global buffer,all_output,window_output
  end=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',window_output.decode(errors='replace') if material else current_frame())):
   if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-7000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:
-   data=os.read(master,65536);buffer+=data;all_output+=data
+   data=os.read(master,65536);buffer+=data;all_output+=data;window_output+=data
 def key(value):
  global buffer
  buffer=b'';os.write(master,value)
@@ -244,17 +248,18 @@ def close():
    except OSError:break
  p.wait(timeout=3);assert p.returncode==0;os.close(master);master=None
 try:
- spawn();wait('ORIGINAL English model body stays exact.');baseline=counts();key(b'/theme');wait('/theme');key(b'\\r');wait('[teal]');wait('Confirmed preferences');assert re.search(b'38;(?:2;78;201;176|5;115)m',buffer)
+ spawn();wait('ORIGINAL English model body stays exact.',material=True);baseline=counts();key(b'/theme');wait('/theme');key(b'\\r');wait('[teal]');wait('Confirmed preferences');assert re.search(b'38;(?:2;78;201;176|5;115)m',buffer)
  key(b'\\x1b[B');wait('> blue');key(b'\\r');wait('blue [blue] ✓');wait('Preference saved');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert json.load(open(pref))['colorPreset']=='blue'
- key(b'\\x1b');wait('ORIGINAL English model body stays exact.');key(b'/language');wait('/language');key(b'\\r');wait('Language');key(b'\\x1b[A');wait('> Simplified Chinese [zh-CN]');key(b'\\r');wait('偏好已保存');wait('简体中文 [zh-CN]');assert json.load(open(pref))['language']=='zh-CN'
- key(b'\\x1b');wait('会话 a');wait('ORIGINAL English model body stays exact.');assert counts()==baseline
+ key(b'\\x1b');wait('Session a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/language');wait('/language');key(b'\\r');wait('Language');key(b'\\x1b[A');wait('> Simplified Chinese [zh-CN]');key(b'\\r');wait('偏好已保存');wait('简体中文 [zh-CN]');assert json.load(open(pref))['language']=='zh-CN'
+ key(b'\\x1b');wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);assert counts()==baseline
  key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');os.rename(pref,pref+'.saved');os.mkdir(pref,0o700)
  key(b'\\x1b[B');wait('> purple');key(b'\\r');wait('tui_preferences_unavailable');wait('保留原值');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert counts()==baseline
  os.rmdir(pref);os.rename(pref+'.saved',pref);key(b'r');wait('blue [blue] ✓');key(b'\\x1b');wait('会话 a');close();assert counts()==baseline
- spawn();wait('会话 a');wait('ORIGINAL English model body stays exact.');key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer)
- key(b'\\x1b');wait('会话 a');key(b'/language');wait('/language');key(b'\\r');wait('语言');wait('简体中文 [zh-CN]');key(b'\\x1b');wait('ORIGINAL English model body stays exact.');close();assert counts()==baseline;assert json.load(open(pref))=={'colorPreset':'blue','language':'zh-CN'}
+ spawn();wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer)
+ key(b'\\x1b');wait('会话 a');key(b'/language');wait('/language');key(b'\\r');wait('语言');wait('简体中文 [zh-CN]');key(b'\\x1b');wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);close();assert counts()==baseline;assert json.load(open(pref))=={'colorPreset':'blue','language':'zh-CN'}
  print('PREFERENCES_ORIGINAL_COMPLETE')
 finally:
+ open(${JSON.stringify(transcript)},'wb').write(all_output)
  if p and p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  if master is not None:os.close(master)
 `;
@@ -266,6 +271,7 @@ finally:
       ]);
       if (exitCode) {
         console.error(out, err);
+        console.error('Preferences transcript:', transcript);
       }
       expect(exitCode).toBe(0);
       expect(out).toContain('PREFERENCES_ORIGINAL_COMPLETE');
