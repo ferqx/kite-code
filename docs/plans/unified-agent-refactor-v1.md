@@ -1908,14 +1908,13 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 
 已运行验收覆盖原公共 HTTP 的来源分类与局部状态、Main/IPC 准入和迟到读取、实际 DOM 的完整分页及切换/关闭；搬迁、删除构建源后的默认 Native 窗口验证了 306 项完整目录、不同 Workspace、冷重启和零 Run/Execution。当前原完整默认 598 文件/475 任务全部通过，正常类型/制品/文档/边界门禁保持；准确范围及原失败见[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)。当前负责说明见 [Desktop](../../apps/desktop/README.md)、[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)，设计理由另记 [Native Skills 决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。
 
-当前 Native 后台 Job 只读消费者的交付与证据见下节。按依赖保留四项退出缺口：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程、默认新 Job 输出生产及正式持续负载资格未闭合；正式 Native 跨会话后台总览尚未消费完整 Job/child/task 状态和原身份；支持范围的 §35/T/E、三平台与兼容制品资格齐全后才能最终退役旧路径。当前选中会话的有限投影和完整已保存输出不替代完整后台目录。不能以静态入口已切换、显式 Shell 生产端资格或原完整默认通过替代默认后端能力证据。
+当前 Native 后台 Job 输出、长会话当前投影及同原 Store 跨会话后台总览的交付与证据见下节。总览已迁移到公开完整目录，原父／child Run、非选中完整读取、准确停止和冷 GET 保持各自身份；恢复为新 Store 的旧来源条目仍须按兼容范围核验。按依赖保留三项退出缺口：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程、默认新 Job 输出生产及正式持续负载资格未闭合；支持范围的 §35/T/E、三平台与兼容制品／新链路数据资格齐全后才能最终退役旧路径。当前选中会话的有限投影不承担完整后台目录。不能以静态入口已切换、显式 Shell 生产端资格或原完整默认通过替代默认后端能力证据。
 
 | 依赖顺序与入口 | 完整行为和退出验收 |
 | --- | --- |
 | 1．正式 Native MCP 设置／真实 Chrome 登录 | 人工接管自有HTTPS证书提示后，完成四项固定Auth、默认OS Vault及原身份冷查回；真实浏览器、凭据和所属进程证据分别保持。 |
 | 2．默认 CLI/TUI/Native 的普通开发Shell／Job | 装配具普通开发FS/network边界且可靠监管全部子树的后端；实际默认新producer、完整保存输出、准确停止与empty证明、宿主退出及持续负载资格齐全，不以PGID或deny-fork替代。 |
-| 3．正式 Native 跨会话后台总览 | 公共完整目录保全Job/child/task与原Session/Execution身份，选择其他会话仍可观察；实际分页、原输出／状态、切换与冷读、明确原目标控制闭合，有限getView不证明目录完整。 |
-| 4．正式制品切换与旧路径退役 | 支持范围的完整§35与适用T/E、三平台、兼容制品／数据和回退分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径。 |
+| 3．正式制品切换与旧路径退役 | 支持范围的完整§35与适用T/E、三平台、兼容制品／新链路数据和回退分别取得真实证据；恢复为新Store的旧来源后台目录与完整详情须另核，再验证正式调用者独立并最终退役历史旧路径。 |
 
 ### 30.2.2 当前 Native Job 完整已保存输出消费者
 
@@ -1933,7 +1932,15 @@ renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断�
 
 公开 Runtime/HTTP/Client 的真实有限回归先创建一个原 detached Job，再完成205轮模型执行并保持第206轮派发中；原 first200 查询实际遗漏当前 Run，修复后公开视图与便携 Desktop controller 同时保原 Run/Model/Job。准确取消当前 Run后旧 Job仍running，原调用计数、Job启动数和只读游标保持。当前有限7文件38pass/549assert/0，正常Root及八workspace类型、八workspace构建、API和依赖边界通过；未参与实现的新 Agent 对本次 SQL/测试及消费者进行独立只读审查，未发现必要修改。首次原完整默认603文件/477任务真实失败于Provider fixture观测抢占，原红保留；仅5行实际模型读取同步后，原Provider1pass/190assert/0与独立审查通过，生产读取和原断言／期限保持。第二次原完整图603文件/477任务全部通过，actualexit0/drain848.510s，4055regular与Git前后一致；新增长会话和原Provider／Native输出均在该完整图中通过，准确范围见进度。
 
-这次修复解决完整当前工作显示的已证实前置错误，没有新增完整 Run/Execution 历史分页或跨会话后台目录，实际验收也不外推真实 Electron/PTY、冷恢复或三平台窗口。正式 Native 仍从当前选中会话的 `selection.executions` 显示执行；跨会话后台总览须有完整公共目录、原身份的新鲜观察及准确控制入口，不能从逐会话有限 `getView` 拼成完整资格。负责合同见[Store owner](../../packages/agent/src/storage/README.md#当前会话视图)，持久取舍见[当前工作决定](../../.agents/notes/implemented/bug-fix/2026-10-07-current-session-view-keeps-unsettled-work.md)，准确执行与剩余四项退出缺口见[进度](unified-agent-refactor-v1-progress.md#2026-10-07长会话当前工作投影)。
+这次修复解决完整当前工作显示的已证实前置错误，没有新增完整 Run/Execution 历史分页或跨会话后台目录，实际验收也不外推真实 Electron/PTY、冷恢复或三平台窗口。本片完成时正式 Native 仍从当前选中会话的 `selection.executions` 显示执行；后续[完整后台总览](#3024-正式-native-跨会话后台总览实施边界)使用独立公开目录与原身份门禁，不能从逐会话有限 `getView` 拼成完整资格。负责合同见[Store owner](../../packages/agent/src/storage/README.md#当前会话视图)，持久取舍见[当前工作决定](../../.agents/notes/implemented/bug-fix/2026-10-07-current-session-view-keeps-unsettled-work.md)，准确执行与当时四项退出缺口见[进度](unified-agent-refactor-v1-progress.md#2026-10-07长会话当前工作投影)。
+
+### 30.2.4 正式 Native 跨会话后台总览实施边界
+
+当前同原 Store 消费者已实施，以此前 §30.2.1 的第三项完整用户入口为交付单位：公开目录覆盖属于原主体根会话树且来源为当前 Store 的全部 Job，包括 child/task carrier 与子会话中的 Job；按持久 Execution rowid 固定上界，跨页观察水位变化时整份重读。目录保留原 Store、会话／根／工作区、执行来源与父子关系，原父 Run、准确 child Run 和结果接纳分别显示，有限 getView 不作为完整目录来源。
+
+实施按公共 Store／Runtime／HTTP／Client 目录、Main 的独立总览观察与原读取／取消门禁、正式 renderer 总览顺序整合。Main 只接受已登记观察中的准确对象，停止前新鲜核原对象并复用既有 durable caller；普通 caller 的选中根作用域不放宽。完整保存输出复用既有固定 H 覆盖，child 日志核原 carrier／父链与根血缘、固定消息上界并读取完整原 Model 正文。选择变化不取消后台执行；close/reset/断线只释放所属 GET。
+
+必要验收覆盖超过单页及200条历史的完整目录、主体和血缘过滤、跨页变更重读、非选中原输出与子日志、多个原任务的准确单目标停止和冷重新打开零启动／零重放。有限8文件37pass/283assert/0；实际搬迁并删除构建源的默认 Native 窗口1pass/18条Bun断言及driver断言通过，252000B完整子正文、原父 waiting_execution、H=1准确task进度、一次原停止／其他任务继续、冷Provider9／cursor150／全部Run和Execution保持、两Service普通退出均实际核对。未参与实现的新Agent独立只读审查无必要修改。当前原完整默认608文件/482任务全部通过，actual0/drain861.018s、4068regular/Git前后一致；最新窗口45879ms通过，正常类型/八workspace构建和强制门禁保持。准确版本、失败保留和最终结果归[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-跨会话后台总览)。恢复为新Store的旧来源条目仍待兼容消费者核验；默认可信Shell producer、真实Auth、支持范围三平台／§35/T/E与旧路径最终退役保持未完成，37能力仍partial、wholeV13=false。当前合同见[Native owner](../../apps/desktop/README.md#native-跨会话后台总览)，取舍见[implemented决定](../../.agents/notes/implemented/architecture/2026-10-07-native-background-overview.md)。
 
 ### 30.3 第一条执行闭环
 

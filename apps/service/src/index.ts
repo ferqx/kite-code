@@ -445,6 +445,8 @@ export async function startService(options: ServiceOptions) {
                       ? 404
                       : [
                             'cursor_ahead',
+                            'directory_changed',
+                            'directory_identity_conflict',
                             'configuration_conflict',
                             'configuration_read_set_conflict',
                             'host_mutation_conflict',
@@ -1276,6 +1278,23 @@ export async function startService(options: ServiceOptions) {
       options.maxBodyBytes ?? 1024 * 1024,
     );
     return context.json(schemas.Workspace.parse(await runtime.createWorkspace(request)), 201);
+  });
+  app.get('/v1/background-executions', async (context) => {
+    const parsed = apiSchemas.BackgroundExecutionQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(context.req.queries()).map(([key, values]) => [
+          key,
+          values.length === 1 ? values[0] : values,
+        ]),
+      ),
+    );
+    if (!parsed.success) throw new HttpFailure('invalid_request', 400);
+    const { storeId, ...page } = parsed.data;
+    return context.json(
+      apiSchemas.BackgroundExecutionPage.parse(
+        await runtime.listBackgroundExecutions({ expectedStoreId: storeId, subjectId, ...page }),
+      ),
+    );
   });
   app.get('/v1/workspace-directory', async (context) => {
     const parsed = apiSchemas.WorkspaceDirectoryQuery.safeParse(

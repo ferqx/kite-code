@@ -186,3 +186,7 @@ both 的 Fork 还要求当前 `codeProof` 与实际新读 `currentDetail`：clos
 Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettings({expectedStoreId,commandId,expectedReadSet,operation,secret?})` 属于同一可选管理能力。SDK 保留并核原 provider marker、operation/readSet 和两个介质的 receipt；只发送一次 POST，未知只允许原 `getHostMutation`。公开 receipt 的 `opaqueRef` 仅在凭据已存时出现，可用于准确 revoke；Native renderer 投影不取得它。`canonicalConfigurationRequest(kind,input)` 是非秘密本地原意图 codec，不提供权限或网络操作，Provider journal 禁止 secret。
 
 `startRun/followUp` 的可选 `reasoningEffort` 使用生成的七值闭集；它是本次原命令语义并参与 canonical 摘要。`steer` 仍拒绝模型或 effort 字段，SDK 不代客户端选择路由。远端支持由 Service 投影和实际模型请求确认。
+
+## 完整后台执行目录
+
+`listBackgroundExecutions({storeId,workspaceId?,rootSessionId?,executionId?,afterSeq?,upperSeq?,snapshotCursor?,limit?})` 读取公开 `/v1/background-executions` 的原 Job 目录。`listAllBackgroundExecutions({workspaceId?,rootSessionId?,signal?})` 冻结原连接 generation/Store，读取所有固定 Decimal64 upper 页面，并沿同一 snapshotCursor 核对；`directory_changed` 时丢弃整个前缀重新扫描，AbortSignal 可结束读取，无累计页数上限。返回 `BackgroundExecutionItem[]`，核当前 Store 的原来源、实际 Session/root/Workspace、父 Run 与精确 child-start Run；重复身份、错序、作用域和绑定冲突均拒绝完整结果。目录不包含 input/result/config/reference 正文，读取不发送 POST或推进ACK。[有限 Client 测试](test/background-directory.test.ts)覆盖重扫与完整身份反例；[真实 HTTP/Store](../../tests/isolated/unified-agent/background-directory.test.ts)覆盖超200原 Job与后代。

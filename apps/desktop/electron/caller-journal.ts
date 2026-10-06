@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   type AgentClient,
+  type BackgroundExecutionItem,
   type CallerCommandRequest,
   type Command,
   canonicalCallerCommandRequest,
@@ -136,7 +137,51 @@ export class NativeCallerJournal {
   records() {
     return this.data.callers();
   }
-  async prepare(sessionId: string, raw: CallerCommandRequest, draft?: NativeCallerIntent['draft']) {
+  prepare(sessionId: string, raw: CallerCommandRequest, draft?: NativeCallerIntent['draft']) {
+    return this.prepareIntent(sessionId, raw, draft);
+  }
+  /** Main supplies an authenticated original directory item; renderer cannot name a child Session. */
+  async prepareBackgroundStop(item: BackgroundExecutionItem, commandId: string) {
+    const storeId = this.client.serverInfo?.storeId,
+      subjectId = this.client.serverInfo?.subjectId;
+    const root = await this.client.getView(item.rootSession.id),
+      source = await this.client.getCommand(item.execution.originCommandId);
+    if (
+      !storeId ||
+      !subjectId ||
+      item.execution.kind !== 'job' ||
+      item.execution.originStoreId !== storeId ||
+      item.execution.sessionId !== item.session.id ||
+      root.storeId !== storeId ||
+      root.session.id !== item.rootSession.id ||
+      root.session.parentSessionId !== null ||
+      root.session.deletedAt !== null ||
+      root.session.workspaceId !== item.session.workspaceId ||
+      item.session.rootSessionId !== root.session.id ||
+      source.id !== item.execution.originCommandId ||
+      source.sessionId !== item.session.id ||
+      source.originStoreId !== storeId ||
+      source.subjectId !== subjectId
+    )
+      throw Error('caller_scope_unavailable');
+    return this.prepareIntent(
+      item.session.id,
+      {
+        kind: 'execution.cancel',
+        expectedStoreId: storeId,
+        commandId,
+        executionId: item.execution.id,
+      },
+      undefined,
+      root.session.id,
+    );
+  }
+  private async prepareIntent(
+    sessionId: string,
+    raw: CallerCommandRequest,
+    draft?: NativeCallerIntent['draft'],
+    backgroundRoot?: string,
+  ) {
     const canonical = canonicalCallerCommandRequest(raw),
       request = JSON.parse(JSON.stringify(raw)) as CallerCommandRequest;
     const view = await this.client.getView(sessionId),
@@ -149,7 +194,8 @@ export class NativeCallerJournal {
     if (
       view.storeId !== scope.storeId ||
       view.session.id !== sessionId ||
-      view.session.parentSessionId !== null ||
+      (view.session.parentSessionId !== null &&
+        (request.kind !== 'execution.cancel' || view.session.rootSessionId !== backgroundRoot)) ||
       view.session.deletedAt !== null ||
       this.client.serverInfo?.storeId !== scope.storeId ||
       !subjectId

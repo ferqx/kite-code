@@ -2086,6 +2086,113 @@ export class AgentClient {
       { signal: options.signal },
     );
   }
+  async listBackgroundExecutions(
+    input: import('./generated/api').BackgroundExecutionQuery,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('sessions');
+    const generation = this.connectionGeneration,
+      frozen = structuredClone(input);
+    validateRequest('BackgroundExecutionQuery', frozen);
+    if (this.serverInfo?.storeId !== frozen.storeId)
+      throw new ClientError('directory_identity_conflict');
+    const query = new URLSearchParams(
+      Object.entries(frozen)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const page = await this.fetchJSON(
+      `/v1/background-executions?${query}`,
+      'BackgroundExecutionPage',
+      options,
+    );
+    this.requireConnection();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    validateDirectoryPage(page, frozen.storeId, frozen);
+    if (frozen.snapshotCursor !== undefined && frozen.snapshotCursor !== page.snapshotCursor)
+      throw new ClientError('directory_identity_conflict');
+    const seen = new Set<string>();
+    for (const item of page.items) {
+      const { execution: e, session: s, rootSession: r, run, childRun, childSession: child } = item;
+      if (
+        seen.has(e.id) ||
+        e.originStoreId !== frozen.storeId ||
+        e.sessionId !== s.id ||
+        e.rootSessionId !== r.id ||
+        s.rootSessionId !== r.id ||
+        r.rootSessionId !== r.id ||
+        r.parentSessionId !== null ||
+        r.deletedAt !== null ||
+        s.workspaceId !== r.workspaceId ||
+        (frozen.workspaceId !== undefined && r.workspaceId !== frozen.workspaceId) ||
+        (frozen.rootSessionId !== undefined && r.id !== frozen.rootSessionId) ||
+        (frozen.executionId !== undefined && e.id !== frozen.executionId) ||
+        (e.runId !== null && run?.id !== e.runId) ||
+        (run &&
+          (run.sessionId !== s.id ||
+            run.originStoreId !== e.originStoreId ||
+            run.rootWorkCommandId !== e.rootWorkCommandId ||
+            run.rootWorkSeq !== e.rootWorkSeq)) ||
+        (e.childSessionId === null
+          ? child !== null || childRun !== null
+          : child?.id !== e.childSessionId) ||
+        (child &&
+          (child.parentSessionId !== s.id ||
+            child.rootSessionId !== r.id ||
+            child.workspaceId !== s.workspaceId)) ||
+        (childRun &&
+          (childRun.sessionId !== child?.id ||
+            childRun.originCommandId !== `child-start-${e.id}` ||
+            childRun.originStoreId !== e.originStoreId ||
+            childRun.rootWorkCommandId !== e.rootWorkCommandId ||
+            childRun.rootWorkSeq !== e.rootWorkSeq))
+      )
+        throw new ClientError('directory_identity_conflict');
+      seen.add(e.id);
+    }
+    return page;
+  }
+  async listAllBackgroundExecutions(
+    options: { workspaceId?: string; rootSessionId?: string; signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('sessions');
+    const storeId = this.serverInfo!.storeId!,
+      generation = this.connectionGeneration;
+    const workspaceId = options.workspaceId,
+      rootSessionId = options.rootSessionId,
+      signal = options.signal;
+    for (;;) {
+      const items: import('./generated/api').BackgroundExecutionItem[] = [],
+        seen = new Set<string>();
+      let afterSeq: string | undefined,
+        upperSeq: string | undefined,
+        snapshotCursor: string | undefined;
+      try {
+        for (;;) {
+          signal?.throwIfAborted();
+          if (generation !== this.connectionGeneration || this.serverInfo?.storeId !== storeId)
+            throw new ClientError('connection_superseded');
+          const page = await this.listBackgroundExecutions(
+            { storeId, workspaceId, rootSessionId, afterSeq, upperSeq, snapshotCursor, limit: 200 },
+            { signal },
+          );
+          signal?.throwIfAborted();
+          upperSeq ??= page.upperSeq;
+          snapshotCursor ??= page.snapshotCursor;
+          for (const item of page.items) {
+            if (seen.has(item.execution.id)) throw new ClientError('directory_identity_conflict');
+            seen.add(item.execution.id);
+            items.push(item);
+          }
+          if (page.nextAfterSeq === null) return items;
+          afterSeq = page.nextAfterSeq;
+        }
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (!(error instanceof ClientError) || error.code !== 'directory_changed') throw error;
+      }
+    }
+  }
   async listWorkspaceDirectory(
     input: import('./generated/api').WorkspaceDirectoryQuery,
     options: { signal?: AbortSignal } = {},

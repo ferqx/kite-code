@@ -1310,6 +1310,73 @@ export const SessionDirectoryPageSchema = z.object({
   ...directoryHeader,
   items: z.array(z.object({ seq: sequence, session: schemas.Session })).max(200),
 });
+export const BackgroundExecutionQuerySchema = SessionDirectoryQuerySchema.extend({
+  rootSessionId: id.optional(),
+  executionId: id.optional(),
+  snapshotCursor: sequence.optional(),
+});
+const backgroundRun = z.strictObject({
+  id,
+  sessionId: id,
+  originCommandId: id,
+  originStoreId: id,
+  rootWorkCommandId: id,
+  rootWorkSeq: sequence,
+  contextSelectionId: id,
+  waitingForResults: z.array(id),
+  status: runStatus,
+  isActive: z.boolean(),
+  createdAt: z.number(),
+  deadlineAt: z.number().nullable(),
+  finishedAt: z.number().nullable(),
+  reason: z.string().nullable(),
+});
+const backgroundExecution = z.strictObject({
+  id,
+  sessionId: id,
+  rootSessionId: id,
+  runId: id.nullable(),
+  originCommandId: id,
+  originStoreId: id,
+  rootWorkCommandId: id,
+  rootWorkSeq: sequence,
+  parentExecutionId: id.nullable(),
+  childSessionId: id.nullable(),
+  cancelWithParent: z.boolean(),
+  stepId: z.string(),
+  callId: z.string(),
+  attempt: z.number().int().min(1),
+  kind: z.literal('job'),
+  definitionId: z.string(),
+  definitionVersion: z.string(),
+  status: executionStatus,
+  ownerGeneration: sequence,
+  cancelRequested: z.boolean(),
+  cancelRequestedAt: z.number().nullable(),
+  resultRevision: sequence,
+  delivery: z.enum(['pending', 'consumed', 'suppressed']).nullable(),
+  deliveryReason: z.string().nullable(),
+  deliveryTargetSessionId: id.nullable(),
+  contextSelectionId: id.nullable(),
+});
+const backgroundSession = schemas.Session.extend({
+  rootSessionId: id,
+  ownerInstanceId: id.nullable(),
+  ownerGeneration: sequence,
+}).strict();
+export const BackgroundExecutionItemSchema = z.strictObject({
+  seq: sequence,
+  execution: backgroundExecution,
+  session: backgroundSession,
+  rootSession: backgroundSession,
+  run: backgroundRun.nullable(),
+  childRun: backgroundRun.nullable(),
+  childSession: backgroundSession.nullable(),
+});
+export const BackgroundExecutionPageSchema = z.strictObject({
+  ...directoryHeader,
+  items: z.array(BackgroundExecutionItemSchema).max(200),
+});
 export const BrowserWorkspaceDirectoryPageSchema = z.object({
   ...directoryHeader,
   items: z
@@ -1427,6 +1494,9 @@ export const apiSchemas = {
   HostStatusQuery: HostStatusQuerySchema,
   HostStatus: HostStatusSchema,
   ...schemas,
+  BackgroundExecutionQuery: BackgroundExecutionQuerySchema,
+  BackgroundExecutionItem: BackgroundExecutionItemSchema,
+  BackgroundExecutionPage: BackgroundExecutionPageSchema,
   WorkspaceDirectoryQuery: WorkspaceDirectoryQuerySchema,
   SessionDirectoryQuery: SessionDirectoryQuerySchema,
   BrowserWorkspaceDirectoryQuery: BrowserWorkspaceDirectoryQuerySchema,
@@ -1520,6 +1590,12 @@ export const apiRoutes = [
     path: '/v1/sessions/{id}/export/verify',
     query: 'VerifySessionExportQuery',
     response: 'SessionExportCompletion',
+  },
+  {
+    method: 'get',
+    path: '/v1/background-executions',
+    query: 'BackgroundExecutionQuery',
+    response: 'BackgroundExecutionPage',
   },
   {
     method: 'get',

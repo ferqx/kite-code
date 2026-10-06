@@ -478,6 +478,17 @@ export interface Store {
     input: WriteContext & { id: string; rootUri: string; name: string },
   ): Promise<WorkspaceRecord>;
   getWorkspace(id: string): Promise<WorkspaceRecord | null>;
+  listBackgroundExecutions(input: {
+    expectedStoreId: string;
+    subjectId: string;
+    workspaceId?: string;
+    rootSessionId?: string;
+    executionId?: string;
+    afterSeq?: string;
+    upperSeq?: string;
+    snapshotCursor?: string;
+    limit?: number;
+  }): Promise<import('./types').BackgroundExecutionPage>;
   listWorkspaceDirectory(input: {
     expectedStoreId: string;
     afterSeq?: string;

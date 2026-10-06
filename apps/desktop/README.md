@@ -1,5 +1,17 @@
 # Desktop 与 Native 制品
 
+## Native 跨会话后台总览
+
+正式 renderer 的[后台总览](src/native-background-panel.tsx)是独立于选中会话的主动入口。它读取原主体根会话树内全部同原 Store 的 Job、child/task carrier 与子会话中的 Job，超过200项仍穷尽全部页，不从有限 `selection.executions` 猜完整集合。每项分别显示原父 Run、准确 `child-start-${executionId}` 子 Run、required 等待与 delivery；较新的子 Run 不替换原载体。公共来源与快照合同由[Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录)、[Service](../service/README.md#完整后台执行目录)和[Client](../../packages/client/README.md#完整后台执行目录)维护。
+
+[Main](electron/background.ts)固定 attach generation、Store、subject，先完整核公开目录再登记 immutable lineage 的 observation。512KiB/最多200项的有限 [IPC](electron/native-ipc.ts)只接 read ID、已观察 execution ID、observation ID 与准确停止 command ID；renderer 无法提供 Session、Workspace、路径、游标或 Runtime authority。[完整目录 reader](src/native-background.ts)只有穷尽同一观察才发布；新读取失败保留同 scope 上次完整显示，但新观察使旧停止 authority 失效。选择变化不清后台观察；断线、观察 reset、attach 替换和释放清所属读取及停止资格。
+
+非选中原输出复用[固定 H reader](electron/job-output-reads.ts)与公共覆盖证明；原目录刷新不重开已经完整的输出。子日志逐页读原子会话固定消息上界，核载体／父链与根血缘，并读取完整原 ModelOutput；64KiB传输核完整EOF、SHA和fatal UTF-8。原载体的子 Run 与日志中后来轮次保持各自身份。关闭详情或总览只 abort 所属 GET，零取消或恢复。当前 reader 限同原 Store；恢复为新 Store 的旧来源条目和对应输出仍待兼容迁移资格，不据此缩小手册的历史读取承诺。
+
+准确停止在 Main 重新核原身份、活动状态、attempt/owner generation/result revision 后，经[原 caller journal](electron/caller-journal.ts)保存准确实际 Session/Workspace 的 `execution.cancel`。内部后台 prepare 只接已观察对象并另核根与原主体来源；普通选中根 caller 门禁保持。既有／冷原意图仍只 GET，受理不冒充实际停止。
+
+[Main/IPC 与原 journal 测试](test/native-background.test.ts)、[实际 DOM](test/native-background-panel.test.tsx)、[公共分页测试](../../packages/client/test/background-directory.test.ts)与[真实 Store/Runtime/HTTP](../../tests/isolated/unified-agent/background-directory.test.ts)核完整目录、原轮次、完整原输出／子日志、精确停止和迟到释放。[源码外默认窗口](test/isolated/native-background-bundle.test.ts)与[Electron driver](test/native-background-electron.fixture.ts)核真实默认 task、同父 required 等待、非选中日志、单目标停止及冷 GET。实际结果与剩余资格见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)；当前源码接入不单独证明默认可信 Shell、恢复兼容或全部平台，持久取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-07-native-background-overview.md)。
+
 ## Native Job 完整已保存输出
 
 正式 Native 的 Runtime logs「已保存执行」中，准确 kind=job 的详情提供主动读取、显式刷新和关闭。[页面](src/native-job-output-panel.tsx)保留全部已保存 stdout/stderr/progress、原序号区间与准确 droppedBytes；null 表示该剪裁区间的丢失字节数无法确定。完整是截至首次固定 H 的全部保存内容与缺口事实，不恢复已丢字节，也不表示 Job 成功或实际停止。新输出只在显式刷新后进入新的观察。

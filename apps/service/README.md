@@ -474,3 +474,7 @@ Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 C
 
 
 [Native MCP 测试装配](test/native-mcp-process.fixture.ts)仅由 Terminal builder 的固定 `native-mcp-loopback` 选项在构建前写入，网络选项和可选公开测试证书均进入 inventory/digest；普通 main/daemon 不选择它。该候选保默认权限、默认 OS vault 和系统 opener，但 loopback/证书网络不是生产默认资格。实际窗口及人工浏览器资格的入口和限制归 [Desktop owner](../desktop/README.md#native-mcp-完整设置)。
+
+## 完整后台执行目录
+
+公开只读 `GET /v1/background-executions` 使用 closed 查询和有限 `BackgroundExecutionPage`：subject 仅由当前宿主准入填入，Store必须一致；root所有权、未删除状态、Workspace/root/Execution过滤由Store在分页前核对。完整 Job目录包含 child/task carrier及其后代，`snapshotCursor`冲突返回409 `directory_changed`，不产生新Command或业务效果。正文和输出沿原接口按需读取；Browser gateway未增加控制或目录准入。原身份、父/child Run和分页契约见[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)，实际协议见[测试](../../tests/isolated/unified-agent/background-directory.test.ts)。

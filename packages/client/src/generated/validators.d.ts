@@ -18,6 +18,7 @@ export declare function response_SessionExportTextPage(value: unknown): boolean;
 export declare function response_SessionExportCompletion(value: unknown): boolean;
 export declare function response_WorkspaceDirectoryPage(value: unknown): boolean;
 export declare function response_SessionDirectoryPage(value: unknown): boolean;
+export declare function response_BackgroundExecutionPage(value: unknown): boolean;
 export declare function response_BrowserWorkspaceDirectoryPage(value: unknown): boolean;
 export declare function response_PermissionModeState(value: unknown): boolean;
 export declare function response_WorkspaceTrustState(value: unknown): boolean;
@@ -92,6 +93,7 @@ export declare function request_BrowserSessionExportTextQuery(value: unknown): b
 export declare function request_BrowserVerifySessionExportQuery(value: unknown): boolean;
 export declare function request_WorkspaceDirectoryQuery(value: unknown): boolean;
 export declare function request_SessionDirectoryQuery(value: unknown): boolean;
+export declare function request_BackgroundExecutionQuery(value: unknown): boolean;
 export declare function request_BrowserWorkspaceDirectoryQuery(value: unknown): boolean;
 export declare function request_BrowserSessionDirectoryQuery(value: unknown): boolean;
 export declare function request_PermissionControlQuery(value: unknown): boolean;
@@ -145,6 +147,7 @@ export declare const responseValidators: {
   SessionExportCompletion: (value: unknown) => boolean;
   WorkspaceDirectoryPage: (value: unknown) => boolean;
   SessionDirectoryPage: (value: unknown) => boolean;
+  BackgroundExecutionPage: (value: unknown) => boolean;
   BrowserWorkspaceDirectoryPage: (value: unknown) => boolean;
   PermissionModeState: (value: unknown) => boolean;
   WorkspaceTrustState: (value: unknown) => boolean;
@@ -221,6 +224,7 @@ export declare const requestValidators: {
   BrowserVerifySessionExportQuery: (value: unknown) => boolean;
   WorkspaceDirectoryQuery: (value: unknown) => boolean;
   SessionDirectoryQuery: (value: unknown) => boolean;
+  BackgroundExecutionQuery: (value: unknown) => boolean;
   BrowserWorkspaceDirectoryQuery: (value: unknown) => boolean;
   BrowserSessionDirectoryQuery: (value: unknown) => boolean;
   PermissionControlQuery: (value: unknown) => boolean;

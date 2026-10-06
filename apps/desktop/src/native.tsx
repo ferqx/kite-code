@@ -12,6 +12,7 @@ import {
 } from '@kite-ai/ui';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { NativeBackgroundPanel } from './native-background-panel';
 import type { NativeDraft, NativeGrantFacts, NativeResult, NativeState } from './native-bridge';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
@@ -34,7 +35,11 @@ import { NativeSkillsSettings } from './native-skills-settings';
 export function NativeDesktop() {
   const bridge = window.kiteNative;
   const [state, setState] = useState<NativeState>();
-  const [directory, setDirectory] = useState<{ workspaces: Workspace[]; sessions: Session[] }>();
+  const [directory, setDirectory] = useState<{
+    storeId: string;
+    workspaces: Workspace[];
+    sessions: Session[];
+  }>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [historyState, setHistoryState] = useState<HistoryState>({
     messages: [],
@@ -591,6 +596,15 @@ export function NativeDesktop() {
           </button>
         ))}
       </section>
+      {state && directory && (
+        <NativeBackgroundPanel
+          bridge={bridge}
+          generation={state.generation}
+          storeId={directory.storeId}
+          unavailable={state.backgroundUnavailable ?? false}
+          onChanged={refresh}
+        />
+      )}
       {selection && state && (
         <section aria-label="当前会话">
           <h2>{selection.session.title}</h2>

@@ -18,16 +18,19 @@ type Lease = {
 export class NativeJobOutputReads {
   private readonly leases = new Map<string, Lease>();
   private readonly client: AgentClient;
-  private readonly current: (executionId: string) => NativeJobOutputScope | undefined;
+  private readonly current: (
+    executionId: string,
+    readId: string,
+  ) => NativeJobOutputScope | undefined;
   constructor(
     client: AgentClient,
-    current: (executionId: string) => NativeJobOutputScope | undefined,
+    current: (executionId: string, readId: string) => NativeJobOutputScope | undefined,
   ) {
     this.client = client;
     this.current = current;
   }
   private check(lease: Lease) {
-    const now = this.current(lease.scope.executionId);
+    const now = this.current(lease.scope.executionId, lease.readId);
     if (
       this.leases.get(lease.readId) !== lease ||
       lease.abort.signal.aborted ||
@@ -45,7 +48,7 @@ export class NativeJobOutputReads {
     viewSelection: number;
     historyEpoch: number;
   }): Promise<NativeJobOutputPage> {
-    const scope = this.current(input.executionId);
+    const scope = this.current(input.executionId, input.readId);
     if (
       !scope ||
       scope.viewSelection !== input.viewSelection ||

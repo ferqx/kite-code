@@ -11,6 +11,7 @@ export async function readNativeJobOutput(input: {
   scope: NativeJobOutputScope;
   signal: AbortSignal;
   isCurrent: () => boolean;
+  background?: boolean;
 }): Promise<ExecutionOutputPage> {
   const scope = { ...input.scope },
     readId = crypto.randomUUID();
@@ -20,7 +21,11 @@ export async function readNativeJobOutput(input: {
     if (closed) return;
     closed = true;
     void input.bridge
-      .request({ method: 'jobOutput.close', generation: scope.generation, readId })
+      .request({
+        method: input.background ? 'background.output.close' : 'jobOutput.close',
+        generation: scope.generation,
+        readId,
+      })
       .catch(() => undefined);
   };
   const check = () => {
@@ -42,15 +47,27 @@ export async function readNativeJobOutput(input: {
       const result = await Promise.race([
         input.bridge.request(
           pages
-            ? { method: 'jobOutput.next', generation: scope.generation, readId }
-            : {
-                method: 'jobOutput.open',
+            ? {
+                method: input.background ? 'background.output.next' : 'jobOutput.next',
                 generation: scope.generation,
                 readId,
-                viewSelection: scope.viewSelection,
-                historyEpoch: scope.historyEpoch,
-                executionId: scope.executionId,
-              },
+              }
+            : input.background
+              ? {
+                  method: 'background.output.open',
+                  generation: scope.generation,
+                  readId,
+                  observationId: scope.viewSelection,
+                  executionId: scope.executionId,
+                }
+              : {
+                  method: 'jobOutput.open',
+                  generation: scope.generation,
+                  readId,
+                  viewSelection: scope.viewSelection,
+                  historyEpoch: scope.historyEpoch,
+                  executionId: scope.executionId,
+                },
         ),
         cancelled,
       ]);

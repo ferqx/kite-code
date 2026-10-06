@@ -40,6 +40,10 @@ MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
 
+完整后台目录沿公开 `BackgroundExecutionPage` 投影同原 Store、原主体根会话树与准确来源 Command；实际 parent 链、Workspace/root 血缘在分页前核实，私有 input/result/configuration 不进入 DTO。固定 Execution 分配上界与同一 Store change cursor，跨页变化整份重读，有限 `getView` 不承担完整目录。原父 Run 从实际执行父链定位，准确 child Run 从原 child-start Command 定位，不能改投当前 active Run。
+
+Native [后台 Main](../../apps/desktop/electron/background.ts)登记完整公开观察，独立于选中会话；有限 IPC 只指定已观察原执行。停止前 fresh 核同原身份／代次／状态，内部 [caller prepare](../../apps/desktop/electron/caller-journal.ts)只为准确 `execution.cancel` 保存实际后代 Session、根、原主体和 Workspace，普通选中根门禁及冷 GET-only 合同保持。完整原输出复用固定 H，子日志核原载体和固定消息上界／完整 ModelOutput。close/reset只释放 GET，原 Task/Run/Job 的业务状态由 Service/Core 决定；当前源 Store与恢复为新Store的兼容范围分别按[owner](../../apps/desktop/README.md#native-跨会话后台总览)和[实施进度](../plans/unified-agent-refactor-v1-progress.md)核验。
+
 Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `SkillCataloguePage`。Main 从实际选中 Session 固定 Workspace/Store 与视图代次，open 核原选择/观察代次后立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，不传路径、正文或授权；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
 
 [本实例生命周期](../../packages/agent/src/lifecycle.README.md)以同步真实 busy 检查与封门实现 if_idle；status 采样不授权稍后的关闭。已受理准备、owner 接管、后台 operation 和未完成 cleanup 参与同一边界，重复关闭共用完成 Promise。只收束本实例真实拥有的工作，不因保存 command ID 就取消另一 Service 已接管的命令。普通 GET 不算执行 busy，但最终 Store 关闭等待原读取资源排空；Service 的窄 beforeResourceClose 回调先封最后业务资源入口再排空。未确认停止或清理失败保留原资源、profile 锁及诊断 HTTP，状态为 drain_failed，不伪造 completed。

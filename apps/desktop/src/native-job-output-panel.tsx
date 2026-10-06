@@ -10,23 +10,27 @@ const safeError = (cause: unknown) => {
     : 'job_output_unavailable';
 };
 
-export function NativeJobOutputPanel({
-  bridge,
-  generation,
-  selection,
-  historyEpoch,
-  executionId,
-}: {
-  bridge: NativeBridge;
-  generation: number;
-  selection: NativeSelection;
-  historyEpoch: number;
-  executionId: string;
-}) {
-  const storeId = selection.storeId,
-    sessionId = selection.session.id,
-    workspaceId = selection.session.workspaceId,
-    viewSelection = selection.viewSelection ?? 0;
+export function NativeJobOutputPanel(
+  props: {
+    bridge: NativeBridge;
+    generation: number;
+    executionId: string;
+  } & (
+    | { selection: NativeSelection; historyEpoch: number }
+    | { backgroundScope: NativeJobOutputScope }
+  ),
+) {
+  const { bridge, generation, executionId } = props;
+  const background = 'backgroundScope' in props;
+  const storeId = background ? props.backgroundScope.storeId : props.selection.storeId,
+    sessionId = background ? props.backgroundScope.sessionId : props.selection.session.id,
+    workspaceId = background
+      ? props.backgroundScope.workspaceId
+      : props.selection.session.workspaceId,
+    viewSelection = background
+      ? props.backgroundScope.viewSelection
+      : (props.selection.viewSelection ?? 0),
+    historyEpoch = background ? 0 : props.historyEpoch;
   const scope: NativeJobOutputScope = useMemo(
     () => ({
       generation,
@@ -39,7 +43,9 @@ export function NativeJobOutputPanel({
     }),
     [generation, viewSelection, historyEpoch, storeId, sessionId, workspaceId, executionId],
   );
-  const identity = JSON.stringify(scope);
+  const identity = JSON.stringify(background ? { ...scope, viewSelection: 0 } : scope);
+  const target = useRef(scope);
+  target.current = scope;
   const [opened, setOpened] = useState(''),
     [refresh, setRefresh] = useState(0),
     [view, setView] = useState<{
@@ -65,7 +71,8 @@ export function NativeJobOutputPanel({
     }));
     void readNativeJobOutput({
       bridge,
-      scope,
+      scope: target.current,
+      background,
       signal: abort.signal,
       isCurrent: () => current.current === readIdentity,
     })
@@ -83,7 +90,7 @@ export function NativeJobOutputPanel({
           }));
       });
     return () => abort.abort();
-  }, [bridge, scope, identity, readIdentity, isOpen]);
+  }, [bridge, background, identity, readIdentity, isOpen]);
   return (
     <section aria-label={`Job 已保存输出 · ${executionId}`}>
       {!isOpen ? (

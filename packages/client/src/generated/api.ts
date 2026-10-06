@@ -1815,6 +1815,273 @@ export type ExtensionCommandRequest = {
   definitionVersion: string;
   input: ExtensionCommandRequest___schema0;
 };
+export type BackgroundExecutionQuery = {
+  storeId: string;
+  afterSeq?: string;
+  upperSeq?: string;
+  limit?: number;
+  workspaceId?: string;
+  rootSessionId?: string;
+  executionId?: string;
+  snapshotCursor?: string;
+};
+export type BackgroundExecutionItem = {
+  seq: string;
+  execution: {
+    id: string;
+    sessionId: string;
+    rootSessionId: string;
+    runId: string | null;
+    originCommandId: string;
+    originStoreId: string;
+    rootWorkCommandId: string;
+    rootWorkSeq: string;
+    parentExecutionId: string | null;
+    childSessionId: string | null;
+    cancelWithParent: boolean;
+    stepId: string;
+    callId: string;
+    attempt: number;
+    kind: 'job';
+    definitionId: string;
+    definitionVersion: string;
+    status:
+      | 'planned'
+      | 'dispatching'
+      | 'running'
+      | 'succeeded'
+      | 'failed'
+      | 'cancelled'
+      | 'outcome_unknown';
+    ownerGeneration: string;
+    cancelRequested: boolean;
+    cancelRequestedAt: number | null;
+    resultRevision: string;
+    delivery: ('pending' | 'consumed' | 'suppressed') | null;
+    deliveryReason: string | null;
+    deliveryTargetSessionId: string | null;
+    contextSelectionId: string | null;
+  };
+  session: {
+    id: string;
+    workspaceId: string;
+    parentSessionId: string | null;
+    rootSessionId: string;
+    title: string;
+    controlRevision: string;
+    contextSelectionId: string;
+    nextSeq: string;
+    deletedAt: number | null;
+    ownerInstanceId: string | null;
+    ownerGeneration: string;
+  };
+  rootSession: {
+    id: string;
+    workspaceId: string;
+    parentSessionId: string | null;
+    rootSessionId: string;
+    title: string;
+    controlRevision: string;
+    contextSelectionId: string;
+    nextSeq: string;
+    deletedAt: number | null;
+    ownerInstanceId: string | null;
+    ownerGeneration: string;
+  };
+  run: {
+    id: string;
+    sessionId: string;
+    originCommandId: string;
+    originStoreId: string;
+    rootWorkCommandId: string;
+    rootWorkSeq: string;
+    contextSelectionId: string;
+    waitingForResults: Array<string>;
+    status:
+      | 'running'
+      | 'waiting_interaction'
+      | 'waiting_execution'
+      | 'cancelling'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted';
+    isActive: boolean;
+    createdAt: number;
+    deadlineAt: number | null;
+    finishedAt: number | null;
+    reason: string | null;
+  } | null;
+  childRun: {
+    id: string;
+    sessionId: string;
+    originCommandId: string;
+    originStoreId: string;
+    rootWorkCommandId: string;
+    rootWorkSeq: string;
+    contextSelectionId: string;
+    waitingForResults: Array<string>;
+    status:
+      | 'running'
+      | 'waiting_interaction'
+      | 'waiting_execution'
+      | 'cancelling'
+      | 'completed'
+      | 'failed'
+      | 'cancelled'
+      | 'interrupted';
+    isActive: boolean;
+    createdAt: number;
+    deadlineAt: number | null;
+    finishedAt: number | null;
+    reason: string | null;
+  } | null;
+  childSession: {
+    id: string;
+    workspaceId: string;
+    parentSessionId: string | null;
+    rootSessionId: string;
+    title: string;
+    controlRevision: string;
+    contextSelectionId: string;
+    nextSeq: string;
+    deletedAt: number | null;
+    ownerInstanceId: string | null;
+    ownerGeneration: string;
+  } | null;
+};
+export type BackgroundExecutionPage = {
+  storeId: string;
+  highWaterSeq: string;
+  upperSeq: string;
+  nextAfterSeq: string | null;
+  snapshotCursor: string;
+  items: Array<{
+    seq: string;
+    execution: {
+      id: string;
+      sessionId: string;
+      rootSessionId: string;
+      runId: string | null;
+      originCommandId: string;
+      originStoreId: string;
+      rootWorkCommandId: string;
+      rootWorkSeq: string;
+      parentExecutionId: string | null;
+      childSessionId: string | null;
+      cancelWithParent: boolean;
+      stepId: string;
+      callId: string;
+      attempt: number;
+      kind: 'job';
+      definitionId: string;
+      definitionVersion: string;
+      status:
+        | 'planned'
+        | 'dispatching'
+        | 'running'
+        | 'succeeded'
+        | 'failed'
+        | 'cancelled'
+        | 'outcome_unknown';
+      ownerGeneration: string;
+      cancelRequested: boolean;
+      cancelRequestedAt: number | null;
+      resultRevision: string;
+      delivery: ('pending' | 'consumed' | 'suppressed') | null;
+      deliveryReason: string | null;
+      deliveryTargetSessionId: string | null;
+      contextSelectionId: string | null;
+    };
+    session: {
+      id: string;
+      workspaceId: string;
+      parentSessionId: string | null;
+      rootSessionId: string;
+      title: string;
+      controlRevision: string;
+      contextSelectionId: string;
+      nextSeq: string;
+      deletedAt: number | null;
+      ownerInstanceId: string | null;
+      ownerGeneration: string;
+    };
+    rootSession: {
+      id: string;
+      workspaceId: string;
+      parentSessionId: string | null;
+      rootSessionId: string;
+      title: string;
+      controlRevision: string;
+      contextSelectionId: string;
+      nextSeq: string;
+      deletedAt: number | null;
+      ownerInstanceId: string | null;
+      ownerGeneration: string;
+    };
+    run: {
+      id: string;
+      sessionId: string;
+      originCommandId: string;
+      originStoreId: string;
+      rootWorkCommandId: string;
+      rootWorkSeq: string;
+      contextSelectionId: string;
+      waitingForResults: Array<string>;
+      status:
+        | 'running'
+        | 'waiting_interaction'
+        | 'waiting_execution'
+        | 'cancelling'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'interrupted';
+      isActive: boolean;
+      createdAt: number;
+      deadlineAt: number | null;
+      finishedAt: number | null;
+      reason: string | null;
+    } | null;
+    childRun: {
+      id: string;
+      sessionId: string;
+      originCommandId: string;
+      originStoreId: string;
+      rootWorkCommandId: string;
+      rootWorkSeq: string;
+      contextSelectionId: string;
+      waitingForResults: Array<string>;
+      status:
+        | 'running'
+        | 'waiting_interaction'
+        | 'waiting_execution'
+        | 'cancelling'
+        | 'completed'
+        | 'failed'
+        | 'cancelled'
+        | 'interrupted';
+      isActive: boolean;
+      createdAt: number;
+      deadlineAt: number | null;
+      finishedAt: number | null;
+      reason: string | null;
+    } | null;
+    childSession: {
+      id: string;
+      workspaceId: string;
+      parentSessionId: string | null;
+      rootSessionId: string;
+      title: string;
+      controlRevision: string;
+      contextSelectionId: string;
+      nextSeq: string;
+      deletedAt: number | null;
+      ownerInstanceId: string | null;
+      ownerGeneration: string;
+    } | null;
+  }>;
+};
 export type WorkspaceDirectoryQuery = {
   storeId: string;
   afterSeq?: string;

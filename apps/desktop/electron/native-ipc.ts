@@ -13,6 +13,16 @@ import type { NativeCaller } from './native-caller';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'background.open': ['readId'],
+  'background.next': ['readId'],
+  'background.close': ['readId'],
+  'background.stop': ['observationId', 'executionId', 'commandId'],
+  'background.output.open': ['observationId', 'executionId', 'readId'],
+  'background.output.next': ['readId'],
+  'background.output.close': ['readId'],
+  'background.child.open': ['observationId', 'executionId', 'readId'],
+  'background.child.read': ['readId', 'offset', 'limit'],
+  'background.child.close': ['readId'],
   'settings.skills.open': ['readId', 'viewSelection', 'historyEpoch'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
@@ -347,7 +357,8 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   )
     throw Error('invalid_native_request');
   if (
-    (method === 'modelOutput.read' ||
+    (method === 'background.child.read' ||
+      method === 'modelOutput.read' ||
       method === 'modelInput.read' ||
       method === 'interactionAttachment.read') &&
     (!Number.isSafeInteger(input.offset) ||

@@ -19,6 +19,7 @@ export interface Responses {
   SessionExportPage: API.SessionExportPage;
   SessionExportTextPage: API.SessionExportTextPage;
   SessionExportCompletion: API.SessionExportCompletion;
+  BackgroundExecutionPage: API.BackgroundExecutionPage;
   WorkspaceDirectoryPage: API.WorkspaceDirectoryPage;
   SessionDirectoryPage: API.SessionDirectoryPage;
   BrowserWorkspaceDirectoryPage: API.BrowserWorkspaceDirectoryPage;
@@ -110,6 +111,7 @@ export function validateRequest(
     | 'BrowserVerifySessionExportQuery'
     | 'WorkspaceDirectoryQuery'
     | 'SessionDirectoryQuery'
+    | 'BackgroundExecutionQuery'
     | 'BrowserWorkspaceDirectoryQuery'
     | 'BrowserSessionDirectoryQuery'
     | 'PermissionControlQuery'

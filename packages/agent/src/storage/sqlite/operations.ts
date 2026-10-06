@@ -40,6 +40,7 @@ import {
   getAuthorizationReview,
   verifyAuthorizationReviewDispatch,
 } from './authorization-review';
+import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
 import { activateChildRun, ensureAgent } from './child-operations';
 import { getAgentSummary, listAgentSummaries } from './child-query-operations';
@@ -755,6 +756,11 @@ export class SqliteOperations {
           this,
           'workspace',
           args[0] as Parameters<Store['listWorkspaceDirectory']>[0],
+        );
+      case 'listBackgroundExecutions':
+        return readBackgroundExecutions(
+          this,
+          args[0] as Parameters<Store['listBackgroundExecutions']>[0],
         );
       case 'listSessionDirectory':
         return readDirectory(

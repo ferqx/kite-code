@@ -37,6 +37,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'listWorkspaces',
   'listWorkspaceDirectory',
   'listSessionDirectory',
+  'listBackgroundExecutions',
   'createSession',
   'getSession',
   'listSessions',

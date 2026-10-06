@@ -745,6 +745,38 @@ export interface AgentSummaryPage {
   snapshotCursor: string;
 }
 
+export type BackgroundRun = Omit<RunRecord, 'configuration' | 'requirements'>;
+export type BackgroundExecution = Omit<
+  ExecutionRecord,
+  | 'input'
+  | 'decisionSource'
+  | 'result'
+  | 'reference'
+  | 'childConfiguration'
+  | 'afterTurn'
+  | 'requirements'
+  | 'recoveryManifest'
+  | 'resultAcceptance'
+  | 'interactionBinding'
+> & { rootSessionId: string; cancelRequested: boolean };
+export interface BackgroundExecutionItem {
+  seq: string;
+  execution: BackgroundExecution;
+  session: SessionRecord;
+  rootSession: SessionRecord;
+  run: BackgroundRun | null;
+  childRun: BackgroundRun | null;
+  childSession: SessionRecord | null;
+}
+export interface BackgroundExecutionPage {
+  storeId: string;
+  items: BackgroundExecutionItem[];
+  highWaterSeq: string;
+  upperSeq: string;
+  nextAfterSeq: string | null;
+  snapshotCursor: string;
+}
+
 export interface SessionDirectoryPage {
   storeId: string;
   items: { seq: string; session: SessionRecord }[];

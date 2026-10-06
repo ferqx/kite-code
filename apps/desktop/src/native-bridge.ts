@@ -20,6 +20,7 @@ import type {
   Workspace,
 } from '@kite-ai/client';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
+import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
 import type {
   ContextSubmission,
   DesktopPermissionFacts,
@@ -31,6 +32,7 @@ import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-b
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 
+export type * from './background-bridge';
 export type * from './job-output-bridge';
 export type * from './mcp-bridge';
 export type * from './skills-bridge';
@@ -279,6 +281,7 @@ export type NativeFileRecoveryObservation = {
   boundary: FileCheckpointRecoveryBoundary;
 };
 export type NativeState = {
+  readonly backgroundUnavailable?: boolean;
   readonly generation: number;
   readonly fileRecoverySubmissions?: readonly FileRecoveryIntent[];
   readonly recoverySubmissions?: readonly NativeRecoverySubmission[];
@@ -343,6 +346,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeBackgroundRequest
   | NativeSkillsRequest
   | NativeJobOutputRequest
   | NativeMcpRequest
@@ -593,6 +597,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeBackgroundResult
   | NativeSkillsPage
   | NativeJobOutputPage
   | NativeMcpResult

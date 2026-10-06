@@ -76,6 +76,7 @@ const responseNames = [
   'SessionExportCompletion',
   'WorkspaceDirectoryPage',
   'SessionDirectoryPage',
+  'BackgroundExecutionPage',
   'BrowserWorkspaceDirectoryPage',
   'PermissionModeState',
   'WorkspaceTrustState',
@@ -152,6 +153,7 @@ const requestNames = [
   'BrowserVerifySessionExportQuery',
   'WorkspaceDirectoryQuery',
   'SessionDirectoryQuery',
+  'BackgroundExecutionQuery',
   'BrowserWorkspaceDirectoryQuery',
   'BrowserSessionDirectoryQuery',
   'PermissionControlQuery',
@@ -214,6 +216,7 @@ for (const [prefix, names] of [
       name !== 'HostStatus' &&
       name !== 'SkillCataloguePage' &&
       name !== 'SessionLogPage' &&
+      name !== 'BackgroundExecutionPage' &&
       name !== 'FileCheckpointPage' &&
       name !== 'FileCheckpointDetail' &&
       name !== 'FileRestoreStatus' &&

@@ -21,6 +21,7 @@ import type {
   NativeState,
 } from '../src/native-bridge';
 import { NativeAnswerJournal } from './answer-journal';
+import { NativeBackground } from './background';
 import {
   callerCanonical,
   callerMetadata,
@@ -71,6 +72,7 @@ export class NativeCaller {
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
   private readonly jobOutput: NativeJobOutputReads;
+  private readonly background: NativeBackground;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -120,6 +122,23 @@ export class NativeCaller {
       },
     });
     this.callerJournal = privateData ? new NativeCallerJournal(client, privateData) : undefined;
+    this.background = new NativeBackground(
+      client,
+      () => {
+        const info = this.client.serverInfo;
+        return !this.closed &&
+          !this.observationUnavailable &&
+          this.generation > 0 &&
+          info?.storeId &&
+          info.subjectId
+          ? { generation: this.generation, storeId: info.storeId, subjectId: info.subjectId }
+          : undefined;
+      },
+      {
+        prepare: (item, commandId) => this.requireCaller().prepareBackgroundStop(item, commandId),
+        submit: (commandId) => this.requireCaller().submit(commandId),
+      },
+    );
     this.input = new DesktopInput({
       admittedClient: client,
       onSubmission: () => this.changed(),
@@ -398,6 +417,7 @@ export class NativeCaller {
     this.observer = signal;
     const originalStore = this.client.serverInfo!.storeId!;
     const invalidate = () => {
+      this.background.release();
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
       this.historyEpoch++;
@@ -546,6 +566,7 @@ export class NativeCaller {
         : undefined;
     return {
       generation: this.generation,
+      backgroundUnavailable: this.observationUnavailable,
       selection,
       historyEpoch: this.historyEpoch,
       creationSubmissions: [...this.creations.values()],
@@ -663,6 +684,7 @@ export class NativeCaller {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
       this.releaseReads();
+      this.background.release();
       this.selection++;
       const generation = ++this.generation;
       this.selected = undefined;
@@ -671,6 +693,7 @@ export class NativeCaller {
       return this.state();
     }
     if (
+      !request.method.startsWith('background.') &&
       ![
         'select',
         'detach',
@@ -695,6 +718,44 @@ export class NativeCaller {
     const generation = request.generation;
     let result: NativeResult;
     switch (request.method) {
+      case 'background.open':
+        result = await this.background.open(request.readId);
+        break;
+      case 'background.next':
+        result = this.background.next(request.readId);
+        break;
+      case 'background.close':
+        this.background.close(request.readId);
+        result = null;
+        break;
+      case 'background.stop':
+        result = await this.background.stop(
+          request.observationId,
+          request.executionId,
+          request.commandId,
+        );
+        this.changed();
+        break;
+      case 'background.output.open':
+        result = await this.background.outputOpen(request);
+        break;
+      case 'background.output.next':
+        result = await this.background.outputNext(request.readId);
+        break;
+      case 'background.output.close':
+        this.background.outputClose(request.readId);
+        result = null;
+        break;
+      case 'background.child.open':
+        result = await this.background.childOpen(request);
+        break;
+      case 'background.child.read':
+        result = this.background.childRead(request);
+        break;
+      case 'background.child.close':
+        this.background.childClose(request.readId);
+        result = null;
+        break;
       case 'jobOutput.open':
         result = await this.jobOutput.open(request);
         break;
@@ -1463,6 +1524,7 @@ export class NativeCaller {
   }
   detach() {
     this.releaseReads();
+    this.background.release();
     this.selection++;
     this.generation++;
     this.selected = undefined;
@@ -1472,6 +1534,7 @@ export class NativeCaller {
     this.refreshTimer = undefined;
     this.refreshRequested = false;
     this.releaseReads();
+    this.background.release();
     this.observer?.abort();
     this.client.disposeNetwork();
     await this.stream;

@@ -685,6 +685,7 @@ export class AgentRuntime {
     this.getMessageOrigin = this.accountEntry(this.getMessageOrigin, 'observation');
     this.getWorkspace = this.accountEntry(this.getWorkspace, 'observation');
     this.listWorkspaces = this.accountEntry(this.listWorkspaces, 'observation');
+    this.listBackgroundExecutions = this.accountEntry(this.listBackgroundExecutions, 'observation');
     this.listSessionDirectory = this.accountEntry(this.listSessionDirectory, 'observation');
     this.listWorkspaceDirectory = this.accountEntry(this.listWorkspaceDirectory, 'observation');
     this.listSessions = this.accountEntry(this.listSessions, 'observation');
@@ -2134,6 +2135,9 @@ export class AgentRuntime {
   }
   createSession(input: Parameters<Store['createSession']>[0]) {
     return this.options.store.createSession(input);
+  }
+  listBackgroundExecutions(input: Parameters<Store['listBackgroundExecutions']>[0]) {
+    return this.options.store.listBackgroundExecutions(input);
   }
   listSessionDirectory(input: Parameters<Store['listSessionDirectory']>[0]) {
     return this.options.store.listSessionDirectory(input);
