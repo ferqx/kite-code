@@ -134,9 +134,13 @@ try:
   if time.monotonic()>deadline:raise RuntimeError('original Run cancellation not confirmed')
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
  key(b'\\x11')`
-     : `card('question');wait('Question 1/2: decision');key(b'\\x1b[B' * ${decision === 'replan' ? 1 : 2});wait('› ${decision}');key(b'\\r')
- wait('Question 2/2: detail');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)});key(b'\\r');wait('interaction.answer: unknown')
- key(b'\\x0c');wait('interaction.answer: unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))})
+     : `card('question');wait('Question 1/2 · Selection: No selection (Enter has no answer)');key(b'\\x1b[B' * ${decision === 'replan' ? 1 : 2});wait('Question 1/2 · Selection: ${decision === 'replan' ? 1 : 2}');key(b'\\r')
+ wait('Question 2/2');key(${JSON.stringify(detail)}.encode());wait(${JSON.stringify(detail)});key(b'\\r');wait('interaction.answer: unknown')
+ key(b'\\x0c');deadline=time.monotonic()+10
+ while not os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))}):
+  if time.monotonic()>deadline:raise RuntimeError('original question answer GET loss not confirmed')
+  if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
+ wait('interaction.answer: unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'first-get-lost'))})
  key(b'\\x0c');wait('interaction.answer: applied')
  ${decision === 'replan' ? "approve('complete_skill');approve('skill.workflow.verify')" : ''}
  wait('WORKFLOW_DECISION_DONE');completed();key(b'\\x11')`
