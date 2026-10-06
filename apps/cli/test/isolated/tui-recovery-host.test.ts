@@ -17,10 +17,13 @@ for (const mode of ['run', 'interrupt'] as const)
       );
       const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,sqlite3,json
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def wait(text):
+def wait(text, material=False):
  global buffer,full
  deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while True:
+  frames=buffer.decode(errors='replace').split('\\x1b[?2026h')
+  frame=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
+  if text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace') if material else frame)):return
   if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:
    data=os.read(master,65536);buffer+=data;full+=data
@@ -31,7 +34,7 @@ try:
  wait('Waiting for answer');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery')
  key(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')}.encode());wait(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')});key(b'\\r');wait('outcome_unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'lost'))})
  key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait(${JSON.stringify(mode === 'run' ? 'run · resumed' : 'interrupt · interrupted')})
- ${mode === 'run' ? `key(b'\\x1b');wait(${JSON.stringify(f.card.id.slice(0, 24))});key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE')` : ''}
+ ${mode === 'run' ? `key(b'\\x1b');wait(${JSON.stringify(f.card.id.slice(0, 24))},True);wait('Up/Down explicit approval selection: none (Enter has no answer)');key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE',True)` : ''}
  key(b'\\x11')
  deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:
@@ -197,10 +200,13 @@ test('80x24 configured-host TUI original report ID creates one source-bound repo
     );
     const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(runner)}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True);os.close(slave);buffer=b'';full=b''
-def wait(text):
+def wait(text, material=False):
  global buffer,full
  deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while True:
+  frames=buffer.decode(errors='replace').split('\\x1b[?2026h')
+  frame=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
+  if text in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace') if material else frame)):return
   if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:
    data=os.read(master,65536);buffer+=data;full+=data
@@ -208,7 +214,7 @@ def key(value):
  global buffer
  buffer=b'';os.write(master,value)
 try:
- wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(`report ${f.reportId}`)}.encode());wait(${JSON.stringify(`report ${f.reportId}`)});key(b'\\r');wait('outcome_unknown');key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait('report · resumed');key(b'\\x1b');wait('REPORT_ORIGINAL_CHILD_DONE');key(b'\\x11')
+ wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(`report ${f.reportId}`)}.encode());wait(${JSON.stringify(`report ${f.reportId}`)});key(b'\\r');wait('outcome_unknown');key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait('report · resumed');key(b'\\x1b');wait('REPORT_ORIGINAL_CHILD_DONE',True);key(b'\\x11')
  deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:
   if select.select([master],[],[],.05)[0]:

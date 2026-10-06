@@ -1404,3 +1404,14 @@ Source 驱动已本地提交 e7067bff4a786986bae0d09e79515661d4de5344，正常�
 当前原 isolated runTestJob/no-orphans 单并发80×24窗口1pass/0fail/44断言、10.31s，日志 `/private/tmp/kite-mcp-cold-current-selection-20261006.log`；CLI完整typecheck、owned Biome及diff检查通过。成功 packet `/private/tmp/kite-mcp-cold-pty-evidence-17841a4b-0126-4ea2-805c-fd33edab4cb0` 的 Python exit0、stderr空，TUI78537/78551正常退出，所属 Service78538/78563 exited:true。选择阶段零GET、冷零POST且准确一次原GET、零Model/remoteRPC以及原第二申请结果保持。Root自检，新的独立审查仍受thread limit限制；iteration_complete/stage/commit ready仅限本片测试与进度两路径。
 
 第十三轮失败不会因局部通过被追认，下一轮仍须冻结当前实现运行完整原入口。37项 partial、Goal active保持；真实原生stdin、受控HTTPS下OS浏览器/nativeVault OAuth组合、默认可信Shell、formal持续Soak、安装、Linux/Windows、§35/适用T-E及正式旧路径退役仍未闭合。已有本地阶段授权不扩大push/PR，无关AGENTS保持独立。
+
+
+## 2026-10-06：TUI 显式恢复等待当前控件与原材料
+
+第十四轮原完整默认在本地 HEAD 486c2271f8341cbd6bbe6a32e3c6d7f634cea765、574文件/464主任务/并发4运行，实际 exit1；151个主任务全部排空、150通过，TUI recovery host 主任务失败，无 plan abort。已运行261文件、313任务未调度；3977 tracked regular SHA及 Git 前后保持。日志 `/private/tmp/kite-current-default-fourteenth-20261006.log`、SHA `c3856073d67d453af3cec7b31d69201aff202e5024451afd06651bec7e25f6f7`，同前缀 plan/inputs/result 保存。当前 MCP cold 原主任务通过，本轮完整默认资格仍 false。
+
+恢复文件实际3pass/2fail：Run 接续已回 resumed，驱动关闭面板后等待重新打印原 approval ID，当前窗口已有未选择审批控件；report 原全文在失败 transcript `/private/tmp/kite-report-caller-reqSzT-report.pty.log` 出现准确一次，原报告 resumed/completed 后关闭面板仍等待重印全文。最小修正只让两处驱动从累计 transcript 核原材料、从最后完整同步帧核当前控件，Run 审批还明确等待无选择状态再按键。原 ID、独立批准、十秒预算、单恢复 POST、首原 GET 丢回执、Ctrl+C 不取消工作及全部持久业务断言保持；生产实现与公共边界无变化。[恢复手册](../handbook/features/recovery.md)、[TUI owner](../../packages/ui/src/tui/README.md)与[CLI owner](../../apps/cli/README.md#显式冷恢复消费者)核对后无额外文档或 Note diff。
+
+当前原 isolated runTestJob/no-orphans 单并发五例5pass/0fail/43断言、9.07s，日志 `/private/tmp/kite-tui-recovery-current-material-20261006.log`；CLI完整typecheck、owned Biome及diff检查通过。五个 Python held TUI 均核正常exit0；两次 SIGKILL 用例仍核所属 paired Service 退出、冷新 PID 与零冷 POST/原 GET。Run 原文件效果及两次准确 Provider 保持，interrupt 无效果且一次 Provider；report 原两 Run completed、parent3/child1/review2、原 Execution succeeded/attempt1/resultRevision1/delivery consumed 保持。Root自核，本片未新增独立审查；iteration_complete/stage/commit ready仅限恢复测试与进度两路径。
+
+第十四轮失败保留，后续仍需当前完整原图。37partial、Goal active及已列 Native stdin、真实 OAuth 组合、默认可信 Shell/Soak、安装、其他平台、§35/T-E与正式旧路径退役缺口保持。已有本地阶段授权不扩大push/PR，无关AGENTS保持独立。
