@@ -51,6 +51,13 @@ export const SkillWorkflowCatalogueSchema = z.strictObject({
 });
 export const SkillCatalogueEntrySchema = z.strictObject({
   id,
+  source: z
+    .strictObject({
+      scope: z.enum(['project', 'user']),
+      origin: z.enum(['.agents', '.kite-code', 'profile', 'configured']),
+    })
+    .nullable()
+    .optional(),
   name: z.string().max(256).nullable(),
   description: z.string().max(4096).nullable(),
   version: digest.nullable(),

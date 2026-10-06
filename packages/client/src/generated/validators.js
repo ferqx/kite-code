@@ -17548,6 +17548,23 @@ var schema36 = {
         type: 'object',
         properties: {
           id: { type: 'string', minLength: 1, maxLength: 128 },
+          source: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  scope: { type: 'string', enum: ['project', 'user'] },
+                  origin: {
+                    type: 'string',
+                    enum: ['.agents', '.kite-code', 'profile', 'configured'],
+                  },
+                },
+                required: ['scope', 'origin'],
+                additionalProperties: false,
+              },
+              { type: 'null' },
+            ],
+          },
           name: { anyOf: [{ type: 'string', maxLength: 256 }, { type: 'null' }] },
           description: { anyOf: [{ type: 'string', maxLength: 4096 }, { type: 'null' }] },
           version: { anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }] },
@@ -18125,23 +18142,36 @@ function validate25(
                                         var valid3 = true;
                                       }
                                       if (valid3) {
-                                        if (data7.name !== undefined) {
-                                          let data9 = data7.name;
+                                        if (data7.source !== undefined) {
+                                          let data9 = data7.source;
                                           const _errs25 = errors;
                                           const _errs26 = errors;
                                           let valid4 = false;
                                           const _errs27 = errors;
                                           if (errors === _errs27) {
-                                            if (typeof data9 === 'string') {
-                                              if (func2(data9) > 256) {
+                                            if (
+                                              data9 &&
+                                              typeof data9 == 'object' &&
+                                              !Array.isArray(data9)
+                                            ) {
+                                              let missing2;
+                                              if (
+                                                (data9.scope === undefined &&
+                                                  (missing2 = 'scope')) ||
+                                                (data9.origin === undefined &&
+                                                  (missing2 = 'origin'))
+                                              ) {
                                                 const err4 = {
                                                   instancePath:
-                                                    instancePath + '/entries/' + i0 + '/name',
+                                                    instancePath + '/entries/' + i0 + '/source',
                                                   schemaPath:
-                                                    '#/properties/entries/items/properties/name/anyOf/0/maxLength',
-                                                  keyword: 'maxLength',
-                                                  params: { limit: 256 },
-                                                  message: 'must NOT have more than 256 characters',
+                                                    '#/properties/entries/items/properties/source/anyOf/0/required',
+                                                  keyword: 'required',
+                                                  params: { missingProperty: missing2 },
+                                                  message:
+                                                    "must have required property '" +
+                                                    missing2 +
+                                                    "'",
                                                 };
                                                 if (vErrors === null) {
                                                   vErrors = [err4];
@@ -18149,61 +18179,203 @@ function validate25(
                                                   vErrors.push(err4);
                                                 }
                                                 errors++;
+                                              } else {
+                                                const _errs29 = errors;
+                                                for (const key2 in data9) {
+                                                  if (!(key2 === 'scope' || key2 === 'origin')) {
+                                                    const err5 = {
+                                                      instancePath:
+                                                        instancePath + '/entries/' + i0 + '/source',
+                                                      schemaPath:
+                                                        '#/properties/entries/items/properties/source/anyOf/0/additionalProperties',
+                                                      keyword: 'additionalProperties',
+                                                      params: { additionalProperty: key2 },
+                                                      message:
+                                                        'must NOT have additional properties',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err5];
+                                                    } else {
+                                                      vErrors.push(err5);
+                                                    }
+                                                    errors++;
+                                                    break;
+                                                  }
+                                                }
+                                                if (_errs29 === errors) {
+                                                  if (data9.scope !== undefined) {
+                                                    let data10 = data9.scope;
+                                                    const _errs30 = errors;
+                                                    if (typeof data10 !== 'string') {
+                                                      const err6 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/entries/' +
+                                                          i0 +
+                                                          '/source/scope',
+                                                        schemaPath:
+                                                          '#/properties/entries/items/properties/source/anyOf/0/properties/scope/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err6];
+                                                      } else {
+                                                        vErrors.push(err6);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    if (
+                                                      !(data10 === 'project' || data10 === 'user')
+                                                    ) {
+                                                      const err7 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/entries/' +
+                                                          i0 +
+                                                          '/source/scope',
+                                                        schemaPath:
+                                                          '#/properties/entries/items/properties/source/anyOf/0/properties/scope/enum',
+                                                        keyword: 'enum',
+                                                        params: {
+                                                          allowedValues:
+                                                            schema36.properties.entries.items
+                                                              .properties.source.anyOf[0].properties
+                                                              .scope.enum,
+                                                        },
+                                                        message:
+                                                          'must be equal to one of the allowed values',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err7];
+                                                      } else {
+                                                        vErrors.push(err7);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                    var valid5 = _errs30 === errors;
+                                                  } else {
+                                                    var valid5 = true;
+                                                  }
+                                                  if (valid5) {
+                                                    if (data9.origin !== undefined) {
+                                                      let data11 = data9.origin;
+                                                      const _errs32 = errors;
+                                                      if (typeof data11 !== 'string') {
+                                                        const err8 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/source/origin',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/source/anyOf/0/properties/origin/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err8];
+                                                        } else {
+                                                          vErrors.push(err8);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      if (
+                                                        !(
+                                                          data11 === '.agents' ||
+                                                          data11 === '.kite-code' ||
+                                                          data11 === 'profile' ||
+                                                          data11 === 'configured'
+                                                        )
+                                                      ) {
+                                                        const err9 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/source/origin',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/source/anyOf/0/properties/origin/enum',
+                                                          keyword: 'enum',
+                                                          params: {
+                                                            allowedValues:
+                                                              schema36.properties.entries.items
+                                                                .properties.source.anyOf[0]
+                                                                .properties.origin.enum,
+                                                          },
+                                                          message:
+                                                            'must be equal to one of the allowed values',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err9];
+                                                        } else {
+                                                          vErrors.push(err9);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      var valid5 = _errs32 === errors;
+                                                    } else {
+                                                      var valid5 = true;
+                                                    }
+                                                  }
+                                                }
                                               }
                                             } else {
-                                              const err5 = {
+                                              const err10 = {
                                                 instancePath:
-                                                  instancePath + '/entries/' + i0 + '/name',
+                                                  instancePath + '/entries/' + i0 + '/source',
                                                 schemaPath:
-                                                  '#/properties/entries/items/properties/name/anyOf/0/type',
+                                                  '#/properties/entries/items/properties/source/anyOf/0/type',
                                                 keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
+                                                params: { type: 'object' },
+                                                message: 'must be object',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err5];
+                                                vErrors = [err10];
                                               } else {
-                                                vErrors.push(err5);
+                                                vErrors.push(err10);
                                               }
                                               errors++;
                                             }
                                           }
                                           var _valid1 = _errs27 === errors;
                                           valid4 = valid4 || _valid1;
-                                          const _errs29 = errors;
+                                          const _errs34 = errors;
                                           if (data9 !== null) {
-                                            const err6 = {
+                                            const err11 = {
                                               instancePath:
-                                                instancePath + '/entries/' + i0 + '/name',
+                                                instancePath + '/entries/' + i0 + '/source',
                                               schemaPath:
-                                                '#/properties/entries/items/properties/name/anyOf/1/type',
+                                                '#/properties/entries/items/properties/source/anyOf/1/type',
                                               keyword: 'type',
                                               params: { type: 'null' },
                                               message: 'must be null',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err6];
+                                              vErrors = [err11];
                                             } else {
-                                              vErrors.push(err6);
+                                              vErrors.push(err11);
                                             }
                                             errors++;
                                           }
-                                          var _valid1 = _errs29 === errors;
+                                          var _valid1 = _errs34 === errors;
                                           valid4 = valid4 || _valid1;
                                           if (!valid4) {
-                                            const err7 = {
+                                            const err12 = {
                                               instancePath:
-                                                instancePath + '/entries/' + i0 + '/name',
+                                                instancePath + '/entries/' + i0 + '/source',
                                               schemaPath:
-                                                '#/properties/entries/items/properties/name/anyOf',
+                                                '#/properties/entries/items/properties/source/anyOf',
                                               keyword: 'anyOf',
                                               params: {},
                                               message: 'must match a schema in anyOf',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err7];
+                                              vErrors = [err12];
                                             } else {
-                                              vErrors.push(err7);
+                                              vErrors.push(err12);
                                             }
                                             errors++;
                                             validate25.errors = vErrors;
@@ -18223,151 +18395,24 @@ function validate25(
                                           var valid3 = true;
                                         }
                                         if (valid3) {
-                                          if (data7.description !== undefined) {
-                                            let data10 = data7.description;
-                                            const _errs31 = errors;
-                                            const _errs32 = errors;
-                                            let valid5 = false;
-                                            const _errs33 = errors;
-                                            if (errors === _errs33) {
-                                              if (typeof data10 === 'string') {
-                                                if (func2(data10) > 4096) {
-                                                  const err8 = {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/entries/' +
-                                                      i0 +
-                                                      '/description',
-                                                    schemaPath:
-                                                      '#/properties/entries/items/properties/description/anyOf/0/maxLength',
-                                                    keyword: 'maxLength',
-                                                    params: { limit: 4096 },
-                                                    message:
-                                                      'must NOT have more than 4096 characters',
-                                                  };
-                                                  if (vErrors === null) {
-                                                    vErrors = [err8];
-                                                  } else {
-                                                    vErrors.push(err8);
-                                                  }
-                                                  errors++;
-                                                }
-                                              } else {
-                                                const err9 = {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/entries/' +
-                                                    i0 +
-                                                    '/description',
-                                                  schemaPath:
-                                                    '#/properties/entries/items/properties/description/anyOf/0/type',
-                                                  keyword: 'type',
-                                                  params: { type: 'string' },
-                                                  message: 'must be string',
-                                                };
-                                                if (vErrors === null) {
-                                                  vErrors = [err9];
-                                                } else {
-                                                  vErrors.push(err9);
-                                                }
-                                                errors++;
-                                              }
-                                            }
-                                            var _valid2 = _errs33 === errors;
-                                            valid5 = valid5 || _valid2;
-                                            const _errs35 = errors;
-                                            if (data10 !== null) {
-                                              const err10 = {
-                                                instancePath:
-                                                  instancePath + '/entries/' + i0 + '/description',
-                                                schemaPath:
-                                                  '#/properties/entries/items/properties/description/anyOf/1/type',
-                                                keyword: 'type',
-                                                params: { type: 'null' },
-                                                message: 'must be null',
-                                              };
-                                              if (vErrors === null) {
-                                                vErrors = [err10];
-                                              } else {
-                                                vErrors.push(err10);
-                                              }
-                                              errors++;
-                                            }
-                                            var _valid2 = _errs35 === errors;
-                                            valid5 = valid5 || _valid2;
-                                            if (!valid5) {
-                                              const err11 = {
-                                                instancePath:
-                                                  instancePath + '/entries/' + i0 + '/description',
-                                                schemaPath:
-                                                  '#/properties/entries/items/properties/description/anyOf',
-                                                keyword: 'anyOf',
-                                                params: {},
-                                                message: 'must match a schema in anyOf',
-                                              };
-                                              if (vErrors === null) {
-                                                vErrors = [err11];
-                                              } else {
-                                                vErrors.push(err11);
-                                              }
-                                              errors++;
-                                              validate25.errors = vErrors;
-                                              return false;
-                                            } else {
-                                              errors = _errs32;
-                                              if (vErrors !== null) {
-                                                if (_errs32) {
-                                                  vErrors.length = _errs32;
-                                                } else {
-                                                  vErrors = null;
-                                                }
-                                              }
-                                            }
-                                            var valid3 = _errs31 === errors;
-                                          } else {
-                                            var valid3 = true;
-                                          }
-                                          if (valid3) {
-                                            if (data7.version !== undefined) {
-                                              let data11 = data7.version;
-                                              const _errs37 = errors;
-                                              const _errs38 = errors;
-                                              let valid6 = false;
-                                              const _errs39 = errors;
-                                              if (errors === _errs39) {
-                                                if (typeof data11 === 'string') {
-                                                  if (!pattern7.test(data11)) {
-                                                    const err12 = {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/entries/' +
-                                                        i0 +
-                                                        '/version',
-                                                      schemaPath:
-                                                        '#/properties/entries/items/properties/version/anyOf/0/pattern',
-                                                      keyword: 'pattern',
-                                                      params: { pattern: '^[a-f0-9]{64}$' },
-                                                      message:
-                                                        'must match pattern "' +
-                                                        '^[a-f0-9]{64}$' +
-                                                        '"',
-                                                    };
-                                                    if (vErrors === null) {
-                                                      vErrors = [err12];
-                                                    } else {
-                                                      vErrors.push(err12);
-                                                    }
-                                                    errors++;
-                                                  }
-                                                } else {
+                                          if (data7.name !== undefined) {
+                                            let data12 = data7.name;
+                                            const _errs36 = errors;
+                                            const _errs37 = errors;
+                                            let valid6 = false;
+                                            const _errs38 = errors;
+                                            if (errors === _errs38) {
+                                              if (typeof data12 === 'string') {
+                                                if (func2(data12) > 256) {
                                                   const err13 = {
                                                     instancePath:
-                                                      instancePath + '/entries/' + i0 + '/version',
+                                                      instancePath + '/entries/' + i0 + '/name',
                                                     schemaPath:
-                                                      '#/properties/entries/items/properties/version/anyOf/0/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
+                                                      '#/properties/entries/items/properties/name/anyOf/0/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 256 },
+                                                    message:
+                                                      'must NOT have more than 256 characters',
                                                   };
                                                   if (vErrors === null) {
                                                     vErrors = [err13];
@@ -18376,19 +18421,15 @@ function validate25(
                                                   }
                                                   errors++;
                                                 }
-                                              }
-                                              var _valid3 = _errs39 === errors;
-                                              valid6 = valid6 || _valid3;
-                                              const _errs41 = errors;
-                                              if (data11 !== null) {
+                                              } else {
                                                 const err14 = {
                                                   instancePath:
-                                                    instancePath + '/entries/' + i0 + '/version',
+                                                    instancePath + '/entries/' + i0 + '/name',
                                                   schemaPath:
-                                                    '#/properties/entries/items/properties/version/anyOf/1/type',
+                                                    '#/properties/entries/items/properties/name/anyOf/0/type',
                                                   keyword: 'type',
-                                                  params: { type: 'null' },
-                                                  message: 'must be null',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
                                                 };
                                                 if (vErrors === null) {
                                                   vErrors = [err14];
@@ -18397,276 +18438,499 @@ function validate25(
                                                 }
                                                 errors++;
                                               }
-                                              var _valid3 = _errs41 === errors;
-                                              valid6 = valid6 || _valid3;
-                                              if (!valid6) {
-                                                const err15 = {
+                                            }
+                                            var _valid2 = _errs38 === errors;
+                                            valid6 = valid6 || _valid2;
+                                            const _errs40 = errors;
+                                            if (data12 !== null) {
+                                              const err15 = {
+                                                instancePath:
+                                                  instancePath + '/entries/' + i0 + '/name',
+                                                schemaPath:
+                                                  '#/properties/entries/items/properties/name/anyOf/1/type',
+                                                keyword: 'type',
+                                                params: { type: 'null' },
+                                                message: 'must be null',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err15];
+                                              } else {
+                                                vErrors.push(err15);
+                                              }
+                                              errors++;
+                                            }
+                                            var _valid2 = _errs40 === errors;
+                                            valid6 = valid6 || _valid2;
+                                            if (!valid6) {
+                                              const err16 = {
+                                                instancePath:
+                                                  instancePath + '/entries/' + i0 + '/name',
+                                                schemaPath:
+                                                  '#/properties/entries/items/properties/name/anyOf',
+                                                keyword: 'anyOf',
+                                                params: {},
+                                                message: 'must match a schema in anyOf',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err16];
+                                              } else {
+                                                vErrors.push(err16);
+                                              }
+                                              errors++;
+                                              validate25.errors = vErrors;
+                                              return false;
+                                            } else {
+                                              errors = _errs37;
+                                              if (vErrors !== null) {
+                                                if (_errs37) {
+                                                  vErrors.length = _errs37;
+                                                } else {
+                                                  vErrors = null;
+                                                }
+                                              }
+                                            }
+                                            var valid3 = _errs36 === errors;
+                                          } else {
+                                            var valid3 = true;
+                                          }
+                                          if (valid3) {
+                                            if (data7.description !== undefined) {
+                                              let data13 = data7.description;
+                                              const _errs42 = errors;
+                                              const _errs43 = errors;
+                                              let valid7 = false;
+                                              const _errs44 = errors;
+                                              if (errors === _errs44) {
+                                                if (typeof data13 === 'string') {
+                                                  if (func2(data13) > 4096) {
+                                                    const err17 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/entries/' +
+                                                        i0 +
+                                                        '/description',
+                                                      schemaPath:
+                                                        '#/properties/entries/items/properties/description/anyOf/0/maxLength',
+                                                      keyword: 'maxLength',
+                                                      params: { limit: 4096 },
+                                                      message:
+                                                        'must NOT have more than 4096 characters',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err17];
+                                                    } else {
+                                                      vErrors.push(err17);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                } else {
+                                                  const err18 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/entries/' +
+                                                      i0 +
+                                                      '/description',
+                                                    schemaPath:
+                                                      '#/properties/entries/items/properties/description/anyOf/0/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'string' },
+                                                    message: 'must be string',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err18];
+                                                  } else {
+                                                    vErrors.push(err18);
+                                                  }
+                                                  errors++;
+                                                }
+                                              }
+                                              var _valid3 = _errs44 === errors;
+                                              valid7 = valid7 || _valid3;
+                                              const _errs46 = errors;
+                                              if (data13 !== null) {
+                                                const err19 = {
                                                   instancePath:
-                                                    instancePath + '/entries/' + i0 + '/version',
+                                                    instancePath +
+                                                    '/entries/' +
+                                                    i0 +
+                                                    '/description',
                                                   schemaPath:
-                                                    '#/properties/entries/items/properties/version/anyOf',
+                                                    '#/properties/entries/items/properties/description/anyOf/1/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'null' },
+                                                  message: 'must be null',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err19];
+                                                } else {
+                                                  vErrors.push(err19);
+                                                }
+                                                errors++;
+                                              }
+                                              var _valid3 = _errs46 === errors;
+                                              valid7 = valid7 || _valid3;
+                                              if (!valid7) {
+                                                const err20 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/entries/' +
+                                                    i0 +
+                                                    '/description',
+                                                  schemaPath:
+                                                    '#/properties/entries/items/properties/description/anyOf',
                                                   keyword: 'anyOf',
                                                   params: {},
                                                   message: 'must match a schema in anyOf',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err15];
+                                                  vErrors = [err20];
                                                 } else {
-                                                  vErrors.push(err15);
+                                                  vErrors.push(err20);
                                                 }
                                                 errors++;
                                                 validate25.errors = vErrors;
                                                 return false;
                                               } else {
-                                                errors = _errs38;
+                                                errors = _errs43;
                                                 if (vErrors !== null) {
-                                                  if (_errs38) {
-                                                    vErrors.length = _errs38;
+                                                  if (_errs43) {
+                                                    vErrors.length = _errs43;
                                                   } else {
                                                     vErrors = null;
                                                   }
                                                 }
                                               }
-                                              var valid3 = _errs37 === errors;
+                                              var valid3 = _errs42 === errors;
                                             } else {
                                               var valid3 = true;
                                             }
                                             if (valid3) {
-                                              if (data7.enabled !== undefined) {
-                                                const _errs43 = errors;
-                                                if (typeof data7.enabled !== 'boolean') {
-                                                  validate25.errors = [
-                                                    {
+                                              if (data7.version !== undefined) {
+                                                let data14 = data7.version;
+                                                const _errs48 = errors;
+                                                const _errs49 = errors;
+                                                let valid8 = false;
+                                                const _errs50 = errors;
+                                                if (errors === _errs50) {
+                                                  if (typeof data14 === 'string') {
+                                                    if (!pattern7.test(data14)) {
+                                                      const err21 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/entries/' +
+                                                          i0 +
+                                                          '/version',
+                                                        schemaPath:
+                                                          '#/properties/entries/items/properties/version/anyOf/0/pattern',
+                                                        keyword: 'pattern',
+                                                        params: { pattern: '^[a-f0-9]{64}$' },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[a-f0-9]{64}$' +
+                                                          '"',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err21];
+                                                      } else {
+                                                        vErrors.push(err21);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  } else {
+                                                    const err22 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/entries/' +
                                                         i0 +
-                                                        '/enabled',
+                                                        '/version',
                                                       schemaPath:
-                                                        '#/properties/entries/items/properties/enabled/type',
+                                                        '#/properties/entries/items/properties/version/anyOf/0/type',
                                                       keyword: 'type',
-                                                      params: { type: 'boolean' },
-                                                      message: 'must be boolean',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                      params: { type: 'string' },
+                                                      message: 'must be string',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err22];
+                                                    } else {
+                                                      vErrors.push(err22);
+                                                    }
+                                                    errors++;
+                                                  }
                                                 }
-                                                var valid3 = _errs43 === errors;
+                                                var _valid4 = _errs50 === errors;
+                                                valid8 = valid8 || _valid4;
+                                                const _errs52 = errors;
+                                                if (data14 !== null) {
+                                                  const err23 = {
+                                                    instancePath:
+                                                      instancePath + '/entries/' + i0 + '/version',
+                                                    schemaPath:
+                                                      '#/properties/entries/items/properties/version/anyOf/1/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'null' },
+                                                    message: 'must be null',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err23];
+                                                  } else {
+                                                    vErrors.push(err23);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var _valid4 = _errs52 === errors;
+                                                valid8 = valid8 || _valid4;
+                                                if (!valid8) {
+                                                  const err24 = {
+                                                    instancePath:
+                                                      instancePath + '/entries/' + i0 + '/version',
+                                                    schemaPath:
+                                                      '#/properties/entries/items/properties/version/anyOf',
+                                                    keyword: 'anyOf',
+                                                    params: {},
+                                                    message: 'must match a schema in anyOf',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err24];
+                                                  } else {
+                                                    vErrors.push(err24);
+                                                  }
+                                                  errors++;
+                                                  validate25.errors = vErrors;
+                                                  return false;
+                                                } else {
+                                                  errors = _errs49;
+                                                  if (vErrors !== null) {
+                                                    if (_errs49) {
+                                                      vErrors.length = _errs49;
+                                                    } else {
+                                                      vErrors = null;
+                                                    }
+                                                  }
+                                                }
+                                                var valid3 = _errs48 === errors;
                                               } else {
                                                 var valid3 = true;
                                               }
                                               if (valid3) {
-                                                if (data7.state !== undefined) {
-                                                  let data13 = data7.state;
-                                                  const _errs45 = errors;
-                                                  if (typeof data13 !== 'string') {
+                                                if (data7.enabled !== undefined) {
+                                                  const _errs54 = errors;
+                                                  if (typeof data7.enabled !== 'boolean') {
                                                     validate25.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
                                                           '/entries/' +
                                                           i0 +
-                                                          '/state',
+                                                          '/enabled',
                                                         schemaPath:
-                                                          '#/properties/entries/items/properties/state/type',
+                                                          '#/properties/entries/items/properties/enabled/type',
                                                         keyword: 'type',
-                                                        params: { type: 'string' },
-                                                        message: 'must be string',
+                                                        params: { type: 'boolean' },
+                                                        message: 'must be boolean',
                                                       },
                                                     ];
                                                     return false;
                                                   }
-                                                  if (
-                                                    !(
-                                                      data13 === 'available' ||
-                                                      data13 === 'disabled' ||
-                                                      data13 === 'unavailable'
-                                                    )
-                                                  ) {
-                                                    validate25.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/entries/' +
-                                                          i0 +
-                                                          '/state',
-                                                        schemaPath:
-                                                          '#/properties/entries/items/properties/state/enum',
-                                                        keyword: 'enum',
-                                                        params: {
-                                                          allowedValues:
-                                                            schema36.properties.entries.items
-                                                              .properties.state.enum,
-                                                        },
-                                                        message:
-                                                          'must be equal to one of the allowed values',
-                                                      },
-                                                    ];
-                                                    return false;
-                                                  }
-                                                  var valid3 = _errs45 === errors;
+                                                  var valid3 = _errs54 === errors;
                                                 } else {
                                                   var valid3 = true;
                                                 }
                                                 if (valid3) {
-                                                  if (data7.reason !== undefined) {
-                                                    let data14 = data7.reason;
-                                                    const _errs47 = errors;
-                                                    const _errs48 = errors;
-                                                    let valid7 = false;
-                                                    const _errs49 = errors;
-                                                    if (typeof data14 !== 'string') {
-                                                      const err16 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/entries/' +
-                                                          i0 +
-                                                          '/reason',
-                                                        schemaPath:
-                                                          '#/properties/entries/items/properties/reason/anyOf/0/type',
-                                                        keyword: 'type',
-                                                        params: { type: 'string' },
-                                                        message: 'must be string',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err16];
-                                                      } else {
-                                                        vErrors.push(err16);
-                                                      }
-                                                      errors++;
+                                                  if (data7.state !== undefined) {
+                                                    let data16 = data7.state;
+                                                    const _errs56 = errors;
+                                                    if (typeof data16 !== 'string') {
+                                                      validate25.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/state',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/state/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        },
+                                                      ];
+                                                      return false;
                                                     }
                                                     if (
                                                       !(
-                                                        data14 === 'invalid_skill_configuration' ||
-                                                        data14 === 'skill_path_denied' ||
-                                                        data14 === 'unsupported_skill_options' ||
-                                                        data14 === 'skill_unavailable' ||
-                                                        data14 === 'skill_version_changed' ||
-                                                        data14 === 'duplicate_skill_location' ||
-                                                        data14 === 'skill_capability_missing' ||
-                                                        data14 === 'skill_metadata_limit' ||
-                                                        data14 === 'skill_text_limit' ||
-                                                        data14 === 'skill_text_invalid' ||
-                                                        data14 === 'skill_path_changed'
+                                                        data16 === 'available' ||
+                                                        data16 === 'disabled' ||
+                                                        data16 === 'unavailable'
                                                       )
                                                     ) {
-                                                      const err17 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/entries/' +
-                                                          i0 +
-                                                          '/reason',
-                                                        schemaPath:
-                                                          '#/properties/entries/items/properties/reason/anyOf/0/enum',
-                                                        keyword: 'enum',
-                                                        params: {
-                                                          allowedValues:
-                                                            schema36.properties.entries.items
-                                                              .properties.reason.anyOf[0].enum,
+                                                      validate25.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/state',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/state/enum',
+                                                          keyword: 'enum',
+                                                          params: {
+                                                            allowedValues:
+                                                              schema36.properties.entries.items
+                                                                .properties.state.enum,
+                                                          },
+                                                          message:
+                                                            'must be equal to one of the allowed values',
                                                         },
-                                                        message:
-                                                          'must be equal to one of the allowed values',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err17];
-                                                      } else {
-                                                        vErrors.push(err17);
-                                                      }
-                                                      errors++;
-                                                    }
-                                                    var _valid4 = _errs49 === errors;
-                                                    valid7 = valid7 || _valid4;
-                                                    const _errs51 = errors;
-                                                    if (data14 !== null) {
-                                                      const err18 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/entries/' +
-                                                          i0 +
-                                                          '/reason',
-                                                        schemaPath:
-                                                          '#/properties/entries/items/properties/reason/anyOf/1/type',
-                                                        keyword: 'type',
-                                                        params: { type: 'null' },
-                                                        message: 'must be null',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err18];
-                                                      } else {
-                                                        vErrors.push(err18);
-                                                      }
-                                                      errors++;
-                                                    }
-                                                    var _valid4 = _errs51 === errors;
-                                                    valid7 = valid7 || _valid4;
-                                                    if (!valid7) {
-                                                      const err19 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/entries/' +
-                                                          i0 +
-                                                          '/reason',
-                                                        schemaPath:
-                                                          '#/properties/entries/items/properties/reason/anyOf',
-                                                        keyword: 'anyOf',
-                                                        params: {},
-                                                        message: 'must match a schema in anyOf',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err19];
-                                                      } else {
-                                                        vErrors.push(err19);
-                                                      }
-                                                      errors++;
-                                                      validate25.errors = vErrors;
+                                                      ];
                                                       return false;
-                                                    } else {
-                                                      errors = _errs48;
-                                                      if (vErrors !== null) {
-                                                        if (_errs48) {
-                                                          vErrors.length = _errs48;
-                                                        } else {
-                                                          vErrors = null;
-                                                        }
-                                                      }
                                                     }
-                                                    var valid3 = _errs47 === errors;
+                                                    var valid3 = _errs56 === errors;
                                                   } else {
                                                     var valid3 = true;
                                                   }
                                                   if (valid3) {
-                                                    if (data7.requiredCapabilities !== undefined) {
-                                                      let data15 = data7.requiredCapabilities;
-                                                      const _errs53 = errors;
-                                                      if (errors === _errs53) {
-                                                        if (Array.isArray(data15)) {
-                                                          var valid8 = true;
-                                                          const len1 = data15.length;
-                                                          for (let i1 = 0; i1 < len1; i1++) {
-                                                            let data16 = data15[i1];
-                                                            const _errs55 = errors;
-                                                            if (errors === _errs55) {
-                                                              if (typeof data16 === 'string') {
-                                                                if (func2(data16) > 256) {
-                                                                  validate25.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/entries/' +
-                                                                        i0 +
-                                                                        '/requiredCapabilities/' +
-                                                                        i1,
-                                                                      schemaPath:
-                                                                        '#/properties/entries/items/properties/requiredCapabilities/items/maxLength',
-                                                                      keyword: 'maxLength',
-                                                                      params: { limit: 256 },
-                                                                      message:
-                                                                        'must NOT have more than 256 characters',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                } else {
-                                                                  if (func2(data16) < 1) {
+                                                    if (data7.reason !== undefined) {
+                                                      let data17 = data7.reason;
+                                                      const _errs58 = errors;
+                                                      const _errs59 = errors;
+                                                      let valid9 = false;
+                                                      const _errs60 = errors;
+                                                      if (typeof data17 !== 'string') {
+                                                        const err25 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/reason',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/reason/anyOf/0/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err25];
+                                                        } else {
+                                                          vErrors.push(err25);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      if (
+                                                        !(
+                                                          data17 ===
+                                                            'invalid_skill_configuration' ||
+                                                          data17 === 'skill_path_denied' ||
+                                                          data17 === 'unsupported_skill_options' ||
+                                                          data17 === 'skill_unavailable' ||
+                                                          data17 === 'skill_version_changed' ||
+                                                          data17 === 'duplicate_skill_location' ||
+                                                          data17 === 'skill_capability_missing' ||
+                                                          data17 === 'skill_metadata_limit' ||
+                                                          data17 === 'skill_text_limit' ||
+                                                          data17 === 'skill_text_invalid' ||
+                                                          data17 === 'skill_path_changed'
+                                                        )
+                                                      ) {
+                                                        const err26 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/reason',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/reason/anyOf/0/enum',
+                                                          keyword: 'enum',
+                                                          params: {
+                                                            allowedValues:
+                                                              schema36.properties.entries.items
+                                                                .properties.reason.anyOf[0].enum,
+                                                          },
+                                                          message:
+                                                            'must be equal to one of the allowed values',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err26];
+                                                        } else {
+                                                          vErrors.push(err26);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      var _valid5 = _errs60 === errors;
+                                                      valid9 = valid9 || _valid5;
+                                                      const _errs62 = errors;
+                                                      if (data17 !== null) {
+                                                        const err27 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/reason',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/reason/anyOf/1/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'null' },
+                                                          message: 'must be null',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err27];
+                                                        } else {
+                                                          vErrors.push(err27);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                      var _valid5 = _errs62 === errors;
+                                                      valid9 = valid9 || _valid5;
+                                                      if (!valid9) {
+                                                        const err28 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/entries/' +
+                                                            i0 +
+                                                            '/reason',
+                                                          schemaPath:
+                                                            '#/properties/entries/items/properties/reason/anyOf',
+                                                          keyword: 'anyOf',
+                                                          params: {},
+                                                          message: 'must match a schema in anyOf',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err28];
+                                                        } else {
+                                                          vErrors.push(err28);
+                                                        }
+                                                        errors++;
+                                                        validate25.errors = vErrors;
+                                                        return false;
+                                                      } else {
+                                                        errors = _errs59;
+                                                        if (vErrors !== null) {
+                                                          if (_errs59) {
+                                                            vErrors.length = _errs59;
+                                                          } else {
+                                                            vErrors = null;
+                                                          }
+                                                        }
+                                                      }
+                                                      var valid3 = _errs58 === errors;
+                                                    } else {
+                                                      var valid3 = true;
+                                                    }
+                                                    if (valid3) {
+                                                      if (
+                                                        data7.requiredCapabilities !== undefined
+                                                      ) {
+                                                        let data18 = data7.requiredCapabilities;
+                                                        const _errs64 = errors;
+                                                        if (errors === _errs64) {
+                                                          if (Array.isArray(data18)) {
+                                                            var valid10 = true;
+                                                            const len1 = data18.length;
+                                                            for (let i1 = 0; i1 < len1; i1++) {
+                                                              let data19 = data18[i1];
+                                                              const _errs66 = errors;
+                                                              if (errors === _errs66) {
+                                                                if (typeof data19 === 'string') {
+                                                                  if (func2(data19) > 256) {
                                                                     validate25.errors = [
                                                                       {
                                                                         instancePath:
@@ -18676,86 +18940,7 @@ function validate25(
                                                                           '/requiredCapabilities/' +
                                                                           i1,
                                                                         schemaPath:
-                                                                          '#/properties/entries/items/properties/requiredCapabilities/items/minLength',
-                                                                        keyword: 'minLength',
-                                                                        params: { limit: 1 },
-                                                                        message:
-                                                                          'must NOT have fewer than 1 characters',
-                                                                      },
-                                                                    ];
-                                                                    return false;
-                                                                  }
-                                                                }
-                                                              } else {
-                                                                validate25.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/entries/' +
-                                                                      i0 +
-                                                                      '/requiredCapabilities/' +
-                                                                      i1,
-                                                                    schemaPath:
-                                                                      '#/properties/entries/items/properties/requiredCapabilities/items/type',
-                                                                    keyword: 'type',
-                                                                    params: { type: 'string' },
-                                                                    message: 'must be string',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              }
-                                                            }
-                                                            var valid8 = _errs55 === errors;
-                                                            if (!valid8) {
-                                                              break;
-                                                            }
-                                                          }
-                                                        } else {
-                                                          validate25.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/entries/' +
-                                                                i0 +
-                                                                '/requiredCapabilities',
-                                                              schemaPath:
-                                                                '#/properties/entries/items/properties/requiredCapabilities/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'array' },
-                                                              message: 'must be array',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                      }
-                                                      var valid3 = _errs53 === errors;
-                                                    } else {
-                                                      var valid3 = true;
-                                                    }
-                                                    if (valid3) {
-                                                      if (data7.missingCapabilities !== undefined) {
-                                                        let data17 = data7.missingCapabilities;
-                                                        const _errs57 = errors;
-                                                        if (errors === _errs57) {
-                                                          if (Array.isArray(data17)) {
-                                                            var valid9 = true;
-                                                            const len2 = data17.length;
-                                                            for (let i2 = 0; i2 < len2; i2++) {
-                                                              let data18 = data17[i2];
-                                                              const _errs59 = errors;
-                                                              if (errors === _errs59) {
-                                                                if (typeof data18 === 'string') {
-                                                                  if (func2(data18) > 256) {
-                                                                    validate25.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/entries/' +
-                                                                          i0 +
-                                                                          '/missingCapabilities/' +
-                                                                          i2,
-                                                                        schemaPath:
-                                                                          '#/properties/entries/items/properties/missingCapabilities/items/maxLength',
+                                                                          '#/properties/entries/items/properties/requiredCapabilities/items/maxLength',
                                                                         keyword: 'maxLength',
                                                                         params: { limit: 256 },
                                                                         message:
@@ -18764,17 +18949,17 @@ function validate25(
                                                                     ];
                                                                     return false;
                                                                   } else {
-                                                                    if (func2(data18) < 1) {
+                                                                    if (func2(data19) < 1) {
                                                                       validate25.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/entries/' +
                                                                             i0 +
-                                                                            '/missingCapabilities/' +
-                                                                            i2,
+                                                                            '/requiredCapabilities/' +
+                                                                            i1,
                                                                           schemaPath:
-                                                                            '#/properties/entries/items/properties/missingCapabilities/items/minLength',
+                                                                            '#/properties/entries/items/properties/requiredCapabilities/items/minLength',
                                                                           keyword: 'minLength',
                                                                           params: { limit: 1 },
                                                                           message:
@@ -18791,10 +18976,10 @@ function validate25(
                                                                         instancePath +
                                                                         '/entries/' +
                                                                         i0 +
-                                                                        '/missingCapabilities/' +
-                                                                        i2,
+                                                                        '/requiredCapabilities/' +
+                                                                        i1,
                                                                       schemaPath:
-                                                                        '#/properties/entries/items/properties/missingCapabilities/items/type',
+                                                                        '#/properties/entries/items/properties/requiredCapabilities/items/type',
                                                                       keyword: 'type',
                                                                       params: { type: 'string' },
                                                                       message: 'must be string',
@@ -18803,8 +18988,8 @@ function validate25(
                                                                   return false;
                                                                 }
                                                               }
-                                                              var valid9 = _errs59 === errors;
-                                                              if (!valid9) {
+                                                              var valid10 = _errs66 === errors;
+                                                              if (!valid10) {
                                                                 break;
                                                               }
                                                             }
@@ -18815,9 +19000,9 @@ function validate25(
                                                                   instancePath +
                                                                   '/entries/' +
                                                                   i0 +
-                                                                  '/missingCapabilities',
+                                                                  '/requiredCapabilities',
                                                                 schemaPath:
-                                                                  '#/properties/entries/items/properties/missingCapabilities/type',
+                                                                  '#/properties/entries/items/properties/requiredCapabilities/type',
                                                                 keyword: 'type',
                                                                 params: { type: 'array' },
                                                                 message: 'must be array',
@@ -18826,108 +19011,180 @@ function validate25(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid3 = _errs57 === errors;
+                                                        var valid3 = _errs64 === errors;
                                                       } else {
                                                         var valid3 = true;
                                                       }
                                                       if (valid3) {
-                                                        if (data7.workflow !== undefined) {
-                                                          let data19 = data7.workflow;
-                                                          const _errs61 = errors;
-                                                          if (errors === _errs61) {
-                                                            if (
-                                                              data19 &&
-                                                              typeof data19 == 'object' &&
-                                                              !Array.isArray(data19)
-                                                            ) {
-                                                              let missing2;
-                                                              if (
-                                                                (data19.extensionId === undefined &&
-                                                                  (missing2 = 'extensionId')) ||
-                                                                (data19.definitionVersion ===
-                                                                  undefined &&
-                                                                  (missing2 =
-                                                                    'definitionVersion')) ||
-                                                                (data19.skillId === undefined &&
-                                                                  (missing2 = 'skillId')) ||
-                                                                (data19.name === undefined &&
-                                                                  (missing2 = 'name')) ||
-                                                                (data19.revision === undefined &&
-                                                                  (missing2 = 'revision')) ||
-                                                                (data19.state === undefined &&
-                                                                  (missing2 = 'state')) ||
-                                                                (data19.reason === undefined &&
-                                                                  (missing2 = 'reason')) ||
-                                                                (data19.manualAllowed ===
-                                                                  undefined &&
-                                                                  (missing2 = 'manualAllowed')) ||
-                                                                (data19.emptyInputValid ===
-                                                                  undefined &&
-                                                                  (missing2 = 'emptyInputValid')) ||
-                                                                (data19.contextMode === undefined &&
-                                                                  (missing2 = 'contextMode'))
-                                                              ) {
-                                                                validate25.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/entries/' +
-                                                                      i0 +
-                                                                      '/workflow',
-                                                                    schemaPath:
-                                                                      '#/properties/entries/items/properties/workflow/required',
-                                                                    keyword: 'required',
-                                                                    params: {
-                                                                      missingProperty: missing2,
-                                                                    },
-                                                                    message:
-                                                                      "must have required property '" +
-                                                                      missing2 +
-                                                                      "'",
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              } else {
-                                                                const _errs63 = errors;
-                                                                for (const key2 in data19) {
-                                                                  if (
-                                                                    !func1.call(
-                                                                      schema36.properties.entries
-                                                                        .items.properties.workflow
-                                                                        .properties,
-                                                                      key2,
-                                                                    )
-                                                                  ) {
+                                                        if (
+                                                          data7.missingCapabilities !== undefined
+                                                        ) {
+                                                          let data20 = data7.missingCapabilities;
+                                                          const _errs68 = errors;
+                                                          if (errors === _errs68) {
+                                                            if (Array.isArray(data20)) {
+                                                              var valid11 = true;
+                                                              const len2 = data20.length;
+                                                              for (let i2 = 0; i2 < len2; i2++) {
+                                                                let data21 = data20[i2];
+                                                                const _errs70 = errors;
+                                                                if (errors === _errs70) {
+                                                                  if (typeof data21 === 'string') {
+                                                                    if (func2(data21) > 256) {
+                                                                      validate25.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/entries/' +
+                                                                            i0 +
+                                                                            '/missingCapabilities/' +
+                                                                            i2,
+                                                                          schemaPath:
+                                                                            '#/properties/entries/items/properties/missingCapabilities/items/maxLength',
+                                                                          keyword: 'maxLength',
+                                                                          params: { limit: 256 },
+                                                                          message:
+                                                                            'must NOT have more than 256 characters',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    } else {
+                                                                      if (func2(data21) < 1) {
+                                                                        validate25.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/entries/' +
+                                                                              i0 +
+                                                                              '/missingCapabilities/' +
+                                                                              i2,
+                                                                            schemaPath:
+                                                                              '#/properties/entries/items/properties/missingCapabilities/items/minLength',
+                                                                            keyword: 'minLength',
+                                                                            params: { limit: 1 },
+                                                                            message:
+                                                                              'must NOT have fewer than 1 characters',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                  } else {
                                                                     validate25.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/entries/' +
                                                                           i0 +
-                                                                          '/workflow',
+                                                                          '/missingCapabilities/' +
+                                                                          i2,
                                                                         schemaPath:
-                                                                          '#/properties/entries/items/properties/workflow/additionalProperties',
-                                                                        keyword:
-                                                                          'additionalProperties',
-                                                                        params: {
-                                                                          additionalProperty: key2,
-                                                                        },
-                                                                        message:
-                                                                          'must NOT have additional properties',
+                                                                          '#/properties/entries/items/properties/missingCapabilities/items/type',
+                                                                        keyword: 'type',
+                                                                        params: { type: 'string' },
+                                                                        message: 'must be string',
                                                                       },
                                                                     ];
                                                                     return false;
-                                                                    break;
                                                                   }
                                                                 }
-                                                                if (_errs63 === errors) {
-                                                                  if (
-                                                                    data19.extensionId !== undefined
-                                                                  ) {
-                                                                    let data20 = data19.extensionId;
-                                                                    const _errs64 = errors;
+                                                                var valid11 = _errs70 === errors;
+                                                                if (!valid11) {
+                                                                  break;
+                                                                }
+                                                              }
+                                                            } else {
+                                                              validate25.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/entries/' +
+                                                                    i0 +
+                                                                    '/missingCapabilities',
+                                                                  schemaPath:
+                                                                    '#/properties/entries/items/properties/missingCapabilities/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'array' },
+                                                                  message: 'must be array',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                          }
+                                                          var valid3 = _errs68 === errors;
+                                                        } else {
+                                                          var valid3 = true;
+                                                        }
+                                                        if (valid3) {
+                                                          if (data7.workflow !== undefined) {
+                                                            let data22 = data7.workflow;
+                                                            const _errs72 = errors;
+                                                            if (errors === _errs72) {
+                                                              if (
+                                                                data22 &&
+                                                                typeof data22 == 'object' &&
+                                                                !Array.isArray(data22)
+                                                              ) {
+                                                                let missing3;
+                                                                if (
+                                                                  (data22.extensionId ===
+                                                                    undefined &&
+                                                                    (missing3 = 'extensionId')) ||
+                                                                  (data22.definitionVersion ===
+                                                                    undefined &&
+                                                                    (missing3 =
+                                                                      'definitionVersion')) ||
+                                                                  (data22.skillId === undefined &&
+                                                                    (missing3 = 'skillId')) ||
+                                                                  (data22.name === undefined &&
+                                                                    (missing3 = 'name')) ||
+                                                                  (data22.revision === undefined &&
+                                                                    (missing3 = 'revision')) ||
+                                                                  (data22.state === undefined &&
+                                                                    (missing3 = 'state')) ||
+                                                                  (data22.reason === undefined &&
+                                                                    (missing3 = 'reason')) ||
+                                                                  (data22.manualAllowed ===
+                                                                    undefined &&
+                                                                    (missing3 = 'manualAllowed')) ||
+                                                                  (data22.emptyInputValid ===
+                                                                    undefined &&
+                                                                    (missing3 =
+                                                                      'emptyInputValid')) ||
+                                                                  (data22.contextMode ===
+                                                                    undefined &&
+                                                                    (missing3 = 'contextMode'))
+                                                                ) {
+                                                                  validate25.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/entries/' +
+                                                                        i0 +
+                                                                        '/workflow',
+                                                                      schemaPath:
+                                                                        '#/properties/entries/items/properties/workflow/required',
+                                                                      keyword: 'required',
+                                                                      params: {
+                                                                        missingProperty: missing3,
+                                                                      },
+                                                                      message:
+                                                                        "must have required property '" +
+                                                                        missing3 +
+                                                                        "'",
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                } else {
+                                                                  const _errs74 = errors;
+                                                                  for (const key3 in data22) {
                                                                     if (
-                                                                      typeof data20 !== 'string'
+                                                                      !func1.call(
+                                                                        schema36.properties.entries
+                                                                          .items.properties.workflow
+                                                                          .properties,
+                                                                        key3,
+                                                                      )
                                                                     ) {
                                                                       validate25.errors = [
                                                                         {
@@ -18935,57 +19192,33 @@ function validate25(
                                                                             instancePath +
                                                                             '/entries/' +
                                                                             i0 +
-                                                                            '/workflow/extensionId',
+                                                                            '/workflow',
                                                                           schemaPath:
-                                                                            '#/properties/entries/items/properties/workflow/properties/extensionId/type',
-                                                                          keyword: 'type',
+                                                                            '#/properties/entries/items/properties/workflow/additionalProperties',
+                                                                          keyword:
+                                                                            'additionalProperties',
                                                                           params: {
-                                                                            type: 'string',
-                                                                          },
-                                                                          message: 'must be string',
-                                                                        },
-                                                                      ];
-                                                                      return false;
-                                                                    }
-                                                                    if (
-                                                                      data20 !==
-                                                                      'builtin.skill-workflow'
-                                                                    ) {
-                                                                      validate25.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/entries/' +
-                                                                            i0 +
-                                                                            '/workflow/extensionId',
-                                                                          schemaPath:
-                                                                            '#/properties/entries/items/properties/workflow/properties/extensionId/const',
-                                                                          keyword: 'const',
-                                                                          params: {
-                                                                            allowedValue:
-                                                                              'builtin.skill-workflow',
+                                                                            additionalProperty:
+                                                                              key3,
                                                                           },
                                                                           message:
-                                                                            'must be equal to constant',
+                                                                            'must NOT have additional properties',
                                                                         },
                                                                       ];
                                                                       return false;
+                                                                      break;
                                                                     }
-                                                                    var valid10 =
-                                                                      _errs64 === errors;
-                                                                  } else {
-                                                                    var valid10 = true;
                                                                   }
-                                                                  if (valid10) {
+                                                                  if (_errs74 === errors) {
                                                                     if (
-                                                                      data19.definitionVersion !==
+                                                                      data22.extensionId !==
                                                                       undefined
                                                                     ) {
-                                                                      let data21 =
-                                                                        data19.definitionVersion;
-                                                                      const _errs66 = errors;
+                                                                      let data23 =
+                                                                        data22.extensionId;
+                                                                      const _errs75 = errors;
                                                                       if (
-                                                                        typeof data21 !== 'string'
+                                                                        typeof data23 !== 'string'
                                                                       ) {
                                                                         validate25.errors = [
                                                                           {
@@ -18993,9 +19226,9 @@ function validate25(
                                                                               instancePath +
                                                                               '/entries/' +
                                                                               i0 +
-                                                                              '/workflow/definitionVersion',
+                                                                              '/workflow/extensionId',
                                                                             schemaPath:
-                                                                              '#/properties/entries/items/properties/workflow/properties/definitionVersion/type',
+                                                                              '#/properties/entries/items/properties/workflow/properties/extensionId/type',
                                                                             keyword: 'type',
                                                                             params: {
                                                                               type: 'string',
@@ -19006,19 +19239,23 @@ function validate25(
                                                                         ];
                                                                         return false;
                                                                       }
-                                                                      if (data21 !== '1') {
+                                                                      if (
+                                                                        data23 !==
+                                                                        'builtin.skill-workflow'
+                                                                      ) {
                                                                         validate25.errors = [
                                                                           {
                                                                             instancePath:
                                                                               instancePath +
                                                                               '/entries/' +
                                                                               i0 +
-                                                                              '/workflow/definitionVersion',
+                                                                              '/workflow/extensionId',
                                                                             schemaPath:
-                                                                              '#/properties/entries/items/properties/workflow/properties/definitionVersion/const',
+                                                                              '#/properties/entries/items/properties/workflow/properties/extensionId/const',
                                                                             keyword: 'const',
                                                                             params: {
-                                                                              allowedValue: '1',
+                                                                              allowedValue:
+                                                                                'builtin.skill-workflow',
                                                                             },
                                                                             message:
                                                                               'must be equal to constant',
@@ -19026,231 +19263,154 @@ function validate25(
                                                                         ];
                                                                         return false;
                                                                       }
-                                                                      var valid10 =
-                                                                        _errs66 === errors;
+                                                                      var valid12 =
+                                                                        _errs75 === errors;
                                                                     } else {
-                                                                      var valid10 = true;
+                                                                      var valid12 = true;
                                                                     }
-                                                                    if (valid10) {
+                                                                    if (valid12) {
                                                                       if (
-                                                                        data19.skillId !== undefined
+                                                                        data22.definitionVersion !==
+                                                                        undefined
                                                                       ) {
-                                                                        let data22 = data19.skillId;
-                                                                        const _errs68 = errors;
-                                                                        const _errs69 = errors;
-                                                                        let valid11 = false;
-                                                                        const _errs70 = errors;
-                                                                        if (errors === _errs70) {
-                                                                          if (
-                                                                            typeof data22 ===
-                                                                            'string'
-                                                                          ) {
-                                                                            if (
-                                                                              func2(data22) > 128
-                                                                            ) {
-                                                                              const err20 = {
-                                                                                instancePath:
-                                                                                  instancePath +
-                                                                                  '/entries/' +
-                                                                                  i0 +
-                                                                                  '/workflow/skillId',
-                                                                                schemaPath:
-                                                                                  '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/maxLength',
-                                                                                keyword:
-                                                                                  'maxLength',
-                                                                                params: {
-                                                                                  limit: 128,
-                                                                                },
-                                                                                message:
-                                                                                  'must NOT have more than 128 characters',
-                                                                              };
-                                                                              if (
-                                                                                vErrors === null
-                                                                              ) {
-                                                                                vErrors = [err20];
-                                                                              } else {
-                                                                                vErrors.push(err20);
-                                                                              }
-                                                                              errors++;
-                                                                            } else {
-                                                                              if (
-                                                                                func2(data22) < 1
-                                                                              ) {
-                                                                                const err21 = {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/entries/' +
-                                                                                    i0 +
-                                                                                    '/workflow/skillId',
-                                                                                  schemaPath:
-                                                                                    '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/minLength',
-                                                                                  keyword:
-                                                                                    'minLength',
-                                                                                  params: {
-                                                                                    limit: 1,
-                                                                                  },
-                                                                                  message:
-                                                                                    'must NOT have fewer than 1 characters',
-                                                                                };
-                                                                                if (
-                                                                                  vErrors === null
-                                                                                ) {
-                                                                                  vErrors = [err21];
-                                                                                } else {
-                                                                                  vErrors.push(
-                                                                                    err21,
-                                                                                  );
-                                                                                }
-                                                                                errors++;
-                                                                              }
-                                                                            }
-                                                                          } else {
-                                                                            const err22 = {
+                                                                        let data24 =
+                                                                          data22.definitionVersion;
+                                                                        const _errs77 = errors;
+                                                                        if (
+                                                                          typeof data24 !== 'string'
+                                                                        ) {
+                                                                          validate25.errors = [
+                                                                            {
                                                                               instancePath:
                                                                                 instancePath +
                                                                                 '/entries/' +
                                                                                 i0 +
-                                                                                '/workflow/skillId',
+                                                                                '/workflow/definitionVersion',
                                                                               schemaPath:
-                                                                                '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/type',
+                                                                                '#/properties/entries/items/properties/workflow/properties/definitionVersion/type',
                                                                               keyword: 'type',
                                                                               params: {
                                                                                 type: 'string',
                                                                               },
                                                                               message:
                                                                                 'must be string',
-                                                                            };
-                                                                            if (vErrors === null) {
-                                                                              vErrors = [err22];
-                                                                            } else {
-                                                                              vErrors.push(err22);
-                                                                            }
-                                                                            errors++;
-                                                                          }
-                                                                        }
-                                                                        var _valid5 =
-                                                                          _errs70 === errors;
-                                                                        valid11 =
-                                                                          valid11 || _valid5;
-                                                                        const _errs72 = errors;
-                                                                        if (data22 !== null) {
-                                                                          const err23 = {
-                                                                            instancePath:
-                                                                              instancePath +
-                                                                              '/entries/' +
-                                                                              i0 +
-                                                                              '/workflow/skillId',
-                                                                            schemaPath:
-                                                                              '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/1/type',
-                                                                            keyword: 'type',
-                                                                            params: {
-                                                                              type: 'null',
                                                                             },
-                                                                            message: 'must be null',
-                                                                          };
-                                                                          if (vErrors === null) {
-                                                                            vErrors = [err23];
-                                                                          } else {
-                                                                            vErrors.push(err23);
-                                                                          }
-                                                                          errors++;
-                                                                        }
-                                                                        var _valid5 =
-                                                                          _errs72 === errors;
-                                                                        valid11 =
-                                                                          valid11 || _valid5;
-                                                                        if (!valid11) {
-                                                                          const err24 = {
-                                                                            instancePath:
-                                                                              instancePath +
-                                                                              '/entries/' +
-                                                                              i0 +
-                                                                              '/workflow/skillId',
-                                                                            schemaPath:
-                                                                              '#/properties/entries/items/properties/workflow/properties/skillId/anyOf',
-                                                                            keyword: 'anyOf',
-                                                                            params: {},
-                                                                            message:
-                                                                              'must match a schema in anyOf',
-                                                                          };
-                                                                          if (vErrors === null) {
-                                                                            vErrors = [err24];
-                                                                          } else {
-                                                                            vErrors.push(err24);
-                                                                          }
-                                                                          errors++;
-                                                                          validate25.errors =
-                                                                            vErrors;
+                                                                          ];
                                                                           return false;
-                                                                        } else {
-                                                                          errors = _errs69;
-                                                                          if (vErrors !== null) {
-                                                                            if (_errs69) {
-                                                                              vErrors.length =
-                                                                                _errs69;
-                                                                            } else {
-                                                                              vErrors = null;
-                                                                            }
-                                                                          }
                                                                         }
-                                                                        var valid10 =
-                                                                          _errs68 === errors;
+                                                                        if (data24 !== '1') {
+                                                                          validate25.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/entries/' +
+                                                                                i0 +
+                                                                                '/workflow/definitionVersion',
+                                                                              schemaPath:
+                                                                                '#/properties/entries/items/properties/workflow/properties/definitionVersion/const',
+                                                                              keyword: 'const',
+                                                                              params: {
+                                                                                allowedValue: '1',
+                                                                              },
+                                                                              message:
+                                                                                'must be equal to constant',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                        var valid12 =
+                                                                          _errs77 === errors;
                                                                       } else {
-                                                                        var valid10 = true;
+                                                                        var valid12 = true;
                                                                       }
-                                                                      if (valid10) {
+                                                                      if (valid12) {
                                                                         if (
-                                                                          data19.name !== undefined
+                                                                          data22.skillId !==
+                                                                          undefined
                                                                         ) {
-                                                                          let data23 = data19.name;
-                                                                          const _errs74 = errors;
-                                                                          const _errs75 = errors;
-                                                                          let valid12 = false;
-                                                                          const _errs76 = errors;
-                                                                          if (errors === _errs76) {
+                                                                          let data25 =
+                                                                            data22.skillId;
+                                                                          const _errs79 = errors;
+                                                                          const _errs80 = errors;
+                                                                          let valid13 = false;
+                                                                          const _errs81 = errors;
+                                                                          if (errors === _errs81) {
                                                                             if (
-                                                                              typeof data23 ===
+                                                                              typeof data25 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
-                                                                                func2(data23) > 256
+                                                                                func2(data25) > 128
                                                                               ) {
-                                                                                const err25 = {
+                                                                                const err29 = {
                                                                                   instancePath:
                                                                                     instancePath +
                                                                                     '/entries/' +
                                                                                     i0 +
-                                                                                    '/workflow/name',
+                                                                                    '/workflow/skillId',
                                                                                   schemaPath:
-                                                                                    '#/properties/entries/items/properties/workflow/properties/name/anyOf/0/maxLength',
+                                                                                    '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/maxLength',
                                                                                   keyword:
                                                                                     'maxLength',
                                                                                   params: {
-                                                                                    limit: 256,
+                                                                                    limit: 128,
                                                                                   },
                                                                                   message:
-                                                                                    'must NOT have more than 256 characters',
+                                                                                    'must NOT have more than 128 characters',
                                                                                 };
                                                                                 if (
                                                                                   vErrors === null
                                                                                 ) {
-                                                                                  vErrors = [err25];
+                                                                                  vErrors = [err29];
                                                                                 } else {
                                                                                   vErrors.push(
-                                                                                    err25,
+                                                                                    err29,
                                                                                   );
                                                                                 }
                                                                                 errors++;
+                                                                              } else {
+                                                                                if (
+                                                                                  func2(data25) < 1
+                                                                                ) {
+                                                                                  const err30 = {
+                                                                                    instancePath:
+                                                                                      instancePath +
+                                                                                      '/entries/' +
+                                                                                      i0 +
+                                                                                      '/workflow/skillId',
+                                                                                    schemaPath:
+                                                                                      '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/minLength',
+                                                                                    keyword:
+                                                                                      'minLength',
+                                                                                    params: {
+                                                                                      limit: 1,
+                                                                                    },
+                                                                                    message:
+                                                                                      'must NOT have fewer than 1 characters',
+                                                                                  };
+                                                                                  if (
+                                                                                    vErrors === null
+                                                                                  ) {
+                                                                                    vErrors = [
+                                                                                      err30,
+                                                                                    ];
+                                                                                  } else {
+                                                                                    vErrors.push(
+                                                                                      err30,
+                                                                                    );
+                                                                                  }
+                                                                                  errors++;
+                                                                                }
                                                                               }
                                                                             } else {
-                                                                              const err26 = {
+                                                                              const err31 = {
                                                                                 instancePath:
                                                                                   instancePath +
                                                                                   '/entries/' +
                                                                                   i0 +
-                                                                                  '/workflow/name',
+                                                                                  '/workflow/skillId',
                                                                                 schemaPath:
-                                                                                  '#/properties/entries/items/properties/workflow/properties/name/anyOf/0/type',
+                                                                                  '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/0/type',
                                                                                 keyword: 'type',
                                                                                 params: {
                                                                                   type: 'string',
@@ -19261,27 +19421,27 @@ function validate25(
                                                                               if (
                                                                                 vErrors === null
                                                                               ) {
-                                                                                vErrors = [err26];
+                                                                                vErrors = [err31];
                                                                               } else {
-                                                                                vErrors.push(err26);
+                                                                                vErrors.push(err31);
                                                                               }
                                                                               errors++;
                                                                             }
                                                                           }
                                                                           var _valid6 =
-                                                                            _errs76 === errors;
-                                                                          valid12 =
-                                                                            valid12 || _valid6;
-                                                                          const _errs78 = errors;
-                                                                          if (data23 !== null) {
-                                                                            const err27 = {
+                                                                            _errs81 === errors;
+                                                                          valid13 =
+                                                                            valid13 || _valid6;
+                                                                          const _errs83 = errors;
+                                                                          if (data25 !== null) {
+                                                                            const err32 = {
                                                                               instancePath:
                                                                                 instancePath +
                                                                                 '/entries/' +
                                                                                 i0 +
-                                                                                '/workflow/name',
+                                                                                '/workflow/skillId',
                                                                               schemaPath:
-                                                                                '#/properties/entries/items/properties/workflow/properties/name/anyOf/1/type',
+                                                                                '#/properties/entries/items/properties/workflow/properties/skillId/anyOf/1/type',
                                                                               keyword: 'type',
                                                                               params: {
                                                                                 type: 'null',
@@ -19290,119 +19450,115 @@ function validate25(
                                                                                 'must be null',
                                                                             };
                                                                             if (vErrors === null) {
-                                                                              vErrors = [err27];
+                                                                              vErrors = [err32];
                                                                             } else {
-                                                                              vErrors.push(err27);
+                                                                              vErrors.push(err32);
                                                                             }
                                                                             errors++;
                                                                           }
                                                                           var _valid6 =
-                                                                            _errs78 === errors;
-                                                                          valid12 =
-                                                                            valid12 || _valid6;
-                                                                          if (!valid12) {
-                                                                            const err28 = {
+                                                                            _errs83 === errors;
+                                                                          valid13 =
+                                                                            valid13 || _valid6;
+                                                                          if (!valid13) {
+                                                                            const err33 = {
                                                                               instancePath:
                                                                                 instancePath +
                                                                                 '/entries/' +
                                                                                 i0 +
-                                                                                '/workflow/name',
+                                                                                '/workflow/skillId',
                                                                               schemaPath:
-                                                                                '#/properties/entries/items/properties/workflow/properties/name/anyOf',
+                                                                                '#/properties/entries/items/properties/workflow/properties/skillId/anyOf',
                                                                               keyword: 'anyOf',
                                                                               params: {},
                                                                               message:
                                                                                 'must match a schema in anyOf',
                                                                             };
                                                                             if (vErrors === null) {
-                                                                              vErrors = [err28];
+                                                                              vErrors = [err33];
                                                                             } else {
-                                                                              vErrors.push(err28);
+                                                                              vErrors.push(err33);
                                                                             }
                                                                             errors++;
                                                                             validate25.errors =
                                                                               vErrors;
                                                                             return false;
                                                                           } else {
-                                                                            errors = _errs75;
+                                                                            errors = _errs80;
                                                                             if (vErrors !== null) {
-                                                                              if (_errs75) {
+                                                                              if (_errs80) {
                                                                                 vErrors.length =
-                                                                                  _errs75;
+                                                                                  _errs80;
                                                                               } else {
                                                                                 vErrors = null;
                                                                               }
                                                                             }
                                                                           }
-                                                                          var valid10 =
-                                                                            _errs74 === errors;
+                                                                          var valid12 =
+                                                                            _errs79 === errors;
                                                                         } else {
-                                                                          var valid10 = true;
+                                                                          var valid12 = true;
                                                                         }
-                                                                        if (valid10) {
+                                                                        if (valid12) {
                                                                           if (
-                                                                            data19.revision !==
+                                                                            data22.name !==
                                                                             undefined
                                                                           ) {
-                                                                            let data24 =
-                                                                              data19.revision;
-                                                                            const _errs80 = errors;
-                                                                            const _errs81 = errors;
-                                                                            let valid13 = false;
-                                                                            const _errs82 = errors;
+                                                                            let data26 =
+                                                                              data22.name;
+                                                                            const _errs85 = errors;
+                                                                            const _errs86 = errors;
+                                                                            let valid14 = false;
+                                                                            const _errs87 = errors;
                                                                             if (
-                                                                              errors === _errs82
+                                                                              errors === _errs87
                                                                             ) {
                                                                               if (
-                                                                                typeof data24 ===
+                                                                                typeof data26 ===
                                                                                 'string'
                                                                               ) {
                                                                                 if (
-                                                                                  !pattern7.test(
-                                                                                    data24,
-                                                                                  )
+                                                                                  func2(data26) >
+                                                                                  256
                                                                                 ) {
-                                                                                  const err29 = {
+                                                                                  const err34 = {
                                                                                     instancePath:
                                                                                       instancePath +
                                                                                       '/entries/' +
                                                                                       i0 +
-                                                                                      '/workflow/revision',
+                                                                                      '/workflow/name',
                                                                                     schemaPath:
-                                                                                      '#/properties/entries/items/properties/workflow/properties/revision/anyOf/0/pattern',
+                                                                                      '#/properties/entries/items/properties/workflow/properties/name/anyOf/0/maxLength',
                                                                                     keyword:
-                                                                                      'pattern',
+                                                                                      'maxLength',
                                                                                     params: {
-                                                                                      pattern:
-                                                                                        '^[a-f0-9]{64}$',
+                                                                                      limit: 256,
                                                                                     },
                                                                                     message:
-                                                                                      'must match pattern "' +
-                                                                                      '^[a-f0-9]{64}$' +
-                                                                                      '"',
+                                                                                      'must NOT have more than 256 characters',
                                                                                   };
                                                                                   if (
                                                                                     vErrors === null
                                                                                   ) {
                                                                                     vErrors = [
-                                                                                      err29,
+                                                                                      err34,
                                                                                     ];
                                                                                   } else {
                                                                                     vErrors.push(
-                                                                                      err29,
+                                                                                      err34,
                                                                                     );
                                                                                   }
                                                                                   errors++;
                                                                                 }
                                                                               } else {
-                                                                                const err30 = {
+                                                                                const err35 = {
                                                                                   instancePath:
                                                                                     instancePath +
                                                                                     '/entries/' +
                                                                                     i0 +
-                                                                                    '/workflow/revision',
+                                                                                    '/workflow/name',
                                                                                   schemaPath:
-                                                                                    '#/properties/entries/items/properties/workflow/properties/revision/anyOf/0/type',
+                                                                                    '#/properties/entries/items/properties/workflow/properties/name/anyOf/0/type',
                                                                                   keyword: 'type',
                                                                                   params: {
                                                                                     type: 'string',
@@ -19413,29 +19569,29 @@ function validate25(
                                                                                 if (
                                                                                   vErrors === null
                                                                                 ) {
-                                                                                  vErrors = [err30];
+                                                                                  vErrors = [err35];
                                                                                 } else {
                                                                                   vErrors.push(
-                                                                                    err30,
+                                                                                    err35,
                                                                                   );
                                                                                 }
                                                                                 errors++;
                                                                               }
                                                                             }
                                                                             var _valid7 =
-                                                                              _errs82 === errors;
-                                                                            valid13 =
-                                                                              valid13 || _valid7;
-                                                                            const _errs84 = errors;
-                                                                            if (data24 !== null) {
-                                                                              const err31 = {
+                                                                              _errs87 === errors;
+                                                                            valid14 =
+                                                                              valid14 || _valid7;
+                                                                            const _errs89 = errors;
+                                                                            if (data26 !== null) {
+                                                                              const err36 = {
                                                                                 instancePath:
                                                                                   instancePath +
                                                                                   '/entries/' +
                                                                                   i0 +
-                                                                                  '/workflow/revision',
+                                                                                  '/workflow/name',
                                                                                 schemaPath:
-                                                                                  '#/properties/entries/items/properties/workflow/properties/revision/anyOf/1/type',
+                                                                                  '#/properties/entries/items/properties/workflow/properties/name/anyOf/1/type',
                                                                                 keyword: 'type',
                                                                                 params: {
                                                                                   type: 'null',
@@ -19446,25 +19602,25 @@ function validate25(
                                                                               if (
                                                                                 vErrors === null
                                                                               ) {
-                                                                                vErrors = [err31];
+                                                                                vErrors = [err36];
                                                                               } else {
-                                                                                vErrors.push(err31);
+                                                                                vErrors.push(err36);
                                                                               }
                                                                               errors++;
                                                                             }
                                                                             var _valid7 =
-                                                                              _errs84 === errors;
-                                                                            valid13 =
-                                                                              valid13 || _valid7;
-                                                                            if (!valid13) {
-                                                                              const err32 = {
+                                                                              _errs89 === errors;
+                                                                            valid14 =
+                                                                              valid14 || _valid7;
+                                                                            if (!valid14) {
+                                                                              const err37 = {
                                                                                 instancePath:
                                                                                   instancePath +
                                                                                   '/entries/' +
                                                                                   i0 +
-                                                                                  '/workflow/revision',
+                                                                                  '/workflow/name',
                                                                                 schemaPath:
-                                                                                  '#/properties/entries/items/properties/workflow/properties/revision/anyOf',
+                                                                                  '#/properties/entries/items/properties/workflow/properties/name/anyOf',
                                                                                 keyword: 'anyOf',
                                                                                 params: {},
                                                                                 message:
@@ -19473,137 +19629,100 @@ function validate25(
                                                                               if (
                                                                                 vErrors === null
                                                                               ) {
-                                                                                vErrors = [err32];
+                                                                                vErrors = [err37];
                                                                               } else {
-                                                                                vErrors.push(err32);
+                                                                                vErrors.push(err37);
                                                                               }
                                                                               errors++;
                                                                               validate25.errors =
                                                                                 vErrors;
                                                                               return false;
                                                                             } else {
-                                                                              errors = _errs81;
+                                                                              errors = _errs86;
                                                                               if (
                                                                                 vErrors !== null
                                                                               ) {
-                                                                                if (_errs81) {
+                                                                                if (_errs86) {
                                                                                   vErrors.length =
-                                                                                    _errs81;
+                                                                                    _errs86;
                                                                                 } else {
                                                                                   vErrors = null;
                                                                                 }
                                                                               }
                                                                             }
-                                                                            var valid10 =
-                                                                              _errs80 === errors;
+                                                                            var valid12 =
+                                                                              _errs85 === errors;
                                                                           } else {
-                                                                            var valid10 = true;
+                                                                            var valid12 = true;
                                                                           }
-                                                                          if (valid10) {
+                                                                          if (valid12) {
                                                                             if (
-                                                                              data19.state !==
+                                                                              data22.revision !==
                                                                               undefined
                                                                             ) {
-                                                                              let data25 =
-                                                                                data19.state;
-                                                                              const _errs86 =
+                                                                              let data27 =
+                                                                                data22.revision;
+                                                                              const _errs91 =
+                                                                                errors;
+                                                                              const _errs92 =
+                                                                                errors;
+                                                                              let valid15 = false;
+                                                                              const _errs93 =
                                                                                 errors;
                                                                               if (
-                                                                                typeof data25 !==
-                                                                                'string'
+                                                                                errors === _errs93
                                                                               ) {
-                                                                                validate25.errors =
-                                                                                  [
-                                                                                    {
-                                                                                      instancePath:
-                                                                                        instancePath +
-                                                                                        '/entries/' +
-                                                                                        i0 +
-                                                                                        '/workflow/state',
-                                                                                      schemaPath:
-                                                                                        '#/properties/entries/items/properties/workflow/properties/state/type',
-                                                                                      keyword:
-                                                                                        'type',
-                                                                                      params: {
-                                                                                        type: 'string',
-                                                                                      },
-                                                                                      message:
-                                                                                        'must be string',
-                                                                                    },
-                                                                                  ];
-                                                                                return false;
-                                                                              }
-                                                                              if (
-                                                                                !(
-                                                                                  data25 ===
-                                                                                    'available' ||
-                                                                                  data25 ===
-                                                                                    'disabled' ||
-                                                                                  data25 ===
-                                                                                    'unavailable'
-                                                                                )
-                                                                              ) {
-                                                                                validate25.errors =
-                                                                                  [
-                                                                                    {
-                                                                                      instancePath:
-                                                                                        instancePath +
-                                                                                        '/entries/' +
-                                                                                        i0 +
-                                                                                        '/workflow/state',
-                                                                                      schemaPath:
-                                                                                        '#/properties/entries/items/properties/workflow/properties/state/enum',
-                                                                                      keyword:
-                                                                                        'enum',
-                                                                                      params: {
-                                                                                        allowedValues:
-                                                                                          schema36
-                                                                                            .properties
-                                                                                            .entries
-                                                                                            .items
-                                                                                            .properties
-                                                                                            .workflow
-                                                                                            .properties
-                                                                                            .state
-                                                                                            .enum,
-                                                                                      },
-                                                                                      message:
-                                                                                        'must be equal to one of the allowed values',
-                                                                                    },
-                                                                                  ];
-                                                                                return false;
-                                                                              }
-                                                                              var valid10 =
-                                                                                _errs86 === errors;
-                                                                            } else {
-                                                                              var valid10 = true;
-                                                                            }
-                                                                            if (valid10) {
-                                                                              if (
-                                                                                data19.reason !==
-                                                                                undefined
-                                                                              ) {
-                                                                                let data26 =
-                                                                                  data19.reason;
-                                                                                const _errs88 =
-                                                                                  errors;
-                                                                                const _errs89 =
-                                                                                  errors;
-                                                                                let valid14 = false;
-                                                                                const _errs90 =
-                                                                                  errors;
                                                                                 if (
-                                                                                  typeof data26 !==
+                                                                                  typeof data27 ===
                                                                                   'string'
                                                                                 ) {
-                                                                                  const err33 = {
+                                                                                  if (
+                                                                                    !pattern7.test(
+                                                                                      data27,
+                                                                                    )
+                                                                                  ) {
+                                                                                    const err38 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/entries/' +
+                                                                                        i0 +
+                                                                                        '/workflow/revision',
+                                                                                      schemaPath:
+                                                                                        '#/properties/entries/items/properties/workflow/properties/revision/anyOf/0/pattern',
+                                                                                      keyword:
+                                                                                        'pattern',
+                                                                                      params: {
+                                                                                        pattern:
+                                                                                          '^[a-f0-9]{64}$',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must match pattern "' +
+                                                                                        '^[a-f0-9]{64}$' +
+                                                                                        '"',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err38,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err38,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  }
+                                                                                } else {
+                                                                                  const err39 = {
                                                                                     instancePath:
                                                                                       instancePath +
                                                                                       '/entries/' +
                                                                                       i0 +
-                                                                                      '/workflow/reason',
+                                                                                      '/workflow/revision',
                                                                                     schemaPath:
-                                                                                      '#/properties/entries/items/properties/workflow/properties/reason/anyOf/0/type',
+                                                                                      '#/properties/entries/items/properties/workflow/properties/revision/anyOf/0/type',
                                                                                     keyword: 'type',
                                                                                     params: {
                                                                                       type: 'string',
@@ -19615,219 +19734,401 @@ function validate25(
                                                                                     vErrors === null
                                                                                   ) {
                                                                                     vErrors = [
-                                                                                      err33,
+                                                                                      err39,
                                                                                     ];
                                                                                   } else {
                                                                                     vErrors.push(
-                                                                                      err33,
+                                                                                      err39,
                                                                                     );
                                                                                   }
                                                                                   errors++;
+                                                                                }
+                                                                              }
+                                                                              var _valid8 =
+                                                                                _errs93 === errors;
+                                                                              valid15 =
+                                                                                valid15 || _valid8;
+                                                                              const _errs95 =
+                                                                                errors;
+                                                                              if (data27 !== null) {
+                                                                                const err40 = {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/entries/' +
+                                                                                    i0 +
+                                                                                    '/workflow/revision',
+                                                                                  schemaPath:
+                                                                                    '#/properties/entries/items/properties/workflow/properties/revision/anyOf/1/type',
+                                                                                  keyword: 'type',
+                                                                                  params: {
+                                                                                    type: 'null',
+                                                                                  },
+                                                                                  message:
+                                                                                    'must be null',
+                                                                                };
+                                                                                if (
+                                                                                  vErrors === null
+                                                                                ) {
+                                                                                  vErrors = [err40];
+                                                                                } else {
+                                                                                  vErrors.push(
+                                                                                    err40,
+                                                                                  );
+                                                                                }
+                                                                                errors++;
+                                                                              }
+                                                                              var _valid8 =
+                                                                                _errs95 === errors;
+                                                                              valid15 =
+                                                                                valid15 || _valid8;
+                                                                              if (!valid15) {
+                                                                                const err41 = {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/entries/' +
+                                                                                    i0 +
+                                                                                    '/workflow/revision',
+                                                                                  schemaPath:
+                                                                                    '#/properties/entries/items/properties/workflow/properties/revision/anyOf',
+                                                                                  keyword: 'anyOf',
+                                                                                  params: {},
+                                                                                  message:
+                                                                                    'must match a schema in anyOf',
+                                                                                };
+                                                                                if (
+                                                                                  vErrors === null
+                                                                                ) {
+                                                                                  vErrors = [err41];
+                                                                                } else {
+                                                                                  vErrors.push(
+                                                                                    err41,
+                                                                                  );
+                                                                                }
+                                                                                errors++;
+                                                                                validate25.errors =
+                                                                                  vErrors;
+                                                                                return false;
+                                                                              } else {
+                                                                                errors = _errs92;
+                                                                                if (
+                                                                                  vErrors !== null
+                                                                                ) {
+                                                                                  if (_errs92) {
+                                                                                    vErrors.length =
+                                                                                      _errs92;
+                                                                                  } else {
+                                                                                    vErrors = null;
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                              var valid12 =
+                                                                                _errs91 === errors;
+                                                                            } else {
+                                                                              var valid12 = true;
+                                                                            }
+                                                                            if (valid12) {
+                                                                              if (
+                                                                                data22.state !==
+                                                                                undefined
+                                                                              ) {
+                                                                                let data28 =
+                                                                                  data22.state;
+                                                                                const _errs97 =
+                                                                                  errors;
+                                                                                if (
+                                                                                  typeof data28 !==
+                                                                                  'string'
+                                                                                ) {
+                                                                                  validate25.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/entries/' +
+                                                                                          i0 +
+                                                                                          '/workflow/state',
+                                                                                        schemaPath:
+                                                                                          '#/properties/entries/items/properties/workflow/properties/state/type',
+                                                                                        keyword:
+                                                                                          'type',
+                                                                                        params: {
+                                                                                          type: 'string',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must be string',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
                                                                                 }
                                                                                 if (
                                                                                   !(
-                                                                                    data26 ===
-                                                                                      'workflow_disabled' ||
-                                                                                    data26 ===
-                                                                                      'workflow_configuration_unavailable' ||
-                                                                                    data26 ===
-                                                                                      'workflow_contract_unavailable' ||
-                                                                                    data26 ===
-                                                                                      'workflow_dependency_unavailable' ||
-                                                                                    data26 ===
-                                                                                      'workflow_manual_not_allowed' ||
-                                                                                    data26 ===
-                                                                                      'workflow_input_required' ||
-                                                                                    data26 ===
-                                                                                      'workflow_fork_unavailable' ||
-                                                                                    data26 ===
-                                                                                      'workflow_verifier_unavailable' ||
-                                                                                    data26 ===
-                                                                                      'workflow_source_changed' ||
-                                                                                    data26 ===
-                                                                                      'skill_unavailable'
+                                                                                    data28 ===
+                                                                                      'available' ||
+                                                                                    data28 ===
+                                                                                      'disabled' ||
+                                                                                    data28 ===
+                                                                                      'unavailable'
                                                                                   )
                                                                                 ) {
-                                                                                  const err34 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/entries/' +
-                                                                                      i0 +
-                                                                                      '/workflow/reason',
-                                                                                    schemaPath:
-                                                                                      '#/properties/entries/items/properties/workflow/properties/reason/anyOf/0/enum',
-                                                                                    keyword: 'enum',
-                                                                                    params: {
-                                                                                      allowedValues:
-                                                                                        schema36
-                                                                                          .properties
-                                                                                          .entries
-                                                                                          .items
-                                                                                          .properties
-                                                                                          .workflow
-                                                                                          .properties
-                                                                                          .reason
-                                                                                          .anyOf[0]
-                                                                                          .enum,
-                                                                                    },
-                                                                                    message:
-                                                                                      'must be equal to one of the allowed values',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err34,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err34,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
-                                                                                }
-                                                                                var _valid8 =
-                                                                                  _errs90 ===
-                                                                                  errors;
-                                                                                valid14 =
-                                                                                  valid14 ||
-                                                                                  _valid8;
-                                                                                const _errs92 =
-                                                                                  errors;
-                                                                                if (
-                                                                                  data26 !== null
-                                                                                ) {
-                                                                                  const err35 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/entries/' +
-                                                                                      i0 +
-                                                                                      '/workflow/reason',
-                                                                                    schemaPath:
-                                                                                      '#/properties/entries/items/properties/workflow/properties/reason/anyOf/1/type',
-                                                                                    keyword: 'type',
-                                                                                    params: {
-                                                                                      type: 'null',
-                                                                                    },
-                                                                                    message:
-                                                                                      'must be null',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err35,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err35,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
-                                                                                }
-                                                                                var _valid8 =
-                                                                                  _errs92 ===
-                                                                                  errors;
-                                                                                valid14 =
-                                                                                  valid14 ||
-                                                                                  _valid8;
-                                                                                if (!valid14) {
-                                                                                  const err36 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/entries/' +
-                                                                                      i0 +
-                                                                                      '/workflow/reason',
-                                                                                    schemaPath:
-                                                                                      '#/properties/entries/items/properties/workflow/properties/reason/anyOf',
-                                                                                    keyword:
-                                                                                      'anyOf',
-                                                                                    params: {},
-                                                                                    message:
-                                                                                      'must match a schema in anyOf',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err36,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err36,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
                                                                                   validate25.errors =
-                                                                                    vErrors;
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/entries/' +
+                                                                                          i0 +
+                                                                                          '/workflow/state',
+                                                                                        schemaPath:
+                                                                                          '#/properties/entries/items/properties/workflow/properties/state/enum',
+                                                                                        keyword:
+                                                                                          'enum',
+                                                                                        params: {
+                                                                                          allowedValues:
+                                                                                            schema36
+                                                                                              .properties
+                                                                                              .entries
+                                                                                              .items
+                                                                                              .properties
+                                                                                              .workflow
+                                                                                              .properties
+                                                                                              .state
+                                                                                              .enum,
+                                                                                        },
+                                                                                        message:
+                                                                                          'must be equal to one of the allowed values',
+                                                                                      },
+                                                                                    ];
                                                                                   return false;
-                                                                                } else {
-                                                                                  errors = _errs89;
-                                                                                  if (
-                                                                                    vErrors !== null
-                                                                                  ) {
-                                                                                    if (_errs89) {
-                                                                                      vErrors.length =
-                                                                                        _errs89;
-                                                                                    } else {
-                                                                                      vErrors =
-                                                                                        null;
-                                                                                    }
-                                                                                  }
                                                                                 }
-                                                                                var valid10 =
-                                                                                  _errs88 ===
+                                                                                var valid12 =
+                                                                                  _errs97 ===
                                                                                   errors;
                                                                               } else {
-                                                                                var valid10 = true;
+                                                                                var valid12 = true;
                                                                               }
-                                                                              if (valid10) {
+                                                                              if (valid12) {
                                                                                 if (
-                                                                                  data19.manualAllowed !==
+                                                                                  data22.reason !==
                                                                                   undefined
                                                                                 ) {
-                                                                                  const _errs94 =
+                                                                                  let data29 =
+                                                                                    data22.reason;
+                                                                                  const _errs99 =
+                                                                                    errors;
+                                                                                  const _errs100 =
+                                                                                    errors;
+                                                                                  let valid16 = false;
+                                                                                  const _errs101 =
                                                                                     errors;
                                                                                   if (
-                                                                                    typeof data19.manualAllowed !==
-                                                                                    'boolean'
+                                                                                    typeof data29 !==
+                                                                                    'string'
                                                                                   ) {
-                                                                                    validate25.errors =
-                                                                                      [
-                                                                                        {
-                                                                                          instancePath:
-                                                                                            instancePath +
-                                                                                            '/entries/' +
-                                                                                            i0 +
-                                                                                            '/workflow/manualAllowed',
-                                                                                          schemaPath:
-                                                                                            '#/properties/entries/items/properties/workflow/properties/manualAllowed/type',
-                                                                                          keyword:
-                                                                                            'type',
-                                                                                          params: {
-                                                                                            type: 'boolean',
-                                                                                          },
-                                                                                          message:
-                                                                                            'must be boolean',
-                                                                                        },
+                                                                                    const err42 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/entries/' +
+                                                                                        i0 +
+                                                                                        '/workflow/reason',
+                                                                                      schemaPath:
+                                                                                        '#/properties/entries/items/properties/workflow/properties/reason/anyOf/0/type',
+                                                                                      keyword:
+                                                                                        'type',
+                                                                                      params: {
+                                                                                        type: 'string',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be string',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err42,
                                                                                       ];
-                                                                                    return false;
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err42,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
                                                                                   }
-                                                                                  var valid10 =
-                                                                                    _errs94 ===
+                                                                                  if (
+                                                                                    !(
+                                                                                      data29 ===
+                                                                                        'workflow_disabled' ||
+                                                                                      data29 ===
+                                                                                        'workflow_configuration_unavailable' ||
+                                                                                      data29 ===
+                                                                                        'workflow_contract_unavailable' ||
+                                                                                      data29 ===
+                                                                                        'workflow_dependency_unavailable' ||
+                                                                                      data29 ===
+                                                                                        'workflow_manual_not_allowed' ||
+                                                                                      data29 ===
+                                                                                        'workflow_input_required' ||
+                                                                                      data29 ===
+                                                                                        'workflow_fork_unavailable' ||
+                                                                                      data29 ===
+                                                                                        'workflow_verifier_unavailable' ||
+                                                                                      data29 ===
+                                                                                        'workflow_source_changed' ||
+                                                                                      data29 ===
+                                                                                        'skill_unavailable'
+                                                                                    )
+                                                                                  ) {
+                                                                                    const err43 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/entries/' +
+                                                                                        i0 +
+                                                                                        '/workflow/reason',
+                                                                                      schemaPath:
+                                                                                        '#/properties/entries/items/properties/workflow/properties/reason/anyOf/0/enum',
+                                                                                      keyword:
+                                                                                        'enum',
+                                                                                      params: {
+                                                                                        allowedValues:
+                                                                                          schema36
+                                                                                            .properties
+                                                                                            .entries
+                                                                                            .items
+                                                                                            .properties
+                                                                                            .workflow
+                                                                                            .properties
+                                                                                            .reason
+                                                                                            .anyOf[0]
+                                                                                            .enum,
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be equal to one of the allowed values',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err43,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err43,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  }
+                                                                                  var _valid9 =
+                                                                                    _errs101 ===
+                                                                                    errors;
+                                                                                  valid16 =
+                                                                                    valid16 ||
+                                                                                    _valid9;
+                                                                                  const _errs103 =
+                                                                                    errors;
+                                                                                  if (
+                                                                                    data29 !== null
+                                                                                  ) {
+                                                                                    const err44 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/entries/' +
+                                                                                        i0 +
+                                                                                        '/workflow/reason',
+                                                                                      schemaPath:
+                                                                                        '#/properties/entries/items/properties/workflow/properties/reason/anyOf/1/type',
+                                                                                      keyword:
+                                                                                        'type',
+                                                                                      params: {
+                                                                                        type: 'null',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be null',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err44,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err44,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  }
+                                                                                  var _valid9 =
+                                                                                    _errs103 ===
+                                                                                    errors;
+                                                                                  valid16 =
+                                                                                    valid16 ||
+                                                                                    _valid9;
+                                                                                  if (!valid16) {
+                                                                                    const err45 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/entries/' +
+                                                                                        i0 +
+                                                                                        '/workflow/reason',
+                                                                                      schemaPath:
+                                                                                        '#/properties/entries/items/properties/workflow/properties/reason/anyOf',
+                                                                                      keyword:
+                                                                                        'anyOf',
+                                                                                      params: {},
+                                                                                      message:
+                                                                                        'must match a schema in anyOf',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err45,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err45,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                    validate25.errors =
+                                                                                      vErrors;
+                                                                                    return false;
+                                                                                  } else {
+                                                                                    errors =
+                                                                                      _errs100;
+                                                                                    if (
+                                                                                      vErrors !==
+                                                                                      null
+                                                                                    ) {
+                                                                                      if (
+                                                                                        _errs100
+                                                                                      ) {
+                                                                                        vErrors.length =
+                                                                                          _errs100;
+                                                                                      } else {
+                                                                                        vErrors =
+                                                                                          null;
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                  var valid12 =
+                                                                                    _errs99 ===
                                                                                     errors;
                                                                                 } else {
-                                                                                  var valid10 = true;
+                                                                                  var valid12 = true;
                                                                                 }
-                                                                                if (valid10) {
+                                                                                if (valid12) {
                                                                                   if (
-                                                                                    data19.emptyInputValid !==
+                                                                                    data22.manualAllowed !==
                                                                                     undefined
                                                                                   ) {
-                                                                                    const _errs96 =
+                                                                                    const _errs105 =
                                                                                       errors;
                                                                                     if (
-                                                                                      typeof data19.emptyInputValid !==
+                                                                                      typeof data22.manualAllowed !==
                                                                                       'boolean'
                                                                                     ) {
                                                                                       validate25.errors =
@@ -19837,9 +20138,9 @@ function validate25(
                                                                                               instancePath +
                                                                                               '/entries/' +
                                                                                               i0 +
-                                                                                              '/workflow/emptyInputValid',
+                                                                                              '/workflow/manualAllowed',
                                                                                             schemaPath:
-                                                                                              '#/properties/entries/items/properties/workflow/properties/emptyInputValid/type',
+                                                                                              '#/properties/entries/items/properties/workflow/properties/manualAllowed/type',
                                                                                             keyword:
                                                                                               'type',
                                                                                             params:
@@ -19852,216 +20153,264 @@ function validate25(
                                                                                         ];
                                                                                       return false;
                                                                                     }
-                                                                                    var valid10 =
-                                                                                      _errs96 ===
+                                                                                    var valid12 =
+                                                                                      _errs105 ===
                                                                                       errors;
                                                                                   } else {
-                                                                                    var valid10 = true;
+                                                                                    var valid12 = true;
                                                                                   }
-                                                                                  if (valid10) {
+                                                                                  if (valid12) {
                                                                                     if (
-                                                                                      data19.contextMode !==
+                                                                                      data22.emptyInputValid !==
                                                                                       undefined
                                                                                     ) {
-                                                                                      let data29 =
-                                                                                        data19.contextMode;
-                                                                                      const _errs98 =
-                                                                                        errors;
-                                                                                      const _errs99 =
-                                                                                        errors;
-                                                                                      let valid15 = false;
-                                                                                      const _errs100 =
+                                                                                      const _errs107 =
                                                                                         errors;
                                                                                       if (
-                                                                                        typeof data29 !==
-                                                                                        'string'
+                                                                                        typeof data22.emptyInputValid !==
+                                                                                        'boolean'
                                                                                       ) {
-                                                                                        const err37 =
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/entries/' +
-                                                                                              i0 +
-                                                                                              '/workflow/contextMode',
-                                                                                            schemaPath:
-                                                                                              '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/0/type',
-                                                                                            keyword:
-                                                                                              'type',
-                                                                                            params:
-                                                                                              {
-                                                                                                type: 'string',
-                                                                                              },
-                                                                                            message:
-                                                                                              'must be string',
-                                                                                          };
-                                                                                        if (
-                                                                                          vErrors ===
-                                                                                          null
-                                                                                        ) {
-                                                                                          vErrors =
-                                                                                            [err37];
-                                                                                        } else {
-                                                                                          vErrors.push(
-                                                                                            err37,
-                                                                                          );
-                                                                                        }
-                                                                                        errors++;
-                                                                                      }
-                                                                                      if (
-                                                                                        !(
-                                                                                          data29 ===
-                                                                                            'inline' ||
-                                                                                          data29 ===
-                                                                                            'fork'
-                                                                                        )
-                                                                                      ) {
-                                                                                        const err38 =
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/entries/' +
-                                                                                              i0 +
-                                                                                              '/workflow/contextMode',
-                                                                                            schemaPath:
-                                                                                              '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/0/enum',
-                                                                                            keyword:
-                                                                                              'enum',
-                                                                                            params:
-                                                                                              {
-                                                                                                allowedValues:
-                                                                                                  schema36
-                                                                                                    .properties
-                                                                                                    .entries
-                                                                                                    .items
-                                                                                                    .properties
-                                                                                                    .workflow
-                                                                                                    .properties
-                                                                                                    .contextMode
-                                                                                                    .anyOf[0]
-                                                                                                    .enum,
-                                                                                              },
-                                                                                            message:
-                                                                                              'must be equal to one of the allowed values',
-                                                                                          };
-                                                                                        if (
-                                                                                          vErrors ===
-                                                                                          null
-                                                                                        ) {
-                                                                                          vErrors =
-                                                                                            [err38];
-                                                                                        } else {
-                                                                                          vErrors.push(
-                                                                                            err38,
-                                                                                          );
-                                                                                        }
-                                                                                        errors++;
-                                                                                      }
-                                                                                      var _valid9 =
-                                                                                        _errs100 ===
-                                                                                        errors;
-                                                                                      valid15 =
-                                                                                        valid15 ||
-                                                                                        _valid9;
-                                                                                      const _errs102 =
-                                                                                        errors;
-                                                                                      if (
-                                                                                        data29 !==
-                                                                                        null
-                                                                                      ) {
-                                                                                        const err39 =
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/entries/' +
-                                                                                              i0 +
-                                                                                              '/workflow/contextMode',
-                                                                                            schemaPath:
-                                                                                              '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/1/type',
-                                                                                            keyword:
-                                                                                              'type',
-                                                                                            params:
-                                                                                              {
-                                                                                                type: 'null',
-                                                                                              },
-                                                                                            message:
-                                                                                              'must be null',
-                                                                                          };
-                                                                                        if (
-                                                                                          vErrors ===
-                                                                                          null
-                                                                                        ) {
-                                                                                          vErrors =
-                                                                                            [err39];
-                                                                                        } else {
-                                                                                          vErrors.push(
-                                                                                            err39,
-                                                                                          );
-                                                                                        }
-                                                                                        errors++;
-                                                                                      }
-                                                                                      var _valid9 =
-                                                                                        _errs102 ===
-                                                                                        errors;
-                                                                                      valid15 =
-                                                                                        valid15 ||
-                                                                                        _valid9;
-                                                                                      if (
-                                                                                        !valid15
-                                                                                      ) {
-                                                                                        const err40 =
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/entries/' +
-                                                                                              i0 +
-                                                                                              '/workflow/contextMode',
-                                                                                            schemaPath:
-                                                                                              '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf',
-                                                                                            keyword:
-                                                                                              'anyOf',
-                                                                                            params:
-                                                                                              {},
-                                                                                            message:
-                                                                                              'must match a schema in anyOf',
-                                                                                          };
-                                                                                        if (
-                                                                                          vErrors ===
-                                                                                          null
-                                                                                        ) {
-                                                                                          vErrors =
-                                                                                            [err40];
-                                                                                        } else {
-                                                                                          vErrors.push(
-                                                                                            err40,
-                                                                                          );
-                                                                                        }
-                                                                                        errors++;
                                                                                         validate25.errors =
-                                                                                          vErrors;
+                                                                                          [
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/entries/' +
+                                                                                                i0 +
+                                                                                                '/workflow/emptyInputValid',
+                                                                                              schemaPath:
+                                                                                                '#/properties/entries/items/properties/workflow/properties/emptyInputValid/type',
+                                                                                              keyword:
+                                                                                                'type',
+                                                                                              params:
+                                                                                                {
+                                                                                                  type: 'boolean',
+                                                                                                },
+                                                                                              message:
+                                                                                                'must be boolean',
+                                                                                            },
+                                                                                          ];
                                                                                         return false;
-                                                                                      } else {
-                                                                                        errors =
-                                                                                          _errs99;
-                                                                                        if (
-                                                                                          vErrors !==
-                                                                                          null
-                                                                                        ) {
-                                                                                          if (
-                                                                                            _errs99
-                                                                                          ) {
-                                                                                            vErrors.length =
-                                                                                              _errs99;
-                                                                                          } else {
-                                                                                            vErrors =
-                                                                                              null;
-                                                                                          }
-                                                                                        }
                                                                                       }
-                                                                                      var valid10 =
-                                                                                        _errs98 ===
+                                                                                      var valid12 =
+                                                                                        _errs107 ===
                                                                                         errors;
                                                                                     } else {
-                                                                                      var valid10 = true;
+                                                                                      var valid12 = true;
+                                                                                    }
+                                                                                    if (valid12) {
+                                                                                      if (
+                                                                                        data22.contextMode !==
+                                                                                        undefined
+                                                                                      ) {
+                                                                                        let data32 =
+                                                                                          data22.contextMode;
+                                                                                        const _errs109 =
+                                                                                          errors;
+                                                                                        const _errs110 =
+                                                                                          errors;
+                                                                                        let valid17 = false;
+                                                                                        const _errs111 =
+                                                                                          errors;
+                                                                                        if (
+                                                                                          typeof data32 !==
+                                                                                          'string'
+                                                                                        ) {
+                                                                                          const err46 =
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/entries/' +
+                                                                                                i0 +
+                                                                                                '/workflow/contextMode',
+                                                                                              schemaPath:
+                                                                                                '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/0/type',
+                                                                                              keyword:
+                                                                                                'type',
+                                                                                              params:
+                                                                                                {
+                                                                                                  type: 'string',
+                                                                                                },
+                                                                                              message:
+                                                                                                'must be string',
+                                                                                            };
+                                                                                          if (
+                                                                                            vErrors ===
+                                                                                            null
+                                                                                          ) {
+                                                                                            vErrors =
+                                                                                              [
+                                                                                                err46,
+                                                                                              ];
+                                                                                          } else {
+                                                                                            vErrors.push(
+                                                                                              err46,
+                                                                                            );
+                                                                                          }
+                                                                                          errors++;
+                                                                                        }
+                                                                                        if (
+                                                                                          !(
+                                                                                            data32 ===
+                                                                                              'inline' ||
+                                                                                            data32 ===
+                                                                                              'fork'
+                                                                                          )
+                                                                                        ) {
+                                                                                          const err47 =
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/entries/' +
+                                                                                                i0 +
+                                                                                                '/workflow/contextMode',
+                                                                                              schemaPath:
+                                                                                                '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/0/enum',
+                                                                                              keyword:
+                                                                                                'enum',
+                                                                                              params:
+                                                                                                {
+                                                                                                  allowedValues:
+                                                                                                    schema36
+                                                                                                      .properties
+                                                                                                      .entries
+                                                                                                      .items
+                                                                                                      .properties
+                                                                                                      .workflow
+                                                                                                      .properties
+                                                                                                      .contextMode
+                                                                                                      .anyOf[0]
+                                                                                                      .enum,
+                                                                                                },
+                                                                                              message:
+                                                                                                'must be equal to one of the allowed values',
+                                                                                            };
+                                                                                          if (
+                                                                                            vErrors ===
+                                                                                            null
+                                                                                          ) {
+                                                                                            vErrors =
+                                                                                              [
+                                                                                                err47,
+                                                                                              ];
+                                                                                          } else {
+                                                                                            vErrors.push(
+                                                                                              err47,
+                                                                                            );
+                                                                                          }
+                                                                                          errors++;
+                                                                                        }
+                                                                                        var _valid10 =
+                                                                                          _errs111 ===
+                                                                                          errors;
+                                                                                        valid17 =
+                                                                                          valid17 ||
+                                                                                          _valid10;
+                                                                                        const _errs113 =
+                                                                                          errors;
+                                                                                        if (
+                                                                                          data32 !==
+                                                                                          null
+                                                                                        ) {
+                                                                                          const err48 =
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/entries/' +
+                                                                                                i0 +
+                                                                                                '/workflow/contextMode',
+                                                                                              schemaPath:
+                                                                                                '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf/1/type',
+                                                                                              keyword:
+                                                                                                'type',
+                                                                                              params:
+                                                                                                {
+                                                                                                  type: 'null',
+                                                                                                },
+                                                                                              message:
+                                                                                                'must be null',
+                                                                                            };
+                                                                                          if (
+                                                                                            vErrors ===
+                                                                                            null
+                                                                                          ) {
+                                                                                            vErrors =
+                                                                                              [
+                                                                                                err48,
+                                                                                              ];
+                                                                                          } else {
+                                                                                            vErrors.push(
+                                                                                              err48,
+                                                                                            );
+                                                                                          }
+                                                                                          errors++;
+                                                                                        }
+                                                                                        var _valid10 =
+                                                                                          _errs113 ===
+                                                                                          errors;
+                                                                                        valid17 =
+                                                                                          valid17 ||
+                                                                                          _valid10;
+                                                                                        if (
+                                                                                          !valid17
+                                                                                        ) {
+                                                                                          const err49 =
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/entries/' +
+                                                                                                i0 +
+                                                                                                '/workflow/contextMode',
+                                                                                              schemaPath:
+                                                                                                '#/properties/entries/items/properties/workflow/properties/contextMode/anyOf',
+                                                                                              keyword:
+                                                                                                'anyOf',
+                                                                                              params:
+                                                                                                {},
+                                                                                              message:
+                                                                                                'must match a schema in anyOf',
+                                                                                            };
+                                                                                          if (
+                                                                                            vErrors ===
+                                                                                            null
+                                                                                          ) {
+                                                                                            vErrors =
+                                                                                              [
+                                                                                                err49,
+                                                                                              ];
+                                                                                          } else {
+                                                                                            vErrors.push(
+                                                                                              err49,
+                                                                                            );
+                                                                                          }
+                                                                                          errors++;
+                                                                                          validate25.errors =
+                                                                                            vErrors;
+                                                                                          return false;
+                                                                                        } else {
+                                                                                          errors =
+                                                                                            _errs110;
+                                                                                          if (
+                                                                                            vErrors !==
+                                                                                            null
+                                                                                          ) {
+                                                                                            if (
+                                                                                              _errs110
+                                                                                            ) {
+                                                                                              vErrors.length =
+                                                                                                _errs110;
+                                                                                            } else {
+                                                                                              vErrors =
+                                                                                                null;
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                        var valid12 =
+                                                                                          _errs109 ===
+                                                                                          errors;
+                                                                                      } else {
+                                                                                        var valid12 = true;
+                                                                                      }
                                                                                     }
                                                                                   }
                                                                                 }
@@ -20073,28 +20422,28 @@ function validate25(
                                                                     }
                                                                   }
                                                                 }
+                                                              } else {
+                                                                validate25.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/entries/' +
+                                                                      i0 +
+                                                                      '/workflow',
+                                                                    schemaPath:
+                                                                      '#/properties/entries/items/properties/workflow/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'object' },
+                                                                    message: 'must be object',
+                                                                  },
+                                                                ];
+                                                                return false;
                                                               }
-                                                            } else {
-                                                              validate25.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/entries/' +
-                                                                    i0 +
-                                                                    '/workflow',
-                                                                  schemaPath:
-                                                                    '#/properties/entries/items/properties/workflow/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'object' },
-                                                                  message: 'must be object',
-                                                                },
-                                                              ];
-                                                              return false;
                                                             }
+                                                            var valid3 = _errs72 === errors;
+                                                          } else {
+                                                            var valid3 = true;
                                                           }
-                                                          var valid3 = _errs61 === errors;
-                                                        } else {
-                                                          var valid3 = true;
                                                         }
                                                       }
                                                     }
@@ -20144,15 +20493,15 @@ function validate25(
                       }
                       if (valid0) {
                         if (data.nextAfterId !== undefined) {
-                          let data30 = data.nextAfterId;
-                          const _errs104 = errors;
-                          const _errs105 = errors;
-                          let valid16 = false;
-                          const _errs106 = errors;
-                          if (errors === _errs106) {
-                            if (typeof data30 === 'string') {
-                              if (func2(data30) > 128) {
-                                const err41 = {
+                          let data33 = data.nextAfterId;
+                          const _errs115 = errors;
+                          const _errs116 = errors;
+                          let valid18 = false;
+                          const _errs117 = errors;
+                          if (errors === _errs117) {
+                            if (typeof data33 === 'string') {
+                              if (func2(data33) > 128) {
+                                const err50 = {
                                   instancePath: instancePath + '/nextAfterId',
                                   schemaPath: '#/properties/nextAfterId/anyOf/0/maxLength',
                                   keyword: 'maxLength',
@@ -20160,14 +20509,14 @@ function validate25(
                                   message: 'must NOT have more than 128 characters',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err41];
+                                  vErrors = [err50];
                                 } else {
-                                  vErrors.push(err41);
+                                  vErrors.push(err50);
                                 }
                                 errors++;
                               } else {
-                                if (func2(data30) < 1) {
-                                  const err42 = {
+                                if (func2(data33) < 1) {
+                                  const err51 = {
                                     instancePath: instancePath + '/nextAfterId',
                                     schemaPath: '#/properties/nextAfterId/anyOf/0/minLength',
                                     keyword: 'minLength',
@@ -20175,15 +20524,15 @@ function validate25(
                                     message: 'must NOT have fewer than 1 characters',
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err42];
+                                    vErrors = [err51];
                                   } else {
-                                    vErrors.push(err42);
+                                    vErrors.push(err51);
                                   }
                                   errors++;
                                 }
                               }
                             } else {
-                              const err43 = {
+                              const err52 = {
                                 instancePath: instancePath + '/nextAfterId',
                                 schemaPath: '#/properties/nextAfterId/anyOf/0/type',
                                 keyword: 'type',
@@ -20191,18 +20540,18 @@ function validate25(
                                 message: 'must be string',
                               };
                               if (vErrors === null) {
-                                vErrors = [err43];
+                                vErrors = [err52];
                               } else {
-                                vErrors.push(err43);
+                                vErrors.push(err52);
                               }
                               errors++;
                             }
                           }
-                          var _valid10 = _errs106 === errors;
-                          valid16 = valid16 || _valid10;
-                          const _errs108 = errors;
-                          if (data30 !== null) {
-                            const err44 = {
+                          var _valid11 = _errs117 === errors;
+                          valid18 = valid18 || _valid11;
+                          const _errs119 = errors;
+                          if (data33 !== null) {
+                            const err53 = {
                               instancePath: instancePath + '/nextAfterId',
                               schemaPath: '#/properties/nextAfterId/anyOf/1/type',
                               keyword: 'type',
@@ -20210,16 +20559,16 @@ function validate25(
                               message: 'must be null',
                             };
                             if (vErrors === null) {
-                              vErrors = [err44];
+                              vErrors = [err53];
                             } else {
-                              vErrors.push(err44);
+                              vErrors.push(err53);
                             }
                             errors++;
                           }
-                          var _valid10 = _errs108 === errors;
-                          valid16 = valid16 || _valid10;
-                          if (!valid16) {
-                            const err45 = {
+                          var _valid11 = _errs119 === errors;
+                          valid18 = valid18 || _valid11;
+                          if (!valid18) {
+                            const err54 = {
                               instancePath: instancePath + '/nextAfterId',
                               schemaPath: '#/properties/nextAfterId/anyOf',
                               keyword: 'anyOf',
@@ -20227,30 +20576,30 @@ function validate25(
                               message: 'must match a schema in anyOf',
                             };
                             if (vErrors === null) {
-                              vErrors = [err45];
+                              vErrors = [err54];
                             } else {
-                              vErrors.push(err45);
+                              vErrors.push(err54);
                             }
                             errors++;
                             validate25.errors = vErrors;
                             return false;
                           } else {
-                            errors = _errs105;
+                            errors = _errs116;
                             if (vErrors !== null) {
-                              if (_errs105) {
-                                vErrors.length = _errs105;
+                              if (_errs116) {
+                                vErrors.length = _errs116;
                               } else {
                                 vErrors = null;
                               }
                             }
                           }
-                          var valid0 = _errs104 === errors;
+                          var valid0 = _errs115 === errors;
                         } else {
                           var valid0 = true;
                         }
                         if (valid0) {
                           if (data.complete !== undefined) {
-                            const _errs110 = errors;
+                            const _errs121 = errors;
                             if (typeof data.complete !== 'boolean') {
                               validate25.errors = [
                                 {
@@ -20263,7 +20612,7 @@ function validate25(
                               ];
                               return false;
                             }
-                            var valid0 = _errs110 === errors;
+                            var valid0 = _errs121 === errors;
                           } else {
                             var valid0 = true;
                           }

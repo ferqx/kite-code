@@ -137,6 +137,8 @@ Settings 模型操作使用 `getModelSettings(scope,{storeId,workspaceId?})` 与
 
 `SkillCataloguePage` 与HostStatus一样使用专门闭合响应schema，拒绝附加正文/路径/凭据字段；其他公共response的可扩展策略不变。available仅说明当前知识发现，不是Workflow activation、工具权限或未来版本预订；unavailable与有效空目录分别表达。单页字节预算不限制listAll的总条目数。
 
+[verifySkillCataloguePage](src/skill-catalogue.ts) 公开同一纯校验入口，私有克隆输入后使用生成的闭合 schema，核指定 Store/Workspace/revision、升序与页尾游标、state/availability 及 opt-in Workflow 资格；`listSkills` 在原连接前后复核之间复用它。Native 的有限 IPC 页使用同一规则，不建立 renderer 专用宽松 decoder。可选 nullable `source` 仅携 project/user 与 .agents/.kite-code/profile/configured 分类，拒绝附加路径；旧响应省略来源仍可消费，调用者不能补造它。该字段不改变知识选择、权限或目录的总条目范围。
+
 显式 `workflow:'manual'` 要求原 Service 同时提供 `skill_workflow_catalogue`，字段在所有页保持冻结。仅 opt-in 接受并要求每项闭合 Workflow 投影；普通知识查询拒绝额外投影。SDK核对独立 available 状态与知识可用、manual/空输入资格、准确 `skill:<name>`、compiled revision 和 contextMode，拒绝缺字段、自相矛盾或附加敏感内容。缺能力在目录 GET 前失败，不修改原连接或 SSE 水位；是否提交激活由调用者决定。新增闭合响应不放宽其他 DTO 的校验策略。
 
 每页读取前后通过 `verifyConnection` 核原profile/build/instance与Store；同endpoint被同Store的新实例替换也拒绝，不用原token可用性或未变化的本地generation冒充身份。调用开始即固定Store/参数，取消、身份变化或中途变更只丢本次目录，不替调用者自动重连。[Skill目录Client测试](test/skill-catalogue.test.ts)覆盖严格metadata、完整多页、scope/revision/cursor反例及替换实例零目录GET。

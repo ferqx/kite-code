@@ -1718,3 +1718,28 @@ Host修正首轮原runTestJob窗口1pass/18assert/48.02s，独立review发现成
 本次图中Native MCP窗口51359ms、Main2476ms、DB7维护3794ms、恢复6486ms、TLS367ms全部passed。MCP Native/Terminal摘要仍e7018050b9351369e2731485c2649e83e73d7fa63ca65d28de773eead7020bb8 / 7b8b3b50ee3b27f1f41898aeda80e98d417b87d8e94b53f39a4f0679c740701b，可信loopback装配productionDefaultNetwork=false；owned Service93150/93582已不存在，root remaining=[]/confirmed=true、准确默认OS引用freshAbsent=true，passing omhUra在SH/EX验证后清除。既有Provider43708ms与190条Bun断言通过，当前Native/Terminal摘要5b4c860f7fd4655a355a8e690ccc905f80e8077a8acd015345134303f3d89155 / 2d4fc65b7f451cf3f552ce7a5f41a2f55f239301d76581be9e2e37a09114720d，Service97911/98108已不存在、passing Trf84Y已清除。两原Node private-data/Files任务5485ms/1024ms通过，Root本次直接核原完整日志；Native安装90236ms通过。上述证据限本机本次候选，不外推其他平台或正式持续Soak。
 
 正式Native MCP消费者已接入来源操作、独立Source Review、连接/重连、工具全文与原申请查询；DB7/manifest15的维护边界和历史资格同步。完整图结束后只同步Native owner、产品指南、当前方案、proposed Note、progress及MCP/Vault/维护三条能力证据；全部37状态保partial。实际默认Chrome/OS vault的四Auth组合仍未通过人工准备页；Root已再次请求用户准备就绪，旧页面/端口已关闭，不自动重启或绕过浏览器警告。该必要验收阻止完整MCP能力和V1.3退出，本地实现检查点保留方案及proposed状态。§35/T/E、三平台、默认可信Shell、正式持续Soak和历史旧源码最终退役仍按当前阶段要求未闭合，Goal active；本轮本地交付只覆盖60个owned路径，不包含无关AGENTS，不扩大原Git授权。
+
+## 2026-10-07：正式 Native 只读 Skills 目录与阶段收束
+
+正式 Native 左侧 Skills 已成为默认公共目录的完整只读消费者，展示所选会话工作区的名称、摘要、有限来源和局部状态，支持文件／配置刷新、关闭、切换和冷重开。[Main](../../apps/desktop/electron/skill-catalogue-reads.ts)封存实际 attach/viewSelection/historyEpoch/Store/Session/Workspace，open 在 GET 前同步登记原 read ID，避免 close 先发生后迟到 open 重新建立读取；关闭仅 abort 原 GET，不提交业务取消。Main 保存原 revision/cursor，以 128 KiB 有限页交接；[renderer](../../apps/desktop/src/native-skills.ts)穷尽同 revision 后才发布完整集合，无总目录截断。普通 controller viewGeneration 更新保持目录，刷新失败保留同作用域上次完整事实并说明未更新，身份或观察 epoch 变化清理旧读取。实际产品和实现归 [Desktop 手册](../handbook/clients/desktop/README.md)、[Desktop owner](../../apps/desktop/README.md#native-skills-只读目录)与[已实施决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。
+
+Service 添加可省略／可 null 的有限 source 分类，来自已准入的配置位置：project/user 和 .agents/.kite-code/profile/configured。禁用项不增加文件读取，拒绝或无法归类的位置为 null；路径、正文、凭据及安装／执行权不进入 DTO。Client 导出纯 `verifySkillCataloguePage`，私有克隆并复用生成闭合 schema 和原身份／revision／顺序／局部状态／分页语义，SDK 仍保原连接、signal 与 generation 检查。旧 producer 省略 source 时明确未记录。当前目录仍由默认 Service 的可信配置装配，不恢复旧 home 隐式扫描；本项不激活 Workflow、选择 Model 或启动 Run。原 Skills/Workflow 整体能力继续 partial。
+
+有限验证沿原 `runTestJob` / no-orphans / maxConcurrency1 执行：
+
+| 范围 | 实际结果 | 原始证据 |
+| --- | --- | --- |
+| 公共 Client／HTTP 与原 Workflow 目录 | Client 7/209、Service 2/58、Workflow 1/47，均零失败；11 输入 SHA 保持 | `/private/tmp/kite-native-skills-catalogue-verification.log`、`kite-native-skills-catalogue-inputs.json` |
+| Main/IPC 与实际 DOM | Main 5/36、DOM 5/33；10 输入 SHA 保持 | `/private/tmp/kite-native-skills-main-dom-v2-20261007.log`、同前缀 inputs |
+| 原 NativeCaller 邻接 | 8/60、零失败 | `/private/tmp/kite-native-skills-caller-neighbor-20261007.log` |
+| 搬迁／删除构建源的默认 Native 实际窗口 | 1pass/28条Bun断言/0fail，48011ms；17 输入 SHA 保持 | `/private/tmp/kite-native-skills-window-v2-20261007.log`、`kite-native-skills-window-v2-inputs-20261007.json` |
+
+本机 macOS 实际窗口使用原默认 Terminal/Native builder，没有注入 Service 配置、resolver 或 network policy。原未信任读取被拒绝；306 项经 16 个真实同 revision HTTP 页完整呈现，最大页126157 bytes并有真实 afterId GET。文件与配置刷新、configuration_unavailable 与真实空目录、两个 Workspace、分类关闭重开和冷启动均完成。两所属 Service41627/41880普通退出后不存在；DB7的ModelRoutes、ConfigIntents、Run、Execution全为零。冷重开观察区间全GET，前一观察区间只有读取和明确trust POST；这不把未安装观测器的启动区间说成全物理零POST。Service退出后，独立 public readonly Store 再核两个Session无Run/Execution，cursor6→6。Native/Terminal摘要为295a287820ac54388099336a2700834fa79472b7ae263da75b13f024ead71744 / 7c3eabaf1c3a77ace85665ac274b333c9f7343ec182a59e916ddd01b4609f874；passing hVipAC 在准确owned process cleanup（remaining=[]/confirmed=true）和两个root EX验证后清除。
+
+新增测试的真实失败保持原记录：首次Main辅助断言在close之前同步等待rejection，使测试不能继续，原job被终止actual143；修正断言安排后原关闭／迟到／scope断言均保持，日志`/private/tmp/kite-native-skills-main-dom-20261007.log`保留。首次实际窗口1fail/5条Bun断言，刷新已展开的同ID条目后helper再次点击将其收起，只读到summary；改为尚未展开才点击，没有删除内容、无路径或无正文断言。原失败日志`/private/tmp/kite-native-skills-window-20261007.log`（SHA a4fc0eb137749608f2cf5072d9935eec2f598b592c53821412194b00c72531a0）与candidate4zNaJ1保留；复验日志SHA b622ff6de9ba2d531f5cab9ba8787036512582f75fb8963cda4600d63f512ab5。未参与实现的新审查者核原close/open竞态修复、完整窗口记录和全部17输入，当前本项无剩余实现阻断。
+
+执行时HEAD3140fe6d37131050033c66ffd9637fe7cd967da9加本轮owned实现差异上，Root与八workspace typecheck、八workspace build、公共API、依赖边界、runtime packages、test ownership与plan evidence检查通过；helper改动后Desktop typecheck再次通过。阶段收束直接运行原 `bun run scripts/run-default-tests.ts`：动态598文件/475原任务（147parallel文件、451isolated、0exclusive，原并发4）全部启动、完成、通过，actual exit0/drain835.710s；0原失败／未调度／运行中，4042tracked与untracked regular SHA及Git HEAD/status前后保持。完整日志`/private/tmp/kite-current-default-native-skills-20261007.log`，SHA13eab154ae76a75197238b20275f3d9aabbb6934f4ebfb2a88934ea77a66bab8；同前缀plan/inputs/after-inputs/runner/result保留，whole_default=true、whole_V13=false。原Terminal20429ms与同名23ms及故意failed(7)仍按临时runner fixture范围保留raw duplicate记录，不增加第二次正式资格，不拼接有限绿或排除原测试。
+
+本次原图的Native Skills窗口59236ms通过，Service目录2321ms与原Workflow目录17447ms通过。实际默认Native/Terminal摘要与上述复验相同；所属Service52469/52798普通退出后不存在，独立post-exit公共冷Store仍为cursor6→6、零Run/Execution，remaining=[]及两个root EX准入confirmed，passing R2OczD清除。完整图后只同步本项owner、手册、方案、implemented Note、progress与skills.load证据，执行输入保持；文档检查另按最终文本执行，无关AGENTS原SHA保持、未纳入本地交付。
+
+当前剩余四项退出缺口按依赖记录：真实Chrome/default OS Vault四项Auth仍待人工证书接管；默认可信Shell未装配，普通开发子进程／正式持续负载资格未闭合；Native后台Job完整输出消费者尚缺，其真实默认stdout/stderr窗口依赖Shell；全§35、适用T/E、三平台与兼容制品资格完成后才能最终退役历史旧路径。实际Native源码仍只有Job result JSON，公共输出页已具固定upperSeq与gap；现有显式Shell夹具不代表默认后端资格。全部37能力状态仍partial，Goal active；当前Native公开只读目录消费者的本地检查点不外推完整Skills/Workflow、平台或发布资格。

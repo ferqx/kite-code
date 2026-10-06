@@ -40,6 +40,8 @@ MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
 
+Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/skill-catalogue-reads.ts)和公开 `SkillCataloguePage`。Main 从实际选中 Session 固定 Workspace/Store 与视图代次，open 核原选择/观察代次后立即登记所属取消域，不排在另一个刷新之后；原 read ID 的 close/next 不能重绑或关闭后复活读取。Main 保留原 revision/cursor，每页 128KiB，renderer 复用公共闭合 verifier 并在穷尽全部页后发布，没有累计条目截断。有限 source 仅为配置位置分类，禁用项不因此读取文件，不传路径、正文或授权；目录和页面关闭不创建 Run、改变 SSE 水位或提交业务取消。实际交付与平台证据归 [Desktop owner](../../apps/desktop/README.md#native-skills-目录迁移)。
+
 [本实例生命周期](../../packages/agent/src/lifecycle.README.md)以同步真实 busy 检查与封门实现 if_idle；status 采样不授权稍后的关闭。已受理准备、owner 接管、后台 operation 和未完成 cleanup 参与同一边界，重复关闭共用完成 Promise。只收束本实例真实拥有的工作，不因保存 command ID 就取消另一 Service 已接管的命令。普通 GET 不算执行 busy，但最终 Store 关闭等待原读取资源排空；Service 的窄 beforeResourceClose 回调先封最后业务资源入口再排空。未确认停止或清理失败保留原资源、profile 锁及诊断 HTTP，状态为 drain_failed，不伪造 completed。
 
 独立 Native `/v1/lifecycle` 与 `/v1/lifecycle/shutdown` 用 lifecycleVersion 和原 profile/instance 核对目标，业务 API 不兼容或 Store 不可用不阻断有限诊断。无 Origin 的 bearer 请求才可进入，Browser gateway 不暴露；202 仅为受理，成功资源关闭及所属进程退出另行确认。公共 Lifecycle Client 丢回复后只查询原实例，不自动重发或改绑。成功 HTTP 关闭明确结束 runner 自己的父管道读取；普通网络退出仍不等于父死亡。理由见[原子关闭决定](../../.agents/notes/implemented/architecture/2026-10-02-atomic-service-shutdown.md)；正式 daemon 目标发现与 CLI 切换尚未由此完成。

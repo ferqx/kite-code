@@ -435,6 +435,10 @@ export type SkillCataloguePage = {
     | null;
   entries: Array<{
     id: string;
+    source?: {
+      scope: 'project' | 'user';
+      origin: '.agents' | '.kite-code' | 'profile' | 'configured';
+    } | null;
     name: string | null;
     description: string | null;
     version: string | null;

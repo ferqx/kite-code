@@ -362,6 +362,8 @@ fork 从原 parent Execution 和封存 parent Run 选择可信角色与准确版
 
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
+默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
+
 目录按配置ID排序，默认128KiB单页字节预算、可选正安全整数limit与不超过1MiB的byteLimit；预算只分页，不截总目录或单项字段，单项放不下明确413。revision涵盖原主体/Store/Workspace、信任身份与revision、Skill配置、能力及完整目录版本状态；后续页必须携原revision，实际变化（包括配置变坏）409，不将新目录拼进旧页。未见afterId拒绝，不猜下一位置。读取不提供与外部文件写者的原子事务，也不预订未来执行版本。
 
 目录的 `workflow=manual` 查询是独立 opt-in：只有实际 source 声明 `supportsWorkflow:true` 才发布 `skill_workflow_catalogue`，配置中的同名 capability 不能替代实现；不支持时该查询返回404。普通请求保留原闭合知识 shape、revision 与读取路径。显式请求的每项附带闭合 `workflow`：固定扩展身份、实际 compiled Skill ID/name/revision、独立 state/reason、manualAllowed、emptyInputValid 与 contextMode。可用只表示该次读取确认手动空对象输入可以准入，不是执行授权。

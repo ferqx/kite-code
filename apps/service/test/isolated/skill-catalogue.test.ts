@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -7,6 +7,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createConfiguredSkillSource } from '../../src/skill-source';
 
 test('default scoped Skill HTTP catalogue is complete, locally unavailable and strictly read only', async () => {
   const root = realpathSync(mkdtempSync('/private/tmp/kite-skills-http-'));
@@ -138,14 +139,21 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     }
     expect(all).toHaveLength(skills.length);
     expect(new Set(all.map((e) => e.id)).size).toBe(skills.length);
+    expect(all.every((entry) => Object.hasOwn(entry, 'source'))).toBe(true);
+    expect(all.find((entry) => entry.id === 'skill-000')?.source).toEqual({
+      scope: 'project',
+      origin: 'configured',
+    });
     expect(all.find((e) => e.id === 'disabled')).toMatchObject({
       state: 'disabled',
+      source: null,
       name: null,
       version: null,
       reason: null,
     });
     expect(all.find((e) => e.id === 'missing')).toMatchObject({
       state: 'unavailable',
+      source: { scope: 'project', origin: 'configured' },
       reason: 'skill_unavailable',
     });
     expect(all.find((e) => e.id === 'needs')).toMatchObject({
@@ -254,6 +262,101 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     await service.close();
     await runtime.close();
     await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('configured Skill source reports bounded location facts and never reads disabled metadata', async () => {
+  const root = realpathSync(mkdtempSync('/private/tmp/kite-skill-source-'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  const locations = [
+    {
+      id: 'agents',
+      path: join(workspace, '.agents', 'skills', 'agents'),
+      source: { scope: 'project', origin: '.agents' },
+    },
+    {
+      id: 'kite',
+      path: join(workspace, '.kite-code', 'skills', 'kite'),
+      source: { scope: 'project', origin: '.kite-code' },
+    },
+    {
+      id: 'custom',
+      path: join(workspace, 'custom'),
+      source: { scope: 'project', origin: 'configured' },
+    },
+    {
+      id: 'profile',
+      path: join(profile.profilePath, 'skills', 'profile'),
+      source: { scope: 'user', origin: 'profile' },
+    },
+    {
+      id: 'disabled',
+      path: join(workspace, '.agents', 'skills', 'disabled'),
+      source: { scope: 'project', origin: '.agents' },
+    },
+  ] as const;
+  try {
+    for (const location of locations) {
+      mkdirSync(location.path, { recursive: true });
+      writeFileSync(
+        join(location.path, 'SKILL.md'),
+        `---\nname: ${location.id}\ndescription: private metadata ${location.id}\n---\nprivate-body`,
+      );
+    }
+    const outside = join(root, 'outside');
+    mkdirSync(outside);
+    writeFileSync(
+      join(outside, 'SKILL.md'),
+      '---\nname: outside\ndescription: private outside\n---\nprivate-body',
+    );
+    symlinkSync(outside, join(workspace, 'escaped'));
+    const source = createConfiguredSkillSource({
+      workspaceRoot: workspace,
+      profile,
+      toolIds: [],
+      skills: [
+        ...locations.map(({ id, path }) => ({
+          id,
+          path,
+          ...(id === 'disabled' ? { enabled: false } : {}),
+        })),
+        { id: 'disabled-missing', path: '.kite-code/skills/absent', enabled: false },
+        { id: 'denied', path: outside },
+        { id: 'escaped', path: 'escaped' },
+        { id: 'invalid', path: 42 },
+        { id: 'empty', path: '' },
+        { id: 'missing', path: 'absent' },
+      ],
+    });
+    const listed = await source.list();
+    for (const location of locations) {
+      expect(listed.states.find((row) => row.id === location.id)?.source).toEqual(location.source);
+    }
+    expect(listed.states.find((row) => row.id === 'disabled')).toMatchObject({
+      state: 'disabled',
+      name: null,
+      description: null,
+      version: null,
+      reason: null,
+    });
+    expect(listed.states.find((row) => row.id === 'disabled-missing')).toMatchObject({
+      state: 'disabled',
+      name: null,
+      source: { scope: 'project', origin: '.kite-code' },
+    });
+    for (const id of ['denied', 'escaped', 'invalid', 'empty'])
+      expect(listed.states.find((row) => row.id === id)?.source).toBeNull();
+    expect(listed.states.find((row) => row.id === 'missing')).toMatchObject({
+      state: 'unavailable',
+      source: { scope: 'project', origin: 'configured' },
+    });
+    expect(listed.entries).toHaveLength(4);
+    expect(JSON.stringify(listed.states)).not.toContain(root);
+    expect(JSON.stringify(listed.states)).not.toContain('private-body');
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

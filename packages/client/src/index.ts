@@ -85,6 +85,7 @@ import {
   validateSessionLogTarget,
   verifySessionLogPage,
 } from './session-logs';
+import { verifySkillCataloguePage } from './skill-catalogue';
 import {
   parseCursorSequence,
   readSSE,
@@ -125,6 +126,10 @@ export {
 } from './mcp-tools';
 export { canonicalModelBody, verifyModelInputSnapshot } from './model-input';
 export { verifyModelOutputSnapshot } from './model-output';
+export {
+  type SkillCatalogueVerificationOptions,
+  verifySkillCataloguePage,
+} from './skill-catalogue';
 export type Json = ExtensionCommandRequest['input'];
 export type { SessionExportFrame, SessionExportSection } from './session-export';
 export { parseCursorSequence, validateCursorBounds } from './sse';
@@ -1348,53 +1353,11 @@ export class AgentClient {
       throw new ClientError('skill_catalogue_changed');
     signal?.throwIfAborted();
     this.requireConnection();
-    if (frozen.limit !== undefined && page.entries.length > frozen.limit)
-      throw new ClientError('invalid_response');
-    let previous = frozen.afterId ?? '';
-    for (const entry of page.entries) {
-      if (
-        entry.id <= previous ||
-        (entry.state === 'available' &&
-          (!entry.enabled ||
-            entry.name === null ||
-            !entry.version ||
-            entry.reason !== null ||
-            entry.missingCapabilities.length)) ||
-        (entry.state === 'disabled' && (entry.enabled || entry.reason !== null)) ||
-        (entry.state === 'unavailable' && (!entry.enabled || entry.reason === null))
-      )
-        throw new ClientError('invalid_response');
-      const workflow = entry.workflow;
-      if (
-        (frozen.workflow === 'manual') !== (workflow !== undefined) ||
-        (workflow &&
-          ((workflow.state === 'available' &&
-            (entry.state !== 'available' ||
-              !workflow.skillId ||
-              !workflow.name ||
-              !workflow.revision ||
-              workflow.reason !== null ||
-              !workflow.manualAllowed ||
-              !workflow.emptyInputValid ||
-              workflow.contextMode === null)) ||
-            (workflow.state !== 'available' && workflow.reason === null) ||
-            (workflow.name !== null && workflow.skillId !== `skill:${workflow.name}`)))
-      )
-        throw new ClientError('invalid_response');
-      previous = entry.id;
-    }
-    if (
-      page.complete !== (page.nextAfterId === null) ||
-      (!page.complete && (!page.entries.length || page.nextAfterId !== previous)) ||
-      (page.availability === 'available' && page.reason !== null) ||
-      (page.availability === 'unavailable' &&
-        (page.reason === null || page.entries.length || !page.complete))
-    )
-      throw new ClientError('invalid_response');
+    const verified = verifySkillCataloguePage(page, { ...frozen, workspaceId });
     await this.verifyConnection({ signal });
     signal?.throwIfAborted();
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
-    return page;
+    return verified;
   }
   async listAllSkills(
     workspaceId: string,

@@ -7,6 +7,11 @@ import { createSkillSource, SkillError, type SkillSummary } from '@kite-ai/agent
 
 export interface ConfiguredSkillState {
   id: string;
+  /** Configured location metadata only; never installation or execution authority. */
+  source: {
+    scope: 'project' | 'user';
+    origin: '.agents' | '.kite-code' | 'profile' | 'configured';
+  } | null;
   name: string | null;
   description: string | null;
   version: string | null;
@@ -62,6 +67,7 @@ export function createConfiguredSkillSource(options: {
           throw new AgentError('invalid_skill_configuration');
         const state: ConfiguredSkillState = {
           id: skill.id,
+          source: null,
           name: null,
           description: null,
           version: null,
@@ -72,10 +78,34 @@ export function createConfiguredSkillSource(options: {
           missingCapabilities: [],
         };
         states.set(skill.id, state);
+        // Classify the admitted configured location without opening disabled Skill files.
+        const path =
+          typeof skill.path === 'string'
+            ? isAbsolute(skill.path)
+              ? resolve(skill.path)
+              : resolve(root, skill.path)
+            : undefined;
+        if (
+          path &&
+          skill.path !== '' &&
+          !path.includes('\0') &&
+          trustedRoots.some((trusted) => inside(trusted, path))
+        ) {
+          state.source =
+            profileRootAvailable && inside(profileRoot, path)
+              ? { scope: 'user', origin: 'profile' }
+              : {
+                  scope: 'project',
+                  origin: inside(join(root, '.agents', 'skills'), path)
+                    ? '.agents'
+                    : inside(join(root, '.kite-code', 'skills'), path)
+                      ? '.kite-code'
+                      : 'configured',
+                };
+        }
         if (!state.enabled) continue;
         try {
-          if (typeof skill.path !== 'string') throw new AgentError('invalid_skill_configuration');
-          const path = isAbsolute(skill.path) ? resolve(skill.path) : resolve(root, skill.path);
+          if (!path) throw new AgentError('invalid_skill_configuration');
           if (!trustedRoots.some((trusted) => inside(trusted, path)))
             throw new AgentError('skill_path_denied');
           if (
@@ -117,6 +147,8 @@ export function createConfiguredSkillSource(options: {
           summaries.set(summary.id, summary);
           nextSources.set(summary.id, source);
         } catch (error) {
+          if (error instanceof AgentError && error.code === 'skill_path_denied')
+            state.source = null;
           state.reason =
             error instanceof AgentError || error instanceof SkillError
               ? error.code

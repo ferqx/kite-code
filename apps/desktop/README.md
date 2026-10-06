@@ -1,5 +1,13 @@
 # Desktop 与 Native 制品
 
+## Native Skills 只读目录
+
+正式 Native 左侧的 Skills 分类展示所选 Session 工作区当前可信配置目录的名称、摘要、来源与可用／禁用／不可用状态。[Main reader](electron/skill-catalogue-reads.ts) 从实际选择封存 attach generation、viewSelection、historyEpoch、Store、Session 与 Workspace；open 在任何 GET 前同步核对原选择并登记 read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭和作用域变化只中止所属读取。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Workspace、路径或执行 authority。
+
+[完整读取](src/native-skills.ts)复用公共 Client 的闭合页 verifier，穷尽同 revision 后才发布，无总目录截断。[页面](src/native-skills-settings.tsx)区分可用空目录与不可用，刷新失败保留同作用域上次完整事实并说明未更新；实际选择、attach 或观察 epoch 改变时清理旧读取，普通 controller viewGeneration 更新不反复重开目录。来源只说明已准入的配置位置，缺字段说明未记录；页面不读正文、安装或激活 Workflow，发现与执行仍由默认 Service 负责，不恢复旧 home 隐式扫描。
+
+[Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证完整分页、关闭、迟到响应、刷新失败和作用域隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)已在本机 macOS 核搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，文件与配置刷新、两个 Workspace、分类关闭重开、冷启动与普通所属 Service 退出均完成；退出后独立公共冷 Store 无 Run/Execution 增长。准确运行证据、原失败和完整默认范围见[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)，取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。这项资格只覆盖当前 Native 公开目录消费者，完整 Skills/Workflow 与其他平台仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
+
 ## Native 普通问题与页面草稿
 
 根 `desktop` 选择的 [Native renderer](src/native.tsx)实际消费共享 Questionnaire；默认 ask_user 的多题选择、自由输入、先浏览后一次提交和显式取消问卷均沿公共原 `interaction.answer`。取消只提交原 schema 的 null，后续 Model 在同一 Run 收到取消信息；所选会话存在 pending question 时，隐藏主输入表单及原命令、原申请或 active Job 的任务停止按钮。主输入草稿仍由页面原状态保留，回答或取消后的交互终态恢复原文；跨会话的主草稿仍沿既有明确保存入口。未知／失败回答保留原意图，只查询原 Command，不再次 POST。

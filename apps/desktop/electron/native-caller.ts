@@ -39,6 +39,7 @@ import type { PrivateData } from './private-data';
 import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
 import { NativeSessionManagement } from './session-management';
+import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
 
 export class NativeCaller {
   private generation = 0;
@@ -67,6 +68,7 @@ export class NativeCaller {
   private readonly inputConfiguration: NativeConfiguration;
   private readonly providers: NativeProviderSettings;
   private readonly mcp: NativeMcpSettings;
+  private readonly skills: NativeSkillCatalogueReads;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -138,6 +140,20 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    this.skills = new NativeSkillCatalogueReads(client, () => {
+      const scope = current(),
+        snapshot = this.controller.snapshot;
+      return scope && snapshot?.sessionId === scope.sessionId
+        ? {
+            generation: scope.generation,
+            viewSelection: scope.selection,
+            historyEpoch: this.historyEpoch,
+            storeId: scope.storeId,
+            sessionId: scope.sessionId,
+            workspaceId: snapshot.view.session.workspaceId,
+          }
+        : undefined;
+    });
     this.attachmentReads = new NativeInteractionAttachmentReads(
       this.controller.readInteractionAttachment.bind(this.controller),
       () => {
@@ -292,6 +308,7 @@ export class NativeCaller {
     this.inputConfiguration.release();
     this.providers.release();
     this.mcp.release();
+    this.skills.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -353,6 +370,7 @@ export class NativeCaller {
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
       this.historyEpoch++;
+      this.skills.release();
       this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
@@ -474,6 +492,7 @@ export class NativeCaller {
     const selection =
       snapshot && this.selected === snapshot.sessionId
         ? {
+            canReadSkills: this.client.serverInfo!.capabilities.includes('skill_catalogue'),
             canReadModelOutput: this.client.serverInfo!.capabilities.includes('model_outputs'),
             canReadModelInput: this.client.serverInfo!.capabilities.includes('model_inputs'),
             canReadPermissionGrants:
@@ -631,6 +650,9 @@ export class NativeCaller {
         'recovery.close',
         'fileRecovery.close',
         'interactions.close',
+        'settings.skills.close',
+        'settings.skills.open',
+        'settings.skills.next',
       ].includes(request.method)
     )
       await this.drainRefresh();
@@ -638,6 +660,16 @@ export class NativeCaller {
     const generation = request.generation;
     let result: NativeResult;
     switch (request.method) {
+      case 'settings.skills.open':
+        result = await this.skills.open(request);
+        break;
+      case 'settings.skills.next':
+        result = await this.skills.next(request.readId);
+        break;
+      case 'settings.skills.close':
+        this.skills.close(request.readId);
+        result = null;
+        break;
       case 'settings.mcp.read':
         result = await this.mcp.read();
         break;

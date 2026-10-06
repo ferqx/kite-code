@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import { createClient, type ServerInfo, type SkillCataloguePage } from '../src';
+import {
+  createClient,
+  type ServerInfo,
+  type SkillCataloguePage,
+  verifySkillCataloguePage,
+} from '../src';
 
 const info: ServerInfo = {
   instanceId: 'i',
@@ -268,4 +273,98 @@ test('manual Workflow metadata rejects missing, private, inconsistent and change
   } finally {
     f.close();
   }
+});
+
+function publicPage(): SkillCataloguePage {
+  return {
+    version: 1,
+    storeId: 'store',
+    workspaceId: 'w',
+    revision: 'b'.repeat(64),
+    availability: 'available',
+    reason: null,
+    entries: [structuredClone(entries[0]!)],
+    complete: true,
+    nextAfterId: null,
+  };
+}
+
+test('public Skill verifier clones closed source metadata and consumes older omitted sources', () => {
+  for (const source of [
+    undefined,
+    null,
+    { scope: 'project', origin: '.agents' },
+    { scope: 'project', origin: '.kite-code' },
+    { scope: 'project', origin: 'configured' },
+    { scope: 'user', origin: 'profile' },
+  ] as const) {
+    const input = publicPage();
+    if (source !== undefined) input.entries[0]!.source = structuredClone(source);
+    const result = verifySkillCataloguePage(input, { storeId: 'store', workspaceId: 'w' });
+    expect(result).toEqual(input);
+    input.entries[0]!.description = 'late mutation';
+    if (input.entries[0]!.source) input.entries[0]!.source.origin = 'configured';
+    expect(result.entries[0]!.description).toBe('metadata only');
+    expect(result.entries[0]!.source).toEqual(source);
+    result.entries[0]!.requiredCapabilities.push('private mutation');
+    expect(input.entries[0]!.requiredCapabilities).toEqual([]);
+  }
+  for (const source of [
+    {},
+    { scope: 'global', origin: 'profile' },
+    { scope: 'project', origin: 'unknown' },
+    { scope: 'project', origin: '.agents', path: '/secret/SKILL.md' },
+    '/secret/SKILL.md',
+  ]) {
+    const input = publicPage();
+    Object.assign(input.entries[0]!, { source });
+    expect(() => verifySkillCataloguePage(input)).toThrow('Invalid SkillCataloguePage response.');
+  }
+});
+
+test('pure public Skill verifier retains identity, state, cursor, and availability checks', () => {
+  const valid = publicPage();
+  expect(() => verifySkillCataloguePage(valid, { storeId: 'other' })).toThrow(
+    'skill_catalogue_identity_mismatch',
+  );
+  expect(() => verifySkillCataloguePage(valid, { workspaceId: 'other' })).toThrow(
+    'skill_catalogue_identity_mismatch',
+  );
+  expect(() => verifySkillCataloguePage(valid, { revision: 'c'.repeat(64) })).toThrow(
+    'skill_catalogue_changed',
+  );
+  expect(() => verifySkillCataloguePage(valid, { afterId: valid.entries[0]!.id })).toThrow(
+    'invalid_response',
+  );
+  for (const mutate of [
+    (page: SkillCataloguePage) => {
+      page.entries[0]!.enabled = false;
+    },
+    (page: SkillCataloguePage) => {
+      page.entries.push(structuredClone(page.entries[0]!));
+    },
+    (page: SkillCataloguePage) => {
+      page.complete = false;
+      page.nextAfterId = 'wrong';
+    },
+    (page: SkillCataloguePage) => {
+      page.availability = 'unavailable';
+      page.reason = 'configuration_unavailable';
+    },
+  ]) {
+    const page = publicPage();
+    mutate(page);
+    expect(() => verifySkillCataloguePage(page)).toThrow('invalid_response');
+  }
+  const privateFields = publicPage();
+  Object.assign(privateFields.entries[0]!, { body: 'private' });
+  expect(() => verifySkillCataloguePage(privateFields)).toThrow(
+    'Invalid SkillCataloguePage response.',
+  );
+  expect(() => verifySkillCataloguePage(valid, { workflow: 'manual' })).toThrow('invalid_response');
+  const unavailable = publicPage();
+  unavailable.availability = 'unavailable';
+  unavailable.reason = 'configuration_unavailable';
+  unavailable.entries = [];
+  expect(verifySkillCataloguePage(unavailable)).toEqual(unavailable);
 });

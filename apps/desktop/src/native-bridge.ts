@@ -28,8 +28,10 @@ import type {
 } from './controller';
 import type { InputMetadata, InputRequest } from './input';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 
 export type * from './mcp-bridge';
+export type * from './skills-bridge';
 
 export type NativeAnswerMetadata = {
   scope: { storeId: string; sessionId: string; workspaceId: string; contextSelectionId: string };
@@ -77,6 +79,7 @@ export type NativeCallerBody = {
   bodyBytes: number;
 };
 export type NativeSelection = {
+  readonly canReadSkills?: boolean;
   readonly canReadContext?: boolean;
   readonly canReadModelOutput: boolean;
   readonly canReadModelInput?: boolean;
@@ -338,6 +341,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeSkillsRequest
   | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
@@ -586,6 +590,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeSkillsPage
   | NativeMcpResult
   | FileCheckpointPage
   | FileCheckpointDetail

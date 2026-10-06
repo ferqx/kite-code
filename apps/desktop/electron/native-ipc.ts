@@ -13,6 +13,9 @@ import type { NativeCaller } from './native-caller';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'settings.skills.open': ['readId', 'viewSelection', 'historyEpoch'],
+  'settings.skills.next': ['readId'],
+  'settings.skills.close': ['readId'],
   'settings.mcp.read': [],
   'settings.mcp.close': [],
   'settings.mcp.sources': ['observationId', 'afterId'],
@@ -174,6 +177,14 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
+  if (
+    method === 'settings.skills.open' &&
+    (!Number.isSafeInteger(input.viewSelection) ||
+      Number(input.viewSelection) < 1 ||
+      !Number.isSafeInteger(input.historyEpoch) ||
+      Number(input.historyEpoch) < 0)
+  )
+    throw Error('invalid_native_request');
   if (
     (method === 'settings.models.enabled' || method === 'settings.models.default') &&
     (typeof input.modelId !== 'string' || !input.modelId.length || input.modelId.length > 128)

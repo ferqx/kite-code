@@ -27,6 +27,7 @@ import { NativeModelSettings } from './native-model-settings';
 import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
+import { NativeSkillsSettings } from './native-skills-settings';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function NativeDesktop() {
@@ -52,7 +53,9 @@ export function NativeDesktop() {
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<'models' | 'providers' | 'mcp'>('models');
+  const [settingsPage, setSettingsPage] = useState<'models' | 'providers' | 'mcp' | 'skills'>(
+    'models',
+  );
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
   const modelChoices = useRef(new Map<string, NativeModelChoice>());
@@ -373,8 +376,22 @@ export function NativeDesktop() {
             >
               MCP
             </button>
+            <button
+              type="button"
+              aria-pressed={settingsPage === 'skills'}
+              onClick={() => setSettingsPage('skills')}
+            >
+              Skills
+            </button>
           </nav>
-          {settingsPage === 'mcp' ? (
+          {settingsPage === 'skills' ? (
+            <NativeSkillsSettings
+              bridge={bridge}
+              generation={generation.current}
+              selection={selection}
+              historyEpoch={state?.historyEpoch ?? 0}
+            />
+          ) : settingsPage === 'mcp' ? (
             <NativeMcpSettings
               bridge={bridge}
               generation={generation.current}

@@ -5050,6 +5050,28 @@
                   "minLength": 1,
                   "maxLength": 128
                 },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "scope": {
+                          "type": "string",
+                          "enum": ["project", "user"]
+                        },
+                        "origin": {
+                          "type": "string",
+                          "enum": [".agents", ".kite-code", "profile", "configured"]
+                        }
+                      },
+                      "required": ["scope", "origin"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "name": {
                   "anyOf": [
                     {

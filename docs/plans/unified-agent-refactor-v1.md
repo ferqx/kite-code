@@ -1900,6 +1900,16 @@ P7 正式切换 + 新基线兼容责任与演进测试固定
 
 R01—R10 的 P1/P2 是审查优先级，不等同于这里的实施阶段编号。相应前置条件从首次接通相关路径时生效：取消/派发在最小执行切片验证，Store 写入身份在 HTTP/operation 接通时验证，恢复目录竞争用 W11-A/W19-A 早期 fixture 验证。完整三平台制品结果可在 P6 收束，但不能先上线无约束的旧命令恢复、子审批或 Rewind，再以“后续阶段补测试”豁免。
 
+### 30.2.1 当前 Native Skills 消费者迁移
+
+2026-10-07 当前 Native 公开目录消费者已实施并取得本机 macOS 实际窗口资格：旧 Desktop 的只读 Skills 分类展示名称、描述、来源和可用状态，正式 Native 已接入默认 Service 的可信配置目录与公共 Client。当前默认发现范围仍由 Service 配置决定；这次入口迁移不恢复旧 home 扫描或将配置来源当作执行授权，完整 Skills/Workflow 能力仍按映射核对。
+
+Main 从实际选中 Session 取得 Workspace，封存 attach generation、view selection、Store、Session、Workspace 与 observation epoch。每次独立读取使用一个 read ID，只经封闭 open/next/close IPC 传输公开的有限目录页；Main 保存原 revision 和 afterId，关闭或作用域变化中止所属 GET，不提交业务取消。renderer 穷尽同 revision 的所有页后才发布完整目录，无总项目截断；刷新失败保留同作用域的已知事实并说明未更新，真实 available-empty 与 unavailable 分别显示。有限来源分类从已准入的配置位置导出，不传路径、正文、凭据或任意配置；旧来源缺该字段明确未记录。
+
+已运行验收覆盖原公共 HTTP 的来源分类与局部状态、Main/IPC 准入和迟到读取、实际 DOM 的完整分页及切换/关闭；搬迁、删除构建源后的默认 Native 窗口验证了 306 项完整目录、不同 Workspace、冷重启和零 Run/Execution。当前原完整默认 598 文件/475 任务全部通过，正常类型/制品/文档/边界门禁保持；准确范围及原失败见[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)。当前负责说明见 [Desktop](../../apps/desktop/README.md)、[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)，设计理由另记 [Native Skills 决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。
+
+当前保留四项退出缺口，按实际依赖继续：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程与正式持续负载资格未闭合；Native 后台 Job 完整输出消费者尚缺，其真实默认 stdout/stderr 窗口依赖前项 Shell；支持范围的 §35/T/E、三平台与兼容制品资格齐全后才能最终退役旧路径。不能以静态入口已切换、定制 Shell 夹具或原完整默认通过替代这些能力证据。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：
