@@ -44,18 +44,21 @@ def receive(data):
  if expected and expected in next_text: found=True
  matching=next_text[-4096:]
  matching_seconds+=time.process_time()-before
-def wait(text):
+def current_frame():
+ raw=b''.join(chunks).decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',raw,re.S)
+ return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',frames[-1] if frames else raw))
+def wait(text,ready=False):
  global expected,found
  expected=text;found=text in matching
  deadline=time.monotonic()+8
- while not found:
+ while not found or (ready and (text not in current_frame() or ' · Loading' in current_frame())):
   if time.monotonic()>deadline: raise RuntimeError('PTY expected '+text+'; bytes='+str(bytes_read)+'; tail='+tail[-200:])
   if select.select([reader],[],[],.1)[0]:
    try: receive(os.read(reader,65536))
    except OSError: raise RuntimeError('PTY ended '+tail)
 try:
  wait('New Run');matching='';os.write(master,b'work');wait('New Run > work');matching='';os.write(master,b'\\r');wait('approval [')
- ${mode === 'complete' ? `matching='';os.write(master,b'approve');wait('feedback / deny. approve');matching='';os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('› internal-choice');matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
+ ${mode === 'complete' ? `matching='';os.write(master,b'approve');wait('feedback / deny. approve');matching='';os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('Question 1/1 · Selection: 1',ready=True);matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
  os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
  while not eof_mode and p.poll() is None and time.monotonic()<deadline:
@@ -95,6 +98,9 @@ finally:
         expect(card.presentationSessionId).toBe('a');
       }
       expect(facts.interactions[0].answer.grant).toBe('approve_once');
+      expect(
+        facts.interactions.find((card: { kind: string }) => card.kind === 'question').answer,
+      ).toEqual({ kind: 'question', answers: { choiceId: 'internal-choice' } });
     } else {
       expect(out).toContain('"effects":0');
       expect(out).toContain(mode === 'cancel' ? '"runs":["cancelled"]' : '"runs":["running"]');
