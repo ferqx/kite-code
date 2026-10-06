@@ -1391,3 +1391,16 @@ Workflow 消费者修正在本地提交 0bf4ae35bf57296b61bfbb6c8b1ea8f959df8eeb
 最小修正仅在原Python驾驶提取已有完整帧的选中行，每次Down后等选中标签真实变化，后台同选中帧不能充当按键完成。严格UTF8、完整同步帧、1MiB尾部、16次drain、原10秒导航预算和业务控制均保留，未改TS测试、UI、Source或审批/原申请guard。Python AST及diff检查通过；[CLI owner](../../apps/cli/README.md)、[TUI owner](../../packages/ui/src/tui/README.md)和[MCP手册](../handbook/clients/tui/guides/mcp-and-skills.md)的产品行为及边界核对后无变化，不新建Note。
 
 当前原isolated runTestJob/no-orphans单并发源码外80×24窗口1pass/0fail/282断言、13.01s，日志 `/private/tmp/kite-source-mutation-selection-ack-current-20261006.log`。packet `/private/tmp/kite-tui-source-mutation-evidence-1c7d6499-e8bf-4097-b98e-c1222c5ba535` success/cleanupConfirmed、errors[]、root删除和lease释放；三TUI61254/61287/61290均正常Ctrl+Q/exit0，四Service清理完成。原暖2POST、cold/foreign零POST、Model/Question resolution零、独立审批、原ID GET-only、foreign字节与共享credential保留断言未缩减。Root自检，独立审查仍受thread limit限制；iteration_complete/stage/commit ready仅覆盖驾驶和进度两路径。第十二轮失败保留，下一轮需当前原完整图；37partial、Goal active及前述Native stdin、真实OAuth组合、默认可信Shell/Soak、安装、三平台、§35/T-E与旧路径退役缺口保持，本地授权不扩大push/PR，无关AGENTS独立。
+
+
+## 2026-10-06：MCP 冷恢复按当前原申请菜单选择
+
+Source 驱动已本地提交 e7067bff4a786986bae0d09e79515661d4de5344，正常三个匹配 hooks 通过、0.13s；日志 `/private/tmp/kite-source-selection-ack-phase-commit-20261006.log`、SHA `52dc859f2002afb9212238b88a29ebbf62dddf6878543599d044c7c76a49767a`。无匹配 TypeScript 的其余 hooks 按原规则跳过。第十三轮原完整默认在该 HEAD、574文件/464主任务/并发4运行，实际 exit1；97主任务全部排空、96通过、MCP cold PTY失败，无 plan abort。已运行204文件，367任务未调度；3977 tracked regular SHA 与 Git 前后保持。日志 `/private/tmp/kite-current-default-thirteenth-20261006.log`、SHA `8f19cebc2b6a7b8b14243e5b3192ccf6154586e7cbc4e86840bb0ff5ed3c390f`，同前缀 plan/inputs/result 保存；Source mutation 主任务已通过，完整默认资格仍 false。
+
+失败 packet `/private/tmp/kite-mcp-cold-pty-evidence-163421cc-48df-4b43-9976-5b839472245d` 显示冷窗口已选中第二条准确原申请，选择阶段零 GET 核对通过。随后菜单加入 Check original change，固定三次 Up 最终选中 Project sources；中间 Check 帧被当作最终 ready，Enter 打开来源页，原 Selection saved 等待失败。四个所属 PID 的 cleanup 均 exited:true；失败收尾不能称暖/冷两窗均正常 Ctrl+Q。
+
+最小修正只在原嵌入 Python 驱动提取最后一个完整同步帧与实际选中标签，从 Project sources 锚点逐键选择准确原申请或 Check original change，并等待选中项真实变化。保留原十秒等待、持续 PTY 排空、独立暖审批、原 Store/申请身份、原字节和 schema/cursor 断言；不修改 UI、CLI Host、Service DTO、执行或恢复权威。[MCP手册](../handbook/clients/tui/guides/mcp-and-skills.md)、[TUI owner](../../packages/ui/src/tui/README.md)及[CLI owner](../../apps/cli/README.md)核对后无产品行为或边界变化，不另建 Note。
+
+当前原 isolated runTestJob/no-orphans 单并发80×24窗口1pass/0fail/44断言、10.31s，日志 `/private/tmp/kite-mcp-cold-current-selection-20261006.log`；CLI完整typecheck、owned Biome及diff检查通过。成功 packet `/private/tmp/kite-mcp-cold-pty-evidence-17841a4b-0126-4ea2-805c-fd33edab4cb0` 的 Python exit0、stderr空，TUI78537/78551正常退出，所属 Service78538/78563 exited:true。选择阶段零GET、冷零POST且准确一次原GET、零Model/remoteRPC以及原第二申请结果保持。Root自检，新的独立审查仍受thread limit限制；iteration_complete/stage/commit ready仅限本片测试与进度两路径。
+
+第十三轮失败不会因局部通过被追认，下一轮仍须冻结当前实现运行完整原入口。37项 partial、Goal active保持；真实原生stdin、受控HTTPS下OS浏览器/nativeVault OAuth组合、默认可信Shell、formal持续Soak、安装、Linux/Windows、§35/适用T-E及正式旧路径退役仍未闭合。已有本地阶段授权不扩大push/PR，无关AGENTS保持独立。

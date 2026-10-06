@@ -326,11 +326,17 @@ def publish_pid():
 def start():
  global p,m,b
  m,s=pty.openpty();fcntl.ioctl(s,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(artifact.executable)},${JSON.stringify(entrypoint)}],stdin=s,stdout=s,stderr=s,start_new_session=True);os.close(s);publish_pid();b=b''
+def current_frame():
+ frames=b.decode(errors='replace').split('\\x1b[?2026h')
+ raw=next((part.split('\\x1b[?2026l')[0] for part in reversed(frames[1:]) if '\\x1b[?2026l' in part),'')
+ return re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',raw)
+def selected_label():
+ return next((line.strip()[2:] for line in current_frame().splitlines() if line.strip().startswith('› ')),None)
 def wait(text, absent=None):
  global b,all_output
  end=time.monotonic()+10
  while True:
-  frame=re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',b.decode(errors='replace').split('\\x1b[?2026h')[-1]))
+  frame=re.sub(r'\\s+',' ',current_frame())
   if text in frame and (absent is None or absent not in frame):return
   if p.poll() is not None:raise RuntimeError('early exit '+b[-3000:].decode(errors='replace'))
   if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+b[-5000:].decode(errors='replace'))
@@ -339,6 +345,18 @@ def wait(text, absent=None):
 def key(value):
  global b
  b=b'';os.write(m,value)
+def choose(label):
+ global b,all_output
+ end=time.monotonic()+10
+ if selected_label()==label:return
+ if selected_label()!='Project sources':
+  key(b'\\x1b[A'*64);wait('› Project sources')
+ while selected_label()!=label:
+  previous=selected_label();key(b'\\x1b[B')
+  while selected_label() is None or selected_label()==previous:
+   if time.monotonic()>end:raise RuntimeError('original MCP selection did not move: '+label)
+   if select.select([m],[],[],.05)[0]:
+    data=os.read(m,65536);b+=data;all_output+=data
 def check(path):
  with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
 def quit():
@@ -355,7 +373,7 @@ try:
   key(b'/mcp');wait('/mcp');key(b'\\r');wait('owned-server','Reading servers');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');key(b'\\x1b[B');wait('› '+('Enable' if ordinal==1 else 'Disable')+' · User settings');key(b'\\r');wait('Confirm server change:');key(b'\\r');wait('Waiting for original result');row=check('approve-'+str(ordinal));key(b'\\x1b[B'*2);wait('› Check original change');key(b'\\r');wait('Selection saved');key(b'\\x1b');wait('New Run')
  warm=quit();row=check('warm-closed');second=row['originals'][1]
  start();wait('New Run');key(b'/mcp');wait('/mcp');key(b'\\r');wait('No configured MCP servers');wait('Original change: '+second);check('cold-open')
- key(b'\\x1b[B'*4);wait('› Original change: '+second);key(b'\\r');wait('Original change: '+second+' · Outcome unknown; check original change');check('cold-selected');key(b'\\x1b[A'*3);wait('› Check original change');key(b'\\r');wait('Selection saved');check('cold-lookup');key(b'\\x1b');wait('New Run');cold=quit();print(json.dumps({'columns':80,'rows':24,'warmPid':warm,'coldPid':cold,'exit':0}))
+ choose('Original change: '+second);key(b'\\r');wait('Original change: '+second+' · Outcome unknown; check original change');check('cold-selected');choose('Check original change');key(b'\\r');wait('Selection saved');check('cold-lookup');key(b'\\x1b');wait('New Run');cold=quit();print(json.dumps({'columns':80,'rows':24,'warmPid':warm,'coldPid':cold,'exit':0}))
 finally:
  with open(${JSON.stringify(join(evidence, 'terminal.txt'))},'wb') as f:f.write(all_output)
  if p is not None and p.poll() is None:os.killpg(p.pid,9);p.wait(timeout=5)
