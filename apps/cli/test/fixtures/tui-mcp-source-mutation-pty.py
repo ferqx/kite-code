@@ -30,11 +30,20 @@ def note(kind, **values):
         del trace[0]
 
 
-def normalized():
+def current_frame():
     frames = buffer.split('\x1b[?2026h')
     frame = next((part.split('\x1b[?2026l')[0] for part in reversed(frames[1:])
                   if '\x1b[?2026l' in part), '')
-    return re.sub(r'\s+', ' ', re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', frame))
+    return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', frame)
+
+
+def normalized():
+    return re.sub(r'\s+', ' ', current_frame())
+
+
+def selected_label():
+    return next((line.strip()[2:] for line in current_frame().splitlines()
+                 if line.strip().startswith('› ')), None)
 
 
 def control(path):
@@ -114,8 +123,13 @@ def choose(label, top='Add source entry'):
             return
         if time.monotonic() > deadline:
             raise RuntimeError('owned_source_mutation_navigation_deadline:' + label)
+        previous = selected_label()
         key(b'\x1b[B')
-        while not normalized():
+        while True:
+            drain(deadline)
+            selected = selected_label()
+            if selected is not None and selected != previous:
+                break
             if time.monotonic() > deadline:
                 raise RuntimeError('owned_source_mutation_navigation_frame_deadline:' + label)
             receive()

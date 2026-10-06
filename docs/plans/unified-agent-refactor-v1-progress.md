@@ -1380,3 +1380,14 @@ Workflow 消费者修正在本地提交 0bf4ae35bf57296b61bfbb6c8b1ea8f959df8eeb
 准确失败在原旧 Run 配置断言：当前真实选择含默认 ask_user@1 与 files.write@2，原测试只期待 Files；后续 tools:[] 的零目录断言也与 [Service owner](../../apps/service/README.md) 的 merge-by-id 合同冲突。消费者现在明确核旧两项原定义、新 Run 仅默认 ask_user@1、Provider 准确 function/name，以及新 Run 零 Tool Execution。旧审批是否接纳仍由当前 programmatic Workspace trust 决定，保 original card revision、旧 Run 选择和文件效果断言；没有改权限或工具装配实现。两个邻接压缩零工具断言对应专门 summary Model，核对后保持原范围。
 
 当前原 isolated runTestJob/no-orphans 单并发整文件6pass/0fail/64断言、4.78s，日志 `/private/tmp/kite-permission-catalogue-current-20261006.log`；Service完整typecheck、owned Biome与diff检查通过。产品、默认工具 owner 与原权限收窄合同核对后无变化，不制造手册、owner或Note diff。Root自检，独立Agent仍受thread limit限制；iteration_complete/stage/commit ready仅限本片测试与进度两路径。第十一轮仍失败，后续需当前完整原图；真实原生stdin、受控HTTPS下OS浏览器/nativeVault OAuth组合、默认可信Shell、formal持续Soak、安装、其他平台、§35/适用T-E及正式旧路径退役仍未闭合。37partial、Goal active保持，本地阶段授权不扩大push/PR，无关AGENTS保持独立。
+
+
+## 2026-10-06：Source 冷菜单等待真实选中变化
+
+权限消费者已本地提交 58b523d94f4a22a6062edaf485daac1e2ce8145b，正常七 hooks 通过、13.84s，日志 `/private/tmp/kite-permission-catalogue-phase-commit-20261006.log`、SHA `d7df88a7bccfb22eb27d64e29ea74609abcb8621167bcb712aba63a572367f2d`。第十二轮原完整默认在该 HEAD、574文件/464主任务/并发4运行，实际 exit1；47主任务全部排空、46通过、Source mutation PTY失败，无 plan abort。已运行154文件，417任务未调度；3977 tracked SHA/Git 前后保持。日志 `/private/tmp/kite-current-default-twelfth-20261006.log`、SHA `75f53991352c6db2a33f433ebf64dbc0cde6bf66d54e157c633553e2ab32ad34`，同前缀 plan/inputs/result 保留，完整默认资格仍 false。
+
+本次发生在 cold-removed 的 MCP 主菜单，尚未打开来源变更页。packet `/private/tmp/kite-tui-source-mutation-evidence-dadd6c73-2cb1-4125-b193-1106da88c29c` 保 success:false、cleanupConfirmed:true、errors[]、candidate lease释放、失败root保留；warm TUI56189正常Ctrl+Q/exit0，cold失败TUI56235由收尾exit-9，不能标正常退出。trace显示后台servers读取错误产生新完整帧，但选中项仍是 Saved tool snapshots；驱动仅等非空帧，又发Down，合并跳过Source entry changes，随后在末项Forced reconnects等待没有发生的移动。当前目录独立reader修复继续保留，本次不是该读取被取消的阶段。
+
+最小修正仅在原Python驾驶提取已有完整帧的选中行，每次Down后等选中标签真实变化，后台同选中帧不能充当按键完成。严格UTF8、完整同步帧、1MiB尾部、16次drain、原10秒导航预算和业务控制均保留，未改TS测试、UI、Source或审批/原申请guard。Python AST及diff检查通过；[CLI owner](../../apps/cli/README.md)、[TUI owner](../../packages/ui/src/tui/README.md)和[MCP手册](../handbook/clients/tui/guides/mcp-and-skills.md)的产品行为及边界核对后无变化，不新建Note。
+
+当前原isolated runTestJob/no-orphans单并发源码外80×24窗口1pass/0fail/282断言、13.01s，日志 `/private/tmp/kite-source-mutation-selection-ack-current-20261006.log`。packet `/private/tmp/kite-tui-source-mutation-evidence-1c7d6499-e8bf-4097-b98e-c1222c5ba535` success/cleanupConfirmed、errors[]、root删除和lease释放；三TUI61254/61287/61290均正常Ctrl+Q/exit0，四Service清理完成。原暖2POST、cold/foreign零POST、Model/Question resolution零、独立审批、原ID GET-only、foreign字节与共享credential保留断言未缩减。Root自检，独立审查仍受thread limit限制；iteration_complete/stage/commit ready仅覆盖驾驶和进度两路径。第十二轮失败保留，下一轮需当前原完整图；37partial、Goal active及前述Native stdin、真实OAuth组合、默认可信Shell/Soak、安装、三平台、§35/T-E与旧路径退役缺口保持，本地授权不扩大push/PR，无关AGENTS独立。
