@@ -31,6 +31,8 @@
 
 未提交普通Action的结果不以Command.applied视为完成；同Session后续普通派发须继续核原receipt主Execution。准确Store/owner观察、合法detached Job与未提交Action的区分，以及真实最终提交故障测试归[Store owner](src/storage/README.md#未提交普通-action-的串行边界)。
 
+MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连持久发布与原事实)沿原operation有界等待真实Job终态，再核完整停止证明。运行中新holder的发布失败继续隔离；超时或迟到结算不追改原unknown，通用Execution与Query合同保持。
+
 ## 当前执行与恢复边界
 
 创建与命令写入核对原 `expectedStoreId`，同一 ID/语义返回原事实，内容冲突拒绝。统一执行先保存意图和派发依据，再调用真实适配器；权限、取消与必要依据在派发边界复查。已派发工具没有可核实结果时保留 `outcome_unknown`，不以普通异常推断没有外部效果。模型不完整响应不能启动工具。

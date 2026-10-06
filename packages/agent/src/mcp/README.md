@@ -2,7 +2,7 @@
 
 原目录工具描述查看已完成 connect/refresh、[公共 Client](../../../client/README.md)与[暖/冷 TUI](../../../ui/src/tui/README.md)的有限实际链路，普通 Model Tool refresh 与公共备份恢复 A→B 后的原 metadata 读取均已实际验证；整体 V1.3 继续实施。查看不授予执行能力或完整管理中心资格。
 
-强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。本机23个目标主任务、源码外80×24整例及当前动态完整默认545文件/441主任务分别通过；真实冻结输入、结果提交故障、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；当前 OAuth/续期与来源增删边界见下文。持续 Soak、真实系统浏览器、OAuth PTY、三平台和完整 V1.3 继续分别验收。
+强制暖连接重连已实施：[共享输入类型](reconnection-types.ts)闭合独立Action的准确原carrier/Job/ref与当前Source/static replacement，[实施决定](../../../../.agents/notes/implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)保存非原子停止/建立、持久发布和原申请的取舍。此前23个目标主任务、源码外80×24整例及545文件/441主任务完整默认分别通过；最新建立失败的持久收尾修复及13项受影响任务见下文。真实冻结输入、当前完整默认失败、历史红与未覆盖范围见[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。普通connect继续暖复用；当前 OAuth/续期与来源增删边界见下文。持续 Soak、真实系统浏览器、OAuth PTY、三平台和完整 V1.3 继续分别验收。
 
 [createMcpAdapter](index.ts) 是显式可选协议适配器，没有第二 Runtime。import/factory 不 spawn、连接或读取旧配置；配置选择一个稳定 server ID 和 stdio（绝对 command/cwd、明确 args/env）或 HTTP URL/headers。凭据由宿主显式注入，adapter 不发现全局凭据、打开认证浏览器或打印远端错误正文。
 
@@ -207,10 +207,12 @@ Service source factory 的 `deriveChildSelection` 在 resolver 阶段封存父�
 
 同 factory 的 Store+Session+Server 私有 ticket 绑定实际 holder、epoch/ref、原 R inputDigest 和 Job bootstrap。stop 前的拒绝保旧连接；实际 owned stop 与旧 Job 的持久 transportStopped 证明之后才 ensure 新 Job。新 Job 与 R 的普通许可独立，process slot=1仍可前进。held/unknown stop、未确认阶段 CAS、迟到 open 或缺原证明保持 fence，不从 Action 返回、目录 ready 或 finally 推导热可用。
 
+新建立或私有preflight失败时，ready拒绝可能早于真实Job终态提交。父R沿准确原 `newOperationRef`、原signal和既有timeout执行普通 `operations.wait`，再用原完整parent/ref/input/Store/root-work及严格stopped/unopened证明分类；局部failure/ended状态只限定等待路径，不证明停止。新holder仍live但ready阶段或发布持久化失败时保持unknown和quarantine，不等待它将来停止。等待失败或超时仍unknown；新Job后来结算也不追改原R终态。
+
 新目录 staged ready 后仍保 publishing ticket。Step、最终 Tool/Task wire、warm connect、后续重连、refresh 和 Resource/Prompt 准入都从原 R 实际 succeeded result、完整 catalogue/ref、inputDigest、Store/Session/root-work 与新 Job parent 证明确认发布。Query 先核完整成功事实，再 await 准确 holder 的发布证明；它不凭公共 phase 清票，冷 ready/live=false仍合法。callback保留在 holder 上，后续证明漂移继续拒绝。
 
 ensure已保存原 Job、但 `new_planned` CAS 或 preflight失败且 owned port 尚未打开时，只可由私有 ensure ticket和真实 Job/ref/input/parent 身份返回 unopened supervision handle。observe保存准确 ended/failed及transportStopped，不能把自报 bootstrap、已打开或迟到 handle当作零 port；缺私有绑定保持原拒绝。该 leaf收尾不修改通用 Execution 终态规则。
 
 [reconnection-proof](reconnection-proof.ts)与[query](reconnection-query.ts)把 stage视为索引，独立核实际旧停止、新 Job与完整原结果。`mcp.reconnection@1` input恰 `{executionId}`，closed envelope≤16KiB，actions/artifactRefs为空；oldStop.confirmed、ready、live/currentGeneration独立。历史读取零 Source、Workspace文件、vault、transport、Model、补record或cursor推进。已有 connection Query与metadata publisher只新增准确 R parent/catalogue 分支，普通 C证明不放宽。
 
-[真实 Core 及故障用例](../../test/isolated/mcp/reconnection.test.ts)、[纯协议反例](../../test/isolated/mcp/reconnection-proof.test.ts)、[真实 HTTP Host](../../../../apps/cli/test/isolated/tui-mcp-reconnection-host.test.ts)与[物理丢回执](../../../../apps/cli/test/isolated/tui-mcp-reconnection-recovery.test.ts)分别验证其断言。当前完整默认在准确冻结的545文件/441主任务全部通过，代码与生成输入保持后单独核对文档归位；有限组、源码外整例与whole各有独立范围。未提交 Action 的串行门禁故障、直接await原waiter的匹配入口对照、正常关闭和历史红保在总体进度，底层停滞原因未知。上述本机资格不证明持续 Soak、远端停止或三平台。
+[真实 Core 及故障用例](../../test/isolated/mcp/reconnection.test.ts)、[纯协议反例](../../test/isolated/mcp/reconnection-proof.test.ts)、[真实 HTTP Host](../../../../apps/cli/test/isolated/tui-mcp-reconnection-host.test.ts)与[物理丢回执](../../../../apps/cli/test/isolated/tui-mcp-reconnection-recovery.test.ts)分别验证其断言。当前13项受影响原任务并发4全部通过，73例2120断言，3979个regular输入及Git前后保持；真实新Job终态提交屏障先复现父R过早unknown，修后屏障内pending、提交后failed且零新initialize。受控两秒等待超时保原unknown，迟到真实failed不改原R；原ready阶段/最终结果提交故障继续核live与发布隔离。此前545文件/441主任务完整默认属于当时冻结输入，最新第十九轮完整默认仍失败；有限组、源码外整例与whole各有独立范围，准确SHA见总体进度。未提交 Action 的串行门禁故障、直接await原waiter的匹配入口对照、正常关闭和历史红保在总体进度，底层停滞原因未知。上述本机资格不证明持续 Soak、远端停止或三平台。

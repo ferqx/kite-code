@@ -83,6 +83,12 @@ test('physical accepted POST loss and cold GET loss preserve original unknown; d
 
 test('replacement Job Ask Source drift occurs after exact old stop and prevents new remote initialize', async () => {
   const f = await reconnectionHostFixture(true);
+  const finish = f.store.finishExecution.bind(f.store);
+  let releaseTerminal!: () => void;
+  const terminalGate = new Promise<void>((resolve) => {
+    releaseTerminal = resolve;
+  });
+  let terminalAttempt: Parameters<typeof finish>[0] | undefined;
   try {
     const a = await f.ordinary('drift_ask_A');
     await f.answer(
@@ -103,17 +109,52 @@ test('replacement Job Ask Source drift occurs after exact old stop and prevents 
       (await f.store.getExecution(observed.target.connectionExecutionId))?.result,
     ).toMatchObject({ details: { transportStopped: true } });
     expect(f.counts().rpc).toEqual(['initialize', 'tools/list']);
+    f.store.finishExecution = async (input) => {
+      if (input.executionId === replacement.executionId) {
+        terminalAttempt = input;
+        await terminalGate;
+      }
+      return finish(input);
+    };
     f.changeSource(7);
     await f.answer(replacement, 'approve');
+    await until(async () => terminalAttempt);
+    expect(terminalAttempt).toMatchObject({
+      status: 'failed',
+      result: { content: 'mcp_source_stale', details: { transportStopped: true } },
+    });
+    expect(await f.store.getExecution(replacement.executionId)).toMatchObject({
+      status: 'running',
+      result: null,
+      resultRevision: '0',
+    });
+    const pending = await f.port().lookup(r, signal());
+    expect(pending.phase).toBe('pending');
+    expect(pending.fact?.oldStop.confirmed).toBe(true);
+    expect(pending.fact?.ready).toBeNull();
+    expect(f.counts().rpc).toEqual(['initialize', 'tools/list']);
+    releaseTerminal();
     const refused = await until(async () => {
       const value = await f.port().lookup(r, signal());
       return ['failed', 'cancelled'].includes(value.phase) ? value : undefined;
     });
+    expect(refused.phase).toBe('failed');
     expect(refused.fact?.oldStop.confirmed).toBe(true);
     expect(refused.fact?.ready).toBeNull();
+    expect(refused.fact?.newConnection).toMatchObject({
+      id: replacement.executionId,
+      status: 'failed',
+    });
+    expect(await f.store.getExecution(replacement.executionId)).toMatchObject({
+      status: 'failed',
+      resultRevision: '1',
+      result: { content: 'mcp_source_stale', details: { transportStopped: true } },
+    });
     expect(f.counts().rpc).toEqual(['initialize', 'tools/list']);
     expect(f.counts()).toMatchObject({ models: 0, vault: 0, effects: 0 });
   } finally {
+    releaseTerminal();
+    f.store.finishExecution = finish;
     await f.close();
   }
 }, 30000);

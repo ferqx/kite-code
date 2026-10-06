@@ -9,7 +9,7 @@ import { createMcpLifecycle, type McpReconnectionInput } from '../../../src/mcp'
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 
-async function fixture(processConcurrency = 1, staticServer = false) {
+async function fixture(processConcurrency = 1, staticServer = false, readyTimeoutMs?: number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-reconnection-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
   let store = await openSqliteStore(profile);
@@ -125,6 +125,7 @@ async function fixture(processConcurrency = 1, staticServer = false) {
     },
   });
   const options = {
+    ...(readyTimeoutMs === undefined ? {} : { readyTimeoutMs }),
     servers: staticServer ? [resolution().server] : [],
     transportPort: staticServer ? resolution().transportPort : undefined,
     scopedSources: {
@@ -600,6 +601,89 @@ test('replacement Job denied after old stop retains exact terminal child/ref and
     await f.close();
   }
 }, 20000);
+
+test('replacement terminal wait timeout keeps the original unknown after the real child later commits', async () => {
+  const f = await fixture(1, false, 2000);
+  const write = f.store.writeExtensionRecord.bind(f.store);
+  const finish = f.store.finishExecution.bind(f.store);
+  let releaseTerminal!: () => void;
+  const terminalGate = new Promise<void>((resolve) => {
+    releaseTerminal = resolve;
+  });
+  let terminalAttempt: Parameters<typeof finish>[0] | undefined;
+  try {
+    await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
+    const b = await f.invoke('b', 'mcp.connect', { serverId: 'local', key: 'b' });
+    const warm = await f.connection(b.id, 'b');
+    f.store.writeExtensionRecord = async (input) => {
+      const receipt = await write(input);
+      const value = input.write.value;
+      if (
+        input.originCommandId === 'r1' &&
+        input.write.contentType === 'builtin.mcp.reconnection' &&
+        value &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        value.stage === 'new_planned'
+      )
+        f.preDrift();
+      return receipt;
+    };
+    f.store.finishExecution = async (input) => {
+      const child = await f.store.getExecution(input.executionId);
+      const parent = child?.parentExecutionId
+        ? await f.store.getExecution(child.parentExecutionId)
+        : null;
+      if (child?.definitionId === 'mcp.source.connection' && parent?.originCommandId === 'r1') {
+        terminalAttempt = input;
+        await terminalGate;
+      }
+      return finish(input);
+    };
+    const r = await f.invoke('r1', 'mcp.reconnect', f.input(warm, 'r1') as unknown as Json);
+    expect(r.status).toBe('outcome_unknown');
+    expect(terminalAttempt).toBeDefined();
+    expect(terminalAttempt).toMatchObject({
+      status: 'failed',
+      result: { details: { transportStopped: true, remoteToolStopConfirmed: false } },
+    });
+    const childId = terminalAttempt!.executionId;
+    expect(await f.store.getExecution(childId)).toMatchObject({
+      status: 'running',
+      result: null,
+      resultRevision: '0',
+    });
+    const before = await f.query(r.id);
+    expect(before.phase).toBe('outcome_unknown');
+    expect((before.oldStop as Record<string, Json>).confirmed).toBe(true);
+    expect(before.ready).toBeNull();
+    expect(f.opens).toHaveLength(1);
+    expect(f.stops).toHaveLength(1);
+    const wire = [...f.wire];
+    releaseTerminal();
+    const deadline = Date.now() + 5000;
+    while ((await f.store.getExecution(childId))?.status !== 'failed') {
+      if (Date.now() > deadline) throw Error('owned_replacement_terminal_deadline');
+      await Bun.sleep(5);
+    }
+    expect(await f.store.getExecution(childId)).toMatchObject({ resultRevision: '1' });
+    expect(await f.store.getExecution(r.id)).toEqual(r);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    const after = await f.query(r.id);
+    expect(after.phase).toBe('outcome_unknown');
+    expect((after.newConnection as Record<string, Json>).status).toBe('failed');
+    expect(after.ready).toBeNull();
+    expect((await f.step()).toolIds).toEqual([]);
+    expect(f.opens).toHaveLength(1);
+    expect(f.wire).toEqual(wire);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+  } finally {
+    releaseTerminal();
+    f.store.writeExtensionRecord = write;
+    f.store.finishExecution = finish;
+    await f.close();
+  }
+}, 15000);
 
 test('refresh then same-key carrier retains original catalogue while reconnect observes current generation', async () => {
   const f = await fixture();

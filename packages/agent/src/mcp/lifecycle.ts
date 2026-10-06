@@ -1449,7 +1449,23 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     } catch (error) {
       if (ticket?.ensureAttempted && stage?.newOperationRef) {
         ticket.openAllowed.reject(error);
-        ticket.safeTerminal = await safeJobTerminal(context, ticket);
+        try {
+          // Failed opening can reject ready before the real Job result commit. A live
+          // ready holder with a failed publication must stay quarantined, without waiting
+          // for an unrelated future stop to classify this original publication failure.
+          if (
+            !ticket.newEntry ||
+            ticket.newEntry.failureCode ||
+            ticket.newEntry.terminal === 'ended'
+          )
+            await context.operations.wait(stage.newOperationRef, {
+              signal: context.signal,
+              timeoutMs: timeout,
+            });
+          ticket.safeTerminal = await safeJobTerminal(context, ticket);
+        } catch {
+          ticket.safeTerminal = false;
+        }
       }
       const knownNoNew = !ticket?.ensureAttempted || ticket.safeTerminal === true;
       const knownStop = stopConfirmed;

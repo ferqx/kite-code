@@ -48,7 +48,7 @@ Server移除或冷重开后仍可查看已保存的历史；旧generation不会�
 
 普通申请连接仍可复用同来源连接。确需替换当前连接时，先明确查询准确原连接或原重连申请，确认当前 live 后选择“Review reconnect”（审查重连）。审查页重新核对原 carrier、连接 Job、观察代次及当前替换来源；再以独立 Enter 确认本次申请。同一会话的后台历史刷新保留这次确认页；手动重新选择会话、工作区变化、离线或历史读取失败后，需要重新审查。旧原目录 ready 不等于当前 live，观察失效时需重新读取。
 
-原重连 Action 和新连接 Job 分别经过普通审批。旧 owned transport 已确认停止、原 Job 已保存停止终态后，才申请新的连接 Job；等待新 Job 审批时，旧连接已经停止。拒绝新 Job、来源变化或建立失败会保留“旧已停、新未建立”，不会自动恢复旧连接。停止本地 transport 不证明远端 Tool 已停止。停止或收尾未确认时保持 unknown，不能通过新的 key 绕过同 Store、Session、Server 的冲突。
+原重连 Action 和新连接 Job 分别经过普通审批。旧 owned transport 已确认停止、原 Job 已保存停止终态后，才申请新的连接 Job；等待新 Job 审批时，旧连接已经停止。新连接收尾期间原申请仍为待决，确认拒绝、来源变化或建立失败后保留“旧已停、新未建立”，不会自动恢复旧连接。停止本地 transport 不证明远端 Tool 已停止。停止或收尾未确认时保持 unknown；迟到的 Job 结果不自动改写原未知申请，也不能通过新的 key 绕过同 Store、Session、Server 的冲突。
 
 “Forced reconnects”（强制重连申请）保存同 Session 的原 ID。上下、Enter 只选择原 ID；明确选择“Check original forced reconnect”才查询原 Command 和结果。冷重开不自动查询或重连；来源文件或工作区目录已移除时仍可查原结果。原 ready、旧停止、当前 live 和 current generation分别显示。离线恢复至新 Store 后保留原申请身份，原记录不成为新 Store 的查询或提交许可。
 

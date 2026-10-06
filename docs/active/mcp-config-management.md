@@ -43,6 +43,8 @@ CLI 新提交核当前完整 Workspace、physical identity 与完整同版本 So
 
 旧owned transport实际stop与原Job持久transportStopped成立后才ensure新Job。R和新Job许可独立；旧停新deny/drift/fail保持旧停止事实，无自动恢复。阶段CAS只是索引，结果提交前保private publishing fence；完整原R succeeded与真实新Job/catalogue证明后才发布Step/wire/live。Query按成功事实后await该私有确认，cold旧ready不重建ticket。未提交原Action的Core串行边界与实际故障复验单独保进度，不以目录ready代证。
 
+新建立失败的ready拒绝不代替Job持久终态：producer仅在建立/preflight失败或已结束路径沿原ref、signal和既有timeout等待，再核完整stopped/unopened证明。仍live的新holder若发布失败继续unknown/quarantine；等待未确认也保unknown，迟到Job终态不追改原R。这个收尾边界不新增恢复权、Query写入或通用Execution模式，真实屏障与超时验证由[MCP owner](../../packages/agent/src/mcp/README.md#强制重连持久发布与原事实)维护。
+
 原重连Query闭合有限事实≤16KiB，历史零Source/Workspace文件/vault/transport/Model/补写。Caller独立原intent journal与ordinary journal同短锁核Store+S+Server未确认冲突；只有本次durable prepare可首次POST，cold/duplicate仅原GET，foreign身份全部HTTP前拒绝。条件v11保存原bytes/subject/SHA/phase，旧v2–v10白名单不扩大，新Store不retag或授热权利。操作归[TUI手册](../handbook/clients/tui/guides/mcp-and-skills.md#强制重连与原申请)，Caller与维护归[CLI](../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[maintenance](../../packages/agent/src/maintenance/README.md#mcp-重连申请的独立离线资产)。当前有限真实范围、失败和未验证窗口沿[进度](../plans/unified-agent-refactor-v1-progress.md)记录，OAuth/续期、增删、持续Soak及三平台另验。
 
 ## 来源条目增删的发布与原结果边界
