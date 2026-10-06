@@ -32,7 +32,10 @@ mkdirSync(workspace);
 const source = 'ORIGINAL_DEFAULT_ARTIFACT_SOURCE\r\nUse no tools.';
 writeFileSync(join(workspace, 'AGENTS.md'), source);
 const original = `\ufeffORIGINAL_USER_BEGIN\r\n${'完整原文 α😀\r\n'.repeat(12000)}ORIGINAL_USER_END`;
-const requests: { messages: { role: string; content: string }[]; tools?: unknown[] }[] = [];
+const requests: {
+  messages: { role: string; content: string }[];
+  tools?: { function: { name: string } }[];
+}[] = [];
 const provider = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
@@ -171,7 +174,7 @@ try {
   assert.equal(model.status, 'succeeded');
   assert.equal(model.runId, run.id);
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0]!.tools ?? [], []);
+  assert.deepEqual(requests[0]!.tools?.map((tool) => tool.function.name) ?? [], ['ask_user']);
   assert(
     requests[0]!.messages.some(
       (message) => message.role === 'user' && message.content === original,
