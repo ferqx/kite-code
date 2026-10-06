@@ -48,7 +48,7 @@ DOM 测试验证 Markdown 安全与完整文本、复制范围、键盘范围、
 
 Current selected context 显示当前选择、完整消息与原 result source 身份；它不是一次 Model 实际输入 Inspector。首次响应封存 highWaterSeq 和 selection，两条 cursor 独立穷尽，全部成功才发布；结束的消息流固定 afterSeq=upper，来源流保最后真实 ID。现公共接口没有禁用已结束 stream 的字段，后续页面可能仍读取其空投影；本地不重新追加该流，不承诺服务器停止扫描。selection/scope/重复或不前进游标冲突不会发布部分结果。
 
-Job output 仅从当前 view 的实际 kind=job ID 进入，不能从 Tool 名称猜 Shell。首响应封存 output highWaterSeq，严格 Decimal64 顺序读取至该上界，保 stdout/stderr/progress、准确 seq/throughSeq、droppedBytes（NULL 表示 clipped interval 的字节数不可用）。按全局 interval 覆盖核缺口；per-stream coalesced gap 可跨越另一个 stream 的保留 chunk，也可与另一个 stream 的 gap 重叠，原记录全部保留。下一游标取本页所有 throughSeq 的最大值，不取排序末项；同 stream 冲突、重复普通 chunk、缺口或提前 EOF 拒绝，不把缺内容显示为完整输出。它不是完整 Runtime 事件日志，不补造退出码。刷新失败保同目标结果并标 stale；换目标立即清除旧正文。
+Job output 仅从当前 view 的实际 kind=job ID 进入，不能从 Tool 名称猜 Shell。完整覆盖现在复用公共 Client 的 [ExecutionOutputPages](../../packages/client/src/execution-output.ts)，与 Native 共用原页语义；Browser 准入、按需读取与原错误分类保持。首响应封存 output highWaterSeq，严格 Decimal64 顺序读取至该上界，保 stdout/stderr/progress、准确 seq/throughSeq、droppedBytes（NULL 表示 clipped interval 的字节数不可用）。按全局 interval 覆盖核缺口；per-stream coalesced gap 可跨越另一个 stream 的保留 chunk，也可与另一个 stream 的 gap 重叠，原记录全部保留。下一游标取本页所有 throughSeq 的最大值，不取排序末项；同 stream 冲突、重复普通 chunk、缺口或提前 EOF 拒绝，不把缺内容显示为完整输出。它不是完整 Runtime 事件日志，不补造退出码。刷新失败保同目标结果并标 stale；换目标立即清除旧正文。
 
 [test/diagnostics.test.tsx](test/diagnostics.test.tsx) 使用 fake 公共 Browser port 和 React/JSDOM 验证双分页、原身份、Decimal64 超过 2^53 的区间、gap NULL、singleflight、scope/conflict 拒绝、同目标 stale、局部能力缺失、关闭/隐藏/切换 abort 与迟到结果隔离。真实 Gateway 接口由 Service 测试核对；这里不冒称真实浏览器布局、滚动或完整日志/Model Inspector 迁移完成。
 

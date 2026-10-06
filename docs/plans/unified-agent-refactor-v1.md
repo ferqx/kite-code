@@ -1908,7 +1908,17 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 
 已运行验收覆盖原公共 HTTP 的来源分类与局部状态、Main/IPC 准入和迟到读取、实际 DOM 的完整分页及切换/关闭；搬迁、删除构建源后的默认 Native 窗口验证了 306 项完整目录、不同 Workspace、冷重启和零 Run/Execution。当前原完整默认 598 文件/475 任务全部通过，正常类型/制品/文档/边界门禁保持；准确范围及原失败见[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)。当前负责说明见 [Desktop](../../apps/desktop/README.md)、[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)，设计理由另记 [Native Skills 决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。
 
-当前保留四项退出缺口，按实际依赖继续：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程与正式持续负载资格未闭合；Native 后台 Job 完整输出消费者尚缺，其真实默认 stdout/stderr 窗口依赖前项 Shell；支持范围的 §35/T/E、三平台与兼容制品资格齐全后才能最终退役旧路径。不能以静态入口已切换、定制 Shell 夹具或原完整默认通过替代这些能力证据。
+当前 Native 后台 Job 只读消费者的交付与证据见下节。保留三项退出缺口：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程、默认新 Job 输出生产及正式持续负载资格未闭合；支持范围的 §35/T/E、三平台与兼容制品资格齐全后才能最终退役旧路径。不能以静态入口已切换、显式 Shell 生产端资格或原完整默认通过替代默认后端能力证据。
+
+### 30.2.2 当前 Native Job 完整已保存输出消费者
+
+当前消费者已实施；产品入口为正式 Native 的 Runtime logs「已保存执行」中准确 kind=job 的详情，提供主动读取、显式刷新与关闭。读取全部已保存 stdout/stderr/progress 及缺口事实，固定首次 highWaterSeq；这里的完整不承诺恢复 producer 或 Store 已丢弃的字节，也不推导 Job 成功、实际停止或默认 Shell 可用。
+
+Main 在任何 GET 前同步核原 viewSelection/historyEpoch 并登记 read ID，从实际选中 Session/Workspace/Store 和 Job 取得身份；fresh Execution 核原 id/session/origin Store/kind，每页前后复核原 Service。有限 open/next/close IPC 不接任意路径、HTTP、Store、Session、游标或执行 authority。首页固定 H，后页固定 upperSeq=H，BigInt 取 max(throughSeq) 续读；原 stdout/stderr/progress、允许跨 stream 重叠的 gap、NULL droppedBytes 均保留。公共 Client 纯校验由 Native 与既有 Web 完整读取复用，保持公共响应允许新增字段。
+
+renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断；不完整、非推进、错误身份或作用域变化使本读取失败。同作用域刷新失败保上次完整事实并标未更新，真实 H=0 为空输出。关闭、刷新、切换、观察 reset 与断线只释放所属 GET，零取消/重放；冷重新打开只读原持久结果，不重建 JobHandle。
+
+本片验收按三层有限范围推进：纯覆盖规则、Main/IPC 与实际 DOM；明确 opt-in 的真实 Shell Job stdout/stderr 多页与正常停止持久化；搬迁并删除构建源后的默认 Native/Service 读取同一原 Store，关闭重开、不同会话、正常所属 Service 退出与冷重启保持原输出，Provider/业务 POST/Run/Execution 不增长。首两层不替代实际窗口；默认只读窗口不证明默认新 Shell Job 生产或其他平台。最终有限范围7文件34pass/293assert/0，原完整默认602文件/476任务全部通过；准确逐行 gap DOM 断言在该完整图中实际执行，359原记录覆盖固定H420，普通退出后的原cursor457保持。强制门禁保持，原失败保留；工具线程容量拒绝fresh reviewer，本片尚无当前diff独立审查结果。实际负责见 [Native owner](../../apps/desktop/README.md#native-job-完整已保存输出)、[公共覆盖](../../packages/client/README.md#完整已保存-job-输出覆盖)与[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-job-完整已保存输出)，取舍见 [Native 输出决定](../../.agents/notes/implemented/architecture/2026-10-07-native-saved-job-output-reader.md)。
 
 ### 30.3 第一条执行闭环
 

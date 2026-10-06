@@ -2,6 +2,7 @@ import {
   type BrowserView,
   ClientError,
   type ExecutionOutputPage,
+  ExecutionOutputPages,
   parseCursorSequence,
   type SelectedContextPage,
 } from '@kite-ai/client';
@@ -147,58 +148,24 @@ export async function readOutput(
     )
   )
     throw new ClientError('job_not_in_selected_view');
-  let upper: string | undefined,
-    after = '0';
+  const pages = new ExecutionOutputPages(executionId);
   const items: ExecutionOutputPage['items'] = [];
-  const ordinarySequences = new Set<string>();
-  const streamEnds = new Map<string, bigint>();
-  while (true) {
+  while (!pages.complete) {
     signal.throwIfAborted();
     const page = await client.listExecutionOutput(view.session.id, executionId, {
-      afterSeq: after,
-      ...(upper === undefined ? {} : { upperSeq: upper }),
+      afterSeq: pages.afterSeq,
+      ...(pages.upperSeq === undefined ? {} : { upperSeq: pages.upperSeq }),
       limit: 200,
       signal,
     });
     signal.throwIfAborted();
-    if (upper === undefined) upper = page.highWaterSeq;
-    if (decimal(page.highWaterSeq) < decimal(upper)) fail();
-    const ordered = [...page.items].sort((a, b) =>
-      decimal(a.seq) < decimal(b.seq) ? -1 : decimal(a.seq) > decimal(b.seq) ? 1 : 0,
-    );
-    let coveredThrough = decimal(after);
-    for (const item of ordered) {
-      const start = decimal(item.seq),
-        end = decimal(item.throughSeq);
-      if (
-        item.executionId !== executionId ||
-        start <= decimal(after) ||
-        start > coveredThrough + 1n ||
-        end < start ||
-        end > decimal(upper)
-      )
-        fail();
-      const dropped = item.droppedBytes === null ? null : decimal(item.droppedBytes);
-      const gap = dropped === null || dropped > 0n || end > start;
-      // Sequence allocation is global, but coalesced gaps are per stream. Their spans may
-      // include another stream's retained chunks or overlap another stream's gap.
-      if (!gap) {
-        if (ordinarySequences.has(item.seq)) fail();
-        ordinarySequences.add(item.seq);
-      }
-      if (gap && (item.content !== '' || dropped === 0n)) fail();
-      const streamEnd = streamEnds.get(item.stream);
-      if (streamEnd !== undefined && start <= streamEnd) fail();
-      streamEnds.set(item.stream, end);
-      items.push(item);
-      if (end > coveredThrough) coveredThrough = end;
+    try {
+      items.push(...pages.accept(page).items);
+    } catch {
+      fail();
     }
-    if (ordered.length === 0 && coveredThrough !== decimal(upper)) fail();
-    if (ordered.length === 0 || coveredThrough === decimal(upper))
-      return { items, highWaterSeq: upper };
-    if (coveredThrough <= decimal(after)) fail();
-    after = coveredThrough.toString();
   }
+  return { items, highWaterSeq: pages.upperSeq! };
 }
 
 type Target = { kind: 'context' } | { kind: 'output'; executionId: string };

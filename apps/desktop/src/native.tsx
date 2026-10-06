@@ -19,6 +19,7 @@ import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
+import { NativeJobOutputPanel } from './native-job-output-panel';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
@@ -67,6 +68,10 @@ export function NativeDesktop() {
   const planModes = useRef(new Map<string, boolean>());
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [expandedExecutions, setExpandedExecutions] = useState<{
+    identity: string;
+    ids: Set<string>;
+  }>({ identity: '', ids: new Set() });
   const generation = useRef(0),
     historyEpoch = useRef<number | undefined>(undefined),
     viewIntent = useRef(0),
@@ -651,7 +656,19 @@ export function NativeDesktop() {
             <h2>Runtime logs · 已保存执行</h2>
             <p>此处是已保存执行的有限投影，不是全部 Runtime 事件。</p>
             {selection.executions.map((execution) => (
-              <details key={execution.id}>
+              <details
+                key={`${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${selection.storeId}/${selection.session.id}/${execution.id}`}
+                onToggle={(event) => {
+                  const identity = `${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${selection.storeId}/${selection.session.id}`,
+                    open = event.currentTarget.open;
+                  setExpandedExecutions((old) => {
+                    const ids = new Set(old.identity === identity ? old.ids : []);
+                    if (open) ids.add(execution.id);
+                    else ids.delete(execution.id);
+                    return { identity, ids };
+                  });
+                }}
+              >
                 <summary>
                   {execution.definitionId} · {execution.status}
                 </summary>
@@ -705,6 +722,18 @@ export function NativeDesktop() {
                     >
                       停止原 Job · {execution.id}
                     </button>
+                  )}
+                {execution.kind === 'job' &&
+                  expandedExecutions.identity ===
+                    `${state.generation}/${selection.viewSelection}/${state.historyEpoch}/${selection.storeId}/${selection.session.id}` &&
+                  expandedExecutions.ids.has(execution.id) && (
+                    <NativeJobOutputPanel
+                      bridge={bridge}
+                      generation={state.generation}
+                      selection={selection}
+                      historyEpoch={state.historyEpoch ?? 0}
+                      executionId={execution.id}
+                    />
                   )}
                 <pre>{JSON.stringify(execution.result, null, 2)}</pre>
               </details>

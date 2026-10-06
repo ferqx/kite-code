@@ -16,6 +16,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'settings.skills.open': ['readId', 'viewSelection', 'historyEpoch'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
+  'jobOutput.open': ['readId', 'executionId', 'viewSelection', 'historyEpoch'],
+  'jobOutput.next': ['readId'],
+  'jobOutput.close': ['readId'],
   'settings.mcp.read': [],
   'settings.mcp.close': [],
   'settings.mcp.sources': ['observationId', 'afterId'],
@@ -178,7 +181,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
   }
   if (
-    method === 'settings.skills.open' &&
+    (method === 'settings.skills.open' || method === 'jobOutput.open') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
       !Number.isSafeInteger(input.historyEpoch) ||

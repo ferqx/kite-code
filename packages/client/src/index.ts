@@ -105,6 +105,7 @@ export function canonicalConfigurationRequest(
   return canonicalModelBody(input);
 }
 export { ClientError, validateRequest } from './decode';
+export { ExecutionOutputPages } from './execution-output';
 export type * from './generated/api';
 export {
   createServiceLifecycleClient,

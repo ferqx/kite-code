@@ -1,5 +1,9 @@
 # Client
 
+## 完整已保存 Job 输出覆盖
+
+公开纯 [ExecutionOutputPages](src/execution-output.ts)由 Native 与 Web 的按需完整 reader 共用。输入私有克隆并沿生成的可扩展 ExecutionOutputPage schema 验证，保未来字段；首 highWaterSeq 固定 H（Native 缩小过大首页时可显式提供原 H），后页 current highWater 可增长。after 从 0 开始，以所有 throughSeq 的最大值推进，严格 Decimal64 不转 Number；原 Job、连续覆盖、普通 seq 唯一及同 stream 不重叠分别核对。coalesced gap 可跨越另一个 stream 的保存内容或与其 gap 重叠，原记录全保留；droppedBytes=null 不补零。完整只表示已覆盖 H 的全部保存内容与缺口，提前空页、不推进、错误区间不能完成前缀。该 leaf 无网络、Store、Session authority 或执行操作；实际作用域、原连接及读取释放由调用者核对，[有限合同](test/execution-output.test.ts)与[Native owner](../../apps/desktop/README.md#native-job-完整已保存输出)记录证据。
+
 [MCP 管理协议 leaf](src/mcp-management.ts)公开正式 Native 设置/来源/连接/认证消费者所需的纯 DTO 与闭合 decoder：`mcp.servers`、分页 `mcp.sources`、原 connection/reconnection、source approve、source mutation、auth status/result。完整 Display envelope 有界（management 512KiB、sources 64KiB、其他 16KiB），固定 namespace/version、空 actions/artifactRefs、字段类型及原 Store/Session/Command/Execution 关系严格核验，不裁剪或接受额外秘密字段。来源六字段 `McpSourceReadSet` 与配置选择 `McpSelectionReadSet` 分离；Source/Auth 原结果不重绑跨 Store。
 
 `McpCommandRequest`、`validateMcpCommandRequest` 与 `canonicalMcpCommandRequest` 只接受固定 select/connect/catalogue.refresh/reconnect/source.approve/credential.bind/source.add/remove 和四类 Auth Action。canonical 仅去除 expectedStoreId/commandId，复用 `canonicalModelBody`；manual bind 只有 serverId、expectedReadSet、expiresAt，不接受秘密正文。解码与规范化只证明协议事实，不授予 POST、凭据、连接或 Tool 权限；没有另造 binding Query，也不递归保存此前 reconnect intent。既有 `canonicalCallerCommandRequest` 与 TUI 消费者保持独立。[纯契约测试](test/mcp-management.test.ts)核固定申请、有限真实 DTO、原身份和秘密字段反例；实际 Main/IPC、HTTP、持久恢复与 Native 入口由其 owner 验证。

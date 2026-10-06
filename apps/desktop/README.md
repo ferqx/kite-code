@@ -1,5 +1,15 @@
 # Desktop 与 Native 制品
 
+## Native Job 完整已保存输出
+
+正式 Native 的 Runtime logs「已保存执行」中，准确 kind=job 的详情提供主动读取、显式刷新和关闭。[页面](src/native-job-output-panel.tsx)保留全部已保存 stdout/stderr/progress、原序号区间与准确 droppedBytes；null 表示该剪裁区间的丢失字节数无法确定。完整是截至首次固定 H 的全部保存内容与缺口事实，不恢复已丢字节，也不表示 Job 成功或实际停止。新输出只在显式刷新后进入新的观察。
+
+[Main reader](electron/job-output-reads.ts)在 GET 前同步核实际选择并登记独立 read ID，绑定 attach generation、viewSelection、historyEpoch、Store、Session、Workspace 和原 Job；fresh Execution 核 id/session/originStore/kind，每页前后复核原 Service 身份。有限 open/next/close [IPC](electron/native-ipc.ts)不接 renderer 提供的 Store、Session、Workspace、游标、路径或执行 authority。单页 512 KiB；公共接口只限 normal rows，过大页先核原身份与完整覆盖语义，再在相同 after/H 下减小 limit，首个响应即使过大也不更换 H；非法页不能借缩小重试被隐藏。合法单条 32 KiB 保存 chunk 的 JSON 编码可通过该预算，不从累计字节或页数裁剪保存内容。
+
+[renderer reader](src/native-job-output.ts)复用公共 [ExecutionOutputPages](../../packages/client/src/execution-output.ts)，严格 Decimal64、max(throughSeq) 与 per-stream 区间核覆盖至 H，跨 stream 重叠 gap 与普通 chunk 全保留；全部成功才发布。错误页、提前 EOF、旧作用域或迟到值不发布前缀。同作用域刷新失败保上次完整事实并标未更新；H=0 为空输出。关闭输出、折叠原详情、切换选择、观察 reset 和释放只 abort 所属 GET，零业务取消或重新执行；普通 controller viewGeneration 更新不重新读取。精确停止仍沿已有原 caller journal，冷读不重建 JobHandle。
+
+[Main/IPC](test/native-job-output-reads.test.ts)、[实际 DOM](test/native-job-output-panel.test.tsx)与[公共覆盖校验](../../packages/client/test/execution-output.test.ts)核完整分页、首 H、大页缩小、合法重叠缺口、原身份与迟到读取。[完整 Native 窗口](test/isolated/native-job-output-bundle.test.ts)和[driver](test/native-job-output-electron.fixture.ts)用公开 Runtime 与显式 Full Shell 产生真实持久输出，再由搬迁、删除构建源的默认 Native/Service 冷读；准确资格与原失败见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-job-完整已保存输出)。默认可信 Shell 仍未合格，cold consumer 不给默认新 Job producer 或其他平台提供资格，剩余依赖见 [P5 当前范围](../../docs/plans/unified-agent-refactor-v1.md#3022-当前-native-job-完整已保存输出消费者)。
+
 ## Native Skills 只读目录
 
 正式 Native 左侧的 Skills 分类展示所选 Session 工作区当前可信配置目录的名称、摘要、来源与可用／禁用／不可用状态。[Main reader](electron/skill-catalogue-reads.ts) 从实际选择封存 attach generation、viewSelection、historyEpoch、Store、Session 与 Workspace；open 在任何 GET 前同步核对原选择并登记 read ID，open/next/close 不排队在 controller refresh 后。Main 保存原 revision/cursor，每页限 128 KiB，关闭和作用域变化只中止所属读取。[IPC](electron/native-ipc.ts) 不接收 renderer 提供的 Workspace、路径或执行 authority。

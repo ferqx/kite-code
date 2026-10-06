@@ -27,9 +27,11 @@ import type {
   PermissionSubmission,
 } from './controller';
 import type { InputMetadata, InputRequest } from './input';
+import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 
+export type * from './job-output-bridge';
 export type * from './mcp-bridge';
 export type * from './skills-bridge';
 
@@ -342,6 +344,7 @@ export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
   | NativeSkillsRequest
+  | NativeJobOutputRequest
   | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
@@ -591,6 +594,7 @@ export type NativeRequest =
     };
 export type NativeResult =
   | NativeSkillsPage
+  | NativeJobOutputPage
   | NativeMcpResult
   | FileCheckpointPage
   | FileCheckpointDetail

@@ -31,6 +31,7 @@ import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
+import { NativeJobOutputReads } from './job-output-reads';
 import { NativeMcpSettings } from './mcp-settings';
 import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
@@ -69,6 +70,7 @@ export class NativeCaller {
   private readonly providers: NativeProviderSettings;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
+  private readonly jobOutput: NativeJobOutputReads;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -140,6 +142,34 @@ export class NativeCaller {
           }
         : undefined;
     this.outputReads = new NativeModelOutputReads(client, current);
+    this.jobOutput = new NativeJobOutputReads(client, (executionId) => {
+      const scope = current(),
+        snapshot = this.controller.snapshot;
+      if (
+        !scope ||
+        this.observationUnavailable ||
+        !snapshot ||
+        snapshot.sessionId !== scope.sessionId ||
+        snapshot.view.storeId !== scope.storeId ||
+        !snapshot.view.executions.some(
+          (item) =>
+            item.id === executionId &&
+            item.sessionId === scope.sessionId &&
+            item.originStoreId === scope.storeId &&
+            item.kind === 'job',
+        )
+      )
+        return undefined;
+      return {
+        generation: scope.generation,
+        viewSelection: scope.selection,
+        historyEpoch: this.historyEpoch,
+        storeId: scope.storeId,
+        sessionId: scope.sessionId,
+        workspaceId: snapshot.view.session.workspaceId,
+        executionId,
+      };
+    });
     this.skills = new NativeSkillCatalogueReads(client, () => {
       const scope = current(),
         snapshot = this.controller.snapshot;
@@ -309,6 +339,7 @@ export class NativeCaller {
     this.providers.release();
     this.mcp.release();
     this.skills.release();
+    this.jobOutput.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -371,6 +402,7 @@ export class NativeCaller {
       this.permissionUnavailable = true;
       this.historyEpoch++;
       this.skills.release();
+      this.jobOutput.release();
       this.attachmentReads.release();
       this.messageRead?.abort.abort();
       this.grants.release();
@@ -653,6 +685,9 @@ export class NativeCaller {
         'settings.skills.close',
         'settings.skills.open',
         'settings.skills.next',
+        'jobOutput.open',
+        'jobOutput.next',
+        'jobOutput.close',
       ].includes(request.method)
     )
       await this.drainRefresh();
@@ -660,6 +695,16 @@ export class NativeCaller {
     const generation = request.generation;
     let result: NativeResult;
     switch (request.method) {
+      case 'jobOutput.open':
+        result = await this.jobOutput.open(request);
+        break;
+      case 'jobOutput.next':
+        result = await this.jobOutput.next(request.readId);
+        break;
+      case 'jobOutput.close':
+        this.jobOutput.close(request.readId);
+        result = null;
+        break;
       case 'settings.skills.open':
         result = await this.skills.open(request);
         break;
