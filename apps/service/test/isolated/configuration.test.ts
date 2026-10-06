@@ -562,6 +562,21 @@ test('explicit recovery resolver preserves the persisted model selection and ref
     expect(binding.snapshot).toMatchObject({
       digest: saved.snapshot.digest,
       skillSelection: saved.snapshot.skillSelection,
+      planning: {
+        binding: {
+          readOnlyDefinitions: expect.arrayContaining([
+            { kind: 'tool', definitionId: 'ask_user', definitionVersion: '1' },
+          ]),
+          tools: expect.arrayContaining([
+            {
+              extensionId: 'builtin.ask-user',
+              extensionVersion: '1',
+              definitionId: 'ask_user',
+              definitionVersion: '1',
+            },
+          ]),
+        },
+      },
     });
     expect(endpoint.requests).toHaveLength(1);
     expect(credentialReads).toBe(0);

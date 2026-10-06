@@ -311,6 +311,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(steps.get('second')).toBe(4);
       for (const request of requests)
         expect(request.tools.map((tool) => tool.function.name).sort()).toEqual([
+          'ask_user',
           'files.read',
           'files.write',
         ]);

@@ -667,7 +667,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
         do {
           refreshAgain = false;
           const target = controller!.state.sessionId;
-          if (target && !ended) await controller!.select(target);
+          if (target && !ended)
+            await controller!.select(target, { preserveReconnectionReview: true });
         } while (refreshAgain && !ended);
       } finally {
         refreshing = false;

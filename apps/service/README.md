@@ -67,7 +67,7 @@ paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger �
 通用命令入口还接纳准确 `run.cancel`、`execution.cancel` 与 `session.cancel`，将显式目标和原 expected Store 传给对应公开 Runtime 方法，由宿主填主体并返回持久控制回执；不会替 Execution 请求选择当前活动 Run。draining 期间四种取消仍可用。跨 Service 测试证明：取消普通 Tool 后其 Run 可继续下一 Model Step，detached sibling 仍运行；明确 Run 取消保留 detached 后台工作；`session.cancel` 的 `includeBackground: true` 停止选中旧工作，并阻止已取消旧 Tool 接纳未来 child。后续明确新用户工作仍可用。拒绝的主体/Store 控制不创建命令或持久变更。
 
 
-有限 W12 默认装配通过 `@kite-ai/service/configuration` 导出 `createDefaultProcessConfiguration({profile,hostConfiguration?,credentialBackend?})`。只读 `<selected profilePath>/config.jsonc` 和明确创建的 Workspace file URI 下的 `kite-agent.jsonc`。defaults、用户文件、Workspace 文件、私有显式 startup `{configuration:{modelId,models,tools,skills,mcp}}`，再加可选 command `modelId/selectedSkills`，决定新 Run。没有旧配置发现/parser。坏 JSONC 或不可用凭据仅拒绝该 Run，bootstrap、History、Query 和准确取消保持可用。未配置模型返回 `model_unavailable`；禁用、未知或不支持的模型不回退其他 route。
+有限 W12 默认装配通过 `@kite-ai/service/configuration` 导出 `createDefaultProcessConfiguration({profile,hostConfiguration?,credentialBackend?})`。只读 `<selected profilePath>/config.jsonc` 和明确创建的 Workspace file URI 下的 `kite-agent.jsonc`。defaults、用户文件、Workspace 文件、私有显式 startup `{configuration:{modelId,models,tools,skills,mcp}}`，再加可选 command `modelId/selectedSkills`，决定新 Run。没有旧配置发现/parser。坏 JSONC 或不可用凭据仅拒绝该 Run，bootstrap、History、Query 和准确取消保持可用。未配置模型返回 `model_unavailable`；禁用、未知或不支持的模型不回退其他 route。可信宿主添加自定义 Extension 时须保留工厂返回的全局 `extensions` 登记，再追加自有定义；覆盖该数组会使默认已选 Tool 缺少实际定义，Command 在 Provider 前以 `tool_unavailable` 拒绝。[配置管理消费者](test/isolated/configuration-management.test.ts)保留默认登记并验证凭据绑定、撤销和 Settings 的真实请求。
 
 模型配置为 `{id,provider:"compatible",model,baseURL,credentialRef?,enabled?,options?}`，endpoint 身份明确。支持的 options 包括 `temperature`（有限数 0–2）、`topP`（有限数 0–1）、`maxOutputTokens`（整数 1–1,000,000）和 compatible transport 的封闭 `reasoningEffort` 值 `none|minimal|low|medium|high|xhigh|max`；其他 options 返回局部不支持错误。effort 可编码不表示已发现远端模型支持，远端拒绝仍是实际请求失败。管理投影只保留该闭集，未知 option 值继续脱敏。这些值冻结进 Run adapter 并传给真实 SDK 请求，不只出现在快照里。Runtime 在模型执行前保存支持的脱敏 effective 配置/digest 和实际注册 Tool ID；活动 Run 保持自己的 route/definitions/options，后续 Run 重读配置。基础授权只允许 `kind:model`，同名 Tool 不取得 Model 权限。
 
@@ -301,7 +301,7 @@ Settings 模型业务端口为 `GET /v1/config/{scope}/models?storeId=...&worksp
 
 专用 `POST /v1/sessions/:id/job-reports/:reportCommandId/resume` 只接受原Store和恢复申请commandId，主体由认证派生，调用Runtime的根Session有限 `resumeJobReport`。返回新的 `job.report.resume` Command，receipt说明原报告、实际Run和恢复/抑制事实；受理不表示模型完成。Browser不获得恢复写权限，读取历史、连接及启动不会触发该入口。
 
-默认宿主用专门 `resolveRecoveryRunConfiguration` 固定原manifest中的modelId与Skill选择，并先比较原配置digest，再读取凭据。原模型参数/引用或支持配置变化时局部拒绝；普通默认模型变更不能偷换旧绑定。Core仍核完整注册manifest和当前afterTurn权限，实际派发仍走原权限/来源检查。没有匹配原版本时保留历史，不自动安装或调用当前默认模型。此能力只恢复已有真实报告的安全推进边界，不宣称一般Run恢复或adapter reconcile已实现。
+默认宿主用专门 `resolveRecoveryRunConfiguration` 固定原manifest中的modelId与Skill选择，并先比较原配置digest，再读取凭据。根 Run 恢复沿用原根工具选择和 Planning/Workflow 快照；携带持久 Model/Skill 选择不把它改为 child，只有新建 child binding 才排除 `ask_user`。原模型参数/引用或支持配置变化时局部拒绝；普通默认模型变更不能偷换旧绑定。[配置冷恢复测试](test/isolated/configuration.test.ts)验证原模型与 `ask_user` 定义保留、配置变化在凭据及 Provider 前拒绝；[实际 child 测试](test/isolated/ask-user-configuration.test.ts)另核继承和显式角色都缺少问题工具。Core仍核完整注册manifest和当前afterTurn权限，实际派发仍走原权限/来源检查。没有匹配原版本时保留历史，不自动安装或调用当前默认模型。此能力只恢复已有真实报告的安全推进边界，不宣称一般Run恢复或adapter reconcile已实现。
 
 
 ## 显式 Job 核实

@@ -898,7 +898,7 @@ test('80x24 forced warm reconnect targets original warm carrier, independently r
       },
     });
     writeFileSync(join(evidence, 'pty-owned.jsonl'), '', { mode: 0o600, flag: 'wx' });
-    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request,codecs
+    const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json,urllib.request,codecs,threading
 p=None;master=None;buffer='';decoder=codecs.getincrementaldecoder('utf-8')('strict');exits=[];cleanup=False;trace=[];failure=None
 
 def note(kind,**values):
@@ -907,7 +907,21 @@ def note(kind,**values):
 
 def control(path):
  note('control',path=path,frame=normalized()[-32768:])
- with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:return json.load(response)
+ # A pending control reply must not stop PTY reads and backpressure the actual Host.
+ result={}
+ def request():
+  try:
+   with urllib.request.urlopen(${JSON.stringify(control.url.href)}+path,timeout=12) as response:result['reply']=json.load(response)
+  except BaseException as error:result['error']=error
+ worker=threading.Thread(target=request,daemon=True);worker.start()
+ deadline=time.monotonic()+12
+ while worker.is_alive():
+  if time.monotonic()>deadline:raise RuntimeError('owned_control_deadline:'+path)
+  if master is None:worker.join(.01)
+  else:receive(.01);drain(deadline)
+ worker.join()
+ if 'error' in result:raise result['error']
+ return result['reply']
 def normalized():
  frames=buffer.split('\\x1b[?2026h')
  complete=next((frame.split('\\x1b[?2026l')[0] for frame in reversed(frames[1:]) if '\\x1b[?2026l' in frame),'')
@@ -931,6 +945,26 @@ def wait(text,compact=False):
   if text in (normalized().replace(' ','') if compact else normalized()):
    note('matched',text=text,frame=normalized()[-32768:]);return
   if time.monotonic()>deadline:raise RuntimeError('owned_frame_deadline:'+text)
+  receive()
+def wait_idle():
+ # API completion can precede the selected Session refresh; wait for its live composer.
+ deadline=time.monotonic()+10
+ while True:
+  drain(deadline)
+  frame=normalized()
+  if 'New Run >' in frame and ' · Loading ' not in frame:
+   note('composer-ready',frame=frame[-32768:]);return
+  if time.monotonic()>deadline:raise RuntimeError('owned_composer_deadline')
+  receive()
+def wait_new_reconnection(previous):
+ # Keep reading while submission completes; older menu and detail IDs are not this request.
+ deadline=time.monotonic()+10
+ while True:
+  drain(deadline)
+  original=next((match.group(1) for match in re.finditer(r'Originalforcedreconnect:([a-f0-9-]{36})',normalized().replace(' ','')) if match.group(1) not in previous),None)
+  if original:
+   note('new-reconnection',commandId=original,frame=normalized()[-32768:]);return original
+  if time.monotonic()>deadline:raise RuntimeError('owned_new_reconnection_deadline')
   receive()
 def key(value,preserveSelectedFrame=False):
  global buffer
@@ -974,7 +1008,7 @@ def select_original(command_id,top):
  note('select-original-key',commandId=command_id,retainedKnownDetail=known)
  key(b'\\r',preserveSelectedFrame=known);selected(command_id)
 def mcp():
- key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Project sources')
+ wait_idle();key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Project sources')
 def request_connection():
  mcp();wait('Server list ready');choose(${JSON.stringify(sourceId)}+' · enabled · available');key(b'\\r');wait('Server:');choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:')
 def check_connection():
@@ -996,7 +1030,7 @@ def close(phase):
  assert p.returncode==0
  os.close(master);master=None;p=None
 try:
- start('warm');request_connection();first=control('approve-a')['commandId'];check_connection();choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-b')['commandId'];check_connection();wait('Reused original connection');choose('Review forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+second);wait('› Confirm forced reconnect');control('before-confirm');key(b'\\r');wait('Original forced reconnect:');leave_reconnections(pending=True);ready=control('approve-replacement')['commandId'];wait('New Run >');reconnections();select_original(ready,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Replacement catalogue ready');wait('Live replacement observed');choose('Review forced reconnect','Check original forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+ready);wait('› Confirm forced reconnect');control('before-second-confirm');key(b'\\r');wait('Original forced reconnect:');leave_reconnections(pending=True);original=control('deny-replacement')['commandId'];wait('New Run >');reconnections();select_original(original,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Forced reconnect failed');wait('Original connection stop confirmed');wait('Live replacement not confirmed');control('warm-complete');leave_reconnections();close('warm')
+ start('warm');request_connection();first=control('approve-a')['commandId'];check_connection();choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-b')['commandId'];check_connection();wait('Reused original connection');choose('Review forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+second);wait('› Confirm forced reconnect');control('before-confirm');key(b'\\r');submitted_ready=wait_new_reconnection([]);leave_reconnections(pending=True);ready=control('approve-replacement')['commandId'];assert ready==submitted_ready;wait('New Run >');reconnections();select_original(ready,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Replacement catalogue ready');wait('Live replacement observed');choose('Review forced reconnect','Check original forced reconnect');key(b'\\r');wait('Confirm forced reconnect:');wait('Original carrier: '+ready);wait('› Confirm forced reconnect');control('before-second-confirm');key(b'\\r');submitted_denied=wait_new_reconnection([ready]);leave_reconnections(pending=True);original=control('deny-replacement')['commandId'];assert original==submitted_denied;wait('New Run >');reconnections();select_original(original,'Check original forced reconnect');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Forced reconnect failed');wait('Original connection stop confirmed');wait('Live replacement not confirmed');control('warm-complete');leave_reconnections();close('warm')
  control('cold-removed');start('cold-removed');reconnections();control('selection-baseline');select_original(original,'Original forced reconnect: '+ready);control('cold-selected');choose('Check original forced reconnect','Check original forced reconnect');key(b'\\r');wait('Forced reconnect failed');wait('Original connection stop confirmed');control('cold-lookup');leave_reconnections(parentTitle='MCP · unavailable');close('cold-removed')
  control('cold-foreign');start('cold-foreign');reconnections();control('selection-baseline');select_original(original,'Original forced reconnect: '+ready);wait('Forced reconnect outcome unknown; Check original');control('foreign-selected');choose('Check original forced reconnect','Check original forced reconnect');note('foreign-check-key',commandId=original,observation='retained identical known unknown detail; no new frame or server receipt');key(b'\\r',preserveSelectedFrame=True);selected(original);wait('Forced reconnect outcome unknown; Check original');control('foreign-lookup');leave_reconnections(parentTitle='MCP · unavailable');close('cold-foreign')
  cleanup=True;print('RECONNECTION_WARM_COLD_FOREIGN_COMPLETE')

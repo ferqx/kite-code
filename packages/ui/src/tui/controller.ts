@@ -696,9 +696,13 @@ export class TuiController {
   }
   observationUnavailable(code: string) {
     const error = `observation_unavailable:${code}`;
+    this.mcpReconnectionRead?.abort();
     this.publish({
       observationState: 'unknown',
       observationError: error,
+      mcpReconnectionObservation: undefined,
+      mcpReconnectionReading: false,
+      mcpReconnectionObserving: false,
       error,
       ...(this.value.status
         ? { status: { ...this.value.status, connection: 'unknown' as const } }
@@ -821,11 +825,14 @@ export class TuiController {
         this.draftUnavailable('tui_draft_storage_unavailable');
       }
   }
-  async select(sessionId: string) {
+  async select(sessionId: string, options: { preserveReconnectionReview?: boolean } = {}) {
     if (this.disposed) return;
     this.fileRead?.abort();
     this.publish({ fileCandidates: undefined });
     const same = this.value.sessionId === sessionId;
+    const preserveReconnectionReview =
+      same && options.preserveReconnectionReview && !this.value.stale;
+    if (!preserveReconnectionReview) this.mcpReconnectionRead?.abort();
     if (!same) {
       this.clearedDisplay = undefined;
       this.fileRecoveryRead?.abort();
@@ -853,9 +860,17 @@ export class TuiController {
       mcpConnectionReading: false,
       mcpReconnectionOpen: same ? this.value.mcpReconnectionOpen : false,
       mcpReconnection: same ? this.value.mcpReconnection : undefined,
-      mcpReconnectionObservation: undefined,
-      mcpReconnectionReading: false,
-      mcpReconnectionObserving: false,
+      // Same-scope event refresh must not withdraw a separate human confirmation.
+      // Explicit selection and a changed Workspace still invalidate this observation.
+      mcpReconnectionObservation: preserveReconnectionReview
+        ? this.value.mcpReconnectionObservation
+        : undefined,
+      mcpReconnectionReading: preserveReconnectionReview
+        ? this.value.mcpReconnectionReading
+        : false,
+      mcpReconnectionObserving: preserveReconnectionReview
+        ? this.value.mcpReconnectionObserving
+        : false,
       mcpMutationOpen: same ? this.value.mcpMutationOpen : false,
       mcpMutationFacts: same ? this.value.mcpMutationFacts : undefined,
       mcpMutationOutcome: same ? this.value.mcpMutationOutcome : undefined,
@@ -1001,12 +1016,17 @@ export class TuiController {
         !read.signal.aborted &&
         generation === this.generation &&
         historyGeneration === this.historyGeneration
-      )
+      ) {
+        this.mcpReconnectionRead?.abort();
         this.publish({
           loading: false,
           snapshotStale: true,
+          mcpReconnectionObservation: undefined,
+          mcpReconnectionReading: false,
+          mcpReconnectionObserving: false,
           error: error instanceof Error ? error.message : 'read_failed',
         });
+      }
     } finally {
       this.reads.delete(read);
     }

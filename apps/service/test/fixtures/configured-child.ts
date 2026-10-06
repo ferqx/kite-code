@@ -15,14 +15,17 @@ await runServiceProcess({
       dataRoot: startup.profile.dataRoot,
       profile: startup.profile.profile,
     });
+    const configured = createDefaultProcessConfiguration({
+      profile: selected,
+      hostConfiguration: startup.hostConfiguration,
+      credentialBackend: backend,
+      knownToolIds: ['a'],
+    });
     return {
-      ...createDefaultProcessConfiguration({
-        profile: selected,
-        hostConfiguration: startup.hostConfiguration,
-        credentialBackend: backend,
-        knownToolIds: ['a'],
-      }),
+      ...configured,
       extensions: [
+        // Preserve the default host's registrations when adding the fixture's ordinary Tool.
+        ...(configured.extensions ?? []),
         defineExtension({
           id: 'fixture.config-tool',
           version: '1',

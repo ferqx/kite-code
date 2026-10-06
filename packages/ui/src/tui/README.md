@@ -160,9 +160,11 @@ controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID�
 
 controller按原scope、selected ID、Abort和generation隔离读取，热submit迟到只更新原Map，不覆盖后选ID或后来Session。同Session原ID列表在空、失败、removed目录仍可进入；只选择零GET，明确Check才lookup。冷记录保持unknown；事实匹配原Store/S/Command/inputDigest及closed protocol后才显示ready/failed，旧停止、原ready代次和当前live/currentGeneration独立，合法当前代次可以高于原ready代次。
 
+实际CLI事件刷新用 `select(sessionId, { preserveReconnectionReview: true })`，仅健康的同Session历史刷新保留准确原Review对象，不重观察或提交。显式选择、Session/Workspace变化、observation unavailable和失败历史快照仍使旧Review失效；失效时Abort既有在途Review/原查回Reader，迟到回复即使忽略Abort也不发布旧确认；随后恢复ready不复活它。健康后台刷新保留在途读取状态。独立Confirm继续核当前carrier及Host的完整fresh target/source/read-set，Scope关闭只释放Reader。[回归](../../test/tui/mcp-reconnection.test.tsx)实际27项165断言；当前全TUI24文件234项1968断言，均限对应测试范围。
+
 未知原申请阻同Store+S+Server冲突，不淘汰128条或换key绕过。Esc/Ctrl+C关闭重连子面板后返回父MCP，再关闭父面板回Main；待决卡继续，完成普通回答前不要求New Run composer出现。physical Workspace移除后父面板标题为unavailable，原结果读取仍可用。Scope关闭不取消R/Run/Job或原审批，固定文案沿presentation三locale，metadata和原身份保持。
 
-[Ink/controller测试](../../test/tui/mcp-reconnection.test.tsx)实际16项123断言覆盖独立确认、select零GET、冷/foreign/scope/late/unknown和ready/currentGeneration反例。真实Host、journal、源码外80×24和收尾资格分别归[CLI owner](../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不由UI fixture推导HTTP、完整默认或三平台。
+[Ink/controller测试](../../test/tui/mcp-reconnection.test.tsx)覆盖独立确认、select零GET、冷/foreign/scope/late/unknown、ready/currentGeneration反例和上述后台刷新边界。真实Host、journal、源码外80×24和收尾资格分别归[CLI owner](../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)及[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不由UI fixture推导HTTP、完整默认或三平台。
 
 ## MCP 来源条目增删与原申请
 

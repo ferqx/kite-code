@@ -583,6 +583,18 @@ def wait(text,compact=False):
 def key(value):
  global buffer
  drain();buffer=b'';os.write(master,value)
+def choose(label):
+ # Read the current choice instead of assuming offsets after a restored original.
+ deadline=time.monotonic()+10
+ key(b'\\x1b[A'*32);wait('› Project sources')
+ for _ in range(32):
+  drain(deadline)
+  if '›'+label.replace(' ','') in normalized().replace(' ',''):return
+  previous=normalized();key(b'\\x1b[B')
+  while not normalized() or normalized()==previous:
+   if time.monotonic()>deadline:raise RuntimeError('owned_choice_deadline:'+label)
+   receive();drain(deadline)
+ raise RuntimeError('owned_choice_unavailable:'+label)
 def selected_connection(command_id):
  # Only selected outcome details include their finite phase; list labels have no phase.
  wait('Originalconnection:'+command_id+'·Connectionoutcomeunknown;checkoriginal',True)
@@ -597,7 +609,7 @@ def request_connection():
  key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('Server list ready');key(b'\\x1b[B');wait('›'+${JSON.stringify(selectedServerId)}+'·enabled·available',True);key(b'\\r');wait('Server:'+${JSON.stringify(selectedServerId)}+'·http',True);wait('Source:')
  key(b'\\x1b[B'*6);wait('› Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:')
 def lookup_detail():
- key(b'\\x1b[B');wait('› Check original connection');key(b'\\r');wait('Original catalogue ready')
+ choose('Check original connection');key(b'\\r');wait('Original catalogue ready')
  with open(${JSON.stringify(join(evidence, 'frames.jsonl'))},'a') as log:log.write(json.dumps({'phase':phase,'frame':normalized()})+'\\n')
 def close():
  global master
@@ -609,8 +621,8 @@ def close():
  p.wait(timeout=3);assert p.returncode==0;os.close(master);master=None
  with open(${JSON.stringify(join(evidence, 'exits.jsonl'))},'a') as log:log.write(json.dumps({'pid':p.pid,'exit':p.returncode})+'\\n')
 try:
- phase='warm';start(phase);request_connection();first=control('approve-new')['commandId'];lookup_detail();key(b'\\x1b[A');wait('› Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-reuse')['commandId'];lookup_detail();wait('Reused original connection');close()
- control('cold');phase='cold';start(phase);key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('No configured MCP servers');key(b'\\x1b[B'*5);wait('› Original connection: '+second);key(b'\\r');selected_connection(second);control('cold-selected');key(b'\\x1b[A'*2);wait('› Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('cold-lookup');key(b'\\x1b[B');wait('› Original connection: '+first);key(b'\\r');selected_connection(first);key(b'\\x1b[A');wait('› Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('check');key(b'\\x1b');wait('New Run >');control('restore-source');request_connection();control('approve-new');lookup_detail();wait('Created by original request');close();control('detached');print('ORIGINAL_CONNECTION_WARM_COLD_COMPLETE')
+ phase='warm';start(phase);request_connection();first=control('approve-new')['commandId'];lookup_detail();choose('Request connection');key(b'\\r');wait('Confirm connection request:');key(b'\\r');wait('Original connection:');second=control('approve-reuse')['commandId'];lookup_detail();wait('Reused original connection');close()
+ control('cold');phase='cold';start(phase);key(b'/mcp');wait('New Run > /mcp');key(b'\\r');wait('No configured MCP servers');choose('Original connection: '+second);key(b'\\r');selected_connection(second);control('cold-selected');choose('Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('cold-lookup');choose('Original connection: '+first);key(b'\\r');selected_connection(first);choose('Check original connection');key(b'\\r');wait('Original catalogue ready');wait('Live connection not confirmed');control('check');key(b'\\x1b');wait('New Run >');control('restore-source');request_connection();control('approve-new');lookup_detail();wait('Created by original request');close();control('detached');print('ORIGINAL_CONNECTION_WARM_COLD_COMPLETE')
 finally:
  try:
   with open(${JSON.stringify(join(evidence, 'final-frame.txt'))},'wb') as log:log.write(buffer)

@@ -420,7 +420,7 @@ test('80x24 Source Review independently confirms Action and original Question de
             executionId: actual.executionId,
             interactionId: actual.interaction.id,
           });
-          return Response.json({ id: actual.interaction.id });
+          return Response.json({ id: actual.interaction.id, commandId: actual.command.id });
         }
         if (action === 'question' || action === 'question-blank') {
           const actual = await card(n, 'question');
@@ -720,6 +720,16 @@ def wait(text,compact=False,deadline=None):
    note('matched',text=text,frame=normalized()[-32768:]);return
   if time.monotonic()>deadline:raise RuntimeError('owned_frame_deadline:'+text)
   receive()
+def wait_new_original(previous):
+ # Keep draining the PTY while the host publishes this request, and reject an older receipt.
+ deadline=time.monotonic()+10
+ while True:
+  drain(deadline)
+  original=next((match.group(1) for match in re.finditer(r'Originalsourcedecision:([a-f0-9-]{36})',normalized().replace(' ','')) if match.group(1) not in previous),None)
+  if original:
+   note('new-original',commandId=original,frame=normalized()[-32768:]);return original
+  if time.monotonic()>deadline:raise RuntimeError('owned_new_original_deadline')
+  receive()
 def key(value,preserveSelectedFrame=False):
  global buffer
  if not value:return
@@ -771,7 +781,7 @@ try:
  start('warm')
  ids=[]
  for n,decision in enumerate(['approved','rejected','cancel'],1):
-  sources();wait('Source list ready');key(b'\\r');wait('› Review project source');key(b'\\r');wait('Confirm project source review:');control('before-confirm/'+str(n));key(b'\\r');wait('Original source decision:');key(b'\\x03');ordinary=control('ordinary/'+str(n));wait('approval['+ordinary['id']+']originalSessiona',True)
+  sources();wait('Source list ready');key(b'\\r');wait('› Review project source');key(b'\\r');wait('Confirm project source review:');control('before-confirm/'+str(n));key(b'\\r');original_id=wait_new_original(ids);key(b'\\x03');ordinary=control('ordinary/'+str(n));assert ordinary['commandId']==original_id;wait('approval['+ordinary['id']+']originalSessiona',True)
   key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True);wait('Up/Down explicit source decision: none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n));key(b'\\x1b[B'*n);wait('Up/Down explicit source decision: '+decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
  control('warm-complete');close('warm')
  for cold in ['cold-removed','cold-missing']:

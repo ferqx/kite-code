@@ -289,6 +289,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     expect(steps.get('second')).toBe(4);
     for (const request of requests)
       expect(request.tools.map((tool) => tool.function.name).sort()).toEqual([
+        'ask_user',
         'files.read',
         'files.write',
       ]);

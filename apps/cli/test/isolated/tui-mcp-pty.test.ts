@@ -462,9 +462,9 @@ try:
  key(b'/mcp');wait('/mcp');key(b'\\r');wait('owned-server');wait('Reading this list does not connect');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');wait('User settings');wait('Project settings');key(b'\\x1b[B');wait('› Enable · User settings');check('read-detail')
  key(b'\\r');wait('Confirm server change:');wait('Enter saves; Esc abandons');check('before-confirm');key(b'\\r');wait('Waiting for original result');check('approve-job')
  key(b'\\x1b[B'*2);wait('› Check original change');key(b'\\r');wait('Selection saved');key(b'\\x1b');wait('New Run');check('new-pending');wait('approval [');check('esc')
- key(b'/mcp');wait('/mcp');key(b'\\r');wait('owned-server');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');key(b'\\x1b[B'*3);wait('› Refresh servers');key(b'\\r');wait('owned-server');check('refresh');key(b'\\x03');wait('approval [');check('ctrl-c')
+ key(b'/mcp');wait('/mcp');key(b'\\r');wait('owned-server');wait('Server list ready');key(b'\\x1b[B');wait('› owned-server ·');key(b'\\r');wait('Server: owned-server');key(b'\\x1b[B'*3);wait('› Refresh servers');key(b'\\r');wait('owned-server');check('refresh');key(b'\\x03');wait('Up/Down explicit approval selection: none');check('ctrl-c')
  assert b'ORIGINAL_COMPLETE_HISTORY_TAIL' in all_output
- key(b'/clear');wait('/clear');key(b'\\r');wait('approval [');check('clear');assert b'ORIGINAL_COMPLETE_HISTORY_TAIL' not in re.sub(rb'\\x1b\\[[0-?]*[ -/]*[@-~]',b'',b)
+ key(b'/clear');wait('/clear');key(b'\\r');wait('Up/Down explicit approval selection: none');check('clear');assert b'ORIGINAL_COMPLETE_HISTORY_TAIL' not in re.sub(rb'\\x1b\\[[0-?]*[ -/]*[@-~]',b'',b)
  key(b'PRIVATE_CARD_DRAFT');wait('PRIVATE_CARD_DRAFT');key(b'\\x0c');wait('PRIVATE_CARD_DRAFT');check('draft-clear');key(b'\\x11')
  end=time.monotonic()+6
  while p.poll() is None and time.monotonic()<end:

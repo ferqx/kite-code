@@ -683,8 +683,9 @@ export function createDefaultProcessConfiguration(options: {
           throw new AgentError('child_tool_unavailable');
         toolIds.splice(0, toolIds.length, ...selection.toolIds);
       }
-      // Child roles never obtain the root-only human question capability.
-      if (selection) {
+      // Root recovery also carries a persisted Model/Skill selection. Only a new child
+      // binding suppresses the root human question capability.
+      if (selection && !recovery) {
         const index = toolIds.indexOf('ask_user');
         if (index >= 0) toolIds.splice(index, 1);
       }

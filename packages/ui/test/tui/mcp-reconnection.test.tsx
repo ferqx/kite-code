@@ -360,6 +360,145 @@ async function choose(ui: ReturnType<typeof render>, label: string) {
   throw Error(`owned_choice_unavailable:${label}`);
 }
 
+for (const change of [
+  'offline-ready',
+  'explicit-selection',
+  'snapshot-failure-recovery',
+  'workspace-roundtrip',
+  'healthy-background',
+] as const)
+  test(`in-flight reconnection Review through ${change} does not restore invalid confirmation`, async () => {
+    const f = fixture();
+    await open(f);
+    const started = deferred<TuiMcpReconnectionObservation>(),
+      gate = deferred<TuiMcpReconnectionObservation>();
+    const original = f.port.mcp!.reconnection!.observe;
+    f.port.mcp!.reconnection!.observe = async (carrier, signal) => {
+      const observation = await original(carrier, signal);
+      started.resolve(observation);
+      return gate.promise;
+    };
+    try {
+      const pending = f.controller.reviewMcpReconnection('connection');
+      const observation = await started.promise;
+      if (change === 'offline-ready') {
+        f.controller.observationUnavailable('owned-disconnect');
+        f.controller.observationReady('store');
+      } else if (change === 'explicit-selection') await f.controller.select('s');
+      else if (change === 'snapshot-failure-recovery') {
+        const read = f.port.readSession;
+        f.port.readSession = async () => {
+          throw Error('owned-history-failed');
+        };
+        await f.controller.select('s', { preserveReconnectionReview: true });
+        f.port.readSession = read;
+        await f.controller.select('s', { preserveReconnectionReview: true });
+      } else if (change === 'workspace-roundtrip') {
+        const read = f.port.readSession;
+        f.port.readSession = async (id, signal) => {
+          const value = await read(id, signal);
+          return {
+            ...value,
+            view: {
+              ...value.view,
+              session: { ...value.view.session, workspaceId: 'other-workspace' },
+            },
+          };
+        };
+        await f.controller.select('s', { preserveReconnectionReview: true });
+        f.port.readSession = read;
+        await f.controller.select('s', { preserveReconnectionReview: true });
+      } else await f.controller.select('s', { preserveReconnectionReview: true });
+      gate.resolve(observation);
+      await pending;
+      const late = f.controller.state.mcpReconnectionObservation;
+      await f.controller.confirmMcpReconnection(late);
+      expect(f.sent).toHaveLength(change === 'healthy-background' ? 1 : 0);
+      if (change === 'healthy-background') expect(late).toBeDefined();
+      else expect(late).toBeUndefined();
+      expect(f.counts()).toEqual({ minted: change === 'healthy-background' ? 1 : 0, business: 0 });
+    } finally {
+      f.controller.dispose();
+    }
+  });
+test('same-Session background history refresh retains the exact independent reconnection review until Confirm', async () => {
+  const f = fixture();
+  await open(f);
+  try {
+    await f.controller.reviewMcpReconnection('connection');
+    const observed = f.controller.state.mcpReconnectionObservation;
+    expect(observed).toBeDefined();
+    await f.controller.select('s', { preserveReconnectionReview: true });
+    await f.controller.select('s', { preserveReconnectionReview: true });
+    expect(f.controller.state.mcpReconnectionObservation).toBe(observed);
+    expect(f.observed).toHaveLength(1);
+    expect(f.sent).toHaveLength(0);
+    expect(f.counts()).toEqual({ minted: 0, business: 0 });
+    await f.controller.confirmMcpReconnection(observed);
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]!.observed).toBe(observed!);
+    expect(f.sent[0]!.intent.request.input.target.carrierExecutionId).toBe('carrier_B');
+    expect(f.counts()).toEqual({ minted: 1, business: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+for (const change of [
+  'explicit-selection',
+  'session',
+  'workspace',
+  'stale',
+  'snapshot-failure',
+] as const)
+  test(`${change} still refuses the prior reconnection review after a background refresh`, async () => {
+    const f = fixture();
+    await open(f);
+    try {
+      await f.controller.reviewMcpReconnection('connection');
+      const observed = f.controller.state.mcpReconnectionObservation;
+      expect(observed).toBeDefined();
+      if (change === 'explicit-selection') await f.controller.select('s');
+      else if (change === 'session')
+        await f.controller.select('other', { preserveReconnectionReview: true });
+      else if (change === 'workspace') {
+        const read = f.port.readSession;
+        f.port.readSession = async (id, signal) => {
+          const snapshot = await read(id, signal);
+          return {
+            ...snapshot,
+            view: {
+              ...snapshot.view,
+              session: { ...snapshot.view.session, workspaceId: 'other-workspace' },
+            },
+          };
+        };
+        await f.controller.select('s', { preserveReconnectionReview: true });
+      } else if (change === 'stale') {
+        f.controller.observationUnavailable('owned-reset');
+        f.controller.observationReady('store');
+        await f.controller.select('s', { preserveReconnectionReview: true });
+      } else {
+        const read = f.port.readSession;
+        f.port.readSession = async () => {
+          throw Error('owned-snapshot-failure');
+        };
+        await f.controller.select('s', { preserveReconnectionReview: true });
+        expect(f.controller.state.snapshotStale).toBe(true);
+        await f.controller.confirmMcpReconnection(observed);
+        expect(f.sent).toHaveLength(0);
+        f.port.readSession = read;
+        await f.controller.select('s', { preserveReconnectionReview: true });
+        expect(f.controller.state.stale).toBe(false);
+      }
+      await f.controller.confirmMcpReconnection(observed);
+      expect(f.sent).toHaveLength(0);
+      expect(f.counts()).toEqual({ minted: 0, business: 0 });
+    } finally {
+      f.controller.dispose();
+    }
+  });
+
 test('real Ink Review then independent Confirm submits once, warm B remains distinct from original Job A; second R keeps only previous request', async () => {
   const f = fixture();
   await open(f);

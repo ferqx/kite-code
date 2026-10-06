@@ -324,7 +324,16 @@ test('HTTP-created credential binds the default Run and revoke only prevents fut
         await Bun.sleep(5);
       }
     };
-    await run('before-revoke');
+    const initial = await run('before-revoke');
+    if (initial.status !== 'applied')
+      throw new Error(`credential_run_not_applied:${JSON.stringify(initial.receipt)}`);
+    const completed = (await f.handle.client.getView('session')).runs.find(
+      (run) => run.originCommandId === 'before-revoke',
+    )!;
+    expect({ status: completed.status, reason: completed.reason }).toEqual({
+      status: 'completed',
+      reason: null,
+    });
     expect(received).toEqual(['Bearer synthetic-run-secret']);
     expect(
       (

@@ -26,6 +26,8 @@ ensure已保存真实N、但new_planned CAS/preflight失败且port尚未open时�
 
 独立原申请资产与ordinary connection journal在同一短data lock中核Store+Session+Server未知冲突；successful durable prepare只给当次进程首次POST权，cold/duplicate仅原GET。新backup v11条件携资产，保v10及旧版本物理白名单；A→B保原bytes和身份，不retag或重建hot permit。Profile lease、private/no-follow/held entity、hash、容量及恢复边界沿现有公共维护能力。
 
+2026-10-06补充：真实CLI事件刷新复用select读取同Session历史，原实现会无条件撤掉已独立Review的确认页。现在仅由实际后台调用者显式标识健康同scope刷新，保留准确Review对象；显式选择、Session/Workspace变化、离线与失败快照仍拒绝旧确认，失效时Abort既有在途Review/原查回Reader，迟到回复即使忽略Abort也不发布旧确认；健康后台刷新保留当前读取状态，恢复ready不复活旧观察。Host提交前的完整fresh target/source/read-set和普通Action/Job审批保持。相比取消历史刷新或每个事件重新Review，这一局部边界保住当前事实和用户独立Enter，并由实际Controller及源码外PTY消费；不增加Core票据、恢复权或私有持久协议。当前实现与验证范围见[共享TUI owner](../../../../packages/ui/src/tui/README.md#mcp-强制重连与原申请)及[CLI owner](../../../../apps/cli/README.md#tui-mcp-强制重连与原申请)。
+
 [原连接决定](../../implemented/architecture/2026-10-05-original-mcp-connection-intent-assets.md)、[原Source决定](../../implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)与[原Tool metadata决定](../../implemented/architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)仍负责已交付的ordinary connect、Source批准与原描述保存。本决定补充强制重连，不替代这些理由，也不宣称[scoped来源提案](../../proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)中的OAuth、增删、平台与全部资格完成。
 
 ## Alternatives considered
