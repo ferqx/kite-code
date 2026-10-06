@@ -1426,3 +1426,11 @@ Source 驱动已本地提交 e7067bff4a786986bae0d09e79515661d4de5344，正常�
 当前恢复组件15pass/0fail/60断言；全部 TUI 24文件243pass/0fail/2020断言、18.74s，日志 `/private/tmp/kite-recovery-control-all-tui-20261006.log`。UI/CLI完整typecheck、UI build、四owned TypeScript Biome和diff检查通过。原五个实际恢复窗口明确一次写入 C/L 批次后5pass/0fail/43断言、8.92s，日志 `/private/tmp/kite-recovery-control-native-pty-20261006.log`；五例最终 held TUI 正常exit0，强杀/cold两例原 Service 消失、新PID与零冷POST/原GET保持。Run 原审批/文件效果、interrupt零效果及report来源、两原Run、parent3/child1/review2断言未缩减。首次本机启动因审批模型容量不足未执行，按同一授权动作重试获准；没有绕过审批。
 
 Root完成实现与自核，未新增独立审查。本片 iteration_complete/stage/commit ready仅覆盖实际 owned 输入修复、消费者和文档；局部通过不追认第十五轮，后续仍需当前原完整图。37partial、Goal active，真实 Native stdin、OS browser/nativeVault OAuth组合、默认可信Shell/Soak、安装、其他平台、§35/T-E和正式旧路径退役仍未闭合。本地阶段授权不扩大push/PR，无关AGENTS保持独立。
+
+## 2026-10-06：Source 备份消费者核对当前 manifest v13
+
+第十六轮原完整默认在 HEAD 83ba6289094057673a1352c63f368dd998e290ac、574文件/464主任务/并发4运行，实际 exit1；159个主任务全部排空、158通过，Source mutation 备份主任务失败，无 plan abort。已运行269文件、305任务未调度；3978 tracked regular SHA与Git前后保持。日志 `/private/tmp/kite-current-default-sixteenth-20261006.log`、SHA `fcfc530139d28196ca1fc45ace098d9165950b691431e33a76a4bb9cc99d90f7`，同前缀 plan/inputs/result 保存。本轮恢复 PTY 主任务通过；完整默认资格仍 false。
+
+失败用例仍把已支持的 manifest v13 当作未来版本，实际 Reader 正确接受 v13 内原 v12 Source 变更资产。最小修改只在原测试明确核对 v13 保留准确资产描述，并将未来版本拒绝改为 v14。无日志时创建 v5、有 Source 日志时创建 v12、旧 v2–11 物理资产白名单、坏格式/路径/额外 authority 字段、重算外层 proof 后的坏内层记录拒绝及原字节/Store 保留断言不变。[维护 owner](../../packages/agent/src/maintenance/README.md)与[离线维护手册](../handbook/cli/commands.md#通用开发入口离线维护)核对后，生产行为、格式合同和公共边界无变化，不另建 Note。
+
+当前原 isolated runTestJob/no-orphans 单并发完整四例4pass/0fail/101断言、2.95s，日志 `/private/tmp/kite-source-manifest-current-isolated-20261006.log`；实际 qualified SQLite 选择、原备份/检查/恢复与 owned root/引擎清理均核实，Agent完整typecheck和owned Biome通过。Root自核，未新增独立审查；iteration_complete/stage/commit ready仅覆盖测试与进度两路径。第十六轮失败保留，后续仍需当前完整原图；37partial、Goal active及Native stdin、真实OAuth组合、默认可信Shell/Soak、安装、其他平台、§35/T-E与正式旧路径退役缺口保持。本地授权不扩大push/PR，无关AGENTS独立。

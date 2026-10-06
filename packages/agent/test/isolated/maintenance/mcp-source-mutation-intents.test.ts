@@ -412,9 +412,14 @@ test('absence preserves old version; all old versions and recomputed outer proof
       bad.assets.mcpSourceMutationIntents = manifest.assets.mcpSourceMutationIntents;
       expect(() => parseManifest(bad)).toThrow();
     }
+    const current = parseManifest({ ...manifest, version: 13 });
+    expect(current.version).toBe(13);
+    expect(current.assets.mcpSourceMutationIntents).toEqual(
+      manifest.assets.mcpSourceMutationIntents,
+    );
     for (const change of [
       (m: typeof manifest) => {
-        m.version = 13;
+        m.version = 14;
       },
       (m: typeof manifest) => {
         m.assets.mcpSourceMutationIntents.format.version = 2;
