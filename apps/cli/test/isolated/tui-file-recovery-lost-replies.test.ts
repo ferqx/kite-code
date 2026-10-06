@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { compileFileRecoveryTUI, fileRecoveryProfile } from '../fixtures/file-recovery-profile';
@@ -13,12 +14,16 @@ test('compiled actual TUI lost Code and Fork receipts query only original IDs af
       `import {appendFileSync} from 'node:fs';const actual=globalThis.fetch;let saved:string|undefined,lost=false;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{const opts=args[1],path=new URL(String(args[0])).pathname,body=opts?.body?JSON.parse(String(opts.body)):null;appendFileSync(${JSON.stringify(join(f.root, 'wire'))},JSON.stringify({method:opts?.method??'GET',path,body})+'\\n');const response=await actual(...args);if(opts?.method==='POST'&&(body?.kind==='extension.invoke'||(path.endsWith('/fork')&&body?.newSessionId))){saved=body.commandId;lost=false;await response.arrayBuffer();throw Error('committed POST response physically lost');}if(saved&&!lost&&path==='/v1/commands/'+saved){lost=true;const text=await response.text();return new Response(text.slice(0,Math.max(1,Math.floor(text.length/2))),{status:response.status,headers:response.headers});}return response;},{preconnect:actual.preconnect});import {runTUIHost} from ${JSON.stringify(join(repo, 'apps/cli/host/tui.tsx'))};await runTUIHost({dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'s',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
     );
     expect((await compileFileRecoveryTUI(f.root, runner)).success).toBe(true);
+    const transcript = `/private/tmp/kite-file-recovery-lost-${randomUUID()}.pty.log`;
     const program = `import os,pty,subprocess,select,time,signal,re,fcntl,termios,struct,json
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(f.root, 'tui.js'))}],stdin=slave,stdout=slave,stderr=slave,cwd=${JSON.stringify(f.workspace)},env={**os.environ,'HOME':${JSON.stringify(f.home)}},start_new_session=True);os.close(slave);buffer=b'';full=b''
-def wait(text):
+def current_frame():
+ text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
+ return frames[-1] if frames else text
+def wait(text,approval=False,material=False):
  global buffer,full
  end=time.monotonic()+20
- while text.replace(' ','') not in re.sub(r'\\s+','',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while text.replace(' ','') not in re.sub(r'\\s+','',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',full.decode(errors='replace') if material else current_frame())) or (approval and 'Files recovery:' in current_frame()):
   if time.monotonic()>end:raise RuntimeError('expected '+text+' tail='+buffer[-8000:].decode(errors='replace'))
   if text in [${JSON.stringify(f.checkpointId.slice(0, 24))}] and 'server_reset' in buffer.decode(errors='replace'):
    buffer=b'';os.write(master,b'r')
@@ -30,7 +35,7 @@ def key(value):
  global buffer
  buffer=b'';os.write(master,value)
 try:
- wait('Session s');key(b'/rewind');wait('/rewind');key(b'\\r');wait('Files recovery:');wait(${JSON.stringify(f.checkpointId.slice(0, 24))});key(b'\\r');wait('preimage');key(b'3');wait('Confirm both');key(b'\\r');wait('pending approval panel');wait('none (Enter has no answer)');key(b'a');wait('none (Enter has no answer)');key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('restored');wait('New Run >');key(b'/rewind');wait('/rewind');key(b'\\r');wait('Saved 1:');key(b'l');wait('"phase":"succeeded"},"fork"');key(b'c');wait('"phase":"unknown"}');key(b'r');
+ wait('Session s');key(b'/rewind');wait('/rewind');key(b'\\r');wait('Files recovery:');wait(${JSON.stringify(f.checkpointId.slice(0, 24))});key(b'\\r');wait('preimage');key(b'3');wait('Confirm both');key(b'\\r');wait('pending approval panel');wait('none (Enter has no answer)');key(b'a');wait('none (Enter has no answer)',approval=True);key(b'\\x1b[B');wait('only this call',approval=True);key(b'\\r');wait('restored',material=True);wait('New Run >');key(b'/rewind');wait('/rewind');key(b'\\r');wait('Saved 1:');key(b'l');wait('"phase":"succeeded"},"fork"');key(b'c');wait('"phase":"unknown"}');key(b'r');
  end=time.monotonic()+20
  while time.monotonic()<end:
   rows=json.load(open(${JSON.stringify(join(f.profile.profilePath, 'ui/file-recovery-intents.json'))}))['records']
@@ -46,7 +51,7 @@ try:
    except OSError:break
  p.wait(timeout=3);assert p.returncode==0;print('FILE_BOTH_ORIGINAL_CONFIRMED')
 finally:
- open(${JSON.stringify(join(f.root, 'pty-output'))},'wb').write(full)
+ open(${JSON.stringify(transcript)},'wb').write(full)
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
  os.close(master)
 `;
@@ -58,6 +63,7 @@ finally:
     ]);
     if (code !== 0) {
       console.error(err);
+      console.error('PTY_TRANSCRIPT', transcript);
       console.error(readFileSync(join(f.root, 'wire'), 'utf8'));
     }
     expect(code).toBe(0);
