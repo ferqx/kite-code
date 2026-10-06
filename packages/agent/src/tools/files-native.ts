@@ -1,4 +1,4 @@
-import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
+import { dlopen, toArrayBuffer } from 'bun:ffi';
 import { closeSync, constants } from 'node:fs';
 import { AgentError } from '../storage/types';
 
@@ -43,7 +43,7 @@ function error(): never {
     { errno },
   );
 }
-const name = (value: string) => ptr(Buffer.from(`${value}\0`));
+const name = (value: string) => Buffer.from(`${value}\0`);
 export function openAt(parent: number, value: string, flags: number, mode = 0): number {
   const symbols = api();
   const operation = '__openat' in symbols ? symbols.__openat : symbols.openat;

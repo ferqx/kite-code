@@ -1329,3 +1329,16 @@ Root对新异步候选独立制作私有延迟probe：离线→ready、显式同
 剩余Capture原断言是 `original.first.source.executionId !== original.last.source.executionId`；第六轮两者均为 `b93d6619-b614-4c13-a714-999869c8d08c`，原完整preimage和last内容hash断言此前已通过。Root最初将其概括成checkpoint排序，随后按准确断言更正。该文件及Agent producer没有本片diff，且只依赖Agent/AI公共源码，不依赖本片Service/CLI/UI；producer SHA `3646406e3b33b22cfac4abfec93cd593bacceda03a74d57164983fa8032c5fef`、test SHA `4c0b899261a387beeb8c048a4db84bc68f77286e26d585f8f2bcbdfeb08df722`匹配第六轮freeze。第四、第五轮同一文件曾通过；原isolated入口仅筛该例再次1pass/41断言、1.05s，日志 `/private/tmp/kite-capture-source-original-isolated-20261006.log`，18项filtered明确保留。单例通过不追认第六轮，不放松来源断言、不改捕获代码或测试。这个捕获来源交错仍需继续定位，作为当前完整默认图的未闭合问题；本地阶段提交仅覆盖已验证的配置与TUI修正。
 
 当前实现与测试归[Service owner](../../apps/service/README.md)及[CLI/TUI owner](../../apps/cli/README.md)。模型手册的活动绑定/后续配置承诺、active的受限根恢复与child限制核对后不变；配置修正恢复既有行为，不新增公共DTO、恢复授权或持久机制；TUI Review与失效读取同步MCP手册和既有implemented决定。Root完成实现与核验，新的独立审查仍受system thread limit限制。原当前完整默认已经实际执行六轮，最新仍因上述未改动Capture路径失败，不具全图资格；已通过的相邻消费者和当前TUI/源码外窗口仅支持本阶段。iteration_complete/stage/commit的ready只限这个已验证diff，完整默认及捕获来源继续按Goal推进。本机临时vault/compatible Provider仍不证明nativeVault、真实收费模型、安装、其他平台或持续Soak。37项继续partial，Goal active，默认可信Shell、完整§35与正式旧路径退役仍未完成；仅按授权本地阶段交付，无push/PR，无关AGENTS保持独立。
+
+
+## 2026-10-06：Files 原生路径寿命与准确捕获来源
+
+第六轮完整默认的首末 Source 相同，不能仅由完整前像与末像推定两条写入都成功。当前只读诊断单独及带原三个 UI 分片各16次未自然复现；随后真实 libc 前强制 GC 证实 POSIX Files 将临时路径 Buffer 转成数字指针后丢失 JavaScript 引用，原存在文件会 ENOENT。原 Capture fixture 只在第一条 Tool 前像读取前收集一次，实际 call-0 failed/ENOENT、call-1和call-2 succeeded，完整560003字节 preimage与last末像正确，first/last均属call-1；日志 `/private/tmp/kite-native-path-gc-red-20261006.log` 和 `/private/tmp/kite-capture-path-gc-red-20261006.log` 保留。第六轮自然失败没有留下原 Tool 详情；相同症状支持这条已证实的失败链，仍不能唯一反推当时原因。
+
+最小修复仅将 NUL结尾 Buffer 直接作为 Bun FFI 参数，保留其引用至 openat/renameat/linkat/unlinkat 完成；移除裸数字ptr，不引入重试、持久机制或Source重标。新的隔离回归在真实原生调用前收集并分配内存，核完整BOM/CRLF字节、原inode基线、replace/create/remove；原Capture首例增加真实三Tool成功回执和准确first/last/created Execution绑定，保留原来源不同、完整Artifact和恢复拒绝断言。当前实现与取舍归 [Files owner](../../packages/agent/src/tools/files/README.md)及既有 implemented 原来源 Note。
+
+两条原失败链在修复后分别1/9、1/5通过。当前正式七文件逐个原isolated进程37pass/499断言：Files基本5/41、恢复原语6/108、全部Capture19/255、路径寿命1/8、实际Runtime1/9、产品与权限4/46、源码树外公开大正文制品1/32。日志 `/private/tmp/kite-files-path-lifetime-current-20261006.log` 与 `/private/tmp/kite-files-path-public-consumers-20261006.log`；后者在新增测试类型/格式修正后重跑该测试。当前Agent完整typecheck和三个owned TypeScript Biome均exit0。预期文件与恢复行为不变，手册核对后无diff；新独立Agent仍受system thread limit限制，Root自检不替代独立审查。
+
+第七轮原完整默认按当前574文件/464唯一主任务、并发4运行；freeze覆盖3977个tracked及owned新增测试输入。实际exit1，99主任务全部排空、98通过，无plan abort；已运行206文件，365任务未调度。3977 SHA和Git前后保持。Capture主任务在真实默认负载下19/255通过、17.942s；新失败为未改动的Service session-logs测试仍期待Provider tools为空，但实际默认登记含ask_user（:460）。日志 `/private/tmp/kite-current-default-seventh-20261006.log`、SHA `aa8b96ec70f67c18a03cc9d51c9ca664c2941461ea2c93f5f6c8db09bf8ebadb`，同前缀plan/inputs/result保留。当前全图仍失败，下一项需按默认问题能力合同核对该消费者；不拼接局部结果作为全图通过。
+
+当前范围只证明macOS/Bun的路径寿命修复与列明消费者。iteration_complete及stage/commit ready仅覆盖本片七个owned路径；原恢复规则和手册承诺保持，Session logs完整默认失败保留为Goal后续未闭合项。37项继续partial，Goal active，完整§35/T/E、安装、Linux/Windows、60min Soak及正式旧路径退役继续未闭合；本片按已有本地阶段提交授权交付，不扩大push/PR，无关AGENTS保持独立。

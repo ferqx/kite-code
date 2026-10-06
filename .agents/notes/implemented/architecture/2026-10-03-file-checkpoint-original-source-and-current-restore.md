@@ -8,6 +8,8 @@ Status: implemented
 
 本决定只覆盖同 Session/Workspace 的默认捕获、历史来源核验与 code-only 恢复。Fork 后节点、客户端三种范围与组合恢复仍遵循手册；当前实现和证据归 [checkpoint owner](../../../../packages/agent/src/business/file-checkpoints/README.md) 与 [Service owner](../../../../apps/service/README.md)，不由 implemented 推定后续部分已交付。
 
+在首末来源核验中，原完整 preimage 与末 postimage 都正确，也可能仅证明第二条 Tool 成功。POSIX Files 曾先取临时路径 Buffer 的数字指针，GC 可在 libc 读取前释放原字节；真实故障注入使第一条 Tool ENOENT、第二条成功，first/last 合法指向第二条。因此应核实际 Tool 回执，不能靠重标 Source ID 或放宽断言修补。
+
 ## Decision
 
 Files 独立 leaf 在普通 write/edit 前后捕获 point/head/path，保存完整 execution-scoped binary preimage、实际 first/last/pending source 和物理 root/baseline。纯全局 metadata factory 唯一注册普通 Tool；每次实际 scope 才解析可信 Workspace、Profile 和真实 loader inventory，开启 protectReads 并独立关闭 FD。保护精确组件路径；完整 terminal root 只来自独立 verifier 和实际 shared lease，任意 custom 单文件父目录没有该资格。
@@ -18,6 +20,8 @@ Files 独立 leaf 在普通 write/edit 前后捕获 point/head/path，保存完�
 
 恢复是当前 Store 的独立普通 Action。默认 full 仍单独请求人类 Ask，不重用 Model/Tool/旧 Store approval；原 context/group/records 的 final SQL guard 与 Workspace serial lock各自负责准确范围。原 baseline、完整 Artifact EOF/hash/size 和 current last baseline 都须匹配，逐文件 durable journal 在 I/O 前保存，发布后无法确认保 unknown。相同 restore ID/原 Command 的 cold 查询只读，不再写文件，不宣称批次原子。
 
+POSIX anchored 调用保留 NUL 结尾 Buffer 作为实际 FFI 参数，由 Bun 在调用时取地址；不新增生命周期容器、重试或捕获来源状态。原 first/last/pending 与完整前像、基线、恢复授权规则保持。实现及真实 GC 回归归 [Files owner](../../../../packages/agent/src/tools/files/README.md)。
+
 ## Alternatives considered
 
 - 仅提供 readBytes/restore/remove 原语：不能代替恢复点、原消费输入和停止组最后门禁，业务 leaf 与通用 Core guard分别实施。
@@ -26,8 +30,12 @@ Files 独立 leaf 在普通 write/edit 前后捕获 point/head/path，保存完�
 - 所有历史来源必须等于当前 Store，或重标 A records/media为B：真实backup/restore后合法媒体仍A，前者错误拒绝，后者丢scope并混旧执行权；当前reader/新Action与原source分开核验。
 - 直接调用文件原语并复用原批准：无法保护Ask等待期间原上下文/读集及当前人类决定；独立ordinary Action/Ask、最后SQL guard和逐文件journal不可省略。
 
+- 以新的 UUID 或重试覆盖失败后的首末来源：会丢失真实执行身份，不能证明第一条写入成功；保留既有捕获规则，仅修复 FFI 路径内存寿命，并在测试中核准确实际回执。
+
 ## Consequences
 
 证明预算为8192完整selected Message、64MiB累计来源、8MiB单页、32层compression、16MiB单preimage；超限明确不可恢复，不裁剪成完整结果。捕获不归档Shell或外部editor。foreign scope、unknown capture、实际postimage漂移及不完整媒体拒绝物理写。Workspace锁不锁非合作编辑者，anchored FD不宣称跨文件或rename竞态原子。
 
 真实macOS/Bun默认paired Main：两层显式compression/用户碰撞与恢复三文件6/259；公开offline backup/inspect/restore A→B、新B普通Run、两Store原来源/连续baseline、原184003字节BOM/CRLF preimage、早A点当前B独立Ask及两创建移除、cold零Provider/文件/cursor增长，单文件1/83，当前五文件19/506通过。foreign Session确切artifact_scope_denied/checkpoint_not_found，真实postimage漂移Command rejected且零Execution/Ask/journal/效果。失败日志保留；不替代跨Fork、automatic compression、全部客户端、一般Shell或平台资格。
+
+2026-10-06 当前 macOS/Bun 真实 libc 前 GC：旧数字指针使原路径 ENOENT；原 Capture fixture 单次首读取 GC 复现第一条 failed、后两条 succeeded、完整 560003 字节前像与末像正确而首末来源相同。保留 Buffer 后两条故障链通过；当前 Files/Capture、真实 Runtime/权限和源码树外大正文制品七文件37/499通过。第六次完整默认失败未保留 Tool 详情，原自然失败原因仍不能由相同症状唯一证明；这组有限证据不替代完整默认图、Linux/Windows、安装或持续负载资格。

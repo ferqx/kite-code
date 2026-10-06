@@ -14,6 +14,8 @@ search 未指定 limit 返回全部匹配；显式 limit<=200 给出完整 next 
 
 文件写入先校验原完整基线、再临时发布。发布后同步/读取失败返回 file_publish_outcome_unknown；Tool 保留 outcome_unknown，不把已发生替换假报为零效果失败。
 
+POSIX anchored 路径调用由 [files-native](../files-native.ts) 将 NUL 结尾的 Buffer 直接交给 Bun FFI；参数保持 JavaScript 引用直至 libc 调用结束。不能先对临时 Buffer 取数字指针再丢弃引用，否则 GC 可使仍存在的原路径返回 ENOENT。[路径寿命回归](../../../test/isolated/files/native-path-lifetime.test.ts)在真实 openat/renameat/linkat/unlinkat 前强制 GC，验证完整字节、原 inode 基线、创建与删除；实际资格当前只覆盖 macOS。捕获测试另核三条真实成功 Tool 回执与 first/last 的准确原 Execution ID，不把第二条单独成功误当成两次成功捕获。
+
 文件系统不是 SQLite 事务：不合作的外部编辑器可能在最后一次基线核对与 rename 之间修改目标或移动目录，无法宣称任意外部 rename/编辑原子 CAS。当前机制绑定原目录对象，合作宿主可装配 Workspace serial 许可；不会创建另一个持久授权或文件状态机。
 
 真实测试在 `test/isolated/files`：内容与 inode CAS、创建冲突、精确 edit、UTF-8/BOM/大小拒绝、symlink 越界拒绝、分页与搜索；固定模型经 Runtime/UnifiedExecution 实际写读，未知工具及权限拒绝零文件写。`test/isolated/storage/build.test.ts` 单独构建公开入口与 Worker/SQL，验证构建文件可执行。

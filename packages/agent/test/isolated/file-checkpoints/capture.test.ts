@@ -509,6 +509,20 @@ test('actual Files Tool receipts seal first full preimage and last postimage; re
   const f = await fixture();
   try {
     await f.run();
+    const writes = (await f.store.getView('s')).executions.filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(
+      writes.map((execution) => ({
+        callId: execution.callId,
+        status: execution.status,
+        failure: execution.status === 'succeeded' ? null : execution.result,
+      })),
+    ).toEqual([
+      { callId: 'call-0', status: 'succeeded', failure: null },
+      { callId: 'call-1', status: 'succeeded', failure: null },
+      { callId: 'call-2', status: 'succeeded', failure: null },
+    ]);
     const points = await f.read.records.list({ contentType: 'builtin.files.checkpoint' });
     expect(points).toHaveLength(1);
     const id = (points[0]!.value as { id: string }).id;
@@ -531,6 +545,9 @@ test('actual Files Tool receipts seal first full preimage and last postimage; re
     expect(full.length).toBeGreaterThan(300 * 1024);
     expect(original.last!.baseline.hash).toBe(bytesDigest(Buffer.from('last\r\n')));
     expect(original.first!.source.executionId).not.toBe(original.last!.source.executionId);
+    expect(original.first!.source.executionId).toBe(writes[0]!.id);
+    expect(original.last!.source.executionId).toBe(writes[1]!.id);
+    expect(created.first!.source.executionId).toBe(writes[2]!.id);
     expect(created.first!.artifact).toBeNull();
     expect(created.first!.baseline).toBeNull();
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
