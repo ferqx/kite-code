@@ -33,7 +33,7 @@ def key(value):
 try:
  wait('Waiting for answer');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery')
  key(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')}.encode());wait(${JSON.stringify(mode === 'run' ? `run ${f.run.id}` : 'interrupt confirm')});key(b'\\r');wait('outcome_unknown');assert os.path.exists(${JSON.stringify(join(f.root, 'lost'))})
- key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait(${JSON.stringify(mode === 'run' ? 'run · resumed' : 'interrupt · interrupted')})
+ key(b'\\x03\\x0c');wait(${JSON.stringify(mode === 'run' ? 'run · resumed' : 'interrupt · interrupted')})
  ${mode === 'run' ? `key(b'\\x1b');wait(${JSON.stringify(f.card.id.slice(0, 24))},True);wait('Up/Down explicit approval selection: none (Enter has no answer)');key(b'\\x1b[B');wait('only this call');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE',True)` : ''}
  key(b'\\x11')
  deadline=time.monotonic()+6
@@ -214,7 +214,7 @@ def key(value):
  global buffer
  buffer=b'';os.write(master,value)
 try:
- wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(`report ${f.reportId}`)}.encode());wait(${JSON.stringify(`report ${f.reportId}`)});key(b'\\r');wait('outcome_unknown');key(b'\\x03');time.sleep(.1);key(b'\\x0c');wait('report · resumed');key(b'\\x1b');wait('REPORT_ORIGINAL_CHILD_DONE',True);key(b'\\x11')
+ wait('Session s');key(b'/recovery');wait('/recovery');key(b'\\r');wait('Explicit recovery');key(${JSON.stringify(`report ${f.reportId}`)}.encode());wait(${JSON.stringify(`report ${f.reportId}`)});key(b'\\r');wait('outcome_unknown');key(b'\\x03\\x0c');wait('report · resumed');key(b'\\x1b');wait('REPORT_ORIGINAL_CHILD_DONE',True);key(b'\\x11')
  deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:
   if select.select([master],[],[],.05)[0]:

@@ -1,12 +1,16 @@
 import { expect, test } from 'bun:test';
 import type { Command, SessionView } from '@kite-ai/client';
+import { render } from 'ink-testing-library';
 import {
   TuiController,
   type TuiPort,
   type TuiRecoveryIntent,
   type TuiRecoveryOutcome,
+  TuiSession,
   type TuiSnapshot,
 } from '../../src/tui';
+
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
 
 const snapshot = (id: string): TuiSnapshot => ({
   storeId: 'store',
@@ -182,6 +186,95 @@ test('TUI interrupt requires explicit orphan-group confirmation and never infers
   f.resolve({ intent: f.original(), status: 'outcome_unknown' });
   await promise;
   f.controller.dispose();
+});
+
+test('recovery native Ctrl+C and Ctrl+L in one input chunk abort only the original read then query the same intent', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  await f.controller.openRecovery();
+  const submitted = f.controller.submitRecovery('interrupt', 'confirm');
+  f.resolve({ intent: f.original(), status: 'outcome_unknown' });
+  await submitted;
+  const original = structuredClone(f.original());
+  const reads: { intent: TuiRecoveryIntent; signal: AbortSignal }[] = [];
+  let finishFirst!: (outcome: TuiRecoveryOutcome) => void;
+  f.port.recovery!.lookup = async (intent, signal) => {
+    reads.push({ intent: structuredClone(intent), signal });
+    return reads.length === 1
+      ? await new Promise<TuiRecoveryOutcome>((resolve) => (finishFirst = resolve))
+      : { intent, status: 'outcome_unknown' };
+  };
+  const app = render(<TuiSession controller={f.controller} />);
+  let first: Promise<void> | undefined;
+  try {
+    await tick();
+    first = f.controller.lookup();
+    await tick();
+    app.stdin.write('\u0003\u000c');
+    await tick();
+    expect(reads).toHaveLength(2);
+    expect(reads[0]!.signal.aborted).toBe(true);
+    expect(reads.map((read) => read.intent)).toEqual([original, original]);
+    expect({ writes: f.stats().writes, cancels: f.stats().cancels }).toEqual({
+      writes: 1,
+      cancels: 0,
+    });
+    expect(f.controller.state.recovery?.intent).toEqual(original);
+    expect(app.lastFrame()).not.toContain('\\u0003\\u000c');
+    finishFirst({ intent: original, status: 'failed', error: 'late original GET' });
+    await first;
+    expect(f.controller.state.recovery?.status).toBe('outcome_unknown');
+    expect(f.controller.state.recovery?.error).not.toBe('late original GET');
+  } finally {
+    if (reads.length) {
+      finishFirst({ intent: original, status: 'outcome_unknown' });
+      await first;
+    }
+    app.unmount();
+    app.cleanup();
+    f.controller.dispose();
+  }
+});
+
+test('recovery bracketed paste keeps a Ctrl+L byte as text without querying the original intent', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  await f.controller.openRecovery();
+  const submitted = f.controller.submitRecovery('interrupt', 'confirm');
+  f.resolve({ intent: f.original(), status: 'outcome_unknown' });
+  await submitted;
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('\u001b[200~\u000c\u001b[201~');
+    await tick();
+    expect(f.stats()).toEqual({ writes: 1, reads: 0, cancels: 0 });
+    expect(f.controller.state.recovery?.intent).toEqual(f.original());
+  } finally {
+    app.unmount();
+    app.cleanup();
+    f.controller.dispose();
+  }
+});
+
+test('recovery bracketed paste cannot submit a typed interrupt confirmation with a pasted Enter', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  await f.controller.openRecovery();
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('interrupt confirm');
+    await tick();
+    app.stdin.write('\u001b[200~\r\u001b[201~');
+    await tick();
+    expect(f.stats()).toEqual({ writes: 0, reads: 0, cancels: 0 });
+    expect(f.controller.state.recovery).toBeUndefined();
+  } finally {
+    app.unmount();
+    app.cleanup();
+    f.controller.dispose();
+  }
 });
 
 test('cold restore retains old Store/Session unknown and blocks new submission until original lookup', async () => {

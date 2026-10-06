@@ -1415,3 +1415,14 @@ Source 驱动已本地提交 e7067bff4a786986bae0d09e79515661d4de5344，正常�
 当前原 isolated runTestJob/no-orphans 单并发五例5pass/0fail/43断言、9.07s，日志 `/private/tmp/kite-tui-recovery-current-material-20261006.log`；CLI完整typecheck、owned Biome及diff检查通过。五个 Python held TUI 均核正常exit0；两次 SIGKILL 用例仍核所属 paired Service 退出、冷新 PID 与零冷 POST/原 GET。Run 原文件效果及两次准确 Provider 保持，interrupt 无效果且一次 Provider；report 原两 Run completed、parent3/child1/review2、原 Execution succeeded/attempt1/resultRevision1/delivery consumed 保持。Root自核，本片未新增独立审查；iteration_complete/stage/commit ready仅限恢复测试与进度两路径。
 
 第十四轮失败保留，后续仍需当前完整原图。37partial、Goal active及已列 Native stdin、真实 OAuth 组合、默认可信 Shell/Soak、安装、其他平台、§35/T-E与正式旧路径退役缺口保持。已有本地阶段授权不扩大push/PR，无关AGENTS保持独立。
+
+
+## 2026-10-06：恢复原生控制键与粘贴的语义边界
+
+第十五轮原完整默认在 HEAD dea51baaf9594b7130d592dc56be8ae0ee5fedd9、574文件/464主任务/并发4运行，实际 exit1；145主任务全部排空、144通过，恢复 PTY 中 interrupt 失败，其余四例通过，无 plan abort。已运行254文件、319任务未调度；3977 tracked regular SHA 与 Git 前后保持。日志 `/private/tmp/kite-current-default-fifteenth-20261006.log`、SHA `6e2237d6f8dfbb5d61d6f80e0c64b8e64b2d52e6d358adbeaefbbc9555530133`，同前缀 plan/inputs/result 保存。原材料等待修正仍保留，该轮完整默认资格 false。
+
+实际帧把连续 Ctrl+C/Ctrl+L 显示为 `\\u0003\\u000c` 输入，原 interrupt 保 unknown；原生多控制字节被 SDK 合并为一个 input。三个确定性输入回归在修复前0pass/3fail/4断言，日志 `/private/tmp/kite-recovery-control-paste-red-20261006.log`：原批次没有新 GET，明确 bracketed paste 的 Ctrl+L 却触发查询，粘贴 Enter 提交已输入的 interrupt confirm。最小实现仅在恢复面板按顺序处理原生 C/L 控制批次，使用现有独立 paste hook 保 literal 文字；不增加通用路由、公共 port、Core/Service 权限或持久结构。进一步回归复现已取消 GET 的迟到失败覆盖新查询，仅原 GET 新增既有 AbortSignal 检查；原提交结果仍按原身份保存。取舍归[恢复输入 Note](../../.agents/notes/implemented/bug-fix/2026-10-06-recovery-native-controls-and-literal-paste.md)，产品、UI/CLI owner与 active 边界同步。
+
+当前恢复组件15pass/0fail/60断言；全部 TUI 24文件243pass/0fail/2020断言、18.74s，日志 `/private/tmp/kite-recovery-control-all-tui-20261006.log`。UI/CLI完整typecheck、UI build、四owned TypeScript Biome和diff检查通过。原五个实际恢复窗口明确一次写入 C/L 批次后5pass/0fail/43断言、8.92s，日志 `/private/tmp/kite-recovery-control-native-pty-20261006.log`；五例最终 held TUI 正常exit0，强杀/cold两例原 Service 消失、新PID与零冷POST/原GET保持。Run 原审批/文件效果、interrupt零效果及report来源、两原Run、parent3/child1/review2断言未缩减。首次本机启动因审批模型容量不足未执行，按同一授权动作重试获准；没有绕过审批。
+
+Root完成实现与自核，未新增独立审查。本片 iteration_complete/stage/commit ready仅覆盖实际 owned 输入修复、消费者和文档；局部通过不追认第十五轮，后续仍需当前原完整图。37partial、Goal active，真实 Native stdin、OS browser/nativeVault OAuth组合、默认可信Shell/Soak、安装、其他平台、§35/T-E和正式旧路径退役仍未闭合。本地阶段授权不扩大push/PR，无关AGENTS保持独立。

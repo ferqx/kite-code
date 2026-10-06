@@ -85,6 +85,8 @@ R 重新读取、K 查询原 mutation、Esc 放弃确认或关闭。提交封存
 
 controller 在提交前保存原 Store、Session、commandId 与目标请求，最多 128 个申请；submitting、accepted、resumed、interrupted、suppressed、failed 和 unknown 分别显示。回执和实际 Run 通过公共专用 decoder 与原 command/目标/来源绑定，applied 不代替完成。切换会话后保留原申请，Ctrl+L 仍先核实原未知 work/answer，随后只查原恢复 command；Ctrl+C 和 Esc 只释放面板所属读取，未知恢复意图不会变成当前选中 Run 的取消。普通输入在原申请未核实时保持阻断，原回答恢复规则不变。
 
+[恢复面板](recovery-panel.tsx)沿 Ink 的独立 paste 通道保留粘贴文字，粘贴的 Enter/Ctrl 字节不能发起恢复或原查询。原生 Ctrl+C/Ctrl+L 在同一输入块中仍逐项先取消所属读取、再查询原申请；只处理这两种控制字节组成的批次，不引入通用键盘路由。已取消原 GET 的晚回复或异常不覆盖后续查询；原 POST 的已发生结果继续按原身份保存，读取取消不撤销写入。当前控制批次、literal paste 和迟到回复反例由 [recovery.test.tsx](../../test/tui/recovery.test.tsx)核对，业务窗口由 CLI owner 负责。
+
 [recovery.test.tsx](../../test/tui/recovery.test.tsx) 核对 scope/kind/目标/来源的稳定反例、重复提交抑制、独立读取取消与跨 Session 原意图；这些有限 port 反例不是业务成功资格。真实默认 Service/SDK、SIGKILL、单 POST/首 GET 丢回执和 80×24 PTY 原 Run/interrupt 的结果见 [CLI owner](../../../../apps/cli/README.md#显式冷恢复消费者)。controller 的 restore 接缝只接纳 host 持久目录中的闭合原意图；冷 submitting/accepted 保持 unknown，首次 POST 前的持久化由 CLI host 完成，UI 不打开文件。恢复目录读取失败阻断新申请，旧 Store/Session 不重标，满 128 槽不驱逐 unknown。真实 TUI 宿主 SIGKILL、配对 Service 重启、原 GET 和 configured-host report 资格见 CLI owner；公共完整目标目录、默认后台汇报开启、全部崩溃窗口、正式旧入口和其他平台仍未由此切片验证。
 
 主输入由 [composer](composer.ts) 与 [Ink 接缝](composer-input.tsx) 管理。真实正文仍通过 controller/host 草稿端口保存，光标、固定命令候选和最近 100 条输入历史仅保留在当前 UI、按原 Store/Workspace/Session 隔离。左右与删除按 grapheme，Home/End 按当前视觉行，跨多行上下在输入边界才进入历史；显示只取光标附近五行，完整正文不截断。使用已声明的 string-width 计算终端 cell，不从 UTF-16 长度猜中文/emoji宽度。

@@ -1,4 +1,4 @@
-import { Box, useInput } from 'ink';
+import { Box, useInput, usePaste } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import { callerKey } from './caller';
 import { type TuiController, terminalText } from './controller';
@@ -11,19 +11,37 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
   const [showRequest, setShowRequest] = useState(false);
   const callers = [...state.callers.values()];
   const caller = callers[Math.min(selected, Math.max(0, callers.length - 1))];
+  const cancelRead = () => {
+    controller.cancelCallerRead();
+    controller.cancelRecoveryRead();
+  };
+  const lookupOriginal = () => {
+    if (caller) void controller.lookupCaller(callerKey(caller.intent));
+    else void controller.lookup();
+  };
+  usePaste((input) => setText((previous) => previous + input));
   useInput((input, key) => {
+    // Ink can group native control bytes; bracketed paste uses the separate hook above.
+    if (
+      input.length > 1 &&
+      [...input].every((control) => control === '\u0003' || control === '\u000c')
+    ) {
+      for (const control of input) {
+        if (control === '\u0003') cancelRead();
+        else lookupOriginal();
+      }
+      return;
+    }
     if (key.escape) {
       controller.closePanel();
       return;
     }
     if (key.ctrl && input === 'c') {
-      controller.cancelCallerRead();
-      controller.cancelRecoveryRead();
+      cancelRead();
       return;
     }
     if (key.ctrl && input === 'l') {
-      if (caller) void controller.lookupCaller(callerKey(caller.intent));
-      else void controller.lookup();
+      lookupOriginal();
       return;
     }
     if (!text && callers.length && (key.upArrow || key.downArrow)) {

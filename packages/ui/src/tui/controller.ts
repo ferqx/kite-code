@@ -1614,9 +1614,11 @@ export class TuiController {
     const read = this.reading();
     this.recoveryRead = read;
     try {
-      this.saveRecovery(saved.intent, await this.port.recovery.lookup(saved.intent, read.signal));
+      const result = await this.port.recovery.lookup(saved.intent, read.signal);
+      if (!read.signal.aborted) this.saveRecovery(saved.intent, result);
     } catch {
-      this.saveRecovery(saved.intent, { intent: saved.intent, status: 'outcome_unknown' });
+      if (!read.signal.aborted)
+        this.saveRecovery(saved.intent, { intent: saved.intent, status: 'outcome_unknown' });
     } finally {
       this.reads.delete(read);
       if (this.recoveryRead === read) this.recoveryRead = undefined;

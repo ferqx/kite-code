@@ -228,6 +228,8 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 
 [recovery-host.test.ts](test/isolated/recovery-host.test.ts) 使用编译默认 Service、固定 loopback SDK、普通 Ask 原 files.write 审批和 disposable owned SQLite，在原 Service SIGKILL 后验证接续/中断、一次 POST 与首次原 GET 丢回执；编译 paired/shared CLI 核原卡一次回答、准确决定 revision、原 Run 完成或中断、保存目录与冷 reference lookup、零 cancel 与重复效果。[tui-recovery-host.test.ts](test/isolated/tui-recovery-host.test.ts) 使用真实 80×24 PTY，另验证 TUI 宿主 SIGKILL、配对 Service 退出和冷进程从 durable journal 只原 GET，Ctrl+C/Ctrl+L 保原 scope。
 
+恢复 PTY 的 Run、interrupt 与 report 窗口明确在一次原生写入中发送 Ctrl+C/Ctrl+L，沿同一原请求检查结果；暖/冷独立申请、原审批、单 POST、原 GET 与实际 Run/效果断言保持。共享 [恢复面板](../../packages/ui/src/tui/recovery-panel.tsx)区分控制批次与 bracketed paste，原材料和当前控件分别按其实际输出核对。完整默认负载及 scoped 结果归[总体进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不由驱动等待或有限组件反例推定全平台恢复资格。
+
 [recovery-report-host.test.ts](test/isolated/recovery-report-host.test.ts) 与同一 PTY fixture 使用显式 program-host afterTurn policy、冻结 reader 角色/model/Task 与真实原 `job.report`：父 Run 已完成，独立 Child Job 批准且效果一次，冷恢复只生成唯一来源绑定的 report Run，report completion 通过原 ledger/SQLite 核实。该证据只覆盖 configured host，不证明默认制品已启用后台汇报。当前 macOS 开发资格不代表完整公共报告目录、全部崩溃窗口、其他平台或正式旧入口切换。
 
 ## 开发 TUI 输入编辑
