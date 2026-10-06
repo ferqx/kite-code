@@ -18,6 +18,8 @@ macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDIN
 
 配对与daemon共用一次Service装配，保持唯一Runtime/Loop；父EOF只用于配对策略。daemon固定原Web资产，并在最终资源关闭阶段封Browser入口、撤销Cookie和排空原请求，随后关闭Store、Native HTTP和所属endpoint。关闭失败保留真实诊断与资源。CLI restart先验证目标制品/资产和可安全检查的Store格式，再向原实例发一次if_idle/cancel关闭；普通start允许坏Store保留安全诊断服务。确认原PID/start退出后才启动新目标，超时不强杀、不偷偷启动替代。
 
+2026-10-06补充：真实Job原核实的shared收尾曾在一次原shutdown后命中daemon_identity_uncertain。身份函数读不到kernel start且PID仍存在时只能保uncertain；该次libproc读取失败的具体原因未知，不能推断为dead。关闭编排现沿原PID/start在既有15秒检查窗口继续只读观察，取得新的真实dead证明才成功；持续uncertain到检查点仍失败，drain_failed仍保资源。最初发现与dead endpoint清理的严格规则保持，不重发shutdown、不发送OS信号、不换目标或启动替代。末次一秒HTTP观察和调度可越过检查点，实际持续故障15.84秒，不宣称硬实时15秒资格。
+
 显式共享CLI/TUI经同一私有bootstrap接入已有daemon，预期profile和必需capabilities在发现前确定，原instance/build由私有通道固定后与HTTP准入核对。省略workspace沿用daemon的canonical目录；显式路径不同则拒绝，已存在Session也须核其Workspace。共享宿主没有对子进程的所有权，关闭只调用Client.disposeNetwork；TUI独立UI lease与草稿保存继续由原宿主持有。网络恢复仍核原实例，不能以发现新daemon替代原目标或重放旧写入。
 
 ## Alternatives considered
@@ -26,6 +28,9 @@ macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDIN
 - 复用旧socket业务carrier：与唯一HTTP业务边界冲突，因此只迁移独立安全leaf和所需事实。
 - 公共Client引入fs/net/FFI：破坏browser-safe依赖边界，故由私有宿主做发现，再使用已有公共HTTP Client。
 - pathname listener再手动检查inode：实际runtime自动unlink仍会删除替换文件，因此使用预bind fd所有权。
+- shutdown后首次uncertain立即失败：真实收尾命中该状态，仍可能随后取得原进程真实dead证明；继续已有有界只读观察，不降低成功证据。
+- 把uncertain直接当dead或从shutdown受理推定退出：会给替代启动/endpoint清理错误权利；持续不明继续失败，真实kernel身份与资源关闭分别证明。
+
 - daemon复用配对父EOF关闭：启动客户端退出会错误停止共享服务，因此存活策略独立，装配共享。
 
 ## Consequences
@@ -37,6 +42,8 @@ macOS进程身份使用本机SDK已核实的libproc `proc_pidinfo(PROC_PIDTBSDIN
 ## Verification and limits
 
 实际隔离进程证明：缺席status零路径创建；endpoint竞争只有一个owner；记录/socket漂移保留；死进程只凭完整准确证明清理；配对EOF关闭而daemon客户端退出不关闭；busy保留、明确cancel等待原进程退出；坏目标资产或Store格式在停止旧实例前拒绝；Web固定原资产、只读权限和真实排空；源码树外完整manifest无旧Runtime回退。未知关闭不重发由公共Lifecycle Client既有用例证明，CLI不强杀或重复POST由本轮实现核对；尚无全部CLI超时/未知handoff故障窗口测试。当前macOS结果与Linux/Windows未验证范围分别记录。
+
+2026-10-06真实原Job消费者保原paired/shared核实、旧unknown结果和一次外部效果，受控一次/持续身份观察故障分别成功/失败；两次独立明确关闭各POST=1。1例43断言及原10文件daemon-host shard33例297断言通过，fixture另用未注入的真实kernel身份等待所属进程结束后清理。该故障注入不证明真实kernel窄窗因果或其他平台；自然红、受控红、冻结SHA与准确限度归总体进度。
 
 ## Remaining constraints
 

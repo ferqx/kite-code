@@ -156,6 +156,8 @@ daemon 制品选择固定 `apps/service/dist/daemon-main.js` 与 `apps/web/dist/
 
 [host/daemon.ts](host/daemon.ts)通过私有 socket 核原 reservation/PID 启动身份，随后只用公共 Lifecycle Client 查询与关闭。start兼容复用不替换build；restart先核目标资产并运行目标只读Store预检，再一次if_idle或明确cancel。未确认原PID退出不启动替代，不以超时强杀；start不自动删除dead/未知endpoint。workspace省略沿用原实例，显式不一致拒绝。status输出分开记录running/target build；未选择目标构建时target为null，不能编造当前安装版本。
 
+一次原shutdown之后，启动身份暂不可读仍按既有15秒检查窗口只读观察原PID/start；后来的真实dead证明才允许成功，持续uncertain到检查点仍 `daemon_identity_uncertain`，drain_failed仍保资源。HTTP观察最多单次一秒，末次等待和调度可越过检查点，不承诺硬15秒退出；不新增POST、信号、清理或替代启动。最初发现与dead endpoint清理继续使用原严格身份规则。[真实原Job核实](test/isolated/job-reconcile-host.test.ts)保paired/shared、同原请求及一次外部效果；受控一次观察故障后成功，持续故障后失败，两次明确关闭分别POST=1，fixture清理另核真实kernel原身份退出。当前1例43断言、19.12s；原含daemon-host的10文件默认shard另33例297断言通过，具体冻结输入与自然/受控红见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。观察故障注入不等于真实kernel窄窗或安装/其他平台资格。
+
 [test/daemon-host.test.ts](test/daemon-host.test.ts)实际构建公开四包manifest并启动所属子进程：默认与显式endpoint缺席零路径创建、lazy resolver零无关调用、准确原实例复用、web只观测、坏目标保留旧服务、实际busy与cancel重启、原Workspace保留及冷启动零Model。该macOS资格未覆盖未知handoff与所有故障窗口，也不完成正式release入口迁移。生命周期编排与共享业务连接分别验证，不能以此证明正式调用者已切换。
 
 

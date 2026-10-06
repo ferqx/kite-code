@@ -246,12 +246,14 @@ async function stopOriginal(
     for (;;) {
       const state = inspectProcess(observed.record.pid, observed.record.processStartIdentity);
       if (state === 'dead') return;
-      if (state === 'uncertain') throw new CLIHostError('daemon_identity_uncertain');
       const status = await client
         .getStatus({ signal: AbortSignal.timeout(1000) })
         .catch(() => undefined);
       if (status?.state === 'drain_failed') throw new CLIHostError('shutdown_cleanup_unconfirmed');
-      if (Date.now() >= end) throw new CLIHostError('daemon_stop_timeout');
+      if (Date.now() >= end)
+        throw new CLIHostError(
+          state === 'uncertain' ? 'daemon_identity_uncertain' : 'daemon_stop_timeout',
+        );
       await delay(50);
     }
   } finally {

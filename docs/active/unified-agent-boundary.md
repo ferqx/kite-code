@@ -96,6 +96,8 @@ Native 的 `configuration_management` 通过公共 Client 固定原 Store/genera
 
 显式开发daemon通过Service私有有限socket交换bootstrap，业务与关闭仍用公共HTTP Client；不把native发现协议暴露为公共业务carrier。paired/daemon共用一次Store/Runtime装配，父EOF策略分别保持；目标子进程只读SQLite预检在旧实例停止前执行。实际边界、保活失败语义与平台范围归[Service owner](../../apps/service/README.md)，开发CLI惰性资产与原实例一次关闭归[CLI owner](../../apps/cli/README.md)。开发CLI run/resume与TUI的显式`--server`经私有宿主发现后固定原实例、profile与Workspace，连接失败不启动替代；共享close仅disposeNetwork，TUI独立草稿lease保持至UI退出。公共Client/UI不引入native发现依赖，正式release与全部调用者迁移仍未完成；设计依据见[私有bootstrap Note](../../.agents/notes/implemented/architecture/2026-10-02-daemon-private-bootstrap.md)。
 
+原shutdown后的PID/start暂时uncertain仅延续既有有界只读观察，成功仍需真实dead证明；持续不明、drain_failed及超时不授替代启动、强杀或endpoint清理权。最初发现、reservation与kernel身份分类保持，公共Lifecycle Client仍只一次POST；检查窗口含末次HTTP等待而非硬实时期限。真实Job消费者及受控观察反例归[CLI owner](../../apps/cli/README.md)与上述Note。
+
 
 开发 TUI 模型设置同样通过专门公共 API，固定实际 Workspace 和原读取集；UI 只得到有限 default/enabled/effort 操作及安全模型 metadata，不取得配置索引或凭据。effort 的有限 enum/null 纳入原 HostMutation marker 和幂等冲突校验；支持字段表示 compatible 适配器 wire 能力，不能推导远端模型支持。清除只影响所选 scope，保留配置 options 的既有整组覆盖语义；原 Run 冻结值不变。Native 当前有限启禁/default IPC 未因 HTTP 契约扩展而扩大。
 

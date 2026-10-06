@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -37,6 +37,7 @@ nativeTest(
   'compiled CLI reconciles the exact cold Job through paired and shared Service without repeating its effect',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-reconcile-'));
+    let daemonClosed = true;
     try {
       const baseEntry = await buildOwnedDaemon(join(root, 'artifact'));
       const output = dirname(baseEntry);
@@ -169,8 +170,79 @@ nativeTest(
             write() {},
           });
         let daemonStarted = false;
+        async function stopWithObservationFault(persistent: boolean) {
+          const actual = { ...(await import('@kite-ai/service/daemon')) };
+          const record = actual.readDaemonReservation(endpoint)!;
+          const bootstrap = await actual.requestDaemonBootstrap(endpoint, {
+            dataRoot: profile.dataRoot,
+            name: profile.profile,
+            accessKey: profile.profileAccessKey,
+          });
+          const origin = new URL(bootstrap.httpEndpoint).origin;
+          const fetch = globalThis.fetch;
+          let posts = 0,
+            faults = 0;
+          globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+            const input = args[0];
+            const url = new URL(input instanceof Request ? input.url : String(input));
+            const method = args[1]?.method ?? (input instanceof Request ? input.method : 'GET');
+            if (
+              url.origin === origin &&
+              url.pathname === '/v1/lifecycle/shutdown' &&
+              method === 'POST'
+            )
+              posts++;
+            return fetch(...args);
+          }, fetch);
+          mock.module('@kite-ai/service/daemon', () => ({
+            ...actual,
+            inspectProcess(pid: number, start: string) {
+              if (
+                posts > 0 &&
+                pid === record.pid &&
+                start === record.processStartIdentity &&
+                (persistent || faults === 0)
+              ) {
+                faults++;
+                return 'uncertain' as const;
+              }
+              return actual.inspectProcess(pid, start);
+            },
+          }));
+          const started = Date.now();
+          try {
+            if (persistent)
+              await expect(daemon('stop')).rejects.toMatchObject({
+                code: 'daemon_identity_uncertain',
+              });
+            else expect(await daemon('stop')).toBe(0);
+            expect(posts).toBe(1);
+            if (persistent) expect(faults).toBeGreaterThan(1);
+            else expect(faults).toBe(1);
+            console.log(
+              JSON.stringify({
+                stage: 'job_reconcile_daemon_stop_observation',
+                persistent,
+                posts,
+                faults,
+                elapsedMs: Date.now() - started,
+              }),
+            );
+          } finally {
+            globalThis.fetch = fetch;
+            mock.module('@kite-ai/service/daemon', () => actual);
+            // The injected observation is never death evidence. Cleanup separately waits
+            // for the real kernel identity of this exact owned daemon, without signalling it.
+            await until(
+              async () => actual.inspectProcess(record.pid, record.processStartIdentity) === 'dead',
+            );
+            daemonStarted = false;
+            daemonClosed = true;
+          }
+        }
         try {
           if (mode === 'shared') {
+            daemonClosed = false;
             await daemon('start');
             daemonStarted = true;
           }
@@ -238,11 +310,21 @@ nativeTest(
               expect(() => process.kill(pid, 0)).toThrow();
           }
         } finally {
-          if (daemonStarted) await daemon('stop');
+          if (daemonStarted) {
+            await stopWithObservationFault(false);
+            daemonClosed = false;
+            await daemon('start');
+            daemonStarted = true;
+            await stopWithObservationFault(true);
+            expect(readFileSync(join(base, 'queries'), 'utf8')).toBe('query\n');
+            expect(readFileSync(join(base, 'ledger'), 'utf8')).toBe(ledgerBefore);
+            expect(existsSync(join(base, 'unexpected-start'))).toBe(false);
+          }
         }
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      if (daemonClosed) rmSync(root, { recursive: true, force: true });
+      else console.error(JSON.stringify({ stage: 'job_reconcile_cleanup_unconfirmed', root }));
     }
   },
   60000,
