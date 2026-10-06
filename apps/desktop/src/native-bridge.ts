@@ -121,14 +121,64 @@ export type NativeModelSettingsFacts = {
   canWrite: boolean;
   errors: string[];
   defaultModelId: string | null;
+  selectedModelId?: string;
   models: {
     id: string;
     provider?: string;
     model?: string;
     enabled: boolean;
     configured: boolean;
+    reasoningEffort?: NativeReasoningEffort | null;
+    reasoningEffortChoices?: NativeReasoningEffort[];
     diagnostics: string[];
   }[];
+};
+export type NativeReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max';
+export type NativeProvider = 'openai' | 'deepseek' | 'compatible' | 'ollama';
+export type NativeProviderOperation = {
+  provider: NativeProvider;
+  connectionId: string | null;
+  baseURL: string;
+  modelNames: string[];
+  credential: 'keep' | 'replace' | 'none';
+};
+export type NativeProviderSettingsFacts = {
+  kind: 'settings.providers';
+  observationId: number;
+  storeId: string;
+  canWrite: boolean;
+  errors: string[];
+  providers: {
+    id: NativeProvider;
+    label: string;
+    defaultBaseURL: string;
+    requiresCredential: boolean;
+    connections: {
+      id: string;
+      baseURL: string;
+      hasCredential: boolean;
+      modelNames: string[];
+      canWrite: boolean;
+    }[];
+  }[];
+};
+export type NativeProviderSubmission = {
+  kind: 'settings.providers.submission';
+  commandId: string;
+  storeId: string;
+  observationId: number;
+  operation: NativeProviderOperation;
+  phase: 'submitting' | 'unknown' | 'applied' | 'failed';
+  credentialState?: 'unchanged' | 'stored' | 'outcome_unknown';
+  configurationState?: 'not_attempted' | 'published' | 'outcome_unknown';
+  error?: string;
 };
 export type NativeModelSettingsSubmission = {
   kind: 'settings.models.submission';
@@ -235,6 +285,7 @@ export type NativeState = {
   readonly compressionSubmissions?: readonly NativeCompressionSubmission[];
   readonly sessionSubmissions?: readonly NativeSessionSubmission[];
   readonly modelSettingsSubmissions?: readonly NativeModelSettingsSubmission[];
+  readonly providerSettingsSubmissions?: readonly NativeProviderSubmission[];
   readonly permissionSubmissions: readonly PermissionSubmission[];
   readonly interactionSubmissions: readonly InteractionAnswerSubmission[];
   readonly answerSubmissions?: readonly NativeAnswerMetadata[];
@@ -285,6 +336,17 @@ export type NativeRequest =
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
   | { method: 'settings.models.read'; generation: number; scope: 'user' | 'workspace' }
+  | { method: 'input.models.read'; generation: number }
+  | { method: 'settings.providers.read'; generation: number }
+  | { method: 'settings.providers.close'; generation: number }
+  | {
+      method: 'settings.providers.save';
+      generation: number;
+      observationId: number;
+      operation: NativeProviderOperation;
+      secret?: string;
+    }
+  | { method: 'settings.providers.lookup'; generation: number; commandId: string }
   | { method: 'settings.models.close'; generation: number }
   | {
       method: 'settings.models.enabled';
@@ -528,6 +590,8 @@ export type NativeResult =
   | NativeRecoveryFacts
   | NativeRecoverySubmission
   | NativeModelSettingsFacts
+  | NativeProviderSettingsFacts
+  | NativeProviderSubmission
   | NativeModelSettingsSubmission
   | NativeSessionFacts
   | NativeContextFacts

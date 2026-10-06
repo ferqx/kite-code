@@ -20,3 +20,8 @@
 
 
 [mcp-selection-intents.test.ts](mcp-selection-intents.test.ts)与[mcp-selection-assets-fixture.ts](mcp-selection-assets-fixture.ts)验证新独立 `ui/mcp-selection-intents.json@1` / closed manifest v8。真实 CLI journal owner 在实际 Profile/data锁内创建原 user终结/workspace unknown；生产维护独立校验固定请求、完整 readSet、subject、两SHA、phase、128条/16MiB、fatalUTF8和私有文件合同，零CLI/UI/Client依赖。DB5/v8备份与新CoreStore恢复保原整字节；源外实际Node用原纯codec冷读，先挡foreign scope再允许任何查询，GET/POST零，未将元数据当Core receipt或恢复POST权。128独立Workspace unknown与准确16MiB完整保存；未来/伪旧版本、坏scope/readSet/内部摘要、重算外proof、重复/超额/非法UTF8/权限/链接失败保源。旧v2–v7、DB1–5准入不扩大；当前Node reader不代表TuiMcpPort完整冷lookup或Windows实际资格。
+
+
+历史 v2–v13 资格的 [Node 资产 fixtures](assets-fixture.ts)明确保留 DB5 输入：实际当前 owner 关闭后，要求 DB6 的 configuration_intents/model_routes 都为空，才物理去掉新增表并标 DB5；有内容即拒绝，不静默丢弃。caller/answer/Files fixtures 同样使用此守卫，既有格式和全文断言保持。
+
+[desktop-configurations.test.ts](desktop-configurations.test.ts)和[独立实际 Node fixture](desktop-configurations-fixture.ts)保留当前 DB6，不降级。公共备份/inspect/v14/新Store恢复核两个原设置GET记录、两个Session路由、七条完整原caller（含high/minimal）、原SQL字节与零HTTP。秘密/数组enum、重算内部SHA的错误effort类型、非法UTF8/route和重标旧清单仍拒绝、失败保源；不以外层摘要代内部grammar，不创建POST权。isolated测试各用独立Bun进程，避免不同SQLite引擎选择在同一进程混用。

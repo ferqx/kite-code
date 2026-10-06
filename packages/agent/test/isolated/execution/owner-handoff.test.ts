@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
+import { defineExtension, type Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { AgentError, OwnerRef } from '../../../src/storage/types';
 
@@ -263,3 +264,204 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
     }
   }, 10000);
 }
+
+test('actual SQLite root owner keeps peer Action intake after an empty control poll while its detached Job is hot', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-hot-owner-intake-')));
+  const storeA = await openSqliteStore({ dataRoot: root, profile: 'new' });
+  const storeB = await openSqliteStore({ dataRoot: root, profile: 'new' });
+  const starts: string[] = [];
+  let finishBackground!: () => void;
+  const backgroundFinished = new Promise<void>((resolve) => {
+    finishBackground = resolve;
+  });
+  const extension = defineExtension({
+    id: 'fixture',
+    version: '1',
+    apiMajor: 1,
+    jobs: [
+      {
+        id: 'fixture.held',
+        version: '1',
+        description: 'Harmless Job held at an explicit terminal barrier',
+        inputSchema: { type: 'object' },
+        resources: { slot: 'process' },
+        async start(_input, context) {
+          starts.push(context.executionId);
+          return { reference: { id: context.executionId } };
+        },
+        async *observe() {
+          await backgroundFinished;
+          yield {
+            type: 'terminal' as const,
+            result: { outcome: 'succeeded' as const, content: 'ended' },
+            supervision: 'ended' as const,
+          };
+        },
+        async cancel() {
+          finishBackground();
+          return { status: 'stopped' as const };
+        },
+        async dispose() {},
+      },
+    ],
+    actions: [
+      {
+        id: 'fixture.launch',
+        version: '1',
+        description: 'Admit one detached Job and return its actual reference',
+        inputSchema: { type: 'object' },
+        async prepare(input) {
+          return input;
+        },
+        async execute(input, context) {
+          const ref = await context.operations.ensure({
+            key: (input as { key: string }).key,
+            cancellation: 'detached',
+            request: {
+              kind: 'job',
+              definitionId: 'fixture.held',
+              definitionVersion: '1',
+              input: {},
+            },
+          });
+          return { outcome: 'succeeded', content: 'admitted', details: ref as unknown as Json };
+        },
+      },
+    ],
+  });
+  const permissions = {
+    async authorize() {
+      return { allowed: true, revision: 'fixed' };
+    },
+  };
+  const runtimeA = createRuntime({
+    store: storeA,
+    instanceId: 'hot-owner-a',
+    extensions: [extension],
+    permissions,
+    processConcurrency: 1,
+  });
+  const runtimeB = createRuntime({
+    store: storeB,
+    instanceId: 'hot-owner-b',
+    extensions: [extension],
+    permissions,
+    processConcurrency: 1,
+  });
+  const until = async <T>(read: () => Promise<T>, valid: (value: T) => boolean): Promise<T> => {
+    const end = Date.now() + 5000;
+    while (true) {
+      const value = await read();
+      if (valid(value)) return value;
+      if (Date.now() >= end) {
+        console.error(JSON.stringify({ phase: 'hot_owner_intake_deadline', lastObserved: value }));
+        throw new Error('hot_owner_intake_deadline', { cause: value });
+      }
+      await Bun.sleep(10);
+    }
+  };
+  const expectedStoreId = (await storeA.getMetadata()).storeId;
+  const submit = (runtime: typeof runtimeA, commandId: string) =>
+    runtime.submitCommand({
+      expectedStoreId,
+      commandId,
+      sessionId: 's',
+      subjectId: 'owner',
+      request: {
+        kind: 'extension.invoke',
+        extensionId: 'fixture',
+        actionId: 'fixture.launch',
+        definitionVersion: '1',
+        input: { key: commandId },
+      },
+    });
+  const action = async (commandId: string) => {
+    const command = await until(
+      () => storeA.getCommand(commandId),
+      (value) => value?.status === 'applied',
+    );
+    const executionId = (command!.receipt as { executionId: string }).executionId;
+    return until(
+      () => storeA.getExecution(executionId),
+      (value) => value?.status === 'succeeded',
+    );
+  };
+  try {
+    await runtimeA.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: `file://${root}`,
+    });
+    await runtimeA.createSession({
+      expectedStoreId,
+      commandId: 'create-s',
+      sessionId: 's',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      title: 's',
+    });
+    let emptyObserved = false;
+    let emptyReturned = false;
+    const list = storeA.listAcceptedCommands.bind(storeA);
+    storeA.listAcceptedCommands = async (sessionId, limit) => {
+      const commands = await list(sessionId, limit);
+      if (
+        !emptyObserved &&
+        starts.length > 0 &&
+        sessionId === 's' &&
+        limit === 1 &&
+        commands.length === 0
+      ) {
+        emptyObserved = true;
+        // Install before first acceptance so even the first empty control poll is observed.
+        // The next turn follows pollControls' synchronous keep/delete decision.
+        setImmediate(() => {
+          emptyReturned = true;
+        });
+      }
+      return commands;
+    };
+    await submit(runtimeA, 'first');
+    const firstAction = (await action('first'))!;
+    const firstJobId = (firstAction.result as { details: { executionId: string } }).details
+      .executionId;
+    const firstJob = (await until(
+      () => storeA.getExecution(firstJobId),
+      (value) => value?.status === 'running',
+    ))!;
+    expect(starts).toEqual([firstJobId]);
+    await until(async () => emptyReturned, Boolean);
+    expect(await storeB.acquireSessionOwner('s', 'hot-owner-b')).toBeNull();
+    expect((await storeA.getExecution(firstJobId))?.status).toBe('running');
+    expect((await submit(runtimeB, 'peer')).status).toBe('accepted');
+    const peerAction = (await action('peer'))!;
+    const peerJobId = (peerAction.result as { details: { executionId: string } }).details
+      .executionId;
+    const peerJob = (await storeA.getExecution(peerJobId))!;
+    expect(peerAction.ownerGeneration).toBe(firstAction.ownerGeneration);
+    expect(peerJob).toMatchObject({
+      status: 'planned',
+      sessionId: 's',
+      originStoreId: expectedStoreId,
+      ownerGeneration: firstJob.ownerGeneration,
+    });
+    expect(starts).toEqual([firstJobId]);
+    expect((await storeA.getExecution(firstJobId))?.status).toBe('running');
+    finishBackground();
+    for (const executionId of [firstJobId, peerJobId])
+      expect(
+        (
+          await until(
+            () => storeA.getExecution(executionId),
+            (value) => value?.status === 'succeeded',
+          )
+        )?.status,
+      ).toBe('succeeded');
+    expect(starts).toEqual([firstJobId, peerJobId]);
+  } finally {
+    finishBackground();
+    await Promise.all([runtimeA.close(), runtimeB.close()]);
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 10000);

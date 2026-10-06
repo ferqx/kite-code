@@ -123,7 +123,7 @@ assert.deepEqual(
 );
 const sql = () => new DatabaseSync(join(path, 'desktop-private/data.sqlite'));
 let raw = sql();
-assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 5);
+assert.equal(raw.prepare('PRAGMA user_version').get()!.user_version, 6);
 assert.deepEqual(
   raw
     .prepare('PRAGMA table_info(file_recovery_intents)')
@@ -186,7 +186,9 @@ raw = sql();
 raw
   .prepare('UPDATE file_recovery_intents SET intent_id=? WHERE intent_id=?')
   .run('code-2', 'wrong-primary');
-raw.exec('DROP TABLE answer_intents; DROP TABLE file_recovery_intents; PRAGMA user_version=3;');
+raw.exec(
+  'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; PRAGMA user_version=3;',
+);
 raw.close();
 access = await acquire();
 data = openPrivateData(path, access);

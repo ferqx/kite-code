@@ -8,7 +8,7 @@ import { MaintenanceError } from './types';
 const digest = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
 /** DB3 caller bytes are UI assets. Content proofs never confer receipt or POST authority. */
-export function verifyDesktopCallerRows(db: Database): void {
+export function verifyDesktopCallerRows(db: Database, allowRunEffort = false): void {
   let bytes = 0;
   const records: unknown[] = [];
   try {
@@ -27,7 +27,7 @@ export function verifyDesktopCallerRows(db: Database): void {
       bytes += Buffer.byteLength(row.state);
       if (bytes > 16 * 1024 * 1024) throw Error();
       const record = JSON.parse(row.state);
-      verifyCallerIntentRecords([record]);
+      verifyCallerIntentRecords([record], false, allowRunEffort);
       const intent = record.intent as {
         request: Record<string, Json>;
         bodyDigest: string;
@@ -44,7 +44,7 @@ export function verifyDesktopCallerRows(db: Database): void {
         throw Error();
       records.push(record);
     }
-    verifyCallerIntentRecords(records);
+    verifyCallerIntentRecords(records, false, allowRunEffort);
   } catch {
     throw new MaintenanceError('backup_ui_invalid');
   }

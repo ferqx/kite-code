@@ -97,18 +97,32 @@ async function setup(serial = false) {
         input: { key: commandId, command },
       });
     const job = async (child: typeof a, commandId: string, _sessionId = 's') => {
-      const id = await until(
-        async () => {
-          const command = await child.client.getCommand(commandId);
-          const actionId = (command.receipt as { executionId?: string } | null)?.executionId;
-          if (!actionId) return undefined;
-          const action = await child.client.getExecution(actionId);
-          return (action.result as { details?: { executionId?: string } } | null)?.details
-            ?.executionId;
-        },
-        (value) => !!value,
-      );
-      return child.client.getExecution(id!);
+      let lastCommand: Awaited<ReturnType<typeof child.client.getCommand>> | undefined;
+      let lastAction: Execution | undefined;
+      try {
+        const id = await until(
+          async () => {
+            lastCommand = await child.client.getCommand(commandId);
+            const actionId = (lastCommand.receipt as { executionId?: string } | null)?.executionId;
+            lastAction = actionId ? await child.client.getExecution(actionId) : undefined;
+            return (lastAction?.result as { details?: { executionId?: string } } | null)?.details
+              ?.executionId;
+          },
+          (value) => !!value,
+        );
+        return child.client.getExecution(id!);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            phase: 'shell_job_reference',
+            commandId,
+            sessionId: _sessionId,
+            lastCommand,
+            lastAction,
+          }),
+        );
+        throw error;
+      }
     };
     const terminal = (child: typeof a, execution: Execution) =>
       until(

@@ -49,6 +49,20 @@ test.skipIf(process.platform !== 'darwin')(
       released = false,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let preserved: { core: string; native: string; config: string } | undefined;
+    const releaseOperation = <T>(operation: string, run: () => T): T => {
+      const started = Date.now();
+      try {
+        return run();
+      } finally {
+        console.log(
+          JSON.stringify({
+            stage: 'native_install_operation',
+            operation,
+            durationMs: Date.now() - started,
+          }),
+        );
+      }
+    };
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -80,8 +94,13 @@ test.skipIf(process.platform !== 'darwin')(
           return Response.json(value);
         }
         if (path === '/upgrade')
-          return Response.json(installNativeBundle({ bundleRoot: secondRoot, prefix }));
-        if (path === '/rollback') return Response.json(rollbackNativeBundle(prefix));
+          return Response.json(
+            releaseOperation('upgrade', () =>
+              installNativeBundle({ bundleRoot: secondRoot, prefix }),
+            ),
+          );
+        if (path === '/rollback')
+          return Response.json(releaseOperation('rollback', () => rollbackNativeBundle(prefix)));
         if (path === '/uninstall') {
           try {
             const bytes = {
@@ -89,7 +108,7 @@ test.skipIf(process.platform !== 'darwin')(
               native: hash(readFileSync(join(profile.profilePath, 'desktop-private/data.sqlite'))),
               config: hash(readFileSync(join(profile.profilePath, 'config.jsonc'))),
             };
-            uninstallNativeBundle(prefix);
+            releaseOperation('uninstall', () => uninstallNativeBundle(prefix));
             preserved = bytes;
             released = true;
             return Response.json({ removed: true });

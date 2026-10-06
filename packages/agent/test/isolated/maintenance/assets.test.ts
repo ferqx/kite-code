@@ -153,7 +153,7 @@ test('unknown or damaged private UI format and SQL journal fail closed', async (
       const db = new Database(path);
       if (kind === 'schema') db.exec('CREATE TABLE unexpected(id TEXT);');
       if (kind === 'application') db.exec('PRAGMA application_id=123;');
-      if (kind === 'version') db.exec('PRAGMA user_version=6;');
+      if (kind === 'version') db.exec('PRAGMA user_version=7;');
       db.close(true);
       if (kind === 'damaged') writeFileSync(path, 'not sqlite');
       if (kind === 'journal') writeFileSync(`${path}-journal`, 'owned incomplete', { mode: 0o600 });

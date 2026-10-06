@@ -20,7 +20,7 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.getByRole('heading', { name: 'Native A', exact: true }).waitFor();
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('first harmless ledger');
-  await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
+  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.getByText('NATIVE FIRST COMPLETED', { exact: true }).first().waitFor();
   await page.getByText('轮次：completed', { exact: true }).waitFor();
   await fetch(`${control}/release-job`);
@@ -59,7 +59,7 @@ try {
   assert.equal(await selected.getByText(/^Source /).count(), 0);
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), 2);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('second active checkpoint');
-  await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
+  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await fetch(`${control}/third-entered`);
   await context.getByRole('button', { name: '读取当前所选上下文' }).press('Enter');
   await selected.getByText(/Include target Run:/).waitFor();

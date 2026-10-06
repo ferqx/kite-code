@@ -43,9 +43,12 @@ export function TuiComposer({
     onFileQuery?.(requestKey ? (JSON.parse(requestKey)[0] as FileToken) : undefined);
   }, [requestKey, onFileQuery]);
   const filePaths = token && files?.key === token.key && files.phase === 'ready' ? files.paths : [];
-  const complete = () =>
-    filePaths.length
-      ? buffer.completeFile(filePaths[buffer.candidate % filePaths.length]!, token!.key)
+  const complete = (currentToken = token, currentPaths = filePaths) =>
+    currentPaths.length
+      ? buffer.completeFile(
+          currentPaths[buffer.candidate % currentPaths.length]!,
+          currentToken!.key,
+        )
       : buffer.complete();
   const update = () => {
     if (buffer.text !== value) onChange(buffer.text);
@@ -61,7 +64,24 @@ export function TuiComposer({
   useInput(
     (input, key) => {
       if (key.ctrl || isCtrlCBatch(input) || (key.meta && !key.return)) return;
-      const candidates = filePaths.length ? filePaths : buffer.candidates;
+      // Ink may deliver ordinary text and its final native Return in one read.
+      // Literal bracketed paste uses usePaste and never enters this branch.
+      const textReturn =
+        !key.return &&
+        !key.shift &&
+        !key.meta &&
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: recognize only plain text followed by one native Return.
+        /^[^\u0000-\u001f\u007f]+\r$/u.test(input);
+      if (textReturn) {
+        buffer.insert(input.slice(0, -1));
+        update();
+      }
+      const currentToken = buffer.fileToken;
+      const currentPaths =
+        currentToken && files?.key === currentToken.key && files.phase === 'ready'
+          ? files.paths
+          : [];
+      const candidates = currentPaths.length ? currentPaths : buffer.candidates;
       if (key.escape) {
         buffer.dismissed = true;
         render();
@@ -82,10 +102,10 @@ export function TuiComposer({
         render();
         return;
       }
-      if (key.return && !key.shift && !key.meta) {
-        if (token && !filePaths.length) return;
+      if ((key.return || textReturn) && !key.shift && !key.meta) {
+        if (currentToken && !currentPaths.length) return;
         if (candidates.length && buffer.text !== candidates[buffer.candidate]) {
-          complete();
+          complete(currentToken, currentPaths);
           update();
           return;
         }

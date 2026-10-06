@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '../../../src/platform/profile';
-import { nodeAssets } from './assets-fixture';
+import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
 const repository = new URL('../../../../../', import.meta.url).pathname;
 export async function nodeFileRecoveryAssets(
@@ -91,5 +91,6 @@ try {
     new Response(child.stderr).text(),
   ]);
   if (exit !== 0) throw Error(`owned_node_file_recovery_ui_failed: ${stderr}`);
+  retainLegacyDb5Fixture(profile);
   return JSON.parse(stdout) as { records: Record<string, unknown>[]; httpRequests: number };
 }

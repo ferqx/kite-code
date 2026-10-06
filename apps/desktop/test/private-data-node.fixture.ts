@@ -13,6 +13,7 @@ import {
   callerTextDigest,
   validateCallerRecord,
 } from '../electron/caller-journal';
+import { parseConfigurationRecord } from '../electron/configuration-journal';
 import { openPrivateData } from '../electron/private-data';
 import { acquireDesktopProfileAccess } from '../electron/profile-access';
 
@@ -242,7 +243,7 @@ if (mode === 'denied') {
     const privatePath = join(profile, 'desktop-private/data.sqlite');
     const legacy = new DatabaseSync(privatePath);
     legacy.exec(
-      'DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; DROP TABLE recovery_intents; PRAGMA user_version=1',
+      'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; DROP TABLE recovery_intents; PRAGMA user_version=1',
     );
     legacy.close();
     data = await open();
@@ -252,7 +253,7 @@ if (mode === 'denied') {
     data.close();
     const version2 = new DatabaseSync(privatePath);
     version2.exec(
-      'DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; PRAGMA user_version=2',
+      'DROP TABLE configuration_intents; DROP TABLE model_routes; DROP TABLE answer_intents; DROP TABLE file_recovery_intents; DROP TABLE caller_intents; PRAGMA user_version=2',
     );
     version2.close();
     data = await open();
@@ -375,6 +376,138 @@ if (mode === 'denied') {
       .run(intactCaller, 'caller-original');
     callerCorrupt.close();
     data = await open();
+    const providerOriginal = parseConfigurationRecord({
+      kind: 'provider',
+      input: {
+        expectedStoreId: scope.storeId,
+        commandId: 'provider-original',
+        expectedReadSet: {
+          userEtag: 'a'.repeat(64),
+          workspaceEtag: null,
+          explicitDigest: 'b'.repeat(64),
+          effectiveDigest: 'c'.repeat(64),
+        },
+        operation: {
+          provider: 'openai',
+          connectionId: null,
+          baseURL: 'https://provider.invalid/v1',
+          modelNames: ['模型雪🙂é'],
+          credential: 'replace',
+        },
+      },
+      state: {
+        kind: 'settings.providers.submission',
+        commandId: 'provider-original',
+        storeId: scope.storeId,
+        observationId: 1,
+        operation: {
+          provider: 'openai',
+          connectionId: null,
+          baseURL: 'https://provider.invalid/v1',
+          modelNames: ['模型雪🙂é'],
+          credential: 'replace',
+        },
+        phase: 'unknown',
+      },
+    });
+    if (providerOriginal.kind !== 'provider') throw Error('actual_provider_record');
+    data.saveConfiguration(providerOriginal);
+    data.rememberModelRoute(scope.storeId, scope.rootSessionId, 'model-original');
+    data.rememberModelRoute('other-store', scope.rootSessionId, 'model-other');
+    assert.throws(
+      () =>
+        data.saveConfiguration({
+          ...providerOriginal,
+          input: { ...providerOriginal.input, secret: 'never-persist-key' },
+        } as never),
+      /draft_storage_unavailable/,
+    );
+    data.close();
+    data = await open();
+    assert.deepEqual(data.configurations(), [providerOriginal]);
+    assert.equal(data.modelRoute(scope.storeId, scope.rootSessionId), 'model-original');
+    assert.equal(data.modelRoute('other-store', scope.rootSessionId), 'model-other');
+    assert.equal(data.modelRoute(scope.storeId, 'other-session'), undefined);
+    assert.throws(
+      () =>
+        data.saveConfiguration({
+          ...providerOriginal,
+          input: {
+            ...providerOriginal.input,
+            expectedReadSet: {
+              ...providerOriginal.input.expectedReadSet,
+              effectiveDigest: 'd'.repeat(64),
+            },
+          },
+        }),
+      /configuration_storage_unavailable/,
+    );
+    data.saveConfiguration({
+      ...providerOriginal,
+      state: { ...providerOriginal.state, phase: 'applied' },
+    });
+    assert.deepEqual(data.configurations(), []);
+    data.saveConfiguration(providerOriginal);
+    data.close();
+    let configurationDb = new DatabaseSync(privatePath);
+    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 6);
+    const originalConfiguration = configurationDb
+      .prepare('SELECT state FROM configuration_intents WHERE command_id=?')
+      .get('provider-original')!.state as string;
+    assert.equal(originalConfiguration.includes('"secret"'), false);
+    assert.equal(originalConfiguration.includes('never-persist-key'), false);
+    configurationDb
+      .prepare('UPDATE configuration_intents SET state=? WHERE command_id=?')
+      .run('{bad', 'provider-original');
+    configurationDb.close();
+    const brokenConfigurationBytes = readFileSync(privatePath);
+    data = await open();
+    assert.throws(() => data.configurations(), /draft_storage_unavailable/);
+    assert.throws(
+      () =>
+        data.saveConfiguration({
+          ...providerOriginal,
+          input: { ...providerOriginal.input, commandId: 'replacement' },
+          state: { ...providerOriginal.state, commandId: 'replacement' },
+        }),
+      /draft_storage_unavailable/,
+    );
+    data.close();
+    assert.deepEqual(readFileSync(privatePath), brokenConfigurationBytes);
+    configurationDb = new DatabaseSync(privatePath);
+    configurationDb
+      .prepare('UPDATE configuration_intents SET state=? WHERE command_id=?')
+      .run(originalConfiguration, 'provider-original');
+    const oldTables = [
+      'drafts',
+      'creations',
+      'recovery_intents',
+      'caller_intents',
+      'file_recovery_intents',
+      'answer_intents',
+    ];
+    const oldRows = oldTables.map((table) =>
+      configurationDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+    );
+    configurationDb.exec(
+      'DROP TABLE configuration_intents; DROP TABLE model_routes; PRAGMA user_version=5',
+    );
+    configurationDb.close();
+    data = await open();
+    assert.deepEqual(data.configurations(), []);
+    assert.equal(data.modelRoute(scope.storeId, scope.rootSessionId), undefined);
+    assert.deepEqual(data.callers()[0]!.intent, caller.intent);
+    data.close();
+    configurationDb = new DatabaseSync(privatePath);
+    assert.equal(configurationDb.prepare('PRAGMA user_version').get()!.user_version, 6);
+    assert.deepEqual(
+      oldTables.map((table) =>
+        configurationDb.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+      ),
+      oldRows,
+    );
+    configurationDb.close();
+    data = await open();
     data.close();
     let corrupt = new DatabaseSync(privatePath);
     const intact = String(
@@ -405,7 +538,7 @@ if (mode === 'denied') {
     data.close();
     assert.deepEqual(readFileSync(privatePath), unknownBytes);
     raw = new DatabaseSync(privatePath);
-    raw.exec('PRAGMA user_version=5');
+    raw.exec('PRAGMA user_version=6');
     raw.prepare('UPDATE drafts SET content=? WHERE id=?').run('{}', draft.id);
     raw.close();
     const damagedRowBytes = readFileSync(privatePath);

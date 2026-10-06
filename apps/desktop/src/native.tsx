@@ -21,7 +21,9 @@ import { nativeTextIntent } from './native-input';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
+import { type NativeModelChoice, NativeModelPicker } from './native-model-picker';
 import { NativeModelSettings } from './native-model-settings';
+import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeSessionPanel } from './native-sessions';
 
@@ -49,6 +51,15 @@ export function NativeDesktop() {
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
   const [planMode, setPlanMode] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<'models' | 'providers'>('models');
+  const [settingsRevision, setSettingsRevision] = useState(0);
+  const [, choiceChanged] = useState(0);
+  const modelChoices = useRef(new Map<string, NativeModelChoice>());
+  const [resolvedChoice, setResolvedChoice] = useState<{
+    identity: string;
+    choice?: NativeModelChoice;
+    ready: boolean;
+  }>();
   const planModes = useRef(new Map<string, boolean>());
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -246,6 +257,25 @@ export function NativeDesktop() {
         permissions: historyState.phase === 'complete' ? state.selection.permissions : undefined,
       }
     : undefined;
+  const choiceKey = JSON.stringify([
+    selection?.storeId,
+    selection?.session.workspaceId,
+    selection?.session.id,
+  ]);
+  const choiceIdentity = JSON.stringify([
+    state?.generation,
+    selection?.storeId,
+    selection?.session.id,
+    selection?.viewSelection,
+  ]);
+  const activeInputRun = selection?.runs.find((run) => run.isActive);
+  const needsNextModel =
+    !activeInputRun ||
+    planMode ||
+    ['context.compress', 'context.compression.reset'].includes(
+      selection?.activeCommand?.kind ?? '',
+    );
+  const nextModelReady = resolvedChoice?.identity === choiceIdentity && resolvedChoice.ready;
   const attachmentGeneration = state?.generation,
     attachmentSessionId = selection?.session.id,
     attachmentView = selection?.viewSelection,
@@ -319,12 +349,41 @@ export function NativeDesktop() {
       <h1>kite</h1>
       <p>原生调用者迁移切片。完整设置、资料与发行能力仍在迁移中。</p>
       {generation.current > 0 && (
-        <NativeModelSettings
-          bridge={bridge}
-          generation={generation.current}
-          selection={selection}
-          submissions={state?.modelSettingsSubmissions ?? []}
-        />
+        <section aria-label="设置">
+          <nav aria-label="设置分类">
+            <button
+              type="button"
+              aria-pressed={settingsPage === 'providers'}
+              onClick={() => setSettingsPage('providers')}
+            >
+              提供商
+            </button>
+            <button
+              type="button"
+              aria-pressed={settingsPage === 'models'}
+              onClick={() => setSettingsPage('models')}
+            >
+              模型
+            </button>
+          </nav>
+          {settingsPage === 'providers' ? (
+            <NativeProviderSettings
+              bridge={bridge}
+              generation={generation.current}
+              selection={selection}
+              submissions={state?.providerSettingsSubmissions ?? []}
+              onSaved={() => setSettingsRevision((value) => value + 1)}
+            />
+          ) : (
+            <NativeModelSettings
+              bridge={bridge}
+              generation={generation.current}
+              selection={selection}
+              submissions={state?.modelSettingsSubmissions ?? []}
+              onSaved={() => setSettingsRevision((value) => value + 1)}
+            />
+          )}
+        </section>
       )}
       {error && <p role="alert">{error}</p>}
       <section aria-label="工作区与会话">
@@ -635,11 +694,22 @@ export function NativeDesktop() {
                       commandId = crypto.randomUUID(),
                       submittedText = draft,
                       submittedRevision = draftRevision.current;
+                    const intent = nativeTextIntent(
+                      selection,
+                      commandId,
+                      draft,
+                      planMode,
+                      resolvedChoice?.identity === choiceIdentity
+                        ? resolvedChoice.choice
+                        : undefined,
+                    );
+                    if (intent.kind !== 'input.steer' && !nextModelReady)
+                      throw Error('model_selection_unavailable');
                     const value = await bridge.request({
                       method: 'submit',
                       generation: current,
                       sessionId,
-                      intent: nativeTextIntent(selection, commandId, draft, planMode),
+                      intent,
                     });
                     if (
                       nonce === viewIntent.current &&
@@ -662,6 +732,23 @@ export function NativeDesktop() {
                   });
                 }}
               >
+                <NativeModelPicker
+                  bridge={bridge}
+                  generation={state.generation}
+                  selection={selection}
+                  revision={String(settingsRevision)}
+                  value={modelChoices.current.get(choiceKey) ?? {}}
+                  onChange={(choice) => {
+                    modelChoices.current.set(choiceKey, choice);
+                    choiceChanged((value) => value + 1);
+                  }}
+                  onReady={(ready, choice) =>
+                    setResolvedChoice((previous) => {
+                      const value = { identity: choiceIdentity, choice, ready };
+                      return JSON.stringify(previous) === JSON.stringify(value) ? previous : value;
+                    })
+                  }
+                />
                 <label>
                   当前会话私有草稿
                   <textarea
@@ -726,7 +813,8 @@ export function NativeDesktop() {
                     pending ||
                     !draft.trim() ||
                     historyState.phase !== 'complete' ||
-                    selection.permissionUnavailable
+                    selection.permissionUnavailable ||
+                    (needsNextModel && !nextModelReady)
                   }
                 >
                   {selection.runs.some((run) => run.isActive)

@@ -155,8 +155,8 @@ function copy(source: string, destination: string) {
     chmodSync(destination, stat.mode & 0o777);
   } else fail('copy_unsupported');
 }
-/** Validate the entire owned install tree before pointer publication or deletion. */
-function inventory(root: string) {
+/** Discover the closed install tree; content validation may follow acquiring every use lease. */
+function inventory(root: string, verifyContent = true) {
   installed(root);
   regular(join(root, '.install.lock'), 0o600);
   if (lstatSync(join(root, '.install.lock')).size !== 0) fail('install_file_unsafe');
@@ -191,7 +191,7 @@ function inventory(root: string) {
   }
   directory(join(root, 'releases'));
   const entries = readdirSync(join(root, 'releases'));
-  const candidates = entries.filter((name) => pattern.test(name));
+  const candidates = entries.filter((name) => pattern.test(name)).sort();
   if (
     !candidates.includes(selection.current) ||
     (selection.previous && !candidates.includes(selection.previous))
@@ -199,7 +199,10 @@ function inventory(root: string) {
     fail('active_invalid');
   for (const name of entries) {
     if (pattern.test(name)) {
-      if (verifyNativeRuntimeBundle(join(root, 'releases', name)).digest !== name)
+      const candidate = join(root, 'releases', name);
+      directory(candidate);
+      directory(join(candidate, 'terminal'));
+      if (verifyContent && verifyNativeRuntimeBundle(candidate).digest !== name)
         fail('candidate_changed');
     } else if (/^\.use-[a-f0-9]{64}\.lock$/.test(name) && candidates.includes(name.slice(5, -5))) {
       if (regular(join(root, 'releases', name), 0o600).size !== 0) fail('install_file_unsafe');
@@ -340,14 +343,22 @@ export function uninstallNativeBundle(prefix: string): void {
   try {
     if (!sameCLIRegistration(owned, readCLIRegistration(root, true)))
       throw Error('cli_registration_changed');
-    const { candidates } = inventory(root);
-    for (const id of candidates.sort()) {
+    const original = inventory(root, false);
+    for (const id of original.candidates) {
       const candidate = join(root, 'releases', id);
       uses.push(acquireArtifactAccess({ root: candidate, mode: 'exclusive' }));
       uses.push(acquireArtifactAccess({ root: join(candidate, 'terminal'), mode: 'exclusive' }));
-      if (verifyNativeRuntimeBundle(candidate).digest !== id) fail('candidate_changed');
     }
-    inventory(root);
+    for (const id of original.candidates)
+      if (verifyNativeRuntimeBundle(join(root, 'releases', id)).digest !== id)
+        fail('candidate_changed');
+    const checked = inventory(root, false);
+    if (
+      checked.selection.current !== original.selection.current ||
+      checked.selection.previous !== original.selection.previous ||
+      checked.candidates.join(',') !== original.candidates.join(',')
+    )
+      fail('install_changed');
     unregisterNativeCLIWhileLocked(root, locks);
     removed = join(dirname(root), `.native-uninstall-${randomUUID()}`);
     renameSync(root, removed);

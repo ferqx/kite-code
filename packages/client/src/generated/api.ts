@@ -1111,6 +1111,7 @@ export type FollowUpCommandRequest = {
   afterRunId: string | null;
   contextSelectionId: string;
   modelId?: string;
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   selectedSkills?: Array<string>;
   extensionInputs?: Array<{
     extensionId: string;
@@ -1314,6 +1315,47 @@ export type ModelSettingsRequest = {
         reasoningEffort: ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max') | null;
       };
 };
+export type ProviderSettingsView = {
+  storeId: string;
+  readSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  } | null;
+  providers: Array<{
+    id: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    label: string;
+    defaultBaseURL: string;
+    requiresCredential: boolean;
+    connections: Array<{
+      id: string;
+      baseURL: string;
+      hasCredential: boolean;
+      modelNames: Array<string>;
+      canWrite: boolean;
+    }>;
+  }>;
+  errors: Array<string>;
+};
+export type ProviderSettingsRequest = {
+  expectedStoreId: string;
+  commandId: string;
+  expectedReadSet: {
+    userEtag: string;
+    workspaceEtag: string | null;
+    explicitDigest: string;
+    effectiveDigest: string;
+  };
+  operation: {
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    connectionId: string | null;
+    baseURL: string;
+    modelNames: Array<string>;
+    credential: 'keep' | 'replace' | 'none';
+  };
+  secret?: string;
+};
 export type ConfigurationReadQuery = { storeId?: string; workspaceId?: string };
 export type HostMutationQuery = { storeId: string };
 type ConfigurationView___schema0 =
@@ -1377,7 +1419,8 @@ export type HostMutation = {
     | 'config.repair'
     | 'credential.put'
     | 'credential.revoke'
-    | 'model_settings.update';
+    | 'model_settings.update'
+    | 'provider_settings.update';
   modelSettings?: {
     expectedReadSet: {
       userEtag: string;
@@ -1396,12 +1439,41 @@ export type HostMutation = {
             | null;
         };
   };
+  providerSettings?: {
+    expectedReadSet: {
+      userEtag: string;
+      workspaceEtag: string | null;
+      explicitDigest: string;
+      effectiveDigest: string;
+    };
+    operation: {
+      provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+      connectionId: string | null;
+      baseURL: string;
+      modelNames: Array<string>;
+      credential: 'keep' | 'replace' | 'none';
+    };
+  };
   state: 'pending' | 'applied' | 'failed' | 'outcome_unknown';
   receipt:
     | Record<string, never>
     | { status: 'applied'; etag: string }
+    | {
+        status: 'applied';
+        etag: string;
+        credentialState: 'unchanged' | 'stored';
+        configurationState: 'published';
+        opaqueRef?: string;
+      }
     | { status: 'applied'; opaqueRef: string; persistence: 'os' | 'temporary' }
-    | { status: 'failed' | 'outcome_unknown'; code: string };
+    | { status: 'failed' | 'outcome_unknown'; code: string }
+    | {
+        status: 'failed' | 'outcome_unknown';
+        code: string;
+        credentialState: 'unchanged' | 'stored' | 'outcome_unknown';
+        configurationState: 'not_attempted' | 'outcome_unknown';
+        opaqueRef?: string;
+      };
 };
 export type ServiceLifecycle = {
   lifecycleVersion: 1;
@@ -1691,6 +1763,7 @@ export type StartCommandRequest = {
   kind: 'run.start';
   content: string;
   modelId?: string;
+  reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   selectedSkills?: Array<string>;
   extensionInputs?: Array<{
     extensionId: string;
@@ -2373,6 +2446,7 @@ export type CommandRequest =
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
+      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
       selectedSkills?: Array<string>;
       extensionInputs?: Array<{
         extensionId: string;
@@ -2388,6 +2462,7 @@ export type CommandRequest =
       kind: 'run.start';
       content: string;
       modelId?: string;
+      reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
       selectedSkills?: Array<string>;
       extensionInputs?: Array<{
         extensionId: string;
@@ -2590,6 +2665,7 @@ export type PendingInputPage = {
           afterRunId: string | null;
           contextSelectionId: string;
           modelId?: string;
+          reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
           selectedSkills?: Array<string>;
           extensionInputs?: Array<{
             extensionId: string;

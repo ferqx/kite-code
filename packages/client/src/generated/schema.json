@@ -6008,6 +6008,10 @@
         "minLength": 1,
         "maxLength": 256
       },
+      "reasoningEffort": {
+        "type": "string",
+        "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+      },
       "selectedSkills": {
         "maxItems": 256,
         "type": "array",
@@ -6958,7 +6962,6 @@
         ]
       },
       "models": {
-        "maxItems": 512,
         "type": "array",
         "items": {
           "type": "object",
@@ -7158,6 +7161,212 @@
             "additionalProperties": false
           }
         ]
+      }
+    },
+    "required": ["expectedStoreId", "commandId", "expectedReadSet", "operation"],
+    "additionalProperties": false
+  },
+  "ProviderSettingsView": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "readSet": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "userEtag": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "workspaceEtag": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "explicitDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "effectiveDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+            "additionalProperties": false
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "providers": {
+        "minItems": 4,
+        "maxItems": 4,
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "enum": ["openai", "deepseek", "compatible", "ollama"]
+            },
+            "label": {
+              "type": "string"
+            },
+            "defaultBaseURL": {
+              "type": "string"
+            },
+            "requiresCredential": {
+              "type": "boolean"
+            },
+            "connections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "baseURL": {
+                    "type": "string"
+                  },
+                  "hasCredential": {
+                    "type": "boolean"
+                  },
+                  "modelNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "canWrite": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["id", "baseURL", "hasCredential", "modelNames", "canWrite"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["id", "label", "defaultBaseURL", "requiresCredential", "connections"],
+          "additionalProperties": false
+        }
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,128}$"
+        }
+      }
+    },
+    "required": ["storeId", "readSet", "providers", "errors"],
+    "additionalProperties": false
+  },
+  "ProviderSettingsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "expectedStoreId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "commandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "object",
+        "properties": {
+          "userEtag": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "workspaceEtag": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explicitDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "effectiveDigest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+        "additionalProperties": false
+      },
+      "operation": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["openai", "deepseek", "compatible", "ollama"]
+          },
+          "connectionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "baseURL": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "modelNames": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          "credential": {
+            "type": "string",
+            "enum": ["keep", "replace", "none"]
+          }
+        },
+        "required": ["provider", "connectionId", "baseURL", "modelNames", "credential"],
+        "additionalProperties": false
+      },
+      "secret": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 65536
       }
     },
     "required": ["expectedStoreId", "commandId", "expectedReadSet", "operation"],
@@ -7585,7 +7794,8 @@
           "config.repair",
           "credential.put",
           "credential.revoke",
-          "model_settings.update"
+          "model_settings.update",
+          "provider_settings.update"
         ]
       },
       "modelSettings": {
@@ -7694,6 +7904,82 @@
         "required": ["expectedReadSet", "operation"],
         "additionalProperties": false
       },
+      "providerSettings": {
+        "type": "object",
+        "properties": {
+          "expectedReadSet": {
+            "type": "object",
+            "properties": {
+              "userEtag": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "workspaceEtag": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "explicitDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "effectiveDigest": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+            "additionalProperties": false
+          },
+          "operation": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["openai", "deepseek", "compatible", "ollama"]
+              },
+              "connectionId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "baseURL": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "modelNames": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              },
+              "credential": {
+                "type": "string",
+                "enum": ["keep", "replace", "none"]
+              }
+            },
+            "required": ["provider", "connectionId", "baseURL", "modelNames", "credential"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["expectedReadSet", "operation"],
+        "additionalProperties": false
+      },
       "state": {
         "type": "string",
         "enum": ["pending", "applied", "failed", "outcome_unknown"]
@@ -7718,6 +8004,33 @@
               }
             },
             "required": ["status", "etag"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "applied"
+              },
+              "etag": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "credentialState": {
+                "type": "string",
+                "enum": ["unchanged", "stored"]
+              },
+              "configurationState": {
+                "type": "string",
+                "const": "published"
+              },
+              "opaqueRef": {
+                "type": "string",
+                "pattern": "^credential:[0-9a-f-]{36}$"
+              }
+            },
+            "required": ["status", "etag", "credentialState", "configurationState"],
             "additionalProperties": false
           },
           {
@@ -7752,6 +8065,33 @@
               }
             },
             "required": ["status", "code"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["failed", "outcome_unknown"]
+              },
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z0-9_]{1,128}$"
+              },
+              "credentialState": {
+                "type": "string",
+                "enum": ["unchanged", "stored", "outcome_unknown"]
+              },
+              "configurationState": {
+                "type": "string",
+                "enum": ["not_attempted", "outcome_unknown"]
+              },
+              "opaqueRef": {
+                "type": "string",
+                "pattern": "^credential:[0-9a-f-]{36}$"
+              }
+            },
+            "required": ["status", "code", "credentialState", "configurationState"],
             "additionalProperties": false
           }
         ]
@@ -9431,6 +9771,10 @@
       "modelId": {
         "type": "string",
         "maxLength": 256
+      },
+      "reasoningEffort": {
+        "type": "string",
+        "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
       },
       "selectedSkills": {
         "maxItems": 256,
@@ -13494,6 +13838,10 @@
             "minLength": 1,
             "maxLength": 256
           },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+          },
           "selectedSkills": {
             "maxItems": 256,
             "type": "array",
@@ -13576,6 +13924,10 @@
           "modelId": {
             "type": "string",
             "maxLength": 256
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
           },
           "selectedSkills": {
             "maxItems": 256,
@@ -14977,6 +15329,10 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 256
+                    },
+                    "reasoningEffort": {
+                      "type": "string",
+                      "enum": ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
                     },
                     "selectedSkills": {
                       "maxItems": 256,

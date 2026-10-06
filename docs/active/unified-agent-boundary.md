@@ -87,9 +87,11 @@ TUI 未提交文本由可信 CLI 宿主保存到所选 profile 的 `ui/tui.json`
 
 [TUI 已加载文本导出](../../packages/ui/src/tui/export.ts)冻结当前原 Store/Session 与展示正文；完整正文只使用已经验证加载的内容，未读正文保预览并标明不完整，不额外读取或执行。可信 CLI 宿主从已选择 profile 推导配置目录，以0600独占创建唯一 Markdown 文件，UI 不提供路径；迟到结果不发布到新会话。
 
+共享 TUI 主 Composer 对普通文字加一个尾 CR 的合并 native 输入，先保存原草稿再沿原 Return 处理；候选按更新后的 token 核对，待完成文件引用不发送，第一次补全后仍需另一次提交。literal bracketed paste 独立保原 CRLF/Ctrl，不触发该提交；准确目标、stale/unknown 与持久申请仍由原 controller/host 门禁拥有。实现与有限实际 Ink/导出 PTY 范围由 [TUI owner](../../packages/ui/src/tui/README.md)维护。
+
 [显式离线备份](../../packages/agent/src/maintenance/README.md)单独取得数据单元外稳定 profile-use 排他锁。Core与Desktop原DB/实际WAL完整配对复制至本次私有scratch，SQL只打开副本；每次复制及SQL前后核原配对presence、完整proof和实体，缺失副文件保持缺失，scratch不进入发布树。SQLite候选与引用媒体完整核验后才发布ready；v2另按独立时间采集原config字节和经闭合格式验证的Desktop UI一致副本，保原草稿/创建身份，不承诺跨介质同一瞬间原子。独立凭据vault、未采集宿主私有资产和协调锁不包含，配置原文自身可能含敏感内容，保持私有权限；TUI真实未提交文本亦按v1闭合JSON采集，保原Store/Workspace/Session、Decimal64和完整文本，不重绑旧草稿。源码/leaf与完整包备份已验证；Worker在释放profile使用锁前必须严格关闭SQLite及其缓存语句，普通close不足以证明数据库文件不再变化。私有副本不放宽关闭/排他边界，也不证明非合作外部writer被阻止；恢复与平台资格仍按实施进度记录。
 
-Native 的 `configuration_management` 通过公共 Client 固定原 Store/generation、命令与 CAS，只发一次 mutation；丢回应和无效回执只按原 ID 查询。持久 HostMutation 仅投影安全 scope/workspace/ifMatch/opaque结果，不返回秘密或内部 request digest。无 Runtime 的诊断连接只允许用户配置读取并保留错误；Browser 不增加管理权。Native 模型面板由 main 冻结观察并派生项目范围，renderer 只有安全模型事实，专门模型设置 API 服务端验证启禁/default、有效配置及原读取集，普通 JSONC 保存仍允许暂时不可路由的期望配置。Native 写入消费者已在真实两模型窗口验证旧轮次A/下一轮次B、物理回执丢失一次POST/原GET、原读取集冲突与冷读零额外Model；main固定原scope/readSet，renderer不取得内部配置权威。远端模型发现未在此范围内。
+Native 的 `configuration_management` 通过公共 Client 固定原 Store/generation、命令与 CAS，只发一次 mutation；丢回应和无效回执只按原 ID 查询。持久 HostMutation 仅投影安全 scope/workspace/ifMatch/opaque结果，不返回秘密或内部 request digest。无 Runtime 的诊断连接只允许用户配置读取并保留错误；Browser 不增加管理权。Native 模型面板由 main 冻结观察并派生项目范围，renderer 只有安全模型事实，专门模型设置 API 服务端验证启禁/default、有效配置及原读取集，普通 JSONC 保存仍允许暂时不可路由的期望配置。Native 写入消费者已在真实两模型窗口验证旧轮次A/下一轮次B、物理回执丢失一次POST/原GET、原读取集冲突与冷读零额外Model；main固定原scope/readSet，renderer不取得内部配置权威。后续完整 Native Provider/下一次模型能力已接公共四family设置与显式空名称发现，见[Native owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。发现只证明目标列表响应，不代表远端可执行资格。
 
 显式恢复生成新 Store，旧origin与已完成receipt保留，备份中的未完成工作不得自动执行。切换全程持同一外部排他锁，先保存原目录再发布候选；未完成journal阻止普通入口建库。核实完成/回退必须匹配观察restoreId/digest及准确目录内容/Store，不能靠路径存在猜测。已交付publication和七个强杀窗口；新 Store 准入和封存原来源现分别校验，原 Model/Artifact/压缩/child/Fork/导出完整读取及新明确 Run 已经真实恢复复验；旧来源执行和新引用发布守卫保持。离线 CLI 直接调用维护 leaf，准确 Store 和明确数据回退确认不可省略，journal 核实另需原 ID/digest/decision；不启动 Service/Provider。配置/Desktop UI采集已由真实owner及携资产的强杀窗口验证；Node独立使用锁的真实窗口已核Service强杀后仍busy、所属UI退出/Node强杀后释放、其他profile不受影响；TUI原文资产及七个强杀窗口已纳入验证；GC、引擎和平台资格继续闭合，不能据目录切换成功宣称完整恢复。[维护owner](../../packages/agent/src/maintenance/README.md)维护准确范围。
 
@@ -188,6 +190,8 @@ UI只持可选connection port和原读取代次；Host用公开完整Workspace�
 
 准确原Action的最终结果提交失败时，Command.applied只保原受理事实。Runtime每个accepted普通Command前由Store短事务观察原receipt主Execution仍planned/dispatching/running的真实身份，停止本Session普通派发并保accepted请求；重复同instance owner与后台onActivity不绕过。该观察不恢复owner、补result或重派原effect，不把合法detached Job当未提交Action，也不改变已持久terminal outcome_unknown的原恢复边界。原GET和owned关闭继续，合同与[真实故障测试](../../packages/agent/test/isolated/execution/action-result-boundary.test.ts)由[Store owner](../../packages/agent/src/storage/README.md#未提交普通-action-的串行边界)维护。
 
+已登记根 Session 的合法 hot detached operation 持有原 owner 时，空命令列表继续保留有限 intake轮询；peer新接纳的同根Session Action仍由原 pump核上述守卫，再返回实际子操作引用。资源等待只延迟 Job启动，不借 intake推进放宽permit、generation或cold恢复。实现、确定性空轮询/peer顺序与本机实际Shell资格由[Runtime owner](../../packages/agent/README.md)维护，跨 child Session未据此取得新资格。
+
 第八/九/十一轮与首次有限诊断曾在原30s用例期限内超时，需精确监督本次owned child退出。两条真实fixture改为直接await同一个原五秒waiter、再断言实际wait_timeout后通过，正常SQLite回复与owned close均确认；Runtime/SQLite生产、业务断言和期限保持。这个对照限定在两条fixture的pending Promise匹配入口，纯timer和Worker对照未复现，底层原因仍未知。真实失败、监督清理边界和复验保在总体进度。
 
 ## 当前发布与资格工具
@@ -195,3 +199,6 @@ UI只持可选connection port和原读取代次；Host用公开完整Workspace�
 根 `agent/tui/prod:tui` 固定完整新 Terminal，`desktop` 固定完整 Native，`server` 显式复用新默认 daemon/Web。八 workspace 的 build/typecheck 与统一默认计划共用同一发现源；root 仅有限脚本安全测试及新公开制品场景。静态守卫检查 root/workspace scripts、递归 aliases、CI run 与实际 import 闭包，包含四个标准/Native CLI/TUI entry；计算模块的 fixture 仍记 pending，不把静态检查当运行资格。
 
 Terminal 与 Native 分别固定真实 Bun/Node SQLite，包内 selection 在 Store/maintenance/Worker 开库前生效；损坏选定资产不回退开发库。Windows ordinary Workspace 配置与 private Profile/协调/数据库角色分开，既有 ACL 不自动修复；实际 native Windows 仍待 CI 证据。三平台 workflow 保原检查名称、固定 Bun/action、源 head 与 clean-source 约束。平台诊断、bounded soak 和源码外制品通过均不等于完整 Shell/confinement、正式 soak 或发布者认证；formal verifier 保持拒绝缺资格。当前边界见[release control](release-control.md)、[Terminal owner](../../apps/cli/docs/terminal-release.md)与[Native owner](../../apps/desktop/docs/native-release.md)。
+
+
+Native Provider/Model 的完整设置消费者由 Main 冻结原观察，热秘密只传一次公共 Provider POST；原非秘密申请先落 Desktop DB6，再允许本次提交，冷记录只显式原 GET。Service/Core composite marker 固定原 readSet/operation/身份，vault保存与JSONC发布分别保留已知/未知结果；stored-unpublished 的原 revoke handle 只向认证SDK开放，renderer不获该authority。新模型disabled，其他连接保留，完整目录不按512项裁切。输入区每Session的下一次model/页面临时effort经真实HTTP原命令进入冻结root快照和实际wire，active steer保持文本语义、child自选preset。DB6离线资产用专属manifest14，旧版本grammar不扩大，详见[Service owner](../../apps/service/README.md#native-provider-与下一次模型绑定)、[维护 owner](../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。macOS默认OSvault/受控loopback真实Native窗口已验，尚不外推生产远端、MCP窗口或其他平台。

@@ -152,6 +152,10 @@ Native 有独立分页 Context reader，因此仅此宿主以 `readContextOnSele
 
 2026-10-02 在 macOS/Bun 1.4.2 当前工作树执行 `bun test apps/desktop/test packages/ui/test/permissions-dom.test.tsx`，最终完整组合为 34 文件、76 项、509 条 Bun 断言，全部通过（约 111 秒）。包括 >17MiB 原作用域输入/输出、Context、授权、私有冷草稿、管理、压缩、活动刷新和新增长历史窗口；各真实窗口仍独立核对所属 Service 退出。首轮组合曾失败于暂时历史加载清除 Context 事实，以及 fixture 在 disabled 按钮直接发送 Enter；前者已修复为 loading 保留只读事实，后者等待原 actionability 后继续原键盘动作，原断言和期限保持。Desktop typecheck/build、11 个归属代码文件 Biome、文档结构/影响及测试归属/统一边界检查通过。该结果不改变正式入口和跨平台资格的未完成状态。
 
+当前输入模型选择要求实际 enabled/configured 目录。[原 Context Service 夹具](test/native-context-service.fixture.ts)为其固定 adapter 提供准确 Store/Workspace 的只读 `fixed` 目录，配置修改入口明确拒绝；[窗口 driver](test/native-context-electron.fixture.ts)两次新轮次等待按钮实际可点击。原四请求、一次 ledger 效果、idle Rewind、active Include 与下一 Model checkpoint 的准确来源、无 Job 重放、页面刷新零新增请求和所属 PID 退出断言保持。该夹具适配不改变生产模型就绪门禁；有限窗口1项4条Bun断言及15条Node断言通过，当前完整默认结果另见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
+[后页 child](test/interaction-pages-child.fixture.ts)和[持久答复 child](test/answer-journal-child.fixture.ts)按同一原 Store/Workspace 的只读目录装配，两个原 driver 的首次发送等待实际按钮可点击；模型事件、权限与所有原期限保持。原后页窗口复验仍完成40个原 Job、40次效果和零取消，原持久答复窗口仍核原全文/身份/digest、POST前SQLite提交、丢原回执、两个Main生命周期、冷原GET两次/POST零次与effect once。源码与新回归符合当前目录合同；第六轮后页现场曾显示run admitted，不能将有限复验通过追认为旧0卡的完整因果，详细范围见进度。
+
 模型设置的安全读取由 [main 配置观察](electron/configuration.ts) 与 [模型面板](src/native-model-settings.tsx) 直接消费公开 NativeClient `getModelSettings`。封闭 IPC 只允许用户或当前项目两种作用域；项目 Workspace 由 main 对当前 Session 的实际 view 推导，renderer 不能提供路径或 Workspace 权威。main 冻结原 Store、选择代次和配置观察，关闭或切换只中止自身 GET，迟到原读取不能进入新选择。renderer 仅收到模型标识、Provider、模型名称、期望启禁、期望默认模型和安全诊断；配置中的 URL、credentialRef、原 snapshot 与 MCP 字段不进入这个面板，配置列表不代表 live 模型发现或 MCP inventory。
 
 模型启禁与默认选择通过专门 `updateModelSettings` 服务业务端口提交；默认模型不能直接禁用，默认选择必须来自已启用且配置可用的模型。main 保存原 Store、作用域、完整读取集和 commandId，最多保留128项原意图；重复在途共享请求，同作用域存在结果未知则阻止新保存。关闭或切换只取消读取，不取消已保存意图；未知回执仅原 commandId/Store 查询，不自动重发。回执需匹配原 scope/readSet/operation，应用成功才重读原面板，迟到旧结果不覆盖新选择。renderer 显示原提交及其 applied/failed/unknown，冲突后须重新读取。一般 JSONC 仍允许暂时不可路由的期望值，不能代替模型设置服务规则；configured 仅是结构/解析事实，不表示远端发现或凭据可用。推理强度已由AI兼容SDK实际传输并保存metadata，当前面板尚不提供该项。[main/IPC 测试](test/native-configuration.test.ts)覆盖脱敏投影、坏配置诊断、原项目推导、拒绝注入 authority 与迟到关闭；[实际基础窗口](test/isolated/native-electron.test.ts)新增六条 Node 断言，实际读取用户和项目配置，Provider 调用为零，再继续原基础执行与所属 Service 退出检查。
@@ -196,13 +200,13 @@ Native 普通 Work 与准确单 Job 停止现在通过 [main caller journal](ele
 
 [Main caller](electron/file-recovery.ts)通过有限的 `fileRecovery.*` 桥读取真实 checkpoint 目录、完整 preview 与恢复状态，观察绑定当前连接 generation、选择、Store/Session/Workspace/contextSelectionId 和输入 revision。Renderer 不能提交任意 Action、请求、Command ID、授权、Profile 或 token。仅会话、仅代码、代码与会话分别使用公共 SDK 的原意图；所有适用 Command/restore/newSession IDs 在第一次 POST 前一次性保存。代码恢复仍经原普通 Action 和独立的人类审批，保存成功回执不代表其他工具已获授权。
 
-Files journal 在 [PrivateData](electron/private-data.ts) 的 DB4 引入准确的 `file_recovery_intents(intent_id TEXT PRIMARY KEY,state TEXT NOT NULL)`；当前 DB5 保留此表，旧版本 0–4 沿各次闭合迁移升级，原四表与 Files 记录保持。整行是完整 `FileRecoveryIntent@1`，主键取首腿 Command ID。异步闭合解析与 SHA 校验不持有同步事务；事务重新核实际已附着 Profile 的 live 数据库、原不可变 canonical 身份、两腿 phase CAS 和单调转换。全部适用 code/Fork Command IDs 跨行唯一；原 UTF-8 损坏、错误 digest/主键/表结构、冲突与容量不足均拒绝，原坏行不删除。目录最多保留 128 行、16MiB 原 UTF-8，不驱逐 unknown。它保存用户申请和核对状态，不保存执行授权。
+Files journal 在 [PrivateData](electron/private-data.ts) 的 DB4 引入准确的 `file_recovery_intents(intent_id TEXT PRIMARY KEY,state TEXT NOT NULL)`；当前 DB6 保留此表，旧版本 0–5 沿各次闭合迁移升级，原四表与 Files 记录保持。整行是完整 `FileRecoveryIntent@1`，主键取首腿 Command ID。异步闭合解析与 SHA 校验不持有同步事务；事务重新核实际已附着 Profile 的 live 数据库、原不可变 canonical 身份、两腿 phase CAS 和单调转换。全部适用 code/Fork Command IDs 跨行唯一；原 UTF-8 损坏、错误 digest/主键/表结构、冲突与容量不足均拒绝，原坏行不删除。目录最多保留 128 行、16MiB 原 UTF-8，不驱逐 unknown。它保存用户申请和核对状态，不保存执行授权。
 
 prepared/submitting/pending/unknown 重开后只能查询原 Command 和准确原 restore ID，不取得热许可、不重新 POST，也不自动继续第二腿。代码成功与 Fork 尚未完成分别显示，关闭、编辑或切换观察不会撤回原申请；迟到结果只更新原保存意图，不能切换新视图。恢复到不同 Store 的旧意图保留原 Store 身份，只读展示，不重新绑定或获得热许可。both 必须明确继续，重读原 Command/status 与原 point 的完整当前 preview，核当前作用域、selector、原 checkpoint 身份和每个文件均为 unchanged。外部编辑或后续合法 Files Run 使它拒绝继续，保留 code succeeded/fork not_started，不重写代码或更换 ID。这里没有全局工作区锁，也不声称消除最后读取与 Fork 之间不合作编辑器的竞态。
 
 [真实 default paired/Node](test/isolated/native-file-recovery-paired.test.ts)覆盖三个 scope、原 Code/Fork HTTP 回应丢失、两份独立 Ask、完整 BOM/CRLF preimage、新 inode、原 ID 冷 GET 零 POST，以及外部编辑和后续实际完成 Run 的继续拒绝。另在完整两腿 intent 已提交 SQLite、首 POST 尚未调用的实际 Node 窗口 SIGKILL，冷重开保原 IDs/unknown、零效果重做。[实际 Electron](test/isolated/native-file-recovery-electron.test.ts)经 Main/preload/renderer/default Service 验证原卡合法 approve_once、代码和 Fork 丢回复、owned Main/Service SIGKILL、冷查原 ID 零 POST与正常退出 owned PID 消失。只读测试观察曾被实际 AbortError 取消；有限 fixture observer 仅在确认真实 abort 后重新 GET，产品没有轮询或自动重试效果。首次 Native 审批解码遗漏 grant 已按有限枚举修复，原失败日志保留。
 
-[真实 Node DB5](test/isolated/file-recovery-private.test.ts)检查三 scope 持久字节、digest/UTF-8/主键/全局第二腿冲突、容量、单调 CAS、冷 unknown 和旧 DB3 迁移；[DOM](test/native-file-recovery-dom.test.tsx)与[有限 IPC/最终提交 scope](test/native-file-recovery.test.ts)覆盖 edit/hide/scope 变化、迟到观察与持久 submitting 后新选择零 POST。这是 macOS 隔离开发制品与固定本机 Provider 的资格，尚不证明正式安装、旧入口切换、Linux/Windows 或全部 Files/Native 功能。
+[真实 Node 私有库](test/isolated/file-recovery-private.test.ts)检查三 scope 持久字节、digest/UTF-8/主键/全局第二腿冲突、容量、单调 CAS、冷 unknown 和旧 DB3 迁移；[DOM](test/native-file-recovery-dom.test.tsx)与[有限 IPC/最终提交 scope](test/native-file-recovery.test.ts)覆盖 edit/hide/scope 变化、迟到观察与持久 submitting 后新选择零 POST。这是 macOS 隔离开发制品与固定本机 Provider 的资格，尚不证明正式安装、旧入口切换、Linux/Windows 或全部 Files/Native 功能。
 
 当前 Native Files 与原 caller/recovery/Session/private-data 邻接为 11 文件、30 项、249 条 Bun 断言全通过（62.99 秒，2026-10-04）；真实 Node 与 Electron driver 的独立断言保留在对应 fixture。Desktop types、portable build、21 个归属代码文件格式及文档/边界/测试归属检查通过。首轮组合的两个失败分别是测试在实际审批卡投影前读取卡，以及旧 Session fixture 固定期待 omitted=true 文案；最终测试等待真实卡、核非法 grant 零 POST 后合法 approve_once，并按实际 applied/omitted 布尔/newSession 回执读取确认分叉。原失败日志保留，生产期限、权限和 scope 校验没有放宽。
 
@@ -223,3 +227,20 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 [有限原意图回归](test/answer-journal.test.ts)核对保存失败零 POST、热提交与冷 GET 的错误回执、subject/Store drift、冷旧卡不能换 ID，以及不恢复附件证明。[实际 Node 私有资产](test/isolated/private-data.test.ts)核对完整 Unicode/CRLF 原答案与大整数 revision 冷开、重复目标/command、容量不淘汰与 DB5 迁移。[实际双 Main](test/isolated/answer-journal-electron.test.ts)使用 macOS 私有开发制品、owned Service/Core、Main SIGKILL 和 Node SQLite 观察，核 POST 前已提交完整原行、提交丢响应后冷 GET 丢一次再查原 ID、cold POST 零、其他 selection 不 rebind、原 Run completed 与原 execution 效果账本一行。此证据不声称正式安装或 Linux/Windows Electron 资格。
 
 原答案随整份一致私有 SQLite 由[维护 v7](../../packages/agent/src/maintenance/README.md#原人类答案请求的独立离线资产)保存、inspect与恢复；新Core Store保旧UI身份，不升级为热权利。纯/实际Node组合13项164断言、相邻8文件38项358断言和真实后页/双Main2项6条Bun断言是各自独立范围，冷Main专项1项3条Bun断言另有真实driver内部断言。丢回执hook转发实际SDK后丢响应，不能冒称物理socket破坏。独立资产的持久理由见[原答案决定](../../.agents/notes/implemented/architecture/2026-10-04-original-human-answer-intent-assets.md)。
+
+
+## Native Provider 与下一次模型选择
+
+[Provider 面板](src/native-provider-settings.tsx)和[模型选择器](src/native-model-picker.tsx)是正式 Native renderer 消费者；Main 的[Provider manager](electron/provider-settings.ts)沿公共 Client/Service 管理接口固定原 Store/generation、用户观察 readSet 和五字段操作。renderer 只持安全连接/模型事实，不取得路径、credentialRef 或 opaque revoke authority。四类明确 family，手动名称直接保存、留空才显式发现；切换/关闭清未保存密钥与字段，局部必填/URL 错误聚焦，提交后密钥清空，等待/未知跨关闭保留。凭据与配置结果分别显示；已发布后的刷新失败保原结果，原 GET 的 applied 刷新输入选择器，不重绑定迟到面板。新模型 disabled，默认禁用门禁和开关失败恢复保留。
+
+[配置原意图](electron/configuration-journal.ts)在首次热 POST 前 FULL 保存非秘密原 input 与 safe state。[PrivateData](electron/private-data.ts) 当前 DB6 从 DB0–5 保留原六表，新增准确 configuration_intents(command_id,state) 与 model_routes(store_id,session_id,model_id)；前者最多128行/16MiB、原 input 不可替换、终结才删除，坏行保字节并拒绝写。Provider 与模型设置共用原 Store 未决门禁。冷行只允许显式原 ID GET，不持有 secret、不自动 GET/POST。已存未发布的 opaque reference 只留 Service/认证 SDK，Main 不投影它到 renderer。
+
+模型选择按 Store/Session 保存，首条原 start/follow-up intent FULL 保存后才记本次模型 ID；打开新 Session 或读设置本身不绑定 route。输入只从 enabled/configured 的完整目录选择；缺失原显式 route 不回退全局默认。临时 effort 只在当前页面会话状态中，换模型/刷新后清除，不进入 model_routes 或配置 journal。[主输入](src/native-input.ts)冻结实际下一次 model/effort 到 start 与 active follow-up；普通 active steer 保原文本/target，不改活动 Run。ModelInput 和实际 wire 使用同一原设置。
+
+[实际默认 Native 候选](test/isolated/native-provider-bundle.test.ts)与[Electron driver](test/native-provider-electron.fixture.ts)在 macOS、源码外搬迁制品、自有 HOME、OS PATH、固定 SQLite 与默认 OS vault 下通过1项/190条Bun断言：四类表单、一次真实发现、7根Run/8次SDK请求、原 effort、活动冻结与下一次切换、新 Session 首次绑定、物理保存丢回执后冷原GET一次/POST零。两个所属 Service PID 正常结束；实际两枚测试凭据由 Service 准确 revoke，profile exclusive lease 可重新取得。endpoint 是受控 loopback，退出 warning 用明确 dialog 端口回答；不证明付费远端、系统 modal 点击、签名安装或其他平台。有限 Main/DOM/输入15项137断言、真实 HTTP8项93断言支持对应局部边界。
+
+本轮当前原完整默认589文件/471原任务全部通过，runner exit0/drain815.977s，4009regular输入与Git前后相同；其中上述实际Provider窗口45573ms及原Model、安装、CLI/TUI、Context/后页/持久答复消费者均通过。原红、嵌套同名fixture、制品摘要和权限环境范围见[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-06native-provider-设置与下一次真实模型选择)；完整默认通过不代表完整V1.3、MCP设置或三平台资格。
+
+DB6 离线备份使用专属 manifest v14，原设置 input、Session route 和完整含 effort 的原 caller 请求在新 Core Store 下保旧身份；冷读不发送请求。旧 v2–v13/DB1–5 仍按各自闭合格式，维护 codec 不依赖 Desktop/Client，见[维护 owner](../../packages/agent/src/maintenance/README.md#desktop-db6-与-manifest-v14)。
+
+原意图、两个介质结果和临时选择的长期取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。

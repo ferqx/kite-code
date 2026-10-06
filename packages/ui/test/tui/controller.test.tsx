@@ -5,6 +5,7 @@ import {
   activity,
   interactionAnswer,
   TuiController,
+  type TuiFilePage,
   type TuiPort,
   TuiSession,
   type TuiSnapshot,
@@ -260,6 +261,154 @@ const card: Interaction = {
   acceptedDecisionRevision: null,
   state: 'pending',
 };
+test('Ink ordinary text and Return in one native input block submit the exact current draft once', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => snapshot(id, false);
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession controller={c} />);
+  try {
+    await Bun.sleep(20);
+    app.stdin.write('owned task\r');
+    await Bun.sleep(20);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({
+      id: 'a',
+      intent: {
+        kind: 'run.start',
+        expectedStoreId: 'store',
+        commandId: 'id1',
+        content: 'owned task',
+      },
+    });
+    expect(f.cancels).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
+test('Ink text plus Return preserves slash completion and routes the complete export command once', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => snapshot(id, false);
+  const exports: unknown[] = [];
+  f.port.exportLoadedText = {
+    write: async (original) => {
+      exports.push(original);
+      return { path: '/owned/conversation.txt' };
+    },
+  };
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession controller={c} />);
+  try {
+    await Bun.sleep(20);
+    app.stdin.write('/exp\r');
+    await Bun.sleep(20);
+    expect(c.state.draft).toBe('/export');
+    expect(exports).toHaveLength(0);
+    app.stdin.write('\r');
+    await Bun.sleep(20);
+    expect(exports).toHaveLength(1);
+    expect(exports[0]).toMatchObject({ storeId: 'store', sessionId: 'a' });
+    app.stdin.write('/export\r');
+    await Bun.sleep(20);
+    expect(exports).toHaveLength(2);
+    expect(f.writes).toHaveLength(0);
+    expect(f.cancels).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
+test('Ink literal bracketed paste preserves CRLF and Ctrl bytes without submit or cancel until a separate Return', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => snapshot(id, false);
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession controller={c} />);
+  const original = '原文\r\nline\u0003';
+  try {
+    await Bun.sleep(20);
+    app.stdin.write(`\u001b[200~${original}\u001b[201~`);
+    await Bun.sleep(20);
+    expect(c.state.draft).toBe(original);
+    expect(f.writes).toHaveLength(0);
+    expect(f.cancels).toHaveLength(0);
+    app.stdin.write('\r');
+    await Bun.sleep(20);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: original } });
+    expect(f.cancels).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
+test('Ink text plus Return uses the updated file token and requires ready completion before a separate submit', async () => {
+  const f = fixture();
+  f.port.readSession = async (id) => snapshot(id, false);
+  const reads: {
+    scope: TuiFilePage['scope'];
+    query: string;
+    resolve(page: TuiFilePage): void;
+  }[] = [];
+  f.port.fileCandidates = {
+    read: (scope, input) =>
+      new Promise((resolve) => reads.push({ scope, query: input.query, resolve })),
+  };
+  const c = new TuiController(f.port);
+  await c.select('a');
+  const app = render(<TuiSession controller={c} />);
+  const finish = (index: number) => {
+    const original = reads[index]!;
+    original.resolve({
+      scope: original.scope,
+      query: original.query,
+      snapshotId: 'original',
+      paths: ['src/文件 空格.txt'],
+      nextCursor: null,
+      unavailable: [],
+    });
+  };
+  try {
+    await Bun.sleep(20);
+    app.stdin.write('@s\r');
+    await Bun.sleep(20);
+    expect(c.state.draft).toBe('@s');
+    expect(f.writes).toHaveLength(0);
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({
+      query: 's',
+      scope: { storeId: 'store', sessionId: 'a', workspaceId: 'w' },
+    });
+    finish(0);
+    await Bun.sleep(20);
+    app.stdin.write('r\r');
+    await Bun.sleep(20);
+    expect(c.state.draft).toBe('@sr');
+    expect(f.writes).toHaveLength(0);
+    expect(reads).toHaveLength(2);
+    expect(reads[1]?.query).toBe('sr');
+    finish(1);
+    await Bun.sleep(20);
+    app.stdin.write('\r');
+    await Bun.sleep(20);
+    expect(c.state.draft).toBe('@"src/文件 空格.txt"');
+    expect(f.writes).toHaveLength(0);
+    app.stdin.write('\r');
+    await Bun.sleep(20);
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({ id: 'a', intent: { content: '@"src/文件 空格.txt"' } });
+    expect(f.cancels).toHaveLength(0);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
 for (const surface of ['approval', 'composer'] as const) {
   test(`native Ctrl+C batch cancels only the original work once on ${surface}; literal paste stays text`, async () => {
     const f = fixture();

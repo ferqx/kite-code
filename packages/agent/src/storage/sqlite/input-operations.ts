@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { reasoningEfforts } from '@kite-ai/ai';
 import { canonicalJson } from '../../json';
 import type { AcceptCommandInput, ApplyInputInput, Store } from '../port';
 import { AgentError, type InputApplication, type Json, type PendingInputPage } from '../types';
@@ -51,6 +52,11 @@ export function validateInputAdmission(
     throw new AgentError('invalid_command_kind');
   if (value.kind === 'run.start' || value.kind === 'input.follow_up') {
     if (
+      Object.hasOwn(value, 'reasoningEffort') &&
+      !reasoningEfforts.includes(value.reasoningEffort!)
+    )
+      throw new AgentError('invalid_input_request');
+    if (
       Object.hasOwn(value, 'extensionInputs') &&
       (!Array.isArray(value.extensionInputs) ||
         value.extensionInputs.some(
@@ -82,7 +88,15 @@ export function validateInputAdmission(
   if (
     value.kind === 'run.start' &&
     (Object.keys(value).some(
-      (key) => !['kind', 'content', 'modelId', 'selectedSkills', 'extensionInputs'].includes(key),
+      (key) =>
+        ![
+          'kind',
+          'content',
+          'modelId',
+          'reasoningEffort',
+          'selectedSkills',
+          'extensionInputs',
+        ].includes(key),
     ) ||
       typeof value.content !== 'string' ||
       (value.modelId !== undefined &&
@@ -127,6 +141,7 @@ export function validateInputAdmission(
           'afterRunId',
           'contextSelectionId',
           'modelId',
+          'reasoningEffort',
           'selectedSkills',
           'extensionInputs',
         ];

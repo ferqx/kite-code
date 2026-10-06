@@ -24,7 +24,7 @@ try {
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
     .fill('40 harmless original Job approvals');
-  await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
+  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page.waitForFunction(async () => {
     const state = await window.kiteNative!.request({ method: 'state', generation: 1 });
     return state && 'selection' in state && state.selection?.runs.some((run) => run.isActive);

@@ -21,6 +21,11 @@ import {
 } from './answer-journal';
 import { callerCanonical, validateCallerRecord } from './caller-journal';
 import {
+  type NativeConfigurationData,
+  type NativeConfigurationRecord,
+  parseConfigurationRecord,
+} from './configuration-journal';
+import {
   assertFileRecoveryCommands,
   assertFileRecoveryTransition,
   fileRecoveryIntentId,
@@ -58,7 +63,7 @@ export type PrivateData = NativeFileRecoveryJournal &
     finishCaller(commandId: string, phase: NativeCallerRecord['phase']): NativeCallerRecord;
     clearCaller(commandId: string): void;
     close(): void;
-  };
+  } & NativeConfigurationData;
 const require = createRequire(import.meta.url);
 const identity = (scope: DraftScope) =>
   createHash('sha256').update(JSON.stringify(scope)).digest('hex');
@@ -131,7 +136,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 2 &&
       version !== 3 &&
       version !== 4 &&
-      version !== 5
+      version !== 5 &&
+      version !== 6
     )
       failure();
     if (
@@ -164,6 +170,10 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       db.exec(
         'PRAGMA synchronous=FULL; BEGIN IMMEDIATE; CREATE TABLE answer_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); PRAGMA user_version=5; COMMIT;',
       );
+    if (version < 6)
+      db.exec(
+        'PRAGMA synchronous=FULL; BEGIN IMMEDIATE; CREATE TABLE configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); CREATE TABLE model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id)); PRAGMA user_version=6; COMMIT;',
+      );
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all()
@@ -173,9 +183,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       JSON.stringify([
         'answer_intents',
         'caller_intents',
+        'configuration_intents',
         'creations',
         'drafts',
         'file_recovery_intents',
+        'model_routes',
         'recovery_intents',
       ])
     )
@@ -194,6 +206,18 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     )
       failure();
     db.prepare('SELECT command_id,state FROM caller_intents LIMIT 0').all();
+    if (
+      db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='configuration_intents'",
+        )
+        .get()?.sql !==
+        'CREATE TABLE configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)' ||
+      db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='model_routes'").get()
+        ?.sql !==
+        'CREATE TABLE model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id))'
+    )
+      failure();
     db.prepare('SELECT command_id,state FROM recovery_intents LIMIT 0').all();
     db.prepare(
       'SELECT id,store_id,workspace_id,root_session_id,revision,content FROM drafts LIMIT 0',
@@ -207,6 +231,32 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     releaseAccess();
   }
   const database = () => db ?? failure();
+  function configurationRows(): NativeConfigurationRecord[] {
+    const result: NativeConfigurationRecord[] = [];
+    let bytes = 0;
+    for (const row of database()
+      .prepare(
+        'SELECT command_id,state,hex(CAST(state AS BLOB)) AS state_hex FROM configuration_intents ORDER BY command_id',
+      )
+      .iterate()) {
+      if (typeof row.state !== 'string' || typeof row.state_hex !== 'string')
+        throw Error('configuration_storage_unavailable');
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(
+        Buffer.from(row.state_hex, 'hex'),
+      );
+      bytes += Buffer.byteLength(text);
+      if (text !== row.state || bytes > 16777216 || result.length >= 128)
+        throw Error('configuration_storage_unavailable');
+      const record = parseConfigurationRecord(JSON.parse(text));
+      if (
+        record.input.commandId !== row.command_id ||
+        !['unknown', 'submitting'].includes(record.state.phase)
+      )
+        throw Error('configuration_storage_unavailable');
+      result.push(record);
+    }
+    return result;
+  }
   function callerRows() {
     const rows: NativeCallerRecord[] = [];
     let bytes = 0;
@@ -349,6 +399,68 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     return row ? draft(row) : { id, ...scope, revision: 0, content: '' };
   };
   const port: PrivateData = {
+    configurations: configurationRows,
+    saveConfiguration(input) {
+      const record = parseConfigurationRecord(input);
+      transaction(() => {
+        const rows = configurationRows();
+        const existing = rows.find((row) => row.input.commandId === record.input.commandId);
+        if (
+          existing &&
+          (existing.kind !== record.kind ||
+            JSON.stringify(existing.input) !== JSON.stringify(record.input))
+        )
+          throw Error('configuration_storage_unavailable');
+        if (['applied', 'failed'].includes(record.state.phase)) {
+          if (!existing) throw Error('configuration_storage_unavailable');
+          database()
+            .prepare('DELETE FROM configuration_intents WHERE command_id=?')
+            .run(record.input.commandId);
+          return;
+        }
+        const text = JSON.stringify(record);
+        if (
+          (!existing && rows.length >= 128) ||
+          Buffer.byteLength(text) +
+            rows.reduce(
+              (total, row) =>
+                total +
+                (row.input.commandId === record.input.commandId
+                  ? 0
+                  : Buffer.byteLength(JSON.stringify(row))),
+              0,
+            ) >
+            16777216
+        )
+          throw Error('configuration_storage_unavailable');
+        database()
+          .prepare(
+            'INSERT INTO configuration_intents VALUES(?,?) ON CONFLICT(command_id) DO UPDATE SET state=excluded.state',
+          )
+          .run(record.input.commandId, text);
+      });
+    },
+    modelRoute(storeId, sessionId) {
+      const row = database()
+        .prepare('SELECT model_id FROM model_routes WHERE store_id=? AND session_id=?')
+        .get(storeId, sessionId);
+      if (!row) return undefined;
+      if (typeof row.model_id !== 'string' || !/^[A-Za-z0-9_.:/-]{1,128}$/.test(row.model_id))
+        throw Error('configuration_storage_unavailable');
+      return row.model_id;
+    },
+    rememberModelRoute(storeId, sessionId, modelId) {
+      if (
+        [storeId, sessionId].some((value) => !/^[A-Za-z0-9_-]{1,128}$/.test(value)) ||
+        !/^[A-Za-z0-9_.:/-]{1,128}$/.test(modelId)
+      )
+        throw Error('configuration_storage_unavailable');
+      database()
+        .prepare(
+          'INSERT INTO model_routes VALUES(?,?,?) ON CONFLICT(store_id,session_id) DO UPDATE SET model_id=excluded.model_id',
+        )
+        .run(storeId, sessionId, modelId);
+    },
     read,
     save(scope, revision, content) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
@@ -705,6 +817,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     },
   };
   const localCodes = new Set([
+    'configuration_storage_unavailable',
     'file_recovery_intent_invalid',
     'file_recovery_storage_unavailable',
     'file_recovery_capacity_exceeded',

@@ -1,3 +1,5 @@
+import type { ReasoningEffort } from '@kite-ai/ai';
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type JsonSchema = Readonly<Record<string, Json>>;
 export type RunStatus =
@@ -81,6 +83,7 @@ export type CommandRequest =
       kind: 'run.start';
       content: string;
       modelId?: string;
+      reasoningEffort?: ReasoningEffort;
       selectedSkills?: readonly string[];
       extensionInputs?: readonly ExtensionInput[];
     }
@@ -91,6 +94,7 @@ export type CommandRequest =
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
+      reasoningEffort?: ReasoningEffort;
       selectedSkills?: readonly string[];
       extensionInputs?: readonly ExtensionInput[];
     }

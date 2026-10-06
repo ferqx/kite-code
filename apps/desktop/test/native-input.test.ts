@@ -88,3 +88,40 @@ test('Native explicit Plan freezes a new Run or queued follow-up with the closed
   expect(queued.kind === 'input.follow_up' && queued.contextSelectionId).toBe('original-selection');
   expect(nativeTextIntent(active, 'ordinary', 'ordinary text').kind).toBe('input.steer');
 });
+
+test('Native input freezes next model and temporary effort only for a new root Run; active steering keeps the original route', () => {
+  const selection = {
+    storeId: 'original-store',
+    session: { id: 'original-session', contextSelectionId: 'selection' },
+    runs: [],
+  } as unknown as NativeSelection;
+  const choice = { modelId: 'actual-model-b', reasoningEffort: 'high' as const };
+  const first = nativeTextIntent(selection, 'first', 'original', false, choice);
+  expect(first).toMatchObject({
+    kind: 'run.start',
+    modelId: 'actual-model-b',
+    reasoningEffort: 'high',
+  });
+  choice.modelId = 'later-model';
+  expect(first.kind === 'run.start' && first.modelId).toBe('actual-model-b');
+  const active = {
+    ...selection,
+    runs: [{ id: 'run', isActive: true, originCommandId: 'origin' }],
+    activeCommand: {
+      id: 'origin',
+      sessionId: 'original-session',
+      originStoreId: 'original-store',
+      kind: 'run.start',
+    },
+  } as unknown as NativeSelection;
+  const steer = nativeTextIntent(active, 'steer', 'ordinary input', false, choice);
+  expect(steer.kind).toBe('input.steer');
+  expect('modelId' in steer).toBe(false);
+  expect('reasoningEffort' in steer).toBe(false);
+  expect(nativeTextIntent(active, 'follow-up', 'next plan', true, choice)).toMatchObject({
+    kind: 'input.follow_up',
+    afterRunId: 'run',
+    modelId: 'later-model',
+    reasoningEffort: 'high',
+  });
+});

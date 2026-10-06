@@ -3146,7 +3146,9 @@ export class AgentRuntime {
       try {
         const pending = await this.options.store.listAcceptedCommands(sessionId, 1);
         if (pending.length) this.schedule(sessionId);
-        else {
+        else if (!this.extensionHost.hasActiveOperations(sessionId)) {
+          // A hot root operation keeps this owner. Peer-accepted commands must
+          // still reach its existing pump while their Jobs wait for resources.
           this.pendingSessions.delete(sessionId);
           this.nextDispatchPoll.delete(sessionId);
         }

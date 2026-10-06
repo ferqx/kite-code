@@ -7,6 +7,7 @@ import { initializeDefaultSqliteEngine } from '../sqlite-engine';
 import { verifyCallerIntentsDocument } from './caller-intents';
 import { verifyDesktopAnswerRows } from './desktop-answers';
 import { verifyDesktopCallerRows } from './desktop-callers';
+import { verifyDesktopConfigurationRows } from './desktop-configurations';
 import {
   verifyDesktopFileRecoveryRows,
   verifyFileRecoveryIntentsDocument,
@@ -53,6 +54,14 @@ const fileRecoverySchema = [
 const answerSchema = [
   'answer_intents',
   'CREATE TABLE answer_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+] as const;
+const configurationSchema = [
+  'configuration_intents',
+  'CREATE TABLE configuration_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+] as const;
+const routeSchema = [
+  'model_routes',
+  'CREATE TABLE model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id))',
 ] as const;
 function verifyRecoveryRows(db: Database) {
   let pending = 0;
@@ -154,19 +163,34 @@ export function openUiDatabase(path: string): Database {
       .query<{ user_version: number }, []>('PRAGMA user_version')
       .get()?.user_version;
     const schema =
-      version === 5
-        ? [answerSchema, callerSchema, ...uiSchema, fileRecoverySchema, recoverySchema]
-        : version === 4
-          ? [callerSchema, ...uiSchema, fileRecoverySchema, recoverySchema]
-          : version === 3
-            ? [callerSchema, ...uiSchema, recoverySchema]
-            : version === 2
-              ? [...uiSchema, recoverySchema]
-              : uiSchema;
+      version === 6
+        ? [
+            answerSchema,
+            callerSchema,
+            configurationSchema,
+            ...uiSchema,
+            fileRecoverySchema,
+            routeSchema,
+            recoverySchema,
+          ]
+        : version === 5
+          ? [answerSchema, callerSchema, ...uiSchema, fileRecoverySchema, recoverySchema]
+          : version === 4
+            ? [callerSchema, ...uiSchema, fileRecoverySchema, recoverySchema]
+            : version === 3
+              ? [callerSchema, ...uiSchema, recoverySchema]
+              : version === 2
+                ? [...uiSchema, recoverySchema]
+                : uiSchema;
     if (
       db.query<{ application_id: number }, []>('PRAGMA application_id').get()?.application_id !==
         1263888689 ||
-      (version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) ||
+      (version !== 1 &&
+        version !== 2 &&
+        version !== 3 &&
+        version !== 4 &&
+        version !== 5 &&
+        version !== 6) ||
       actual.length !== schema.length ||
       actual.some(
         (row, i) =>
@@ -182,10 +206,13 @@ export function openUiDatabase(path: string): Database {
       db.query('SELECT * FROM pragma_foreign_key_check LIMIT 1').get()
     )
       throw new MaintenanceError('backup_ui_invalid');
-    if (version === 2 || version === 3 || version === 4 || version === 5) verifyRecoveryRows(db);
-    if (version === 3 || version === 4 || version === 5) verifyDesktopCallerRows(db);
-    if (version === 4 || version === 5) verifyDesktopFileRecoveryRows(db);
-    if (version === 5) verifyDesktopAnswerRows(db);
+    if (version === 2 || version === 3 || version === 4 || version === 5 || version === 6)
+      verifyRecoveryRows(db);
+    if (version === 3 || version === 4 || version === 5 || version === 6)
+      verifyDesktopCallerRows(db, version === 6);
+    if (version === 4 || version === 5 || version === 6) verifyDesktopFileRecoveryRows(db);
+    if (version === 5 || version === 6) verifyDesktopAnswerRows(db);
+    if (version === 6) verifyDesktopConfigurationRows(db);
     return db;
   } catch (error) {
     db.close(true);
@@ -364,17 +391,18 @@ export async function captureAssets(
   const mcpSourceApprovalIntents = await capture('ui/mcp-source-approval-intents.json', false);
   const mcpConnectionIntents = await capture('ui/mcp-connection-intents.json', false);
   const mcpSelectionIntents = await capture('ui/mcp-selection-intents.json', false);
-  let uiVersion: 1 | 2 | 3 | 4 | 5 | undefined;
+  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | undefined;
   if (desktopUi.present) {
     const db = openUiDatabase(join(target, desktopUi.path));
     try {
       uiVersion = db
-        .query<{ user_version: 1 | 2 | 3 | 4 | 5 }, []>('PRAGMA user_version')
+        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 }, []>('PRAGMA user_version')
         .get()!.user_version;
     } finally {
       db.close(true);
     }
   }
+  const currentDesktop = uiVersion === 6;
   return {
     configuration: await capture('config.jsonc', false),
     skillWorkflowConfiguration: await capture('skill-workflow.jsonc', false),
@@ -393,7 +421,8 @@ export async function captureAssets(
     mcpSourceMutationIntents.present ||
     authCaller ||
     uiVersion === 4 ||
-    uiVersion === 5
+    uiVersion === 5 ||
+    currentDesktop
       ? {
           fileRecoveryIntents: {
             ...fileRecoveryIntents,
@@ -404,7 +433,8 @@ export async function captureAssets(
     ...(mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
-    authCaller
+    authCaller ||
+    currentDesktop
       ? {
           mcpSourceApprovalIntents: {
             ...mcpSourceApprovalIntents,
@@ -412,7 +442,10 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpReconnectionIntents.present || mcpSourceMutationIntents.present || authCaller
+    ...(mcpReconnectionIntents.present ||
+    mcpSourceMutationIntents.present ||
+    authCaller ||
+    currentDesktop
       ? {
           mcpReconnectionIntents: {
             ...mcpReconnectionIntents,
@@ -424,7 +457,8 @@ export async function captureAssets(
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
-    authCaller
+    authCaller ||
+    currentDesktop
       ? {
           mcpConnectionIntents: {
             ...mcpConnectionIntents,
@@ -437,7 +471,8 @@ export async function captureAssets(
     mcpSourceApprovalIntents.present ||
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
-    authCaller
+    authCaller ||
+    currentDesktop
       ? {
           mcpSelectionIntents: {
             ...mcpSelectionIntents,
@@ -445,7 +480,7 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpSourceMutationIntents.present || authCaller
+    ...(mcpSourceMutationIntents.present || authCaller || currentDesktop
       ? {
           mcpSourceMutationIntents: {
             ...mcpSourceMutationIntents,

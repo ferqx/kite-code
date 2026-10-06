@@ -34,6 +34,7 @@ import { NativeInteractionAttachmentReads } from './interaction-attachment-reads
 import { NativeModelOutputReads } from './model-output-reads';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
+import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
 import { NativeSessionManagement } from './session-management';
 
@@ -61,6 +62,8 @@ export class NativeCaller {
   private readonly fileRecovery: NativeFileRecovery;
   private readonly sessions: NativeSessionManagement;
   private readonly configuration: NativeConfiguration;
+  private readonly inputConfiguration: NativeConfiguration;
+  private readonly providers: NativeProviderSettings;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -154,6 +157,23 @@ export class NativeCaller {
             }
           : undefined,
       () => this.changed(),
+      privateData,
+    );
+    const configurationScope = () =>
+      !this.closed
+        ? {
+            generation: this.generation,
+            selection: this.selection,
+            storeId: this.client.serverInfo!.storeId!,
+            ...(this.selected ? { sessionId: this.selected } : {}),
+          }
+        : undefined;
+    this.inputConfiguration = new NativeConfiguration(client, configurationScope);
+    this.providers = new NativeProviderSettings(
+      client,
+      configurationScope,
+      () => this.changed(),
+      privateData,
     );
     this.fileRecovery = new NativeFileRecovery(client, current, () => this.changed(), privateData);
     this.recovery = new NativeRecovery(client, current, () => this.changed(), privateData);
@@ -229,6 +249,8 @@ export class NativeCaller {
     this.controller.cancelInteractionRead();
     this.callerReads.clear();
     this.configuration.release();
+    this.inputConfiguration.release();
+    this.providers.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
     this.messageRead?.abort.abort();
@@ -442,6 +464,7 @@ export class NativeCaller {
       compressionSubmissions: this.context.compressionSubmissions,
       sessionSubmissions: this.sessions.submissions,
       modelSettingsSubmissions: this.configuration.submissions,
+      providerSettingsSubmissions: this.providers.submissions,
       inputSubmissions: this.input.submissions.map(inputMetadata),
       ...this.callerState(),
       permissionSubmissions: this.controller.permissionSubmissions,
@@ -696,6 +719,35 @@ export class NativeCaller {
       case 'settings.models.read':
         result = await this.configuration.read(request.scope);
         break;
+      case 'input.models.read': {
+        if (!this.selected) throw new ClientError('native_selection_changed');
+        const sessionId = this.selected;
+        const facts = await this.inputConfiguration.read('workspace');
+        result = {
+          ...facts,
+          ...(this.privateData?.modelRoute(facts.storeId, sessionId)
+            ? { selectedModelId: this.privateData.modelRoute(facts.storeId, sessionId) }
+            : {}),
+        };
+        break;
+      }
+      case 'settings.providers.read':
+        result = await this.providers.read();
+        break;
+      case 'settings.providers.save':
+        result = await this.providers.submit(
+          request.observationId,
+          request.operation,
+          request.secret,
+        );
+        break;
+      case 'settings.providers.lookup':
+        result = await this.providers.lookup(request.commandId);
+        break;
+      case 'settings.providers.close':
+        this.providers.cancelRead();
+        result = null;
+        break;
       case 'settings.models.enabled':
       case 'settings.models.default':
         result = await this.configuration.submit(
@@ -943,6 +995,15 @@ export class NativeCaller {
           request.intent,
           request.draft,
         );
+        if (
+          (request.intent.kind === 'run.start' || request.intent.kind === 'input.follow_up') &&
+          request.intent.modelId
+        )
+          this.requirePrivateData().rememberModelRoute(
+            request.intent.expectedStoreId,
+            request.sessionId,
+            request.intent.modelId,
+          );
         result = callerMetadata(row);
         break;
       }
@@ -1042,6 +1103,12 @@ export class NativeCaller {
           request.intent,
           draftProof,
         );
+        if (request.intent.kind !== 'input.steer' && request.intent.modelId)
+          this.requirePrivateData().rememberModelRoute(
+            request.intent.expectedStoreId,
+            request.sessionId,
+            request.intent.modelId,
+          );
         this.check(generation);
         if (originalSelection !== this.selection || this.selected !== request.sessionId)
           throw new ClientError('native_selection_changed');

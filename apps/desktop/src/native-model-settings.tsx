@@ -12,11 +12,13 @@ export function NativeModelSettings({
   generation,
   selection,
   submissions,
+  onSaved,
 }: {
   bridge: NativeBridge;
   generation: number;
   selection?: NativeSelection;
   submissions: readonly NativeModelSettingsSubmission[];
+  onSaved?: () => void;
 }) {
   const [facts, setFacts] = useState<NativeModelSettingsFacts>();
   const [reading, setReading] = useState(false),
@@ -44,12 +46,15 @@ export function NativeModelSettings({
     const code = (cause as { code?: string }).code ?? (cause as Error).message;
     setError(/^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code : 'configuration_unavailable');
   }
-  async function read(scope: 'user' | 'workspace') {
+  async function read(scope: 'user' | 'workspace', afterSave = false) {
     const original = identity,
       request = ++sequence.current;
     setReading(true);
     setError('');
-    setFacts(undefined);
+    if (!afterSave)
+      setFacts((previous) =>
+        previous?.scope === scope ? { ...previous, canWrite: false } : undefined,
+      );
     try {
       const value = await bridge.request({ method: 'settings.models.read', generation, scope });
       if (current.current !== original || sequence.current !== request) return;
@@ -57,7 +62,10 @@ export function NativeModelSettings({
         throw Error('configuration_unavailable');
       setFacts(value);
     } catch (cause) {
-      if (current.current === original && sequence.current === request) showError(cause);
+      if (current.current === original && sequence.current === request) {
+        if (afterSave) setError('已保存模型配置，刷新失败。请重新读取，无需重复保存。');
+        else showError(cause);
+      }
     } finally {
       if (current.current === original && sequence.current === request) setReading(false);
     }
@@ -69,7 +77,17 @@ export function NativeModelSettings({
     inFlight.current = true;
     setWriting(true);
     setError('');
-    if (observed) setFacts({ ...observed, canWrite: false });
+    if (observed)
+      setFacts({
+        ...observed,
+        canWrite: false,
+        ...(input.method === 'settings.models.default' ? { defaultModelId: input.modelId } : {}),
+        models: observed.models.map((model) =>
+          input.method === 'settings.models.enabled' && input.modelId === model.id
+            ? { ...model, enabled: input.enabled }
+            : model,
+        ),
+      });
     try {
       const result = await bridge.request(input);
       if (current.current !== original || sequence.current !== request) return;
@@ -81,10 +99,22 @@ export function NativeModelSettings({
       )
         throw Error('configuration_unavailable');
       // Only the observation used to save may trigger a fresh read. Original lookups never rebind a new panel.
-      if (result.phase === 'applied' && observed) await read(observed.scope);
-      else if (result.error) setError(result.error);
+      if (result.phase === 'applied') {
+        if (
+          result.storeId === selection?.storeId ||
+          (observed && result.storeId === observed.storeId)
+        )
+          onSaved?.();
+        if (observed) await read(observed.scope, true);
+      } else {
+        if (result.phase === 'failed' && observed) setFacts({ ...observed, canWrite: false });
+        if (result.error) setError(result.error);
+      }
     } catch (cause) {
-      if (current.current === original && sequence.current === request) showError(cause);
+      if (current.current === original && sequence.current === request) {
+        if (observed) setFacts({ ...observed, canWrite: false });
+        showError(cause);
+      }
     } finally {
       if (current.current === original) {
         inFlight.current = false;
@@ -101,6 +131,11 @@ export function NativeModelSettings({
         submission.workspaceId === facts.workspaceId &&
         ['submitting', 'unknown'].includes(submission.phase),
     );
+  const groups = new Map<string, NativeModelSettingsFacts['models']>();
+  for (const model of facts?.models ?? []) {
+    const provider = model.provider ?? '其他';
+    groups.set(provider, [...(groups.get(provider) ?? []), model]);
+  }
   const canWrite = facts?.canWrite && !pending && !reading && !writing;
   return (
     <section aria-label="模型设置">
@@ -131,59 +166,65 @@ export function NativeModelSettings({
               配置诊断：{code}
             </p>
           ))}
-          <ul>
-            {facts.models.map((model) => (
-              <li key={model.id}>
-                {model.id} · {model.provider} · {model.model} · {model.enabled ? '启用' : '禁用'} ·{' '}
-                {model.configured ? '配置可用' : '配置不完整'}
-                {model.diagnostics.map((code) => (
-                  <span key={code}> {code}</span>
+          {[...groups].map(([provider, models]) => (
+            <section aria-label={`模型提供商 ${provider}`} key={provider}>
+              <h3>{provider}</h3>
+              <ul>
+                {models.map((model) => (
+                  <li key={model.id}>
+                    {model.id} · {model.provider} · {model.model} ·{' '}
+                    {model.enabled ? '启用' : '禁用'} ·{' '}
+                    {model.configured ? '配置可用' : '配置不完整'}
+                    {model.diagnostics.map((code) => (
+                      <span key={code}> {code}</span>
+                    ))}
+                    <button
+                      type="button"
+                      aria-label={`${model.enabled ? '禁用' : '启用'}模型 ${model.id}`}
+                      disabled={!canWrite || (model.enabled && model.id === facts.defaultModelId)}
+                      onClick={() =>
+                        void write(
+                          {
+                            method: 'settings.models.enabled',
+                            generation,
+                            observationId: facts.observationId,
+                            modelId: model.id,
+                            enabled: !model.enabled,
+                          },
+                          facts,
+                        )
+                      }
+                    >
+                      {model.enabled ? '禁用' : '启用'}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`设为默认 ${model.id}`}
+                      disabled={
+                        !canWrite ||
+                        !model.enabled ||
+                        !model.configured ||
+                        model.id === facts.defaultModelId
+                      }
+                      onClick={() =>
+                        void write(
+                          {
+                            method: 'settings.models.default',
+                            generation,
+                            observationId: facts.observationId,
+                            modelId: model.id,
+                          },
+                          facts,
+                        )
+                      }
+                    >
+                      设为默认
+                    </button>
+                  </li>
                 ))}
-                <button
-                  type="button"
-                  aria-label={`${model.enabled ? '禁用' : '启用'}模型 ${model.id}`}
-                  disabled={!canWrite || (model.enabled && model.id === facts.defaultModelId)}
-                  onClick={() =>
-                    void write(
-                      {
-                        method: 'settings.models.enabled',
-                        generation,
-                        observationId: facts.observationId,
-                        modelId: model.id,
-                        enabled: !model.enabled,
-                      },
-                      facts,
-                    )
-                  }
-                >
-                  {model.enabled ? '禁用' : '启用'}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`设为默认 ${model.id}`}
-                  disabled={
-                    !canWrite ||
-                    !model.enabled ||
-                    !model.configured ||
-                    model.id === facts.defaultModelId
-                  }
-                  onClick={() =>
-                    void write(
-                      {
-                        method: 'settings.models.default',
-                        generation,
-                        observationId: facts.observationId,
-                        modelId: model.id,
-                      },
-                      facts,
-                    )
-                  }
-                >
-                  设为默认
-                </button>
-              </li>
-            ))}
-          </ul>
+              </ul>
+            </section>
+          ))}
           {!facts.errors.length && !facts.models.length && <p>当前期望配置没有模型。</p>}
           {!canWrite && (
             <p role="status">当前观察只读。未决提交先查询原结果，其他情况请重新读取配置。</p>

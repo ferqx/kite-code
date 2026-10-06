@@ -6,6 +6,8 @@
 
 Session pump 在取得原 OS owner 前即计入派发工作，直到 owner 释放和绑定清理完成才移除登记。Extension 操作覆盖 detached Job 和重试，直到实际清理完成。Run 到达终态不意味着其保留的后台绑定已空闲。绑定清理失败或 Job 停止/清理未确认时，实例仍为 busy。停止或 handle 清理未确认的 Job 保留原 handle 和 permit；后续绑定清理失败不抹掉已经确认的释放事实。实现不新增第二个全局任务注册表，也不扫描同 profile 的全部 Session。
 
+原根 Session 有本实例 hot operation 时，其已登记的 accepted-command 轮询资格保留，即使当前列表为空；peer 的新申请仍通过原 pump 和 Store owner/generation、未提交 Action检查。operation 实际清理后，后继空列表才释放该轮询登记。它沿已有有限 pendingSessions/operationSessions，不把冷 unknown 变成 hot，也不放宽关闭或资源许可。准确根 Session intake与有限资格由[Runtime owner](../README.md)和[原交接反例](../test/isolated/execution/owner-handoff.test.ts)维护。
+
 每个已派发 Job 额外保留一份原 Run 绑定，使其与实际 handle 和执行 permit 同寿命。停止未确认时，普通观察操作可以结束，但不会因此清理该绑定。停止确认且 handle 清理成功后，先释放 permit，再释放绑定；绑定 disposer 因而可以等待其 Workspace 资源协调器，不与后续 Job 清理形成循环。停止或 handle 清理失败时，保留该绑定和 permit。barrier 测试使用真实临时 Workspace OS 锁协调器，核对这一准确释放顺序。
 
 cancel 路径封住新工作，并复用原 owner 范围内的清理链。封门前已接纳的 Command 可以留给仍存活的合法 owner 推进；接纳事实本身不能证明关闭实例拥有该执行。提交准备在实际接纳前再次检查封门状态。写入已经提交、响应仍在途时，保留其耐久 receipt，不因观察该事实的实例关闭就取消它。

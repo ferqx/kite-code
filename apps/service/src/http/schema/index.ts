@@ -64,6 +64,7 @@ const followUpInput = z.strictObject({
   afterRunId: id.nullable(),
   contextSelectionId: id,
   modelId: z.string().min(1).max(256).optional(),
+  reasoningEffort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   selectedSkills: selectedSkills.optional(),
   extensionInputs: extensionInputs.optional(),
 });
@@ -368,6 +369,17 @@ const modelSettingsOperation = z.discriminatedUnion('kind', [
 const modelSettingsMarker = z.strictObject({
   expectedReadSet: modelSettingsReadSet,
   operation: modelSettingsOperation,
+});
+const providerSettingsOperation = z.strictObject({
+  provider: z.enum(['openai', 'deepseek', 'compatible', 'ollama']),
+  connectionId: etag.nullable(),
+  baseURL: z.string().min(1).max(4096),
+  modelNames: z.array(z.string().min(1).max(256)),
+  credential: z.enum(['keep', 'replace', 'none']),
+});
+const providerSettingsMarker = z.strictObject({
+  expectedReadSet: modelSettingsReadSet,
+  operation: providerSettingsOperation,
 });
 export const schemas = {
   ModelInputMetadata: modelInputMetadata,
@@ -674,31 +686,29 @@ export const schemas = {
     workspaceId: id.optional(),
     readSet: modelSettingsReadSet.nullable(),
     defaultModelId: definitionId.nullable(),
-    models: z
-      .array(
-        z.object({
-          id: definitionId,
-          enabled: z.boolean(),
-          configured: z.boolean(),
-          provider: z.string().optional(),
-          model: z.string().optional(),
-          reasoningEffort: z
-            .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-            .nullable()
-            .optional(),
-          reasoningEffortChoices: z
-            .array(z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']))
-            .max(7)
-            .optional(),
-          reasoningEffortSupport: z.enum(['compatible_wire', 'unsupported']).optional(),
-          reasoningEffortReadonlyReason: z
-            .enum(['model_settings_override', 'model_reasoning_effort_unsupported'])
-            .nullable()
-            .optional(),
-          diagnostics: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
-        }),
-      )
-      .max(512),
+    models: z.array(
+      z.object({
+        id: definitionId,
+        enabled: z.boolean(),
+        configured: z.boolean(),
+        provider: z.string().optional(),
+        model: z.string().optional(),
+        reasoningEffort: z
+          .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+          .nullable()
+          .optional(),
+        reasoningEffortChoices: z
+          .array(z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']))
+          .max(7)
+          .optional(),
+        reasoningEffortSupport: z.enum(['compatible_wire', 'unsupported']).optional(),
+        reasoningEffortReadonlyReason: z
+          .enum(['model_settings_override', 'model_reasoning_effort_unsupported'])
+          .nullable()
+          .optional(),
+        diagnostics: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
+      }),
+    ),
     errors: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
   }),
   ModelSettingsRequest: z.strictObject({
@@ -707,6 +717,37 @@ export const schemas = {
     workspaceId: id.optional(),
     expectedReadSet: modelSettingsReadSet,
     operation: modelSettingsOperation,
+  }),
+  ProviderSettingsView: z.object({
+    storeId: id,
+    readSet: modelSettingsReadSet.nullable(),
+    providers: z
+      .array(
+        z.object({
+          id: z.enum(['openai', 'deepseek', 'compatible', 'ollama']),
+          label: z.string(),
+          defaultBaseURL: z.string(),
+          requiresCredential: z.boolean(),
+          connections: z.array(
+            z.object({
+              id: etag,
+              baseURL: z.string(),
+              hasCredential: z.boolean(),
+              modelNames: z.array(z.string()),
+              canWrite: z.boolean(),
+            }),
+          ),
+        }),
+      )
+      .length(4),
+    errors: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
+  }),
+  ProviderSettingsRequest: z.strictObject({
+    expectedStoreId: id,
+    commandId: id,
+    expectedReadSet: modelSettingsReadSet,
+    operation: providerSettingsOperation,
+    secret: z.string().min(1).max(65536).optional(),
   }),
   ConfigurationReadQuery: z.strictObject({ storeId: id.optional(), workspaceId: id.optional() }),
   HostMutationQuery: z.strictObject({ storeId: id }),
@@ -752,12 +793,21 @@ export const schemas = {
       'credential.put',
       'credential.revoke',
       'model_settings.update',
+      'provider_settings.update',
     ]),
     modelSettings: modelSettingsMarker.optional(),
+    providerSettings: providerSettingsMarker.optional(),
     state: z.enum(['pending', 'applied', 'failed', 'outcome_unknown']),
     receipt: z.union([
       z.strictObject({}),
       z.strictObject({ status: z.literal('applied'), etag }),
+      z.strictObject({
+        status: z.literal('applied'),
+        etag,
+        credentialState: z.enum(['unchanged', 'stored']),
+        configurationState: z.literal('published'),
+        opaqueRef: opaqueCredentialRef.optional(),
+      }),
       z.strictObject({
         status: z.literal('applied'),
         opaqueRef: opaqueCredentialRef,
@@ -766,6 +816,13 @@ export const schemas = {
       z.strictObject({
         status: z.enum(['failed', 'outcome_unknown']),
         code: z.string().regex(/^[a-z0-9_]{1,128}$/),
+      }),
+      z.strictObject({
+        status: z.enum(['failed', 'outcome_unknown']),
+        code: z.string().regex(/^[a-z0-9_]{1,128}$/),
+        credentialState: z.enum(['unchanged', 'stored', 'outcome_unknown']),
+        configurationState: z.enum(['not_attempted', 'outcome_unknown']),
+        opaqueRef: opaqueCredentialRef.optional(),
       }),
     ]),
   }),
@@ -958,6 +1015,9 @@ export const schemas = {
     kind: z.literal('run.start'),
     content: z.string().max(262144),
     modelId: z.string().max(256).optional(),
+    reasoningEffort: z
+      .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+      .optional(),
     selectedSkills: selectedSkills.optional(),
     extensionInputs: extensionInputs.optional(),
   }),
@@ -1413,6 +1473,18 @@ export const apiSchemas = {
   SessionExportCompletion: SessionExportCompletionSchema,
 };
 export const apiRoutes = [
+  {
+    method: 'get',
+    path: '/v1/config/user/providers',
+    query: 'HostMutationQuery',
+    response: 'ProviderSettingsView',
+  },
+  {
+    method: 'post',
+    path: '/v1/config/user/providers',
+    request: 'ProviderSettingsRequest',
+    response: 'HostMutation',
+  },
   {
     method: 'get',
     path: '/v1/config/{scope}/models',

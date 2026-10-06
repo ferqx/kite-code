@@ -22,3 +22,6 @@
 推理强度使用中立有限值 `none/minimal/low/medium/high/xhigh/max`。只有本厂构建的兼容模型绑定接受这项 preset；不透明 SDK Model 在任何 I/O 前返回 `model_reasoning_effort_unsupported`。SDK 通过 `providerOptions.openaiCompatible.reasoningEffort` 传为实际 `reasoning_effort`，纯描述和原 Execution settings 保存相同冻结值；未配置时不发送该字段。这些值表示适配器的编码范围，不是远端模型发现或支持保证，远端拒绝按实际单次请求失败处理，不切换模型、不重试。
 
 [SDK 请求](test/sdk.test.ts)逐值核对真实本机 HTTP、绑定后 caller 改值不影响请求、未知值/不透明绑定拒绝；[配套 Service](../../apps/service/test/isolated/configuration.test.ts)核对活动旧 Run 与后续新 Run 的实际 low/high 请求和公开历史 ModelInput。2026-10-02 与 Core metadata/Native-Browser inspector 组合29项、239断言通过；不证明生产 Provider 或设置面板资格。
+
+
+默认宿主显式传入 `provider` 时，绑定的公开 family 为 `openai`、`deepseek`、`ollama` 或兼容默认 `openai-compatible`，与实际 endpoint/model 同时冻结；不会从模型名称猜 family。四类仍走同一明确单次 SDK compatible transport，凭据和 endpoint 不进入公开 metadata。Service 的[真实 HTTP 四路请求](../../apps/service/test/isolated/run-model-selection.test.ts)与 [Native 原 ModelInput/wire 验收](../../apps/desktop/test/isolated/native-provider-bundle.test.ts)核对绑定、临时 effort 和 child preset；不据此宣称生产 Provider 全部语义兼容。

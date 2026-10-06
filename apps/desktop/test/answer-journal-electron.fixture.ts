@@ -51,7 +51,7 @@ try {
     }, privatePath);
   await page.getByRole('button', { name: 's', exact: true }).click();
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('one original question');
-  await page.getByRole('button', { name: '发送明确的新轮次' }).press('Enter');
+  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   const shown = await until((s) => s.selection?.interactions.length === 1);
   const card = shown.selection!.interactions[0]!,
     runId = card.runId!;

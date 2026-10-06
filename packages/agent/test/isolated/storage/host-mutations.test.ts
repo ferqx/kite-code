@@ -425,3 +425,297 @@ test('model Settings journal marker is closed data, original read set and operat
     await f.close();
   }
 });
+
+test('Provider journal preserves the original family, endpoint and read set; closed user intent cannot acquire Workspace or secret authority', async () => {
+  const f = await fixture();
+  const readSet = {
+    userEtag: 'a'.repeat(64),
+    workspaceEtag: null,
+    explicitDigest: 'b'.repeat(64),
+    effectiveDigest: 'c'.repeat(64),
+  };
+  const marker = {
+    expectedReadSet: readSet,
+    operation: {
+      provider: 'openai',
+      connectionId: null,
+      baseURL: 'https://provider.invalid/v1',
+      modelNames: ['actual-雪🙂'],
+      credential: 'replace',
+    },
+  };
+  const input = {
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'owner',
+    commandId: 'provider',
+    kind: 'config.user.write' as const,
+    scope: 'user',
+    requestDigest: f.digest(marker),
+    safeRequest: {
+      scope: 'user',
+      ifMatch: readSet.userEtag,
+      operationCount: 1,
+      providerSettings: marker,
+    },
+  };
+  try {
+    for (const provider of ['openai', 'deepseek', 'compatible', 'ollama']) {
+      const request = {
+        ...input,
+        commandId: `provider-${provider}`,
+        safeRequest: {
+          ...input.safeRequest,
+          providerSettings: { ...marker, operation: { ...marker.operation, provider } },
+        },
+      };
+      expect((await f.store.beginHostMutation(request)).created).toBe(true);
+      expect((await f.store.beginHostMutation(request)).created).toBe(false);
+    }
+    await f.store.beginHostMutation(input);
+    await rejected(
+      f.store.beginHostMutation({ ...input, expectedStoreId: 'foreign' }),
+      'store_identity_mismatch',
+    );
+    for (const providerSettings of [
+      { ...marker, operation: { ...marker.operation, baseURL: 'https://other.invalid/v1' } },
+      { ...marker, expectedReadSet: { ...readSet, effectiveDigest: 'd'.repeat(64) } },
+    ])
+      await rejected(
+        f.store.beginHostMutation({
+          ...input,
+          safeRequest: { ...input.safeRequest, providerSettings },
+        }),
+        'host_mutation_conflict',
+      );
+    const bads = [
+      { ...input.safeRequest, providerSettings: { ...marker, secret: 'never-store' } },
+      {
+        ...input.safeRequest,
+        providerSettings: {
+          ...marker,
+          operation: {
+            ...marker.operation,
+            credentialRef: 'credential:00000000-0000-0000-0000-000000000001',
+          },
+        },
+      },
+      {
+        ...input.safeRequest,
+        providerSettings: {
+          ...marker,
+          operation: {
+            ...marker.operation,
+            baseURL: 'https://provider.invalid/v1?key=never-store',
+          },
+        },
+      },
+      {
+        ...input.safeRequest,
+        modelSettings: { expectedReadSet: readSet, operation: { kind: 'default', modelId: 'a' } },
+      },
+    ];
+    for (const [index, safeRequest] of bads.entries()) {
+      const commandId = `bad-provider-${index}`;
+      await rejected(
+        f.store.beginHostMutation({ ...input, commandId, safeRequest }),
+        'invalid_host_mutation',
+      );
+      expect(
+        await f.store.getHostMutation({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'owner',
+          commandId,
+        }),
+      ).toBeNull();
+    }
+    await f.store.createWorkspace({
+      expectedStoreId: f.expectedStoreId,
+      id: 'w',
+      rootUri: 'file:///disposable',
+      name: 'w',
+    });
+    await rejected(
+      f.store.beginHostMutation({
+        ...input,
+        commandId: 'workspace-provider',
+        kind: 'config.workspace.write',
+        scope: 'w',
+        safeRequest: {
+          ...input.safeRequest,
+          scope: 'workspace',
+          workspaceId: 'w',
+          providerSettings: {
+            ...marker,
+            expectedReadSet: { ...readSet, workspaceEtag: readSet.userEtag },
+          },
+        },
+      }),
+      'invalid_host_mutation',
+    );
+    expect(
+      (
+        await f.store.getHostMutation({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'owner',
+          commandId: input.commandId,
+        })
+      )?.safeRequest,
+    ).toEqual(input.safeRequest);
+    expect(JSON.stringify(f.db.query('SELECT * FROM host_mutation').all())).not.toContain(
+      'never-store',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('Provider terminal journal distinguishes stored-unpublished, uncertain vault and published config using its original marker', async () => {
+  const f = await fixture();
+  const input = {
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'owner',
+    commandId: 'split',
+    kind: 'config.user.write' as const,
+    scope: 'user',
+    requestDigest: 'a'.repeat(64),
+    safeRequest: {
+      scope: 'user',
+      ifMatch: 'b'.repeat(64),
+      operationCount: 1,
+      providerSettings: {
+        expectedReadSet: {
+          userEtag: 'b'.repeat(64),
+          workspaceEtag: null,
+          explicitDigest: 'c'.repeat(64),
+          effectiveDigest: 'd'.repeat(64),
+        },
+        operation: {
+          provider: 'openai',
+          connectionId: null,
+          baseURL: 'https://provider.invalid/v1',
+          modelNames: ['actual'],
+          credential: 'replace',
+        },
+      },
+    },
+  };
+  const opaqueRef = 'credential:00000000-0000-0000-0000-000000000001';
+  try {
+    await f.store.beginHostMutation(input);
+    const finish = {
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: input.commandId,
+      requestDigest: input.requestDigest,
+    };
+    const split = {
+      ...finish,
+      state: 'failed' as const,
+      receipt: {
+        status: 'failed',
+        code: 'configuration_read_set_conflict',
+        credentialState: 'stored',
+        configurationState: 'not_attempted',
+        opaqueRef,
+      },
+    };
+    await rejected(
+      f.store.finishHostMutation({
+        ...split,
+        receipt: {
+          status: 'failed',
+          code: split.receipt.code,
+          credentialState: 'stored',
+          configurationState: 'not_attempted',
+        },
+      }),
+      'invalid_host_mutation',
+    );
+    const stored = await f.store.finishHostMutation(split);
+    expect(stored.receipt).toEqual(split.receipt);
+    expect(await f.store.finishHostMutation(split)).toEqual(stored);
+    expect((await f.store.beginHostMutation(input)).created).toBe(false);
+    await rejected(
+      f.store.finishHostMutation({
+        ...finish,
+        state: 'applied',
+        receipt: {
+          status: 'applied',
+          etag: 'e'.repeat(64),
+          credentialState: 'stored',
+          configurationState: 'published',
+          opaqueRef,
+        },
+      }),
+      'host_mutation_terminal_conflict',
+    );
+    await f.store.beginHostMutation({ ...input, commandId: 'unknown' });
+    const uncertain = {
+      ...finish,
+      commandId: 'unknown',
+      state: 'outcome_unknown' as const,
+      receipt: {
+        status: 'outcome_unknown',
+        code: 'credential_unavailable',
+        credentialState: 'outcome_unknown',
+        configurationState: 'not_attempted',
+      },
+    };
+    await rejected(
+      f.store.finishHostMutation({
+        ...uncertain,
+        state: 'failed',
+        receipt: { ...uncertain.receipt, status: 'failed' },
+      }),
+      'invalid_host_mutation',
+    );
+    await rejected(
+      f.store.finishHostMutation({
+        ...uncertain,
+        receipt: { ...uncertain.receipt, credentialState: 'unchanged' },
+      }),
+      'invalid_host_mutation',
+    );
+    expect((await f.store.finishHostMutation(uncertain)).receipt).toEqual(uncertain.receipt);
+    await f.store.beginHostMutation({ ...input, commandId: 'published' });
+    const published = {
+      ...finish,
+      commandId: 'published',
+      state: 'applied' as const,
+      receipt: {
+        status: 'applied',
+        etag: 'e'.repeat(64),
+        credentialState: 'unchanged',
+        configurationState: 'published',
+      },
+    };
+    await rejected(
+      f.store.finishHostMutation({
+        ...published,
+        receipt: { ...published.receipt, configurationState: 'not_attempted' },
+      }),
+      'invalid_host_mutation',
+    );
+    expect((await f.store.finishHostMutation(published)).receipt).toEqual(published.receipt);
+    await f.store.beginHostMutation({
+      ...input,
+      commandId: 'generic',
+      safeRequest: { scope: 'user', ifMatch: input.safeRequest.ifMatch, operationCount: 1 },
+    });
+    await rejected(
+      f.store.finishHostMutation({ ...published, commandId: 'generic' }),
+      'invalid_host_mutation',
+    );
+    expect(
+      (
+        await f.store.getHostMutation({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'owner',
+          commandId: 'generic',
+        })
+      )?.state,
+    ).toBe('pending');
+  } finally {
+    await f.close();
+  }
+});

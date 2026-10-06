@@ -58,7 +58,8 @@ test('Native model settings DOM sends one finite intent and retains original unk
   const delayedRead = new Promise<NativeModelSettingsFacts>((resolve) => {
     releaseRead = resolve;
   });
-  let reads = 0;
+  let reads = 0,
+    catalogRefreshes = 0;
   const bridge: NativeBridge = {
     watch: () => () => {},
     request: async (input) => {
@@ -79,6 +80,7 @@ test('Native model settings DOM sends one finite intent and retains original unk
         generation={1}
         selection={selected(id)}
         submissions={submissions}
+        onSaved={() => catalogRefreshes++}
       />,
     );
   const button = (name: string) =>
@@ -102,11 +104,13 @@ test('Native model settings DOM sends one finite intent and retains original unk
     expect(reads).toBe(1);
     expect(element.textContent).not.toContain('当前期望默认模型');
     expect(element.textContent).toContain('原提交 original');
+    expect(catalogRefreshes).toBe(0);
     await act(async () => button('查询原提交').click());
     expect(calls.filter((input) => input.method === 'settings.models.lookup')).toEqual([
       { method: 'settings.models.lookup', generation: 1, commandId: 'original' },
     ]);
     expect(reads).toBe(1);
+    expect(catalogRefreshes).toBe(1);
     await act(async () => button('读取用户模型配置').click());
     await act(async () => render('old', [original]));
     await act(async () => releaseRead({ ...facts, defaultModelId: 'stale-new-view' }));
@@ -115,6 +119,97 @@ test('Native model settings DOM sends one finite intent and retains original unk
     expect(button('设为默认 b').disabled).toBe(true);
     expect(button('禁用模型 b').disabled).toBe(true);
     expect(element.textContent).toContain('未决提交先查询原结果');
+  } finally {
+    await act(async () => root.unmount());
+    Object.assign(globalThis, prior);
+    dom.window.close();
+  }
+});
+
+test('model settings groups by Provider and keeps an optimistic row in place, then restores failed enablement', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const element = dom.window.document.getElementById('root')!,
+    root = createRoot(element);
+  const facts: NativeModelSettingsFacts = {
+    kind: 'settings.models',
+    observationId: 2,
+    storeId: 'store',
+    scope: 'user',
+    canWrite: true,
+    errors: [],
+    defaultModelId: 'a',
+    models: [
+      {
+        id: 'a',
+        provider: 'openai',
+        model: 'actual-a',
+        enabled: true,
+        configured: true,
+        diagnostics: [],
+      },
+      {
+        id: 'b',
+        provider: 'deepseek',
+        model: 'actual-b',
+        enabled: false,
+        configured: true,
+        diagnostics: [],
+      },
+    ],
+  };
+  let release!: (value: NativeModelSettingsSubmission) => void;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      if (input.method === 'settings.models.read') return facts;
+      if (input.method === 'settings.models.enabled')
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      return null;
+    },
+  };
+  const button = (name: string) =>
+    [...element.querySelectorAll('button')].find(
+      (entry) => entry.textContent === name || entry.getAttribute('aria-label') === name,
+    )!;
+  try {
+    await act(async () =>
+      root.render(<NativeModelSettings bridge={bridge} generation={1} submissions={[]} />),
+    );
+    await act(async () => button('读取用户模型配置').click());
+    expect(element.querySelector('[aria-label="模型提供商 openai"]')).not.toBeNull();
+    expect(element.querySelector('[aria-label="模型提供商 deepseek"]')).not.toBeNull();
+    const row = button('启用模型 b').closest('li');
+    await act(async () => button('启用模型 b').click());
+    expect(button('禁用模型 b').closest('li')).toBe(row);
+    expect(button('禁用模型 b').disabled).toBe(true);
+    await act(async () =>
+      release({
+        kind: 'settings.models.submission',
+        commandId: 'failed',
+        storeId: 'store',
+        scope: 'user',
+        observationId: 2,
+        operation: { kind: 'enabled', modelId: 'b', enabled: true },
+        phase: 'failed',
+        error: 'configuration_conflict',
+      }),
+    );
+    expect(button('启用模型 b').closest('li')).toBe(row);
+    expect(element.textContent).toContain('configuration_conflict');
+    expect(button('启用模型 b').disabled).toBe(true);
   } finally {
     await act(async () => root.unmount());
     Object.assign(globalThis, prior);

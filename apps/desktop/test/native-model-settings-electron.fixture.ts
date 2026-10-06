@@ -216,6 +216,7 @@ try {
       .commandId,
   );
   eq('content' in heldRequest && heldRequest.content, 'Held original model A');
+  eq('modelId' in heldRequest && heldRequest.modelId, 'A');
   const oldRun = held.selection!.runs.find((r) => r.isActive)!.id;
   eq(await count(), 1);
   let panel = page.getByRole('region', { name: '模型设置', exact: true });
@@ -299,6 +300,19 @@ try {
     page,
     (s) => s.selection?.runs.find((r) => r.id === oldRun)?.status === 'completed',
   );
+  const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
+  // The global default is B; this existing Session still owns its original next-run preference A.
+  eq(await picker.getByRole('button', { name: /^模型：fixed-A/ }).isVisible(), true);
+  eq(JSON.parse(retained.replace(/\n\/\/ external editor retained\n$/, '')).modelId, 'B');
+  await picker.getByRole('button', { name: /^模型：/ }).click();
+  await picker
+    .getByRole('region', { name: '模型与思考浮层' })
+    .getByRole('button', { name: 'fixed-A', exact: true })
+    .click();
+  await picker.getByRole('button', { name: '选择模型 B', exact: true }).click();
+  await picker.getByRole('button', { name: '关闭模型选择', exact: true }).click();
+  eq(await picker.getByRole('button', { name: /^模型：fixed-B/ }).isVisible(), true);
+  eq(await count(), 1);
   await page.evaluate(() => {
     (Reflect.get(window, '__settingsInputEvents') as unknown[]).length = 0;
   });
@@ -338,6 +352,16 @@ try {
     finishedRequests.filter((r) => 'content' in r && r.content === 'Explicit next model B').length,
     1,
   );
+  eq(
+    finishedRequests.some(
+      (r) =>
+        'content' in r &&
+        r.content === 'Explicit next model B' &&
+        'modelId' in r &&
+        r.modelId === 'B',
+    ),
+    true,
+  );
   eq(await count(), 2);
   const bodies = await (await controlFetch('requests')).json();
   eq(bodies[0].model, 'fixed-A');
@@ -354,6 +378,17 @@ try {
   await panel.getByText(/当前期望默认模型：B/).waitFor();
   eq(await count(), 2);
   eq((await state(page)).selection!.runs.length, 2);
+  await page
+    .getByRole('region', { name: '下一轮模型选择', exact: true })
+    .getByRole('button', { name: /^模型：fixed-B/ })
+    .waitFor();
+  eq(
+    await page
+      .getByRole('region', { name: '下一轮模型选择', exact: true })
+      .getByRole('button', { name: /^模型：fixed-B/ })
+      .isVisible(),
+    true,
+  );
   await quitOwned();
   console.log(
     'Native Model Settings Node assertions:',

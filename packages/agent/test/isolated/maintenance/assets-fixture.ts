@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,6 +12,27 @@ const repository = new URL('../../../../../', import.meta.url).pathname;
 export const configBytes = Buffer.from(
   '// exact config with comments\n{"future":{"unchanged":true},"credentialRef":"credential:01234567-1234-1234-1234-012345678901"}\n',
 );
+/** Historical v2–v13 qualifications keep DB5 inputs; current DB6 has its own actual Node qualification. */
+export function retainLegacyDb5Fixture(profile: { dataRoot: string; profile: string }) {
+  const db = new Database(join(selectProfile(profile).profilePath, 'desktop-private/data.sqlite'));
+  try {
+    if (
+      db.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version !== 6 ||
+      db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM configuration_intents').get()
+        ?.count !== 0 ||
+      db.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM model_routes').get()?.count !==
+        0
+    )
+      throw Error('legacy_fixture_requires_empty_db6_additions');
+    db.run('BEGIN IMMEDIATE');
+    db.run('DROP TABLE configuration_intents');
+    db.run('DROP TABLE model_routes');
+    db.run('PRAGMA user_version=5');
+    db.run('COMMIT');
+  } finally {
+    db.close(true);
+  }
+}
 export async function nodeAssets(
   root: string,
   profile: { dataRoot: string; profile: string },
@@ -98,6 +120,7 @@ try {
     new Response(child.stderr).text(),
   ]);
   if (exit !== 0) throw Error(`owned_node_ui_failed: ${stderr}`);
+  retainLegacyDb5Fixture(profile);
   return JSON.parse(stdout) as {
     count: number;
     original: { storeId: string; content: string };

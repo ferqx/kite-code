@@ -142,7 +142,14 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
     allowed =
       input.kind === 'config.repair'
         ? ['scope', 'workspaceId', 'ifMatch']
-        : ['scope', 'workspaceId', 'ifMatch', 'operationCount', 'modelSettings'];
+        : [
+            'scope',
+            'workspaceId',
+            'ifMatch',
+            'operationCount',
+            'modelSettings',
+            'providerSettings',
+          ];
     if (
       typeof value.ifMatch !== 'string' ||
       value.ifMatch.length > 256 ||
@@ -153,9 +160,16 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
           value.operationCount > 128))
     )
       throw new AgentError('invalid_host_mutation');
-    if (value.modelSettings !== undefined) {
+    if (value.modelSettings !== undefined || value.providerSettings !== undefined) {
       if (value.operationCount !== 1) throw new AgentError('invalid_host_mutation');
-      const marker = value.modelSettings;
+      if (
+        value.providerSettings !== undefined &&
+        (value.modelSettings !== undefined ||
+          input.kind !== 'config.user.write' ||
+          value.scope !== 'user')
+      )
+        throw new AgentError('invalid_host_mutation');
+      const marker = value.providerSettings ?? value.modelSettings;
       if (
         !marker ||
         typeof marker !== 'object' ||
@@ -182,7 +196,50 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
         value.ifMatch !== (value.scope === 'user' ? readSet.userEtag : readSet.workspaceEtag)
       )
         throw new AgentError('invalid_host_mutation');
-      if (
+      if (value.providerSettings !== undefined) {
+        if (
+          !operation ||
+          typeof operation !== 'object' ||
+          Array.isArray(operation) ||
+          Object.keys(operation).sort().join(',') !==
+            'baseURL,connectionId,credential,modelNames,provider' ||
+          typeof operation.provider !== 'string' ||
+          !['openai', 'deepseek', 'compatible', 'ollama'].includes(operation.provider) ||
+          !(
+            operation.connectionId === null ||
+            (typeof operation.connectionId === 'string' &&
+              /^[a-f0-9]{64}$/.test(operation.connectionId))
+          ) ||
+          typeof operation.baseURL !== 'string' ||
+          !operation.baseURL ||
+          operation.baseURL.length > 4096 ||
+          !Array.isArray(operation.modelNames) ||
+          operation.modelNames.some(
+            (name) =>
+              typeof name !== 'string' ||
+              !name.trim() ||
+              name.length > 256 ||
+              /[\r\n]/.test(name) ||
+              name.includes(String.fromCharCode(0)),
+          ) ||
+          typeof operation.credential !== 'string' ||
+          !['keep', 'replace', 'none'].includes(operation.credential)
+        )
+          throw new AgentError('invalid_host_mutation');
+        try {
+          const url = new URL(operation.baseURL);
+          if (
+            !['http:', 'https:'].includes(url.protocol) ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash
+          )
+            throw Error();
+        } catch {
+          throw new AgentError('invalid_host_mutation');
+        }
+      } else if (
         !operation ||
         typeof operation !== 'object' ||
         Array.isArray(operation) ||
@@ -272,12 +329,19 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
   if (Object.keys(value).some((key) => !allowed.includes(key)))
     throw new AgentError('invalid_host_mutation');
 }
-function receipt(kind: HostMutationRecord['kind'], state: string, value: Json): void {
+function receipt(
+  kind: HostMutationRecord['kind'],
+  state: string,
+  value: Json,
+  provider = false,
+): void {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new AgentError('invalid_host_mutation');
-  const keys = kind.startsWith('credential.')
-    ? ['status', 'code', 'opaqueRef', 'persistence', 'revoked']
-    : ['status', 'code', 'etag'];
+  const keys = provider
+    ? ['status', 'code', 'etag', 'credentialState', 'configurationState', 'opaqueRef']
+    : kind.startsWith('credential.')
+      ? ['status', 'code', 'opaqueRef', 'persistence', 'revoked']
+      : ['status', 'code', 'etag'];
   if (Object.keys(value).some((key) => !keys.includes(key)) || Object.keys(value).length === 0)
     throw new AgentError('invalid_host_mutation');
   if (value.status !== undefined && value.status !== state)
@@ -300,6 +364,27 @@ function receipt(kind: HostMutationRecord['kind'], state: string, value: Json): 
   )
     throw new AgentError('invalid_host_mutation');
   if (value.revoked !== undefined && typeof value.revoked !== 'boolean')
+    throw new AgentError('invalid_host_mutation');
+  if (
+    provider &&
+    (value.status !== state ||
+      typeof value.credentialState !== 'string' ||
+      !['unchanged', 'stored', 'outcome_unknown'].includes(value.credentialState) ||
+      typeof value.configurationState !== 'string' ||
+      !['not_attempted', 'published', 'outcome_unknown'].includes(value.configurationState) ||
+      (value.credentialState === 'stored') !== (typeof value.opaqueRef === 'string') ||
+      (state === 'applied'
+        ? value.configurationState !== 'published' ||
+          value.credentialState === 'outcome_unknown' ||
+          typeof value.etag !== 'string' ||
+          value.code !== undefined
+        : typeof value.code !== 'string' ||
+          value.etag !== undefined ||
+          value.configurationState === 'published' ||
+          (state === 'outcome_unknown') !==
+            (value.credentialState === 'outcome_unknown' ||
+              value.configurationState === 'outcome_unknown')))
+  )
     throw new AgentError('invalid_host_mutation');
 }
 export function callHostMutation(
@@ -460,7 +545,14 @@ export function callHostMutation(
         safe(db, original);
         checkControlRevision(db, original);
       }
-    } else receipt(row.kind as HostMutationRecord['kind'], input.state, input.receipt);
+    } else
+      receipt(
+        row.kind as HostMutationRecord['kind'],
+        input.state,
+        input.receipt,
+        (JSON.parse(String(row.safe_request_json)) as Record<string, Json>).providerSettings !==
+          undefined,
+      );
     if (row.state !== 'pending') {
       if (row.state !== input.state || row.receipt_json !== canonicalJson(finalReceipt))
         throw new AgentError('host_mutation_terminal_conflict');

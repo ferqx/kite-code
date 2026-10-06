@@ -307,7 +307,7 @@ test('future DB/manifest fields and old version aliases reject DB5, including re
       original,
     );
     for (const statement of [
-      'PRAGMA user_version=6',
+      'PRAGMA user_version=7',
       'PRAGMA user_version=5;CREATE TABLE future(value TEXT)',
     ]) {
       mutate(f.path, (db) => db.exec(statement));

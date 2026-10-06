@@ -15,3 +15,8 @@ receipt 为闭合集：config 仅 status/code/etag；credential 仅 status/code/
 
 
 config.user.write / config.workspace.write 可携封闭 `modelSettings` 安全 marker，仅 `{expectedReadSet:{userEtag,workspaceEtag,explicitDigest,effectiveDigest},operation:{kind:"enabled",modelId,enabled}|{kind:"default",modelId}|{kind:"effort",modelId,reasoningEffort}}`，其中 effort 为有限枚举或 null。原 scope 对应的 ETag 必须与 ifMatch 一致；用户读取集合的 workspaceEtag 为 null，Workspace 集合为真实 ETag。未知 purpose/字段、隐藏主体和坏 hash 被接纳前拒绝。同 ID 下 marker 任一事实改变都冲突。Core只验证这些普通配置审计数据和原身份，不判断模型有效性、不新增调度或业务表；完整候选/default 规则属于 Service Settings。回执继续只保存 status/etag 或有限失败码。 [host-mutations tests](../../../test/isolated/storage/host-mutations.test.ts) 验证恶意 marker 零接纳、原事实不可替换。
+
+
+config.user.write 的 user scope 可携封闭 providerSettings，与 modelSettings 互斥且 operationCount:1。marker 恰含原四字段 readSet（workspaceEtag 必须 null、userEtag 等于 ifMatch）和 {provider,connectionId,baseURL,modelNames,credential}；协议为四个明确字符串值、connectionId 为 null/64hex、URL 无 userinfo/query/hash，credential 为 keep/replace/none。Core 不接受秘密、路径、主体或隐藏 Workspace。原 Store/subject/command/kind/scope/完整 marker 与 HMAC digest 绑定不变。
+
+receipt grammar 由持久原 marker 决定，分开核 credentialState:unchanged|stored|outcome_unknown 与 configurationState:not_attempted|published|outcome_unknown。opaqueRef 当且仅当 stored；applied 必须 published/已知凭据/etag，failed 两介质必须已知且无etag，unknown 至少一个介质未知。普通 config/credential receipt 不接受该复合格式。Core 只记录结果，不核 vault I/O、不回滚、不自动重发；实际配置合法性与两个介质发布属于 Service owner。[真实 Worker 测试](../../../test/isolated/storage/host-mutations.test.ts)核原 marker、身份冲突、秘密/authority拒绝和对应终态。

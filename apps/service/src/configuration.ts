@@ -54,6 +54,7 @@ import {
   createMcpSourceConfiguration,
   type McpSourceConfigurationOptions,
 } from './mcp-source-configuration';
+import { isSupportedModelProvider, supportsReasoningEffort } from './model-providers';
 import { createPermissionManagement, type PermissionManagementPort } from './permission-management';
 import {
   type CapabilityDescription,
@@ -655,7 +656,7 @@ export function createDefaultProcessConfiguration(options: {
       }
       const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
       const current = explicitConfiguration(explicit);
-      const request = command.request as { modelId?: string };
+      const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
       if (selection) current.modelId = selection.modelId;
       else if (request.modelId !== undefined) current.modelId = request.modelId;
       const effective = resolveConfiguration({
@@ -667,11 +668,24 @@ export function createDefaultProcessConfiguration(options: {
       const selected = effective.models?.find((model) => model.id === effective.modelId);
       if (!selected || selected.enabled === false)
         throw new ConfigurationError('model_unavailable');
-      if (selected.provider !== 'compatible')
+      if (!isSupportedModelProvider(selected.provider))
         throw new ConfigurationError('model_provider_unsupported');
       if (!selected.baseURL || !selected.model)
         throw new ConfigurationError('invalid_model_configuration');
+      // A root command owns its temporary effort. Apply it before snapshot sealing;
+      // a child selection uses its configured preset, while recovery reproduces
+      // the original root request rather than inheriting the current default.
+      if ((!selection || recovery) && request.reasoningEffort !== undefined) {
+        if (!supportsReasoningEffort(selected.provider) || selected.reasoningSupported === false)
+          throw new ConfigurationError('model_reasoning_effort_unsupported');
+        selected.options = { ...selected.options, reasoningEffort: request.reasoningEffort };
+      }
       const actualOptions = parseModelPreset(selected.options);
+      if (
+        actualOptions.reasoningEffort !== undefined &&
+        (!supportsReasoningEffort(selected.provider) || selected.reasoningSupported === false)
+      )
+        throw new ConfigurationError('model_reasoning_effort_unsupported');
       // Preserve the non-Skill credential/shape preflight before constructing any
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
@@ -900,6 +914,7 @@ export function createDefaultProcessConfiguration(options: {
             ? undefined
             : await vault.resolve(selected.credentialRef);
         const binding = createCompatibleModelBinding({
+          name: selected.provider,
           baseURL: selected.baseURL,
           modelId: selected.model,
           apiKey,
@@ -953,7 +968,7 @@ export function createDefaultProcessConfiguration(options: {
           if (
             candidate &&
             candidate.enabled !== false &&
-            candidate.provider === 'compatible' &&
+            isSupportedModelProvider(candidate.provider) &&
             candidate.baseURL &&
             candidate.model
           )

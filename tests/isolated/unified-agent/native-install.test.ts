@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -53,6 +54,61 @@ test('finite Native managed install preserves lock0600 and closed launcher, roll
     expect(existsSync(prefix)).toBe(false);
   } finally {
     rmSync(parent, { recursive: true, force: true });
+  }
+});
+test('Native uninstall rejects a live inner holder before reading corrupted candidate content and releases its outer lease', () => {
+  const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-busy-'));
+  try {
+    const source = finiteNativeFixture(parent),
+      prefix = join(parent, 'installed'),
+      installed = installNativeBundle({ bundleRoot: source, prefix }),
+      manifest = join(installed.releaseRoot, 'native-manifest.json'),
+      original = readFileSync(manifest),
+      active = readFileSync(join(prefix, 'active')),
+      holder = acquireArtifactAccess({
+        root: join(installed.releaseRoot, 'terminal'),
+        mode: 'shared',
+      });
+    writeFileSync(manifest, 'invalid candidate content');
+    try {
+      expect(() => uninstallNativeBundle(prefix)).toThrow('Lock is busy');
+      expect(readFileSync(join(prefix, 'active'))).toEqual(active);
+      expect(readFileSync(manifest, 'utf8')).toBe('invalid candidate content');
+      const outer = acquireArtifactAccess({ root: installed.releaseRoot, mode: 'exclusive' });
+      outer.release();
+    } finally {
+      holder.release();
+    }
+    expect(() => uninstallNativeBundle(prefix)).toThrow('native_manifest_invalid');
+    expect(existsSync(prefix)).toBe(true);
+    expect(readFileSync(join(prefix, 'active'))).toEqual(active);
+    writeFileSync(manifest, original);
+    uninstallNativeBundle(prefix);
+    expect(existsSync(prefix)).toBe(false);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('Native uninstall rejects candidate and inner directory aliases before taking their use locks', () => {
+  for (const nested of [false, true]) {
+    const parent = realpathSync(mkdtempSync('/private/tmp/kite-native-install-alias-'));
+    try {
+      const source = finiteNativeFixture(parent),
+        prefix = join(parent, 'installed'),
+        installed = installNativeBundle({ bundleRoot: source, prefix }),
+        path = nested ? join(installed.releaseRoot, 'terminal') : installed.releaseRoot,
+        target = join(parent, 'alias-target'),
+        active = readFileSync(join(prefix, 'active'));
+      renameSync(path, target);
+      symlinkSync(target, path);
+      expect(() => uninstallNativeBundle(prefix)).toThrow();
+      expect(existsSync(prefix)).toBe(true);
+      expect(readFileSync(join(prefix, 'active'))).toEqual(active);
+      expect(existsSync(target)).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   }
 });
 test('finite Native install refuses unknown files, badactive/marker, lock aliases and modes without deleting managed candidate', () => {

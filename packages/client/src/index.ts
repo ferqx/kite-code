@@ -46,6 +46,7 @@ import type {
   JobReconcileCommand,
   ModelSettingsRequest,
   PermissionMutation,
+  ProviderSettingsRequest,
   ReconcileJobRequest,
   RecoverSessionRequest,
   RecoverSessionResponse,
@@ -93,6 +94,15 @@ import {
 } from './sse';
 
 export { type CallerCommandRequest, canonicalCallerCommandRequest } from './command-request';
+/** Closed, non-secret configuration intent for a Native original-operation journal. */
+export function canonicalConfigurationRequest(
+  kind: 'model' | 'provider',
+  input: ModelSettingsRequest | Omit<ProviderSettingsRequest, 'secret'>,
+): string {
+  if ('secret' in input) throw new ClientError('invalid_request');
+  validateRequest(kind === 'model' ? 'ModelSettingsRequest' : 'ProviderSettingsRequest', input);
+  return canonicalModelBody(input);
+}
 export { ClientError, validateRequest } from './decode';
 export type * from './generated/api';
 export {
@@ -113,7 +123,7 @@ export {
   type McpToolsSnapshots,
   readMcpToolDescriptor,
 } from './mcp-tools';
-export { verifyModelInputSnapshot } from './model-input';
+export { canonicalModelBody, verifyModelInputSnapshot } from './model-input';
 export { verifyModelOutputSnapshot } from './model-output';
 export type Json = ExtensionCommandRequest['input'];
 export type { SessionExportFrame, SessionExportSection } from './session-export';
@@ -459,8 +469,12 @@ export class AgentClient {
       throw new ClientError('host_mutation_scope_mismatch');
     this.configurationScope(result.scope, result.workspaceId);
     const configuration =
-      result.kind.startsWith('config.') || result.kind === 'model_settings.update';
+      result.kind.startsWith('config.') ||
+      result.kind === 'model_settings.update' ||
+      result.kind === 'provider_settings.update';
     if ((result.kind === 'model_settings.update') !== (result.modelSettings !== undefined))
+      throw new ClientError('invalid_response');
+    if ((result.kind === 'provider_settings.update') !== (result.providerSettings !== undefined))
       throw new ClientError('invalid_response');
     if (configuration !== (typeof result.ifMatch === 'string'))
       throw new ClientError('invalid_response');
@@ -470,15 +484,39 @@ export class AgentClient {
     if (result.state === 'pending') {
       if (keys !== '') throw new ClientError('invalid_response');
     } else if (result.state === 'applied') {
+      const provider = result.kind === 'provider_settings.update';
       if (
         receipt.status !== 'applied' ||
-        keys !== (configuration ? 'etag,status' : 'opaqueRef,persistence,status')
+        keys !==
+          (provider
+            ? `configurationState,credentialState,etag,${receipt.opaqueRef === undefined ? '' : 'opaqueRef,'}status`
+            : configuration
+              ? 'etag,status'
+              : 'opaqueRef,persistence,status')
       )
         throw new ClientError('invalid_response');
       if (configuration && typeof receipt.etag !== 'string')
         throw new ClientError('invalid_response');
-    } else if (receipt.status !== result.state || keys !== 'code,status')
+    } else if (
+      receipt.status !== result.state ||
+      keys !==
+        (result.kind === 'provider_settings.update'
+          ? `code,configurationState,credentialState,${receipt.opaqueRef === undefined ? '' : 'opaqueRef,'}status`
+          : 'code,status')
+    )
       throw new ClientError('invalid_response');
+    if (result.kind === 'provider_settings.update' && result.state !== 'pending') {
+      if (
+        (receipt.credentialState === 'stored') !== (typeof receipt.opaqueRef === 'string') ||
+        (result.state === 'failed' &&
+          (receipt.credentialState === 'outcome_unknown' ||
+            receipt.configurationState === 'outcome_unknown')) ||
+        (result.state === 'outcome_unknown' &&
+          receipt.credentialState !== 'outcome_unknown' &&
+          receipt.configurationState !== 'outcome_unknown')
+      )
+        throw new ClientError('invalid_response');
+    }
   }
   async getHostMutation(commandId: string, options: { storeId: string; signal?: AbortSignal }) {
     const storeId = options.storeId;
@@ -502,6 +540,7 @@ export class AgentClient {
     path: string,
     shape:
       | 'ModelSettingsRequest'
+      | 'ProviderSettingsRequest'
       | 'ConfigurationPatchRequest'
       | 'ConfigurationRepairRequest'
       | 'CredentialPutRequest'
@@ -509,6 +548,7 @@ export class AgentClient {
     kind: HostMutation['kind'],
     input:
       | ModelSettingsRequest
+      | ProviderSettingsRequest
       | ConfigurationPatchRequest
       | ConfigurationRepairRequest
       | CredentialPutRequest
@@ -555,7 +595,9 @@ export class AgentClient {
               ? intent.ifMatch
               : undefined) ||
         ('expectedReadSet' in intent &&
-          canonicalModelBody(result.modelSettings) !==
+          canonicalModelBody(
+            kind === 'provider_settings.update' ? result.providerSettings : result.modelSettings,
+          ) !==
             canonicalModelBody({
               expectedReadSet: intent.expectedReadSet,
               operation: intent.operation,
@@ -628,6 +670,42 @@ export class AgentClient {
       'model_settings.update',
       input,
       scope,
+      'POST',
+      options.signal,
+    );
+  }
+  async getProviderSettings(options: { storeId: string; signal?: AbortSignal }) {
+    const { signal, storeId } = options;
+    this.managementStore(storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    const result = await this.fetchJSON(
+      `/v1/config/user/providers?${new URLSearchParams({ storeId })}`,
+      'ProviderSettingsView',
+      { signal },
+    );
+    if (result.storeId !== storeId) throw new ClientError('configuration_scope_mismatch');
+    if (
+      new Set(result.providers.map((provider) => provider.id)).size !== 4 ||
+      result.readSet?.workspaceEtag != null ||
+      result.providers.some(
+        (provider) =>
+          new Set(provider.connections.map((connection) => connection.id)).size !==
+          provider.connections.length,
+      )
+    )
+      throw new ClientError('invalid_response');
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
+  updateProviderSettings(input: ProviderSettingsRequest, options: { signal?: AbortSignal } = {}) {
+    return this.writeManagement(
+      '/v1/config/user/providers',
+      'ProviderSettingsRequest',
+      'provider_settings.update',
+      input,
+      'user',
       'POST',
       options.signal,
     );

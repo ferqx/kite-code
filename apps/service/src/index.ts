@@ -884,6 +884,30 @@ export async function startService(options: ServiceOptions) {
       },
     });
   });
+  app.get('/v1/config/user/providers', async (context) => {
+    const raw = context.req.queries();
+    const query = schemas.HostMutationQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(raw).map(([key, values]) => [key, values.length === 1 ? values[0] : values]),
+      ),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    return context.json(
+      schemas.ProviderSettingsView.parse(
+        await management().readProviders({ expectedStoreId: query.data.storeId }),
+      ),
+    );
+  });
+  app.post('/v1/config/user/providers', async (context) => {
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.ProviderSettingsRequest,
+      options.maxBodyBytes ?? 1048576,
+    );
+    return context.json(
+      schemas.HostMutation.parse(await management().updateProviders({ ...input, subjectId })),
+    );
+  });
   app.get('/v1/config/:scope/models', async (context) => {
     const raw = context.req.queries();
     const query = schemas.ConfigurationReadQuery.safeParse(
@@ -1536,6 +1560,9 @@ export async function startService(options: ServiceOptions) {
             afterRunId: request.afterRunId,
             contextSelectionId: request.contextSelectionId,
             ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+            ...(request.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: request.reasoningEffort }),
             ...(request.selectedSkills === undefined
               ? {}
               : { selectedSkills: request.selectedSkills }),
@@ -1648,6 +1675,9 @@ export async function startService(options: ServiceOptions) {
             kind: request.kind,
             content: request.content,
             ...(request.modelId ? { modelId: request.modelId } : {}),
+            ...(request.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: request.reasoningEffort }),
             ...(request.selectedSkills === undefined
               ? {}
               : { selectedSkills: request.selectedSkills }),

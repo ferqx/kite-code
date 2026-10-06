@@ -58,7 +58,12 @@ function selection(request: Record<string, unknown>) {
     }
   }
 }
-function requestTarget(value: unknown, sessionId: unknown, allowAuth: boolean) {
+function requestTarget(
+  value: unknown,
+  sessionId: unknown,
+  allowAuth: boolean,
+  allowRunEffort: boolean,
+) {
   const kind = object(
     value,
     ['kind'],
@@ -67,6 +72,7 @@ function requestTarget(value: unknown, sessionId: unknown, allowAuth: boolean) {
       'commandId',
       'content',
       'modelId',
+      ...(allowRunEffort ? ['reasoningEffort'] : []),
       'selectedSkills',
       'extensionInputs',
       'targetRunId',
@@ -78,7 +84,12 @@ function requestTarget(value: unknown, sessionId: unknown, allowAuth: boolean) {
     ],
   ).kind;
   const common = ['kind', 'expectedStoreId', 'commandId'];
-  const optional = ['modelId', 'selectedSkills', 'extensionInputs'];
+  const optional = [
+    'modelId',
+    'selectedSkills',
+    'extensionInputs',
+    ...(allowRunEffort ? ['reasoningEffort'] : []),
+  ];
   let request: Record<string, unknown>, target: Record<string, unknown>;
   if (kind === 'run.start') {
     request = object(value, [...common, 'content'], optional);
@@ -154,11 +165,24 @@ function requestTarget(value: unknown, sessionId: unknown, allowAuth: boolean) {
     if (readSet.workspace !== null) verifyRead(readSet.workspace, 'workspace');
     target = { kind: 'session', id: sessionId };
   } else throw invalid();
-  if (!id(request.expectedStoreId) || !id(request.commandId)) throw invalid();
+  if (
+    !id(request.expectedStoreId) ||
+    !id(request.commandId) ||
+    (Object.hasOwn(request, 'reasoningEffort') &&
+      (typeof request.reasoningEffort !== 'string' ||
+        !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(
+          request.reasoningEffort,
+        )))
+  )
+    throw invalid();
   return { request, target };
 }
 /** Closed metadata rows, shared by the two explicitly captured private caller assets. */
-export function verifyCallerIntentRecords(records: unknown, allowAuth = false): boolean {
+export function verifyCallerIntentRecords(
+  records: unknown,
+  allowAuth = false,
+  allowRunEffort = false,
+): boolean {
   let hasAuth = false;
   if (!Array.isArray(records) || records.length > 128) throw invalid();
   const commands = new Set<string>();
@@ -184,7 +208,12 @@ export function verifyCallerIntentRecords(records: unknown, allowAuth = false): 
       !hash(intent.requestDigest)
     )
       throw invalid();
-    const { request, target } = requestTarget(intent.request, scope.sessionId, allowAuth);
+    const { request, target } = requestTarget(
+      intent.request,
+      scope.sessionId,
+      allowAuth,
+      allowRunEffort,
+    );
     if (request.expectedStoreId !== scope.storeId || commands.has(String(request.commandId)))
       throw invalid();
     commands.add(String(request.commandId));

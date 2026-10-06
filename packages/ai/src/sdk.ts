@@ -309,7 +309,13 @@ export function createCompatibleModelBinding(options: {
   }).chatModel(options.modelId);
   compatibleSnapshots.set(
     model,
-    Object.freeze({ family: 'openai-compatible', modelId: options.modelId }),
+    Object.freeze({
+      family:
+        options.name && ['openai', 'deepseek', 'ollama'].includes(options.name)
+          ? options.name
+          : 'openai-compatible',
+      modelId: options.modelId,
+    }),
   );
   return model;
 }

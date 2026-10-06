@@ -15,6 +15,11 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'interactions.next': ['viewGeneration', 'afterId'],
   'interactions.close': ['viewGeneration'],
   'settings.models.read': ['scope'],
+  'input.models.read': [],
+  'settings.providers.read': [],
+  'settings.providers.close': [],
+  'settings.providers.save': ['observationId', 'operation', 'secret'],
+  'settings.providers.lookup': ['commandId'],
   'settings.models.close': [],
   'settings.models.enabled': ['observationId', 'modelId', 'enabled'],
   'settings.models.default': ['observationId', 'modelId'],
@@ -126,6 +131,32 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'settings.models.read' && !['user', 'workspace'].includes(input.scope as string))
     throw Error('invalid_native_request');
+  if (method === 'settings.providers.save') {
+    const operation = record(input.operation);
+    exact(operation, ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential']);
+    if (
+      !['openai', 'deepseek', 'compatible', 'ollama'].includes(String(operation.provider)) ||
+      !(
+        operation.connectionId === null ||
+        (typeof operation.connectionId === 'string' &&
+          /^[a-f0-9]{64}$/.test(operation.connectionId))
+      ) ||
+      typeof operation.baseURL !== 'string' ||
+      !operation.baseURL ||
+      operation.baseURL.length > 4096 ||
+      !Array.isArray(operation.modelNames) ||
+      operation.modelNames.some(
+        (name) => typeof name !== 'string' || !name.trim() || name.length > 256,
+      ) ||
+      !['keep', 'replace', 'none'].includes(String(operation.credential)) ||
+      (operation.credential === 'replace') !== (input.secret !== undefined) ||
+      (input.secret !== undefined &&
+        (typeof input.secret !== 'string' ||
+          !input.secret.trim() ||
+          Buffer.byteLength(input.secret) > 65536))
+    )
+      throw Error('invalid_native_request');
+  }
   if (
     method === 'recovery.prepare' &&
     (!['run', 'report', 'interrupt'].includes(String(input.kind)) ||

@@ -1,4 +1,5 @@
 import { appendFileSync } from 'node:fs';
+import { AgentError } from '@kite-ai/agent';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { runServiceProcess } from '@kite-ai/service/main';
 
@@ -34,6 +35,50 @@ await runServiceProcess({
   configure: async () => ({
     model,
     modelId: 'fixed',
+    configurationManagement(runtime) {
+      const readonly = async (): Promise<never> => {
+        throw new AgentError('fixture_configuration_readonly');
+      };
+      return {
+        async readModels(input) {
+          if (!runtime) throw new AgentError('data_unavailable');
+          const { storeId } = await runtime.getMetadata();
+          if (input.expectedStoreId !== storeId) throw new AgentError('store_mismatch');
+          if (input.scope === 'workspace') {
+            if (!input.workspaceId || !(await runtime.getWorkspace(input.workspaceId)))
+              throw new AgentError('workspace_missing');
+          } else if (input.workspaceId !== undefined)
+            throw new AgentError('invalid_configuration_scope');
+          return {
+            storeId,
+            scope: input.scope,
+            ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+            readSet: null,
+            defaultModelId: 'fixed',
+            models: [
+              {
+                id: 'fixed',
+                enabled: true,
+                configured: true,
+                provider: 'fixture',
+                model: 'fixed',
+                diagnostics: [],
+              },
+            ],
+            errors: [],
+          };
+        },
+        read: readonly,
+        updateModels: readonly,
+        readProviders: readonly,
+        updateProviders: readonly,
+        patch: readonly,
+        repair: readonly,
+        putCredential: readonly,
+        revokeCredential: readonly,
+        getMutation: readonly,
+      };
+    },
     permissions: {
       async authorize() {
         return { allowed: true, revision: 'trusted-fixture-only' };

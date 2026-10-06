@@ -258,6 +258,7 @@ finally:
  os.close(master)
 `;
       const pty = await execute(['/usr/bin/python3', '-c', program], '/usr/bin:/bin');
+      if (pty.code !== 0) console.error({ phase: 'cli_registration_pty', root, ...pty });
       expect(pty.code).toBe(0);
       expect(pty.stdout).toContain('REGISTERED_PTY_COMPLETE');
       expect(calls).toBe(3);

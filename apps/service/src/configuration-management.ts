@@ -19,6 +19,17 @@ import type { Json } from '@kite-ai/agent/extensions';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { type ReasoningEffort, reasoningEfforts } from '@kite-ai/ai';
 import { parseModelPreset } from './configuration';
+import {
+  discoverProviderModels,
+  isSupportedModelProvider,
+  modelProviders,
+  type ProviderSettingsOperation,
+  providerConnectionId,
+  providerModelNames,
+  providerSettingsFacts,
+  safeProviderEndpoint,
+  supportsReasoningEffort,
+} from './model-providers';
 
 export type ConfigurationScope = 'user' | 'workspace';
 export interface ConfigurationLocation {
@@ -36,8 +47,13 @@ export interface ManagementMutation {
     | 'config.repair'
     | 'credential.put'
     | 'credential.revoke'
-    | 'model_settings.update';
+    | 'model_settings.update'
+    | 'provider_settings.update';
   modelSettings?: { expectedReadSet: ModelSettingsReadSet; operation: ModelSettingsOperation };
+  providerSettings?: {
+    expectedReadSet: ModelSettingsReadSet;
+    operation: ProviderSettingsOperation;
+  };
   state: 'pending' | 'applied' | 'failed' | 'outcome_unknown';
   receipt: Json;
 }
@@ -87,6 +103,30 @@ interface MutationIdentity {
   expectedStoreId: string;
   subjectId: string;
 }
+export interface ProviderSettingsView {
+  storeId: string;
+  readSet: ModelSettingsReadSet | null;
+  providers: ReturnType<typeof providerSettingsFacts>;
+  errors: string[];
+}
+type CredentialState = 'unchanged' | 'stored' | 'outcome_unknown';
+type ConfigurationState = 'not_attempted' | 'published' | 'outcome_unknown';
+class ProviderMutationFailure extends AgentError {
+  readonly credentialState: CredentialState;
+  readonly configurationState: ConfigurationState;
+  readonly opaqueRef?: string;
+  constructor(
+    code: string,
+    credentialState: CredentialState,
+    configurationState: ConfigurationState,
+    opaqueRef?: string,
+  ) {
+    super(code);
+    this.credentialState = credentialState;
+    this.configurationState = configurationState;
+    this.opaqueRef = opaqueRef;
+  }
+}
 export interface ConfigurationManagementPort {
   read(input: ConfigurationLocation & { expectedStoreId?: string }): Promise<ConfigurationRead>;
   readModels(
@@ -98,6 +138,14 @@ export interface ConfigurationManagementPort {
         expectedReadSet: ModelSettingsReadSet;
         operation: ModelSettingsOperation;
       },
+  ): Promise<ManagementMutation>;
+  readProviders(input: { expectedStoreId: string }): Promise<ProviderSettingsView>;
+  updateProviders(
+    input: MutationIdentity & {
+      expectedReadSet: ModelSettingsReadSet;
+      operation: ProviderSettingsOperation;
+      secret?: string;
+    },
   ): Promise<ManagementMutation>;
   patch(
     input: ConfigurationLocation &
@@ -115,16 +163,26 @@ function publicMutation(
 ): ManagementMutation {
   const request = record.safeRequest as JsonObject;
   const kind =
-    request.modelSettings !== undefined
-      ? 'model_settings.update'
-      : record.kind === 'config.user.write' || record.kind === 'config.workspace.write'
-        ? 'config.patch'
-        : (record.kind as ManagementMutation['kind']);
+    request.providerSettings !== undefined
+      ? 'provider_settings.update'
+      : request.modelSettings !== undefined
+        ? 'model_settings.update'
+        : record.kind === 'config.user.write' || record.kind === 'config.workspace.write'
+          ? 'config.patch'
+          : (record.kind as ManagementMutation['kind']);
   const scope = request.scope;
   if (scope !== 'user' && scope !== 'workspace') throw new AgentError('mutation_unavailable');
   const value = record.receipt as JsonObject;
   let receipt: Json = {};
-  if (record.state === 'applied')
+  if (kind === 'provider_settings.update' && record.state !== 'pending')
+    receipt = {
+      status: record.state,
+      ...(record.state === 'applied' ? { etag: value.etag! } : { code: value.code! }),
+      credentialState: value.credentialState!,
+      configurationState: value.configurationState!,
+      ...(typeof value.opaqueRef === 'string' ? { opaqueRef: value.opaqueRef } : {}),
+    };
+  else if (record.state === 'applied')
     receipt =
       kind.startsWith('config.') || kind === 'model_settings.update'
         ? { status: 'applied', etag: value.etag! }
@@ -141,6 +199,13 @@ function publicMutation(
       ? {
           modelSettings: structuredClone(request.modelSettings) as unknown as NonNullable<
             ManagementMutation['modelSettings']
+          >,
+        }
+      : {}),
+    ...(kind === 'provider_settings.update'
+      ? {
+          providerSettings: structuredClone(request.providerSettings) as unknown as NonNullable<
+            ManagementMutation['providerSettings']
           >,
         }
       : {}),
@@ -300,7 +365,7 @@ export function createConfigurationManagement(options: {
   }
   function configured(model: JsonObject): string[] {
     try {
-      if (model.provider !== 'compatible')
+      if (!isSupportedModelProvider(model.provider))
         throw new ConfigurationError('model_provider_unsupported');
       if (
         typeof model.model !== 'string' ||
@@ -311,6 +376,11 @@ export function createConfigurationManagement(options: {
         throw new ConfigurationError('invalid_model_configuration');
       createConfigurationSnapshot(resolveConfiguration({ defaults: { models: [model] } }));
       parseModelPreset(model.options);
+      if (
+        parseModelPreset(model.options).reasoningEffort !== undefined &&
+        (!supportsReasoningEffort(model.provider) || model.reasoningSupported === false)
+      )
+        throw new ConfigurationError('model_reasoning_effort_unsupported');
       return [];
     } catch (error) {
       return [publicError(error).code];
@@ -360,7 +430,9 @@ export function createConfigurationManagement(options: {
       .update(canonical(body))
       .digest('hex');
     const storageKind =
-      kind === 'config.patch' || kind === 'model_settings.update'
+      kind === 'config.patch' ||
+      kind === 'model_settings.update' ||
+      kind === 'provider_settings.update'
         ? (safeRequest as JsonObject).scope === 'user'
           ? 'config.user.write'
           : 'config.workspace.write'
@@ -384,16 +456,36 @@ export function createConfigurationManagement(options: {
     } catch (error) {
       const failure = publicError(error);
       const uncertain =
+        (error instanceof ProviderMutationFailure &&
+          (error.credentialState === 'outcome_unknown' ||
+            error.configurationState === 'outcome_unknown')) ||
         failure.code === 'configuration_publication_uncertain' ||
         (kind.startsWith('credential.') && failure.code === 'credential_unavailable');
-      await options.runtime.finishHostMutation({
+      const final = await options.runtime.finishHostMutation({
         expectedStoreId: input.expectedStoreId,
         requestDigest,
         commandId: input.commandId,
         subjectId: input.subjectId,
         state: uncertain ? 'outcome_unknown' : 'failed',
-        receipt: { status: uncertain ? 'outcome_unknown' : 'failed', code: failure.code },
+        receipt: {
+          status: uncertain ? 'outcome_unknown' : 'failed',
+          code: failure.code,
+          ...(kind === 'provider_settings.update'
+            ? {
+                credentialState:
+                  error instanceof ProviderMutationFailure ? error.credentialState : 'unchanged',
+                configurationState:
+                  error instanceof ProviderMutationFailure
+                    ? error.configurationState
+                    : 'not_attempted',
+                ...(error instanceof ProviderMutationFailure && error.opaqueRef
+                  ? { opaqueRef: error.opaqueRef }
+                  : {}),
+              }
+            : {}),
+        },
       });
+      if (kind === 'provider_settings.update') return publicMutation(final);
       throw failure;
     }
     try {
@@ -499,15 +591,21 @@ export function createConfigurationManagement(options: {
                   ? (parseModelPreset(model.options).reasoningEffort ?? null)
                   : null,
               reasoningEffortChoices:
-                model.provider === 'compatible' && diagnostics.length === 0
+                supportsReasoningEffort(model.provider) &&
+                model.reasoningSupported !== false &&
+                diagnostics.length === 0
                   ? [...reasoningEfforts]
                   : [],
               reasoningEffortSupport:
-                model.provider === 'compatible' && diagnostics.length === 0
+                supportsReasoningEffort(model.provider) &&
+                model.reasoningSupported !== false &&
+                diagnostics.length === 0
                   ? 'compatible_wire'
                   : 'unsupported',
               reasoningEffortReadonlyReason:
-                model.provider !== 'compatible' || diagnostics.length
+                !supportsReasoningEffort(model.provider) ||
+                model.reasoningSupported === false ||
+                diagnostics.length
                   ? 'model_reasoning_effort_unsupported'
                   : explicitModel && Object.hasOwn(explicitModel, 'options')
                     ? 'model_settings_override'
@@ -528,6 +626,197 @@ export function createConfigurationManagement(options: {
           errors: [publicError(error).code],
         };
       }
+    },
+    async readProviders(input) {
+      if (
+        !options.runtime ||
+        (await options.runtime.getMetadata()).storeId !== input.expectedStoreId
+      )
+        throw new AgentError('store_mismatch');
+      try {
+        const state = rawModels({ scope: 'user' }, userPath);
+        return {
+          storeId: input.expectedStoreId,
+          readSet: state.readSet,
+          providers: providerSettingsFacts(state.user.value, state.effective.models ?? []),
+          errors: [],
+        };
+      } catch (error) {
+        return {
+          storeId: input.expectedStoreId,
+          readSet: null,
+          providers: providerSettingsFacts({}, []),
+          errors: [publicError(error).code],
+        };
+      }
+    },
+    async updateProviders(input) {
+      const location = { scope: 'user' as const };
+      const ifMatch = input.expectedReadSet.userEtag;
+      const operation = structuredClone(input.operation);
+      return mutate(
+        input,
+        'provider_settings.update',
+        'user',
+        {
+          scope: 'user',
+          ifMatch,
+          operationCount: 1,
+          providerSettings: {
+            expectedReadSet: input.expectedReadSet as unknown as Json,
+            operation,
+          },
+        },
+        {
+          expectedReadSet: input.expectedReadSet as unknown as Json,
+          operation,
+          secret: input.secret ?? null,
+        },
+        async () => {
+          let credentialState: CredentialState = 'unchanged';
+          let configurationState: ConfigurationState = 'not_attempted';
+          let storedRef: string | undefined;
+          try {
+            const state = assertReadSet(location, userPath, input.expectedReadSet);
+            const provider = modelProviders.find((entry) => entry.id === operation.provider);
+            if (!provider || input.expectedReadSet.workspaceEtag !== null)
+              throw new AgentError('invalid_request');
+            const baseURL = safeProviderEndpoint(operation.baseURL);
+            const facts = providerSettingsFacts(state.user.value, state.effective.models ?? []);
+            const connection = facts
+              .find((entry) => entry.id === provider.id)
+              ?.connections.find((entry) => entry.id === operation.connectionId);
+            if (operation.connectionId !== null && (!connection || !connection.canWrite))
+              throw new AgentError('provider_settings_override');
+            const raw = (state.user.value.models ?? []) as JsonObject[];
+            const existing =
+              operation.connectionId === null
+                ? []
+                : raw.filter((entry) => providerConnectionId(entry) === operation.connectionId);
+            const originalRef = existing[0]?.credentialRef;
+            if (
+              (operation.credential === 'replace') !== (input.secret !== undefined) ||
+              (operation.credential === 'replace' && !input.secret?.trim()) ||
+              (operation.credential === 'keep' && typeof originalRef !== 'string') ||
+              (provider.requiresCredential && operation.credential === 'none')
+            )
+              throw new AgentError('provider_credential_required');
+            let names = providerModelNames(operation.modelNames);
+            if (!names.length) {
+              const secret =
+                operation.credential === 'replace'
+                  ? input.secret
+                  : operation.credential === 'keep'
+                    ? await options.vault.resolve(originalRef as string)
+                    : undefined;
+              names = await discoverProviderModels(baseURL, secret);
+            }
+            // Discovery may take time. A stale read never consumes a new credential.
+            assertReadSet(location, userPath, input.expectedReadSet);
+            let opaqueRef =
+              operation.credential === 'keep'
+                ? (originalRef as string)
+                : operation.credential === 'replace'
+                  ? `credential:${crypto.randomUUID()}`
+                  : undefined;
+            const models = structuredClone(raw);
+            const changed: JsonObject[] = [];
+            for (const model of models) {
+              if (!existing.some((entry) => entry.id === model.id)) continue;
+              model.baseURL = baseURL;
+              if (opaqueRef) model.credentialRef = opaqueRef;
+              else delete model.credentialRef;
+              changed.push(model);
+            }
+            for (const name of names) {
+              if (changed.some((model) => model.model === name)) continue;
+              const model: JsonObject = {
+                id: `model-${crypto.randomUUID()}`,
+                provider: provider.id,
+                model: name,
+                baseURL,
+                enabled: false,
+                ...(opaqueRef ? { credentialRef: opaqueRef } : {}),
+              };
+              models.push(model);
+              changed.push(model);
+            }
+            const validate = (candidate: JsonObject) => {
+              const fresh = assertReadSet(location, userPath, input.expectedReadSet);
+              const effective = resolveConfiguration({
+                defaults: { modelId: null, models: [], tools: [], skills: [], mcp: [] },
+                user: candidate,
+                explicit: fresh.explicit,
+              });
+              createConfigurationSnapshot(effective);
+              for (const model of changed) {
+                const actual = effective.models?.find((entry) => entry.id === model.id);
+                if (
+                  !actual ||
+                  ['provider', 'model', 'baseURL', 'credentialRef'].some(
+                    (key) => actual[key] !== model[key],
+                  ) ||
+                  configured(actual).length
+                )
+                  throw new AgentError('provider_settings_override');
+              }
+              const defaultModel = effective.models?.find(
+                (model) => model.id === effective.modelId,
+              );
+              if (
+                effective.modelId &&
+                (!defaultModel || defaultModel.enabled === false || configured(defaultModel).length)
+              )
+                throw new AgentError('model_settings_default_unconfigured');
+            };
+            // Preflight the complete candidate before either publication medium is touched.
+            validate({ ...state.user.value, models });
+            if (operation.credential === 'replace') {
+              credentialState = 'outcome_unknown';
+              const stored = await options.vault.put(input.secret!);
+              credentialState = 'stored';
+              storedRef = stored.id;
+              opaqueRef = stored.id;
+              for (const model of changed) model.credentialRef = stored.id;
+            }
+            configurationState = 'outcome_unknown';
+            let result: ReturnType<typeof updateConfigurationFile>;
+            try {
+              result = updateConfigurationFile({
+                path: userPath,
+                windowsPathPolicy: 'private',
+                ifMatch,
+                operations: [{ kind: 'set', path: ['models'], value: models }],
+                validateCandidate: validate,
+                validatePublication() {
+                  assertReadSet(location, userPath, input.expectedReadSet);
+                },
+              });
+            } catch (error) {
+              if (
+                !(error instanceof ConfigurationError) ||
+                error.code !== 'configuration_publication_uncertain'
+              )
+                configurationState = 'not_attempted';
+              throw error;
+            }
+            configurationState = 'published';
+            return {
+              etag: result.etag,
+              credentialState,
+              configurationState,
+              ...(storedRef ? { opaqueRef: storedRef } : {}),
+            };
+          } catch (error) {
+            throw new ProviderMutationFailure(
+              publicError(error).code,
+              credentialState,
+              configurationState,
+              storedRef,
+            );
+          }
+        },
+      );
     },
     async updateModels(input) {
       const path = await pathFor(input);
@@ -616,7 +905,11 @@ export function createConfigurationManagement(options: {
                       ],
                     };
           if (input.operation.kind === 'effort') {
-            if (selected.provider !== 'compatible' || configured(selected).length)
+            if (
+              !supportsReasoningEffort(selected.provider) ||
+              selected.reasoningSupported === false ||
+              configured(selected).length
+            )
               throw new AgentError('model_reasoning_effort_unsupported');
             if (
               input.operation.reasoningEffort !== null &&

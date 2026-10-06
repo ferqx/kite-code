@@ -54,7 +54,8 @@ export function parseManifest(value: unknown): BackupManifest {
       row.version !== 10 &&
       row.version !== 11 &&
       row.version !== 12 &&
-      row.version !== 13) ||
+      row.version !== 13 &&
+      row.version !== 14) ||
     row.kind !== 'profile_backup' ||
     row.consistency !== 'sqlite_snapshot_with_verified_media_and_separate_assets' ||
     canonicalJson(row.excluded as never) !== canonicalJson([...excluded])
@@ -110,7 +111,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? ['tuiRecovery']
       : []),
     ...(row.version === 4 ||
@@ -122,7 +124,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? ['callerIntents']
       : []),
     ...(row.version === 6 ||
@@ -132,7 +135,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? ['fileRecoveryIntents']
       : []),
     ...(row.version === 8 ||
@@ -140,27 +144,41 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? ['mcpSelectionIntents']
       : []),
     ...(row.version === 9 ||
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? ['mcpConnectionIntents']
       : []),
-    ...(row.version === 10 || row.version === 11 || row.version === 12 || row.version === 13
+    ...(row.version === 10 ||
+    row.version === 11 ||
+    row.version === 12 ||
+    row.version === 13 ||
+    row.version === 14
       ? ['mcpSourceApprovalIntents']
       : []),
-    ...(row.version === 11 || row.version === 12 || row.version === 13
+    ...(row.version === 11 || row.version === 12 || row.version === 13 || row.version === 14
       ? ['mcpReconnectionIntents']
       : []),
-    ...(row.version === 12 || row.version === 13 ? ['mcpSourceMutationIntents'] : []),
+    ...(row.version === 12 || row.version === 13 || row.version === 14
+      ? ['mcpSourceMutationIntents']
+      : []),
     'vaultExcluded',
     'configurationMayContainSensitiveContent',
   ]);
   if (assets.vaultExcluded !== true || assets.configurationMayContainSensitiveContent !== true)
+    throw new MaintenanceError('backup_invalid_manifest');
+  if (
+    row.version === 14 &&
+    (!(assets.desktopUi as { present?: unknown })?.present ||
+      (assets.desktopUi as { format?: { userVersion?: unknown } })?.format?.userVersion !== 6)
+  )
     throw new MaintenanceError('backup_invalid_manifest');
   for (const [key, path] of [
     ['configuration', 'config.jsonc'],
@@ -178,7 +196,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? [['tuiRecovery', 'ui/recovery.json'] as const]
       : []),
     ...(row.version === 4 ||
@@ -190,7 +209,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? [['callerIntents', 'ui/caller-intents.json'] as const]
       : []),
     ...(row.version === 6 ||
@@ -200,7 +220,8 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? [['fileRecoveryIntents', 'ui/file-recovery-intents.json'] as const]
       : []),
     ...(row.version === 8 ||
@@ -208,23 +229,29 @@ export function parseManifest(value: unknown): BackupManifest {
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? [['mcpSelectionIntents', 'ui/mcp-selection-intents.json'] as const]
       : []),
     ...(row.version === 9 ||
     row.version === 10 ||
     row.version === 11 ||
     row.version === 12 ||
-    row.version === 13
+    row.version === 13 ||
+    row.version === 14
       ? [['mcpConnectionIntents', 'ui/mcp-connection-intents.json'] as const]
       : []),
-    ...(row.version === 10 || row.version === 11 || row.version === 12 || row.version === 13
+    ...(row.version === 10 ||
+    row.version === 11 ||
+    row.version === 12 ||
+    row.version === 13 ||
+    row.version === 14
       ? [['mcpSourceApprovalIntents', 'ui/mcp-source-approval-intents.json'] as const]
       : []),
-    ...(row.version === 11 || row.version === 12 || row.version === 13
+    ...(row.version === 11 || row.version === 12 || row.version === 13 || row.version === 14
       ? [['mcpReconnectionIntents', 'ui/mcp-reconnection-intents.json'] as const]
       : []),
-    ...(row.version === 12 || row.version === 13
+    ...(row.version === 12 || row.version === 13 || row.version === 14
       ? [['mcpSourceMutationIntents', 'ui/mcp-source-mutation-intents.json'] as const]
       : []),
   ] as const) {
@@ -270,7 +297,8 @@ export function parseManifest(value: unknown): BackupManifest {
                 row.version === 10 ||
                 row.version === 11 ||
                 row.version === 12 ||
-                row.version === 13) &&
+                row.version === 13 ||
+                row.version === 14) &&
               format.userVersion === 2
             ) &&
             !(
@@ -282,7 +310,8 @@ export function parseManifest(value: unknown): BackupManifest {
                 row.version === 10 ||
                 row.version === 11 ||
                 row.version === 12 ||
-                row.version === 13) &&
+                row.version === 13 ||
+                row.version === 14) &&
               format.userVersion === 3
             ) &&
             !(
@@ -293,7 +322,8 @@ export function parseManifest(value: unknown): BackupManifest {
                 row.version === 10 ||
                 row.version === 11 ||
                 row.version === 12 ||
-                row.version === 13) &&
+                row.version === 13 ||
+                row.version === 14) &&
               format.userVersion === 4
             ) &&
             !(
@@ -303,9 +333,11 @@ export function parseManifest(value: unknown): BackupManifest {
                 row.version === 10 ||
                 row.version === 11 ||
                 row.version === 12 ||
-                row.version === 13) &&
+                row.version === 13 ||
+                row.version === 14) &&
               format.userVersion === 5
-            ))
+            ) &&
+            !(row.version === 14 && format.userVersion === 6))
         )
           throw new MaintenanceError('backup_invalid_manifest');
       } else if (asset.format !== null) throw new MaintenanceError('backup_invalid_manifest');

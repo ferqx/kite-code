@@ -6,6 +6,7 @@ import {
   type ModelSettingsView,
 } from '@kite-ai/client';
 import type { NativeModelSettingsFacts, NativeModelSettingsSubmission } from '../src/native-bridge';
+import type { NativeConfigurationData } from './configuration-journal';
 
 type Scope = { generation: number; selection: number; storeId: string; sessionId?: string };
 type Entry = {
@@ -30,14 +31,29 @@ export class NativeConfiguration {
   private readonly client: AgentClient;
   private readonly current: () => Scope | undefined;
   private readonly notify: () => void;
+  private readonly data?: NativeConfigurationData;
+  private unavailable = false;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
     notify: () => void = () => {},
+    data?: NativeConfigurationData,
   ) {
     this.client = client;
     this.current = current;
     this.notify = notify;
+    this.data = data;
+    try {
+      for (const row of data?.configurations() ?? []) {
+        if (row.kind !== 'model') continue;
+        this.entries.set(`cold:${row.input.commandId}`, {
+          input: row.input,
+          state: { ...row.state, phase: 'unknown' },
+        });
+      }
+    } catch {
+      this.unavailable = true;
+    }
   }
   get observation() {
     return this.observed && this.same(this.observed.scope)
@@ -57,6 +73,7 @@ export class NativeConfiguration {
     return !!now && (Object.keys(scope) as (keyof Scope)[]).every((key) => scope[key] === now[key]);
   }
   async read(location: 'user' | 'workspace'): Promise<NativeModelSettingsFacts> {
+    if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     this.release();
     const current = this.current();
     if (!current) throw new ClientError('native_generation_changed');
@@ -105,6 +122,12 @@ export class NativeConfiguration {
           configured: model.configured,
           ...(model.provider === undefined ? {} : { provider: model.provider }),
           ...(model.model === undefined ? {} : { model: model.model }),
+          ...(model.reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort: model.reasoningEffort }),
+          ...(model.reasoningEffortChoices === undefined
+            ? {}
+            : { reasoningEffortChoices: [...model.reasoningEffortChoices] }),
           diagnostics: [...model.diagnostics],
         })),
       };
@@ -119,6 +142,7 @@ export class NativeConfiguration {
     }
   }
   submit(observationId: number, operation: NativeModelSettingsSubmission['operation']) {
+    if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     const observed = this.observed;
     if (!observed || observed.facts.observationId !== observationId || !this.same(observed.scope))
       throw new ClientError('configuration_observation_changed');
@@ -144,6 +168,8 @@ export class NativeConfiguration {
     if (prior?.promise) return prior.promise;
     if (prior) throw new ClientError('configuration_intent_consumed');
     if (
+      (this.data?.configurations().some((row) => row.state.storeId === observed.scope.storeId) ??
+        false) ||
       [...this.entries.values()].some(
         ({ state }) =>
           state.storeId === observed.scope.storeId &&
@@ -153,7 +179,15 @@ export class NativeConfiguration {
       )
     )
       throw new ClientError('configuration_mutation_pending');
-    if (this.entries.size >= 128) throw new ClientError('configuration_intent_limit');
+    if (this.entries.size >= 128) {
+      const terminal = [...this.entries].find(
+        ([, entry]) =>
+          ['applied', 'failed'].includes(entry.state.phase) &&
+          entry.state.observationId !== observationId,
+      );
+      if (!terminal) throw new ClientError('configuration_intent_limit');
+      this.entries.delete(terminal[0]);
+    }
     const input: ModelSettingsRequest = {
       commandId: crypto.randomUUID(),
       expectedStoreId: observed.scope.storeId,
@@ -174,12 +208,14 @@ export class NativeConfiguration {
         phase: 'submitting',
       },
     };
+    this.data?.saveConfiguration({ kind: 'model', input: entry.input, state: entry.state });
     this.entries.set(key, entry);
     this.notify();
     entry.promise = this.client
       .updateModelSettings(entry.state.scope, input)
       .then((receipt) => {
         this.apply(entry, receipt);
+        this.data?.saveConfiguration({ kind: 'model', input: entry.input, state: entry.state });
         return structuredClone(entry.state);
       })
       .catch((error: unknown) => {
@@ -187,6 +223,7 @@ export class NativeConfiguration {
         entry.state.phase =
           status !== undefined && status >= 400 && status < 500 ? 'failed' : 'unknown';
         entry.state.error = code(error);
+        this.data?.saveConfiguration({ kind: 'model', input: entry.input, state: entry.state });
         throw error;
       })
       .finally(() => {
@@ -233,9 +270,11 @@ export class NativeConfiguration {
       .getHostMutation(commandId, { storeId: entry.input.expectedStoreId })
       .then((receipt) => {
         this.apply(entry, receipt);
+        this.data?.saveConfiguration({ kind: 'model', input: entry.input, state: entry.state });
         return structuredClone(entry.state);
       })
       .catch((error: unknown) => {
+        entry.state.phase = 'unknown';
         entry.state.error = code(error);
         throw error;
       })

@@ -170,3 +170,8 @@ Code 的成功需原 Command 身份/subject/raw SHA/receipt 与原 v2 journal、
 both 的 Fork 还要求当前 `codeProof` 与实际新读 `currentDetail`：closed outer current Store/S/W、完整原 checkpoint canonical 一致、全部文件 unchanged，路径唯一且覆盖原 succeeded Code journal 的每个路径。允许真实 empty journal/detail 和额外 unchanged 路径，不增加 quota 或要求等长。原 Code 历史成功不足以证明当前磁盘；外部编辑或后来 completed Run 仍可使第二步不可继续。该纯输入校验补结构与已知路径完整性，不对注入数据来源作密码学证明；实际 CLI/Native driver 使用原有限 GET，并核前后 scope/selector。最后读取至 Fork 的变化、跨文件/跨 leg 原子均不由 SDK 保证。
 
 [纯合同测试](test/isolated/file-recovery-intent.test.ts)当前 13 项 180 条断言；[真实 packaged default](test/isolated/file-recovery-intent-default.test.ts)当前 1 项 165 条断言，2026-10-04 组合 14/345/0。actual source candidate `terminal-d2889750326d67556f4f4c0034e9f0d7e99cba0a3a52780c5377fc2e00fd3003` 核三范围、独立 Ask、两次物理 POST 丢回执、一次 GET 正文丢失、冷原 GET-only、完整 364003 字节 BOM/CRLF 与真实新 inode；后续同 S distinct completed Run/selector 未变及外部编辑均阻止 Fork，零新恢复 POST、保 Code succeeded/Fork not_started。Provider 36、五个恢复 POST 各原 ID 一次、冷 cursor 512 不变；仅固定本机 loopback Provider，不代替实际 CLI/TUI/Native 窗口、独立安装或全 §35。
+
+
+Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettings({expectedStoreId,commandId,expectedReadSet,operation,secret?})` 属于同一可选管理能力。SDK 保留并核原 provider marker、operation/readSet 和两个介质的 receipt；只发送一次 POST，未知只允许原 `getHostMutation`。公开 receipt 的 `opaqueRef` 仅在凭据已存时出现，可用于准确 revoke；Native renderer 投影不取得它。`canonicalConfigurationRequest(kind,input)` 是非秘密本地原意图 codec，不提供权限或网络操作，Provider journal 禁止 secret。
+
+`startRun/followUp` 的可选 `reasoningEffort` 使用生成的七值闭集；它是本次原命令语义并参与 canonical 摘要。`steer` 仍拒绝模型或 effort 字段，SDK 不代客户端选择路由。远端支持由 Service 投影和实际模型请求确认。

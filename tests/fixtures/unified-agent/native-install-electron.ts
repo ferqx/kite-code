@@ -68,8 +68,15 @@ process.on('SIGTERM', () => {
   }
   process.exitCode = 1;
 });
-const query = async (path: string) =>
-  (await (await fetch(`${control}/${path}`)).json()) as Record<string, unknown>;
+const query = async (path: string) => {
+  const started = Date.now();
+  diagnostic('query_begin', { path });
+  try {
+    return (await (await fetch(`${control}/${path}`)).json()) as Record<string, unknown>;
+  } finally {
+    diagnostic('query_end', { path, durationMs: Date.now() - started });
+  }
+};
 try {
   diagnostic('first_launch_begin');
   app = await _electron.launch({
@@ -117,6 +124,7 @@ try {
   assert.deepEqual(await query('locks'), { outer: true, inner: true });
   assert.equal((await query('uninstall')).blocked, true);
   const pid = childPid!;
+  diagnostic('first_normal_close_begin');
   await app.evaluate(({ app }) => app.quit());
   await app.close();
   diagnostic('first_normal_close_complete');

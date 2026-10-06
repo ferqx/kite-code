@@ -10,6 +10,10 @@ import {
 } from '../electron/answer-journal';
 import { callerCanonical, validateCallerRecord } from '../electron/caller-journal';
 import {
+  type NativeConfigurationRecord,
+  parseConfigurationRecord,
+} from '../electron/configuration-journal';
+import {
   assertFileRecoveryTransition,
   fileRecoveryIntentId,
 } from '../electron/file-recovery-journal';
@@ -23,6 +27,8 @@ import type {
 /** Explicit unit port. Production main always opens the Node private file. */
 export function memoryPrivateData(): PrivateData {
   const files = new Map<string, FileRecoveryIntent>();
+  const configurations = new Map<string, NativeConfigurationRecord>();
+  const routes = new Map<string, string>();
   const answers = new Map<string, NativeAnswerRecord>();
   const drafts = new Map<string, NativeDraft>(),
     creations = new Map<string, NativeCreation>(),
@@ -36,6 +42,20 @@ export function memoryPrivateData(): PrivateData {
       revision: 0,
     };
   return {
+    configurations: () => [...configurations.values()].map((row) => structuredClone(row)),
+    saveConfiguration(raw) {
+      const record = parseConfigurationRecord(raw);
+      const old = configurations.get(record.input.commandId);
+      if (old && JSON.stringify(old.input) !== JSON.stringify(record.input))
+        throw Error('configuration_storage_unavailable');
+      if (['applied', 'failed'].includes(record.state.phase))
+        configurations.delete(record.input.commandId);
+      else configurations.set(record.input.commandId, record);
+    },
+    modelRoute: (storeId, sessionId) => routes.get(JSON.stringify([storeId, sessionId])),
+    rememberModelRoute: (storeId, sessionId, modelId) => {
+      routes.set(JSON.stringify([storeId, sessionId]), modelId);
+    },
     answers: () => [...answers.values()].map((row) => structuredClone(row)),
     beginAnswer(raw) {
       const value = validateAnswerRecord(raw),
