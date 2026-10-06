@@ -313,7 +313,9 @@ export function TuiMcpSourceMutationPanel({ controller }: { controller: TuiContr
           </Text>
         </>
       )}
-      {reading || state.mcpMutationReading ? <Text>{t('Reading source entry facts')}</Text> : null}
+      {reading || state.mcpMutationFactsReading || state.mcpMutationReading ? (
+        <Text>{t('Reading source entry facts')}</Text>
+      ) : null}
       {state.mcpMutationOutcome && step === 'list' ? (
         <>
           <Text>

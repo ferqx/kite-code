@@ -367,6 +367,8 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 
 ## TUI MCP 来源条目增删与原申请
 
+共享 controller 的来源目录与原申请读取各有独立 lifetime；原 ID 的选择和明确查回不取消当前目录查询。同 Session 历史刷新保留实际 Reading，关闭或切 Session/Workspace 取消所属 Reader，已经提交的原 Action/Job 与审批继续。原源码外窗口 Add→查回→Remove、cold removed和foreign恢复验证这一交接，实际资格见[共享 TUI](../../packages/ui/src/tui/README.md#mcp-来源条目增删与原申请)和[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
+
 [独立 Host](host/tui-mcp-source-mutation.ts)接普通 `builtin.mcp.sources/mcp.source.add@1`、`mcp.source.remove@1`，当前 `mcp.source.entry.preview` 与历史 `mcp.source.mutation.result` Query。提交核真实 Store/subject/Session、完整 Workspace 目录、canonical root/dev/ino、同版本完整 Source 分页及六字段 read-set；当前读取预算为 8192 项/16MiB。Add 只接受闭合 basic 名称、HTTP URL 或绝对 STDIO command，不收 args/env/headers/auth/Tool policy；Remove 核准确 source/raw digest 和安全 fallback，不让当前目录替代原删除身份。
 
 [原 intent codec](host/mcp-source-mutation-intents.ts)与[journal](host/mcp-source-mutation-journal.ts)保存独立 `ui/mcp-source-mutation-intents.json@1`，闭合每条完整 intent/subjectId/bodySha256/requestSha256/phase。完整 body 与公开 canonical request 分别重算摘要；128 条/16MiB 不淘汰 unknown。只有本次完整 durable prepare 有一次原 POST 权，cold、已有或 duplicate 仅查原 ID。选择原记录零 GET，明确 Check 只原 Command 与有限历史 Query；foreign Store/subject 在原 HTTP 前拒绝，关闭及切 Session 不取消 Action、Run 或审批。

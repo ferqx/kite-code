@@ -74,9 +74,9 @@ Review 显示本次输入和目标范围，可上下滚动，Home/End 到首尾�
 
 移除时选择准确的“Remove source entry”（移除来源条目）行。Review 与 Confirm 均展示原来源、原条目摘要和同名用户 fallback。对该来源自有 OAuth 凭据，先检查后端可用性，再删除声明并清理准确本地凭据；后端 locked/unavailable 时拒绝发布。声明已删而清理失败或未知时，分别保留“来源已删除”与凭据清理提示，不回滚声明、不默认撤销远端 Token。手工共享 Bearer 引用保留。旧执行与连接仍保原身份，移除不停止已有连接，也不证明远端工具已停止；source-entry saved 只证明声明发布。
 
-“Original source change”（原来源变更）行保留原申请 ID、Store 和 Session；只选择零查询。明确选择“Check original source change”才核原 Command 和有限结果。冷重开不自动查询或重新提交；来源文件或工作区目录被移除仍可查已经保存的原结果。未知时先查原申请，不能用新 ID、另一个 Session 或同文件其他名称绕过未确认修改；用户来源的未确认修改也会阻止其他工作区触及同源。来源批准与修改共享实际来源依赖的冲突检查。坏申请文件、容量满或保存失败均拒绝新修改，不删除 unknown 腾出空间。
+“Original source change”（原来源变更）行保留原申请 ID、Store 和 Session；只选择零查询。明确选择“Check original source change”才核原 Command 和有限结果。选择或查回原申请不取消当前来源目录的读取；读取完成后，当前可移除的条目仍会显示。冷重开不自动查询或重新提交；来源文件或工作区目录被移除仍可查已经保存的原结果。未知时先查原申请，不能用新 ID、另一个 Session 或同文件其他名称绕过未确认修改；用户来源的未确认修改也会阻止其他工作区触及同源。来源批准与修改共享实际来源依赖的冲突检查。坏申请文件、容量满或保存失败均拒绝新修改，不删除 unknown 腾出空间。
 
-Esc 返回当前编辑步骤或父面板；Ctrl+C、关闭或切 Session 只结束所属读取，已提交工作和原待决审批继续。离线备份保完整原申请字节；恢复到新 Store 后仍显示原身份，原申请不能成为新 Store 的查询或提交许可。实现和实际资格由[CLI Host](../../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)、[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-来源条目增删与原申请)及[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
+Esc 返回当前编辑步骤或父面板；Ctrl+C、关闭或切 Session/Workspace 只结束所属读取，已提交工作和原待决审批继续。离线备份保完整原申请字节；恢复到新 Store 后仍显示原身份，原申请不能成为新 Store 的查询或提交许可。实现和实际资格由[CLI Host](../../../../../apps/cli/README.md#tui-mcp-来源条目增删与原申请)、[共享 TUI](../../../../../packages/ui/src/tui/README.md#mcp-来源条目增删与原申请)及[当前进度](../../../../plans/unified-agent-refactor-v1-progress.md)核对。
 
 ## HTTP 认证与原申请
 

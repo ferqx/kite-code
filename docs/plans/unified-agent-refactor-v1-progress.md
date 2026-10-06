@@ -1345,3 +1345,16 @@ Root对新异步候选独立制作私有延迟probe：离线→ready、显式同
 
 
 同一默认目录合同的两个实际 Service 消费者已核对并同步：Session logs 首次 Provider 请求准确只有 ask_user、实际 Run 零 Tool Execution，原 >64KiB sealed input 保存 ask_user@1，Browser/Native读原完整输入、原来源与foreign拒绝，冷读仍零Provider/SQL增写；该文件3/80通过。相邻 assembly-http 原断言也实际复现为空目录失败；修正后后续 Run 仅保默认 ask_user，已等待 Run 保原配置，禁用 Files 后零Tool与零文件效果，文件4/33通过。两文件当前合计7/113，原isolated日志 `/private/tmp/kite-session-logs-adjacent-catalogue-20261006.log` 和 `/private/tmp/kite-assembly-default-catalogue-current-20261006.log` 保留；Service完整typecheck和两owned Biome均exit0（旧SSE拼接仅info）。源码默认注册/merge-by-id、DTO及产品行为无变化，Service owner默认ask_user条目和手册核对后无diff。新修正不追认第七轮全图失败；后续仍需当前原完整图验证，37partial与Goal active保持。
+
+
+## 2026-10-06：Source 目录与原申请读取的独立寿命
+
+第八轮原完整默认在 HEAD 6d83b04f943de50a21cbde5348716e6d00f73d0b、574 文件/464 唯一主任务、并发4的冻结输入运行，实际 exit1；46 个已启动主任务全部排空、45通过、Source mutation PTY失败，无 plan abort。已运行153文件，418任务未调度；3977 tracked regular SHA 和真实 Git 前后保持。日志 `/private/tmp/kite-current-default-eighth-20261006.log`、SHA `81fa9faa047c1f406642fcc13d0576ab8db9423480f1fb6755e30b2b00a7421c`，同前缀 plan/inputs/result 保存。该轮 Capture 19/255 通过；完整默认资格仍为 false。
+
+Source 原失败0pass/1fail/81断言，26.641s；packet `/private/tmp/kite-tui-source-mutation-evidence-0994f04b-72a7-4f21-9839-93b529b2cd99/` 保存 success:false、cleanupConfirmed:true、errors[]，失败 root 保留，candidate lease 已释放。实际 Add 已保存，Service 当前 sources Query 已显示 workspace 条目，但 UI 无 Remove 选项，Python 在原10秒导航预算内失败。当前目录与原申请查询共用 reader：选择原 ID 取消未完成目录；原查询结束又清除共享 Reading。新增确定性回归在生产修复前复现 signal.aborted 为 true，日志 `/private/tmp/kite-source-directory-reader-red-20261006.log`。没有把实际 producer 缺口改成驱动等待问题。
+
+最小实现只分开共享 TUI 的目录 reader/Reading 与 preview、原申请 reader/Reading。同 Session 后台刷新保留真实读取状态；关闭、切换 Session/Workspace 撤销两者，替换目录读取只撤销旧目录且忽略晚回复。保留原 ID 零 GET、明确 Check 才查询、完整原身份和独立 Action/审批/Source/Host 守卫；不增加写入重试、持久机制或 Service DTO。当前行为同步 [MCP 手册](../handbook/clients/tui/guides/mcp-and-skills.md)、[TUI owner](../../packages/ui/src/tui/README.md)、[CLI owner](../../apps/cli/README.md)与既有 implemented Source-entry Note；Source writer、审批和 owned credential 合同核对后不变。
+
+当前全部 TUI 24 文件240pass/0fail/2008断言，日志 `/private/tmp/kite-source-directory-all-tui-current-20261006.log`；UI/CLI typecheck 和三个 owned TypeScript Biome 均 exit0。未改动驱动及原 isolated 测试的源码外80×24窗口1pass/0fail/280断言、12.16s，日志 `/private/tmp/kite-source-directory-actual-pty-20261006.log`。成功 packet `/private/tmp/kite-tui-source-mutation-evidence-91e4bae2-a3d8-4929-8b3e-6679d74c9101/` 为 success:true、cleanupConfirmed:true、errors[]、retainedRoot:null、candidateLeaseRetained:false；三个 TUI 正常 Ctrl+Q/exit0，四个 Service 均完成关闭。warm 准确2POST、cold/foreign零POST、零 Model/Question resolution、共享凭据保留，以及原独立确认、冷原 GET-only 和 foreign 字节边界均保持。
+
+Root 完成实现和自检；新的独立审查受 system thread limit 限制，自检不替代独立审查。本片验证只覆盖列明 macOS/Bun 窗口，不能拼接为新完整默认图；第八轮失败不追认，后续仍须冻结当前实现运行原完整入口。iteration_complete/stage/commit ready 仅限本片九个 owned 路径。37项继续 partial、Goal active；默认可信 Shell、完整 §35/T/E、真实 OS browser/nativeVault OAuth 组合、安装、Linux/Windows、60min Soak 和正式旧路径退役仍未闭合。本地阶段提交沿已有授权，不扩大 push/PR，无关 AGENTS 保持独立。

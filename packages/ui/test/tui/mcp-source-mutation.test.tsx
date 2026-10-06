@@ -159,6 +159,7 @@ function fixture(rows: TuiMcpSourceMutationOutcome[] = [], directoryFails = fals
   };
   return {
     controller: new TuiController(port),
+    port,
     mutationPort: port.mcp!.sourceMutation!,
     sent,
     lookups,
@@ -270,6 +271,145 @@ test('failed directory keeps second original keyboard reachable; selecting zero 
     ui.unmount();
     f.controller.dispose();
   }
+});
+
+test('selecting and checking an original source change keeps the current directory reader alive', async () => {
+  const f = fixture([saved('first')]);
+  let resolve!: (value: TuiMcpSourceSnapshot) => void;
+  let signal: AbortSignal | undefined;
+  f.mutationPort.read = (_sessionId, readerSignal) => {
+    signal = readerSignal;
+    return new Promise((r) => {
+      resolve = r;
+    });
+  };
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  const opening = f.controller.openMcpSourceMutations();
+  await tick();
+  f.controller.selectMcpSourceMutation('first');
+  expect(signal?.aborted).toBe(false);
+  await f.controller.lookupMcpSourceMutation();
+  expect(signal?.aborted).toBe(false);
+  expect(f.controller.state.mcpMutationFactsReading).toBe(true);
+  expect(f.controller.state.mcpMutationReading).toBe(false);
+  resolve(snapshot);
+  await opening;
+  expect(f.controller.state.mcpMutationFacts).toEqual(snapshot);
+  expect(f.controller.state.mcpMutationFactsReading).toBe(false);
+  expect(f.controller.state.mcpMutationOutcome?.intent.request.commandId).toBe('first');
+  expect(f.lookups).toHaveLength(1);
+  expect(f.sent).toHaveLength(0);
+  expect(f.counts()).toEqual({ business: 0, minted: 0 });
+  f.controller.dispose();
+});
+
+test('same-session history refresh preserves both source readers and their actual pending states', async () => {
+  const f = fixture([saved('first')]);
+  let resolveFacts!: (value: TuiMcpSourceSnapshot) => void;
+  let resolveOriginal!: (value: TuiMcpSourceMutationOutcome) => void;
+  let factsSignal: AbortSignal | undefined;
+  let originalSignal: AbortSignal | undefined;
+  f.mutationPort.read = (_sessionId, signal) => {
+    factsSignal = signal;
+    return new Promise((r) => {
+      resolveFacts = r;
+    });
+  };
+  f.mutationPort.lookup = (_intent, signal) => {
+    originalSignal = signal;
+    return new Promise((r) => {
+      resolveOriginal = r;
+    });
+  };
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  const opening = f.controller.openMcpSourceMutations();
+  await tick();
+  f.controller.selectMcpSourceMutation('first');
+  const lookup = f.controller.lookupMcpSourceMutation();
+  await f.controller.select('a');
+  expect(factsSignal?.aborted).toBe(false);
+  expect(originalSignal?.aborted).toBe(false);
+  expect(f.controller.state.mcpMutationFactsReading).toBe(true);
+  expect(f.controller.state.mcpMutationReading).toBe(true);
+  resolveOriginal({ ...saved('first'), phase: 'saved' });
+  await lookup;
+  expect(f.controller.state.mcpMutationFactsReading).toBe(true);
+  expect(f.controller.state.mcpMutationReading).toBe(false);
+  resolveFacts(snapshot);
+  await opening;
+  expect(f.controller.state.mcpMutationFacts).toEqual(snapshot);
+  expect(f.controller.state.mcpMutationOutcome?.phase).toBe('saved');
+  expect(f.controller.state.mcpMutationFactsReading).toBe(false);
+  expect(f.counts()).toEqual({ business: 0, minted: 0 });
+  f.controller.dispose();
+});
+
+for (const change of ['close', 'session', 'workspace'] as const) {
+  test(`source directory reader aborts on ${change}; late facts cannot restore the old scope`, async () => {
+    const f = fixture([saved('first')]);
+    let resolve!: (value: TuiMcpSourceSnapshot) => void;
+    let signal: AbortSignal | undefined;
+    f.mutationPort.read = (_sessionId, readerSignal) => {
+      signal = readerSignal;
+      return new Promise((r) => {
+        resolve = r;
+      });
+    };
+    await f.controller.select('a');
+    await f.controller.openMcp();
+    const opening = f.controller.openMcpSourceMutations();
+    await tick();
+    if (change === 'close') f.controller.closeMcpSourceMutations();
+    else if (change === 'session') await f.controller.select('other-session');
+    else {
+      const readSession = f.port.readSession;
+      f.port.readSession = async (id, options) => {
+        const value = await readSession(id, options);
+        return {
+          ...value,
+          view: {
+            ...value.view,
+            session: { ...value.view.session, workspaceId: 'other-workspace' },
+          },
+        };
+      };
+      await f.controller.select('a');
+    }
+    expect(signal?.aborted).toBe(true);
+    resolve(snapshot);
+    await opening;
+    expect(f.controller.state.mcpMutationOpen).toBe(false);
+    expect(f.controller.state.mcpMutationFacts).toBeUndefined();
+    expect(f.controller.state.mcpMutationFactsReading).toBe(false);
+    expect(f.counts()).toEqual({ business: 0, minted: 0 });
+    f.controller.dispose();
+  });
+}
+
+test('refreshing the source directory cancels its previous reader and ignores an older late snapshot', async () => {
+  const f = fixture();
+  const pending: { resolve: (value: TuiMcpSourceSnapshot) => void; signal: AbortSignal }[] = [];
+  f.mutationPort.read = (_sessionId, signal) =>
+    new Promise((resolve) => pending.push({ resolve, signal }));
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  const first = f.controller.openMcpSourceMutations();
+  await tick();
+  const second = f.controller.openMcpSourceMutations();
+  await tick();
+  expect(pending[0]!.signal.aborted).toBe(true);
+  expect(pending[1]!.signal.aborted).toBe(false);
+  const current = { ...snapshot, registryRevision: 'current' };
+  pending[1]!.resolve(current);
+  await second;
+  pending[0]!.resolve(snapshot);
+  await first;
+  expect(f.controller.state.mcpMutationFacts).toEqual(current);
+  expect(f.controller.state.mcpMutationFactsReading).toBe(false);
+  expect(f.counts()).toEqual({ business: 0, minted: 0 });
+  f.controller.dispose();
 });
 
 test('reader closes and scope switches abort owned lookup; late original result cannot overwrite second original', async () => {

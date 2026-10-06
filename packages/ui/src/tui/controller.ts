@@ -247,6 +247,7 @@ export interface TuiState {
   mcpMutationSaved?: readonly TuiMcpSourceMutationOutcome[];
   mcpMutationOutcome?: TuiMcpSourceMutationOutcome;
   mcpMutationError?: string;
+  mcpMutationFactsReading?: boolean;
   mcpMutationReading?: boolean;
   mcpAuthOpen?: boolean;
   mcpAuthServerId?: string;
@@ -401,6 +402,7 @@ export class TuiController {
   private mcpReconnectionIntents = new Map<string, TuiMcpReconnectionOutcome>();
   private mcpReconnectionBusy = false;
   private mcpMutationRead?: AbortController;
+  private mcpMutationFactsRead?: AbortController;
   private mcpMutationBusy = false;
   private mcpMutationIntents = new Map<string, TuiMcpSourceMutationOutcome>();
   private mcpAuthRead?: AbortController;
@@ -874,7 +876,8 @@ export class TuiController {
       mcpMutationOpen: same ? this.value.mcpMutationOpen : false,
       mcpMutationFacts: same ? this.value.mcpMutationFacts : undefined,
       mcpMutationOutcome: same ? this.value.mcpMutationOutcome : undefined,
-      mcpMutationReading: false,
+      mcpMutationFactsReading: same ? this.value.mcpMutationFactsReading : false,
+      mcpMutationReading: same ? this.value.mcpMutationReading : false,
       mcpAuthOpen: same ? this.value.mcpAuthOpen : false,
       mcpAuthServerId: same ? this.value.mcpAuthServerId : undefined,
       mcpAuthStatus: same ? this.value.mcpAuthStatus : undefined,
@@ -924,6 +927,8 @@ export class TuiController {
         this.mcpToolsRead?.abort();
         this.mcpConnectionRead?.abort();
         this.mcpReconnectionRead?.abort();
+        this.mcpMutationRead?.abort();
+        this.mcpMutationFactsRead?.abort();
         this.mcpAuthRead?.abort();
         this.mcpSourceRead?.abort();
         this.mcpSourceLookupRead?.abort();
@@ -932,6 +937,11 @@ export class TuiController {
           mcpReconnectionObservation: undefined,
           mcpReconnectionReading: false,
           mcpReconnectionObserving: false,
+          mcpMutationOpen: false,
+          mcpMutationFacts: undefined,
+          mcpMutationOutcome: undefined,
+          mcpMutationFactsReading: false,
+          mcpMutationReading: false,
           mcpSource: undefined,
           mcpSourceOutcome: undefined,
           mcpSourceReading: false,
@@ -2486,14 +2496,15 @@ export class TuiController {
     if (!port || !sessionId || this.value.panel !== 'mcp') return;
     this.closeMcpSources();
     this.closeMcpReconnections();
+    this.mcpMutationFactsRead?.abort();
     const read = this.reading(),
       generation = this.generation;
-    this.mcpMutationRead = read;
+    this.mcpMutationFactsRead = read;
     this.publish({
       mcpMutationOpen: true,
       mcpMutationFacts: undefined,
       mcpMutationError: undefined,
-      mcpMutationReading: true,
+      mcpMutationFactsReading: true,
     });
     try {
       const rows = await port.list();
@@ -2520,13 +2531,13 @@ export class TuiController {
       )
         this.publish({
           mcpMutationFacts: freezeIntent(structuredClone(facts)),
-          mcpMutationReading: false,
+          mcpMutationFactsReading: false,
         });
     } catch {
       if (!read.signal.aborted && generation === this.generation && this.value.mcpMutationOpen)
         this.publish({
           mcpMutationError: 'Source directory unavailable',
-          mcpMutationReading: false,
+          mcpMutationFactsReading: false,
         });
     } finally {
       this.reads.delete(read);
@@ -2534,7 +2545,12 @@ export class TuiController {
   }
   closeMcpSourceMutations() {
     this.mcpMutationRead?.abort();
-    this.publish({ mcpMutationOpen: false, mcpMutationReading: false });
+    this.mcpMutationFactsRead?.abort();
+    this.publish({
+      mcpMutationOpen: false,
+      mcpMutationFactsReading: false,
+      mcpMutationReading: false,
+    });
   }
   selectMcpSourceMutation(id: string) {
     const row = this.mcpMutationIntents.get(id);

@@ -8,6 +8,8 @@ Status: implemented
 
 当前需求沿[MCP手册](../../../../docs/handbook/clients/tui/guides/mcp-and-skills.md)、[V1.3](../../../../docs/plans/unified-agent-refactor-v1.md)及[MCP来源发布边界](../../../../docs/active/mcp-config-management.md#来源条目增删的发布与原结果边界)。[Source owner](../../../../packages/agent/src/config/README.md)、[Service](../../../../apps/service/README.md)、[CLI](../../../../apps/cli/README.md)和[共享TUI](../../../../packages/ui/src/tui/README.md)说明当前已交付边界。本记录只说明已交付的来源条目切片；完整产品能力与V1.3资格仍按当前负责文档和[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)核对，不能由局部通过推导整体完成。
 
+当前源码外 Add→Check→Remove 窗口还暴露共享 TUI 的读取寿命缺口：当前目录与原申请查询共用 AbortController。Add 已保存且 Service 已读到 workspace 条目，选择原 ID 却取消尚未完成的目录读取，导致 Remove 选项缺失；原结果查询结束还会提前清除目录的 Reading。该问题属于 UI 读取所有权，不能由原申请 saved 推导当前目录。
+
 ## Decision
 
 使用独立普通mcp.source.add/remove Actions、current entry preview及原mutation result Query。closed基本声明只收当前TUI的name、HTTP URL/绝对STDIO command与来源层，不收secret/args/env/header/auth/Tool policy。private leaf仍保原advanced字段和完整字节；generic configuration writer不放宽。实际producer核原Action/Command/subject、完整input、Store/S/W/root-work及HostMutation，安全preview把source identity/raw digest和user fallback分开。
@@ -19,6 +21,8 @@ Remove只删除准确effective来源项，project user显露在独立确认前�
 Caller独立原intent与closed文件，在同一tui_private短锁内与Source approval核实际共享来源依赖。增删同source文件跨S阻挡，user跨W；原Store/source identity比较不使用绑定Session的整个scopeDigest。selection的配置介质及ordinary/forced transport的原未知guard继续独立，raw edit不修复或重放其效果。只有本次完整durable prepare取得首次POST权，cold/duplicate只原GET；原ID选择零GET、明确Check才查，foreign任何HTTP前拒绝。
 
 独立条件维护资产及新版本保旧物理白名单、UTF8/完整SHA/private entity/capacity，A→B保原request/subject/Store/S/bytes/phase，无retag/hot permit。历史Query只核原持久证明，移除Source或physical Workspace不依赖当前文件；晚回复只更新原intent。
+
+当前目录与 preview/原申请查询各持独立的有限 reader 和 Reading 状态。选择原 ID 或明确 Check 不取消目录，同 Session 后台历史读取保留两者的真实未完成状态；关闭或切换 Session/Workspace 仍撤销两者。再次读取目录只撤销前一目录 reader，晚回复不能覆盖新目录。复用现有 generation、scope 和 Abort 守卫，不增加写入、重试、持久机制或公共 Service DTO。当前实现归共享 TUI owner。
 
 [原来源批准理由](../../implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)、[原选择理由](../../implemented/architecture/2026-10-04-original-mcp-selection-intent-assets.md)、[普通连接](../../implemented/architecture/2026-10-05-original-mcp-connection-intent-assets.md)、[强制重连](../../implemented/architecture/2026-10-05-forced-mcp-reconnection-and-original-outcomes.md)与[scoped来源提案](../../proposed/architecture/2026-10-03-scoped-default-mcp-sources.md)仍各负已交付或尚待交付的范围；本记录不整篇替代它们。
 
@@ -32,11 +36,15 @@ Caller独立原intent与closed文件，在同一tui_private短锁内与Source ap
 - 删除所有配置credentialRef：引用和binding不证明底层Vault所有权，可能删除共享用户secret；保manual引用；后续OAuth只清有准确owned身份的本地材料，完整边界见上述认证决定。
 - 对所有selection/transport unknown一律建立新全局锁：原介质与实际效果不同，旧intent没有完整source身份也不能证明这种全局精确域；Source修改与Source批准只核真实共享来源，原transport guard与freshness继续保护其未知效果。
 
+- 延长 PTY 等待或用原申请 saved 补造当前目录：实际目录 reader 已被取消，等待不能恢复；原结果与当前来源身份各有依据。采用分开现有 reader 的局部修复，保留真实 Remove 及独立审批断言。
+
 ## Verification
+
+2026-10-06 当前 reader 回归先确定性复现选择原 ID 立即 abort 目录；修复后当前全部 TUI 24 文件 240 项、2008 断言通过，含选择/Check、同 Session 历史刷新、关闭、Session/Workspace 切换与替换目录读取。UI/CLI typecheck 通过。未修改驱动的实际源码外 80×24 Add/Remove/cold removed/foreign restored 1 项、280 断言通过，三个 TUI 正常 Ctrl+Q、四个 Service 完成关闭，临时 root 与 candidate lease 已释放。第八轮修复前完整默认仍是实际 exit1、46 主任务中45通过，不能追认为当前全图通过；原始日志及范围见总体进度。
 
 真实Source leaf原new+neighbor27项280断言；release故障修复前11pass/3fail保留。实际default Service原producer17项622断言及独立目录fsync+lock-close故障1项32断言证明rename后E/M unknown、effectAttempted:true、duplicate原C只一rename，零Model/vault/transport。真实Caller物理毁POST及首GET回复2项71断言，原lookup恢复saved、总POST1及cursor不变；52Source三页/101Workspace真实完整目录与准确非首页target分别核验。
 
-Root冻结正常八workspace types/build与原28任务图实际233pass/4328assert/0fail；含当前Source外80×24 Add/Remove/cold removed/foreign restored全例1项255断言。当前动态完整默认554个唯一文件/447个主任务全部通过，runner0、765.161s正常排空，3816个regular冻结输入及真实Git前后保持；raw2611pass/3expected nestedfail/17skip/0error/38737assert。完整默认completion SHA f99c82d65a39c513c680eca258a1664fa0e55b124b298c8987e5c548596561de，原红和有限窗口按总体进度记录；原计划七项各由所列实际Source/Service/Caller/UI/maintenance/制品与集成证据支持，未测范围不标不适用。
+此前来源条目基线冻结的正常八workspace types/build与原28任务图实际233pass/4328assert/0fail；含当前Source外80×24 Add/Remove/cold removed/foreign restored全例1项255断言。该既有冻结版本的动态完整默认554个唯一文件/447个主任务全部通过，runner0、765.161s正常排空，3816个regular冻结输入及真实Git前后保持；raw2611pass/3expected nestedfail/17skip/0error/38737assert。完整默认completion SHA f99c82d65a39c513c680eca258a1664fa0e55b124b298c8987e5c548596561de，原红和有限窗口按总体进度记录；原计划七项各由所列实际Source/Service/Caller/UI/maintenance/制品与集成证据支持，未测范围不标不适用。
 
 ## Consequences
 
