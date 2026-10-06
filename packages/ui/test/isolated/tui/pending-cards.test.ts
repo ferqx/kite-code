@@ -5,15 +5,20 @@ for (const order of ['root-first', 'job-first'] as const) {
   test(`real 80x24 ${order} four pending cards preserve independent approval and unknown original answer`, async () => {
     const program = `import os,pty,subprocess,select,time,signal,json,re,tempfile,fcntl,termios,struct
 master,slave=pty.openpty();fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,80,0,0));temporary=tempfile.TemporaryDirectory(prefix='kite-cards-');facts=os.path.join(temporary.name,'facts.json');cardsfile=os.path.join(temporary.name,'cards.json');wire=os.path.join(temporary.name,'wire.jsonl');reviews=os.path.join(temporary.name,'reviews.json');env=dict(os.environ);env.update(KITE_TUI_FACTS=facts,KITE_TUI_CARDS=cardsfile,KITE_TUI_WIRE=wire,KITE_TUI_REVIEWS=reviews,KITE_LOSE_CARD='1',KITE_TUI_ROOT=os.path.join(temporary.name,'runtime'));os.mkdir(env['KITE_TUI_ROOT'],0o700)
+transcript_fd,transcript=tempfile.mkstemp(prefix='kite-pending-cards-${order}-',suffix='.pty.log');os.close(transcript_fd)
 p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(import.meta.dir, 'pending-cards.fixture.tsx'))}],stdin=slave,stdout=slave,stderr=slave,env=env,start_new_session=True);os.close(slave);buffer=b'';full=b''
 def pump():
  global buffer,full
  if select.select([master],[],[],.08)[0]:
   try: data=os.read(master,65536);buffer+=data;full+=data
   except OSError: pass
-def wait(text):
+def current_frame():
+ text=buffer.decode(errors='replace');frames=re.findall(r'\\x1b\\[\\?2026h(.*?)\\x1b\\[\\?2026l',text,re.S)
+ return frames[-1] if frames else text
+def visible(text):return re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',text))
+def wait(text,material=False,ready=False):
  deadline=time.monotonic()+8
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
+ while text not in visible(full.decode(errors='replace') if material else current_frame()) or (ready and ' · Loading' in visible(current_frame())):
   if time.monotonic()>deadline:raise RuntimeError('expected '+text+' tail='+buffer[-5000:].decode(errors='replace'))
   pump()
 def key(data):
@@ -37,7 +42,14 @@ def waitreview(card):
   if time.monotonic()>deadline:raise RuntimeError('missing original full attachment '+str(current)+' tail='+buffer[-3000:].decode(errors='replace'))
   pump()
 def choose(card):
- current=cards();index=next(i for i,c in enumerate(current) if c['id']==card['id']);key(b'\\x02');wait('Pending cards');key(b'\\x1b[A'*5);key(b'\\x1b[B'*index);key(b'\\r');wait(card['id'])
+ current=cards();index=next(i for i,c in enumerate(current) if c['id']==card['id']);key(b'\\x02');wait('Pending cards')
+ selected=re.search(r'› (?:question|approval) \\[([^\\]]+)\\]',visible(current_frame()));assert selected,visible(current_frame())
+ position=next(i for i,c in enumerate(current) if c['id']==selected.group(1))
+ while position!=index:
+  direction=1 if position<index else -1;position+=direction;key(b'\\x1b[B' if direction==1 else b'\\x1b[A');target=current[position]
+  wait('› '+target['kind']+' ['+target['id']+'] original Session '+target['sessionId']+' · Store '+target['originStoreId']+' · revision '+target['revision'])
+ wait('› '+card['kind']+' ['+card['id']+'] original Session '+card['sessionId']+' · Store '+card['originStoreId']+' · revision '+card['revision']);key(b'\\r')
+ wait('Question 1/1 · Selection:' if card['kind']=='question' else 'Up/Down explicit approval selection:');wait(card['id'],material=True)
 try:
  wait('New Run');key(b'work');key(b'\\r');waitcards(4);initial=cards();assert len({c['id'] for c in initial})==4;assert len({c['originStoreId'] for c in initial})==1
  root=next(c for c in initial if c['kind']=='question');job=next(c for c in initial if c['definitionId']=='required-verifier');children=[c for c in initial if c['definitionId']=='ask'];assert len(children)==2;assert len({c['sessionId'] for c in children})==2;assert root['sessionId']=='a';assert job['sessionId']=='a';assert all(c['presentationSessionId']=='a' for c in initial)
@@ -46,13 +58,14 @@ try:
  order=[root,children[1],job,children[0]] if ${JSON.stringify(order)}=='root-first' else [job,children[0],root,children[1]]
  for i,card in enumerate(order):
   choose(card)
-  if card['kind']=='question':key(b'{"choiceId":"root-choice"}')
+  if card['kind']=='question':
+   wait('1. root-choice',material=True);key(b'\\x1b[B');wait('Question 1/1 · Selection: 1',ready=True)
   else:
-   waitreview(card);key(b'\\x1b[B')
+   waitreview(card);key(b'\\x1b[B');wait('Up/Down explicit approval selection: only this call')
   key(b'\\r')
   if i==0:
-   wait('unknown');before=open(wire).read().count('"method":"POST"');key(b'\\x02');key(b'\\x1b[B');key(b'\\r');key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
-   key(b'\\x0c');wait('unknown');key(b'\\x0c')
+   wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');choose(next(c for c in cards() if c['id']!=card['id']));key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
+   key(b'\\x0c');wait('interaction.answer: unknown');key(b'\\x0c');wait('interaction.answer: applied')
   waitcards(3-i)
  wait('MULTI_CARD_DONE');os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
@@ -60,6 +73,7 @@ try:
  p.wait(timeout=3);print('SAFE_FACTS '+open(facts).read());print('WIRE_FACTS '+json.dumps([json.loads(line) for line in open(wire)]));print('PTY_COMPLETE_BYTES '+str(len(full)))
 finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
+ open(transcript,'wb').write(full);print('PTY_TRANSCRIPT '+transcript)
  os.close(master);temporary.cleanup()
 `;
     const child = Bun.spawn(['python3', '-c', program], { stdout: 'pipe', stderr: 'pipe' });
@@ -136,6 +150,7 @@ finally:
       );
       if (card.kind === 'approval')
         expect(card.answer).toMatchObject({ decision: 'approve', grant: 'approve_once' });
+      else expect(card.answer).toEqual({ kind: 'question', answers: { choiceId: 'root-choice' } });
     }
     const lostPost = posts.find((row) => row.body!.commandId === facts.lostCommand)!;
     const lostCardId = decodeURIComponent(lostPost.path.split('/').at(-2)!);
