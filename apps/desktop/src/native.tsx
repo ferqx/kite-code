@@ -283,6 +283,17 @@ export function NativeDesktop() {
     selection?.viewSelection,
   ]);
   const activeInputRun = selection?.runs.find((run) => run.isActive);
+  const jobs =
+    selection?.executions.filter(
+      (execution) =>
+        execution.kind === 'job' &&
+        execution.sessionId === selection.session.id &&
+        execution.originStoreId === selection.storeId,
+    ) ?? [];
+  const unfinishedJobs = jobs.filter((job) =>
+    ['planned', 'dispatching', 'running'].includes(job.status),
+  ).length;
+  const unknownJobs = jobs.filter((job) => job.status === 'outcome_unknown').length;
   const needsNextModel =
     !activeInputRun ||
     planMode ||
@@ -656,6 +667,12 @@ export function NativeDesktop() {
           {selection.runs.map((run) => (
             <p key={run.id}>轮次：{run.status}</p>
           ))}
+          <p role="status" aria-label="当前会话后台状态">
+            后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
+            {selection.viewLoading || selection.permissionUnavailable || state.backgroundUnavailable
+              ? ' · 上次确认状态'
+              : ''}
+          </p>
           {modelInputPort && (
             <ModelInputs
               key={`${state.generation}/${selection.storeId}/${selection.session.id}/${modelInputTarget?.revision ?? 0}`}

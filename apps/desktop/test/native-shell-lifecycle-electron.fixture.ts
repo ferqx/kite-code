@@ -343,6 +343,10 @@ try {
   await send('HOST_FIRST', 1);
   const exact = await originalJob('exact'),
     main = await originalJob('main');
+  await page
+    .getByRole('status', { name: '当前会话后台状态', exact: true })
+    .filter({ hasText: /^后台状态：2 项未结束，0 项未知$/ })
+    .waitFor();
   await card(exact.id)
     .getByRole('button', { name: `停止后台执行 · ${exact.id}`, exact: true })
     .click();
@@ -364,6 +368,10 @@ try {
   const other = (await state()).selection!.executions.find((entry) => entry.id === main.id)!;
   assert.equal(other.status, 'running');
   assert.equal(other.cancelRequestedAt, null);
+  await page
+    .getByRole('status', { name: '当前会话后台状态', exact: true })
+    .filter({ hasText: /^后台状态：1 项未结束，0 项未知$/ })
+    .waitFor();
   await read('tree', { label: 'main' });
   const posts = await currentPhysical();
   const stops = posts.filter(

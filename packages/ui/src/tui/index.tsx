@@ -247,6 +247,17 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   );
   const { t } = useTuiPresentation();
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const jobs =
+    state.snapshot?.view.executions.filter(
+      (execution) =>
+        execution.kind === 'job' &&
+        execution.sessionId === state.sessionId &&
+        execution.originStoreId === state.snapshot?.storeId,
+    ) ?? [];
+  const unfinishedJobs = jobs.filter((job) =>
+    ['planned', 'dispatching', 'running'].includes(job.status),
+  ).length;
+  const unknownJobs = jobs.filter((job) => job.status === 'outcome_unknown').length;
   const composers = useRef(new Map<string, ComposerBuffer>());
   const composerScope = JSON.stringify([
     state.snapshot?.storeId,
@@ -673,6 +684,11 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         {state.loading ? t(' · Loading') : ''}
         {state.stale ? t(' · Stale') : ''}
       </Text>
+      {(unfinishedJobs > 0 || unknownJobs > 0) && (
+        <Text>
+          {t('Background Jobs:')} {unfinishedJobs} {t('unfinished')} · {unknownJobs} {t('unknown')}
+        </Text>
+      )}
       {(state.panel === 'models' || state.panel === 'effort') && (
         <TuiModelPanel key={state.sessionId} controller={controller} />
       )}

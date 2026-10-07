@@ -39,6 +39,9 @@ def wait(t):
   pump()
 try:
  wait('Session s')
+ wait('Session s · Idle')
+ wait('Background Jobs: ${cold ? 1 : 2} unfinished · 0 unknown')
+ wait('PARENT_DONE_TWO_INDEPENDENT_JOBS')
  ${
    cold
      ? `key(b'/recovery');key(b'\\r');wait('execution.cancel');key(b'\\x0c');end=time.monotonic()+5

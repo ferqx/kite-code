@@ -1,5 +1,7 @@
 # 独立终端消费者
 
+主会话底部另列当前 Session/Store 的未结束 Job 和 outcome_unknown 数量；planned/dispatching/running 包含已请求停止但未到终态的项，已结束、其他 Session、旧 Store 和非 Job 不计入。计数直接消费完整当前 view 的全部非终态投影，不依赖显示基线或最近历史数量，不增加读取、缓存或执行权。父 Run 完成后的 Idle 与后台数保持独立，stale 时保留原数及原状态提示。[controller 测试](../../test/tui/controller.test.tsx)核清屏、未知、来源隔离与切会话；[真实80×24 PTY](../../../../apps/cli/test/isolated/tui-caller-job-stop.test.ts)核父已完成而两个 Job 存续、准确单项停止后冷读剩余一个、原一 POST 和 sibling 不取消。实际 installed Native 的第二消费者与当前原完整默认结果归[阶段进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
+
 普通 question 的有限原 schema grammar 由 [中立解析器](../question.ts)与 DOM 共用，[TUI adapter](question.ts)只负责 ComposerBuffer 编辑草稿。闭合浅问卷加明确 `const:null` 的根 oneOf 保留原整份替代决定；仅原 schema 提供该项时，Alt+A 提交这个 null 信息答案。默认 ask_user 将它解释为取消问卷，原任务继续；Ctrl+C 仍是准确原 work 取消，Ctrl+A 仍读取附件，Alt+Enter／Shift+Enter 仍插入换行。未知 schema 不生成替代项，不把 Escape 或空白当取消答案。
 
 安全项目来源目录、独立 Review、明确 Source Question 选择与原申请读取已接入；共享接口与当前交互见[Source owner](#mcp-项目来源与原决定申请)，已完成的源码外键盘和当前完整默认验收及取舍见[Source 决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。

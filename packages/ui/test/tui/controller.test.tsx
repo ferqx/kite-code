@@ -111,6 +111,65 @@ function fixture() {
   };
   return { port, writes, cancels, reads: () => reads };
 }
+test('completed parent and current unfinished Jobs stay separate through clear, stale reads and Session selection', async () => {
+  const f = fixture();
+  let current = snapshot('a', false);
+  const job = (id: string, status: SessionView['executions'][number]['status']) => ({
+    id,
+    sessionId: 'a',
+    originStoreId: 'store',
+    runId: 'completed-parent',
+    kind: 'job' as const,
+    definitionId: 'shell.command',
+    definitionVersion: '1',
+    status,
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: null,
+  });
+  current.view.runs = [{ ...snapshot().view.runs[0]!, status: 'completed', isActive: false }];
+  current.view.executions = [
+    job('running', 'running'),
+    { ...job('stopping', 'running'), cancelRequestedAt: 1 },
+    job('queued', 'planned'),
+    job('unknown', 'outcome_unknown'),
+    job('finished', 'succeeded'),
+    { ...job('other-session', 'running'), sessionId: 'b' },
+    { ...job('restored-history', 'running'), originStoreId: 'prior-store' },
+    { ...job('tool', 'running'), kind: 'tool' },
+  ];
+  f.port.readSession = async (id) => (id === 'a' ? current : snapshot(id, false));
+  const controller = new TuiController(f.port);
+  await controller.select('a');
+  const app = render(<TuiSession controller={controller} />);
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  try {
+    await pause();
+    expect(app.lastFrame()).toContain('Background Jobs: 3 unfinished · 1 unknown');
+    expect(app.lastFrame()).toContain('full正文尾部');
+    controller.clearDisplay();
+    await pause();
+    expect(app.lastFrame()).toContain('Background Jobs: 3 unfinished · 1 unknown');
+    current = { ...current, view: { ...current.view, executions: [job('running', 'running')] } };
+    await controller.select('a');
+    await pause();
+    expect(app.lastFrame()).toContain('Session a · Idle');
+    expect(app.lastFrame()).toContain('Background Jobs: 1 unfinished · 0 unknown');
+    controller.observationUnavailable('lost-observer');
+    await pause();
+    expect(app.lastFrame()).toContain('Stale');
+    expect(app.lastFrame()).toContain('Background Jobs: 1 unfinished · 0 unknown');
+    await controller.select('b');
+    await pause();
+    expect(app.lastFrame()).not.toContain('Background Jobs:');
+    expect(f.writes).toEqual([]);
+    expect(f.cancels).toEqual([]);
+  } finally {
+    app.unmount();
+    app.cleanup();
+    controller.dispose();
+  }
+});
 test('active exact steer, idle start, unknown original lookup and precise cancel do not rebind or resend', async () => {
   const f = fixture(),
     c = new TuiController(f.port);
