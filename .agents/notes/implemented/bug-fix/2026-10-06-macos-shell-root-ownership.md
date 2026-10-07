@@ -29,3 +29,5 @@ macOS guardian 通过私有 Darwin owned-child port 原生启动直接 child，�
 当前完整事实与验证边界归 [Jobs owner](../../../../packages/agent/src/jobs/README.md)，平台入口归[平台 owner](../../../../packages/agent/src/platform/README.md)。
 
 2026-10-07完整默认的失败启动例在全局P_ALL观测到0，但原FD集合相等已通过、准确child来源未留。已知自有无关child正例证明该全局条件能受harness影响；失败启动的原40次throw、FD集合、严格waitid=-1/ECHILD共43条断言现全部在fresh owner进程执行，父进程真实无关child前后仍活着。有限整个文件6pass/35条父Bun加43条child断言/actual0，原5000ms整例和生产端口保持，probe另有3000ms准确kill/await。原失败与未知、最小正例及完整阶段结果归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)；本补充只修测试namespace，不放宽进程停止证明。
+
+2026-10-07 默认宿主另以[独占 resource coalition](../architecture/2026-10-07-macos-host-shell-owned-coalition.md)覆盖允许 fork 的 setsid/orphan 后代；本记录仍约束准确原根占位、组证明和一次 reap，不将数值 PGID 扩为完整子树证明。

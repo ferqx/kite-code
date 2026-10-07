@@ -58,7 +58,7 @@ export function confinedProfile(
     .join('\n');
 }
 
-const SEATBELT_BASE_POLICY = `(version 1)
+export const SEATBELT_BASE_POLICY = `(version 1)
 (import "system.sb")
 (deny default)
 

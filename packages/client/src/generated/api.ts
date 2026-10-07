@@ -505,12 +505,18 @@ export type HostStatus = {
   execution: {
     state: 'available' | 'unavailable';
     reason: 'diagnostic_source_unavailable' | null;
-    sandbox: { backend: 'none'; available: false; qualification: 'unqualified' };
+    sandbox:
+      | { backend: 'none'; available: false; qualification: 'unqualified' }
+      | { backend: 'macos_seatbelt'; available: true; qualification: 'host_scope' };
     shell: {
       configured: boolean;
       available: boolean;
-      supervision: 'none' | 'posix_group';
-      qualification: 'not_configured' | 'darwin_supervision_only' | 'unavailable';
+      supervision: 'none' | 'posix_group' | 'macos_coalition';
+      qualification:
+        | 'not_configured'
+        | 'darwin_supervision_only'
+        | 'darwin_host_boundary'
+        | 'unavailable';
       reason:
         | (
             | 'shell_not_configured'

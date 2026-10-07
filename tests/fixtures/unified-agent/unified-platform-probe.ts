@@ -24,7 +24,12 @@ mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
 writeFileSync(join(barrier, 'ready'), 'second-owned-shared', { mode: 0o600, flag: 'wx' });
 let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
-let calls = 0;
+let calls = 0,
+  fileCalls = 0,
+  shellCalls = 0;
+let shellEvidence: Record<string, unknown>;
+let shellExecutionId: string | undefined;
+let shellOutput: unknown;
 const asset = 'candidate/node_modules/@kite-ai/agent/storage/migrations/0001-baseline.sql';
 const body = 'actual ordinary Files 😀\r\n';
 const assetHash = createHash('sha256')
@@ -41,17 +46,32 @@ const provider = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
-    const raw = (await request.json()) as { messages: unknown[] };
+    const raw = (await request.json()) as { messages: { role: string; content: unknown }[] };
     if (!Array.isArray(raw.messages)) throw Error('fixed_provider_bad_request');
     calls++;
-    const call =
-      calls === 1
+    const shell =
+      raw.messages.filter((message) => message.role === 'user').at(-1)?.content ===
+      'Selected default Shell.';
+    if (shell) shellCalls++;
+    else fileCalls++;
+    const call = shell
+      ? shellCalls === 1
+        ? {
+            name: 'shell.launch',
+            input: {
+              key: 'platform-shell',
+              command: 'printf default-shell; printf default-stderr >&2',
+              cancellation: 'detached',
+            },
+          }
+        : null
+      : fileCalls === 1
         ? { name: 'files.write', input: { path: 'ordinary.txt', base: null, content: body } }
-        : calls === 2
+        : fileCalls === 2
           ? { name: 'files.read', input: { path: 'ordinary.txt' } }
-          : calls === 3
+          : fileCalls === 3
             ? { name: 'files.read', input: { path: asset } }
-            : calls === 4
+            : fileCalls === 4
               ? {
                   name: 'files.write',
                   input: { path: asset, base: assetBaseline, content: 'MUST_NOT_PUBLISH' },
@@ -62,7 +82,7 @@ const provider = Bun.serve({
           tool_calls: [
             {
               index: 0,
-              id: `platform-${calls}`,
+              id: shell ? 'platform-shell' : `platform-${fileCalls}`,
               type: 'function',
               function: { name: call.name, arguments: JSON.stringify(call.input) },
             },
@@ -153,24 +173,83 @@ try {
     ifRevision: mode.revision,
     ifDefaultRevision: mode.defaultRevision,
   });
+  const shellCommandId = process.platform === 'darwin' ? 'default-shell' : 'no-default-shell';
   await client.startRun('s', {
     kind: 'run.start',
     expectedStoreId: storeId,
-    commandId: 'no-default-shell',
-    content: 'Selected Shell must remain unavailable.',
+    commandId: shellCommandId,
+    content: 'Selected default Shell.',
   });
   const shell = await until(
-    () => client.getCommand('no-default-shell'),
+    () => client.getCommand(shellCommandId),
     (value) => value.status !== 'accepted',
   );
-  const shellView = await client.getView('s');
-  if (
-    shell.status !== 'rejected' ||
-    !JSON.stringify(shell).includes('shell_unavailable') ||
-    calls !== 0 ||
-    shellView.executions.length !== 0
-  )
-    throw Error('default_shell_gate_not_closed');
+  if (process.platform === 'darwin') {
+    const shellRunId = (shell.receipt as { runId?: string } | null)?.runId;
+    if (shell.status !== 'applied' || !shellRunId) throw Error('default_shell_run_not_applied');
+    const shellRun = await until(
+      () => client.getRun(shellRunId),
+      (value) => !value.isActive,
+    );
+    const jobs = await until(
+      async () =>
+        (await client.getView('s')).executions.filter(
+          (row) => row.definitionId === 'shell.command',
+        ),
+      (value) =>
+        value.length === 1 && !['planned', 'dispatching', 'running'].includes(value[0]!.status),
+    );
+    const job = jobs[0]!;
+    if (
+      shellRun.status !== 'completed' ||
+      shellCalls !== 2 ||
+      job.status !== 'succeeded' ||
+      !JSON.stringify(job.result).includes('"processTreeStopped":true')
+    )
+      throw Error('default_shell_stop_not_confirmed');
+    shellExecutionId = job.id;
+    const output = await client.listExecutionOutput(job.id, { afterSeq: '0', limit: 200 });
+    const stdout = output.items
+      .filter((row) => row.stream === 'stdout')
+      .map((row) => row.content)
+      .join('');
+    const stderr = output.items
+      .filter((row) => row.stream === 'stderr')
+      .map((row) => row.content)
+      .join('');
+    if (stdout !== 'default-shell' || stderr !== 'default-stderr')
+      throw Error('default_shell_actual_output_mismatch');
+    shellOutput = output;
+    shellEvidence = {
+      status: 'passed',
+      commandId: shellCommandId,
+      runId: shellRunId,
+      executionId: job.id,
+      providerCalls: shellCalls,
+      jobs: jobs.length,
+      processTreeStopped: true,
+      stdoutSha256: createHash('sha256').update(stdout).digest('hex'),
+      stderrSha256: createHash('sha256').update(stderr).digest('hex'),
+      coldRead: false,
+      noReplay: false,
+    };
+  } else {
+    const shellView = await client.getView('s');
+    if (
+      shell.status !== 'rejected' ||
+      !JSON.stringify(shell).includes('shell_unavailable') ||
+      calls !== 0 ||
+      shellView.executions.length !== 0
+    )
+      throw Error('default_shell_gate_not_closed');
+    shellEvidence = {
+      status: 'unavailable',
+      commandId: shellCommandId,
+      reason: 'shell_unavailable',
+      providerCalls: 0,
+      jobs: 0,
+    };
+  }
   writeFileSync(
     configPath,
     configuration([
@@ -196,10 +275,11 @@ try {
     (value) => !value.isActive,
   );
   const view = await client.getView('s');
-  const tools = view.executions.filter((value) => value.kind === 'tool');
+  const tools = view.executions.filter((value) => value.kind === 'tool' && value.runId === id);
   if (
     run.status !== 'completed' ||
-    Number(calls) !== 5 ||
+    fileCalls !== 5 ||
+    Number(calls) !== 5 + shellCalls ||
     tools.length !== 4 ||
     tools.filter((e) => e.status === 'succeeded').length !== 2 ||
     tools.filter((e) => e.status === 'failed').length !== 2 ||
@@ -219,7 +299,7 @@ try {
     mode: 'readonly',
   });
   const originalTools = (await reader.listExecutions('s'))
-    .filter((e) => e.kind === 'tool')
+    .filter((e) => e.kind === 'tool' && e.runId === id)
     .sort((a, b) => a.callId.localeCompare(b.callId));
   if (
     originalTools.map((e) => e.callId).join(',') !==
@@ -239,11 +319,30 @@ try {
     throw Error('actual_selected_sqlite_mismatch');
   const cursor = (await reader.getMetadata()).lastChangeCursor;
   if (
-    (await reader.getCommand('no-default-shell'))?.status !== 'rejected' ||
+    (await reader.getCommand(shellCommandId))?.status !==
+      (process.platform === 'darwin' ? 'applied' : 'rejected') ||
     (await reader.getRun(id))?.status !== 'completed' ||
     (await reader.getMetadata()).lastChangeCursor !== cursor
   )
     throw Error('cold_platform_facts_changed');
+  if (shellExecutionId) {
+    const job = await reader.getExecution(shellExecutionId);
+    const output = await reader.listExecutionOutput({
+      executionId: shellExecutionId,
+      afterSeq: '0',
+      limit: 200,
+    });
+    if (
+      job?.status !== 'succeeded' ||
+      !JSON.stringify(job.result).includes('"processTreeStopped":true') ||
+      JSON.stringify(output) !== JSON.stringify(shellOutput) ||
+      (await reader.getMetadata()).lastChangeCursor !== cursor ||
+      calls !== 7
+    )
+      throw Error('cold_default_shell_facts_changed');
+    shellEvidence.coldRead = true;
+    shellEvidence.noReplay = true;
+  }
   result = {
     status: 'passed',
     pid: process.pid,
@@ -266,13 +365,7 @@ try {
       writeExecutionId: originalTools[3]!.id,
       unchangedSha256: assetHash,
     },
-    shell: {
-      status: 'unavailable',
-      commandId: shell.id,
-      reason: 'shell_unavailable',
-      providerCalls: 0,
-      jobs: 0,
-    },
+    shell: shellEvidence,
     sqlite: {
       status: 'passed',
       driver: 'bun:sqlite',

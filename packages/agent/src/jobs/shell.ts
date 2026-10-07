@@ -11,7 +11,12 @@ import type {
   StopConfirmation,
   ToolResult,
 } from '@kite-ai/agent/extensions';
-import { type ConfinedPaths, captureConfinedLaunch } from './confined-preparation';
+import {
+  type ConfinedLaunch,
+  type ConfinedPaths,
+  captureConfinedLaunch,
+} from './confined-preparation';
+import { captureMacosHostLaunch, type MacosHostPaths } from './host-preparation';
 
 export interface ShellJobOptions {
   readonly cwd: string;
@@ -21,6 +26,8 @@ export interface ShellJobOptions {
   readonly shellExecutable?: string;
   readonly maxQueuedBytes?: number;
   readonly graceMs?: number;
+  /** Trusted macOS host only; never supplied by the command input. */
+  readonly supervision?: { readonly kind: 'macos-launchd-coalition'; readonly controlBase: string };
 }
 interface QueueItem {
   event: JobEvent;
@@ -37,6 +44,7 @@ interface State {
   result?: ToolResult;
   groupStopped: boolean;
   groupId?: number;
+  coalitionId?: string;
   terminal: Promise<void>;
   stopped: Promise<void>;
   proveStop: () => void;
@@ -80,9 +88,26 @@ export function createMacosConfinedShellJob(
   return shellJob(options, prepare);
 }
 
+/** macOS host tools, inherited Seatbelt scope and a fresh launchd-owned descendant coalition. */
+export function createMacosHostShellJob(options: ShellJobOptions & MacosHostPaths): JobDefinition {
+  const supervisor = options.supervisorPath ?? shellSupervisorAsset();
+  const prepare = captureMacosHostLaunch(options, [
+    supervisor,
+    options.bunExecutable ?? process.execPath,
+    options.shellExecutable ?? '/bin/sh',
+  ]);
+  return shellJob(
+    {
+      ...options,
+      supervision: { kind: 'macos-launchd-coalition', controlBase: options.controlBase },
+    },
+    prepare,
+  );
+}
+
 function shellJob(
   options: ShellJobOptions,
-  prepare?: ReturnType<typeof captureConfinedLaunch>,
+  prepare?: (command: string, shell: string, context: JobContext) => ConfinedLaunch,
 ): JobDefinition {
   const configuration = { ...options, env: { ...options.env } };
   const maximum = configuration.maxQueuedBytes ?? 256 * 1024;
@@ -94,6 +119,10 @@ function shellJob(
     !Number.isSafeInteger(grace) ||
     grace < 0 ||
     grace > 5000 ||
+    (configuration.supervision &&
+      (process.platform !== 'darwin' ||
+        configuration.supervision.kind !== 'macos-launchd-coalition' ||
+        !isAbsolute(configuration.supervision.controlBase))) ||
     Object.values(configuration.env).some((value) => typeof value !== 'string')
   )
     throw new Error('invalid_shell_configuration');
@@ -201,7 +230,7 @@ function shellJob(
       const shell = configuration.shellExecutable ?? '/bin/sh';
       if (![supervisor, bun, shell].every((path) => isAbsolute(path) && existsSync(path)))
         throw new Error('shell_supervisor_asset_unavailable');
-      const confined = prepare?.(value.command, shell);
+      const confined = prepare?.(value.command, shell, context);
       const launch = confined ?? {
         executable: shell,
         argv: ['-c', value.command],
@@ -218,7 +247,7 @@ function shellJob(
       const childEnv = confined
         ? {
             ...env,
-            HOME: confined.temp,
+            ...(confined.preserveHostHome ? {} : { HOME: confined.temp }),
             TMPDIR: confined.temp,
             TMP: confined.temp,
             TEMP: confined.temp,
@@ -298,6 +327,15 @@ function shellJob(
               Number.isSafeInteger(frame.processGroupId) &&
               Number(frame.processGroupId) > 1
             ) {
+              if (configuration.supervision) {
+                if (
+                  typeof frame.coalitionId !== 'string' ||
+                  !/^[1-9][0-9]{0,19}$/.test(frame.coalitionId) ||
+                  BigInt(frame.coalitionId) > 18446744073709551615n
+                )
+                  throw Error('invalid_private_coalition');
+                state.coalitionId = frame.coalitionId;
+              }
               state.groupId = Number(frame.processGroupId);
               state.acknowledge();
             } else if (
@@ -318,6 +356,12 @@ function shellJob(
               ) &&
               typeof frame.groupStopped === 'boolean'
             ) {
+              if (
+                configuration.supervision &&
+                frame.groupStopped &&
+                frame.coalitionId !== state.coalitionId
+              )
+                throw Error('invalid_private_coalition');
               finish(
                 state,
                 {
@@ -328,6 +372,9 @@ function shellJob(
                     processGroupId: state.groupId ?? null,
                     groupStopped: frame.groupStopped,
                     forced: frame.forced === true,
+                    ...(state.coalitionId
+                      ? { coalitionId: state.coalitionId, processTreeStopped: frame.groupStopped }
+                      : {}),
                   },
                 },
                 frame.groupStopped,
@@ -371,6 +418,12 @@ function shellJob(
           cwd: launch.cwd,
           env: childEnv,
           graceMs: grace,
+          ...(configuration.supervision
+            ? {
+                supervision: configuration.supervision.kind,
+                controlBase: configuration.supervision.controlBase,
+              }
+            : {}),
         })}\n`,
       );
       const timer = setTimeout(() => {
@@ -390,13 +443,14 @@ function shellJob(
           nonce,
           processGroupId: state.groupId ?? null,
           supervisorPid: proc.pid ?? null,
+          ...(state.coalitionId ? { coalitionId: state.coalitionId } : {}),
           executionId: context.executionId,
           ...(confined
             ? {
                 confinement: {
                   backend: 'macos-seatbelt',
                   profileDigest: confined.profileDigest,
-                  subprocesses: 'denied',
+                  subprocesses: configuration.supervision ? 'coalition_owned' : 'denied',
                 },
               }
             : {}),

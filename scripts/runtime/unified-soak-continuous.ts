@@ -1,8 +1,35 @@
-/** Closed diagnostic workload evidence. Formal thresholds cannot be caller overrides. */
+import { createHash } from 'node:crypto';
+
+/** Closed workload evidence. Formal thresholds cannot be caller overrides. */
 export const CONTINUOUS_MINIMUM_BUSY_MS = 450_000;
 export const CONTINUOUS_OPERATION_MS = 180_000;
+export const CONTINUOUS_SHELL_UNITS = 65_536;
+export const CONTINUOUS_SHELL_SOURCE = `import{createHash}from'node:crypto';
+const nonce=process.argv[1];const bytes=Buffer.alloc(65536,16);const startedAt=Date.now();let digest='';
+for(let unit=0;unit<${CONTINUOUS_SHELL_UNITS};unit++){bytes.writeUInt32LE(unit);digest=createHash('sha256').update(bytes).digest('hex');}
+console.log(JSON.stringify({nonce,startedAt,endedAt:Date.now(),units:${CONTINUOUS_SHELL_UNITS},digest}));`;
+export interface ContinuousShellEvidence {
+  backend: 'macos-launchd-coalition';
+  candidateDigest: string;
+  sourceSha256: string;
+  wallStartedAt: number;
+  jobs: {
+    commandId: string;
+    sessionId: string;
+    executionId: string;
+    coalitionId: string;
+    startedAt: number;
+    endedAt: number;
+    units: number;
+    digest: string;
+    processTreeStopped: true;
+    stdoutSha256: string;
+  }[];
+  coldRead: boolean;
+  noReplay: boolean;
+}
 export interface ContinuousEvidence {
-  version: 1;
+  version: 1 | 2;
   mode: 'diagnostic' | 'formal';
   status: 'passed' | 'failed';
   storeId: string;
@@ -23,6 +50,8 @@ export interface ContinuousEvidence {
   admissionLatencyMs: number[];
   cleanupConfirmed: boolean;
   missing: string[];
+  /** v2 only: actual default packaged Service producer, never a diagnostic claim. */
+  shell?: ContinuousShellEvidence;
 }
 export function unionBusyIntervals(intervals: readonly (readonly [number, number])[]) {
   const ordered = [...intervals].sort((a, b) => a[0] - b[0]);
@@ -62,6 +91,7 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
     'admissionLatencyMs',
     'cleanupConfirmed',
     'missing',
+    ...(value?.version === 2 ? ['shell'] : []),
   ];
   if (
     !value ||
@@ -76,7 +106,7 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
     new Set(values).size === values.length &&
     values.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(id));
   if (
-    value.version !== 1 ||
+    ![1, 2].includes(value.version) ||
     !['diagnostic', 'formal'].includes(value.mode) ||
     value.status !== 'passed' ||
     !ids([value.storeId], 1) ||
@@ -130,14 +160,63 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
   try {
     if (
       value.busyIntervals.some(([, end]) => end > value.wallDurationMs) ||
-      value.busyIntervals.some(
-        ([start, end], index) => Math.abs(end - start - value.operationDurationMs[index]!) > 0.001,
+      value.busyIntervals.some(([start, end], index) =>
+        value.version === 1
+          ? Math.abs(end - start - value.operationDurationMs[index]!) > 0.001
+          : end - start > value.operationDurationMs[index]!,
       ) ||
       Math.abs(busyDuration(value.busyIntervals) - value.activeWorkloadDurationMs) > 0.001
     )
       return ['continuous_busy_union_invalid'];
   } catch {
     return ['continuous_busy_union_invalid'];
+  }
+  if (value.version === 2) {
+    const shell = value.shell;
+    const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+    const bytes = Buffer.alloc(65536, 16);
+    bytes.writeUInt32LE(CONTINUOUS_SHELL_UNITS - 1);
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    if (
+      !shell ||
+      Object.keys(shell).sort().join(',') !==
+        'backend,candidateDigest,coldRead,jobs,noReplay,sourceSha256,wallStartedAt' ||
+      shell.backend !== 'macos-launchd-coalition' ||
+      !hash(shell.candidateDigest) ||
+      shell.sourceSha256 !== createHash('sha256').update(CONTINUOUS_SHELL_SOURCE).digest('hex') ||
+      !Number.isSafeInteger(shell.wallStartedAt) ||
+      shell.wallStartedAt <= 0 ||
+      shell.coldRead !== true ||
+      shell.noReplay !== true ||
+      !Array.isArray(shell.jobs) ||
+      shell.jobs.length !== value.commandIds.length ||
+      !ids(shell.jobs.map((job) => job.executionId)) ||
+      new Set(shell.jobs.map((job) => job.coalitionId)).size !== shell.jobs.length ||
+      shell.jobs.some(
+        (job, index) =>
+          Object.keys(job).sort().join(',') !==
+            'coalitionId,commandId,digest,endedAt,executionId,processTreeStopped,sessionId,startedAt,stdoutSha256,units' ||
+          job.commandId !== value.commandIds[index] ||
+          !value.sessionIds.includes(job.sessionId) ||
+          !/^[1-9][0-9]{0,19}$/.test(job.coalitionId) ||
+          !Number.isSafeInteger(job.startedAt) ||
+          !Number.isSafeInteger(job.endedAt) ||
+          job.endedAt <= job.startedAt ||
+          job.units !== CONTINUOUS_SHELL_UNITS ||
+          job.digest !== digest ||
+          job.processTreeStopped !== true ||
+          !hash(job.stdoutSha256) ||
+          job.stdoutSha256 !==
+            createHash('sha256')
+              .update(
+                `${JSON.stringify({ nonce: job.commandId, startedAt: job.startedAt, endedAt: job.endedAt, units: job.units, digest: job.digest })}\n`,
+              )
+              .digest('hex') ||
+          job.startedAt - shell.wallStartedAt !== value.busyIntervals[index]![0] ||
+          job.endedAt - shell.wallStartedAt !== value.busyIntervals[index]![1],
+      )
+    )
+      return ['continuous_background_shell_invalid'];
   }
   if (
     formal &&
@@ -146,6 +225,6 @@ export function verifyContinuousEvidence(value: ContinuousEvidence, formal: bool
       value.activeWorkloadDurationMs < CONTINUOUS_MINIMUM_BUSY_MS)
   )
     return ['continuous_formal_unqualified'];
-  if (formal) return ['continuous_background_shell_unqualified'];
+  if (formal && value.version !== 2) return ['continuous_background_shell_unqualified'];
   return [];
 }

@@ -20688,24 +20688,43 @@ var schema37 = {
           anyOf: [{ type: 'string', enum: ['diagnostic_source_unavailable'] }, { type: 'null' }],
         },
         sandbox: {
-          type: 'object',
-          properties: {
-            backend: { type: 'string', const: 'none' },
-            available: { type: 'boolean', const: false },
-            qualification: { type: 'string', const: 'unqualified' },
-          },
-          required: ['backend', 'available', 'qualification'],
-          additionalProperties: false,
+          oneOf: [
+            {
+              type: 'object',
+              properties: {
+                backend: { type: 'string', const: 'none' },
+                available: { type: 'boolean', const: false },
+                qualification: { type: 'string', const: 'unqualified' },
+              },
+              required: ['backend', 'available', 'qualification'],
+              additionalProperties: false,
+            },
+            {
+              type: 'object',
+              properties: {
+                backend: { type: 'string', const: 'macos_seatbelt' },
+                available: { type: 'boolean', const: true },
+                qualification: { type: 'string', const: 'host_scope' },
+              },
+              required: ['backend', 'available', 'qualification'],
+              additionalProperties: false,
+            },
+          ],
         },
         shell: {
           type: 'object',
           properties: {
             configured: { type: 'boolean' },
             available: { type: 'boolean' },
-            supervision: { type: 'string', enum: ['none', 'posix_group'] },
+            supervision: { type: 'string', enum: ['none', 'posix_group', 'macos_coalition'] },
             qualification: {
               type: 'string',
-              enum: ['not_configured', 'darwin_supervision_only', 'unavailable'],
+              enum: [
+                'not_configured',
+                'darwin_supervision_only',
+                'darwin_host_boundary',
+                'unavailable',
+              ],
             },
             reason: {
               anyOf: [
@@ -21750,7 +21769,11 @@ function validate26(
                               if (data11.sandbox !== undefined) {
                                 let data14 = data11.sandbox;
                                 const _errs49 = errors;
-                                if (errors === _errs49) {
+                                const _errs50 = errors;
+                                let valid8 = false;
+                                let passing0 = null;
+                                const _errs51 = errors;
+                                if (errors === _errs51) {
                                   if (
                                     data14 &&
                                     typeof data14 == 'object' &&
@@ -21764,19 +21787,22 @@ function validate26(
                                       (data14.qualification === undefined &&
                                         (missing4 = 'qualification'))
                                     ) {
-                                      validate26.errors = [
-                                        {
-                                          instancePath: instancePath + '/execution/sandbox',
-                                          schemaPath:
-                                            '#/properties/execution/properties/sandbox/required',
-                                          keyword: 'required',
-                                          params: { missingProperty: missing4 },
-                                          message: "must have required property '" + missing4 + "'",
-                                        },
-                                      ];
-                                      return false;
+                                      const err19 = {
+                                        instancePath: instancePath + '/execution/sandbox',
+                                        schemaPath:
+                                          '#/properties/execution/properties/sandbox/oneOf/0/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing4 },
+                                        message: "must have required property '" + missing4 + "'",
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err19];
+                                      } else {
+                                        vErrors.push(err19);
+                                      }
+                                      errors++;
                                     } else {
-                                      const _errs51 = errors;
+                                      const _errs53 = errors;
                                       for (const key4 in data14) {
                                         if (
                                           !(
@@ -21785,146 +21811,420 @@ function validate26(
                                             key4 === 'qualification'
                                           )
                                         ) {
-                                          validate26.errors = [
-                                            {
-                                              instancePath: instancePath + '/execution/sandbox',
-                                              schemaPath:
-                                                '#/properties/execution/properties/sandbox/additionalProperties',
-                                              keyword: 'additionalProperties',
-                                              params: { additionalProperty: key4 },
-                                              message: 'must NOT have additional properties',
-                                            },
-                                          ];
-                                          return false;
+                                          const err20 = {
+                                            instancePath: instancePath + '/execution/sandbox',
+                                            schemaPath:
+                                              '#/properties/execution/properties/sandbox/oneOf/0/additionalProperties',
+                                            keyword: 'additionalProperties',
+                                            params: { additionalProperty: key4 },
+                                            message: 'must NOT have additional properties',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err20];
+                                          } else {
+                                            vErrors.push(err20);
+                                          }
+                                          errors++;
                                           break;
                                         }
                                       }
-                                      if (_errs51 === errors) {
+                                      if (_errs53 === errors) {
                                         if (data14.backend !== undefined) {
                                           let data15 = data14.backend;
-                                          const _errs52 = errors;
+                                          const _errs54 = errors;
                                           if (typeof data15 !== 'string') {
-                                            validate26.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath + '/execution/sandbox/backend',
-                                                schemaPath:
-                                                  '#/properties/execution/properties/sandbox/properties/backend/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
+                                            const err21 = {
+                                              instancePath:
+                                                instancePath + '/execution/sandbox/backend',
+                                              schemaPath:
+                                                '#/properties/execution/properties/sandbox/oneOf/0/properties/backend/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err21];
+                                            } else {
+                                              vErrors.push(err21);
+                                            }
+                                            errors++;
                                           }
                                           if (data15 !== 'none') {
-                                            validate26.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath + '/execution/sandbox/backend',
-                                                schemaPath:
-                                                  '#/properties/execution/properties/sandbox/properties/backend/const',
-                                                keyword: 'const',
-                                                params: { allowedValue: 'none' },
-                                                message: 'must be equal to constant',
-                                              },
-                                            ];
-                                            return false;
+                                            const err22 = {
+                                              instancePath:
+                                                instancePath + '/execution/sandbox/backend',
+                                              schemaPath:
+                                                '#/properties/execution/properties/sandbox/oneOf/0/properties/backend/const',
+                                              keyword: 'const',
+                                              params: { allowedValue: 'none' },
+                                              message: 'must be equal to constant',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err22];
+                                            } else {
+                                              vErrors.push(err22);
+                                            }
+                                            errors++;
                                           }
-                                          var valid8 = _errs52 === errors;
+                                          var valid9 = _errs54 === errors;
                                         } else {
-                                          var valid8 = true;
+                                          var valid9 = true;
                                         }
-                                        if (valid8) {
+                                        if (valid9) {
                                           if (data14.available !== undefined) {
                                             let data16 = data14.available;
-                                            const _errs54 = errors;
+                                            const _errs56 = errors;
                                             if (typeof data16 !== 'boolean') {
-                                              validate26.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath + '/execution/sandbox/available',
-                                                  schemaPath:
-                                                    '#/properties/execution/properties/sandbox/properties/available/type',
-                                                  keyword: 'type',
-                                                  params: { type: 'boolean' },
-                                                  message: 'must be boolean',
-                                                },
-                                              ];
-                                              return false;
+                                              const err23 = {
+                                                instancePath:
+                                                  instancePath + '/execution/sandbox/available',
+                                                schemaPath:
+                                                  '#/properties/execution/properties/sandbox/oneOf/0/properties/available/type',
+                                                keyword: 'type',
+                                                params: { type: 'boolean' },
+                                                message: 'must be boolean',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err23];
+                                              } else {
+                                                vErrors.push(err23);
+                                              }
+                                              errors++;
                                             }
                                             if (data16 !== false) {
-                                              validate26.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath + '/execution/sandbox/available',
-                                                  schemaPath:
-                                                    '#/properties/execution/properties/sandbox/properties/available/const',
-                                                  keyword: 'const',
-                                                  params: { allowedValue: false },
-                                                  message: 'must be equal to constant',
-                                                },
-                                              ];
-                                              return false;
+                                              const err24 = {
+                                                instancePath:
+                                                  instancePath + '/execution/sandbox/available',
+                                                schemaPath:
+                                                  '#/properties/execution/properties/sandbox/oneOf/0/properties/available/const',
+                                                keyword: 'const',
+                                                params: { allowedValue: false },
+                                                message: 'must be equal to constant',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err24];
+                                              } else {
+                                                vErrors.push(err24);
+                                              }
+                                              errors++;
                                             }
-                                            var valid8 = _errs54 === errors;
+                                            var valid9 = _errs56 === errors;
                                           } else {
-                                            var valid8 = true;
+                                            var valid9 = true;
                                           }
-                                          if (valid8) {
+                                          if (valid9) {
                                             if (data14.qualification !== undefined) {
                                               let data17 = data14.qualification;
-                                              const _errs56 = errors;
+                                              const _errs58 = errors;
                                               if (typeof data17 !== 'string') {
-                                                validate26.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/execution/sandbox/qualification',
-                                                    schemaPath:
-                                                      '#/properties/execution/properties/sandbox/properties/qualification/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
+                                                const err25 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/execution/sandbox/qualification',
+                                                  schemaPath:
+                                                    '#/properties/execution/properties/sandbox/oneOf/0/properties/qualification/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err25];
+                                                } else {
+                                                  vErrors.push(err25);
+                                                }
+                                                errors++;
                                               }
                                               if (data17 !== 'unqualified') {
-                                                validate26.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/execution/sandbox/qualification',
-                                                    schemaPath:
-                                                      '#/properties/execution/properties/sandbox/properties/qualification/const',
-                                                    keyword: 'const',
-                                                    params: { allowedValue: 'unqualified' },
-                                                    message: 'must be equal to constant',
-                                                  },
-                                                ];
-                                                return false;
+                                                const err26 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/execution/sandbox/qualification',
+                                                  schemaPath:
+                                                    '#/properties/execution/properties/sandbox/oneOf/0/properties/qualification/const',
+                                                  keyword: 'const',
+                                                  params: { allowedValue: 'unqualified' },
+                                                  message: 'must be equal to constant',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err26];
+                                                } else {
+                                                  vErrors.push(err26);
+                                                }
+                                                errors++;
                                               }
-                                              var valid8 = _errs56 === errors;
+                                              var valid9 = _errs58 === errors;
                                             } else {
-                                              var valid8 = true;
+                                              var valid9 = true;
                                             }
                                           }
                                         }
                                       }
                                     }
                                   } else {
-                                    validate26.errors = [
-                                      {
+                                    const err27 = {
+                                      instancePath: instancePath + '/execution/sandbox',
+                                      schemaPath:
+                                        '#/properties/execution/properties/sandbox/oneOf/0/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err27];
+                                    } else {
+                                      vErrors.push(err27);
+                                    }
+                                    errors++;
+                                  }
+                                }
+                                var _valid4 = _errs51 === errors;
+                                if (_valid4) {
+                                  valid8 = true;
+                                  passing0 = 0;
+                                  var props0 = true;
+                                }
+                                const _errs60 = errors;
+                                if (errors === _errs60) {
+                                  if (
+                                    data14 &&
+                                    typeof data14 == 'object' &&
+                                    !Array.isArray(data14)
+                                  ) {
+                                    let missing5;
+                                    if (
+                                      (data14.backend === undefined && (missing5 = 'backend')) ||
+                                      (data14.available === undefined &&
+                                        (missing5 = 'available')) ||
+                                      (data14.qualification === undefined &&
+                                        (missing5 = 'qualification'))
+                                    ) {
+                                      const err28 = {
                                         instancePath: instancePath + '/execution/sandbox',
                                         schemaPath:
-                                          '#/properties/execution/properties/sandbox/type',
-                                        keyword: 'type',
-                                        params: { type: 'object' },
-                                        message: 'must be object',
-                                      },
-                                    ];
-                                    return false;
+                                          '#/properties/execution/properties/sandbox/oneOf/1/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing5 },
+                                        message: "must have required property '" + missing5 + "'",
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err28];
+                                      } else {
+                                        vErrors.push(err28);
+                                      }
+                                      errors++;
+                                    } else {
+                                      const _errs62 = errors;
+                                      for (const key5 in data14) {
+                                        if (
+                                          !(
+                                            key5 === 'backend' ||
+                                            key5 === 'available' ||
+                                            key5 === 'qualification'
+                                          )
+                                        ) {
+                                          const err29 = {
+                                            instancePath: instancePath + '/execution/sandbox',
+                                            schemaPath:
+                                              '#/properties/execution/properties/sandbox/oneOf/1/additionalProperties',
+                                            keyword: 'additionalProperties',
+                                            params: { additionalProperty: key5 },
+                                            message: 'must NOT have additional properties',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err29];
+                                          } else {
+                                            vErrors.push(err29);
+                                          }
+                                          errors++;
+                                          break;
+                                        }
+                                      }
+                                      if (_errs62 === errors) {
+                                        if (data14.backend !== undefined) {
+                                          let data18 = data14.backend;
+                                          const _errs63 = errors;
+                                          if (typeof data18 !== 'string') {
+                                            const err30 = {
+                                              instancePath:
+                                                instancePath + '/execution/sandbox/backend',
+                                              schemaPath:
+                                                '#/properties/execution/properties/sandbox/oneOf/1/properties/backend/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err30];
+                                            } else {
+                                              vErrors.push(err30);
+                                            }
+                                            errors++;
+                                          }
+                                          if (data18 !== 'macos_seatbelt') {
+                                            const err31 = {
+                                              instancePath:
+                                                instancePath + '/execution/sandbox/backend',
+                                              schemaPath:
+                                                '#/properties/execution/properties/sandbox/oneOf/1/properties/backend/const',
+                                              keyword: 'const',
+                                              params: { allowedValue: 'macos_seatbelt' },
+                                              message: 'must be equal to constant',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err31];
+                                            } else {
+                                              vErrors.push(err31);
+                                            }
+                                            errors++;
+                                          }
+                                          var valid10 = _errs63 === errors;
+                                        } else {
+                                          var valid10 = true;
+                                        }
+                                        if (valid10) {
+                                          if (data14.available !== undefined) {
+                                            let data19 = data14.available;
+                                            const _errs65 = errors;
+                                            if (typeof data19 !== 'boolean') {
+                                              const err32 = {
+                                                instancePath:
+                                                  instancePath + '/execution/sandbox/available',
+                                                schemaPath:
+                                                  '#/properties/execution/properties/sandbox/oneOf/1/properties/available/type',
+                                                keyword: 'type',
+                                                params: { type: 'boolean' },
+                                                message: 'must be boolean',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err32];
+                                              } else {
+                                                vErrors.push(err32);
+                                              }
+                                              errors++;
+                                            }
+                                            if (data19 !== true) {
+                                              const err33 = {
+                                                instancePath:
+                                                  instancePath + '/execution/sandbox/available',
+                                                schemaPath:
+                                                  '#/properties/execution/properties/sandbox/oneOf/1/properties/available/const',
+                                                keyword: 'const',
+                                                params: { allowedValue: true },
+                                                message: 'must be equal to constant',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err33];
+                                              } else {
+                                                vErrors.push(err33);
+                                              }
+                                              errors++;
+                                            }
+                                            var valid10 = _errs65 === errors;
+                                          } else {
+                                            var valid10 = true;
+                                          }
+                                          if (valid10) {
+                                            if (data14.qualification !== undefined) {
+                                              let data20 = data14.qualification;
+                                              const _errs67 = errors;
+                                              if (typeof data20 !== 'string') {
+                                                const err34 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/execution/sandbox/qualification',
+                                                  schemaPath:
+                                                    '#/properties/execution/properties/sandbox/oneOf/1/properties/qualification/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err34];
+                                                } else {
+                                                  vErrors.push(err34);
+                                                }
+                                                errors++;
+                                              }
+                                              if (data20 !== 'host_scope') {
+                                                const err35 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/execution/sandbox/qualification',
+                                                  schemaPath:
+                                                    '#/properties/execution/properties/sandbox/oneOf/1/properties/qualification/const',
+                                                  keyword: 'const',
+                                                  params: { allowedValue: 'host_scope' },
+                                                  message: 'must be equal to constant',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err35];
+                                                } else {
+                                                  vErrors.push(err35);
+                                                }
+                                                errors++;
+                                              }
+                                              var valid10 = _errs67 === errors;
+                                            } else {
+                                              var valid10 = true;
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  } else {
+                                    const err36 = {
+                                      instancePath: instancePath + '/execution/sandbox',
+                                      schemaPath:
+                                        '#/properties/execution/properties/sandbox/oneOf/1/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err36];
+                                    } else {
+                                      vErrors.push(err36);
+                                    }
+                                    errors++;
+                                  }
+                                }
+                                var _valid4 = _errs60 === errors;
+                                if (_valid4 && valid8) {
+                                  valid8 = false;
+                                  passing0 = [passing0, 1];
+                                } else {
+                                  if (_valid4) {
+                                    valid8 = true;
+                                    passing0 = 1;
+                                    if (props0 !== true) {
+                                      props0 = true;
+                                    }
+                                  }
+                                }
+                                if (!valid8) {
+                                  const err37 = {
+                                    instancePath: instancePath + '/execution/sandbox',
+                                    schemaPath: '#/properties/execution/properties/sandbox/oneOf',
+                                    keyword: 'oneOf',
+                                    params: { passingSchemas: passing0 },
+                                    message: 'must match exactly one schema in oneOf',
+                                  };
+                                  if (vErrors === null) {
+                                    vErrors = [err37];
+                                  } else {
+                                    vErrors.push(err37);
+                                  }
+                                  errors++;
+                                  validate26.errors = vErrors;
+                                  return false;
+                                } else {
+                                  errors = _errs50;
+                                  if (vErrors !== null) {
+                                    if (_errs50) {
+                                      vErrors.length = _errs50;
+                                    } else {
+                                      vErrors = null;
+                                    }
                                   }
                                 }
                                 var valid6 = _errs49 === errors;
@@ -21933,25 +22233,25 @@ function validate26(
                               }
                               if (valid6) {
                                 if (data11.shell !== undefined) {
-                                  let data18 = data11.shell;
-                                  const _errs58 = errors;
-                                  if (errors === _errs58) {
+                                  let data21 = data11.shell;
+                                  const _errs69 = errors;
+                                  if (errors === _errs69) {
                                     if (
-                                      data18 &&
-                                      typeof data18 == 'object' &&
-                                      !Array.isArray(data18)
+                                      data21 &&
+                                      typeof data21 == 'object' &&
+                                      !Array.isArray(data21)
                                     ) {
-                                      let missing5;
+                                      let missing6;
                                       if (
-                                        (data18.configured === undefined &&
-                                          (missing5 = 'configured')) ||
-                                        (data18.available === undefined &&
-                                          (missing5 = 'available')) ||
-                                        (data18.supervision === undefined &&
-                                          (missing5 = 'supervision')) ||
-                                        (data18.qualification === undefined &&
-                                          (missing5 = 'qualification')) ||
-                                        (data18.reason === undefined && (missing5 = 'reason'))
+                                        (data21.configured === undefined &&
+                                          (missing6 = 'configured')) ||
+                                        (data21.available === undefined &&
+                                          (missing6 = 'available')) ||
+                                        (data21.supervision === undefined &&
+                                          (missing6 = 'supervision')) ||
+                                        (data21.qualification === undefined &&
+                                          (missing6 = 'qualification')) ||
+                                        (data21.reason === undefined && (missing6 = 'reason'))
                                       ) {
                                         validate26.errors = [
                                           {
@@ -21959,22 +22259,22 @@ function validate26(
                                             schemaPath:
                                               '#/properties/execution/properties/shell/required',
                                             keyword: 'required',
-                                            params: { missingProperty: missing5 },
+                                            params: { missingProperty: missing6 },
                                             message:
-                                              "must have required property '" + missing5 + "'",
+                                              "must have required property '" + missing6 + "'",
                                           },
                                         ];
                                         return false;
                                       } else {
-                                        const _errs60 = errors;
-                                        for (const key5 in data18) {
+                                        const _errs71 = errors;
+                                        for (const key6 in data21) {
                                           if (
                                             !(
-                                              key5 === 'configured' ||
-                                              key5 === 'available' ||
-                                              key5 === 'supervision' ||
-                                              key5 === 'qualification' ||
-                                              key5 === 'reason'
+                                              key6 === 'configured' ||
+                                              key6 === 'available' ||
+                                              key6 === 'supervision' ||
+                                              key6 === 'qualification' ||
+                                              key6 === 'reason'
                                             )
                                           ) {
                                             validate26.errors = [
@@ -21983,7 +22283,7 @@ function validate26(
                                                 schemaPath:
                                                   '#/properties/execution/properties/shell/additionalProperties',
                                                 keyword: 'additionalProperties',
-                                                params: { additionalProperty: key5 },
+                                                params: { additionalProperty: key6 },
                                                 message: 'must NOT have additional properties',
                                               },
                                             ];
@@ -21991,10 +22291,10 @@ function validate26(
                                             break;
                                           }
                                         }
-                                        if (_errs60 === errors) {
-                                          if (data18.configured !== undefined) {
-                                            const _errs61 = errors;
-                                            if (typeof data18.configured !== 'boolean') {
+                                        if (_errs71 === errors) {
+                                          if (data21.configured !== undefined) {
+                                            const _errs72 = errors;
+                                            if (typeof data21.configured !== 'boolean') {
                                               validate26.errors = [
                                                 {
                                                   instancePath:
@@ -22008,14 +22308,14 @@ function validate26(
                                               ];
                                               return false;
                                             }
-                                            var valid9 = _errs61 === errors;
+                                            var valid11 = _errs72 === errors;
                                           } else {
-                                            var valid9 = true;
+                                            var valid11 = true;
                                           }
-                                          if (valid9) {
-                                            if (data18.available !== undefined) {
-                                              const _errs63 = errors;
-                                              if (typeof data18.available !== 'boolean') {
+                                          if (valid11) {
+                                            if (data21.available !== undefined) {
+                                              const _errs74 = errors;
+                                              if (typeof data21.available !== 'boolean') {
                                                 validate26.errors = [
                                                   {
                                                     instancePath:
@@ -22029,15 +22329,15 @@ function validate26(
                                                 ];
                                                 return false;
                                               }
-                                              var valid9 = _errs63 === errors;
+                                              var valid11 = _errs74 === errors;
                                             } else {
-                                              var valid9 = true;
+                                              var valid11 = true;
                                             }
-                                            if (valid9) {
-                                              if (data18.supervision !== undefined) {
-                                                let data21 = data18.supervision;
-                                                const _errs65 = errors;
-                                                if (typeof data21 !== 'string') {
+                                            if (valid11) {
+                                              if (data21.supervision !== undefined) {
+                                                let data24 = data21.supervision;
+                                                const _errs76 = errors;
+                                                if (typeof data24 !== 'string') {
                                                   validate26.errors = [
                                                     {
                                                       instancePath:
@@ -22053,7 +22353,11 @@ function validate26(
                                                   return false;
                                                 }
                                                 if (
-                                                  !(data21 === 'none' || data21 === 'posix_group')
+                                                  !(
+                                                    data24 === 'none' ||
+                                                    data24 === 'posix_group' ||
+                                                    data24 === 'macos_coalition'
+                                                  )
                                                 ) {
                                                   validate26.errors = [
                                                     {
@@ -22074,15 +22378,15 @@ function validate26(
                                                   ];
                                                   return false;
                                                 }
-                                                var valid9 = _errs65 === errors;
+                                                var valid11 = _errs76 === errors;
                                               } else {
-                                                var valid9 = true;
+                                                var valid11 = true;
                                               }
-                                              if (valid9) {
-                                                if (data18.qualification !== undefined) {
-                                                  let data22 = data18.qualification;
-                                                  const _errs67 = errors;
-                                                  if (typeof data22 !== 'string') {
+                                              if (valid11) {
+                                                if (data21.qualification !== undefined) {
+                                                  let data25 = data21.qualification;
+                                                  const _errs78 = errors;
+                                                  if (typeof data25 !== 'string') {
                                                     validate26.errors = [
                                                       {
                                                         instancePath:
@@ -22099,9 +22403,10 @@ function validate26(
                                                   }
                                                   if (
                                                     !(
-                                                      data22 === 'not_configured' ||
-                                                      data22 === 'darwin_supervision_only' ||
-                                                      data22 === 'unavailable'
+                                                      data25 === 'not_configured' ||
+                                                      data25 === 'darwin_supervision_only' ||
+                                                      data25 === 'darwin_host_boundary' ||
+                                                      data25 === 'unavailable'
                                                     )
                                                   ) {
                                                     validate26.errors = [
@@ -22123,19 +22428,19 @@ function validate26(
                                                     ];
                                                     return false;
                                                   }
-                                                  var valid9 = _errs67 === errors;
+                                                  var valid11 = _errs78 === errors;
                                                 } else {
-                                                  var valid9 = true;
+                                                  var valid11 = true;
                                                 }
-                                                if (valid9) {
-                                                  if (data18.reason !== undefined) {
-                                                    let data23 = data18.reason;
-                                                    const _errs69 = errors;
-                                                    const _errs70 = errors;
-                                                    let valid10 = false;
-                                                    const _errs71 = errors;
-                                                    if (typeof data23 !== 'string') {
-                                                      const err19 = {
+                                                if (valid11) {
+                                                  if (data21.reason !== undefined) {
+                                                    let data26 = data21.reason;
+                                                    const _errs80 = errors;
+                                                    const _errs81 = errors;
+                                                    let valid12 = false;
+                                                    const _errs82 = errors;
+                                                    if (typeof data26 !== 'string') {
+                                                      const err38 = {
                                                         instancePath:
                                                           instancePath + '/execution/shell/reason',
                                                         schemaPath:
@@ -22145,22 +22450,22 @@ function validate26(
                                                         message: 'must be string',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err19];
+                                                        vErrors = [err38];
                                                       } else {
-                                                        vErrors.push(err19);
+                                                        vErrors.push(err38);
                                                       }
                                                       errors++;
                                                     }
                                                     if (
                                                       !(
-                                                        data23 === 'shell_not_configured' ||
-                                                        data23 === 'shell_platform_unqualified' ||
-                                                        data23 === 'shell_asset_unavailable' ||
-                                                        data23 === 'invalid_shell_configuration' ||
-                                                        data23 === 'diagnostic_source_unavailable'
+                                                        data26 === 'shell_not_configured' ||
+                                                        data26 === 'shell_platform_unqualified' ||
+                                                        data26 === 'shell_asset_unavailable' ||
+                                                        data26 === 'invalid_shell_configuration' ||
+                                                        data26 === 'diagnostic_source_unavailable'
                                                       )
                                                     ) {
-                                                      const err20 = {
+                                                      const err39 = {
                                                         instancePath:
                                                           instancePath + '/execution/shell/reason',
                                                         schemaPath:
@@ -22176,17 +22481,17 @@ function validate26(
                                                           'must be equal to one of the allowed values',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err20];
+                                                        vErrors = [err39];
                                                       } else {
-                                                        vErrors.push(err20);
+                                                        vErrors.push(err39);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid4 = _errs71 === errors;
-                                                    valid10 = valid10 || _valid4;
-                                                    const _errs73 = errors;
-                                                    if (data23 !== null) {
-                                                      const err21 = {
+                                                    var _valid5 = _errs82 === errors;
+                                                    valid12 = valid12 || _valid5;
+                                                    const _errs84 = errors;
+                                                    if (data26 !== null) {
+                                                      const err40 = {
                                                         instancePath:
                                                           instancePath + '/execution/shell/reason',
                                                         schemaPath:
@@ -22196,16 +22501,16 @@ function validate26(
                                                         message: 'must be null',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err21];
+                                                        vErrors = [err40];
                                                       } else {
-                                                        vErrors.push(err21);
+                                                        vErrors.push(err40);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid4 = _errs73 === errors;
-                                                    valid10 = valid10 || _valid4;
-                                                    if (!valid10) {
-                                                      const err22 = {
+                                                    var _valid5 = _errs84 === errors;
+                                                    valid12 = valid12 || _valid5;
+                                                    if (!valid12) {
+                                                      const err41 = {
                                                         instancePath:
                                                           instancePath + '/execution/shell/reason',
                                                         schemaPath:
@@ -22215,26 +22520,26 @@ function validate26(
                                                         message: 'must match a schema in anyOf',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err22];
+                                                        vErrors = [err41];
                                                       } else {
-                                                        vErrors.push(err22);
+                                                        vErrors.push(err41);
                                                       }
                                                       errors++;
                                                       validate26.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs70;
+                                                      errors = _errs81;
                                                       if (vErrors !== null) {
-                                                        if (_errs70) {
-                                                          vErrors.length = _errs70;
+                                                        if (_errs81) {
+                                                          vErrors.length = _errs81;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid9 = _errs69 === errors;
+                                                    var valid11 = _errs80 === errors;
                                                   } else {
-                                                    var valid9 = true;
+                                                    var valid11 = true;
                                                   }
                                                 }
                                               }
@@ -22256,30 +22561,30 @@ function validate26(
                                       return false;
                                     }
                                   }
-                                  var valid6 = _errs58 === errors;
+                                  var valid6 = _errs69 === errors;
                                 } else {
                                   var valid6 = true;
                                 }
                                 if (valid6) {
                                   if (data11.permissions !== undefined) {
-                                    let data24 = data11.permissions;
-                                    const _errs75 = errors;
-                                    if (errors === _errs75) {
+                                    let data27 = data11.permissions;
+                                    const _errs86 = errors;
+                                    if (errors === _errs86) {
                                       if (
-                                        data24 &&
-                                        typeof data24 == 'object' &&
-                                        !Array.isArray(data24)
+                                        data27 &&
+                                        typeof data27 == 'object' &&
+                                        !Array.isArray(data27)
                                       ) {
-                                        let missing6;
+                                        let missing7;
                                         if (
-                                          (data24.state === undefined && (missing6 = 'state')) ||
-                                          (data24.scope === undefined && (missing6 = 'scope')) ||
-                                          (data24.mode === undefined && (missing6 = 'mode')) ||
-                                          (data24.defaultMode === undefined &&
-                                            (missing6 = 'defaultMode')) ||
-                                          (data24.workspaceTrust === undefined &&
-                                            (missing6 = 'workspaceTrust')) ||
-                                          (data24.reason === undefined && (missing6 = 'reason'))
+                                          (data27.state === undefined && (missing7 = 'state')) ||
+                                          (data27.scope === undefined && (missing7 = 'scope')) ||
+                                          (data27.mode === undefined && (missing7 = 'mode')) ||
+                                          (data27.defaultMode === undefined &&
+                                            (missing7 = 'defaultMode')) ||
+                                          (data27.workspaceTrust === undefined &&
+                                            (missing7 = 'workspaceTrust')) ||
+                                          (data27.reason === undefined && (missing7 = 'reason'))
                                         ) {
                                           validate26.errors = [
                                             {
@@ -22287,23 +22592,23 @@ function validate26(
                                               schemaPath:
                                                 '#/properties/execution/properties/permissions/required',
                                               keyword: 'required',
-                                              params: { missingProperty: missing6 },
+                                              params: { missingProperty: missing7 },
                                               message:
-                                                "must have required property '" + missing6 + "'",
+                                                "must have required property '" + missing7 + "'",
                                             },
                                           ];
                                           return false;
                                         } else {
-                                          const _errs77 = errors;
-                                          for (const key6 in data24) {
+                                          const _errs88 = errors;
+                                          for (const key7 in data27) {
                                             if (
                                               !(
-                                                key6 === 'state' ||
-                                                key6 === 'scope' ||
-                                                key6 === 'mode' ||
-                                                key6 === 'defaultMode' ||
-                                                key6 === 'workspaceTrust' ||
-                                                key6 === 'reason'
+                                                key7 === 'state' ||
+                                                key7 === 'scope' ||
+                                                key7 === 'mode' ||
+                                                key7 === 'defaultMode' ||
+                                                key7 === 'workspaceTrust' ||
+                                                key7 === 'reason'
                                               )
                                             ) {
                                               validate26.errors = [
@@ -22313,7 +22618,7 @@ function validate26(
                                                   schemaPath:
                                                     '#/properties/execution/properties/permissions/additionalProperties',
                                                   keyword: 'additionalProperties',
-                                                  params: { additionalProperty: key6 },
+                                                  params: { additionalProperty: key7 },
                                                   message: 'must NOT have additional properties',
                                                 },
                                               ];
@@ -22321,11 +22626,11 @@ function validate26(
                                               break;
                                             }
                                           }
-                                          if (_errs77 === errors) {
-                                            if (data24.state !== undefined) {
-                                              let data25 = data24.state;
-                                              const _errs78 = errors;
-                                              if (typeof data25 !== 'string') {
+                                          if (_errs88 === errors) {
+                                            if (data27.state !== undefined) {
+                                              let data28 = data27.state;
+                                              const _errs89 = errors;
+                                              if (typeof data28 !== 'string') {
                                                 validate26.errors = [
                                                   {
                                                     instancePath:
@@ -22341,9 +22646,9 @@ function validate26(
                                               }
                                               if (
                                                 !(
-                                                  data25 === 'available' ||
-                                                  data25 === 'unbound' ||
-                                                  data25 === 'unavailable'
+                                                  data28 === 'available' ||
+                                                  data28 === 'unbound' ||
+                                                  data28 === 'unavailable'
                                                 )
                                               ) {
                                                 validate26.errors = [
@@ -22364,15 +22669,15 @@ function validate26(
                                                 ];
                                                 return false;
                                               }
-                                              var valid11 = _errs78 === errors;
+                                              var valid13 = _errs89 === errors;
                                             } else {
-                                              var valid11 = true;
+                                              var valid13 = true;
                                             }
-                                            if (valid11) {
-                                              if (data24.scope !== undefined) {
-                                                let data26 = data24.scope;
-                                                const _errs80 = errors;
-                                                if (typeof data26 !== 'string') {
+                                            if (valid13) {
+                                              if (data27.scope !== undefined) {
+                                                let data29 = data27.scope;
+                                                const _errs91 = errors;
+                                                if (typeof data29 !== 'string') {
                                                   validate26.errors = [
                                                     {
                                                       instancePath:
@@ -22389,9 +22694,9 @@ function validate26(
                                                 }
                                                 if (
                                                   !(
-                                                    data26 === 'default' ||
-                                                    data26 === 'session' ||
-                                                    data26 === 'unbound'
+                                                    data29 === 'default' ||
+                                                    data29 === 'session' ||
+                                                    data29 === 'unbound'
                                                   )
                                                 ) {
                                                   validate26.errors = [
@@ -22413,19 +22718,19 @@ function validate26(
                                                   ];
                                                   return false;
                                                 }
-                                                var valid11 = _errs80 === errors;
+                                                var valid13 = _errs91 === errors;
                                               } else {
-                                                var valid11 = true;
+                                                var valid13 = true;
                                               }
-                                              if (valid11) {
-                                                if (data24.mode !== undefined) {
-                                                  let data27 = data24.mode;
-                                                  const _errs82 = errors;
-                                                  const _errs83 = errors;
-                                                  let valid12 = false;
-                                                  const _errs84 = errors;
-                                                  if (typeof data27 !== 'string') {
-                                                    const err23 = {
+                                              if (valid13) {
+                                                if (data27.mode !== undefined) {
+                                                  let data30 = data27.mode;
+                                                  const _errs93 = errors;
+                                                  const _errs94 = errors;
+                                                  let valid14 = false;
+                                                  const _errs95 = errors;
+                                                  if (typeof data30 !== 'string') {
+                                                    const err42 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/execution/permissions/mode',
@@ -22436,21 +22741,21 @@ function validate26(
                                                       message: 'must be string',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err23];
+                                                      vErrors = [err42];
                                                     } else {
-                                                      vErrors.push(err23);
+                                                      vErrors.push(err42);
                                                     }
                                                     errors++;
                                                   }
                                                   if (
                                                     !(
-                                                      data27 === 'ask' ||
-                                                      data27 === 'auto' ||
-                                                      data27 === 'accept_edits' ||
-                                                      data27 === 'full'
+                                                      data30 === 'ask' ||
+                                                      data30 === 'auto' ||
+                                                      data30 === 'accept_edits' ||
+                                                      data30 === 'full'
                                                     )
                                                   ) {
-                                                    const err24 = {
+                                                    const err43 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/execution/permissions/mode',
@@ -22467,17 +22772,17 @@ function validate26(
                                                         'must be equal to one of the allowed values',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err24];
+                                                      vErrors = [err43];
                                                     } else {
-                                                      vErrors.push(err24);
+                                                      vErrors.push(err43);
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid5 = _errs84 === errors;
-                                                  valid12 = valid12 || _valid5;
-                                                  const _errs86 = errors;
-                                                  if (data27 !== null) {
-                                                    const err25 = {
+                                                  var _valid6 = _errs95 === errors;
+                                                  valid14 = valid14 || _valid6;
+                                                  const _errs97 = errors;
+                                                  if (data30 !== null) {
+                                                    const err44 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/execution/permissions/mode',
@@ -22488,16 +22793,16 @@ function validate26(
                                                       message: 'must be null',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err25];
+                                                      vErrors = [err44];
                                                     } else {
-                                                      vErrors.push(err25);
+                                                      vErrors.push(err44);
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid5 = _errs86 === errors;
-                                                  valid12 = valid12 || _valid5;
-                                                  if (!valid12) {
-                                                    const err26 = {
+                                                  var _valid6 = _errs97 === errors;
+                                                  valid14 = valid14 || _valid6;
+                                                  if (!valid14) {
+                                                    const err45 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/execution/permissions/mode',
@@ -22508,36 +22813,36 @@ function validate26(
                                                       message: 'must match a schema in anyOf',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err26];
+                                                      vErrors = [err45];
                                                     } else {
-                                                      vErrors.push(err26);
+                                                      vErrors.push(err45);
                                                     }
                                                     errors++;
                                                     validate26.errors = vErrors;
                                                     return false;
                                                   } else {
-                                                    errors = _errs83;
+                                                    errors = _errs94;
                                                     if (vErrors !== null) {
-                                                      if (_errs83) {
-                                                        vErrors.length = _errs83;
+                                                      if (_errs94) {
+                                                        vErrors.length = _errs94;
                                                       } else {
                                                         vErrors = null;
                                                       }
                                                     }
                                                   }
-                                                  var valid11 = _errs82 === errors;
+                                                  var valid13 = _errs93 === errors;
                                                 } else {
-                                                  var valid11 = true;
+                                                  var valid13 = true;
                                                 }
-                                                if (valid11) {
-                                                  if (data24.defaultMode !== undefined) {
-                                                    let data28 = data24.defaultMode;
-                                                    const _errs88 = errors;
-                                                    const _errs89 = errors;
-                                                    let valid13 = false;
-                                                    const _errs90 = errors;
-                                                    if (typeof data28 !== 'string') {
-                                                      const err27 = {
+                                                if (valid13) {
+                                                  if (data27.defaultMode !== undefined) {
+                                                    let data31 = data27.defaultMode;
+                                                    const _errs99 = errors;
+                                                    const _errs100 = errors;
+                                                    let valid15 = false;
+                                                    const _errs101 = errors;
+                                                    if (typeof data31 !== 'string') {
+                                                      const err46 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/execution/permissions/defaultMode',
@@ -22548,21 +22853,21 @@ function validate26(
                                                         message: 'must be string',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err27];
+                                                        vErrors = [err46];
                                                       } else {
-                                                        vErrors.push(err27);
+                                                        vErrors.push(err46);
                                                       }
                                                       errors++;
                                                     }
                                                     if (
                                                       !(
-                                                        data28 === 'ask' ||
-                                                        data28 === 'auto' ||
-                                                        data28 === 'accept_edits' ||
-                                                        data28 === 'full'
+                                                        data31 === 'ask' ||
+                                                        data31 === 'auto' ||
+                                                        data31 === 'accept_edits' ||
+                                                        data31 === 'full'
                                                       )
                                                     ) {
-                                                      const err28 = {
+                                                      const err47 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/execution/permissions/defaultMode',
@@ -22579,17 +22884,17 @@ function validate26(
                                                           'must be equal to one of the allowed values',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err28];
+                                                        vErrors = [err47];
                                                       } else {
-                                                        vErrors.push(err28);
+                                                        vErrors.push(err47);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid6 = _errs90 === errors;
-                                                    valid13 = valid13 || _valid6;
-                                                    const _errs92 = errors;
-                                                    if (data28 !== null) {
-                                                      const err29 = {
+                                                    var _valid7 = _errs101 === errors;
+                                                    valid15 = valid15 || _valid7;
+                                                    const _errs103 = errors;
+                                                    if (data31 !== null) {
+                                                      const err48 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/execution/permissions/defaultMode',
@@ -22600,16 +22905,16 @@ function validate26(
                                                         message: 'must be null',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err29];
+                                                        vErrors = [err48];
                                                       } else {
-                                                        vErrors.push(err29);
+                                                        vErrors.push(err48);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid6 = _errs92 === errors;
-                                                    valid13 = valid13 || _valid6;
-                                                    if (!valid13) {
-                                                      const err30 = {
+                                                    var _valid7 = _errs103 === errors;
+                                                    valid15 = valid15 || _valid7;
+                                                    if (!valid15) {
+                                                      const err49 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/execution/permissions/defaultMode',
@@ -22620,32 +22925,32 @@ function validate26(
                                                         message: 'must match a schema in anyOf',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err30];
+                                                        vErrors = [err49];
                                                       } else {
-                                                        vErrors.push(err30);
+                                                        vErrors.push(err49);
                                                       }
                                                       errors++;
                                                       validate26.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs89;
+                                                      errors = _errs100;
                                                       if (vErrors !== null) {
-                                                        if (_errs89) {
-                                                          vErrors.length = _errs89;
+                                                        if (_errs100) {
+                                                          vErrors.length = _errs100;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid11 = _errs88 === errors;
+                                                    var valid13 = _errs99 === errors;
                                                   } else {
-                                                    var valid11 = true;
+                                                    var valid13 = true;
                                                   }
-                                                  if (valid11) {
-                                                    if (data24.workspaceTrust !== undefined) {
-                                                      let data29 = data24.workspaceTrust;
-                                                      const _errs94 = errors;
-                                                      if (typeof data29 !== 'string') {
+                                                  if (valid13) {
+                                                    if (data27.workspaceTrust !== undefined) {
+                                                      let data32 = data27.workspaceTrust;
+                                                      const _errs105 = errors;
+                                                      if (typeof data32 !== 'string') {
                                                         validate26.errors = [
                                                           {
                                                             instancePath:
@@ -22662,11 +22967,11 @@ function validate26(
                                                       }
                                                       if (
                                                         !(
-                                                          data29 === 'trusted' ||
-                                                          data29 === 'untrusted' ||
-                                                          data29 === 'scope_changed' ||
-                                                          data29 === 'unbound' ||
-                                                          data29 === 'unavailable'
+                                                          data32 === 'trusted' ||
+                                                          data32 === 'untrusted' ||
+                                                          data32 === 'scope_changed' ||
+                                                          data32 === 'unbound' ||
+                                                          data32 === 'unavailable'
                                                         )
                                                       ) {
                                                         validate26.errors = [
@@ -22689,19 +22994,19 @@ function validate26(
                                                         ];
                                                         return false;
                                                       }
-                                                      var valid11 = _errs94 === errors;
+                                                      var valid13 = _errs105 === errors;
                                                     } else {
-                                                      var valid11 = true;
+                                                      var valid13 = true;
                                                     }
-                                                    if (valid11) {
-                                                      if (data24.reason !== undefined) {
-                                                        let data30 = data24.reason;
-                                                        const _errs96 = errors;
-                                                        const _errs97 = errors;
-                                                        let valid14 = false;
-                                                        const _errs98 = errors;
-                                                        if (typeof data30 !== 'string') {
-                                                          const err31 = {
+                                                    if (valid13) {
+                                                      if (data27.reason !== undefined) {
+                                                        let data33 = data27.reason;
+                                                        const _errs107 = errors;
+                                                        const _errs108 = errors;
+                                                        let valid16 = false;
+                                                        const _errs109 = errors;
+                                                        if (typeof data33 !== 'string') {
+                                                          const err50 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/execution/permissions/reason',
@@ -22712,20 +23017,20 @@ function validate26(
                                                             message: 'must be string',
                                                           };
                                                           if (vErrors === null) {
-                                                            vErrors = [err31];
+                                                            vErrors = [err50];
                                                           } else {
-                                                            vErrors.push(err31);
+                                                            vErrors.push(err50);
                                                           }
                                                           errors++;
                                                         }
                                                         if (
                                                           !(
-                                                            data30 === 'data_unavailable' ||
-                                                            data30 ===
+                                                            data33 === 'data_unavailable' ||
+                                                            data33 ===
                                                               'permission_source_unavailable'
                                                           )
                                                         ) {
-                                                          const err32 = {
+                                                          const err51 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/execution/permissions/reason',
@@ -22742,17 +23047,17 @@ function validate26(
                                                               'must be equal to one of the allowed values',
                                                           };
                                                           if (vErrors === null) {
-                                                            vErrors = [err32];
+                                                            vErrors = [err51];
                                                           } else {
-                                                            vErrors.push(err32);
+                                                            vErrors.push(err51);
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid7 = _errs98 === errors;
-                                                        valid14 = valid14 || _valid7;
-                                                        const _errs100 = errors;
-                                                        if (data30 !== null) {
-                                                          const err33 = {
+                                                        var _valid8 = _errs109 === errors;
+                                                        valid16 = valid16 || _valid8;
+                                                        const _errs111 = errors;
+                                                        if (data33 !== null) {
+                                                          const err52 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/execution/permissions/reason',
@@ -22763,16 +23068,16 @@ function validate26(
                                                             message: 'must be null',
                                                           };
                                                           if (vErrors === null) {
-                                                            vErrors = [err33];
+                                                            vErrors = [err52];
                                                           } else {
-                                                            vErrors.push(err33);
+                                                            vErrors.push(err52);
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid7 = _errs100 === errors;
-                                                        valid14 = valid14 || _valid7;
-                                                        if (!valid14) {
-                                                          const err34 = {
+                                                        var _valid8 = _errs111 === errors;
+                                                        valid16 = valid16 || _valid8;
+                                                        if (!valid16) {
+                                                          const err53 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/execution/permissions/reason',
@@ -22783,26 +23088,26 @@ function validate26(
                                                             message: 'must match a schema in anyOf',
                                                           };
                                                           if (vErrors === null) {
-                                                            vErrors = [err34];
+                                                            vErrors = [err53];
                                                           } else {
-                                                            vErrors.push(err34);
+                                                            vErrors.push(err53);
                                                           }
                                                           errors++;
                                                           validate26.errors = vErrors;
                                                           return false;
                                                         } else {
-                                                          errors = _errs97;
+                                                          errors = _errs108;
                                                           if (vErrors !== null) {
-                                                            if (_errs97) {
-                                                              vErrors.length = _errs97;
+                                                            if (_errs108) {
+                                                              vErrors.length = _errs108;
                                                             } else {
                                                               vErrors = null;
                                                             }
                                                           }
                                                         }
-                                                        var valid11 = _errs96 === errors;
+                                                        var valid13 = _errs107 === errors;
                                                       } else {
-                                                        var valid11 = true;
+                                                        var valid13 = true;
                                                       }
                                                     }
                                                   }
@@ -22825,7 +23130,7 @@ function validate26(
                                         return false;
                                       }
                                     }
-                                    var valid6 = _errs75 === errors;
+                                    var valid6 = _errs86 === errors;
                                   } else {
                                     var valid6 = true;
                                   }
@@ -22854,38 +23159,38 @@ function validate26(
                 }
                 if (valid0) {
                   if (data.release !== undefined) {
-                    let data31 = data.release;
-                    const _errs102 = errors;
-                    if (errors === _errs102) {
-                      if (data31 && typeof data31 == 'object' && !Array.isArray(data31)) {
-                        let missing7;
+                    let data34 = data.release;
+                    const _errs113 = errors;
+                    if (errors === _errs113) {
+                      if (data34 && typeof data34 == 'object' && !Array.isArray(data34)) {
+                        let missing8;
                         if (
-                          (data31.state === undefined && (missing7 = 'state')) ||
-                          (data31.active === undefined && (missing7 = 'active')) ||
-                          (data31.production === undefined && (missing7 = 'production')) ||
-                          (data31.qualification === undefined && (missing7 = 'qualification')) ||
-                          (data31.reason === undefined && (missing7 = 'reason'))
+                          (data34.state === undefined && (missing8 = 'state')) ||
+                          (data34.active === undefined && (missing8 = 'active')) ||
+                          (data34.production === undefined && (missing8 = 'production')) ||
+                          (data34.qualification === undefined && (missing8 = 'qualification')) ||
+                          (data34.reason === undefined && (missing8 = 'reason'))
                         ) {
                           validate26.errors = [
                             {
                               instancePath: instancePath + '/release',
                               schemaPath: '#/properties/release/required',
                               keyword: 'required',
-                              params: { missingProperty: missing7 },
-                              message: "must have required property '" + missing7 + "'",
+                              params: { missingProperty: missing8 },
+                              message: "must have required property '" + missing8 + "'",
                             },
                           ];
                           return false;
                         } else {
-                          const _errs104 = errors;
-                          for (const key7 in data31) {
+                          const _errs115 = errors;
+                          for (const key8 in data34) {
                             if (
                               !(
-                                key7 === 'state' ||
-                                key7 === 'active' ||
-                                key7 === 'production' ||
-                                key7 === 'qualification' ||
-                                key7 === 'reason'
+                                key8 === 'state' ||
+                                key8 === 'active' ||
+                                key8 === 'production' ||
+                                key8 === 'qualification' ||
+                                key8 === 'reason'
                               )
                             ) {
                               validate26.errors = [
@@ -22893,7 +23198,7 @@ function validate26(
                                   instancePath: instancePath + '/release',
                                   schemaPath: '#/properties/release/additionalProperties',
                                   keyword: 'additionalProperties',
-                                  params: { additionalProperty: key7 },
+                                  params: { additionalProperty: key8 },
                                   message: 'must NOT have additional properties',
                                 },
                               ];
@@ -22901,11 +23206,11 @@ function validate26(
                               break;
                             }
                           }
-                          if (_errs104 === errors) {
-                            if (data31.state !== undefined) {
-                              let data32 = data31.state;
-                              const _errs105 = errors;
-                              if (typeof data32 !== 'string') {
+                          if (_errs115 === errors) {
+                            if (data34.state !== undefined) {
+                              let data35 = data34.state;
+                              const _errs116 = errors;
+                              if (typeof data35 !== 'string') {
                                 validate26.errors = [
                                   {
                                     instancePath: instancePath + '/release/state',
@@ -22917,7 +23222,7 @@ function validate26(
                                 ];
                                 return false;
                               }
-                              if (!(data32 === 'available' || data32 === 'unavailable')) {
+                              if (!(data35 === 'available' || data35 === 'unavailable')) {
                                 validate26.errors = [
                                   {
                                     instancePath: instancePath + '/release/state',
@@ -22932,15 +23237,15 @@ function validate26(
                                 ];
                                 return false;
                               }
-                              var valid15 = _errs105 === errors;
+                              var valid17 = _errs116 === errors;
                             } else {
-                              var valid15 = true;
+                              var valid17 = true;
                             }
-                            if (valid15) {
-                              if (data31.active !== undefined) {
-                                let data33 = data31.active;
-                                const _errs107 = errors;
-                                if (typeof data33 !== 'boolean') {
+                            if (valid17) {
+                              if (data34.active !== undefined) {
+                                let data36 = data34.active;
+                                const _errs118 = errors;
+                                if (typeof data36 !== 'boolean') {
                                   validate26.errors = [
                                     {
                                       instancePath: instancePath + '/release/active',
@@ -22952,7 +23257,7 @@ function validate26(
                                   ];
                                   return false;
                                 }
-                                if (data33 !== false) {
+                                if (data36 !== false) {
                                   validate26.errors = [
                                     {
                                       instancePath: instancePath + '/release/active',
@@ -22964,14 +23269,14 @@ function validate26(
                                   ];
                                   return false;
                                 }
-                                var valid15 = _errs107 === errors;
+                                var valid17 = _errs118 === errors;
                               } else {
-                                var valid15 = true;
+                                var valid17 = true;
                               }
-                              if (valid15) {
-                                if (data31.production !== undefined) {
-                                  const _errs109 = errors;
-                                  if (data31.production !== null) {
+                              if (valid17) {
+                                if (data34.production !== undefined) {
+                                  const _errs120 = errors;
+                                  if (data34.production !== null) {
                                     validate26.errors = [
                                       {
                                         instancePath: instancePath + '/release/production',
@@ -22984,15 +23289,15 @@ function validate26(
                                     ];
                                     return false;
                                   }
-                                  var valid15 = _errs109 === errors;
+                                  var valid17 = _errs120 === errors;
                                 } else {
-                                  var valid15 = true;
+                                  var valid17 = true;
                                 }
-                                if (valid15) {
-                                  if (data31.qualification !== undefined) {
-                                    let data35 = data31.qualification;
-                                    const _errs111 = errors;
-                                    if (typeof data35 !== 'string') {
+                                if (valid17) {
+                                  if (data34.qualification !== undefined) {
+                                    let data38 = data34.qualification;
+                                    const _errs122 = errors;
+                                    if (typeof data38 !== 'string') {
                                       validate26.errors = [
                                         {
                                           instancePath: instancePath + '/release/qualification',
@@ -23005,7 +23310,7 @@ function validate26(
                                       ];
                                       return false;
                                     }
-                                    if (data35 !== 'unverified') {
+                                    if (data38 !== 'unverified') {
                                       validate26.errors = [
                                         {
                                           instancePath: instancePath + '/release/qualification',
@@ -23018,15 +23323,15 @@ function validate26(
                                       ];
                                       return false;
                                     }
-                                    var valid15 = _errs111 === errors;
+                                    var valid17 = _errs122 === errors;
                                   } else {
-                                    var valid15 = true;
+                                    var valid17 = true;
                                   }
-                                  if (valid15) {
-                                    if (data31.reason !== undefined) {
-                                      let data36 = data31.reason;
-                                      const _errs113 = errors;
-                                      if (typeof data36 !== 'string') {
+                                  if (valid17) {
+                                    if (data34.reason !== undefined) {
+                                      let data39 = data34.reason;
+                                      const _errs124 = errors;
+                                      if (typeof data39 !== 'string') {
                                         validate26.errors = [
                                           {
                                             instancePath: instancePath + '/release/reason',
@@ -23041,8 +23346,8 @@ function validate26(
                                       }
                                       if (
                                         !(
-                                          data36 === 'release_manifest_not_bound' ||
-                                          data36 === 'diagnostic_source_unavailable'
+                                          data39 === 'release_manifest_not_bound' ||
+                                          data39 === 'diagnostic_source_unavailable'
                                         )
                                       ) {
                                         validate26.errors = [
@@ -23060,9 +23365,9 @@ function validate26(
                                         ];
                                         return false;
                                       }
-                                      var valid15 = _errs113 === errors;
+                                      var valid17 = _errs124 === errors;
                                     } else {
-                                      var valid15 = true;
+                                      var valid17 = true;
                                     }
                                   }
                                 }
@@ -23083,45 +23388,45 @@ function validate26(
                         return false;
                       }
                     }
-                    var valid0 = _errs102 === errors;
+                    var valid0 = _errs113 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (data.telemetry !== undefined) {
-                      let data37 = data.telemetry;
-                      const _errs115 = errors;
-                      if (errors === _errs115) {
-                        if (data37 && typeof data37 == 'object' && !Array.isArray(data37)) {
-                          let missing8;
+                      let data40 = data.telemetry;
+                      const _errs126 = errors;
+                      if (errors === _errs126) {
+                        if (data40 && typeof data40 == 'object' && !Array.isArray(data40)) {
+                          let missing9;
                           if (
-                            (data37.state === undefined && (missing8 = 'state')) ||
-                            (data37.enabled === undefined && (missing8 = 'enabled')) ||
-                            (data37.exporterConfigured === undefined &&
-                              (missing8 = 'exporterConfigured')) ||
-                            (data37.diskSpool === undefined && (missing8 = 'diskSpool')) ||
-                            (data37.reason === undefined && (missing8 = 'reason'))
+                            (data40.state === undefined && (missing9 = 'state')) ||
+                            (data40.enabled === undefined && (missing9 = 'enabled')) ||
+                            (data40.exporterConfigured === undefined &&
+                              (missing9 = 'exporterConfigured')) ||
+                            (data40.diskSpool === undefined && (missing9 = 'diskSpool')) ||
+                            (data40.reason === undefined && (missing9 = 'reason'))
                           ) {
                             validate26.errors = [
                               {
                                 instancePath: instancePath + '/telemetry',
                                 schemaPath: '#/properties/telemetry/required',
                                 keyword: 'required',
-                                params: { missingProperty: missing8 },
-                                message: "must have required property '" + missing8 + "'",
+                                params: { missingProperty: missing9 },
+                                message: "must have required property '" + missing9 + "'",
                               },
                             ];
                             return false;
                           } else {
-                            const _errs117 = errors;
-                            for (const key8 in data37) {
+                            const _errs128 = errors;
+                            for (const key9 in data40) {
                               if (
                                 !(
-                                  key8 === 'state' ||
-                                  key8 === 'enabled' ||
-                                  key8 === 'exporterConfigured' ||
-                                  key8 === 'diskSpool' ||
-                                  key8 === 'reason'
+                                  key9 === 'state' ||
+                                  key9 === 'enabled' ||
+                                  key9 === 'exporterConfigured' ||
+                                  key9 === 'diskSpool' ||
+                                  key9 === 'reason'
                                 )
                               ) {
                                 validate26.errors = [
@@ -23129,7 +23434,7 @@ function validate26(
                                     instancePath: instancePath + '/telemetry',
                                     schemaPath: '#/properties/telemetry/additionalProperties',
                                     keyword: 'additionalProperties',
-                                    params: { additionalProperty: key8 },
+                                    params: { additionalProperty: key9 },
                                     message: 'must NOT have additional properties',
                                   },
                                 ];
@@ -23137,11 +23442,11 @@ function validate26(
                                 break;
                               }
                             }
-                            if (_errs117 === errors) {
-                              if (data37.state !== undefined) {
-                                let data38 = data37.state;
-                                const _errs118 = errors;
-                                if (typeof data38 !== 'string') {
+                            if (_errs128 === errors) {
+                              if (data40.state !== undefined) {
+                                let data41 = data40.state;
+                                const _errs129 = errors;
+                                if (typeof data41 !== 'string') {
                                   validate26.errors = [
                                     {
                                       instancePath: instancePath + '/telemetry/state',
@@ -23153,7 +23458,7 @@ function validate26(
                                   ];
                                   return false;
                                 }
-                                if (!(data38 === 'available' || data38 === 'unavailable')) {
+                                if (!(data41 === 'available' || data41 === 'unavailable')) {
                                   validate26.errors = [
                                     {
                                       instancePath: instancePath + '/telemetry/state',
@@ -23168,15 +23473,15 @@ function validate26(
                                   ];
                                   return false;
                                 }
-                                var valid16 = _errs118 === errors;
+                                var valid18 = _errs129 === errors;
                               } else {
-                                var valid16 = true;
+                                var valid18 = true;
                               }
-                              if (valid16) {
-                                if (data37.enabled !== undefined) {
-                                  let data39 = data37.enabled;
-                                  const _errs120 = errors;
-                                  if (typeof data39 !== 'boolean') {
+                              if (valid18) {
+                                if (data40.enabled !== undefined) {
+                                  let data42 = data40.enabled;
+                                  const _errs131 = errors;
+                                  if (typeof data42 !== 'boolean') {
                                     validate26.errors = [
                                       {
                                         instancePath: instancePath + '/telemetry/enabled',
@@ -23189,7 +23494,7 @@ function validate26(
                                     ];
                                     return false;
                                   }
-                                  if (data39 !== false) {
+                                  if (data42 !== false) {
                                     validate26.errors = [
                                       {
                                         instancePath: instancePath + '/telemetry/enabled',
@@ -23202,15 +23507,15 @@ function validate26(
                                     ];
                                     return false;
                                   }
-                                  var valid16 = _errs120 === errors;
+                                  var valid18 = _errs131 === errors;
                                 } else {
-                                  var valid16 = true;
+                                  var valid18 = true;
                                 }
-                                if (valid16) {
-                                  if (data37.exporterConfigured !== undefined) {
-                                    let data40 = data37.exporterConfigured;
-                                    const _errs122 = errors;
-                                    if (typeof data40 !== 'boolean') {
+                                if (valid18) {
+                                  if (data40.exporterConfigured !== undefined) {
+                                    let data43 = data40.exporterConfigured;
+                                    const _errs133 = errors;
+                                    if (typeof data43 !== 'boolean') {
                                       validate26.errors = [
                                         {
                                           instancePath:
@@ -23224,7 +23529,7 @@ function validate26(
                                       ];
                                       return false;
                                     }
-                                    if (data40 !== false) {
+                                    if (data43 !== false) {
                                       validate26.errors = [
                                         {
                                           instancePath:
@@ -23238,15 +23543,15 @@ function validate26(
                                       ];
                                       return false;
                                     }
-                                    var valid16 = _errs122 === errors;
+                                    var valid18 = _errs133 === errors;
                                   } else {
-                                    var valid16 = true;
+                                    var valid18 = true;
                                   }
-                                  if (valid16) {
-                                    if (data37.diskSpool !== undefined) {
-                                      let data41 = data37.diskSpool;
-                                      const _errs124 = errors;
-                                      if (typeof data41 !== 'boolean') {
+                                  if (valid18) {
+                                    if (data40.diskSpool !== undefined) {
+                                      let data44 = data40.diskSpool;
+                                      const _errs135 = errors;
+                                      if (typeof data44 !== 'boolean') {
                                         validate26.errors = [
                                           {
                                             instancePath: instancePath + '/telemetry/diskSpool',
@@ -23259,7 +23564,7 @@ function validate26(
                                         ];
                                         return false;
                                       }
-                                      if (data41 !== false) {
+                                      if (data44 !== false) {
                                         validate26.errors = [
                                           {
                                             instancePath: instancePath + '/telemetry/diskSpool',
@@ -23272,15 +23577,15 @@ function validate26(
                                         ];
                                         return false;
                                       }
-                                      var valid16 = _errs124 === errors;
+                                      var valid18 = _errs135 === errors;
                                     } else {
-                                      var valid16 = true;
+                                      var valid18 = true;
                                     }
-                                    if (valid16) {
-                                      if (data37.reason !== undefined) {
-                                        let data42 = data37.reason;
-                                        const _errs126 = errors;
-                                        if (typeof data42 !== 'string') {
+                                    if (valid18) {
+                                      if (data40.reason !== undefined) {
+                                        let data45 = data40.reason;
+                                        const _errs137 = errors;
+                                        if (typeof data45 !== 'string') {
                                           validate26.errors = [
                                             {
                                               instancePath: instancePath + '/telemetry/reason',
@@ -23295,8 +23600,8 @@ function validate26(
                                         }
                                         if (
                                           !(
-                                            data42 === 'exporter_not_configured' ||
-                                            data42 === 'diagnostic_source_unavailable'
+                                            data45 === 'exporter_not_configured' ||
+                                            data45 === 'diagnostic_source_unavailable'
                                           )
                                         ) {
                                           validate26.errors = [
@@ -23315,9 +23620,9 @@ function validate26(
                                           ];
                                           return false;
                                         }
-                                        var valid16 = _errs126 === errors;
+                                        var valid18 = _errs137 === errors;
                                       } else {
-                                        var valid16 = true;
+                                        var valid18 = true;
                                       }
                                     }
                                   }
@@ -23338,7 +23643,7 @@ function validate26(
                           return false;
                         }
                       }
-                      var valid0 = _errs115 === errors;
+                      var valid0 = _errs126 === errors;
                     } else {
                       var valid0 = true;
                     }

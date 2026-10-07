@@ -11,6 +11,17 @@ export interface ConfinedPaths {
   readonly protectedRoots: readonly string[];
   readonly temporaryRoot?: string;
 }
+export interface ConfinedLaunch {
+  executable: string;
+  argv: string[];
+  cwd: string;
+  temp: string;
+  identities: import('./launch-identity').LaunchIdentity[];
+  runtimeTemp: import('./launch-identity').LaunchIdentity;
+  profileDigest: string;
+  preserveHostHome?: boolean;
+  cleanup(): void;
+}
 /** Host-only capture. Revalidated after ordinary authorization/resources, at the actual Job start. */
 export function captureConfinedLaunch(options: ConfinedPaths, binaries: readonly string[]) {
   if (process.platform !== 'darwin') throw Error('confined_shell_platform_unsupported');

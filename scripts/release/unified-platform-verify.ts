@@ -59,11 +59,15 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
   if (
     !Array.isArray(value.missing) ||
     JSON.stringify(value.missing) !==
-      JSON.stringify([
-        'default_shell_not_delivered',
-        'cross_platform_confinement_not_qualified',
-        'native_fork_network_resource_limits_not_qualified',
-      ])
+      JSON.stringify(
+        value.platform === 'darwin'
+          ? ['cross_platform_confinement_not_qualified', 'native_resource_limits_not_qualified']
+          : [
+              'default_shell_not_delivered',
+              'cross_platform_confinement_not_qualified',
+              'native_fork_network_resource_limits_not_qualified',
+            ],
+      )
   )
     errors.push('platform_missing_boundary_invalid');
   if (
@@ -129,7 +133,7 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
     !text(evidence.runtimeVersion) ||
     !text(evidence.storeId) ||
     evidence.sessionId !== 's' ||
-    evidence.providerCalls !== 5 ||
+    evidence.providerCalls !== (value.platform === 'darwin' ? 7 : 5) ||
     typeof evidence.cursor !== 'string' ||
     !/^(0|[1-9][0-9]*)$/.test(evidence.cursor)
   )
@@ -155,7 +159,35 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
     !hash(assets.unchangedSha256)
   )
     errors.push('platform_assets_case_invalid');
-  if (
+  if (value.platform === 'darwin') {
+    if (
+      !closed(shell, [
+        'status',
+        'commandId',
+        'runId',
+        'executionId',
+        'providerCalls',
+        'jobs',
+        'processTreeStopped',
+        'stdoutSha256',
+        'stderrSha256',
+        'coldRead',
+        'noReplay',
+      ]) ||
+      shell.status !== 'passed' ||
+      shell.commandId !== 'default-shell' ||
+      !text(shell.runId) ||
+      !text(shell.executionId) ||
+      shell.providerCalls !== 2 ||
+      shell.jobs !== 1 ||
+      shell.processTreeStopped !== true ||
+      shell.stdoutSha256 !== createHash('sha256').update('default-shell').digest('hex') ||
+      shell.stderrSha256 !== createHash('sha256').update('default-stderr').digest('hex') ||
+      shell.coldRead !== true ||
+      shell.noReplay !== true
+    )
+      errors.push('platform_shell_case_invalid');
+  } else if (
     !closed(shell, ['status', 'commandId', 'reason', 'providerCalls', 'jobs']) ||
     shell.status !== 'unavailable' ||
     shell.commandId !== 'no-default-shell' ||
@@ -183,7 +215,8 @@ export function verifyUnifiedPlatformReport(value: unknown, mode: 'diagnostic' |
       files.readExecutionId,
       assets.readExecutionId,
       assets.writeExecutionId,
-    ]).size !== 4
+      ...(value.platform === 'darwin' && object(shell) ? [shell.executionId] : []),
+    ]).size !== (value.platform === 'darwin' ? 5 : 4)
   )
     errors.push('platform_execution_identity_invalid');
   if (

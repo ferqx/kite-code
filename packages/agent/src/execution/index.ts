@@ -529,6 +529,10 @@ export class UnifiedExecution {
       requirements,
       freshness: { checked: true, source },
     });
+    return {
+      revision: decision.revision,
+      ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
+    };
   }
   async model(
     scope: ExecutionScope,
@@ -1169,7 +1173,7 @@ export class UnifiedExecution {
           },
         });
       }
-      await this.dispatch(
+      const dispatchAuthorization = await this.dispatch(
         scope,
         executionId,
         definition.id,
@@ -1184,6 +1188,7 @@ export class UnifiedExecution {
         sessionId: scope.command.sessionId,
         executionId,
         signal: scope.signal,
+        dispatchAuthorization,
       });
       await this.options.store.markRunning({
         expectedStoreId: scope.command.originStoreId,

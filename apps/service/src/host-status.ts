@@ -57,7 +57,7 @@ export function unavailableHostStatus(): Pick<HostStatus, 'execution' | 'release
     },
   };
 }
-/** The default host has no release attestation, sandbox or remote exporter. JSONC cannot alter these facts. */
+/** Trusted host assets describe the selected boundary; JSONC cannot grant it or attest production. */
 export function createDefaultHostStatusSource(options: {
   shell?: ShellConfigurationOptions;
   externalPermissionAuthority?: boolean;
@@ -96,10 +96,16 @@ export function createDefaultHostStatusSource(options: {
           facts.execution.shell = {
             configured: true,
             available: true,
-            supervision: 'posix_group',
-            qualification: 'darwin_supervision_only',
+            supervision: shell.host ? 'macos_coalition' : 'posix_group',
+            qualification: shell.host ? 'darwin_host_boundary' : 'darwin_supervision_only',
             reason: null,
           };
+          if (shell.host)
+            facts.execution.sandbox = {
+              backend: 'macos_seatbelt',
+              available: true,
+              qualification: 'host_scope',
+            };
         } catch (error) {
           const code = error instanceof AgentError ? error.code : 'shell_asset_unavailable';
           facts.execution.shell = {

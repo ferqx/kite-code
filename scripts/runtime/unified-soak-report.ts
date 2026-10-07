@@ -17,8 +17,17 @@ export const QUALIFICATION_MISSING = Object.freeze([
   'process_handles',
   'owned_descendant_start_identity',
   'qualified_background_shell',
-  'formal_continuous_workload_not_implemented',
+  'formal_continuous_workload_not_qualified_on_required_platform',
 ]);
+/** macOS has an actual default producer; the whole resource/release gate remains blocked. */
+export function qualificationMissing(platform: string): string[] {
+  return QUALIFICATION_MISSING.filter(
+    (reason) =>
+      platform !== 'darwin' ||
+      (reason !== 'qualified_background_shell' &&
+        reason !== 'formal_continuous_workload_not_qualified_on_required_platform'),
+  );
+}
 export interface QualificationPreflight {
   status: 'blocked';
   requiredIterations: 8;
@@ -265,7 +274,8 @@ function verifyReport(
       preflight.minimumDurationMs !== FORMAL_DURATION_MS ||
       preflight.maximumDurationMs !== GLOBAL_DEADLINE_MS ||
       preflight.diagnosticIterations !== 1 ||
-      canonical(preflight.reasons) !== canonical(QUALIFICATION_MISSING) ||
+      canonical(preflight.reasons) !==
+        canonical(qualificationMissing(value.environment.platform)) ||
       value.profile !== 'qualification'
     )
       return ['qualification_preflight_invalid'];

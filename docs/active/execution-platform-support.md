@@ -9,9 +9,9 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 ## 当前 V1.3 执行与发行
 
-CLI/TUI/Service和平台、execution、release workflow已选择新完整Terminal/Native闭包。正式默认Shell仍`unavailable`，在Provider/Job前拒绝；新Files可用并保护准确runtimeAssets，但不证明跨平台Shell、network/fork/资源隔离。可信普通Job监督和macOS confined样本各有其有限证据，不能据此扩大production support set。
+CLI/TUI/Service 与平台/execution/release workflow 已选择新完整 Terminal/Native 闭包。macOS 默认 Shell 现选择宿主 Seatbelt/launchd resource coalition，允许 fork 并核完整 setsid/orphan 后代；Files 保准确 runtimeAssets 与原权限/read-set。非 Full/Full、私有根/祖先、网络及停止的实际范围归 [Jobs owner](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)及[执行边界](execution-boundary.md)。显式 POSIX 和固定 confined 保各自合同，不能互借资格。
 
-新[平台probe](../../scripts/release/unified-platform-probe.ts)真实运行Source之外的完整candidate，核Files、准确SQLite、实际PID、两个独立SH、原Run终态和cleanup。diagnostic通过只证明其报告；formal verifier仍明确拒`default_effectful_platform_not_qualified`。新3OSworkflow保actualproducer、源head/clean-source、固定Bun/actions与失败上传，未在对应OS执行不获qualification。
+新[平台 probe](../../scripts/release/unified-platform-probe.ts)实际运行 Source 外的完整 candidate，核 Files、准确 SQLite、实际 PID、两个独立 SH、原 Run 及 cleanup；macOS 另核真实默认 Shell 的原 execution/output hash、全树停止和 cold 同结果/零重放。diagnostic 通过只证明列明范围；资源与跨平台仍缺资格，formal verifier 继续拒 `default_effectful_platform_not_qualified`，productionQualified/effectfulQualified 保持 false。新三 OS workflow 保 actual producer、原 head/clean-source、固定 Bun/actions 与失败上传；用户已确认 Win/Linux 验证留到重构完成后的 GitHub Actions，本机不再等待或安装这两个环境，也未 dispatch workflow。未在对应 OS 执行不取得其资格。
 
 Windows private Profile/Store/config native实现与普通Workspace scope的边界见[路径owner](../../packages/agent/src/platform/windows-path-security.README.md)；本机POSIX邻接不证明Windows。Windows ArtifactStore 已接入原生 x64 HANDLE 流读写、私有 temporary、protected FR 发布与完整 hash 校验，实际原生执行仍待资格，见[Artifact owner](../../packages/agent/src/artifacts/README.md)。Windows candidate public scope 的 root/parent 多ACE政策与祖先原HANDLE已实现，3个原生场景仍未本机执行。
 

@@ -75,7 +75,7 @@ test('actual invalid argv performs no profile, candidate or report I/O', async (
   }
 });
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
-  'actual relocated default platform diagnostic proves Files, exact runtime denial, selected SQLite and two independent shared leases without claiming production Shell',
+  'actual relocated default platform diagnostic proves macOS default Shell, Files, runtime denial, SQLite and two shared leases',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-platform-test-')));
     try {
@@ -102,6 +102,26 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       expect(verifyUnifiedPlatformReport(corrupt, 'diagnostic')).toContain(
         'platform_report_digest_mismatch',
       );
+      if (process.platform === 'darwin') {
+        const evidence = body.evidence as Record<string, unknown>;
+        const shell = evidence.shell as Record<string, unknown>;
+        expect(shell).toMatchObject({
+          status: 'passed',
+          jobs: 1,
+          processTreeStopped: true,
+          coldRead: true,
+          noReplay: true,
+        });
+        for (const field of ['processTreeStopped', 'coldRead', 'noReplay']) {
+          const forged = sealUnifiedPlatform({
+            ...body,
+            evidence: { ...evidence, shell: { ...shell, [field]: false } },
+          });
+          expect(verifyUnifiedPlatformReport(forged, 'diagnostic')).toContain(
+            'platform_shell_case_invalid',
+          );
+        }
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

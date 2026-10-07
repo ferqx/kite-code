@@ -27,7 +27,7 @@ function runId(receipt: unknown) {
     : null;
 }
 test.skipIf(!['darwin', 'linux'].includes(process.platform))(
-  'relocated formal candidate loads actual native keyring without vault operations; absent Shell host is local while ordinary Files/chat complete',
+  'relocated formal candidate loads native keyring without vault operations; default macOS Shell and ordinary Files/chat use the actual host',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-formal-optional-')),
       home = join(root, 'home');
@@ -41,19 +41,44 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
     let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
     let coldAccess: ReturnType<typeof acquireArtifactAccess> | undefined;
     const requests: { messages: { role: string; content: string }[] }[] = [];
+    let fileCalls = 0;
+    let shellCalls = 0;
+    let shellJobId: string | undefined;
+    let shellOutput:
+      | Awaited<
+          ReturnType<
+            Awaited<ReturnType<typeof launchPairedService>>['client']['listExecutionOutput']
+          >
+        >
+      | undefined;
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as (typeof requests)[number];
         requests.push(body);
-        const call =
-          requests.length === 1
+        const shell =
+          body.messages.filter((message) => message.role === 'user').at(-1)?.content ===
+          'Optional Shell selected';
+        if (shell) shellCalls++;
+        else fileCalls++;
+        const call = shell
+          ? shellCalls === 1
+            ? {
+                name: 'shell.launch',
+                input: {
+                  key: 'default-shell',
+                  command: 'printf default-shell; printf default-stderr >&2',
+                  cancellation: 'detached',
+                },
+              }
+            : null
+          : fileCalls === 1
             ? {
                 name: 'files.write',
                 input: { path: 'neighbor.txt', base: null, content: 'ordinary 😀\r\n' },
               }
-            : requests.length === 2
+            : fileCalls === 2
               ? { name: 'files.read', input: { path: 'neighbor.txt' } }
               : null;
         const delta = call
@@ -117,6 +142,21 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       });
       const client = service.client,
         storeId = service.bootstrap.storeId!;
+      if (process.platform === 'darwin') {
+        const facts = await client.getHostStatus();
+        expect(facts.execution.shell).toMatchObject({
+          configured: true,
+          available: true,
+          supervision: 'macos_coalition',
+          qualification: 'darwin_host_boundary',
+        });
+        expect(facts.execution.sandbox).toEqual({
+          backend: 'macos_seatbelt',
+          available: true,
+          qualification: 'host_scope',
+        });
+        expect(facts.release.production).toBeNull();
+      }
       await client.createWorkspace({
         expectedStoreId: storeId,
         id: 'w',
@@ -161,14 +201,58 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         await Bun.sleep(10);
         rejected = await client.getCommand('no-shell');
       }
-      expect(rejected.status).toBe('rejected');
-      expect(JSON.stringify(rejected)).toContain('shell_unavailable');
-      expect(requests).toHaveLength(0);
-      expect(
-        (await client.getView('s')).executions.filter(
+      if (process.platform === 'darwin') {
+        expect(rejected.status, JSON.stringify(rejected)).toBe('applied');
+        const id = runId(rejected.receipt);
+        expect(id).toBeString();
+        while ((await client.getRun(id!)).isActive) {
+          if (Date.now() > deadline) throw Error('default_shell_run_deadline');
+          await Bun.sleep(10);
+        }
+        let jobs = (await client.getView('s')).executions.filter(
           (row) => row.definitionId === 'shell.command',
-        ),
-      ).toHaveLength(0);
+        );
+        while (
+          jobs.length !== 1 ||
+          ['planned', 'dispatching', 'running'].includes(jobs[0]!.status)
+        ) {
+          if (Date.now() > deadline) throw Error('default_shell_job_deadline');
+          await Bun.sleep(10);
+          jobs = (await client.getView('s')).executions.filter(
+            (row) => row.definitionId === 'shell.command',
+          );
+        }
+        expect(jobs).toHaveLength(1);
+        shellJobId = jobs[0]!.id;
+        expect(jobs[0]).toMatchObject({
+          status: 'succeeded',
+          result: { details: { processTreeStopped: true } },
+        });
+        const output = await client.listExecutionOutput(jobs[0]!.id, { afterSeq: '0', limit: 200 });
+        shellOutput = output;
+        expect(
+          output.items
+            .filter((item) => item.stream === 'stdout')
+            .map((item) => item.content)
+            .join(''),
+        ).toBe('default-shell');
+        expect(
+          output.items
+            .filter((item) => item.stream === 'stderr')
+            .map((item) => item.content)
+            .join(''),
+        ).toBe('default-stderr');
+        expect(shellCalls).toBe(2);
+      } else {
+        expect(rejected.status).toBe('rejected');
+        expect(JSON.stringify(rejected)).toContain('shell_unavailable');
+        expect(requests).toHaveLength(0);
+        expect(
+          (await client.getView('s')).executions.filter(
+            (row) => row.definitionId === 'shell.command',
+          ),
+        ).toHaveLength(0);
+      }
       expect(existsSync(join(root, 'neighbor.txt'))).toBe(false);
       writeFileSync(
         configPath,
@@ -198,8 +282,17 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       expect(run.status).toBe('completed');
       expect(command.status).toBe('applied');
       expect(readFileSync(join(root, 'neighbor.txt'), 'utf8')).toBe('ordinary 😀\r\n');
-      expect(requests).toHaveLength(3);
-      expect(requests.at(-1)!.messages.filter((row) => row.role === 'tool')).toHaveLength(2);
+      expect(requests).toHaveLength(3 + shellCalls);
+      const ordinaryMessages = requests.at(-1)!.messages;
+      const ordinaryInput = ordinaryMessages.reduce(
+        (found, row, index) =>
+          row.role === 'user' && row.content === 'Ordinary Files' ? index : found,
+        -1,
+      );
+      expect(ordinaryInput).toBeGreaterThanOrEqual(0);
+      expect(
+        ordinaryMessages.slice(ordinaryInput + 1).filter((row) => row.role === 'tool'),
+      ).toHaveLength(2);
       writeFileSync(configPath, config([]), { mode: 0o600 });
       await client.startRun('s', {
         kind: 'run.start',
@@ -220,7 +313,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       }
       expect(chatCommand.status).toBe('applied');
       expect(chat.status).toBe('completed');
-      expect(requests).toHaveLength(4);
+      expect(requests).toHaveLength(4 + shellCalls);
       expect(readFileSync(join(root, 'neighbor.txt'), 'utf8')).toBe('ordinary 😀\r\n');
       await service.close();
       service = undefined;
@@ -238,13 +331,24 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         mode: 'readonly',
       });
       const cursor = (await reader.getMetadata()).lastChangeCursor;
-      expect((await reader.getCommand('no-shell'))?.status).toBe('rejected');
+      expect((await reader.getCommand('no-shell'))?.status).toBe(
+        process.platform === 'darwin' ? 'applied' : 'rejected',
+      );
       expect((await reader.getRun(run.id))?.status).toBe('completed');
       expect(
         (await reader.listExecutions('s')).filter((row) => row.definitionId === 'shell.command'),
-      ).toHaveLength(0);
+      ).toHaveLength(process.platform === 'darwin' ? 1 : 0);
+      if (shellJobId) {
+        expect(await reader.getExecution(shellJobId)).toMatchObject({
+          status: 'succeeded',
+          result: { details: { processTreeStopped: true } },
+        });
+        expect(
+          await reader.listExecutionOutput({ executionId: shellJobId, afterSeq: '0', limit: 200 }),
+        ).toEqual(shellOutput!);
+      }
       expect((await reader.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect(requests).toHaveLength(4);
+      expect(requests).toHaveLength(4 + shellCalls);
       expect((await reader.getRun(chat.id))?.status).toBe('completed');
       console.log(
         JSON.stringify({
@@ -252,7 +356,10 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           engineManifestSha256: coldEngine.selection.manifestSha256,
           engineSourceId: coldEngine.sourceId,
           nativeLoadOnly: true,
-          shell: 'unavailable_not_delivered',
+          shell:
+            process.platform === 'darwin'
+              ? 'default_host_producer_passed'
+              : 'unavailable_not_delivered',
           provider: requests.length,
           storeId,
           runId: run.id,

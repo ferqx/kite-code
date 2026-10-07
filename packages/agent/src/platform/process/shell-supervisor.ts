@@ -5,7 +5,13 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from '../../jobs/launch-identity';
+import {
+  connectLaunchdControl,
+  removeLaunchdRegistration,
+  startLaunchdSupervisor,
+} from './darwin-launchd-supervisor';
 import { type DarwinOwnedChild, startDarwinOwnedChild } from './darwin-owned-child';
+import { claimDarwinOwnedCoalition } from './darwin-owned-coalition';
 
 interface Request {
   nonce: string;
@@ -17,8 +23,17 @@ interface Request {
   identities?: LaunchIdentity[];
   runtimeTemp?: LaunchIdentity;
   profileDigest?: string;
+  supervision?: 'macos-launchd-coalition';
+  controlBase?: string;
 }
 const MAX_FRAME = 1024 * 1024;
+const launchdOwned = process.argv[2] === '--launchd-owned';
+const coalition = launchdOwned ? claimDarwinOwnedCoalition() : undefined;
+const launchdControl = launchdOwned ? await connectLaunchdControl(process.argv[3]!) : undefined;
+const incoming = launchdControl?.socket ?? process.stdin;
+const outgoing = launchdControl?.socket ?? process.stdout;
+let bridge: Awaited<ReturnType<typeof startLaunchdSupervisor>> | undefined;
+let bridgeStarting: Promise<void> | undefined;
 let request: Request | undefined;
 let child: Pick<ChildProcess, 'pid' | 'stdout' | 'stderr'> | undefined;
 let ownedChild: DarwinOwnedChild | undefined;
@@ -27,25 +42,32 @@ let closing: Promise<void> | undefined;
 let parentGone = false;
 let childExit: Promise<number | null> | undefined;
 let outputDrain: Promise<unknown> | undefined;
+const pendingSends = new Set<() => void>();
+
+function disconnectParent(): void {
+  parentGone = true;
+  for (const settle of pendingSends) settle();
+  pendingSends.clear();
+  void stop();
+}
 
 async function send(frame: object): Promise<void> {
   if (parentGone) return;
   await new Promise<void>((resolve) => {
-    process.stdout.write(`${JSON.stringify({ nonce: request?.nonce, ...frame })}\n`, (error) => {
-      if (error) {
-        parentGone = true;
-        void stop();
-      }
+    const settle = () => {
+      pendingSends.delete(settle);
       resolve();
+    };
+    pendingSends.add(settle);
+    outgoing.write(`${JSON.stringify({ nonce: request?.nonce, ...frame })}\n`, (error) => {
+      if (error) disconnectParent();
+      settle();
     });
   });
 }
-process.stdout.on('error', () => {
-  parentGone = true;
-  void stop();
-});
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk: string) => {
+outgoing.on('error', disconnectParent);
+incoming.setEncoding('utf8');
+incoming.on('data', (chunk: string) => {
   buffer += chunk;
   if (buffer.length > MAX_FRAME) {
     parentGone = true;
@@ -75,6 +97,10 @@ process.stdin.on('data', (chunk: string) => {
           !Number.isSafeInteger(frame.graceMs) ||
           Number(frame.graceMs) < 0 ||
           Number(frame.graceMs) > 5000 ||
+          (frame.supervision !== undefined && frame.supervision !== 'macos-launchd-coalition') ||
+          (frame.supervision === 'macos-launchd-coalition' &&
+            (typeof frame.controlBase !== 'string' || !frame.controlBase.startsWith('/'))) ||
+          (launchdOwned && frame.supervision !== 'macos-launchd-coalition') ||
           process.platform === 'win32'
         )
           throw new Error('invalid_private_start');
@@ -88,18 +114,9 @@ process.stdin.on('data', (chunk: string) => {
     }
   }
 });
-process.stdin.on('end', () => {
-  parentGone = true;
-  void stop();
-});
-process.stdin.on('error', () => {
-  parentGone = true;
-  void stop();
-});
-process.on('SIGTERM', () => {
-  parentGone = true;
-  void stop();
-});
+incoming.on('end', disconnectParent);
+incoming.on('error', disconnectParent);
+process.on('SIGTERM', disconnectParent);
 
 function groupAlive(pid: number): boolean {
   try {
@@ -155,6 +172,29 @@ async function drain(stream: NodeJS.ReadableStream, name: 'stdout' | 'stderr'): 
 }
 async function start(): Promise<void> {
   const input = request!;
+  if (input.supervision === 'macos-launchd-coalition' && !launchdOwned) {
+    bridgeStarting = (async () => {
+      bridge = await startLaunchdSupervisor({
+        frame: input as unknown as Record<string, unknown>,
+        controlBase: input.controlBase!,
+        onFrame: send,
+      });
+      if (parentGone) bridge.stop();
+    })();
+    try {
+      await bridgeStarting;
+      await bridge!.finished;
+      process.exit(0);
+    } catch {
+      await send({
+        type: 'terminal',
+        outcome: 'outcome_unknown',
+        exitCode: null,
+        groupStopped: false,
+      });
+      process.exit(125);
+    }
+  }
   try {
     if (input.identities) verifyLaunchIdentities(input.identities);
     if (
@@ -193,7 +233,12 @@ async function start(): Promise<void> {
       });
     }
     const processChild = child;
-    await send({ type: 'ready', processGroupId: processChild.pid, supervisorPid: process.pid });
+    await send({
+      type: 'ready',
+      processGroupId: processChild.pid,
+      supervisorPid: process.pid,
+      ...(coalition ? { coalitionId: coalition.id } : {}),
+    });
     const outputs = Promise.all([
       drain(processChild.stdout!, 'stdout'),
       drain(processChild.stderr!, 'stderr'),
@@ -210,6 +255,13 @@ async function start(): Promise<void> {
   }
 }
 function stop(): Promise<void> {
+  if (bridgeStarting)
+    return bridgeStarting
+      .then(() => {
+        bridge!.stop();
+        return bridge!.finished;
+      })
+      .catch(() => {});
   if (closing) return closing;
   if (!child?.pid) process.exit(125);
   return close('cancelled', null);
@@ -221,10 +273,13 @@ function close(
 ): Promise<void> {
   if (closing) return closing;
   closing = (async () => {
+    const orphaned = parentGone;
     const stopped = child?.pid
-      ? await (ownedChild
-          ? ownedChild.terminateGroup(request?.graceMs ?? 200)
-          : terminateGroup(child.pid))
+      ? await (ownedChild && coalition
+          ? coalition.stop(ownedChild, request?.graceMs ?? 200)
+          : ownedChild
+            ? ownedChild.terminateGroup(request?.graceMs ?? 200)
+            : terminateGroup(child.pid))
       : { confirmed: true, forced: false };
     if (stopped.confirmed) await childExit;
     else {
@@ -252,7 +307,20 @@ function close(
       exitCode,
       groupStopped: stopped.confirmed,
       forced: stopped.forced,
+      ...(coalition ? { coalitionId: coalition.id } : {}),
     });
+    coalition?.close();
+    if (launchdControl && orphaned && stopped.confirmed) {
+      try {
+        // Self-bootout may terminate this guardian before launchctl returns.
+        // Remove only its original private directory after the business subtree
+        // and temp are proven stopped, then remove the exact registration.
+        removeRuntimeTemp(launchdControl.registration.root);
+        await removeLaunchdRegistration(launchdControl.registration);
+      } catch {
+        process.exit(125);
+      }
+    }
     process.exit(stopped.confirmed && !helperFailure ? 0 : 125);
   })();
   return closing;

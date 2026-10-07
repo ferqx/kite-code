@@ -94,12 +94,20 @@ test('bounded continuous load uses two real Services, twenty original Sessions a
   }
 }, 180000);
 
-test('schedule refuses unqualified formal and pre-stopped work before Profile I/O', async () => {
+test('schedule refuses pre-stopped work and unsupported formal before Profile I/O', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-soak-continuous-refuse-'));
   try {
     const formalRoot = join(root, 'formal');
-    await expect(runContinuousSchedule(formalRoot, 'formal')).rejects.toThrow(
-      'continuous_qualified_background_shell_required',
+    await expect(
+      runContinuousSchedule(
+        formalRoot,
+        'formal',
+        process.platform === 'darwin' ? AbortSignal.abort() : undefined,
+      ),
+    ).rejects.toThrow(
+      process.platform === 'darwin'
+        ? 'continuous_schedule_stopped'
+        : 'continuous_qualified_background_shell_required',
     );
     expect(existsSync(formalRoot)).toBe(false);
     const stopRoot = join(root, 'stopped');

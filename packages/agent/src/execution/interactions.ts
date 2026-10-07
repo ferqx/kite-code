@@ -162,6 +162,7 @@ export class InteractionGate {
             revision: decision.revision,
             reviewExecutionId: reviewed.reviewExecutionId,
             ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
+            ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
         if (reviewed.decision === 'approve_once') reviewedGrant = reviewed.reviewExecutionId;
         if (reviewed.decision === 'reject') {
@@ -318,6 +319,7 @@ export class InteractionGate {
       interactionId: accepted.id,
       decisionRevision: accepted.acceptedDecisionRevision!,
       ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
+      ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
       ...(reviewedGrant ? { reviewExecutionId: reviewedGrant } : {}),
     } satisfies AcceptedAuthorization;
   }

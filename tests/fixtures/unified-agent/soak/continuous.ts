@@ -9,7 +9,9 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import {
   busyDuration,
+  CONTINUOUS_MINIMUM_BUSY_MS,
   type ContinuousEvidence,
+  verifyContinuousEvidence,
 } from '../../../../scripts/runtime/unified-soak-continuous';
 import { until } from './common';
 
@@ -345,14 +347,34 @@ export async function openContinuousFixture(root: string) {
   }
 }
 
-/** Bounded diagnostics now; qualification fails before any Profile I/O until the real backend exists. */
+/** Diagnostic adapters stay v1. Formal macOS uses the actual default packaged producer. */
 export async function runContinuousSchedule(
   root: string,
   mode: 'diagnostic' | 'formal',
   signal?: AbortSignal,
 ): Promise<ContinuousEvidence> {
-  if (mode === 'formal') throw Error('continuous_qualified_background_shell_required');
   if (signal?.aborted) throw Error('continuous_schedule_stopped');
+  if (mode === 'formal') {
+    if (process.platform !== 'darwin')
+      throw Error('continuous_qualified_background_shell_required');
+    const { openDefaultShellContinuousFixture } = await import('./continuous-default-shell');
+    const fixture = await openDefaultShellContinuousFixture(root);
+    try {
+      do {
+        await fixture.cycle(signal);
+      } while (
+        fixture.evidence().completedCycles < 2 ||
+        fixture.evidence().activeWorkloadDurationMs < CONTINUOUS_MINIMUM_BUSY_MS
+      );
+      await fixture.confirmCold();
+      const evidence = fixture.evidence();
+      if (verifyContinuousEvidence(evidence, true).length)
+        throw Error('continuous_default_formal_evidence_invalid');
+      return evidence;
+    } finally {
+      await fixture.close();
+    }
+  }
   const fixture = await openContinuousFixture(root);
   let completedCycles = 0;
   try {

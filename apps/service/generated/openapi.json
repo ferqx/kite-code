@@ -5523,23 +5523,46 @@
                 ]
               },
               "sandbox": {
-                "type": "object",
-                "properties": {
-                  "backend": {
-                    "type": "string",
-                    "const": "none"
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "backend": {
+                        "type": "string",
+                        "const": "none"
+                      },
+                      "available": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "qualification": {
+                        "type": "string",
+                        "const": "unqualified"
+                      }
+                    },
+                    "required": ["backend", "available", "qualification"],
+                    "additionalProperties": false
                   },
-                  "available": {
-                    "type": "boolean",
-                    "const": false
-                  },
-                  "qualification": {
-                    "type": "string",
-                    "const": "unqualified"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "backend": {
+                        "type": "string",
+                        "const": "macos_seatbelt"
+                      },
+                      "available": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "qualification": {
+                        "type": "string",
+                        "const": "host_scope"
+                      }
+                    },
+                    "required": ["backend", "available", "qualification"],
+                    "additionalProperties": false
                   }
-                },
-                "required": ["backend", "available", "qualification"],
-                "additionalProperties": false
+                ]
               },
               "shell": {
                 "type": "object",
@@ -5552,11 +5575,16 @@
                   },
                   "supervision": {
                     "type": "string",
-                    "enum": ["none", "posix_group"]
+                    "enum": ["none", "posix_group", "macos_coalition"]
                   },
                   "qualification": {
                     "type": "string",
-                    "enum": ["not_configured", "darwin_supervision_only", "unavailable"]
+                    "enum": [
+                      "not_configured",
+                      "darwin_supervision_only",
+                      "darwin_host_boundary",
+                      "unavailable"
+                    ]
                   },
                   "reason": {
                     "anyOf": [

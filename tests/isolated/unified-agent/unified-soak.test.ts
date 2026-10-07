@@ -26,6 +26,7 @@ import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
   QUALIFICATION_MISSING,
+  qualificationMissing,
   seal,
   type UnifiedSoakReport,
   verifyUnifiedSoakReport,
@@ -99,6 +100,19 @@ function reseal(value: UnifiedSoakReport) {
   const { digest: _digest, ...body } = value;
   return seal(body);
 }
+test('macOS default workload qualification preserves the whole resource gate and cannot qualify other platforms', () => {
+  expect(qualificationMissing('darwin')).toEqual([
+    'process_active_resources_not_proven_on_bun',
+    'process_handles',
+    'owned_descendant_start_identity',
+  ]);
+  for (const platform of ['linux', 'win32', 'unknown']) {
+    expect(qualificationMissing(platform)).toContain('qualified_background_shell');
+    expect(qualificationMissing(platform)).toContain(
+      'formal_continuous_workload_not_qualified_on_required_platform',
+    );
+  }
+});
 test('CI packet is diagnostic; formal qualification rejects short/local/missing telemetry', () => {
   const report = packet();
   expect(verifyUnifiedSoakReport(report, null, false)).toEqual([]);
@@ -267,7 +281,7 @@ test('blocked preflight is closed and cannot lower the formal iterations or dura
     minimumDurationMs: FORMAL_DURATION_MS,
     maximumDurationMs: GLOBAL_DEADLINE_MS,
     diagnosticIterations: 1,
-    reasons: [...QUALIFICATION_MISSING],
+    reasons: qualificationMissing(report.environment.platform),
   };
   expect(verifyUnifiedSoakReport(reseal(report), null, true)).toContain(
     'qualification_preflight_blocked',
@@ -370,7 +384,7 @@ test.skipIf(process.platform === 'win32')(
         minimumDurationMs: FORMAL_DURATION_MS,
         maximumDurationMs: GLOBAL_DEADLINE_MS,
         diagnosticIterations: 1,
-        reasons: [...QUALIFICATION_MISSING],
+        reasons: qualificationMissing(process.platform),
       });
       expect(JSON.parse(readFileSync(output, 'utf8'))).toEqual(report);
       expect(statSync(output).mode & 0o777).toBe(0o600);

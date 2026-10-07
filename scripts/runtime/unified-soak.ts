@@ -28,7 +28,7 @@ import {
   FORMAL_DURATION_MS,
   GLOBAL_DEADLINE_MS,
   type ProbeEvidence,
-  QUALIFICATION_MISSING,
+  qualificationMissing,
   type SourceIdentity,
   seal,
   UNIFIED_SOAK_REVISION,
@@ -244,7 +244,7 @@ export async function runUnifiedSoak(args: readonly string[]): Promise<UnifiedSo
   const started = performance.now();
   const failures: string[] = [],
     attempts: UnifiedSoakReport['attempts'] = [];
-  const unsupported = [...QUALIFICATION_MISSING];
+  const unsupported = qualificationMissing(process.platform);
   const qualificationBlocked = options.profile === 'qualification' && unsupported.length > 0;
   const formalWorkload = options.profile === 'qualification' && !qualificationBlocked;
   let candidateId = '',

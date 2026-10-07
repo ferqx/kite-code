@@ -11,9 +11,9 @@ import {
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
-import type { AuthorizationRequest } from '@kite-ai/agent/extensions';
+import type { AuthorizationRequest, JobContext, JobEvent } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
@@ -31,7 +31,7 @@ async function until<T>(read: () => Promise<T | undefined>) {
     await Bun.sleep(5);
   }
 }
-function endpoint(command: string, stop = false, background = false) {
+function endpoint(command: string, stop = false, background = false, child = false) {
   let actualCommand = command;
   const requests: Record<string, unknown>[] = [];
   const server = Bun.serve({
@@ -42,22 +42,45 @@ function endpoint(command: string, stop = false, background = false) {
       requests.push(body);
       const messages = body.messages as { role: string; content: string }[];
       const last = messages.reduce(
-        (v, m, i) => (m.role === 'user' && /^work$|^next$|^grant-[a-z-]+$/.test(m.content) ? i : v),
+        (v, m, i) =>
+          m.role === 'user' &&
+          (/^work$|^next$|^grant-[a-z-]+$/.test(m.content) ||
+            (child && m.content.includes('child-shell-task')))
+            ? i
+            : v,
         -1,
       );
       const results = messages.slice(last + 1).filter((row) => row.role === 'tool');
-      const key = messages[last]?.content ?? 'work';
-      const calls = [
-        { name: 'shell.launch', input: { key, command: actualCommand, cancellation: 'detached' } },
-        {
-          name: stop ? 'shell.stop' : 'shell.wait',
-          input: stop
-            ? { shellId: key, commandId: `stop-${key}` }
-            : { shellId: key, timeoutMs: 4000 },
-        },
-        { name: 'shell.wait', input: { shellId: key, timeoutMs: 4000 } },
-        { name: 'shell.read', input: { shellId: key, afterSeq: '0', limit: 200 } },
-      ];
+      const isChild = child && messages[last]?.content.includes('child-shell-task');
+      const key = isChild ? 'child-shell' : (messages[last]?.content ?? 'work');
+      const calls =
+        child && !isChild
+          ? [
+              {
+                name: 'task',
+                input: {
+                  key,
+                  role: 'worker',
+                  input: { content: 'child-shell-task' },
+                  cancellation: 'attached',
+                  resultDisposition: 'required',
+                },
+              },
+            ]
+          : [
+              {
+                name: 'shell.launch',
+                input: { key, command: actualCommand, cancellation: 'detached' },
+              },
+              {
+                name: stop ? 'shell.stop' : 'shell.wait',
+                input: stop
+                  ? { shellId: key, commandId: `stop-${key}` }
+                  : { shellId: key, timeoutMs: 4000 },
+              },
+              { name: 'shell.wait', input: { shellId: key, timeoutMs: 4000 } },
+              { name: 'shell.read', input: { shellId: key, afterSeq: '0', limit: 200 } },
+            ];
       const call = background && results.length > 0 ? undefined : calls[results.length];
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -102,11 +125,15 @@ async function fixture(
     command?: string;
     background?: boolean;
     persistentPermissions?: boolean;
+    hostBoundary?: boolean;
+    child?: boolean;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-shell-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
+  const control = join(root, 'control');
+  if (options.hostBoundary) mkdirSync(control, { mode: 0o700 });
   const built = await Bun.build({
     entrypoints: [
       join(import.meta.dir, '../../../../packages/agent/src/platform/process/shell-supervisor.ts'),
@@ -123,12 +150,18 @@ async function fixture(
     options.command ??
     // biome-ignore lint/suspicious/noTemplateCurlyInString: actual POSIX parameter expansion, not JavaScript
     'printf \'%s|%s|%s\' "$PWD" "$FIXED_VALUE" "${HOME-unset}"; printf once >> effect';
-  const a = endpoint(command, options.stop, options.background),
+  const a = endpoint(command, options.stop, options.background, options.child),
     b = endpoint('printf next >> effect');
   const configuration = {
     modelId: 'model',
     models: [{ id: 'model', provider: 'compatible', model: 'local-A', baseURL: a.baseURL }],
-    tools: ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].map((id) => ({
+    tools: [
+      'shell.launch',
+      'shell.read',
+      'shell.wait',
+      'shell.stop',
+      ...(options.child ? ['task'] : []),
+    ].map((id) => ({
       id,
       definitionVersion: '1',
     })),
@@ -148,6 +181,16 @@ async function fixture(
             bunExecutable: process.execPath,
             shellExecutable: '/bin/sh',
             graceMs: 20,
+            ...(options.hostBoundary
+              ? {
+                  host: {
+                    controlBase: control,
+                    protectedRoots: [profile.dataRoot, control],
+                    readonlyAssets: [join(root, 'assets')],
+                    runtimeReadOnlyRoots: [dirname(process.execPath)],
+                  },
+                }
+              : {}),
           },
         }
       : {}),
@@ -241,11 +284,19 @@ async function fixture(
       }),
     done: (id = 'work') => runtime.waitForCommand(id, { timeoutMs: 8000 }),
     async card(definitionId: string) {
-      return until(async () =>
-        (
-          await store.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' })
-        ).interactions.find((row) => row.definitionId === definitionId),
-      );
+      return until(async () => {
+        for (const session of await store.listSessions()) {
+          const card = (
+            await store.listInteractions({
+              expectedStoreId,
+              sessionId: session.id,
+              state: 'pending',
+            })
+          ).interactions.find((row) => row.definitionId === definitionId);
+          if (card) return card;
+        }
+        return undefined;
+      });
     },
     async approve(
       definitionId: string,
@@ -271,6 +322,310 @@ async function fixture(
     },
   };
 }
+nativeTest(
+  'default delegated Shell preserves accepted parent/child policy snapshots for Full and approved Ask',
+  async () => {
+    const f = await fixture({ hostBoundary: true, persistentPermissions: true, child: true });
+    const outside = join(f.root, 'child-outside-effect');
+    const dispatch = f.store.markDispatching.bind(f.store);
+    const snapshots: unknown[] = [];
+    f.store.markDispatching = async (input) => {
+      const result = await dispatch(input);
+      if ((await f.store.getExecution(input.executionId))?.definitionId === 'shell.command')
+        snapshots.push(structuredClone(input.authorization.snapshot));
+      return result;
+    };
+    const setMode = async (mode: 'full' | 'ask', commandId: string) => {
+      const current = await f.permissionManagement.readMode(f.base);
+      await f.permissionManagement.setMode({
+        ...f.base,
+        mode,
+        commandId,
+        ifRevision: current.revision,
+        ifDefaultRevision: current.defaultRevision,
+        makeDefault: true,
+      });
+    };
+    const childJob = () =>
+      until(async () => {
+        const child = (await f.store.listExecutions('s'))
+          .filter((row) => row.childSessionId)
+          .at(-1);
+        if (!child?.childSessionId) return undefined;
+        const job = (await f.store.listExecutions(child.childSessionId)).find(
+          (row) => row.definitionId === 'shell.command',
+        );
+        return job && !['planned', 'dispatching', 'running'].includes(job.status) ? job : undefined;
+      });
+    try {
+      await setMode('full', 'child-full');
+      f.a.command(`printf full > '${outside}'; printf full >> effect`);
+      await f.submit();
+      expect((await f.done()).status).toBe('applied');
+      expect(await childJob()).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+      expect(readFileSync(outside, 'utf8')).toBe('full');
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('full');
+      await setMode('ask', 'child-ask');
+      f.a.command(`printf denied > '${outside}'; printf ask >> effect`);
+      await f.submit('grant-child');
+      await f.approve('task', 'child-approve-task');
+      await f.approve('agent/worker', 'child-approve-carrier');
+      await f.approve('shell.launch', 'child-approve-launch');
+      const card = await f.card('shell.command');
+      expect(card.presentationSessionId).toBe('s');
+      expect((await f.store.getExecution(card.executionId))?.sessionId).not.toBe('s');
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('full');
+      await f.approve('shell.command', 'child-approve-job');
+      expect((await f.done('grant-child')).status).toBe('applied');
+      expect(await childJob()).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+      expect(readFileSync(outside, 'utf8')).toBe('full');
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('fullask');
+      expect(snapshots).toEqual(
+        ['full', 'ask'].map((mode) =>
+          expect.objectContaining({
+            namespace: 'agent.permission-intersection',
+            version: '1',
+            data: {
+              policies: ['parent', 'child'].map((scope) =>
+                expect.objectContaining({
+                  scope,
+                  allowed: mode === 'full',
+                  snapshot: expect.objectContaining({
+                    namespace: 'builtin.permissions',
+                    version: '1',
+                    data: expect.objectContaining({ mode, workspaceTrust: true }),
+                  }),
+                }),
+              ),
+            },
+          }),
+        ),
+      );
+      const requests = f.a.requests.length;
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      await f.submit('grant-child');
+      await f.runtime.getView('s');
+      expect(f.a.requests).toHaveLength(requests);
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('fullask');
+    } finally {
+      await f.close();
+    }
+  },
+  30000,
+);
+nativeTest(
+  'host Job applies the stricter nested AND scope and rejects missing or unknown policy leaves before effects',
+  async () => {
+    const f = await fixture({ hostBoundary: true });
+    const outside = join(f.root, 'nested-outside-effect');
+    const leaf = (mode: 'full' | 'ask') => ({
+      namespace: 'builtin.permissions',
+      version: '1',
+      data: {
+        mode,
+        workspaceTrust: true,
+        capability: {
+          kind: 'job',
+          definitionId: 'shell.command',
+          definitionVersion: '1',
+          hardAllowed: true,
+        },
+      },
+    });
+    const intersect = (
+      snapshots: NonNullable<JobContext['dispatchAuthorization']>['snapshot'][],
+    ) => ({
+      namespace: 'agent.permission-intersection',
+      version: '1',
+      data: {
+        policies: snapshots.map((snapshot, index) => ({
+          scope: index ? 'child' : 'parent',
+          revision: `owned-${index}`,
+          allowed: false,
+          snapshot: snapshot ?? null,
+        })),
+      },
+    });
+    try {
+      const configuration = await createShellConfiguration({
+        workspaceRoot: f.workspace,
+        toolIds: ['shell.launch'],
+        options: {
+          platform: 'darwin',
+          configurationId: 'nested-scope-test',
+          env: { PATH: '/usr/bin:/bin' },
+          supervisorPath: join(f.root, 'assets/shell-supervisor.js'),
+          bunExecutable: process.execPath,
+          shellExecutable: '/bin/sh',
+          graceMs: 20,
+          host: {
+            controlBase: join(f.root, 'control'),
+            protectedRoots: [f.profile.dataRoot, join(f.root, 'control')],
+            readonlyAssets: [join(f.root, 'assets')],
+            runtimeReadOnlyRoots: [dirname(process.execPath)],
+          },
+        },
+      });
+      const job = configuration.extensions[0]!.jobs![0]!;
+      const context: JobContext = {
+        sessionId: 'adapter-test',
+        executionId: 'owned-nested',
+        signal: new AbortController().signal,
+        dispatchAuthorization: {
+          revision: 'owned-final-acceptance',
+          snapshot: intersect([intersect([leaf('full')]), leaf('ask')]),
+        },
+      };
+      const handle = await job.start(
+        { command: `printf denied > '${outside}'; printf workspace > effect` },
+        context,
+      );
+      const events: JobEvent[] = [];
+      try {
+        for await (const event of job.observe(handle)) events.push(event);
+      } finally {
+        await job.dispose(handle);
+      }
+      expect(events.find((event) => event.type === 'terminal')).toMatchObject({
+        supervision: 'ended',
+        result: { outcome: 'succeeded', details: { processTreeStopped: true } },
+      });
+      expect(existsSync(outside)).toBe(false);
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
+      for (const snapshot of [
+        undefined,
+        intersect([leaf('full'), undefined]),
+        { ...leaf('full'), namespace: 'unknown-policy' },
+      ]) {
+        await expect(
+          job.start(
+            { command: 'printf bypass >> effect' },
+            {
+              ...context,
+              dispatchAuthorization: {
+                revision: 'owned-final-acceptance',
+                ...(snapshot ? { snapshot } : {}),
+              },
+            },
+          ),
+        ).rejects.toMatchObject({ code: 'shell_dispatch_scope_unavailable' });
+      }
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+nativeTest(
+  'host Shell uses the final accepted persistent permission snapshot for Full and approved Workspace scopes',
+  async () => {
+    const f = await fixture({
+      hostBoundary: true,
+      persistentPermissions: true,
+      background: true,
+    });
+    const outside = join(f.root, 'outside-effect');
+    const dispatch = f.store.markDispatching.bind(f.store);
+    const snapshots: unknown[] = [];
+    f.store.markDispatching = async (input) => {
+      const result = await dispatch(input);
+      if ((await f.store.getExecution(input.executionId))?.definitionId === 'shell.command')
+        snapshots.push(structuredClone(input.authorization.snapshot));
+      return result;
+    };
+    const setMode = async (mode: 'full' | 'ask', commandId: string) => {
+      const current = await f.permissionManagement.readMode(f.base);
+      await f.permissionManagement.setMode({
+        ...f.base,
+        mode,
+        commandId,
+        ifRevision: current.revision,
+        ifDefaultRevision: current.defaultRevision,
+        makeDefault: false,
+      });
+    };
+    const finishedJob = () =>
+      until(async () => {
+        const jobs = (await f.store.listExecutions('s')).filter(
+          (row) => row.definitionId === 'shell.command',
+        );
+        const job = jobs.at(-1);
+        return job && !['planned', 'dispatching', 'running'].includes(job.status) ? job : undefined;
+      });
+    let failure: unknown;
+    let cleanupFailure: unknown;
+    try {
+      await setMode('full', 'host-full');
+      f.a.command(`printf full > '${outside}'`);
+      await f.submit();
+      await f.done();
+      expect(await finishedJob()).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+      expect(readFileSync(outside, 'utf8')).toBe('full');
+      await setMode('ask', 'host-ask');
+      f.a.command(`printf denied > '${outside}'; printf workspace >> effect`);
+      await f.submit('grant-workspace');
+      await f.approve('shell.launch', 'host-approve-tool');
+      const card = await f.card('shell.command');
+      expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
+      expect(readFileSync(outside, 'utf8')).toBe('full');
+      await f.approve('shell.command', 'host-approve-job');
+      await f.done('grant-workspace');
+      const job = await until(async () => {
+        const row = await f.store.getExecution(card.executionId);
+        return row && !['planned', 'dispatching', 'running'].includes(row.status) ? row : undefined;
+      });
+      expect(job).toMatchObject({
+        status: 'succeeded',
+        result: { details: { processTreeStopped: true } },
+      });
+      expect(readFileSync(outside, 'utf8')).toBe('full');
+      expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('workspace');
+      expect(snapshots).toEqual([
+        expect.objectContaining({
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: expect.objectContaining({ mode: 'full', workspaceTrust: true }),
+        }),
+        expect.objectContaining({
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: expect.objectContaining({ mode: 'ask', workspaceTrust: true }),
+        }),
+      ]);
+    } catch (error) {
+      failure = error;
+      console.error(
+        JSON.stringify({
+          caseId: 'host_shell_persistent_permission_failure',
+          root: f.root,
+          executions: await f.store.listExecutions('s'),
+        }),
+      );
+    } finally {
+      try {
+        await f.close();
+      } catch (cleanupError) {
+        cleanupFailure = cleanupError;
+      }
+    }
+    if (failure && cleanupFailure)
+      throw new AggregateError([failure, cleanupFailure], 'host_shell_test_failed');
+    if (failure) throw failure;
+    if (cleanupFailure) throw cleanupFailure;
+  },
+  20000,
+);
 nativeTest(
   'default Shell tools use actual Workspace/env/assets and durable Job output; exact Command retry and reads cause no process replay',
   async () => {

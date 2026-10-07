@@ -1,15 +1,16 @@
-import { realpathSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { existsSync, lstatSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute } from 'node:path';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { shellSupervisorAsset } from '@kite-ai/agent/jobs/shell';
 import { McpStdioPortError, mcpStdioGuardianAsset } from '@kite-ai/agent/mcp';
-import { selectProfile } from '@kite-ai/agent/profile';
+import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { readSessionLogs } from '@kite-ai/agent/storage';
 import { type ConfigureProcessHost, type PrivateStartup, privateStartupSchema } from './bootstrap';
-import { createDefaultProcessConfiguration } from './configuration';
+import { createDefaultProcessConfiguration, type ShellConfigurationOptions } from './configuration';
 import { startService } from './index';
 import { runtimeProtectionRoots, verifyRuntimeProtection } from './runtime-protection';
 
@@ -116,6 +117,7 @@ export async function assembleProcessService(
           hostConfiguration: startup.hostConfiguration,
           mcpSources: packagedMcpSourceAssets(),
           runtimeAssets,
+          shell: packagedShellAssets(selected, runtimeAssets),
         });
   } catch (error) {
     runtimeAssetAccess?.release();
@@ -240,4 +242,41 @@ function packagedMcpSourceAssets() {
       throw error;
     return {};
   }
+}
+
+function packagedShellAssets(
+  profile: ProfileSelection,
+  runtimeAssets: readonly string[],
+): ShellConfigurationOptions | undefined {
+  if (process.platform !== 'darwin') return;
+  let supervisorPath: string;
+  try {
+    supervisorPath = shellSupervisorAsset();
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'shell_supervisor_asset_unavailable')
+      throw error;
+    return;
+  }
+  const roots = [...new Set([dirname(process.execPath), ...(process.env.PATH ?? '').split(':')])]
+    .filter((path) => isAbsolute(path) && path !== '/' && existsSync(path))
+    .map((path) => realpathSync.native(path))
+    .filter((path) => lstatSync(path).isDirectory());
+  return {
+    platform: 'darwin',
+    configurationId: 'default.macos-host-shell-v1',
+    env: Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string',
+      ),
+    ),
+    supervisorPath,
+    bunExecutable: process.execPath,
+    shellExecutable: '/bin/sh',
+    host: {
+      controlBase: profile.coordinationPath,
+      protectedRoots: [profile.dataRoot, profile.coordinationPath],
+      readonlyAssets: [...runtimeAssets],
+      runtimeReadOnlyRoots: [...new Set(roots)],
+    },
+  };
 }

@@ -33,6 +33,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 当前公共场景与证据
 
+[默认 macOS host Shell](../packages/agent/test/isolated/jobs/macos-host-shell.test.ts)核真实宿主/fork/setsid、Full/Workspace写、保护根/准确祖先、网络、父退出及注册清理；[源码外默认消费者](isolated/unified-agent/formal-optional-capabilities.test.ts)与[平台报告](isolated/unified-agent/unified-platform.test.ts)核普通默认Provider/Job和cold输出零重放。[默认 continuous](isolated/unified-agent/unified-default-shell-continuous.test.ts)只做两cycle40Command的实际短验收，原450秒formal组件另由[固定producer](fixtures/unified-agent/soak/continuous-default-shell.ts)运行；并行计算区间取并集，不能加构建/空闲/重复时间取得资格。Win/Linux实际验证依用户选择在重构完成后交给GitHub Actions，平台skip不计原生通过。
+
 [Profile MCP 恢复](isolated/unified-agent/profile-mcp-restore.test.ts)沿原 isolated共享槽，使用公开 builder/install与默认 Service，删除原 candidate后通过实际 installed CLI create/inspect/restore A→B，公开 Client核原 C/E、Core Question原行、当前来源准入、新 Question和显式 owned stdio连接／停止；冷 GET-only／cursor保持，Model0，原项目文件／配置／opaque refs保持。credential transport未派发，不证明 OS Vault／OAuth。对应[raw资产](../packages/agent/test/isolated/maintenance/mcp-configuration.test.ts)和[实际 Node DB7](../packages/agent/test/isolated/maintenance/desktop-mcp.test.ts)分别核 private/proof/absent／旧白名单及 v15/v16真实物理恢复；旧无 MCP文件的来源变更PTY仍为 v12。完整默认与有限结果单列于当前进度。
 
 通用 Agent V1.3 的当前切片通过 `bun run test:unified-agent` 验证：新包 owner、真实 HTTP/SSE 与双 Service、外部计数工具/mini-review、[两真实进程](isolated/unified-agent/persistence.test.ts)、取消、来源刷新、显式恢复与[目标依赖边界](isolated/scripts/unified-agent-boundary.test.ts)。runner 复用默认 isolated/exclusive 分类，编译与强杀场景按逐文件隔离运行。新 `ai/agent/client/ui` 与 `apps/service/cli/desktop/web` 已纳入默认发现和 build/typecheck，根正式/default/CI已选择新闭包，原客户端测试仅作历史参考；完整能力替代与平台仍待验收。平台、完整交互、维护恢复与制品结果按[进度](../docs/plans/unified-agent-refactor-v1-progress.md)记录，部分子场景不代表完整 T/E 场景通过。

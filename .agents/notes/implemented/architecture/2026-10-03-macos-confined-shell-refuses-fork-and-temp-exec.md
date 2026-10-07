@@ -26,3 +26,5 @@ Status: implemented
 负责事实见 [Jobs](../../../../packages/agent/src/jobs/README.md) 与[平台资产](../../../../packages/agent/src/platform/README.md)。
 
 2026-10-06 原组所有权与一次收尾加固见[原根保留决定](../bug-fix/2026-10-06-macos-shell-root-ownership.md)。它只替换 guardian 的 macOS child ownership，保留本记录的 deny-fork、临时程序执行拒绝和无 fallback 理由；未因此取得通用默认 Shell 或允许派生子进程的资格。
+
+2026-10-07 默认宿主另采用[独占 resource coalition](2026-10-07-macos-host-shell-owned-coalition.md)允许 fork 并证明完整后代停止。本记录仍完整适用于显式 createMacosConfinedShellJob/声明补偿，不再用其 deny-fork 样本代表默认宿主工具。

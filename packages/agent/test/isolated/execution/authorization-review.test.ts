@@ -8,6 +8,11 @@ import type { Permissions } from '../../../src/extensions';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
+const permissionSnapshot = {
+  namespace: 'fixture.permissions',
+  version: '1',
+  data: { mode: 'auto' },
+};
 for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
   test(`runless ${targetKind} retains its original source through one real reviewer and an independent human approval`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runless-review-')));
@@ -61,7 +66,12 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       permissions: {
         async authorize(candidate) {
           return candidate.definitionId === definitionId
-            ? { allowed: false, revision: 'p1', review: { request, requireApproval: true } }
+            ? {
+                allowed: false,
+                revision: 'p1',
+                snapshot: permissionSnapshot,
+                review: { request, requireApproval: true },
+              }
             : { allowed: true, revision: 'trusted' };
         },
       },
@@ -197,6 +207,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       expect(targetAuthorization).toMatchObject({
         reviewExecutionId: carrier.id,
         interactionId: interaction.id,
+        snapshot: permissionSnapshot,
       });
       expect(effects).toBe(1);
       expect(reviews).toBe(1);
@@ -257,6 +268,7 @@ async function fixture(
           : {
               allowed: false,
               revision: 'p1',
+              snapshot: permissionSnapshot,
               review: { request: { task: 'exact harmless effect', parameters: request.input } },
             };
       },
@@ -314,11 +326,16 @@ async function fixture(
 
 test('durable reviewer uses one actual Model call with zero tools and grants only original target', async () => {
   let reviews = 0;
+  let release!: () => void;
+  const reviewing = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const inputs: unknown[] = [];
   const f = await fixture({
     async *stream(input) {
       reviews++;
       inputs.push(input);
+      await reviewing;
       yield {
         type: 'text_delta',
         text: '{"decision":"approve_once","reason":"Exact bounded effect"}',
@@ -326,13 +343,23 @@ test('durable reviewer uses one actual Model call with zero tools and grants onl
       yield finish;
     },
   });
+  const dispatch = f.store.markDispatching.bind(f.store);
+  let acceptedSnapshot: unknown;
+  f.store.markDispatching = async (input) => {
+    const result = await dispatch(input);
+    if (result.definitionId === 'fixture.effect')
+      acceptedSnapshot = structuredClone(input.authorization.snapshot);
+    return result;
+  };
   try {
+    release();
     await f.runtime.waitForCommand('work');
     expect(f.effects()).toBe(1);
     expect(reviews).toBe(1);
     expect(inputs[0]).toMatchObject({ tools: [] });
     const execution = (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')!;
     expect(execution.status).toBe('succeeded');
+    expect(acceptedSnapshot).toEqual(permissionSnapshot);
     expect((await f.runtime.getRun(execution.runId!))?.status).toBe('completed');
     const carrier = (await f.store.listExecutions('s')).find((value) => value.kind === 'job')!;
     expect(carrier.status).toBe('succeeded');
@@ -360,6 +387,7 @@ test('durable reviewer uses one actual Model call with zero tools and grants onl
     }
     expect(reviews).toBe(1);
   } finally {
+    release();
     await f.close();
   }
 });

@@ -2029,6 +2029,16 @@ release candidate现另执行整个POSIX Terminal、Mac Native及Xvfb Linux Nati
 
 本片只关闭Windows维护文件端口的源码接入，原生实际验收尚未闭合。四项退出缺口继续成立：Native四Auth/Chrome/defaultVault、默认宿主Shell与完整fork/setsid/持久Job/formal负载、完整release与维护各平台/发布样本/恢复场景、最后legacy删除。37能力仍partial、wholeV13=false、Goal active；保留用户确认的macOS宿主执行语义，容器只作为独立验证；本地授权不扩大到push/PR/发布。
 
+### 30.2.12 macOS 默认宿主 Shell 与当前验证顺序
+
+用户已确认保留宿主 Shell 语义，不把 Linux 容器设为默认，并明确先解决 macOS，Win/Linux 在重构完成后交给 GitHub Actions 验证。现有跨平台资格条件不放宽；不再等待本地 Windows 环境、不安装或重开 Linux 验证，也未获授权 dispatch workflow/push/PR。此前平台阶段结果保留各自冻结范围。
+
+默认 ProcessService 已从真实 Terminal/Native runtimeAssets、Profile/coordination、Bun/shell 和宿主运行根装配 macOS Seatbelt/launchd resource coalition。普通 Tool/Job 分别授权；最终 markDispatching 接受的准确权限快照才选择 Full 或 Workspace 写范围，人工及自动批准保原 snapshot。宿主 HOME/广泛读取与 fork 保留；私有根、runtimeAssets、准确祖先 unlink、temp exec 和非 Full Unix socket 边界实际执行。准确原 guardian 的 resource coalition task count 与 pidversion 信号覆盖 setsid/orphan 后代，原根占位/组证明和一次 reap 继续有效。当前合同归[Jobs](../../packages/agent/src/jobs/README.md#默认-macos-宿主-shell)、[Service](../../apps/service/README.md#默认-shell-装配)及[新决定](../../.agents/notes/implemented/architecture/2026-10-07-macos-host-shell-owned-coalition.md)。
+
+已执行真实 host 11项61断言，根及默认Task子Agent的权限/Core/Service三文件33项343断言；源码外默认候选和平台报告保实际 Provider/Job、输出 SHA、全树停止、cold 原结果/游标及零重放。持续负载的新默认 producer 使用两 Service、20原 Session、普通 Files/Task/后台 Shell，固定每 Job 65536次64KiB SHA256，busy 仅累计实际子程序计算区间并集。两轮短试跑40个 Command实际完成/cold无重放，但短结果不授正式450秒资格。正式第一轮259 Shell成功/1unknown后以180秒原操作期限失败，原记录与准确注册absence保留；准确标签absence有界等待后的原组件通过保留；子策略接入后当前制品的一轮有两个尚未返回handle的启动unknown，原因尚未确认。有界私有启动诊断接入后，当前14cycle/280Command正式组件actual0、busy并集482073ms、最长operation13634.693ms、280unique execution/coalition/cold零重放全验，原红不拼接且不据新绿称旧启动问题已修复；最终证据归[当前进度](unified-agent-refactor-v1-progress.md#2026-10-07macos-默认宿主-shell-与持续负载)。8outer/60分钟、完整资源/release、其余§35/T/E与跨平台不由单组件关闭。 当前实现的原完整默认615文件/489唯一主作业全部实际通过，4089 regular与HEAD/status保持，whole_default=true、wholeV13=false；当前源码及限制的准确证据归进度，不闭合旧启动unknown原因或独立Review资格。
+
+§30.2.9的默认 Shell 缺口已实际推进到上述 macOS 默认路径与持久消费者，macOS正式组件已通过；本阶段当前源码的完整默认结果另登记。Native四Auth仍需原 Chrome 精确授权/人工证书处理；其他产品/维护/已发布样本与最终 legacy 删除仍按原退出条件。37能力partial、wholeV13=false；独立Reviewer受工具线程限额尚未取得，root自检不替代独立审查。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

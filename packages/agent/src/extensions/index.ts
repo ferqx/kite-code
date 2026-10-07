@@ -78,6 +78,12 @@ export interface JobContext {
   readonly sessionId: string;
   readonly executionId: string;
   readonly signal: AbortSignal;
+  /** Actual final dispatch metadata, after the owned Store transaction accepted it.
+   * It explains the trusted host's decision; it never independently grants execution. */
+  readonly dispatchAuthorization?: {
+    readonly revision: string;
+    readonly snapshot?: { namespace: string; version: string; data: Json };
+  };
 }
 /** Cold verification has no execution, interaction, or operation-start capabilities. */
 export interface JobReconcileContext {

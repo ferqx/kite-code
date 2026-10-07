@@ -3,13 +3,13 @@ import { constants, createReadStream } from 'node:fs';
 import { access, lstat, realpath } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { AgentError } from '@kite-ai/agent';
-import type { AuthorizationRequest, Extension } from '@kite-ai/agent/extensions';
-import { createShellJob } from '@kite-ai/agent/jobs/shell';
+import type { AuthorizationRequest, Extension, JobContext } from '@kite-ai/agent/extensions';
+import { createMacosHostShellJob, createShellJob } from '@kite-ai/agent/jobs/shell';
 import { createShellExtension } from '@kite-ai/agent/shell';
 import type { CapabilityEffect } from './permissions';
 
 export interface ShellConfigurationOptions {
-  /** This slice qualifies explicit macOS POSIX group supervision, not a filesystem/network sandbox. */
+  /** Trusted macOS assembly; host selects the filesystem/network and coalition boundary. */
   readonly platform: 'darwin';
   readonly configurationId: string;
   readonly env: Readonly<Record<string, string>>;
@@ -18,8 +18,76 @@ export interface ShellConfigurationOptions {
   readonly shellExecutable: string;
   readonly graceMs?: number;
   readonly maxQueuedBytes?: number;
+  /** Default macOS host boundary; omission keeps explicit legacy group-only assembly. */
+  readonly host?: {
+    readonly controlBase: string;
+    readonly protectedRoots: readonly string[];
+    readonly readonlyAssets: readonly string[];
+    readonly runtimeReadOnlyRoots: readonly string[];
+  };
 }
 export const shellToolIds = ['shell.launch', 'shell.read', 'shell.wait', 'shell.stop'] as const;
+/** Interpret only the original accepted default-policy tree, including delegated AND policies. */
+function hostFilesystemScope(context: JobContext): 'workspace_write' | 'full_access' {
+  const authorization = context.dispatchAuthorization;
+  const pending = [authorization?.snapshot];
+  let scope: 'workspace_write' | 'full_access' = 'full_access';
+  let count = 0;
+  if (!authorization?.revision) throw new AgentError('shell_dispatch_scope_unavailable');
+  while (pending.length) {
+    const snapshot = pending.pop();
+    if (snapshot?.version !== '1' || ++count > 8192)
+      throw new AgentError('shell_dispatch_scope_unavailable');
+    const data = snapshot.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+      throw new AgentError('shell_dispatch_scope_unavailable');
+    if (snapshot.namespace === 'agent.permission-intersection') {
+      const policies = data.policies;
+      if (!Array.isArray(policies) || policies.length < 1 || policies.length > 2)
+        throw new AgentError('shell_dispatch_scope_unavailable');
+      for (const [index, policy] of policies.entries()) {
+        if (
+          !policy ||
+          typeof policy !== 'object' ||
+          Array.isArray(policy) ||
+          policy.scope !== (index === 0 ? 'parent' : 'child') ||
+          typeof policy.revision !== 'string' ||
+          !policy.revision ||
+          typeof policy.allowed !== 'boolean' ||
+          !policy.snapshot ||
+          typeof policy.snapshot !== 'object' ||
+          Array.isArray(policy.snapshot) ||
+          typeof policy.snapshot.namespace !== 'string' ||
+          typeof policy.snapshot.version !== 'string' ||
+          !Object.hasOwn(policy.snapshot, 'data')
+        )
+          throw new AgentError('shell_dispatch_scope_unavailable');
+        // allowed=false can be the original policy's approval challenge. The
+        // final owned dispatch accepted that challenge; hardAllowed still must
+        // be true in every leaf. Never synthesize a grant from this metadata.
+        pending.push(policy.snapshot as NonNullable<typeof authorization.snapshot>);
+      }
+      continue;
+    }
+    const capability = data.capability;
+    if (
+      snapshot.namespace !== 'builtin.permissions' ||
+      data.workspaceTrust !== true ||
+      typeof data.mode !== 'string' ||
+      !['ask', 'accept_edits', 'auto', 'full'].includes(data.mode) ||
+      !capability ||
+      typeof capability !== 'object' ||
+      Array.isArray(capability) ||
+      capability.kind !== 'job' ||
+      capability.definitionId !== 'shell.command' ||
+      capability.definitionVersion !== '1' ||
+      capability.hardAllowed !== true
+    )
+      throw new AgentError('shell_dispatch_scope_unavailable');
+    if (data.mode !== 'full') scope = 'workspace_write';
+  }
+  return scope;
+}
 /** Read-only verification of trusted supervision assets; does not create a Job or process. */
 export async function inspectShellAssets(options: ShellConfigurationOptions) {
   assertShellConfiguration(options);
@@ -76,7 +144,7 @@ export async function createShellConfiguration(input: {
     const cwd = await realpath(input.workspaceRoot);
     if (!(await lstat(cwd)).isDirectory()) throw new AgentError('shell_workspace_unavailable');
     const [supervisor, bun, shell] = await inspectShellAssets(options);
-    const job = createShellJob({
+    const jobOptions = {
       cwd,
       env: options.env,
       supervisorPath: supervisor.path,
@@ -84,7 +152,14 @@ export async function createShellConfiguration(input: {
       shellExecutable: shell.path,
       ...(options.graceMs !== undefined ? { graceMs: options.graceMs } : {}),
       ...(options.maxQueuedBytes !== undefined ? { maxQueuedBytes: options.maxQueuedBytes } : {}),
-    });
+    };
+    const job = options.host
+      ? createMacosHostShellJob({
+          ...jobOptions,
+          ...options.host,
+          filesystemScope: hostFilesystemScope,
+        })
+      : createShellJob(jobOptions);
     const extension = createShellExtension({
       job: {
         ...job,
@@ -98,7 +173,17 @@ export async function createShellConfiguration(input: {
           if (actual.some((item, index) => item.digest !== [supervisor, bun, shell][index]!.digest))
             throw new AgentError('shell_asset_changed');
           context.signal.throwIfAborted();
-          return job.start(value, context);
+          try {
+            return await job.start(value, context);
+          } catch (error) {
+            if (!options.host || error instanceof AgentError) throw error;
+            // Only a fixed non-secret adapter code crosses the ordinary Job
+            // failure contract; private paths and native error text stay private.
+            const message = error instanceof Error ? error.message : '';
+            throw new AgentError(
+              /^[a-z][a-z0-9_]{1,80}$/.test(message) ? message : 'shell_start_failed',
+            );
+          }
         },
       },
     });
@@ -107,10 +192,13 @@ export async function createShellConfiguration(input: {
       snapshot: {
         available: true,
         platform: 'darwin',
-        qualification: 'posix_group_supervision_only',
+        qualification: options.host
+          ? 'macos_launchd_coalition_seatbelt'
+          : 'posix_group_supervision_only',
         configurationId: options.configurationId,
         cwd,
         assets: { supervisor, bun, shell },
+        ...(options.host ? { host: options.host, scope: 'final_dispatch_authorization' } : {}),
         envKeys: Object.keys(options.env).sort(),
         tools: (extension.tools ?? [])
           .filter((tool) => selected.includes(tool.id))
@@ -161,6 +249,7 @@ export async function createShellConfiguration(input: {
               cwd,
               env: Object.entries(options.env).sort(([left], [right]) => left.localeCompare(right)),
               assets: [supervisor, bun, shell],
+              ...(options.host ? { host: options.host } : {}),
               graceMs: options.graceMs ?? 200,
               maxQueuedBytes: options.maxQueuedBytes ?? 256 * 1024,
             }),

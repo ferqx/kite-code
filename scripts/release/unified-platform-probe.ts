@@ -83,11 +83,14 @@ export async function runUnifiedPlatformProbe(
     sourceScriptSha256,
     helperSourceSha256: sha(readFileSync(helperPath)),
     github,
-    missing: [
-      'default_shell_not_delivered',
-      'cross_platform_confinement_not_qualified',
-      'native_fork_network_resource_limits_not_qualified',
-    ],
+    missing:
+      process.platform === 'darwin'
+        ? ['cross_platform_confinement_not_qualified', 'native_resource_limits_not_qualified']
+        : [
+            'default_shell_not_delivered',
+            'cross_platform_confinement_not_qualified',
+            'native_fork_network_resource_limits_not_qualified',
+          ],
   };
   let root: string | undefined,
     inputLease: ReturnType<AcquireArtifactAccess> | undefined,

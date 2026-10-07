@@ -26,16 +26,28 @@ export const HostStatusSchema = z.strictObject({
   execution: z.strictObject({
     state,
     reason: z.enum(['diagnostic_source_unavailable']).nullable(),
-    sandbox: z.strictObject({
-      backend: z.literal('none'),
-      available: z.literal(false),
-      qualification: z.literal('unqualified'),
-    }),
+    sandbox: z.discriminatedUnion('backend', [
+      z.strictObject({
+        backend: z.literal('none'),
+        available: z.literal(false),
+        qualification: z.literal('unqualified'),
+      }),
+      z.strictObject({
+        backend: z.literal('macos_seatbelt'),
+        available: z.literal(true),
+        qualification: z.literal('host_scope'),
+      }),
+    ]),
     shell: z.strictObject({
       configured: z.boolean(),
       available: z.boolean(),
-      supervision: z.enum(['none', 'posix_group']),
-      qualification: z.enum(['not_configured', 'darwin_supervision_only', 'unavailable']),
+      supervision: z.enum(['none', 'posix_group', 'macos_coalition']),
+      qualification: z.enum([
+        'not_configured',
+        'darwin_supervision_only',
+        'darwin_host_boundary',
+        'unavailable',
+      ]),
       reason: z
         .enum([
           'shell_not_configured',
