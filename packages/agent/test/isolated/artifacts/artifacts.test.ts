@@ -88,6 +88,11 @@ test('immutable publication precedes scoped reference, hash alone cannot grant r
   const ref = await f.artifact.publish(input);
   expect(ref.size).toBe(String(bytes.length));
   expect(Buffer.from(await f.artifact.read(input))).toEqual(bytes);
+  expect(
+    Buffer.from(
+      await f.artifact.readReference({ expectedStoreId: f.expectedStoreId, reference: ref }),
+    ),
+  ).toEqual(bytes);
   expect(await f.artifact.publish(input)).toEqual(ref);
   const secondType = await f.artifact.publish({
     ...input,
@@ -96,6 +101,27 @@ test('immutable publication precedes scoped reference, hash alone cannot grant r
   });
   expect(secondType.hash).toBe(ref.hash);
   expect(secondType.mediaType).toBe('application/octet-stream');
+  await code(
+    f.artifact.readReference({
+      expectedStoreId: f.expectedStoreId,
+      reference: { ...ref, mediaType: secondType.mediaType },
+    }),
+    'artifact_reference_mismatch',
+  );
+  await code(
+    f.artifact.readReference({
+      expectedStoreId: f.expectedStoreId,
+      reference: { ...ref, storeId: 'different-origin' },
+    }),
+    'artifact_reference_mismatch',
+  );
+  await code(
+    f.artifact.readReference({
+      expectedStoreId: f.expectedStoreId,
+      reference: { ...ref, subjectId: 'intruder' },
+    }),
+    'artifact_scope_denied',
+  );
   expect((await f.store.getArtifactReference(input))?.mediaType).toBe('text/plain');
   await code(
     f.artifact.publish({ ...input, mediaType: 'application/octet-stream' }),
@@ -129,6 +155,9 @@ test('immutable publication precedes scoped reference, hash alone cannot grant r
   const reader = createArtifactStore({ profile: f.profile, store });
   artifacts.push(reader);
   expect(Buffer.from(await reader.read(input))).toEqual(bytes);
+  expect(
+    Buffer.from(await reader.readReference({ expectedStoreId: f.expectedStoreId, reference: ref })),
+  ).toEqual(bytes);
   await code(reader.publish({ ...input, refId: 'read-only' }), 'read_only');
 });
 test('two actual Workers compete for same hash/reference and verify content rather than trusting filename', async () => {
@@ -161,6 +190,10 @@ test('two actual Workers compete for same hash/reference and verify content rath
   chmodSync(path, 0o400);
   await code(a2.publish(input), 'artifact_content_mismatch');
   await code(f.artifact.read(input), 'artifact_content_mismatch');
+  await code(
+    f.artifact.readReference({ expectedStoreId: f.expectedStoreId, reference: one }),
+    'artifact_content_mismatch',
+  );
 });
 test('real registration transaction failure leaves only orphan bytes; nonexistent and symlink blobs never register', async () => {
   const f = await fixture();

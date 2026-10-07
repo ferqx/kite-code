@@ -2,6 +2,8 @@
 
 Core 的 `ToolResult.modelContent` 是 `{kind:'artifact',reference,encoding:'utf-8'}`。公开 reference 只表示准确原 scope 的产物，不授予 hash/path 读取权。Tool、Action、Job 返回时都核对真实引用；读取选中 Tool 历史或纳入的后台结果时，Runtime 从原 Execution/Command 派生 Store、Session 与 subject，核对 metadata，再完整读取、严格 UTF-8 解码与核 hash。Provider 同时收到原结果 metadata/summary 与完整正文，Files baseline/selection 不因展开正文丢失；不把摘要或引用当成已读内容。来源 ID、选定上下文和原调用关系保持。背景正文仍明确作为低信任 user 数据，不增加权限。传输、短事务与实际审核 proof 的取舍见[完整正文决定](../../../../.agents/notes/implemented/architecture/2026-10-01-immutable-model-body-and-review-proof.md)。
 
+完整正文读取优先使用[Artifact owner](../artifacts/README.md)的可选 `readReference` 端口，一次实时 scope 查询同时核完整原引用并完整验证文件。Runtime 仍复核 bytes 的 size/hash 和读取前后取消；没有新入口的自定义端口保留原 metadata 查询及 `read` 回退。逐段引用、恢复后的原出处与当前连接准入保持，不跨调用缓存验证结果。
+
 大 Model 请求、决策来源与 Auto 请求使用版本 1 的中立 `ModelBodyReference`。64 KiB 是转为不可变 Artifact 的传输阈值，不是拒绝、截断或累计预算；完整 canonical JSON 保存在原 Session scope，ref ID 包含完整 hash，Model requestId/modelId 和实际 tools identity 留在有限持久 header。原始完整 sources/sourceIds 位于正文，header 保留必要来源 id/digest 与工具装配身份。每次实际 Provider I/O 前完整核 scope、metadata、字节大小、SHA256、严格 UTF-8、请求身份和工具身份并展开；读取取消、缺失能力、损坏或错误 scope 会阻止 Provider。成功 Model 回执另存实际 `result.modelInputBodyHash`，冷重开准确读取原 scope，不重新标 Store 或重放旧意图。
 
 Worker 的控制/正文队列仍为原有限容量，没有移除或提高额度。`storage/sqlite/model-body.ts` 在短事务里只核已登记 blob_ref/hash/size/MIME/原主体与 scope；不进行正文文件读取或 JSON 语义解析。完整验证在 Core 的 Artifact I/O 端口进行。Artifact 登记的完整字节验证在登记事务之前，事务再核原 Store/scope 与 metadata；这段已有 Worker 同步验证仍可能推迟控制调度，本切片不宣称大文件时的控制延迟资格。便利 JSON/字符串展开受真实内存与平台表示能力影响。

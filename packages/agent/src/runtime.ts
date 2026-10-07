@@ -4995,25 +4995,34 @@ export class AgentRuntime {
     if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
     signal?.throwIfAborted();
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
-    const original = await this.options.store.getArtifactReference({
+    const input = {
       expectedStoreId: storeId,
       sessionId: reference.sessionId,
       subjectId: reference.subjectId,
       refId: reference.id,
       scope: reference.scope,
-    });
-    if (
-      !original ||
-      canonicalJson(original as unknown as Json) !== canonicalJson(reference as unknown as Json)
-    )
-      throw new AgentError('model_body_invalid');
-    const content = await this.options.artifacts.read({
-      expectedStoreId: storeId,
-      sessionId: reference.sessionId,
-      subjectId: reference.subjectId,
-      refId: reference.id,
-      scope: reference.scope,
-    });
+    };
+    let content: Uint8Array;
+    if (this.options.artifacts.readReference) {
+      try {
+        content = await this.options.artifacts.readReference({
+          expectedStoreId: storeId,
+          reference,
+        });
+      } catch (error) {
+        if (error instanceof AgentError && error.code === 'artifact_reference_mismatch')
+          throw new AgentError('model_body_invalid');
+        throw error;
+      }
+    } else {
+      const original = await this.options.store.getArtifactReference(input);
+      if (
+        !original ||
+        canonicalJson(original as unknown as Json) !== canonicalJson(reference as unknown as Json)
+      )
+        throw new AgentError('model_body_invalid');
+      content = await this.options.artifacts.read(input);
+    }
     signal?.throwIfAborted();
     if (
       String(content.byteLength) !== reference.size ||

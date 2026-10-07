@@ -14,6 +14,8 @@ Tool 的完整 Model 内容使用中立 `ToolResult.modelContent` Artifact 引�
 
 大 Model 请求、决策来源与 Auto 请求以版本 1 的 `ModelBodyReference` 指向准确原 Session scope 的不可变完整 canonical JSON。64 KiB 只决定传输路径，不是内容拒绝、裁剪或累计 Run 额度。实际 requestId/modelId、来源摘要和工具身份保存在有限 header，完整 sources 与请求保存在正文。Provider I/O 前重新完整展开并核对身份，实际成功 Model 回执保存 `inputBodyHash`。冷查询保持原 scope，不重新标 Store 或重跑旧 carrier。
 
+中立 ArtifactContentStore 可提供 readReference：默认 Artifact leaf 在一个在途读取内实时查询原 scope，并核完整登记引用（含出处、MIME、hash、size）的 canonical 相等，再完整验证文件。Runtime 复核 bytes size/hash 与读取前后取消；未提供新入口的旧端口继续原 metadata/read 路径。此入口消除 Runtime 与默认 reader 的重复引用查询，不缓存已验证正文或许可、不减少原发布同步、owner 守卫和每段检查点；当前连接 expectedStoreId 与 reference 的原 Store 出处继续分开。读取包装端口显式接入其提供的两个入口，取消测试对两者使用同一原阻塞门，人工审批的字节漂移也在实际所选入口注入；Runtime 完整 bytes 复核和原零效果断言保持。原17MiB系统完成10秒预算保持，失败记录与复验归[当前进展](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，机制合同归[Artifact owner](../../../../packages/agent/src/artifacts/README.md)。
+
 SQLite 的 Model body 校验只在短事务中核已登记的 ref/hash/size/MIME、原主体与 scope，不在业务事务中读取完整文件或解析完整 JSON。Artifact 登记的字节核验先于登记事务，事务再核身份及 metadata。当前登记仍由 Worker 同步读取字节；它不构成大文件控制延迟资格。
 
 Auto 继续使用唯一 Loop、共享 Model 槽、无 Tool/额外来源的专用 child，并限制为一个实际 Model 调用。审核原文从真实原命令、根工作、目标输入/来源及同组成功 Model 派生；Core 封存 carrier 的审核绑定 digest。最终 SQL 许可核对这个绑定、实际输入 hash、唯一成功 Model、completed child、succeeded carrier 与闭合输出。公开请求不能声明审核 proof，也不能开放 planned 父执行的通用绕过入口。

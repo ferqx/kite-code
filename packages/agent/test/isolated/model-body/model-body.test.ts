@@ -40,16 +40,18 @@ async function setup(
   const readGate = new Promise<void>((resolve) => {
     releaseRead = resolve;
   });
+  async function holdRead(reading: Promise<Uint8Array>) {
+    const bytes = await reading;
+    if (mode === 'cancel') {
+      readEntered = true;
+      await readGate;
+    }
+    return bytes;
+  }
   const port: ArtifactContentStore = {
     ...artifacts,
-    async read(input) {
-      const bytes = await artifacts.read(input);
-      if (mode === 'cancel') {
-        readEntered = true;
-        await readGate;
-      }
-      return bytes;
-    },
+    read: (input) => holdRead(artifacts.read(input)),
+    readReference: (input) => holdRead(artifacts.readReference(input)),
   };
   const model = createFixedModel(
     mode === 'source' || mode === 'origin'

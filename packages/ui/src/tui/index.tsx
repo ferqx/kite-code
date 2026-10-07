@@ -60,6 +60,8 @@ export function TuiSession({ controller }: { controller: TuiController }) {
 }
 type Execution = SessionView['executions'][number];
 type HistoryItem = { key: string; version: string; node: ReactNode };
+const executionDisplayKey = (execution: Execution) =>
+  JSON.stringify([execution.originStoreId, execution.sessionId, execution.id]);
 
 /** Ink owns the emitted bytes; these are only the current immutable render items. */
 function TuiHistory({
@@ -67,11 +69,15 @@ function TuiHistory({
   card,
   form,
   step,
+  collapsed,
+  showReasoning,
 }: {
   controller: TuiController;
   card?: Interaction;
   form?: ReturnType<typeof questionForm>;
   step?: number;
+  collapsed: ReadonlySet<string>;
+  showReasoning: boolean;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const { stdout, write } = useStdout();
@@ -99,12 +105,16 @@ function TuiHistory({
           message.contentFormat,
           message.outputBody,
           state.fullOutputs.get(message.id),
+          showReasoning,
+          state.loadedOutputBodies.get(message.id)?.reasoning,
         ]),
         node: (
           <TuiMessage
             message={message}
             controller={controller}
             fullOutput={state.fullOutputs.get(message.id)}
+            reasoning={state.loadedOutputBodies.get(message.id)?.reasoning}
+            showReasoning={showReasoning}
           />
         ),
       })),
@@ -115,8 +125,14 @@ function TuiHistory({
           execution.status,
           execution.resultRevision,
           execution.result,
+          collapsed.has(executionDisplayKey(execution)),
         ]),
-        node: <TuiExecution execution={execution} />,
+        node: (
+          <TuiExecution
+            execution={execution}
+            collapsed={collapsed.has(executionDisplayKey(execution))}
+          />
+        ),
       })),
       ...(card
         ? [
@@ -157,7 +173,20 @@ function TuiHistory({
           ]
         : []),
     ];
-  }, [messages, executions, state.fullOutputs, state.attachments, card, form, step, controller, t]);
+  }, [
+    messages,
+    executions,
+    state.fullOutputs,
+    state.loadedOutputBodies,
+    state.attachments,
+    card,
+    form,
+    step,
+    controller,
+    t,
+    collapsed,
+    showReasoning,
+  ]);
   const [committed, setCommitted] = useState({ scope, items, epoch: 0 });
   const replace =
     committed.scope !== scope ||
@@ -193,10 +222,14 @@ function TuiMessage({
   message,
   controller,
   fullOutput,
+  reasoning,
+  showReasoning,
 }: {
   message: Message;
   controller: TuiController;
   fullOutput?: string;
+  reasoning?: string;
+  showReasoning: boolean;
 }) {
   const { t } = useTuiPresentation();
   return (
@@ -206,6 +239,32 @@ function TuiMessage({
         {terminalText(message.id)}
         {']'} {message.status}
       </Text>
+      {showReasoning && message.role === 'assistant' && message.outputBody && (
+        <Box flexDirection="column">
+          <Text dimColor>
+            {t('Recorded reasoning')} ·{' '}
+            {message.outputBody.complete ? t('complete') : t('incomplete prefix')}
+          </Text>
+          {reasoning === undefined ? (
+            <Text dimColor>
+              {message.outputBody.reasoningBytes === '0'
+                ? t('No recorded reasoning in this snapshot')
+                : `${t('Recorded reasoning not loaded;')} ${
+                    message.outputBody.readAvailability === 'unsupported' ||
+                    message.contentFormat === 'unsupported'
+                      ? t('full read unsupported')
+                      : controller.port.readModelOutput
+                        ? t('Ctrl+O reads verified full body')
+                        : t('full reader unavailable')
+                  }`}
+            </Text>
+          ) : reasoning.length === 0 ? (
+            <Text dimColor>{t('Recorded reasoning is empty')}</Text>
+          ) : (
+            <TerminalMarkdown content={reasoning} />
+          )}
+        </Box>
+      )}
       <TerminalMarkdown content={fullOutput ?? message.content} />
       {message.outputBody && fullOutput === undefined && (
         <Text>
@@ -225,7 +284,8 @@ function TuiMessage({
     </Box>
   );
 }
-function TuiExecution({ execution }: { execution: Execution }) {
+function TuiExecution({ execution, collapsed }: { execution: Execution; collapsed: boolean }) {
+  const { t } = useTuiPresentation();
   return (
     <Box flexDirection="column">
       <Text>
@@ -233,7 +293,11 @@ function TuiExecution({ execution }: { execution: Execution }) {
         {terminalText(execution.id)}
         {']'} {execution.status}
       </Text>
-      <Text>{terminalText(JSON.stringify(execution.result, null, 2))}</Text>
+      {collapsed ? (
+        <Text dimColor>{t('Result collapsed')}</Text>
+      ) : (
+        <Text>{terminalText(JSON.stringify(execution.result, null, 2))}</Text>
+      )}
     </Box>
   );
 }
@@ -249,6 +313,30 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
   const { t } = useTuiPresentation();
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
+  const resultExecutions = controller.visibleExecutions.filter((item) => item.kind !== 'model');
+  const resultKeys = new Set(
+    state.snapshot?.view.executions
+      .filter((item) => item.kind !== 'model')
+      .map(executionDisplayKey),
+  );
+  const tail = resultExecutions.at(-1);
+  const [savedDisplay, setResultDisplay] = useState({
+    scope: resultScope,
+    collapsed: new Set<string>(),
+    showReasoning: false,
+  });
+  let resultDisplay = savedDisplay;
+  if (savedDisplay.scope !== resultScope) {
+    resultDisplay = { scope: resultScope, collapsed: new Set(), showReasoning: false };
+    setResultDisplay(resultDisplay);
+  } else if ([...savedDisplay.collapsed].some((key) => !resultKeys.has(key))) {
+    resultDisplay = {
+      ...savedDisplay,
+      collapsed: new Set([...savedDisplay.collapsed].filter((key) => resultKeys.has(key))),
+    };
+    setResultDisplay(resultDisplay);
+  }
   const jobs =
     state.snapshot?.view.executions.filter(
       (execution) =>
@@ -514,6 +602,22 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       if (message) void controller.loadOutput(message);
       return;
     }
+    if (key.ctrl && input === 't') {
+      if (card || state.panel || chooser || cardChooser) return;
+      setResultDisplay({ ...resultDisplay, showReasoning: !resultDisplay.showReasoning });
+      if (!resultDisplay.showReasoning) {
+        const message = controller.visibleMessages
+          .filter((item) => item.role === 'assistant' && item.outputBody)
+          .at(-1);
+        if (
+          message?.outputBody &&
+          message.outputBody.reasoningBytes !== '0' &&
+          !state.loadedOutputBodies.has(message.id)
+        )
+          void controller.loadOutput(message);
+      }
+      return;
+    }
     if (key.ctrl && input === 'a' && card) {
       void controller.loadAttachment(card);
       return;
@@ -658,7 +762,14 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     }
   });
   const history = (
-    <TuiHistory controller={controller} card={card} form={form} step={question?.step} />
+    <TuiHistory
+      controller={controller}
+      card={card}
+      form={form}
+      step={question?.step}
+      collapsed={resultDisplay.collapsed}
+      showReasoning={resultDisplay.showReasoning}
+    />
   );
   const withHistory = (panel: ReactNode) => (
     <Box flexDirection="column">
@@ -919,6 +1030,22 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command',
         )}
       </Text>
+      {!card && !state.panel && !chooser && !cardChooser && (
+        <Text dimColor>
+          {tail &&
+            t(
+              resultDisplay.collapsed.has(executionDisplayKey(tail))
+                ? 'Empty Enter expands the current tail result'
+                : 'Empty Enter collapses the current tail result',
+            )}
+          {tail && ' · '}
+          {t(
+            resultDisplay.showReasoning
+              ? 'Ctrl+T hides recorded reasoning'
+              : 'Ctrl+T shows recorded reasoning',
+          )}
+        </Text>
+      )}
       <TuiComposer
         buffer={composer}
         files={state.fileCandidates}
@@ -941,6 +1068,23 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         }
         onChange={(text) => controller.setDraft(text)}
         onSubmit={() => void controller.send()}
+        onEmptyEnter={() => {
+          const current = controller.visibleExecutions
+            .filter((item) => item.kind !== 'model')
+            .at(-1);
+          if (
+            !tail ||
+            !current ||
+            controller.state.sessionId !== state.sessionId ||
+            executionDisplayKey(current) !== executionDisplayKey(tail)
+          )
+            return;
+          const collapsed = new Set(resultDisplay.collapsed),
+            key = executionDisplayKey(tail);
+          if (collapsed.has(key)) collapsed.delete(key);
+          else collapsed.add(key);
+          setResultDisplay({ ...resultDisplay, collapsed });
+        }}
         onTogglePlan={() => controller.togglePlanning()}
       />
     </Box>

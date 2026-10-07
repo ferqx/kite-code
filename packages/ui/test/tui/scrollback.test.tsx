@@ -1,12 +1,268 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import type { ReadStream, WriteStream } from 'node:tty';
-import type { SessionView } from '@kite-ai/client';
+import type { ModelOutputSnapshot, SessionView } from '@kite-ai/client';
 import { render } from 'ink';
 import { render as renderFrames } from 'ink-testing-library';
 import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
 
 const pause = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+test('empty Enter toggles only the original tail result; input, refresh and earlier results keep their original facts', async () => {
+  const current = snapshot('a', ['MODEL_HISTORY_ORIGINAL']);
+  current.view.executions = ['earlier', 'tail'].map((id) => ({
+    id,
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: null,
+    kind: id === 'tail' ? 'job' : 'tool',
+    definitionId: `original-${id}`,
+    definitionVersion: '1',
+    status: 'succeeded',
+    resultRevision: '1',
+    result: { text: `${id.toUpperCase()}_RESULT_原文🙂`, path: '/Original/Language' },
+    cancelRequestedAt: null,
+    parentExecutionId: null,
+    childSessionId: id === 'tail' ? 'original-child' : null,
+  }));
+  const before = JSON.stringify(current);
+  const writes: unknown[] = [];
+  let reads = 0;
+  const forbidden = async () => {
+    throw Error('display must not answer, cancel or query a Command');
+  };
+  const controller = new TuiController({
+    storeId: 'store',
+    nextCommandId: () => 'typed-original',
+    listSessions: async () => [],
+    readSession: async () => {
+      reads++;
+      return current;
+    },
+    submit: async (id, request) => {
+      writes.push({ id, request });
+      return {
+        id: request.commandId,
+        sessionId: id,
+        kind: request.kind,
+        originStoreId: 'store',
+        status: 'accepted',
+        receipt: {},
+        cancelRequestedAt: null,
+      };
+    },
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+  });
+  await controller.select('a');
+  const ui = renderFrames(<TuiSession controller={controller} />);
+  try {
+    await pause();
+    expect(ui.lastFrame()).toContain('TAIL_RESULT_原文🙂');
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    expect(ui.lastFrame()).toContain('original-tail [tail] succeeded');
+    expect(ui.lastFrame()).toContain('EARLIER_RESULT_原文🙂');
+    expect(ui.lastFrame()).toContain('MODEL_HISTORY_ORIGINAL');
+    expect(writes).toHaveLength(0);
+    expect(reads).toBe(1);
+    controller.setDraft('typed queued 原文🙂');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    ui.stdin.write('\r');
+    await pause();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ id: 'a', request: { content: 'typed queued 原文🙂' } });
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    controller.setDraft('');
+    await controller.select('a');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).toContain('TAIL_RESULT_原文🙂');
+    expect(JSON.stringify(current)).toBe(before);
+    expect(writes).toHaveLength(1);
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    controller.clearDisplay();
+    await pause();
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_原文🙂');
+    expect(writes).toHaveLength(1);
+    current.view.executions = current.view.executions.map((item) =>
+      item.id === 'tail'
+        ? { ...item, resultRevision: '2', result: { text: 'TAIL_RESULT_UPDATED_原文🙂' } }
+        : item,
+    );
+    await controller.select('a');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_UPDATED_原文🙂');
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).toContain('TAIL_RESULT_UPDATED_原文🙂');
+    ui.stdin.write('\r');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('TAIL_RESULT_UPDATED_原文🙂');
+    expect(writes).toHaveLength(1);
+  } finally {
+    ui.unmount();
+    ui.cleanup();
+    controller.dispose();
+  }
+});
+
+test('CtrlT reads original reasoning once, toggles only display and never carries it to another Session', async () => {
+  let reads = 0;
+  let pending = false;
+  const reasoning = (id: string) => `REASON_${id}_原文🙂 /Theme/Language\u001b[2J`;
+  const forbidden = async () => {
+    throw Error('reasoning display must not execute');
+  };
+  const port: TuiPort = {
+    storeId: 'store',
+    nextCommandId: () => 'never',
+    listSessions: async () => [],
+    readSession: async (id) => {
+      const current = snapshot(id, ['PREVIEW_ORIGINAL']);
+      const messages: TuiSnapshot['messages'] = current.messages.map((m) => ({
+        ...m,
+        runId: 'run',
+        outputBody: {
+          kind: 'model_output',
+          executionId: 'model-original',
+          complete: true,
+          contentBytes: '21',
+          reasoningBytes: String(Buffer.byteLength(reasoning(id))),
+          toolCallCount: 0,
+          ...(id === 'c' ? { readAvailability: 'unsupported' as const } : {}),
+        },
+      }));
+      const interactions: TuiSnapshot['interactions'] = pending
+        ? [
+            {
+              id: 'original-question',
+              originStoreId: 'store',
+              sessionId: id,
+              presentationSessionId: id,
+              runId: 'run',
+              executionId: 'question-original',
+              attempt: 1,
+              ancestry: [],
+              definitionId: 'question',
+              definitionVersion: '1',
+              inputDigest: 'original-input',
+              policyRevision: '1',
+              requiredRefs: [],
+              answer: null,
+              acceptedDecisionRevision: null,
+              kind: 'question',
+              revision: '1',
+              state: 'pending',
+              request: { schema: { type: 'string', title: 'ORIGINAL_QUESTION', minLength: 1 } },
+            },
+          ]
+        : [];
+      return { ...current, messages, interactions };
+    },
+    readModelOutput: async (id, executionId) => {
+      reads++;
+      const output: ModelOutputSnapshot['output'] = {
+        content: 'FULL_CONTENT_ORIGINAL',
+        reasoning: reasoning(id),
+        toolCalls: [],
+        complete: true,
+      };
+      const body = Buffer.from(JSON.stringify(output));
+      return {
+        storeId: 'store',
+        sessionId: id,
+        rootSessionId: id,
+        runId: 'run',
+        executionId,
+        originCommandId: 'original-work',
+        rootWorkCommandId: 'original-work',
+        rootWorkSeq: '1',
+        attempt: 1,
+        status: 'succeeded',
+        bodyHash: createHash('sha256').update(body).digest('hex'),
+        bodyBytes: String(body.byteLength),
+        contentBytes: String(Buffer.byteLength(output.content)),
+        reasoningBytes: String(Buffer.byteLength(output.reasoning)),
+        snapshotCursor: '1',
+        output,
+      };
+    },
+    submit: forbidden,
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+  };
+  const reader = port.readModelOutput;
+  port.readModelOutput = undefined;
+  const controller = new TuiController(port);
+  await controller.select('a');
+  const ui = renderFrames(<TuiSession controller={controller} />);
+  try {
+    await pause();
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('Recorded reasoning not loaded; full reader unavailable');
+    expect(reads).toBe(0);
+    ui.stdin.write('\u0014');
+    await pause();
+    port.readModelOutput = reader;
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('REASON_a_原文🙂 /Theme/Language\\u001b[2J');
+    expect(ui.lastFrame()).toContain('FULL_CONTENT_ORIGINAL');
+    expect(reads).toBe(1);
+    const original = JSON.stringify([...controller.state.loadedOutputBodies]);
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
+    expect(ui.lastFrame()).toContain('FULL_CONTENT_ORIGINAL');
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('REASON_a_');
+    expect(reads).toBe(1);
+    expect(JSON.stringify([...controller.state.loadedOutputBodies])).toBe(original);
+    pending = true;
+    await controller.select('a');
+    await pause();
+    expect(ui.lastFrame()).toContain('ORIGINAL_QUESTION');
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('REASON_a_');
+    expect(reads).toBe(1);
+    pending = false;
+    await controller.select('b');
+    await pause();
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
+    expect(ui.lastFrame()).not.toContain('REASON_b_');
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('REASON_b_');
+    expect(ui.lastFrame()).not.toContain('REASON_a_');
+    expect(reads).toBe(2);
+    await controller.select('c');
+    await pause();
+    ui.stdin.write('\u0014');
+    await pause();
+    expect(ui.lastFrame()).toContain('Recorded reasoning not loaded; full read unsupported');
+    expect(reads).toBe(2);
+  } finally {
+    ui.unmount();
+    ui.cleanup();
+    controller.dispose();
+  }
+});
 function snapshot(sessionId: string, bodies: readonly string[]): TuiSnapshot {
   return {
     storeId: 'store',

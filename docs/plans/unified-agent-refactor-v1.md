@@ -2009,6 +2009,9 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 
 37能力保持partial、wholeV13=false、Goal active；本地stage/commit授权不扩大到push/PR/发布。
 
+正式 TUI 的结果阅读缺口现补齐：空 Enter 只展开／收起当前尾部原结果，排队输入和同会话刷新保选择；Ctrl+T沿既有原完整reader／缓存显示或隐藏reasoning，明确unsupported/unavailable，原执行／导出语义保持。完整本机Terminal候选包的正式前门、默认Profile、包内Bun/Service与80×24 PTY实际1/17通过，原Provider2、9MiB全文、原Artifact refs、两次0600导出和所属退出／冷重开保持；原20秒滚屏PTY1/169及五UI文件48/420通过。当前四项依赖仍成立，准确原红、收束完整默认和独立审查限制归[本轮证据](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的工具结果与思考查看)。
+
+
 ### 30.2.10 Linux 真实代码升级与冷回退
 
 本轮沿实际installed CLI/Native入口补齐Linux arm64的A→B→A→B完整代码兼容链。Mac仍固定3140原提交及原前端差异断言；Linux固定首个准确builtin SQLite3.53.2已准入的原提交1b796e30，由各自原始Terminal/Native builder构建，锁文件/八workspace/补丁/SQLformat1保持。原Mac前驱在Linux的准确来源拒绝保留，不修改旧源码、引擎白名单或版本文字；取舍归[平台前驱决定](../../.agents/notes/implemented/testing/2026-10-07-platform-real-code-predecessors.md)。

@@ -12,6 +12,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { ArtifactReferenceReadInput } from './artifact-port';
 import {
   artifactChunkBytes,
   artifactPath,
@@ -19,10 +20,11 @@ import {
   readPublishedArtifactChunks,
   verifyPublishedArtifact,
 } from './artifacts-files';
+import { canonicalJson } from './json';
 import { acquireProfileAccess, assertNoSymlinkPath, type ProfileOptions } from './platform/profile';
 import { createWindowsArtifactTemporary } from './platform/windows-artifact-files';
 import type { Store } from './storage/port';
-import { AgentError, type ArtifactReference, type ArtifactScope } from './storage/types';
+import { AgentError, type ArtifactReference, type ArtifactScope, type Json } from './storage/types';
 
 export type { ArtifactReference, ArtifactScope } from './storage/types';
 export interface ArtifactReadInput {
@@ -44,6 +46,7 @@ export interface ArtifactStore {
     },
   ): Promise<ArtifactReference>;
   read(input: ArtifactReadInput): Promise<Uint8Array>;
+  readReference(input: ArtifactReferenceReadInput): Promise<Uint8Array>;
   /** Successful EOF verifies full hash and identity; cancellation/partial bytes are not a complete body. */
   readStream(input: ArtifactReadInput & { signal?: AbortSignal }): AsyncIterable<Uint8Array>;
   close(): Promise<void>;
@@ -194,6 +197,25 @@ export function createArtifactStore(options: {
         const ref = await options.store.getArtifactReference(input);
         if (!ref) throw new AgentError('artifact_reference_not_found');
         return readPublishedArtifact(access.profilePath, ref.hash, ref.size);
+      });
+    },
+    readReference(input) {
+      const expectedStoreId = input.expectedStoreId;
+      const reference = { ...input.reference, scope: { ...input.reference.scope } };
+      return use(async () => {
+        const original = await options.store.getArtifactReference({
+          expectedStoreId,
+          sessionId: reference.sessionId,
+          subjectId: reference.subjectId,
+          refId: reference.id,
+          scope: reference.scope,
+        });
+        if (
+          !original ||
+          canonicalJson(original as unknown as Json) !== canonicalJson(reference as unknown as Json)
+        )
+          throw new AgentError('artifact_reference_mismatch');
+        return readPublishedArtifact(access.profilePath, original.hash, original.size);
       });
     },
     async *readStream(input) {

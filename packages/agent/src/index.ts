@@ -1,4 +1,8 @@
-export type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
+export type {
+  ArtifactContentStore,
+  ArtifactReadInput,
+  ArtifactReferenceReadInput,
+} from './artifact-port';
 export type {
   CompressionInput,
   ContextCompressor,

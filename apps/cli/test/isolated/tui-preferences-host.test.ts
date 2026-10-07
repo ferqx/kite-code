@@ -251,18 +251,18 @@ try:
  spawn();wait('ORIGINAL English model body stays exact.',material=True);baseline=counts();key(b'/theme');wait('/theme');key(b'\\r');wait('[teal]');wait('Confirmed preferences');assert re.search(b'38;(?:2;78;201;176|5;115)m',buffer)
  key(b'\\x1b[B');wait('> blue');key(b'\\r');wait('blue [blue] ✓');wait('Preference saved');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert json.load(open(pref))['colorPreset']=='blue'
  key(b'\\x1b');wait('Session a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/language');wait('/language');key(b'\\r');wait('Language');key(b'\\x1b[A');wait('> Simplified Chinese [zh-CN]');key(b'\\r');wait('偏好已保存');wait('简体中文 [zh-CN]');assert json.load(open(pref))['language']=='zh-CN'
- key(b'\\x1b');wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);assert counts()==baseline
+ key(b'\\x1b');wait('会话 a');wait('新 Run >');wait('ORIGINAL English model body stays exact.',material=True);assert counts()==baseline
  wait('终端界面 · Ctrl+N 新工作区会话 · Ctrl+Q');wait('${mode === 'paired' ? '退出当前宿主' : '断开共享服务'}')
- key(b'/background');wait('/background');key(b'\\r');wait('原后台任务 · 会话 a');wait('当前快照中没有已核验的 Job');key(b'\\x1b');wait('会话 a')
- key(b'/recovery');wait('/recovery');key(b'\\r');wait('显式恢复 · a');wait('Ctrl+L 查询原申请');key(b'\\x1b');wait('会话 a')
- key(b'/rewind');wait('/rewind');key(b'\\r');wait('文件恢复：');wait('Enter 确认所选范围');key(b'\\x1b');wait('会话 a')
+ key(b'/background');wait('/background');key(b'\\r');wait('原后台任务 · 会话 a');wait('当前快照中没有已核验的 Job');key(b'\\x1b');wait('会话 a');wait('新 Run >')
+ key(b'/recovery');wait('/recovery');key(b'\\r');wait('显式恢复 · a');wait('Ctrl+L 查询原申请');key(b'\\x1b');wait('会话 a');wait('新 Run >')
+ key(b'/rewind');wait('/rewind');key(b'\\r');wait('文件恢复：');wait('Enter 确认所选范围');key(b'\\x1b');wait('会话 a');wait('新 Run >')
  paste='Theme Language /Original/path\\n中文🙂e\\u0301';key(b'\\x1b[200~'+paste.encode()+b'\\x1b[201~');wait('[已粘贴 '+str(len(paste))+' 个字符]');key(b'\\x7f');wait('新 Run >');assert counts()==baseline
  print('CHINESE_OWNED_PANELS_AND_PASTE')
  key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');os.rename(pref,pref+'.saved');os.mkdir(pref,0o700)
  key(b'\\x1b[B');wait('> purple');key(b'\\r');wait('tui_preferences_unavailable');wait('保留原值');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer);assert counts()==baseline
- os.rmdir(pref);os.rename(pref+'.saved',pref);key(b'r');wait('blue [blue] ✓');key(b'\\x1b');wait('会话 a');close();assert counts()==baseline
+ os.rmdir(pref);os.rename(pref+'.saved',pref);key(b'r');wait('blue [blue] ✓');key(b'\\x1b');wait('会话 a');wait('新 Run >');close();assert counts()==baseline
  spawn();wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);key(b'/theme');wait('/theme');key(b'\\r');wait('主题');wait('blue [blue] ✓');assert re.search(b'38;(?:2;86;156;214|5;110)m',buffer)
- key(b'\\x1b');wait('会话 a');key(b'/language');wait('/language');key(b'\\r');wait('语言');wait('简体中文 [zh-CN]');key(b'\\x1b');wait('会话 a');wait('ORIGINAL English model body stays exact.',material=True);close();assert counts()==baseline;assert json.load(open(pref))=={'colorPreset':'blue','language':'zh-CN'}
+ key(b'\\x1b');wait('会话 a');wait('新 Run >');key(b'/language');wait('/language');key(b'\\r');wait('语言');wait('简体中文 [zh-CN]');key(b'\\x1b');wait('会话 a');wait('新 Run >');wait('ORIGINAL English model body stays exact.',material=True);close();assert counts()==baseline;assert json.load(open(pref))=={'colorPreset':'blue','language':'zh-CN'}
  print('PREFERENCES_ORIGINAL_COMPLETE')
 finally:
  open(${JSON.stringify(transcript)},'wb').write(all_output)

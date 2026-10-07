@@ -15,6 +15,7 @@ export function TuiComposer({
   label,
   onChange,
   onSubmit,
+  onEmptyEnter,
   onTogglePlan,
   files,
   fileScope,
@@ -26,6 +27,7 @@ export function TuiComposer({
   label: string;
   onChange(text: string): void;
   onSubmit(): void;
+  onEmptyEnter?(): void;
   onTogglePlan?(): void;
   files?: TuiState['fileCandidates'];
   fileScope?: string;
@@ -106,6 +108,10 @@ export function TuiComposer({
         return;
       }
       if ((key.return || textReturn) && !key.shift && !key.meta) {
+        if (buffer.text.length === 0 && onEmptyEnter) {
+          onEmptyEnter();
+          return;
+        }
         if (currentToken && !currentPaths.length) return;
         if (candidates.length && buffer.text !== candidates[buffer.candidate]) {
           complete(currentToken, currentPaths);

@@ -6,6 +6,8 @@
 
 `readStream` 先核准确 Store、Session、subject 和 scope，再 no-follow 打开只读不可变 Blob，逐块完整核 hash、size 和 FD 前后 identity。**只有成功 EOF 才证明完整内容**；提前停止、取消或末尾校验错误不能把已接收前缀称为全文。消费者必须完成迭代或调用 iterator.return，close 会排空真实在途操作后释放 profile 使用权。`read` 便利入口收集完整 bytes 并在成功完整校验后返回。
 
+`readReference({expectedStoreId, reference})` 在同一个在途读取中实时查询准确 scope 的登记引用，逐项保持完整原 metadata（含出处、MIME、hash 和 size）的 canonical 相等，再沿同一完整文件验证返回 bytes；不缓存引用或授权。`expectedStoreId` 是当前连接准入，`reference.storeId` 是原引用出处，恢复后不能互换。中立 `ArtifactContentStore` 将这个入口设为可选：Runtime 使用它避免先查询、再由默认 `read` 重复查询同一引用；未提供该入口的自定义端口保留原 Runtime metadata 校验与 `read` 路径。包装读取的端口需要明确包装所提供的两个入口，不能把一个入口的阻塞或取消钩子当作另一个入口也已执行。Runtime 在读取前后仍核取消并复核完整 bytes 的 size/hash，发布、owner 守卫和每段持久检查点保持。
+
 Store 登记使用 `verifyPublishedArtifact` 固定工作内存复核全文，不把整 Blob 分配到 Worker 事务中。Windows x64 使用下面的固定原生实现；其他 Windows architecture 仍明确 unsupported。本机 macOS 证据不代表 Windows/Linux、独立安装或跨平台发行资格。
 
 Windows [内部媒体 leaf](../platform/windows-artifact-files.ts)仅在实际调用时加载固定 System DLL，读取当前 token SID，不接受 caller HANDLE、SID、ACL 或 DLL。Profile/blob 目录仍用原 [Windows 私有路径政策](../platform/windows-path-security.README.md)，未改变 Profile/config 的 FA DACL。实际流写入使用原子 CREATE_NEW 私有 temporary 和原 HANDLE，每块最多 64 KiB，保 signed-64 总字节计数。只有这个新建 temporary 可通过 SetSecurityInfo 减权为 protected currentSID-only FILE_GENERIC_READ；已有对象 ACL 不修复。owner 主动改 ACL 与 POSIX owner 主动 chmod 类似，不属于防御同一 owner 的独立安全边界。

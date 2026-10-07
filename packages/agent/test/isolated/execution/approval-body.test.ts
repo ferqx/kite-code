@@ -61,15 +61,18 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
       [finish],
     ]);
     const read = artifacts.read.bind(artifacts);
-    artifacts.read = async (request) => {
-      const content = await read(request);
-      if (changed && change === 'artifact_bytes' && request.refId.startsWith('approval-body-')) {
+    const readReference = artifacts.readReference.bind(artifacts);
+    function drift(refId: string, content: Uint8Array) {
+      if (changed && change === 'artifact_bytes' && refId.startsWith('approval-body-')) {
         const corrupt = new Uint8Array(content);
         corrupt[corrupt.length - 2] = corrupt[corrupt.length - 2]! ^ 1;
         return corrupt;
       }
       return content;
-    };
+    }
+    artifacts.read = async (request) => drift(request.refId, await read(request));
+    artifacts.readReference = async (request) =>
+      drift(request.reference.id, await readReference(request));
     const runtime = createRuntime({
       store,
       artifacts,
