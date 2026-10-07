@@ -31,17 +31,30 @@ export function NativeJobOutputPanel(
       ? props.backgroundScope.viewSelection
       : (props.selection.viewSelection ?? 0),
     historyEpoch = background ? 0 : props.historyEpoch;
+  const originStoreId = background
+    ? props.backgroundScope.originStoreId
+    : (props.selection.executions.find((item) => item.id === executionId)?.originStoreId ?? '');
   const scope: NativeJobOutputScope = useMemo(
     () => ({
       generation,
       viewSelection,
       historyEpoch,
       storeId,
+      originStoreId,
       sessionId,
       workspaceId,
       executionId,
     }),
-    [generation, viewSelection, historyEpoch, storeId, sessionId, workspaceId, executionId],
+    [
+      generation,
+      viewSelection,
+      historyEpoch,
+      storeId,
+      originStoreId,
+      sessionId,
+      workspaceId,
+      executionId,
+    ],
   );
   const identity = JSON.stringify(background ? { ...scope, viewSelection: 0 } : scope);
   const target = useRef(scope);

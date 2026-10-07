@@ -6,6 +6,7 @@ export type NativeJobOutputScope = {
   viewSelection: number;
   historyEpoch: number;
   storeId: string;
+  originStoreId: string;
   sessionId: string;
   workspaceId: string;
   executionId: string;

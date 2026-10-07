@@ -12,7 +12,12 @@ import type {
 import { NativeJobOutputPanel } from '../src/native-job-output-panel';
 
 const selected = (viewSelection = 2) =>
-  ({ storeId: 'store', session: { id: 's', workspaceId: 'w' }, viewSelection }) as NativeSelection;
+  ({
+    storeId: 'store',
+    session: { id: 's', workspaceId: 'w' },
+    executions: [{ id: 'job', originStoreId: 'store' }],
+    viewSelection,
+  }) as unknown as NativeSelection;
 const row = (
   seq: string,
   stream: 'stdout' | 'stderr' | 'progress',
@@ -33,6 +38,7 @@ function result(
       viewSelection: 2,
       historyEpoch: 0,
       storeId: 'store',
+      originStoreId: 'store',
       sessionId: 's',
       workspaceId: 'w',
       executionId: 'job',

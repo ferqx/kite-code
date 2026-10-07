@@ -12,6 +12,7 @@ const scope: NativeJobOutputScope = {
   viewSelection: 2,
   historyEpoch: 0,
   storeId: 'store',
+  originStoreId: 'store',
   sessionId: 's',
   workspaceId: 'w',
   executionId: 'job',

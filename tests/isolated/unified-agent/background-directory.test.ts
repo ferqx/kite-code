@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { chmodSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
@@ -9,14 +9,23 @@ import { createClient } from '@kite-ai/client';
 import { startService } from '../../../apps/service/src';
 import { BackgroundExecutionPageSchema } from '../../../apps/service/src/http/schema';
 import { semanticDigest } from '../../../packages/agent/src/json';
+import { createProfileBackup, restoreProfileBackup } from '../../../packages/agent/src/maintenance';
+import { prepareQualifiedSqliteFixture } from '../../fixtures/unified-agent/qualified-sqlite-fixture';
+
+let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>>;
+beforeAll(async () => {
+  qualified = await prepareQualifiedSqliteFixture();
+}, 60000);
+afterAll(() => qualified?.close());
 
 test('public background directory reads all original Jobs beyond history, scopes before paging and fences snapshots without writes', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-background-directory-'));
-  const store = await openSqliteStore({ dataRoot: root, profile: 'test' }),
-    storeId = (await store.getMetadata()).storeId;
-  const db = new Database(join(root, 'test', 'core.db'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-background-directory-')));
+  chmodSync(root, 0o700);
+  let store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+  const storeId = (await store.getMetadata()).storeId;
+  let db = new Database(join(root, 'test', 'core.db'));
   let models = 0;
-  const runtime = createRuntime({
+  let runtime = createRuntime({
     store,
     model: {
       async *stream() {
@@ -350,7 +359,280 @@ test('public background directory reads all original Jobs beyond history, scopes
     // Tombstone exclusion applies to the whole owned subtree, before LIMIT.
     db.run('UPDATE session SET delete_requested=1 WHERE id=?', ['s']);
     expect(await client.listAllBackgroundExecutions()).toHaveLength(0);
+    db.run('UPDATE session SET delete_requested=0 WHERE id IN (?,?)', ['s', activation.session.id]);
+    const originalIds = (
+      await store.listBackgroundExecutions({
+        expectedStoreId: storeId,
+        subjectId: 'owner',
+        limit: 200,
+      })
+    ).items.map((i) => i.execution.id);
+    const oldReceipt = await store.cancelWork({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      subjectId: 'owner',
+      commandId: 'old-cancel',
+      kind: 'execution.cancel',
+      executionId: child.executionId!,
+    });
+    const oldPublicReceipt = await client.getCommand('old-cancel');
     client.disposeNetwork();
+    await service.close();
+    service = undefined;
+    await runtime.close();
+    db.close();
+    await store.close();
+    let currentId = storeId;
+    const provenance = new Map<string, string>();
+    for (let pass = 0; pass < 2; pass++) {
+      const backup = await createProfileBackup({
+        profile: { dataRoot: root, profile: 'test' },
+        destinationRoot: join(root, `backup-${pass}`),
+      });
+      const restored = await restoreProfileBackup({
+        profile: { dataRoot: root, profile: 'test' },
+        expectedStoreId: currentId,
+        backup,
+        intent: 'replace_with_selected_backup',
+      });
+
+      expect(restored.storeId).not.toBe(currentId);
+      currentId = restored.storeId;
+      store = await openSqliteStore({ dataRoot: root, profile: 'test' });
+      db = new Database(join(root, 'test', 'core.db'));
+      runtime = createRuntime({
+        store,
+        model: {
+          async *stream() {
+            models++;
+            yield { type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } };
+          },
+        },
+        permissions: {
+          async authorize() {
+            return { allowed: false, revision: 'deny' };
+          },
+        },
+      });
+      service = await startService({
+        runtime,
+        profile: { dataRoot: root, name: 'test', accessKey: 'background' },
+        buildId: 'test',
+        subjectId: 'owner',
+      });
+      const restoredClient = createClient({
+        endpoint: service.endpoint,
+        token: service.bootstrap.token,
+        expected: {
+          profile: { dataRoot: root, name: 'test', accessKey: 'background' },
+          apiMajor: 1,
+          requiredCapabilities: ['sessions'],
+        },
+        bootstrap: service.bootstrap,
+      });
+      await restoredClient.connect();
+      const before = counts(),
+        cursor = (await store.getMetadata()).lastChangeCursor;
+      const restoredItems = await restoredClient.listAllBackgroundExecutions();
+
+      expect(restoredItems).toHaveLength(208 + pass);
+      expect(originalIds.every((id) => restoredItems.some((i) => i.execution.id === id))).toBe(
+        true,
+      );
+      expect(restoredItems.find((i) => i.execution.id === child.executionId)?.childRun?.id).toBe(
+        activation.run.id,
+      );
+      expect(restoredItems.find((i) => i.execution.id === nested.executionId)?.run?.id).toBe(
+        activation.run.id,
+      );
+      for (const i of restoredItems)
+        expect(i.execution.originStoreId).toBe(provenance.get(i.execution.id) ?? storeId);
+      expect((await restoredClient.listBackgroundExecutions({ storeId: currentId })).storeId).toBe(
+        currentId,
+      );
+      expect(restoredClient.lastAppliedCursor).toBeUndefined();
+      expect(counts()).toEqual(before);
+      expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(models).toBe(0);
+      const deniedPublic = await restoredClient
+        .cancelExecution('s', {
+          kind: 'execution.cancel',
+          expectedStoreId: currentId,
+          commandId: `denied-public-${pass}`,
+          executionId: child.executionId!,
+        })
+        .then(
+          () => null,
+          (error) => ({ code: error.code, status: error.status }),
+        );
+      expect(deniedPublic).toEqual({ code: 'permission_denied', status: 403 });
+      expect(counts()).toEqual(before);
+      expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+      // Matching foreign execution/source identities alone do not admit history under a current root.
+      db.run('UPDATE command SET origin_store_id=? WHERE id=?', [currentId, 'create-s']);
+      expect(await restoredClient.listAllBackgroundExecutions()).toHaveLength(0);
+      db.run('UPDATE command SET origin_store_id=? WHERE id=?', [storeId, 'create-s']);
+      // The root-work owner is independently checked before paging every Job.
+      db.run('UPDATE command SET subject_id=? WHERE id=?', ['other', 'work']);
+      expect(
+        (
+          await restoredClient.listBackgroundExecutions({
+            storeId: currentId,
+            executionId: child.executionId!,
+          })
+        ).items,
+      ).toHaveLength(0);
+      db.run('UPDATE command SET subject_id=? WHERE id=?', ['owner', 'work']);
+      expect(await restoredClient.getCommand('old-cancel')).toEqual(oldPublicReceipt);
+      expect(
+        await store.cancelWork({
+          expectedStoreId: currentId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'old-cancel',
+          kind: 'execution.cancel',
+          executionId: child.executionId!,
+        }),
+      ).toEqual(oldReceipt);
+
+      for (const request of [
+        { kind: 'execution.cancel', executionId: child.executionId! },
+        { kind: 'run.cancel', runId: run.id },
+        { targetCommandId: 'work' },
+        { kind: 'session.cancel', includeBackground: true },
+      ]) {
+        const input = {
+          expectedStoreId: currentId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: `denied-${pass}-${Object.keys(request)[1]}`,
+          ...request,
+        };
+        const failure = await ('targetCommandId' in input
+          ? store.cancelCommand(input as never)
+          : store.cancelWork(input as never)
+        ).then(
+          () => 'accepted',
+          (error) => error.code,
+        );
+
+        expect(failure).toBe('permission_denied');
+        expect(counts()).toEqual(before);
+        expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+      }
+
+      const commandId = `new-work-${pass}`;
+      await store.acceptCommand({
+        expectedStoreId: currentId,
+        commandId,
+        sessionId: 's',
+        subjectId: 'owner',
+        request: { kind: 'run.start', content: 'new work' },
+      });
+      const newOwner = (await store.acquireSessionOwner('s', `owner-${pass}`))!;
+      const newRun = await store.startRun({
+        expectedStoreId: currentId,
+        owner: newOwner,
+        commandId,
+        configuration: { tools: [{ id: 'fixture/parent', version: '1', extensionId: 'fixture' }] },
+      });
+      await store.planExecution({
+        expectedStoreId: currentId,
+        owner: newOwner,
+        executionId: `new-parent-${pass}`,
+        sessionId: 's',
+        runId: newRun.id,
+        originCommandId: commandId,
+        stepId: 'new-step',
+        callId: 'new-call',
+        kind: 'tool',
+        definitionId: 'fixture/parent',
+        definitionVersion: '1',
+        input: {},
+        decisionSource: source,
+      });
+      await store.markDispatching({
+        expectedStoreId: currentId,
+        owner: newOwner,
+        executionId: `new-parent-${pass}`,
+        authorization: {
+          allowed: true,
+          revision: '1',
+          definitionVersion: '1',
+          inputDigest: await semanticDigest({}),
+        },
+        requirements: [],
+        freshness: { checked: true, source },
+      });
+      const fresh = await store.ensureOperation({
+        expectedStoreId: currentId,
+        owner: newOwner,
+        sessionId: 's',
+        extensionId: 'fixture',
+        originCommandId: commandId,
+        parentExecutionId: `new-parent-${pass}`,
+        operationKey: `new-job-${pass}`,
+        request: { kind: 'job', definitionId: 'fixture/job', definitionVersion: '1', input: {} },
+      });
+      provenance.set(fresh.executionId!, currentId);
+      const controlCounts = counts(),
+        controlCursor = (await store.getMetadata()).lastChangeCursor;
+      db.run('UPDATE execution SET parent_execution_id=? WHERE id=?', [
+        `new-parent-${pass}`,
+        child.executionId!,
+      ]);
+      const deniedExpansion = await store
+        .cancelWork({
+          expectedStoreId: currentId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: `denied-expansion-${pass}`,
+          kind: 'execution.cancel',
+          executionId: `new-parent-${pass}`,
+        })
+        .then(
+          () => 'accepted',
+          (error) => error.code,
+        );
+      expect(deniedExpansion).toBe('permission_denied');
+      expect(counts()).toEqual(controlCounts);
+      expect((await store.getMetadata()).lastChangeCursor).toBe(controlCursor);
+      db.run('UPDATE execution SET parent_execution_id=? WHERE id=?', [
+        'history-0',
+        child.executionId!,
+      ]);
+
+      const control = await restoredClient.cancelExecution('s', {
+        kind: 'execution.cancel',
+        expectedStoreId: currentId,
+        commandId: `new-cancel-${pass}`,
+        executionId: fresh.executionId!,
+      });
+      expect(control.originStoreId).toBe(currentId);
+      expect((await store.getExecution(fresh.executionId!))?.cancelRequestedAt).not.toBeNull();
+      expect(models).toBe(0);
+
+      console.log(
+        JSON.stringify({
+          stage: 'restored_background_directory',
+          restore: pass + 1,
+          originalJobs: restoredItems.length,
+          originalChildRun: true,
+          historicalCancelDenied: true,
+          attachedHistoryDenied: true,
+          currentCancelAccepted: true,
+          models,
+        }),
+      );
+      restoredClient.disposeNetwork();
+      if (pass === 0) {
+        await service.close();
+        service = undefined;
+        await runtime.close();
+        db.close();
+        await store.close();
+      }
+    }
   } finally {
     await service?.close();
     await runtime.close();
@@ -358,4 +640,4 @@ test('public background directory reads all original Jobs beyond history, scopes
     await store.close();
     rmSync(root, { recursive: true, force: true });
   }
-}, 20000);
+}, 60000);

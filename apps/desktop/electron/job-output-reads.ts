@@ -74,7 +74,7 @@ export class NativeJobOutputReads {
       if (
         execution.id !== scope.executionId ||
         execution.sessionId !== scope.sessionId ||
-        execution.originStoreId !== scope.storeId ||
+        execution.originStoreId !== scope.originStoreId ||
         execution.kind !== 'job'
       )
         throw new ClientError('job_output_identity_mismatch');

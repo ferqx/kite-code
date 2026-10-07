@@ -1936,11 +1936,15 @@ renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断�
 
 ### 30.2.4 正式 Native 跨会话后台总览实施边界
 
-当前同原 Store 消费者已实施，以此前 §30.2.1 的第三项完整用户入口为交付单位：公开目录覆盖属于原主体根会话树且来源为当前 Store 的全部 Job，包括 child/task carrier 与子会话中的 Job；按持久 Execution rowid 固定上界，跨页观察水位变化时整份重读。目录保留原 Store、会话／根／工作区、执行来源与父子关系，原父 Run、准确 child Run 和结果接纳分别显示，有限 getView 不作为完整目录来源。
+当前消费者已实施，以此前 §30.2.1 的第三项完整用户入口为交付单位：公开目录覆盖原主体根会话树内的全部当前来源 Job 及准确恢复根内的旧来源历史，包括 child/task carrier 与子会话中的 Job；按持久 Execution rowid 固定上界，跨页观察水位变化时整份重读。目录保留原 Store、会话／根／工作区、执行来源与父子关系，原父 Run、准确 child Run 和结果接纳分别显示，有限 getView 不作为完整目录来源。
 
 实施按公共 Store／Runtime／HTTP／Client 目录、Main 的独立总览观察与原读取／取消门禁、正式 renderer 总览顺序整合。Main 只接受已登记观察中的准确对象，停止前新鲜核原对象并复用既有 durable caller；普通 caller 的选中根作用域不放宽。完整保存输出复用既有固定 H 覆盖，child 日志核原 carrier／父链与根血缘、固定消息上界并读取完整原 Model 正文。选择变化不取消后台执行；close/reset/断线只释放所属 GET。
 
-必要验收覆盖超过单页及200条历史的完整目录、主体和血缘过滤、跨页变更重读、非选中原输出与子日志、多个原任务的准确单目标停止和冷重新打开零启动／零重放。有限8文件37pass/283assert/0；实际搬迁并删除构建源的默认 Native 窗口1pass/18条Bun断言及driver断言通过，252000B完整子正文、原父 waiting_execution、H=1准确task进度、一次原停止／其他任务继续、冷Provider9／cursor150／全部Run和Execution保持、两Service普通退出均实际核对。未参与实现的新Agent独立只读审查无必要修改。当前原完整默认608文件/482任务全部通过，actual0/drain861.018s、4068regular/Git前后一致；最新窗口45879ms通过，正常类型/八workspace构建和强制门禁保持。准确版本、失败保留和最终结果归[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-跨会话后台总览)。恢复为新Store的旧来源条目仍待兼容消费者核验；默认可信Shell producer、真实Auth、支持范围三平台／§35/T/E与旧路径最终退役保持未完成，37能力仍partial、wholeV13=false。当前合同见[Native owner](../../apps/desktop/README.md#native-跨会话后台总览)，取舍见[implemented决定](../../.agents/notes/implemented/architecture/2026-10-07-native-background-overview.md)。
+必要验收覆盖超过单页及200条历史的完整目录、主体和血缘过滤、跨页变更重读、非选中原输出与子日志、多个原任务的准确单目标停止和冷重新打开零启动／零重放。有限8文件37pass/283assert/0；实际搬迁并删除构建源的默认 Native 窗口1pass/18条Bun断言及driver断言通过，252000B完整子正文、原父 waiting_execution、H=1准确task进度、一次原停止／其他任务继续、冷Provider9／cursor150／全部Run和Execution保持、两Service普通退出均实际核对。未参与实现的新Agent独立只读审查无必要修改。当前原完整默认608文件/482任务全部通过，actual0/drain861.018s、4068regular/Git前后一致；最新窗口45879ms通过，正常类型/八workspace构建和强制门禁保持。准确版本、失败保留和最终结果归[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-跨会话后台总览)。上述上轮证据属于同原Store版本；本轮恢复历史消费者已按下文实施、实际新Store窗口通过，完整阶段证据归进度。默认可信Shell producer、真实Auth、支持范围三平台／§35/T/E与旧路径最终退役保持未完成，37能力仍partial、wholeV13=false。当前合同见[Native owner](../../apps/desktop/README.md#native-跨会话后台总览)，取舍见[implemented决定](../../.agents/notes/implemented/architecture/2026-10-07-native-background-overview.md)。
+
+本轮已补齐上述总览的恢复历史读取：公开物理 backup／restore 从 A 生成 B，当前准入与快照仍为 B，原 Job／Command／Run／child 与输出出处保持 A。只在准确已恢复根会话及真实来源／root-work／child-start 血缘内接纳旧来源；重复恢复也须保留期间新 B 工作的原出处。Native Main 同时固定当前连接与原执行来源，完整输出／子消息及 ModelOutput 沿现有 GET 读取，历史项明确显示只读。底层取消在任何写入前核目标及扩展范围属于当前 Store，不能因新取消命令而修改旧执行；当前 B 工作仍按原明确停止入口控制。
+
+已执行的同一公开恢复 fixture 证明完整目录、原输出／子轮次、历史取消零写入及当前工作正常控制，既有源码外默认 Native 窗口的 cold 阶段已改为真实恢复后的新 Store，1pass／27Bun断言及实际driver断言通过。读取前后的 Provider、cursor、Session／Run／Execution 和物理 HTTP 方法必须保持只读；恢复本身的合法保守状态变更单独作 cold 基线。该范围仍不包括诊断 SessionLog 的 replayFloor 重放、新 producer 或其他平台；完整子日志指现有固定消息上界的子会话消息与完整 ModelOutput。阶段收束原完整608文件／482任务全部通过，actual0／857.470s、4068regular／Git前后一致，原恢复窗口47774ms再次通过，制品digest同有限窗口。类型／八workspacebuild／API与文档／边界门禁通过；完整证据归[进度](unified-agent-refactor-v1-progress.md#2026-10-07恢复后的正式-native-后台历史)，沿已有本地提交授权交付。
 
 ### 30.3 第一条执行闭环
 

@@ -232,6 +232,7 @@ export class NativeBackground {
     if (
       control &&
       (this.observed?.id !== lease.observationId ||
+        item.execution.originStoreId !== lease.scope.storeId ||
         !['planned', 'dispatching', 'running'].includes(item.execution.status) ||
         item.execution.cancelRequested ||
         item.execution.cancelRequestedAt !== null ||
@@ -259,6 +260,7 @@ export class NativeBackground {
       viewSelection: lease.observationId,
       historyEpoch: 0,
       storeId: lease.scope.storeId,
+      originStoreId: lease.item.execution.originStoreId,
       sessionId: lease.item.session.id,
       workspaceId: lease.item.session.workspaceId,
       executionId: lease.item.execution.id,
@@ -327,7 +329,7 @@ export class NativeBackground {
         if (
           parent.id !== parentId ||
           parent.sessionId !== item.session.id ||
-          parent.originStoreId !== lease.scope.storeId
+          parent.originStoreId !== item.execution.originStoreId
         )
           throw new ClientError('background_child_binding_changed');
         parents.push(parent);
@@ -372,19 +374,30 @@ export class NativeBackground {
             message.outputBody.readAvailability !== 'unsupported' &&
             message.contentFormat !== 'unsupported'
           ) {
-            const sourceStore = message.originMessage?.storeId ?? lease.scope.storeId,
-              sourceSession = message.originMessage?.sessionId ?? childId,
+            const sourceSession = message.originMessage?.sessionId ?? childId,
               runId = message.originMessage ? message.originMessage.runId : message.runId;
-            if (sourceStore !== lease.scope.storeId)
-              throw new ClientError('background_child_binding_changed');
+            if (message.originMessage) {
+              const source = await this.client.getExecution(message.outputBody.executionId, {
+                signal,
+              });
+              this.check(lease);
+              if (
+                source.id !== message.outputBody.executionId ||
+                source.kind !== 'model' ||
+                source.sessionId !== sourceSession ||
+                source.runId !== runId ||
+                source.originStoreId !== message.originMessage.storeId
+              )
+                throw new ClientError('background_child_binding_changed');
+            }
             const snapshot = await this.client.getModelOutput(
               sourceSession,
               message.outputBody.executionId,
-              { expectedStoreId: sourceStore, signal },
+              { expectedStoreId: lease.scope.storeId, signal },
             );
             this.check(lease);
             if (
-              snapshot.storeId !== sourceStore ||
+              snapshot.storeId !== lease.scope.storeId ||
               snapshot.sessionId !== sourceSession ||
               snapshot.executionId !== message.outputBody.executionId ||
               snapshot.runId !== runId ||

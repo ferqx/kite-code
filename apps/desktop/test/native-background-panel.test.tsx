@@ -119,6 +119,7 @@ test('Native background DOM publishes only complete pages, shows original parent
               viewSelection: 1,
               historyEpoch: 0,
               storeId: 'store',
+              originStoreId: 'store',
               sessionId: 'root',
               workspaceId: 'w',
               executionId: request.executionId,
@@ -216,4 +217,47 @@ test('Native background attach replacement clears the old complete facts and ref
     expect(
       calls.filter((call) => call.method === 'background.close' && call.generation === 1).length,
     ).toBeGreaterThan(0);
+  }));
+
+test('restored background DOM retains original Store and read-only history while current work remains stoppable', async () =>
+  fixture(async (host, render) => {
+    const old = backgroundItem(1),
+      current = backgroundItem(2);
+    old.execution.originStoreId = 'original-store';
+    old.run!.originStoreId = 'original-store';
+    const calls: NativeRequest[] = [];
+    const bridge: NativeBridge = {
+      watch: () => () => undefined,
+      request: async (request) => {
+        calls.push(request);
+        if (request.method !== 'background.open') return null;
+        return {
+          kind: 'background.page',
+          viewGeneration: 1,
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          startIndex: 0,
+          nextIndex: 2,
+          total: 2,
+          complete: true,
+          entries: [old, current],
+        };
+      },
+    };
+    await render(bridge);
+    await click(host, '打开后台总览');
+    const oldCard = host.querySelector<HTMLElement>('[data-execution-id="job-1"]')!;
+    expect(oldCard.textContent).toContain('原 Store original-store');
+    expect(oldCard.textContent).toContain('恢复历史，只读');
+    expect(oldCard.textContent).toContain('读取完整已保存输出');
+    expect(
+      [...oldCard.querySelectorAll('button')].some((button) =>
+        button.textContent?.startsWith('停止后台执行'),
+      ),
+    ).toBe(false);
+    expect(host.querySelector('[data-execution-id="job-2"]')!.textContent).toContain(
+      '停止后台执行 · job-2',
+    );
+    expect(calls.some((request) => request.method === 'background.stop')).toBe(false);
   }));

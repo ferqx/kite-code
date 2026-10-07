@@ -123,6 +123,7 @@ function BackgroundPanel({
               stoppable =
                 !view.busy &&
                 !view.error &&
+                e.originStoreId === storeId &&
                 !unavailable &&
                 !!view.observationId &&
                 ['planned', 'dispatching', 'running'].includes(e.status) &&
@@ -146,6 +147,8 @@ function BackgroundPanel({
                   原执行 {e.id} · 来源会话 {e.sessionId} · 原命令 {e.originCommandId} · 尝试{' '}
                   {e.attempt}
                 </p>
+                <p>原 Store {e.originStoreId}</p>
+                {e.originStoreId !== storeId && <p>恢复历史，只读。当前连接已使用新 Store。</p>}
                 {item.run && (
                   <p>
                     原父轮次 {item.run.id} · {item.run.status}
@@ -210,6 +213,7 @@ function BackgroundPanel({
                       viewSelection: view.observationId,
                       historyEpoch: 0,
                       storeId,
+                      originStoreId: e.originStoreId,
                       sessionId: item.session.id,
                       workspaceId: item.session.workspaceId,
                       executionId: e.id,

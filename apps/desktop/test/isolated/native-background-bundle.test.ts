@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
+import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
@@ -22,7 +23,7 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free default Native background overview retains original tasks, full child logs and exact stop across cold reopen',
+  'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-background-bundle-')),
       home = join(root, 'home'),
@@ -40,7 +41,9 @@ test.skipIf(process.platform !== 'darwin')(
     expect(Buffer.byteLength(unicode)).toBeGreaterThan(65536);
     const calls: { marker: string; tools: number }[] = [];
     const releases = new Map<string, () => void>();
-    let baseline: Awaited<ReturnType<typeof snapshot>> | undefined;
+    let baseline: Awaited<ReturnType<typeof snapshot>> | undefined,
+      restoredStoreId: string | undefined;
+    let restoreStarted = false;
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -54,9 +57,70 @@ test.skipIf(process.platform !== 'darwin')(
           else releases.get(marker)?.();
           return new Response('released');
         }
-        if (url.pathname === '/baseline') {
-          baseline = await snapshot(profile);
-          return Response.json({ cursor: baseline.cursor, calls: calls.length });
+        if (url.pathname === '/restore') {
+          if (restoreStarted) return new Response('restore_already_started', { status: 409 });
+          restoreStarted = true;
+          const pid = Number(url.searchParams.get('pid'));
+          expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
+          expect(() => process.kill(pid, 0)).toThrow();
+          try {
+            const before = await snapshot(profile);
+            const backup = await createProfileBackup({
+              profile,
+              destinationRoot: join(root, 'backup'),
+            });
+            // Public maintenance obtains the exclusive profile-use lease after the
+            // ordinary Electron/Service exit; no metadata or SQL relabeling.
+            const restored = await restoreProfileBackup({
+              profile,
+              expectedStoreId: before.storeId,
+              backup,
+              intent: 'replace_with_selected_backup',
+            });
+            expect(restored.outcome).toBe('restored');
+            expect(restored.storeId).not.toBe(before.storeId);
+            restoredStoreId = restored.storeId;
+            baseline = await snapshot(profile);
+            expect(baseline.storeId).toBe(restoredStoreId);
+            const identities = (value: typeof before) =>
+              value.sessions.map((session) => ({
+                id: session.id,
+                runs: session.runs.map((run) => ({ id: run.id, originStoreId: run.originStoreId })),
+                executions: session.executions.map((execution) => ({
+                  id: execution.id,
+                  sessionId: execution.sessionId,
+                  childSessionId: execution.childSessionId,
+                  originStoreId: execution.originStoreId,
+                  cancelRequestedAt: execution.cancelRequestedAt,
+                })),
+              }));
+            expect(identities(baseline)).toEqual(identities(before));
+            const evidence = {
+              originalStoreId: before.storeId,
+              restoredStoreId,
+              restoreId: restored.restoreId,
+              backupVersion: backup.manifest.version,
+              originalServicePid: pid,
+              serviceAbsent: true,
+              exclusiveProfileLease: true,
+              cursor: baseline.cursor,
+              calls: calls.length,
+            };
+            writeFileSync(join(root, 'restore-evidence.json'), JSON.stringify(evidence));
+            console.log(JSON.stringify({ stage: 'public_backup_restore_A_to_B', ...evidence }));
+            return Response.json(evidence);
+          } catch (cause) {
+            const code = (cause as { code?: string }).code ?? 'maintenance_failed';
+            const evidence = {
+              stage: 'public_backup_restore_failed',
+              code,
+              originalServicePid: pid,
+              root,
+            };
+            writeFileSync(join(root, 'restore-failure.json'), JSON.stringify(evidence));
+            console.error(JSON.stringify(evidence));
+            return Response.json(evidence, { status: 500 });
+          }
         }
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
         const lastUser = body.messages.filter((row) => row.role === 'user').at(-1)?.content;
@@ -191,6 +255,7 @@ test.skipIf(process.platform !== 'darwin')(
           ],
           tools: [{ id: 'task', definitionVersion: '1' }],
         }),
+        { mode: 0o600 },
       );
       writeFileSync(join(home, 'original-background.json'), JSON.stringify({ unicode }));
       const fixture = join(root, 'driver.ts');
@@ -272,7 +337,14 @@ test.skipIf(process.platform !== 'darwin')(
         callsBeforeCold: number;
         executionIds: string[];
         stoppedId: string;
+        originalStoreId: string;
+        restoredStoreId: string;
+        childSessionId: string;
+        childRunId: string;
       };
+      expect(report.originalStoreId).toBe(storeId!);
+      expect(report.restoredStoreId).toBe(restoredStoreId!);
+      expect(report.restoredStoreId).not.toBe(report.originalStoreId);
       expect(report.pids).toHaveLength(2);
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
       expect(report.coldPhysical.every((row) => row.method === 'GET')).toBe(true);
@@ -300,7 +372,10 @@ test.skipIf(process.platform !== 'darwin')(
           productionDefaultService: true,
           productionDefaultOSVault: true,
           root,
-          storeId,
+          originalStoreId: storeId,
+          restoredStoreId,
+          childSessionId: report.childSessionId,
+          childRunId: report.childRunId,
           originalCursor: baseline!.cursor,
           providerCalls: calls.length,
           executionIds: report.executionIds,
@@ -444,7 +519,8 @@ async function snapshot(profile: ReturnType<typeof selectProfile>) {
         runs: (await store.getView(row.id)).runs,
         executions: await store.listExecutions(row.id),
       });
-    return { cursor: (await store.getMetadata()).lastChangeCursor, sessions };
+    const metadata = await store.getMetadata();
+    return { storeId: metadata.storeId, cursor: metadata.lastChangeCursor, sessions };
   } finally {
     await store.close();
   }

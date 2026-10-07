@@ -75,7 +75,7 @@ export async function readNativeBackground(input: BackgroundRead) {
           decimal(item.seq) <= lastSeq ||
           ids.has(item.execution.id) ||
           item.execution.kind !== 'job' ||
-          item.execution.originStoreId !== input.storeId ||
+          !item.execution.originStoreId ||
           item.execution.sessionId !== item.session.id ||
           item.execution.rootSessionId !== item.rootSession.id ||
           item.session.rootSessionId !== item.rootSession.id ||
@@ -93,7 +93,12 @@ export async function readNativeBackground(input: BackgroundRead) {
           (item.childRun !== null &&
             (item.childRun.sessionId !== item.execution.childSessionId ||
               item.childRun.originCommandId !== `child-start-${item.execution.id}` ||
-              item.childRun.originStoreId !== input.storeId))
+              item.childRun.originStoreId !== item.execution.originStoreId)) ||
+          (item.run !== null &&
+            (item.run.sessionId !== item.session.id ||
+              item.run.originStoreId !== item.execution.originStoreId ||
+              item.run.rootWorkCommandId !== item.execution.rootWorkCommandId ||
+              item.run.rootWorkSeq !== item.execution.rootWorkSeq))
         )
           throw new ClientError('background_identity_mismatch');
         ids.add(item.execution.id);
@@ -206,7 +211,7 @@ export async function readNativeBackgroundChild(
     if (
       body.item.execution.id !== executionId ||
       body.item.execution.childSessionId !== childId ||
-      body.item.execution.originStoreId !== input.storeId ||
+      body.item.execution.originStoreId !== input.item.execution.originStoreId ||
       body.item.session.id !== input.item.session.id ||
       body.item.rootSession.id !== input.item.rootSession.id ||
       (body.item.childRun?.id ?? null) !== opened.childRunId ||
@@ -242,7 +247,6 @@ export async function readNativeBackgroundChild(
         snapshot.storeId !== input.storeId ||
         snapshot.rootSessionId !== input.item.rootSession.id ||
         snapshot.sessionId !== (message.originMessage?.sessionId ?? childId) ||
-        (message.originMessage && message.originMessage.storeId !== input.storeId) ||
         snapshot.executionId !== message.outputBody.executionId ||
         snapshot.runId !== (message.originMessage ? message.originMessage.runId : message.runId) ||
         snapshot.output.complete !== message.outputBody.complete ||

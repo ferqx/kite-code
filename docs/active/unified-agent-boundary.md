@@ -40,7 +40,7 @@ MCP 的 resources/prompts、live-only `mcp.catalogue.refresh` 均是普通 Tool/
 
 公开 HTTP DTO 的来源为[Service schema](../../apps/service/src/http/schema/index.ts)，生成到 Client 目录与 OpenAPI；领域/SQL记录通过明确投影连接，不能直接成为 renderer 契约。正式客户端切换完成前，HTTP/Client 的交付只覆盖证据记录的切片。新的连接必须核对启动前选择的目标与必需接口，Store 写身份仍在各自事务内核对。
 
-完整后台目录沿公开 `BackgroundExecutionPage` 投影同原 Store、原主体根会话树与准确来源 Command；实际 parent 链、Workspace/root 血缘在分页前核实，私有 input/result/configuration 不进入 DTO。固定 Execution 分配上界与同一 Store change cursor，跨页变化整份重读，有限 `getView` 不承担完整目录。原父 Run 从实际执行父链定位，准确 child Run 从原 child-start Command 定位，不能改投当前 active Run。
+完整后台目录沿公开 `BackgroundExecutionPage` 投影原主体根会话树与准确来源 Command；当前 Store 用于准入与快照，Execution／Command／Run 保持原 origin。旧来源只在原 root creator 已证明恢复的根内接纳，真实 source／root-work 与不可变 child-start／carrier／Workspace 血缘在分页前核实；多次恢复保期间各原 Store。私有 input/result/configuration 不进入 DTO。固定 Execution 分配上界与同一 Store change cursor，跨页变化整份重读，有限 `getView` 不承担完整目录。原父 Run 从实际执行父链定位，准确 child Run 从原 child-start Command 定位，不能改投当前 active Run。
 
 Native [后台 Main](../../apps/desktop/electron/background.ts)登记完整公开观察，独立于选中会话；有限 IPC 只指定已观察原执行。停止前 fresh 核同原身份／代次／状态，内部 [caller prepare](../../apps/desktop/electron/caller-journal.ts)只为准确 `execution.cancel` 保存实际后代 Session、根、原主体和 Workspace，普通选中根门禁及冷 GET-only 合同保持。完整原输出复用固定 H，子日志核原载体和固定消息上界／完整 ModelOutput。close/reset只释放 GET，原 Task/Run/Job 的业务状态由 Service/Core 决定；当前源 Store与恢复为新Store的兼容范围分别按[owner](../../apps/desktop/README.md#native-跨会话后台总览)和[实施进度](../plans/unified-agent-refactor-v1-progress.md)核验。
 

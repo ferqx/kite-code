@@ -136,7 +136,7 @@ test('whole background scan retries from zero at a changed snapshot and retains 
   expect(f.queries[3]).toContain('upperSeq=9007199254740994');
   expect(result[0]!.execution.originStoreId).toBe('store');
 });
-for (const mode of ['duplicate', 'scope', 'store', 'origin', 'child', 'order', 'body'])
+for (const mode of ['duplicate', 'scope', 'store', 'child', 'order', 'body'])
   test(`background scan rejects ${mode} without exposing a prefix`, async () => {
     const f = fixture(mode);
     await f.client.connect();
@@ -155,4 +155,12 @@ test('background query rejects authority injection before GET and already aborte
     f.client.listAllBackgroundExecutions({ signal: abort.signal }),
   ).rejects.toBeDefined();
   expect(f.queries).toHaveLength(0);
+});
+
+test('background scan accepts restored Job provenance under the current snapshot Store', async () => {
+  const f = fixture('origin');
+  await f.client.connect();
+  const result = await f.client.listAllBackgroundExecutions();
+  expect(result).toHaveLength(2);
+  expect(result.every((i) => i.execution.originStoreId === 'other')).toBe(true);
 });

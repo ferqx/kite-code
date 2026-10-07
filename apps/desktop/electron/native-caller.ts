@@ -163,20 +163,18 @@ export class NativeCaller {
     this.outputReads = new NativeModelOutputReads(client, current);
     this.jobOutput = new NativeJobOutputReads(client, (executionId) => {
       const scope = current(),
-        snapshot = this.controller.snapshot;
+        snapshot = this.controller.snapshot,
+        execution = snapshot?.view.executions.find((item) => item.id === executionId);
       if (
         !scope ||
         this.observationUnavailable ||
         !snapshot ||
         snapshot.sessionId !== scope.sessionId ||
         snapshot.view.storeId !== scope.storeId ||
-        !snapshot.view.executions.some(
-          (item) =>
-            item.id === executionId &&
-            item.sessionId === scope.sessionId &&
-            item.originStoreId === scope.storeId &&
-            item.kind === 'job',
-        )
+        !execution ||
+        !execution.originStoreId ||
+        execution.sessionId !== scope.sessionId ||
+        execution.kind !== 'job'
       )
         return undefined;
       return {
@@ -184,6 +182,7 @@ export class NativeCaller {
         viewSelection: scope.selection,
         historyEpoch: this.historyEpoch,
         storeId: scope.storeId,
+        originStoreId: execution.originStoreId,
         sessionId: scope.sessionId,
         workspaceId: snapshot.view.session.workspaceId,
         executionId,

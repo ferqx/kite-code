@@ -63,9 +63,10 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
   const session = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
   if (!session || session.delete_requested) throw new AgentError('session_not_found');
   const runIds: string[] = [];
+  const stopBoundaries: { id: string; seq: string }[] = [];
   const seedIds: string[] = [];
   const commandIds = new Set<string>();
-  const subject = (commandId: string, exact = true) => {
+  const subject = (commandId: string, exact = true, current = true) => {
     const command = db.row(
       'SELECT c.* FROM command c JOIN session s ON s.id=c.session_id WHERE c.id=? AND s.root_id=?',
       commandId,
@@ -73,7 +74,11 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     );
     if (!command || (exact && command.session_id !== input.sessionId))
       throw new AgentError('command_not_found');
-    if (command.subject_id !== input.subjectId) throw new AgentError('permission_denied');
+    if (
+      command.subject_id !== input.subjectId ||
+      (current && command.origin_store_id !== input.expectedStoreId)
+    )
+      throw new AgentError('permission_denied');
     return command;
   };
   const runSeed = (runId: string, exact = true) => {
@@ -84,6 +89,7 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     );
     if (!run || (exact && run.session_id !== input.sessionId))
       throw new AgentError('run_not_found');
+    if (run.origin_store_id !== input.expectedStoreId) throw new AgentError('permission_denied');
     subject(String(run.origin_command_id), exact);
     commandIds.add(String(run.origin_command_id));
     runIds.push(runId);
@@ -125,7 +131,7 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       input.sessionId,
     );
     if (!creator) throw new AgentError('session_subject_unverifiable');
-    subject(String(creator.id));
+    subject(String(creator.id), true, false);
     if (input.includeBackground) {
       const root = db.row('SELECT next_seq FROM session WHERE id=?', session.root_id!)!;
       const scopes = db.rows(
@@ -134,11 +140,7 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       );
       if (scopes.length > 256) throw new AgentError('cancel_scope_too_large');
       for (const current of scopes) {
-        db.run(
-          'UPDATE session SET stop_boundary=max(stop_boundary,?) WHERE id=?',
-          root.next_seq!,
-          current.id!,
-        );
+        stopBoundaries.push({ id: String(current.id), seq: String(root.next_seq) });
         for (const command of db.rows(
           "SELECT id FROM command WHERE session_id=? AND root_work_seq<=? AND status='accepted' LIMIT 4097",
           current.id!,
@@ -168,13 +170,15 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
   if (uniqueSeeds.length > bound || commandIds.size > bound)
     throw new AgentError('cancel_scope_too_large');
   const executions = expand(db, String(session.root_id), uniqueSeeds);
-  const now = Date.now();
+  // Resolve the entire effect set before the first write. Prior receipts above stay read-only.
   for (const id of executions) {
     const execution = db.row(
       'SELECT * FROM execution WHERE id=? AND root_session_id=?',
       id,
       session.root_id!,
     )!;
+    if (execution.origin_store_id !== input.expectedStoreId)
+      throw new AgentError('permission_denied');
     const own = subject(String(execution.origin_command_id), false);
     if (execution.child_session_id !== null) {
       for (const childRun of db.rows(
@@ -196,6 +200,28 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       ? (JSON.parse(String(own.receipt_json)) as { executionId?: string })
       : {};
     if (receipt.executionId === id) commandIds.add(String(own.id));
+  }
+  for (const id of commandIds) subject(id, false);
+  for (const id of runIds) {
+    const run = db.row('SELECT origin_store_id FROM run WHERE id=?', id);
+    if (!run || run.origin_store_id !== input.expectedStoreId)
+      throw new AgentError('permission_denied');
+    const pending = db.rows(
+      "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status IN ('accepted','applied') LIMIT 4097",
+      id,
+    );
+    if (pending.length > bound) throw new AgentError('cancel_scope_too_large');
+    for (const command of pending) subject(String(command.id), false);
+  }
+  const now = Date.now();
+  for (const boundary of stopBoundaries)
+    db.run(
+      'UPDATE session SET stop_boundary=max(stop_boundary,?) WHERE id=?',
+      boundary.seq,
+      boundary.id,
+    );
+  for (const id of executions) {
+    const execution = db.row('SELECT * FROM execution WHERE id=?', id)!;
     db.run(
       'UPDATE execution SET cancel_requested=1,cancel_requested_at=COALESCE(cancel_requested_at,?) WHERE id=?',
       now,

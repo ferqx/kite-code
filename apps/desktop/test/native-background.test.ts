@@ -46,6 +46,8 @@ function fixture(items: BackgroundExecutionItem[]) {
             kind: 'tool',
             sessionId: 'root',
             originStoreId: 'store',
+            rootWorkCommandId: 'start',
+            rootWorkSeq: '1',
             parentExecutionId: null,
             childSessionId: null,
           }
@@ -153,6 +155,7 @@ test('complete Main/renderer background directory and pinned original output sur
         viewSelection: facts.observationId,
         historyEpoch: 0,
         storeId: 'store',
+        originStoreId: 'store',
         sessionId: 'root',
         workspaceId: 'w',
         executionId: 'job-1',
@@ -206,102 +209,167 @@ test('fresh original identity and current lifecycle are required for stop, and o
     f.main.release();
   }
 });
-test('child read preserves the original carrier Run, exhausts messages and verifies complete Unicode Model output over finite chunks', async () => {
-  const item = backgroundItem(1, true),
-    f = fixture([item]),
-    text = `${'完整子消息中文🙂'.repeat(16000)}END`,
-    output = { complete: true, content: text, reasoning: '', toolCalls: [] };
-  const snapshot: ModelOutputSnapshot = {
-    storeId: 'store',
-    sessionId: 'child',
-    rootSessionId: 'root',
-    runId: 'original-child-run',
-    executionId: 'child-model',
-    originCommandId: 'child-start-job-1',
-    rootWorkCommandId: 'start',
-    rootWorkSeq: '1',
-    attempt: 1,
-    status: 'succeeded',
-    bodyHash: createHash('sha256').update(JSON.stringify(output)).digest('hex'),
-    bodyBytes: String(Buffer.byteLength(JSON.stringify(output))),
-    contentBytes: String(Buffer.byteLength(text)),
-    reasoningBytes: '0',
-    snapshotCursor: '1',
-    output,
-  };
-  const messages = Array.from({ length: 205 }, (_, i) => ({
-    id: `m-${i + 1}`,
-    sessionId: 'child',
-    runId: 'original-child-run',
-    seq: String(i + 1),
-    status: 'complete' as const,
-    role: 'user' as const,
-    content: `原消息-${i + 1}`,
-  }));
-  const modelMessage = {
-    ...messages.at(-1)!,
-    role: 'assistant' as const,
-    content: 'preview',
-    outputBody: {
-      kind: 'model_output' as const,
-      executionId: snapshot.executionId,
-      complete: true,
-      contentBytes: snapshot.contentBytes,
-      reasoningBytes: '0',
-      toolCallCount: 0,
-    },
-  };
-  const all = [...messages.slice(0, -1), modelMessage];
-  f.port.getView = async () =>
-    ({
-      storeId: 'store',
-      session: item.childSession,
-      runs: [{ id: 'newer-child-run' }],
-      executions: [],
-    }) as never;
-  const bounds: string[] = [];
-  f.port.listMessages = async (_id, options) => {
-    bounds.push(options!.upperSeq!);
-    return all.filter((m) => BigInt(m.seq) > BigInt(options!.afterSeq!)).slice(0, options!.limit);
-  };
-  f.port.getModelOutput = async () => snapshot;
+test('restored Native history pins original output provenance and refuses fresh stop even when old lifecycle says running', async () => {
+  const item = backgroundItem();
+  item.execution.originStoreId = 'original-store';
+  item.run!.originStoreId = 'original-store';
+  const f = fixture([item]);
   try {
-    const page = await f.main.open('directory');
-    f.main.close('directory');
-    let chunks = 0;
-    const bridge: NativeBridge = {
-      ...f.bridge,
-      request: async (request) => {
-        const result = await f.bridge.request(request);
-        if (result && 'readId' in result && result.kind === 'background.child.chunk') {
-          expect(Buffer.from(result.data, 'base64').length).toBeLessThanOrEqual(65536);
-          chunks++;
-        }
-        return result;
-      },
-    };
-    const body = await readNativeBackgroundChild({
-      bridge,
+    const facts = await readNativeBackground({
+      bridge: f.bridge,
       generation: 1,
       storeId: 'store',
-      observationId: page.observationId,
-      item,
       signal: new AbortController().signal,
       isCurrent: () => true,
     });
-    expect(body.messages).toHaveLength(205);
-    expect(body.modelOutputs[0]!.snapshot.output.content).toBe(text);
-    expect(body.item.childRun!.id).toBe('original-child-run');
-    expect(bounds).toEqual(['210', '210']);
-    expect(chunks).toBeGreaterThan(5);
-    expect(() => f.main.childRead({ readId: 'missing', offset: 0, limit: 1 })).toThrow(
-      'background_read_missing',
-    );
+    expect(facts.items[0]!.execution.originStoreId).toBe('original-store');
+    const output = await readNativeJobOutput({
+      bridge: f.bridge,
+      scope: {
+        generation: 1,
+        viewSelection: facts.observationId,
+        historyEpoch: 0,
+        storeId: 'store',
+        originStoreId: 'original-store',
+        sessionId: 'root',
+        workspaceId: 'w',
+        executionId: item.execution.id,
+      },
+      background: true,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+    });
+    expect(output.items).toHaveLength(301);
+    expect(output.items.at(-1)!.content.endsWith('-301')).toBe(true);
+    await expect(
+      f.main.stop(facts.observationId, item.execution.id, 'restore-stop'),
+    ).rejects.toMatchObject({ code: 'background_stop_unavailable' });
     expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
   } finally {
     f.main.release();
   }
 });
+for (const originStoreId of ['store', 'original-store']) {
+  test(`child read preserves ${originStoreId} carrier Run, exhausts messages and verifies complete Unicode Model output under current Store`, async () => {
+    const item = backgroundItem(1, true),
+      f = fixture([item]),
+      text = `${'完整子消息中文🙂'.repeat(16000)}END`,
+      output = { complete: true, content: text, reasoning: '', toolCalls: [] };
+    item.execution.originStoreId = originStoreId;
+    item.run!.originStoreId = originStoreId;
+    item.childRun!.originStoreId = originStoreId;
+    const getExecution = f.port.getExecution;
+    f.port.getExecution = async (id, options) =>
+      id === 'child-model'
+        ? ({
+            id,
+            kind: 'model',
+            sessionId: 'child',
+            runId: 'original-child-run',
+            originStoreId,
+          } as never)
+        : { ...(await getExecution(id, options)), originStoreId };
+    const snapshot: ModelOutputSnapshot = {
+      storeId: 'store',
+      sessionId: 'child',
+      rootSessionId: 'root',
+      runId: 'original-child-run',
+      executionId: 'child-model',
+      originCommandId: 'child-start-job-1',
+      rootWorkCommandId: 'start',
+      rootWorkSeq: '1',
+      attempt: 1,
+      status: 'succeeded',
+      bodyHash: createHash('sha256').update(JSON.stringify(output)).digest('hex'),
+      bodyBytes: String(Buffer.byteLength(JSON.stringify(output))),
+      contentBytes: String(Buffer.byteLength(text)),
+      reasoningBytes: '0',
+      snapshotCursor: '1',
+      output,
+    };
+    const messages = Array.from({ length: 205 }, (_, i) => ({
+      id: `m-${i + 1}`,
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: String(i + 1),
+      status: 'complete' as const,
+      role: 'user' as const,
+      content: `原消息-${i + 1}`,
+    }));
+    const modelMessage = {
+      ...messages.at(-1)!,
+      role: 'assistant' as const,
+      content: 'preview',
+      originMessage: {
+        storeId: originStoreId,
+        sessionId: 'child',
+        messageId: 'source-message',
+        runId: 'original-child-run',
+      },
+      outputBody: {
+        kind: 'model_output' as const,
+        executionId: snapshot.executionId,
+        complete: true,
+        contentBytes: snapshot.contentBytes,
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    };
+    const all = [...messages.slice(0, -1), modelMessage];
+    f.port.getView = async () =>
+      ({
+        storeId: 'store',
+        session: item.childSession,
+        runs: [{ id: 'newer-child-run' }],
+        executions: [],
+      }) as never;
+    const bounds: string[] = [];
+    f.port.listMessages = async (_id, options) => {
+      bounds.push(options!.upperSeq!);
+      return all.filter((m) => BigInt(m.seq) > BigInt(options!.afterSeq!)).slice(0, options!.limit);
+    };
+    f.port.getModelOutput = async (_sessionId, _executionId, options) => {
+      expect(options!.expectedStoreId).toBe('store');
+      return snapshot;
+    };
+    try {
+      const page = await f.main.open('directory');
+      f.main.close('directory');
+      let chunks = 0;
+      const bridge: NativeBridge = {
+        ...f.bridge,
+        request: async (request) => {
+          const result = await f.bridge.request(request);
+          if (result && 'readId' in result && result.kind === 'background.child.chunk') {
+            expect(Buffer.from(result.data, 'base64').length).toBeLessThanOrEqual(65536);
+            chunks++;
+          }
+          return result;
+        },
+      };
+      const body = await readNativeBackgroundChild({
+        bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: page.observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+      });
+      expect(body.messages).toHaveLength(205);
+      expect(body.modelOutputs[0]!.snapshot.output.content).toBe(text);
+      expect(body.item.childRun!.id).toBe('original-child-run');
+      expect(bounds).toEqual(['210', '210']);
+      expect(chunks).toBeGreaterThan(5);
+      expect(() => f.main.childRead({ readId: 'missing', offset: 0, limit: 1 })).toThrow(
+        'background_read_missing',
+      );
+      expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+    } finally {
+      f.main.release();
+    }
+  });
+}
 test('closed Native observations reject authority injection and releasing a held original directory prevents late publication', async () => {
   expect(() =>
     decodeNativeRequest({

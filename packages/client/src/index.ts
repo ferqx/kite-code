@@ -2116,7 +2116,6 @@ export class AgentClient {
       const { execution: e, session: s, rootSession: r, run, childRun, childSession: child } = item;
       if (
         seen.has(e.id) ||
-        e.originStoreId !== frozen.storeId ||
         e.sessionId !== s.id ||
         e.rootSessionId !== r.id ||
         s.rootSessionId !== r.id ||

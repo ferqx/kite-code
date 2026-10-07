@@ -64,25 +64,35 @@ export function readBackgroundExecutions(
     if (BigInt(upperSeq) > BigInt(highWaterSeq) || BigInt(afterSeq) > BigInt(upperSeq))
       throw new AgentError('invalid_page');
     const rows = db.rows(
-      `WITH RECURSIVE eligible(id,root_id,workspace_id) AS (
-        SELECT r.id,r.id,r.workspace_id FROM session r
+      `WITH RECURSIVE eligible(id,root_id,workspace_id,restored) AS (
+        SELECT r.id,r.id,r.workspace_id,creator.origin_store_id<>? FROM session r JOIN command creator ON creator.session_id=r.id AND creator.kind='session.create'
         WHERE r.parent_id IS NULL AND r.root_id=r.id AND r.delete_requested=0
         AND (? IS NULL OR r.workspace_id=?) AND (? IS NULL OR r.id=?)
-        AND EXISTS(SELECT 1 FROM command creator WHERE creator.session_id=r.id AND creator.kind='session.create' AND creator.subject_id=?)
+        AND creator.subject_id=?
         UNION
-        SELECT child.id,parent.root_id,parent.workspace_id FROM session child JOIN eligible parent ON child.parent_id=parent.id
+        SELECT child.id,parent.root_id,parent.workspace_id,parent.restored FROM session child JOIN eligible parent ON child.parent_id=parent.id
         WHERE child.root_id=parent.root_id AND child.workspace_id=parent.workspace_id AND child.delete_requested=0
+        AND EXISTS(SELECT 1 FROM command c JOIN execution carrier ON carrier.id=json_extract(c.request_json,'$.parentExecutionId') JOIN command o ON o.id=carrier.origin_command_id
+          WHERE c.session_id=child.id AND c.kind='child.start' AND carrier.child_session_id=child.id AND carrier.session_id=parent.id AND carrier.root_session_id=parent.root_id
+          AND o.session_id=carrier.session_id AND o.root_work_command_id=carrier.root_work_command_id AND o.root_work_seq=carrier.root_work_seq
+          AND EXISTS(SELECT 1 FROM command rw WHERE rw.id=carrier.root_work_command_id AND rw.session_id=parent.root_id AND rw.subject_id=c.subject_id AND rw.origin_store_id=carrier.origin_store_id AND rw.seq=carrier.root_work_seq)
+          AND c.subject_id=? AND o.subject_id=c.subject_id AND c.origin_store_id=carrier.origin_store_id AND o.origin_store_id=carrier.origin_store_id
+          AND c.root_work_command_id=carrier.root_work_command_id AND c.root_work_seq=carrier.root_work_seq)
       ) SELECT e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,
       e.parent_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
       e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
       JOIN eligible s ON s.id=e.session_id JOIN command source ON source.id=e.origin_command_id AND source.session_id=e.session_id
       WHERE e.kind='job' AND e.rowid>? AND e.rowid<=? AND (? IS NULL OR e.id=?)
-      AND e.origin_store_id=? AND source.origin_store_id=e.origin_store_id AND source.subject_id=?
+      AND (e.origin_store_id=? OR s.restored=1) AND source.origin_store_id=e.origin_store_id AND source.subject_id=?
+      AND e.root_session_id=s.root_id AND source.root_work_command_id=e.root_work_command_id AND source.root_work_seq=e.root_work_seq
+      AND EXISTS(SELECT 1 FROM command root_work WHERE root_work.id=e.root_work_command_id AND root_work.session_id=s.root_id AND root_work.subject_id=source.subject_id AND root_work.origin_store_id=e.origin_store_id AND root_work.seq=e.root_work_seq)
       ORDER BY e.rowid LIMIT ?`,
+      input.expectedStoreId,
       input.workspaceId ?? null,
       input.workspaceId ?? null,
       input.rootSessionId ?? null,
       input.rootSessionId ?? null,
+      input.subjectId,
       input.subjectId,
       afterSeq,
       upperSeq,
@@ -184,6 +194,23 @@ export function readBackgroundExecutions(
         String(command.origin_store_id) !== execution.originStoreId ||
         String(command.root_work_command_id) !== execution.rootWorkCommandId ||
         String(command.root_work_seq) !== execution.rootWorkSeq
+      )
+        throw new AgentError('directory_identity_conflict');
+      const childStart = childSession
+        ? db.row(
+            "SELECT * FROM command WHERE id=? AND session_id=? AND kind='child.start'",
+            `child-start-${execution.id}`,
+            childSession.id,
+          )
+        : null;
+      if (
+        childSession &&
+        (!childStart ||
+          childStart.subject_id !== input.subjectId ||
+          childStart.origin_store_id !== execution.originStoreId ||
+          childStart.root_work_command_id !== execution.rootWorkCommandId ||
+          String(childStart.root_work_seq) !== execution.rootWorkSeq ||
+          JSON.parse(String(childStart.request_json)).parentExecutionId !== execution.id)
       )
         throw new AgentError('directory_identity_conflict');
       const childRow = childSession
