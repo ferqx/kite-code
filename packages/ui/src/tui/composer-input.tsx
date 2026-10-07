@@ -4,6 +4,7 @@ import stringWidth from 'string-width';
 import { type ComposerBuffer, composerDisplay } from './composer';
 import type { TuiState } from './controller';
 import type { FileToken } from './file-candidates';
+import { useTuiPresentation } from './presentation';
 export function isCtrlCBatch(input: string): boolean {
   return input.length > 1 && [...input].every((control) => control === '\u0003');
 }
@@ -31,6 +32,8 @@ export function TuiComposer({
   onFileQuery?(token?: FileToken): void;
 }) {
   const [, render] = useReducer((n: number) => n + 1, 0);
+  const { t } = useTuiPresentation();
+  const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const { stdout } = useStdout();
   const prefix = `${label} > `;
   const width = Math.max(24, (stdout.columns ?? 80) - stringWidth(prefix) - 1);
@@ -115,10 +118,10 @@ export function TuiComposer({
       }
       if (key.leftArrow) buffer.horizontal(-1);
       else if (key.rightArrow) buffer.horizontal(1);
-      else if (key.upArrow) buffer.vertical(-1, width);
-      else if (key.downArrow) buffer.vertical(1, width);
-      else if (key.home) buffer.boundary(false, width);
-      else if (key.end) buffer.boundary(true, width);
+      else if (key.upArrow) buffer.vertical(-1, width, display);
+      else if (key.downArrow) buffer.vertical(1, width, display);
+      else if (key.home) buffer.boundary(false, width, display);
+      else if (key.end) buffer.boundary(true, width, display);
       else if (key.backspace) buffer.remove(true);
       else if (key.delete) buffer.remove(false);
       else if (key.return) buffer.insert('\n');
@@ -128,42 +131,43 @@ export function TuiComposer({
     { isActive: active },
   );
   if (!active) return null;
-  const { lines, index } = buffer.row(width),
+  const { lines, index } = buffer.row(width, display),
     start = Math.max(0, index - 2),
     visible = lines.slice(start, start + 5);
   return (
     <Box flexDirection="column">
-      {start > 0 && <Text dimColor>↑ Earlier input</Text>}
+      {start > 0 && <Text dimColor>{t('↑ Earlier input')}</Text>}
       {visible.map((line, n) => (
         <Text key={start + n}>
           {n === 0 ? prefix : ' '.repeat(stringWidth(prefix))}
           {buffer.parts.slice(line.start, line.end).map((part, i) => (
             <Text key={line.start + i} inverse={buffer.cursor === line.start + i}>
-              {composerDisplay(part)}
+              {display(part)}
             </Text>
           ))}
           {buffer.cursor === line.end && <Text inverse> </Text>}
         </Text>
       ))}
-      {start + visible.length < lines.length && <Text dimColor>↓ Later input</Text>}
+      {start + visible.length < lines.length && <Text dimColor>{t('↓ Later input')}</Text>}
       {files && files.key === tokenKey && files.phase === 'reading' && (
-        <Text dimColor>Reading Workspace file names…</Text>
+        <Text dimColor>{t('Reading Workspace file names…')}</Text>
       )}
       {files && files.key === tokenKey && files.phase === 'ready' && (
         <Text dimColor>
           {filePaths.length
-            ? `${filePaths.length} Workspace file candidates · ${(buffer.candidate % filePaths.length) + 1}/${filePaths.length}`
-            : 'No matching Workspace file names · Esc resumes ordinary input'}
+            ? `${filePaths.length} ${t('Workspace file candidates')} · ${(buffer.candidate % filePaths.length) + 1}/${filePaths.length}`
+            : t('No matching Workspace file names · Esc resumes ordinary input')}
         </Text>
       )}
       {files && files.key === tokenKey && files.phase === 'failed' && (
         <Text color="yellow">
-          File candidates unavailable: {composerDisplay({ text: files.error ?? 'unavailable' })}
+          {t('File candidates unavailable:')}{' '}
+          {composerDisplay({ text: files.error ?? t('unavailable') })}
         </Text>
       )}
       {files && files.key === tokenKey && files.unavailable.length > 0 && (
         <Text color="yellow">
-          File candidates incomplete: {files.unavailable.length} unavailable paths
+          {t('File candidates incomplete:')} {files.unavailable.length} {t('unavailable paths')}
         </Text>
       )}
       {(filePaths.length ? filePaths : buffer.candidates)

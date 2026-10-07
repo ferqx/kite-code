@@ -33,6 +33,7 @@ const source = `
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 int main(int argc,char **argv) {
   if(argc!=3)return 90; alarm(12);
   pid_t child=fork(); if(child<0)return 91;
@@ -40,8 +41,14 @@ int main(int argc,char **argv) {
     if(setsid()<0)_exit(92);signal(SIGTERM,SIG_IGN);
     pid_t grand=fork();if(grand<0)_exit(93);
     if(grand==0){alarm(12);close(0);close(1);close(2);for(;;)pause();}
-    FILE *f=fopen(argv[2],"w");if(!f)_exit(94);
-    fprintf(f,"%d %d %d",getpid(),grand,getsid(0));fclose(f);
+    /* File existence announces a complete PID record to the test parent. */
+    char pending[PATH_MAX];
+    int length=snprintf(pending,sizeof(pending),"%s.pending",argv[2]);
+    if(length<0 || (size_t)length>=sizeof(pending))_exit(94);
+    FILE *f=fopen(pending,"w");if(!f)_exit(94);
+    int written=fprintf(f,"%d %d %d",getpid(),grand,getsid(0));
+    int closed=fclose(f);if(written<0 || closed!=0)_exit(94);
+    if(rename(pending,argv[2])!=0)_exit(94);
     close(0);close(1);close(2);for(;;)pause();
   }
   for(int i=0;i<100 && access(argv[2],F_OK);i++)usleep(10000);
@@ -474,6 +481,8 @@ for (const mode of ['eof', 'kill'] as const)
         const reference = JSON.parse(readFileSync(readyFile, 'utf8'));
         expect(reference.coalitionId).toMatch(/^[1-9][0-9]*$/);
         const pids = readFileSync(pidFile, 'utf8').split(' ').map(Number);
+        expect(pids).toHaveLength(3);
+        expect(pids.every((pid) => Number.isSafeInteger(pid) && pid > 0)).toBe(true);
         if (mode === 'eof') parent.stdin.end();
         else parent.kill('SIGKILL');
         await parent.exited;

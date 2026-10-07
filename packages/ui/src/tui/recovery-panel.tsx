@@ -2,10 +2,11 @@ import { Box, useInput, usePaste } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import { callerKey } from './caller';
 import { type TuiController, terminalText } from './controller';
-import { TuiText as Text } from './presentation';
+import { TuiText as Text, useTuiPresentation } from './presentation';
 
 export function TuiRecoveryPanel({ controller }: { controller: TuiController }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const { t } = useTuiPresentation();
   const [text, setText] = useState('');
   const [selected, setSelected] = useState(0);
   const [showRequest, setShowRequest] = useState(false);
@@ -70,21 +71,28 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
   });
   return (
     <Box flexDirection="column">
-      <Text>Explicit recovery · {terminalText(state.sessionId ?? '')}</Text>
-      <Text>run &lt;original Run ID&gt; / report &lt;original report Command ID&gt;</Text>
       <Text>
-        interrupt confirm: explicitly interrupt this root Session's orphan execution group; unknown
-        effects remain unknown.
+        {t('Explicit recovery ·')} {terminalText(state.sessionId ?? '')}
+      </Text>
+      <Text>{t('run <original Run ID> / report <original report Command ID>')}</Text>
+      <Text>
+        {t(
+          "interrupt confirm: explicitly interrupt this root Session's orphan execution group; unknown effects remain unknown.",
+        )}
       </Text>
       <Text>
-        Enter submits once; Ctrl+L checks the original request; Ctrl+C stops this read; Esc closes.
+        {t(
+          'Enter submits once; Ctrl+L checks the original request; Ctrl+C stops this read; Esc closes.',
+        )}
       </Text>
       <Text>{terminalText(text)}</Text>
       {callers.length > 0 && (
         <>
           <Text>
-            Saved caller intents {callers.length} · ↑/↓ select · Ctrl+L original GET · Ctrl+V full
-            frozen request · Ctrl+D clear confirmed caller only
+            {t('Saved caller intents')} {callers.length}
+            {t(
+              ' · ↑/↓ select · Ctrl+L original GET · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only',
+            )}
           </Text>
           {callers.slice(Math.max(0, selected - 2), selected + 3).map((row) => (
             <Text key={callerKey(row.intent)}>
@@ -96,20 +104,22 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
           {caller && (
             <>
               <Text>
-                Original Store {terminalText(caller.intent.scope.storeId)} · Workspace{' '}
-                {terminalText(caller.intent.scope.workspaceId)} · Session{' '}
+                {t('Original Store')} {terminalText(caller.intent.scope.storeId)} {t('· Workspace')}{' '}
+                {terminalText(caller.intent.scope.workspaceId)} {t('· Session')}{' '}
                 {terminalText(caller.intent.scope.sessionId)}
               </Text>
               <Text>
-                Subject {terminalText(caller.intent.subjectId)} · target{' '}
+                {t('Subject')} {terminalText(caller.intent.subjectId)} {t('· target')}{' '}
                 {terminalText(JSON.stringify(caller.intent.target))}
               </Text>
-              <Text>Request SHA {caller.intent.requestDigest}</Text>
+              <Text>
+                {t('Request SHA')} {caller.intent.requestDigest}
+              </Text>
               <Text>
                 {caller.intent.request.kind === 'execution.cancel' ||
                 caller.intent.request.kind === 'command.cancel'
-                  ? 'applied means cancellation requested; actual termination is separate'
-                  : 'applied means original Command applied; actual Run result is separate'}
+                  ? t('applied means cancellation requested; actual termination is separate')
+                  : t('applied means original Command applied; actual Run result is separate')}
               </Text>
               {showRequest && <Text>{terminalText(JSON.stringify(caller.intent.request))}</Text>}
             </>
@@ -117,7 +127,9 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
         </>
       )}
       {state.callerUnavailable && (
-        <Text>Caller journal unavailable: {terminalText(state.callerUnavailable)}</Text>
+        <Text>
+          {t('Caller journal unavailable:')} {terminalText(state.callerUnavailable)}
+        </Text>
       )}
       {state.recovery && (
         <>
@@ -125,12 +137,12 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
             {state.recovery.intent.kind} · {state.recovery.status}
           </Text>
           <Text>
-            Original Session {terminalText(state.recovery.intent.sessionId)} · Command{' '}
+            {t('Original Session')} {terminalText(state.recovery.intent.sessionId)} {t('· Command')}{' '}
             {terminalText(state.recovery.intent.request.commandId)}
           </Text>
           {state.recovery.run && (
             <Text>
-              Original result Run {terminalText(state.recovery.run.id)} ·{' '}
+              {t('Original result Run')} {terminalText(state.recovery.run.id)} ·{' '}
               {state.recovery.run.status}
             </Text>
           )}

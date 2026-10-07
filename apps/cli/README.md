@@ -220,7 +220,9 @@ Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，�
 
 宿主持续持有 profile shared lease，读取和发布时核实原真实使用权、私有路径及文件；实际保存复用 configuration leaf 的稳定短文件锁、完整字节 SHA CAS、JSONC 单字段编辑和持久原子替换，保留无关字段与可保留注释。损坏、非法值、links、宽权限或失效 lease 局部拒绝。旧 revision 冲突不自动重试；另一个终端写入后需重新读取再明确选择。保存失败保留原显示值，发布后无法确认则报告有限 unknown 原因并允许重读。偏好文件纳入维护备份原字节资产，文件锁本身不进入备份。
 
-设置属于当前 profile 的终端显示，不随 Session 切换、不依赖 SSE 写入准入，不提交 Command、Run、Model 或权限。关闭选择器不取消业务工作。当前实现与实际验证范围继续见总体[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)，不能据此认定正式旧 TUI 或三平台发布已切换。
+设置属于当前 profile 的终端显示，不随 Session 切换、不依赖 SSE 写入准入，不提交 Command、Run、Model 或权限。关闭选择器不取消业务工作。正式 Terminal 和开发入口使用同一 host/renderer。[TerminalHost](host/tui.tsx)只经 UI 公共 `translateTuiLabel` 翻译宿主固定快捷键和创建提示；未知原创建回执保准确原 ID，不改变原查回操作。所有业务正文、命令 JSON、机器值和错误原因保原文。
+
+原[完整偏好 PTY](test/isolated/tui-preferences-host.test.ts)在 macOS paired/shared 两模式核真实语言保存后的宿主提示、空 Job 目录、显式恢复、只读文件恢复和 Unicode bracketed paste；原保存失败旧配色/语言、profile 冷重开、Provider1、五张业务表计数不增加及所属 Service 正常关闭/共享 detach 的断言保持。中文输入显示和原正文保真另有 UI 回归，实际版本与阶段完整默认见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)；该本机资格不证明其他平台或完整 V1.3 退出。
 
 ## 通用终端候选安装
 

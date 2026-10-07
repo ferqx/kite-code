@@ -11,7 +11,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { interactionKey } from './cards';
-import { ComposerBuffer } from './composer';
+import { ComposerBuffer, composerDisplay } from './composer';
 import { isCtrlCBatch, TuiComposer } from './composer-input';
 import { activity, type TuiController, terminalText } from './controller';
 import { TuiExecutionPanel } from './execution-panel';
@@ -47,6 +47,7 @@ export * from './mcp-connection';
 export * from './mcp-reconnection';
 export * from './mcp-source';
 export * from './mcp-source-mutation';
+export { translateTuiLabel } from './presentation';
 
 /** Independent Ink renderer. Host owns admission, full readers and Service lifetime. */
 export function TuiSession({ controller }: { controller: TuiController }) {
@@ -246,6 +247,7 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
     [controller],
   );
   const { t } = useTuiPresentation();
+  const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const jobs =
     state.snapshot?.view.executions.filter(
@@ -552,10 +554,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
           const width = questionInputWidth(stdout.columns, t('Answer'));
           if (key.leftArrow) draft.buffer.horizontal(-1);
           else if (key.rightArrow) draft.buffer.horizontal(1);
-          else if (key.home) draft.buffer.boundary(false, width);
-          else if (key.end) draft.buffer.boundary(true, width);
-          else if (key.upArrow) draft.buffer.vertical(-1, width);
-          else if (key.downArrow) draft.buffer.vertical(1, width);
+          else if (key.home) draft.buffer.boundary(false, width, display);
+          else if (key.end) draft.buffer.boundary(true, width, display);
+          else if (key.upArrow) draft.buffer.vertical(-1, width, display);
+          else if (key.downArrow) draft.buffer.vertical(1, width, display);
           else if (key.backspace) draft.buffer.remove(true);
           else if (key.delete) draft.buffer.remove(false);
           else if (key.return) draft.buffer.insert('\n');
@@ -639,10 +641,10 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
         const width = questionInputWidth(stdout.columns, t('Answer'));
         if (key.leftArrow) answerBuffer.horizontal(-1);
         else if (key.rightArrow) answerBuffer.horizontal(1);
-        else if (key.home) answerBuffer.boundary(false, width);
-        else if (key.end) answerBuffer.boundary(true, width);
-        else if (key.upArrow) answerBuffer.vertical(-1, width);
-        else if (key.downArrow) answerBuffer.vertical(1, width);
+        else if (key.home) answerBuffer.boundary(false, width, display);
+        else if (key.end) answerBuffer.boundary(true, width, display);
+        else if (key.upArrow) answerBuffer.vertical(-1, width, display);
+        else if (key.downArrow) answerBuffer.vertical(1, width, display);
         else if (key.backspace) answerBuffer.remove(true);
         else if (key.delete) answerBuffer.remove(false);
         else if (key.return) answerBuffer.insert('\n');
@@ -711,16 +713,18 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       {cardChooser && (
         <Box flexDirection="column">
           <Text bold>
-            Pending cards · {cardOptions.length} · Up/Down, Enter selects original card, Esc closes
+            {t('Pending cards ·')} {cardOptions.length}{' '}
+            {t('· Up/Down, Enter selects original card, Esc closes')}
           </Text>
           {cardOptions.slice(Math.max(0, cardIndex - 2), cardIndex + 3).map((item) => (
             <Text key={interactionKey(item)}>
               {cardOptions[cardIndex] === item ? '› ' : '  '}
-              {item.kind} [{terminalText(item.id)}] original Session {terminalText(item.sessionId)}{' '}
-              · Store {terminalText(item.originStoreId)} · revision {item.revision}
+              {item.kind} [{terminalText(item.id)}
+              {t('] original Session')} {terminalText(item.sessionId)} · Store{' '}
+              {terminalText(item.originStoreId)} {t('· revision')} {item.revision}
               {cards.some((current) => interactionKey(current) === interactionKey(item))
                 ? ''
-                : ' · changed; reopen to select'}
+                : t(' · changed; reopen to select')}
             </Text>
           ))}
         </Box>
@@ -781,32 +785,38 @@ function TuiSessionView({ controller }: { controller: TuiController }) {
       {state.panel === 'rewind' && (
         <Box flexDirection="column">
           <Text>
-            Files recovery: arrows/Enter preview; 1 session only, 2 code only, 3 both; Enter
-            confirms selected scope. R reloads readonly directory. Esc closes.
+            {t(
+              'Files recovery: arrows/Enter preview; 1 session only, 2 code only, 3 both; Enter confirms selected scope. R reloads readonly directory. Esc closes.',
+            )}
           </Text>
           {state.fileRecovery?.points?.payload.items.map((item, i) => (
             <Text key={item.checkpoint.id}>
               {panelIndex === i ? '› ' : ''}
-              {item.checkpoint.id} original {item.checkpoint.boundary.sessionId} trigger{' '}
-              {item.checkpoint.boundary.triggerSeq}
+              {item.checkpoint.id} {t('original')} {item.checkpoint.boundary.sessionId}{' '}
+              {t('trigger')} {item.checkpoint.boundary.triggerSeq}
             </Text>
           ))}
           {state.fileRecovery?.detail && (
             <Text>{terminalText(JSON.stringify(state.fileRecovery.detail.preview.payload))}</Text>
           )}
           {state.fileRecovery?.scopeChoice && (
-            <Text>Confirm {state.fileRecovery.scopeChoice} with Enter</Text>
+            <Text>
+              {t('Confirm')} {state.fileRecovery.scopeChoice} {t('with Enter')}
+            </Text>
           )}
           {state.fileRecovery?.intent && (
             <Text>
-              {terminalText(JSON.stringify(state.fileRecovery.intent))} A: pending approval panel;
-              R: original GET; C: explicitly continue untouched leg
+              {terminalText(JSON.stringify(state.fileRecovery.intent))}{' '}
+              {t(
+                'A: pending approval panel; R: original GET; C: explicitly continue untouched leg',
+              )}
             </Text>
           )}
           {state.fileRecovery?.saved?.map((intent, i) => (
             <Text key={intent.code?.request.commandId ?? intent.fork!.request.commandId}>
-              Saved {i + 1}: {intent.scope} code {intent.code?.phase ?? '-'} fork{' '}
-              {intent.fork?.phase ?? '-'}; L queries selected original intent
+              {t('Saved')} {i + 1}: {intent.scope} {t('code')} {intent.code?.phase ?? '-'}{' '}
+              {t('fork')} {intent.fork?.phase ?? '-'}
+              {t('; L queries selected original intent')}
             </Text>
           ))}
         </Box>

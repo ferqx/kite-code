@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { SessionView } from '@kite-ai/client';
+import type { Execution, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
 import {
   TuiController,
@@ -7,11 +7,17 @@ import {
   type TuiPreferenceEdit,
   type TuiPreferences,
   TuiSession,
+  type TuiState,
   verifyTuiPreferences,
 } from '../../src/tui';
+import { ComposerBuffer } from '../../src/tui/composer';
+import { TuiComposer } from '../../src/tui/composer-input';
+import { TuiExecutionPanel } from '../../src/tui/execution-panel';
 import { TuiModelPanel } from '../../src/tui/model-panel';
 import { TuiPermissionPanel } from '../../src/tui/permission-panel';
 import { TuiPresentationProvider, tuiChinese } from '../../src/tui/presentation';
+import { TuiAnswerInput } from '../../src/tui/question-panel';
+import { TuiRecoveryPanel } from '../../src/tui/recovery-panel';
 import { TuiSkillsPanel } from '../../src/tui/skills-panel';
 import { TuiStatusPanel } from '../../src/tui/status-panel';
 
@@ -137,7 +143,30 @@ test('Ink saves selected theme/language only after persistence; switch retains t
   expect(ui.lastFrame()).toContain('会话 a');
   expect(ui.lastFrame()).toContain('空闲');
   expect(ui.lastFrame()).toContain('新 Run');
+  expect(ui.lastFrame()).toContain('Ctrl+B 待决卡片');
   expect(ui.lastFrame()).toContain('Models Theme Session /path/语言');
+  expect(ui.lastFrame()).toContain('unsent original');
+  f.controller.togglePlanning();
+  await tick();
+  expect(ui.lastFrame()).toContain('计划下一 Run');
+  const originalRead = f.port.readSession;
+  f.port.readSession = async (id, signal) => {
+    const snapshot = await originalRead(id, signal);
+    return id === 'a'
+      ? {
+          ...snapshot,
+          view: {
+            ...snapshot.view,
+            runs: [
+              { id: 'original-active', sessionId: id, status: 'running', isActive: true },
+            ] as SessionView['runs'],
+          },
+        }
+      : snapshot;
+  };
+  await f.controller.select('a');
+  await tick();
+  expect(ui.lastFrame()).toContain('在原 Run 后排队计划');
   expect(ui.lastFrame()).toContain('unsent original');
   await f.controller.select('b');
   await tick();
@@ -424,5 +453,239 @@ test('populated model, permission and Skill panels translate owned instructions 
     for (const value of raw) expect(ui.lastFrame()).toContain(value);
     ui.unmount();
   }
+  f.controller.dispose();
+});
+
+test('saved language translates background and recovery instructions without translating output, machine facts or frozen caller requests', async () => {
+  const f = fixture();
+  await tick();
+  await f.controller.select('a');
+  const job: Execution = {
+    id: 'job-original',
+    originStoreId: 'store',
+    sessionId: 'a',
+    runId: null,
+    kind: 'job',
+    definitionId: 'Models',
+    definitionVersion: '1',
+    status: 'running',
+    result: null,
+    resultRevision: '0',
+    cancelRequestedAt: 1,
+    parentExecutionId: null,
+    childSessionId: null,
+  };
+  const request = {
+    kind: 'run.start' as const,
+    expectedStoreId: 'store',
+    commandId: 'caller-original',
+    content: 'Theme Language /Original/path\n原正文🙂',
+  };
+  const state: TuiState = {
+    ...f.controller.state,
+    snapshot: {
+      ...f.controller.state.snapshot!,
+      view: { ...f.controller.state.snapshot!.view, executions: [job] },
+    },
+    jobStops: new Map([
+      [
+        'stop-original',
+        {
+          target: { storeId: 'store', sessionId: 'a', executionId: job.id },
+          request: {
+            kind: 'execution.cancel',
+            expectedStoreId: 'store',
+            commandId: 'stop-original',
+            executionId: job.id,
+          },
+          phase: 'applied',
+        },
+      ],
+    ]),
+    executionReading: {
+      target: { storeId: 'store', sessionId: 'a', executionId: job.id },
+      phase: 'ready',
+      output: {
+        highWaterSeq: '3',
+        items: [
+          {
+            executionId: job.id,
+            seq: '1',
+            throughSeq: '1',
+            stream: 'stdout',
+            content: request.content,
+            droppedBytes: '0',
+          },
+          {
+            executionId: job.id,
+            seq: '2',
+            throughSeq: '3',
+            stream: 'stderr',
+            content: '',
+            droppedBytes: null,
+          },
+        ],
+      },
+    },
+    callers: new Map([
+      [
+        'original',
+        {
+          intent: {
+            scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+            request,
+            subjectId: 'a',
+            bodyDigest: 'a'.repeat(64),
+            requestDigest: 'b'.repeat(64),
+            target: { kind: 'session', id: 'a' },
+          },
+          phase: 'unknown',
+        },
+      ],
+    ]),
+  };
+  const presented = Object.create(f.controller) as TuiController;
+  Object.defineProperty(presented, 'state', { value: state });
+  const before = JSON.stringify([job, state.executionReading, [...state.callers.values()]]);
+  const counts = f.counts();
+  const english = f.facts();
+  await f.controller.savePreference({
+    expectedRevision: english.revision,
+    key: 'language',
+    value: 'zh-CN',
+  });
+  const chinese = f.controller.state.preferences;
+  for (const [Panel, heading, labels] of [
+    [
+      TuiExecutionPanel,
+      'Original background Jobs',
+      ['原后台任务 · 会话 a', '取消已请求；清理尚未确认', '已保存输出截至 3', '丢失字节数不可用'],
+    ],
+    [
+      TuiRecoveryPanel,
+      'Explicit recovery',
+      [
+        '显式恢复 · a',
+        '已保存原申请 1',
+        '原 Store store',
+        '已应用仅表示原 Command 已应用；Run 实际结果另行确认',
+      ],
+    ],
+  ] as const) {
+    const ui = render(
+      <TuiPresentationProvider value={{ preferences: english }}>
+        <Panel controller={presented} />
+      </TuiPresentationProvider>,
+    );
+    expect(ui.lastFrame()).toContain(heading);
+    ui.rerender(
+      <TuiPresentationProvider value={{ preferences: chinese }}>
+        <Panel controller={presented} />
+      </TuiPresentationProvider>,
+    );
+    await tick();
+    for (const label of labels) expect(ui.lastFrame()).toContain(label);
+    expect(ui.lastFrame()).not.toContain(heading);
+    if (Panel === TuiExecutionPanel) {
+      expect(ui.lastFrame()).toContain(request.content);
+      expect(ui.lastFrame()).toContain('Models [job-original] running');
+      expect(ui.lastFrame()).toContain('stop-original: applied');
+      expect(ui.lastFrame()).toContain('stdout · 1…1');
+    } else {
+      ui.stdin.write('\u0016');
+      await tick();
+      expect(ui.lastFrame()?.replace(/\n/g, ' ')).toContain(JSON.stringify(request));
+      expect(ui.lastFrame()).toContain('run.start · unknown · caller-original');
+      expect(ui.lastFrame()).toContain('b'.repeat(64));
+    }
+    ui.unmount();
+  }
+  expect(JSON.stringify([job, state.executionReading, [...state.callers.values()]])).toBe(before);
+  expect(f.counts()).toEqual(counts);
+  expect(f.edits).toHaveLength(1);
+  f.controller.dispose();
+});
+
+test('composer and answer paste labels and file candidate hints follow locale while keeping raw Unicode and diagnostics', async () => {
+  const f = fixture();
+  await tick();
+  const preferences = {
+    ...f.facts(),
+    language: 'zh-CN' as const,
+    resolvedLanguage: 'zh-CN' as const,
+  };
+  const buffer = new ComposerBuffer();
+  const raw = 'Theme /Original/path\n中文🙂e\u0301';
+  buffer.insert(raw, true);
+  let changes = 0,
+    submits = 0;
+  const composer = (
+    <TuiComposer
+      buffer={buffer}
+      value={raw}
+      active
+      label="新 Run"
+      onChange={() => changes++}
+      onSubmit={() => submits++}
+    />
+  );
+  const ui = render(
+    <TuiPresentationProvider value={{ preferences }}>{composer}</TuiPresentationProvider>,
+  );
+  expect(ui.lastFrame()).toContain(`[已粘贴 ${Array.from(raw).length} 个字符]`);
+  ui.rerender(
+    <TuiPresentationProvider value={{ preferences }}>
+      <TuiAnswerInput buffer={buffer} />
+    </TuiPresentationProvider>,
+  );
+  await tick();
+  expect(ui.lastFrame()).toContain(`[已粘贴 ${Array.from(raw).length} 个字符]`);
+  expect(buffer.text).toBe(raw);
+  ui.unmount();
+  const candidates = new ComposerBuffer();
+  candidates.sync('@Theme');
+  const scope = { storeId: 'store', sessionId: 'a', workspaceId: 'w' };
+  let files: NonNullable<TuiState['fileCandidates']> = {
+    key: candidates.fileToken!.key,
+    scope,
+    phase: 'reading',
+    paths: [],
+    unavailable: [],
+  };
+  const view = () => (
+    <TuiPresentationProvider value={{ preferences }}>
+      <TuiComposer
+        buffer={candidates}
+        value={candidates.text}
+        active
+        label="新 Run"
+        files={files}
+        onChange={() => changes++}
+        onSubmit={() => submits++}
+      />
+    </TuiPresentationProvider>
+  );
+  const list = render(view());
+  expect(list.lastFrame()).toContain('读取工作区文件名中');
+  files = {
+    ...files,
+    phase: 'ready',
+    paths: ['Theme /原文🙂.txt'],
+    unavailable: [{ path: 'bad', reason: 'raw_failure' }],
+  };
+  list.rerender(view());
+  await tick();
+  expect(list.lastFrame()).toContain('1 个工作区文件候选');
+  expect(list.lastFrame()).toContain('Theme /原文🙂.txt');
+  expect(list.lastFrame()).toContain('文件候选不完整： 1 个路径不可用');
+  files = { ...files, phase: 'failed', error: 'Theme' };
+  list.rerender(view());
+  await tick();
+  expect(list.lastFrame()).toContain('文件候选不可用： Theme');
+  expect(list.lastFrame()).not.toContain('文件候选不可用： 主题');
+  expect(changes).toBe(0);
+  expect(submits).toBe(0);
+  expect(f.counts().effects).toBe(0);
+  list.unmount();
   f.controller.dispose();
 });

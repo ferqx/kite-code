@@ -2,7 +2,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import { ClientError, type Interaction, type Message } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { TuiController, type TuiPort, TuiSession } from '@kite-ai/ui/tui';
+import { TuiController, type TuiPort, TuiSession, translateTuiLabel } from '@kite-ai/ui/tui';
 import { Box, render, Text, useInput } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import {
@@ -65,6 +65,14 @@ function TerminalHost({
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const [notice, setNotice] = useState('');
+  const t = (label: string) => translateTuiLabel(label, state.preferences.resolvedLanguage);
+  const original =
+    /^Original Session creation unknown: ([A-Za-z0-9_-]+)(; Ctrl\+N reads this ID only)?$/.exec(
+      notice,
+    );
+  const shownNotice = original
+    ? `${t('Original Session creation unknown:')} ${original[1]}${original[2] ? t(original[2]) : ''}`
+    : t(notice);
   useInput((input, key) => {
     if (key.ctrl && input === 'n') void onNew().then(setNotice);
     if (key.ctrl && input === 'q') onQuit();
@@ -72,13 +80,13 @@ function TerminalHost({
   return (
     <Box flexDirection="column">
       <Text>
-        Development TUI · Ctrl+N new Workspace Session · Ctrl+Q{' '}
-        {shared ? 'disconnect shared service' : 'quit owned host'}
+        {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
+        {shared ? t('disconnect shared service') : t('quit owned host')}
       </Text>
       <TuiSession controller={controller} />
-      {notice && <Text>{notice}</Text>}
+      {notice && <Text>{shownNotice}</Text>}
       {state.intent?.phase === 'unknown' && (
-        <Text>Original outcome unknown: Ctrl+K only reads original Command</Text>
+        <Text>{t('Original outcome unknown: Ctrl+K only reads original Command')}</Text>
       )}
     </Box>
   );

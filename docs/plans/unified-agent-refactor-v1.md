@@ -2003,6 +2003,8 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 
 完整能力缺口中的 T055 当前会话展示已补齐：正式 TUI 和 Native 分别显示主轮次事实、当前 Session/Store 未结束 Job 数与未知数；父完成不清后台，准确停止一项不改 sibling，旧 Store 历史不计入。原真实80×24 PTY与installed默认Native完整文件已通过，详情见[本阶段证据](unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。完整能力及其余§35/T/E条件不因这项展示闭合而默认通过。
 
+正式 TUI 原有 `/language` 的固定提示缺口现另补齐：后台/恢复/文件恢复/待决选择/文件候选/粘贴与宿主提示沿已保存语言呈现，原业务材料和机器身份保留。普通输入与答案的 paste 显示和光标行采用同一 cell 宽度，保存失败、原 GET-only 和关闭语义不变。实际原 paired/shared 完整偏好 PTY及准确回归范围见[当前阶段证据](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)；不以此替代四项退出缺口或整体能力通过。
+
 默认宿主 Shell 的原候选接口核验保留：本机 SDK 27 声明的后代范围 Endpoint Security 接口最低要求 macOS 27.0 和对应 entitlement，当前 macOS 26.7.1 运行库没有该符号；后续实际交付的launchd/coalition方案见§30.2.12。原接口探针与未验条件归 [Jobs owner](../../packages/agent/src/jobs/README.md)及[进度](unified-agent-refactor-v1-progress.md#2026-10-07宿主-shell-完整后代接口的运行资格)。用户后续已授权本任务Chrome认证测试，原入口passed见§30.2.13；Windows/Linux按用户要求留到重构完成后由GitHub Actions验证，原浏览器状态读取拒绝不再作为本机资格的待答项。
 
 37能力保持partial、wholeV13=false、Goal active；本地stage/commit授权不扩大到push/PR/发布。

@@ -20,6 +20,83 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Answer needs at least': '回答至少需要',
   'Answer allows at most': '回答最多允许',
   characters: '个字符',
+  Pasted: '已粘贴',
+  'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':
+    'Ctrl+B 待决卡片 · Ctrl+R 会话 · Ctrl+L 刷新 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
+  'Queue Planning after original Run': '在原 Run 后排队计划',
+  'Planning next Run': '计划下一 Run',
+  'Reading Workspace file names…': '读取工作区文件名中…',
+  'Workspace file candidates': '个工作区文件候选',
+  'No matching Workspace file names · Esc resumes ordinary input':
+    '没有匹配的工作区文件名 · Esc 返回普通输入',
+  'File candidates unavailable:': '文件候选不可用：',
+  'File candidates incomplete:': '文件候选不完整：',
+  'unavailable paths': '个路径不可用',
+  'Pending cards ·': '待决卡片 ·',
+  '· Up/Down, Enter selects original card, Esc closes': '· 上下键选择，Enter 打开原卡片，Esc 关闭',
+  ' · changed; reopen to select': ' · 已变化；重新打开后选择',
+  'Files recovery: arrows/Enter preview; 1 session only, 2 code only, 3 both; Enter confirms selected scope. R reloads readonly directory. Esc closes.':
+    '文件恢复：方向键/Enter 预览；1 仅会话，2 仅代码，3 两者；Enter 确认所选范围。R 重读只读目录。Esc 关闭。',
+  original: '原会话',
+  trigger: '触发序号',
+  Confirm: '确认',
+  'with Enter': '按 Enter 提交',
+  'A: pending approval panel; R: original GET; C: explicitly continue untouched leg':
+    'A：待决审批面板；R：查询原申请；C：明确继续尚未提交的部分',
+  Saved: '已保存',
+  code: '代码',
+  fork: '分支',
+  '; L queries selected original intent': '；L 查询所选原申请',
+  'Original background Jobs · Session': '原后台任务 · 会话',
+  'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Ctrl+L original receipt · Esc/Ctrl+C close reader':
+    '上下键选择目标 · O 读取已保存完整输出 · C 子日志 · S 后按 Enter 停止原 Job · R 刷新 · Ctrl+L 查询原回执 · Esc/Ctrl+C 关闭读取',
+  ' · cancel requested; cleanup not confirmed': ' · 取消已请求；清理尚未确认',
+  'No verified Job in the current snapshot': '当前快照中没有已核验的 Job',
+  'Confirm stop original Job': '确认停止原 Job',
+  ' · Enter submits once; Esc closes': ' · Enter 提交一次；Esc 关闭',
+  '/ stop Command': '/ 停止 Command',
+  ' · cancel requested; await actual Job terminal': ' · 取消已请求；等待 Job 实际终态',
+  'Observation unknown: new stop requests disabled': '观察未知：禁止提交新停止申请',
+  'Original read': '原输出读取',
+  'Recorded output through': '已保存输出截至',
+  '; gaps remain unavailable': '；缺口内容仍不可用',
+  ' · dropped bytes unavailable': ' · 丢失字节数不可用',
+  dropped: '丢失',
+  bytes: '字节',
+  'Original child': '原子会话',
+  ' · parent carrier [': ' · 父执行载体 [',
+  ' · selection': ' · 上下文选择',
+  ' · frozen history through': ' · 固定历史截至',
+  '· seq': '· 序号',
+  'Original tool call': '原工具调用',
+  'Verified recorded Model body ·': '已核验的保存 Model 正文 ·',
+  'content bytes': '正文的字节数',
+  'incomplete recorded prefix': '已保存的不完整前缀',
+  'Full Model reader unsupported; showing original message projection':
+    '不支持完整 Model 读取；显示原消息投影',
+  'Explicit recovery ·': '显式恢复 ·',
+  'run <original Run ID> / report <original report Command ID>':
+    'run <原 Run ID> / report <原报告 Command ID>',
+  "interrupt confirm: explicitly interrupt this root Session's orphan execution group; unknown effects remain unknown.":
+    'interrupt confirm：明确中断此根会话的孤立执行组；未知效果仍为未知。',
+  'Enter submits once; Ctrl+L checks the original request; Ctrl+C stops this read; Esc closes.':
+    'Enter 提交一次；Ctrl+L 查询原申请；Ctrl+C 停止本次读取；Esc 关闭。',
+  'Saved caller intents': '已保存原申请',
+  ' · ↑/↓ select · Ctrl+L original GET · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only':
+    ' · ↑/↓ 选择 · Ctrl+L 查询原申请 · Ctrl+V 查看完整固定请求 · Ctrl+D 仅清理已核实原申请',
+  'Original Store': '原 Store',
+  '· Session': '· 会话',
+  Subject: '主体',
+  '· target': '· 目标',
+  'Request SHA': '请求 SHA',
+  'applied means cancellation requested; actual termination is separate':
+    '已应用仅表示取消已请求；实际停止另行确认',
+  'applied means original Command applied; actual Run result is separate':
+    '已应用仅表示原 Command 已应用；Run 实际结果另行确认',
+  'Caller journal unavailable:': '原申请凭证不可用：',
+  'Original Session': '原会话',
+  '· Command': '· Command',
+  'Original result Run': '原结果 Run',
   entered: '已输入',
   'Ctrl+A: read required attachment. Question: choose or enter the original-schema answer above.':
     'Ctrl+A：读取必要附件。问题：选择或输入上方原 schema 的回答。',
@@ -409,15 +486,30 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'System language': '系统语言',
   'Simplified Chinese': '简体中文',
   English: '英文',
+  'Development TUI · Ctrl+N new Workspace Session · Ctrl+Q':
+    '终端界面 · Ctrl+N 新工作区会话 · Ctrl+Q',
+  'disconnect shared service': '断开共享服务',
+  'quit owned host': '退出当前宿主',
+  'Original outcome unknown: Ctrl+K only reads original Command':
+    '原结果未知：Ctrl+K 只读取原 Command',
+  'Session creation already in progress': '会话创建正在进行',
+  'Original Session creation rejected': '原会话创建已拒绝',
+  'Original Session creation unknown:': '原会话创建结果未知：',
+  '; Ctrl+N reads this ID only': '；Ctrl+N 只读取此 ID',
+  'Original Session creation applied': '原会话创建已应用',
+  'New Workspace Session selected': '已选择新工作区会话',
+  'Session creation unavailable': '会话创建不可用',
 };
 export type TuiTranslator = (label: string) => string;
+export function translateTuiLabel(label: string, language: 'zh-CN' | 'en-US'): string {
+  return language === 'zh-CN' ? (tuiChinese[label] ?? label) : label;
+}
 const Presentation = createContext({ preferences: defaultTuiPreferences });
 export const TuiPresentationProvider = Presentation.Provider;
 export function useTuiPresentation() {
   const { preferences } = useContext(Presentation);
   const t = useMemo<TuiTranslator>(
-    () => (label) =>
-      preferences.resolvedLanguage === 'zh-CN' ? (tuiChinese[label] ?? label) : label,
+    () => (label) => translateTuiLabel(label, preferences.resolvedLanguage),
     [preferences.resolvedLanguage],
   );
   return { t, preferences };

@@ -52,7 +52,8 @@ export function TuiAnswerInput({ buffer }: { buffer: ComposerBuffer }) {
   const { stdout } = useStdout();
   const prefix = `${t('Answer')} > `;
   const width = questionInputWidth(stdout.columns, t('Answer'));
-  const { lines, index } = buffer.row(width),
+  const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
+  const { lines, index } = buffer.row(width, display),
     start = Math.max(0, index - 2),
     visible = lines.slice(start, start + 5);
   return (
@@ -66,7 +67,7 @@ export function TuiAnswerInput({ buffer }: { buffer: ComposerBuffer }) {
               key={line.start + i}
               inverse={start + n === index && buffer.cursor === line.start + i}
             >
-              {composerDisplay(part)}
+              {display(part)}
             </Text>
           ))}
           {start + n === index && buffer.cursor === line.end && <Text inverse> </Text>}

@@ -82,6 +82,8 @@ R 重新读取、K 查询原 mutation、Esc 放弃确认或关闭。提交封存
 
 呈现层只翻译显式自有文案，原用户/Model/Tool 正文、路径、命令和机器码保留；语义色提供五种配色与 dark/light 基础主题。关闭面板后的同 profile 保存结果可更新全局显示，但不重开选择器；dispose 后迟到结果不发布。文件持久化和维护资产资格由 [CLI owner](../../../../apps/cli/README.md#开发-tui-显示偏好) 维护。
 
+后台 Job 的原输出/子日志/准确停止提示、恢复的原 caller/完整请求/显式操作提示、文件恢复与待决卡片选择、文件候选及粘贴占位均使用同一[显式文案目录](presentation.tsx)。`translateTuiLabel` 是宿主固定标签的纯翻译函数，CLI 不用它翻译原 ID、请求 JSON 或业务正文。`ComposerBuffer` 的行与移动方法接收可选 display；普通输入、自由答案和原 JSON 输入传入当前语言的同一 display，折叠 paste 的 cell 宽度与实际显示一致，默认英文调用保持原合同。原字符簇、全文、草稿、reader 和业务 authority 不变。[preferences 测试](../../test/tui/preferences.test.tsx)核已保存语言、populated Job 输出和固定请求保真、原机器码及文件候选，[composer 测试](../../test/tui/composer.test.ts)核中文粘贴的视觉行与 Home/End/上下移动；实际 paired/shared 80×24 偏好入口由 CLI owner 维护，阶段证据归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-的语言提示与原始内容)。
+
 
 原答案提交独立封存 presentation Session、Interaction ID、原决定 revision 和完整 Answer request；成功只接纳准确 `interaction.answer`、原 Store/Session/Command 与 `applied/answer_saved` 回执，并核对决定 revision 为原版本加一。身份错误、仅 accepted 或丢回执保持 unknown，未知时仅 GET 原 Command，零重复 POST；同一原卡版本已保存后不再次答复。取消回执不会覆盖未知原答案的恢复意图，其他未知命令仍保留各自查询身份。Ctrl+L 先核实未知原答案，即使原 work 已结束或视图已切到其他 Session，再在选择未变时刷新当前快照。它不从 saved 推导 Core 已接受决定或工具已派发。
 

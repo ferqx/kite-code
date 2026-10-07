@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { ComposerBuffer, composerDisplay } from '../../src/tui/composer';
+import { translateTuiLabel } from '../../src/tui/presentation';
 
 test('grapheme insertion and directional deletion preserve CJK, emoji and combining boundaries', () => {
   const b = new ComposerBuffer();
@@ -110,4 +111,29 @@ test('separate keyboard events join combining marks and ZWJ emoji into one curso
   expect(b.text).toBe('👩\u200d💻');
   b.remove(true);
   expect(b.text).toBe('');
+});
+
+test('localized atomic paste uses its displayed cell width for wrapping, Home/End and vertical movement', () => {
+  const b = new ComposerBuffer();
+  b.sync('abcdefghij');
+  b.insert('12\n🙂', true);
+  b.insert('xy');
+  const display = (part: ComposerBuffer['parts'][number]) =>
+    composerDisplay(part, (label) => translateTuiLabel(label, 'zh-CN'));
+  expect(display(b.parts[10]!)).toBe('[已粘贴 4 个字符]');
+  expect(composerDisplay(b.parts[10]!)).toBe('[Pasted 4 characters]');
+  expect(b.lines(28, display)).toEqual([
+    { start: 0, end: 12, cells: 28 },
+    { start: 12, end: 13, cells: 1 },
+  ]);
+  b.boundary(false, 28, display);
+  expect(b.cursor).toBe(12);
+  b.vertical(-1, 28, display);
+  expect(b.cursor).toBe(0);
+  b.boundary(true, 28, display);
+  expect(b.cursor).toBe(12);
+  expect(b.row(28, display).index).toBe(0);
+  b.horizontal(1);
+  expect(b.row(28, display).index).toBe(1);
+  expect(b.text).toBe('abcdefghij12\n🙂xy');
 });

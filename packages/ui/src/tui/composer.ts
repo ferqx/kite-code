@@ -3,12 +3,16 @@ import { fixedTuiCommands } from './commands';
 import { fileReference, fileToken } from './file-candidates';
 
 type Unit = { text: string; pasted?: true };
+export type ComposerDisplay = (unit: Unit) => string;
 export type ComposerLine = { start: number; end: number; cells: number };
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const units = (text: string): Unit[] =>
   Array.from(segmenter.segment(text), ({ segment }) => ({ text: segment }));
-export function composerDisplay(unit: Unit): string {
-  if (unit.pasted) return `[Pasted ${Array.from(unit.text).length} characters]`;
+export function composerDisplay(
+  unit: Unit,
+  t: (label: string) => string = (label) => label,
+): string {
+  if (unit.pasted) return `[${t('Pasted')} ${Array.from(unit.text).length} ${t('characters')}]`;
   return unit.text.replace(
     // biome-ignore lint/suspicious/noControlCharactersInRegex: display terminal protocol bytes as text; raw input stays unchanged.
     /[\x00-\x09\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,
@@ -83,7 +87,7 @@ export class ComposerBuffer {
     this.endAffinity = false;
     this.cursor = Math.max(0, Math.min(this.parts.length, this.cursor + direction));
   }
-  lines(width: number): ComposerLine[] {
+  lines(width: number, display: ComposerDisplay = composerDisplay): ComposerLine[] {
     const result: ComposerLine[] = [];
     let start = 0,
       cells = 0;
@@ -95,7 +99,7 @@ export class ComposerBuffer {
         cells = 0;
         continue;
       }
-      const size = stringWidth(composerDisplay(part));
+      const size = stringWidth(display(part));
       if (cells && cells + size > width) {
         result.push({ start, end: index, cells });
         start = index;
@@ -106,8 +110,8 @@ export class ComposerBuffer {
     result.push({ start, end: this.parts.length, cells });
     return result;
   }
-  row(width: number) {
-    const lines = this.lines(width);
+  row(width: number, display: ComposerDisplay = composerDisplay) {
+    const lines = this.lines(width, display);
     let index = lines.length - 1;
     while (index > 0 && this.cursor < lines[index]!.start) index--;
     if (
@@ -119,25 +123,28 @@ export class ComposerBuffer {
       index--;
     return { lines, index, line: lines[index]! };
   }
-  boundary(end: boolean, width: number) {
-    const { line } = this.row(width);
+  boundary(end: boolean, width: number, display: ComposerDisplay = composerDisplay) {
+    const { line } = this.row(width, display);
     this.cursor = end ? line.end : line.start;
     this.endAffinity = end;
   }
-  vertical(direction: -1 | 1, width: number) {
-    const { lines, index, line } = this.row(width),
+  vertical(direction: -1 | 1, width: number, display: ComposerDisplay = composerDisplay) {
+    const { lines, index, line } = this.row(width, display),
       target = lines[index + direction];
     if (!target) {
       this.navigateHistory(direction);
       return;
     }
     const column = stringWidth(
-      this.parts.slice(line.start, this.cursor).map(composerDisplay).join(''),
+      this.parts
+        .slice(line.start, this.cursor)
+        .map((part) => display(part))
+        .join(''),
     );
     let next = target.start,
       cells = 0;
     while (next < target.end) {
-      const size = stringWidth(composerDisplay(this.parts[next]!));
+      const size = stringWidth(display(this.parts[next]!));
       if (cells + size > column) break;
       cells += size;
       next++;

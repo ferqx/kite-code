@@ -36,7 +36,7 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 自然退出、cancel、父 EOF/SIGKILL 加入同一次停止。完整子树为空要求原 guardian 仍在同一 coalition、内核 count=1、原命令根已退出，再核原根/组证明及准确 reap。只有本次 coalition 的证明才保存 `processTreeStopped:true`；普通 POSIX groupStopped 继续只表达原组。正常 broker 尝试准确 bootout，再须核准确 label absence 和原私有目录清理才交付 terminal；失联、容量不足、身份漂移或清理不确定保存 unknown。父已退出时 guardian 只在全树证明后删除原目录并撤销自己的注册。原 cold reference 仅供读取，不创建新 handle 或重跑。
 
-[真实 host 测试](../../test/isolated/jobs/macos-host-shell.test.ts)11项/61断言已在 macOS26.7.1 arm64/Bun1.4.2 运行通过：宿主工具/fork/HOME/广泛读取、两种写范围、IP与带无沙箱正例的Unix拒绝、实际 Full 父目录 rename/hardlink拒绝、自然根退出后的 setsid/grandchildren、重复取消/无关存活、长控制路径、输出gap和父 EOF/SIGKILL及准确标签已撤销后的清理。默认消费者、最终 Ask/Full 快照、源码树外/持久输出及持续负载分别归[Service owner](../../../../apps/service/README.md#默认-shell-装配)和[韧性 owner](../../../../docs/active/runtime-resilience-qualification.md)。这些不等于跨平台、全部原生资源指标或完整发布 qualification。
+[真实 host 测试](../../test/isolated/jobs/macos-host-shell.test.ts)11项/65断言已在 macOS26.7.1 arm64/Bun1.4.2 运行通过：宿主工具/fork/HOME/广泛读取、两种写范围、IP与带无沙箱正例的Unix拒绝、实际 Full 父目录 rename/hardlink拒绝、自然根退出后的 setsid/grandchildren、重复取消/无关存活、长控制路径、输出gap和父 EOF/SIGKILL及准确标签已撤销后的清理。夹具先完整关闭 PID 记录，再原子发布就绪路径；父退出场景核三项均为正整数后才观察实际后代。原清理断言和观察期限保持。默认消费者、最终 Ask/Full 快照、源码树外/持久输出及持续负载分别归[Service owner](../../../../apps/service/README.md#默认-shell-装配)和[韧性 owner](../../../../docs/active/runtime-resilience-qualification.md)。这些不等于跨平台、全部原生资源指标或完整发布 qualification。
 
 ## 固定 macOS confined Shell
 
