@@ -18,6 +18,8 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 
 更新/回滚只修改自己仍持有的登记，卸载以原 nonce CAS 撤销；另一个 Native 后写的登记不能被旧卸载删除。撤销后仍存在的独立前门恢复 Terminal。显式 source/candidate 选择不读取登记，也不重新绑定冷原意图或活动 Run。
 
+真实代码兼容验收使用固定旧源码的原 Terminal/Native builder；不把当前 builder 配旧 inner、改 productVersion 或当前代码自造旧库当两版 Native。旧 Native 构建须在旧源码删除前完成；打包后产品只能使用物化候选的闭包。2026-10-07 已沿正式 installed 窗口完成本机 A→B→A→B，原 Core format 1/Native DB7 与数据保留、完整 B 正文和后续实际工作分别证明。该选择补齐兼容验证输入，不改变安装、回退或 trust 语义，也不把冷 caller 记录提升为新的进程内输入绑定。
+
 ## Alternatives considered
 
 - 只把 Native CLI 可执行路径写入前门：不足以核 runtime/Service 和完整依赖；改为准确 outer/inner、nonce 与 active 的闭合身份。

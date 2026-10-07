@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 
 export const TERMINAL_PREDECESSOR_COMMIT = '3140fe6d37131050033c66ffd9637fe7cd967da9';
@@ -89,6 +90,8 @@ export async function materializeTerminalPredecessor(input: {
   bunExecutable?: string;
   sqliteLibrary?: string;
   buildTimeoutMs?: number;
+  /** Also build the old Native app from this same original checkout, before deleting it. */
+  nativeElectronDist?: string;
 }) {
   const root = realpathSync(input.root),
     repository = realpathSync(input.repositoryRoot);
@@ -248,7 +251,10 @@ for (const path of JSON.parse(workspaceJSON)) {
     throw Error('terminal_predecessor_source_identity_invalid');
   writeFileSync(
     buildScript,
-    `import {buildTerminalBundle} from ${JSON.stringify(pathToFileURL(join(source, 'scripts/release/terminal-bundle.ts')).href)};\nawait buildTerminalBundle(${JSON.stringify({ destination: candidate, repositoryRoot: source, bunExecutable: bun, ...(input.sqliteLibrary ? { sqliteLibrary: input.sqliteLibrary } : {}) })});\n`,
+    `import {buildTerminalBundle} from ${JSON.stringify(pathToFileURL(join(source, 'scripts/release/terminal-bundle.ts')).href)};\nawait buildTerminalBundle(${JSON.stringify({ destination: candidate, repositoryRoot: source, bunExecutable: bun, ...(input.sqliteLibrary ? { sqliteLibrary: input.sqliteLibrary } : {}) })});\n` +
+      (input.nativeElectronDist
+        ? `import {buildNativeCandidate} from ${JSON.stringify(pathToFileURL(join(source, 'apps/desktop/scripts/build-native.ts')).href)};\nawait buildNativeCandidate(${JSON.stringify({ terminalRoot: candidate, electronDist: realpathSync(input.nativeElectronDist), outdir: join(root, 'predecessor-native') })});\n`
+        : ''),
   );
   await command([bun, buildScript], source, timeoutMs);
   const built = verifyTerminalRuntimeBundle(candidate),
@@ -268,8 +274,14 @@ for (const path of JSON.parse(workspaceJSON)) {
   if (existsSync(source)) throw Error('terminal_predecessor_source_removal_unconfirmed');
   const verified = verifyTerminalRuntimeBundle(candidate);
   if (verified.digest !== built.digest) throw Error('terminal_predecessor_candidate_changed');
+  const nativeCandidate = input.nativeElectronDist
+    ? verifyNativeRuntimeBundle(join(root, 'predecessor-native'))
+    : undefined;
+  if (nativeCandidate && nativeCandidate.terminal.digest !== verified.digest)
+    throw Error('native_predecessor_terminal_mismatch');
   return {
     candidate: verified,
+    ...(nativeCandidate ? { nativeCandidate } : {}),
     provenance: {
       kind: 'local-real-code-comparison' as const,
       commit: TERMINAL_PREDECESSOR_COMMIT,

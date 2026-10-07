@@ -33,6 +33,14 @@ Node main 持 outer/inner 两个 SH，继承 Bun helper 只关闭副本，不对
 
 Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal 前门也可选择该 Native。安装更新只更新自己仍拥有的登记，卸载以 nonce CAS 撤销，不能抹掉后来另一个 Native 的登记。独立前门仍存在时，标准命令恢复该 Terminal。若父 shell 已缓存 Native-bin-first 的路径，删除后该缓存真实返回 127；用户执行 `hash -r` 或打开新 shell 后恢复 PATH 查找。安装器无法清除父 shell 缓存，不留未经用户授权的 stub，不修改 PATH/RC。
 
+## 真实代码升级与冷回退
+
+[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。固定旧提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 由自己的 Terminal 和 Native builder 构建，与当前代码保持相同锁文件、八 workspace 清单、补丁、Core format 1 与 Native DB7；两者 productVersion 都是 `0.1.0`，inner、Main、renderer 的实际字节及候选 ID 不同。[物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)在删除旧源码前完成旧 Native 构建，随后两个候选均归档、解包、搬迁并删除原输出。临时旧 clone 仅是验证输入，不承载当前实现或 Git 交付。
+
+实际 installed `bin/kite-desktop` 启动默认 Main 和配对 Service，经窗口完成 A 原任务、升级 B 并产生新完整正文、冷回退 A 读取 B 正文并继续原会话，再切回 B 冷读三条原任务。升级时运行中的 A 仍持原 outer/inner，卸载 busy；四次普通退出后全部候选两层可独占。Core 和 Native 私有数据库的 inode/完整字节、原配置在指针切换与卸载时保持，回退不恢复旧备份。完整正文经过实际窗口按钮与 Main/HTTP 读取；短回答以内联全文显示，同时经 Main 完整读取边界核对。每次冷读保持原 Command/Run/Model、正文/hash/ref 与 Store 游标，Provider 不增长。持久 caller 目录保原记录，冷记录不恢复为当前进程输入绑定；回退后的新模型实际收到 B 全文。
+
+本机有限作业已通过 1 项、374 条 Bun 断言及实际 driver 断言，三次失败与修正、准确候选和阶段完整回归归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-真实代码升级与冷回退)。这证明 macOS 上两个本地真实代码候选的兼容链，不是已发布 predecessor/T029、任意版本回退、远端 Provider 或 Linux/Windows 资格。生产安装和回退逻辑未修改，现有 Windows 限制保持。
+
 ## 验证与限制
 
 [真实 Native archive/install/lifecycle](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)在源码树外删除原候选后启动实际 Electron Main 与所属 Service，验证原数据/cold 读取、升级旧进程固定、双锁强杀窗口、回滚与卸载。[注册验收](../../../tests/isolated/unified-agent/cli-registration-lifecycle.test.ts)核两种 PATH 与真正 80×24 TUI，公共 Store 核三条 Run completed，实际 Provider 3；每次运行中卸载 busy 并保持登记，卸载后原查询、数据库/config/caller bytes 和 cursor 不变。[Files 保护](../../../tests/isolated/unified-agent/native-runtime-protection.test.ts)核 Workspace 中实际 outer/inner 读写保护与邻接正常效果。

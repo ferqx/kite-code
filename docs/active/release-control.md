@@ -28,6 +28,8 @@ Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。�
 
 Terminal 已有本机真实跨代码版本冷回退资格：固定新基线旧提交由其原 builder 构建，与当前代码保持相同依赖输入及 format=1 SQL 基线；经源码外安装前门 A→B→A→B 四个冷实例核原 Store、原任务身份、B 新完整正文和后续真实工作。回退仅交换候选指针，数据库未恢复；正常 stop 核准确进程退出和所有候选 EX，卸载保独立 Profile。完整测试与范围由[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)维护；本地代码比较不等于已发布 predecessor、Native 或三平台资格。Required 默认测试 checkout 保完整历史，以读取固定真实旧提交，缺旧对象直接失败。
 
+Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核对：旧源码使用自己的两层 builder，与当前格式兼容而 Main/renderer/inner 字节不同；四次默认窗口和配对 Service 普通退出，原数据、完整正文/hash/ref、持久 caller 及回退后的新工作保持正确。指针操作保 Core/Native 私有数据库 inode/bytes 和配置，不恢复数据；运行中的旧窗口保持原闭包。准确资格及限制归[Native owner](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)。两项本地代码比较均不替代已发布 predecessor/T029、任意版本或其他平台的实际证据。
+
 ## SQLite 与可选能力
 
 Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建测量复制后 runtime，正式启动在首次数据库前选择并核包内 metadata，Worker 核同一 process-global 引擎。完全无选定资产的开发模式 unqualified；损坏/不完整资产拒绝，不查系统库 fallback。

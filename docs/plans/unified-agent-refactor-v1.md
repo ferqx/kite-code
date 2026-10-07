@@ -1914,7 +1914,7 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 | --- | --- |
 | 1．正式 Native MCP 设置／真实 Chrome 登录 | 人工接管自有HTTPS证书提示后，完成四项固定Auth、默认OS Vault及原身份冷查回；真实浏览器、凭据和所属进程证据分别保持。 |
 | 2．默认 CLI/TUI/Native 的普通开发Shell／Job | 装配具普通开发FS/network边界且可靠监管全部子树的后端；实际默认新producer、完整保存输出、准确停止与empty证明、宿主退出及持续负载资格齐全，不以PGID或deny-fork替代。 |
-| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复、完整§35与适用T/E、三平台、Native跨代码冷回退和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者、本机Terminal代码组合及Profile MCP配置恢复见§30.2.4／30.2.5／30.2.6。 |
+| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复、完整§35与适用T/E、三平台和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者、本机Terminal/Native代码组合及Profile MCP配置恢复见§30.2.4／30.2.5／30.2.6／30.2.7。 |
 
 ### 30.2.2 当前 Native Job 完整已保存输出消费者
 
@@ -1963,6 +1963,16 @@ renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断�
 raw资产4／129核部分缺失、完整bytes／proof、旧格式／实体拒绝、private守卫和取消无ready；实际Node DB7原v15与新增v16第二次新Store恢复4／40保16MiB完整state。CLI源码外DB5离线argv、既有Source Host／PTY及connection／reconnection恢复依各实际fixture验证：批准文件或source文件仍在时v16，无三文件的原Source mutation／reconnection PTY保持v12／v11。connection实际原文件的v9断言已随v16修正并保全部原37断言，新增三raw proof／bytes断言后1／40通过；首轮完整默认的真实1fail及343unrun保留。阶段完整默认和门禁结果归[进度](unified-agent-refactor-v1-progress.md#2026-10-07profile-mcp-配置备份恢复)，当前负责合同见[maintenance](../../packages/agent/src/maintenance/README.md#profile-mcp-配置资产与-manifest-v16)与[CLI](../../apps/cli/README.md#开发-cli-离线维护)，取舍见[implemented决定](../../.agents/notes/implemented/architecture/2026-10-07-profile-mcp-configuration-assets.md)。
 
 该入口的本机完整用户链已验证；当前阶段原完整默认611文件／485主作业全部通过，actual0／normal drain899.891s，4074regular与Git保持，三个真实主红和其修正证据保留。`profileComplete:false`保持，Windows maintenance仍未实现，Linux／Windows发行资格、真实Chrome/default OS Vault、默认可信Shell／新Job／formal soak、Native跨代码冷回退／已发布旧样本／完整§35/T/E和最后旧路径退役仍未闭合。37能力仍partial，wholeV13=false，Goal active。工具线程上限拒绝新的独立Reviewer，本片尚未取得独立审查，root自检不替代它。
+
+### 30.2.7 Native 真实代码升级与冷回退
+
+已实施正式 installed Native 的本机真实两代码候选兼容链，补齐 §35/P6 的 Native 冷回退缺口。固定新基线旧提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 由自己的 Terminal 和 Native builder 构建；与当前 `59b22df5` 加本片 dirty 工作树保持相同依赖输入、Core format 1/Native DB7、productVersion 0.1.0，而 inner、Main、renderer 的实际字节与候选 ID 不同。旧源码与两个原输出在运行前删除，当前实现留在 durable checkout，临时 clone 仅为验收输入。
+
+实际 installed `bin/kite-desktop` 经默认 Main/Service 完成 A 原任务、A 仍运行时升级 B、正常退出后 B 新任务、冷回退 A 读 B 完整正文并继续原会话，再切回 B 冷读全部三条原任务。短回答保真实内联全文并经 Main 完整读取，大正文点击实际窗口按钮；全部原 Command/Run/Model、完整原输出/hash/ref 与持久 caller 记录保持。冷 GET/read-only probe 保 Store 游标、Provider 与业务事实；冷记录不重建 hot 输入。B 的 352041B 完整正文实际进入回退后 A 的下一模型请求。代码指针切换及卸载保 Core/Native 私有数据库 inode/bytes 和原配置，四次 Service 普通退出及所有候选 outer/inner EX 均核实，未恢复数据。
+
+有限原 isolated 作业 1pass/374 条 Bun 断言及实际 driver 断言通过，166.215s；三次真实失败和对应测试修正保留，生产安装/回退逻辑未改。阶段原完整默认612文件/486主作业全部通过，actual0/正常排空992.320s，4077regular与Git前后一致；图内本片Native244256ms、原Terminal跨代码156504ms及原Native lifecycle93656ms均通过。当前根包/八workspace types、API/依赖/边界/测试归属与根readonlyformat通过，最终文档门禁按本地交付范围复核。工具线程额度拒绝新独立 Agent，本片尚无 fresh 独立审查，root 自检不替代它。完整当前合同见[Native owner](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)，执行与剩余条件归[进度](unified-agent-refactor-v1-progress.md#2026-10-07native-真实代码升级与冷回退)。
+
+本机 Native 真实代码冷回退不再列为未实施缺口；已发布 predecessor/T029、其他平台、真实 Chrome/default OS Vault 四Auth、默认可信 Shell/新 Job producer/正式持续负载、其余维护恢复及全部 §35/T/E 仍 pending，齐全后才能最终退役旧路径。37能力 status 仍 partial，wholeV13=false，Goal active，本地授权不扩大到 push/PR/发布。
 
 ### 30.3 第一条执行闭环
 

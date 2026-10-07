@@ -96,6 +96,8 @@ candidate Main 只接受固定 `{kind:'candidate'}`，从实际 appPath 推导�
 
 Windows 的[有限 Node-API 后端](native/windows-access/README.md)由 Main 和 Service 各自取得 LockFileEx SH，不借继承 HANDLE 授权。私有 UI prepare 保原 Profile/UI 目录与主 DB HANDLE、volume/FileID，SQLite关闭后再释放，sidecar不永久钉名称。但 hash `.node` 到 require 仍缺加载前原对象/发布者根证明，正式 candidate Main 在应用 addon/SQLite/factory/child 前拒绝 `native_windows_bootstrap_unqualified`，不提供formal bypass。本机负例3项21断言核这些加载/启动计数全零；5个Windows强制案例、MSVC/Electron ABI及完整Native资格尚未执行，不能由类型或POSIX邻接放行。
 
+正式 installed Native 已补齐本机两个真实代码候选的 A→B→A→B 冷启动验收，区别于同源码版本标记测试。默认窗口保原任务、完整正文与持久 caller 记录，回退后继续工作实际使用 B 全文；四次所属 Service 普通退出、两层租约释放及指针切换/卸载的数据保留均核实。完整负责范围、真实旧 builder、失败与平台限制见[Native 发行 owner](docs/native-release.md#真实代码升级与冷回退)，不据此宣称已发布旧样本或三平台完成。
+
 [实际内嵌 Electron 候选](test/isolated/native-bundle.test.ts)使用真正 terminal builder 和本机安装 Electron dist，搬迁后删除原构建输出、独立 HOME/PATH、无 Service 源码或 npm 回退；原默认 Profile 的 Files.write 经实际 approve_once 一次完成，Provider 为 2。正常退出所属 child PID 消失，两 root 可独占；冷重开只读不增 Provider。第二窗口用精确所属 child SIGSTOP 固定有限观测，再 SIGKILL Main，实际 Service 仍持 outer/inner 两锁，SIGKILL child 后才释放；这不是生产暂停、自动恢复或所有进程树场景的证明。[公共 Node verifier](../service/test/isolated/native-runtime-assets.test.ts)另核原 SHA、完整内层、空锁、闭合 schema、模式/字节/硬链接/逃逸链接与空目录负例。最终候选及原 Files/Session Electron 邻接为 4 文件、6 项、55 条 Bun 断言全通过（68.65 秒，2026-10-04），包含真实 driver 独立断言；Desktop/Service types 与 Service build 通过。
 
 首实际构建因原 Electron 空 locale 未声明而拒绝；第二轮定位 Electron ASAR 虚拟目录差异，第三/四轮有限 driver 的失败清理等待退出确认，第五轮卡已经可见但 main 新投影暂空。保留所有失败日志；最终 observer 在原 10 秒内等待准确 pending card，失败清理只限所属进程，没有放宽权限、执行 deadline 或伪造成功。这些资格只覆盖 macOS arm64、Electron 44.3.0、Bun 1.4.2 的隔离候选；旧正式 launcher 切换、安装器、签名/公证、Linux/Windows 及完整 §35 由各 owner 单独闭合。
