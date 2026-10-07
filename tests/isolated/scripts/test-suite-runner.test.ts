@@ -173,6 +173,49 @@ test('queued', () => writeFileSync(${JSON.stringify(neverStarted)}, 'started'));
     expect(existsSync(neverStarted)).toBe(false);
   });
 
+  test('starts a declared small file in the shared queue and still runs every larger file', async () => {
+    const root = fixture();
+    const ready = join(root, 'priority-ready.txt');
+    const priority = join(root, 'tests', 'priority.test.ts');
+    const completed = join(root, 'completed.jsonl');
+    writeFileSync(
+      priority,
+      `import { test } from 'bun:test'; import { writeFileSync, appendFileSync } from 'node:fs';
+test('priority', () => { writeFileSync(${JSON.stringify(ready)}, 'ready'); appendFileSync(${JSON.stringify(completed)}, 'priority\\n'); });`,
+    );
+    const larger = ['first', 'second'].map((name) => {
+      const file = join(root, 'tests', `${name}.test.ts`);
+      writeFileSync(
+        file,
+        `import { test, expect } from 'bun:test'; import { existsSync, appendFileSync } from 'node:fs';
+test('shared', async () => {
+  const deadline = performance.now() + 1000;
+  while (!existsSync(${JSON.stringify(ready)}) && performance.now() < deadline) await Bun.sleep(5);
+  expect(existsSync(${JSON.stringify(ready)})).toBe(true);
+  appendFileSync(${JSON.stringify(completed)}, ${JSON.stringify(`${name}\n`)});
+});\n// ${'larger source '.repeat(200)}`,
+      );
+      return { label: name, files: [file], maxConcurrency: 1, drainOnFailure: true };
+    });
+    expect(
+      await runTestPlan(
+        root,
+        {
+          concurrent: [...larger, { label: 'priority', files: [priority], maxConcurrency: 1 }],
+          exclusive: [],
+          counts: { parallel: 0, isolated: 3, exclusive: 0 },
+        },
+        2,
+        { firstFiles: ['tests/priority.test.ts'] },
+      ),
+    ).toBe(0);
+    expect(readFileSync(completed, 'utf8').trim().split('\n').sort()).toEqual([
+      'first',
+      'priority',
+      'second',
+    ]);
+  });
+
   test('runs exclusive files only after all concurrent work has exited', async () => {
     const root = fixture();
     const marker = join(root, 'concurrent-active.txt');

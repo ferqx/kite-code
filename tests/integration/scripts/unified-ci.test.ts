@@ -214,6 +214,58 @@ test('release candidate must execute the complete installed Terminal lifecycle o
   }
 });
 
+test('Linux release must execute the whole installed Native lifecycle in an actual display', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  const command =
+    'run: xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts';
+  for (const mutate of [
+    (s: string) =>
+      s.replace(
+        "- if: runner.os == 'Linux'\n        name: Actual source-free Linux Native Main",
+        "- if: runner.os == 'macOS'\n        name: Actual source-free Linux Native Main",
+      ),
+    (s: string) => s.replace(command, 'run: echo native-install-lifecycle.test.ts'),
+    (s: string) =>
+      s.replace(command, command.replace('bun test', 'bun test --test-name-pattern=never-match')),
+    (s: string) => s.replace(command, command.replace('xvfb-run -a ', '')),
+  ]) {
+    const root = fixture();
+    put(root, '.github/workflows/release-candidate.yml', mutate(source));
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-linux-native-lifecycle-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
+test('Required unit gives the whole Linux default graph an actual display', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/required.yml'),
+    'utf8',
+  );
+  for (const replacement of [
+    'run: bun run test',
+    'run: echo xvfb-run -a bun run test',
+    'if: false\n        run: xvfb-run -a bun run test',
+  ]) {
+    const root = fixture();
+    put(
+      root,
+      '.github/workflows/required.yml',
+      source.replace('run: xvfb-run -a bun run test', replacement),
+    );
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-linux-unit-display-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
 test('a platform slice must retain the formal verifier, not only a diagnostic report', () => {
   const root = fixture('bun run scripts/release/unified-platform-probe.ts --output=owned.json');
   expect(

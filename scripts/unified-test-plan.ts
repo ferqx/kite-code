@@ -36,6 +36,12 @@ export const UNIFIED_TEST_SUITES = [
   ...FINITE_ROOT_SCRIPT_TESTS,
 ] as const;
 
+// The complete install/PATH/PTY/cold chain has a bounded body but copies and syncs
+// a large runtime closure. Source byte size does not represent its scheduling cost.
+export const UNIFIED_FIRST_TEST_FILES = [
+  'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
+] as const;
+
 export function unifiedTestInventory(root: string): string[] {
   return UNIFIED_TEST_SUITES.flatMap((suite) => collectTestFiles(resolve(root, suite)))
     .map((file) => relative(root, file).replaceAll('\\', '/'))
@@ -54,7 +60,7 @@ export async function runUnifiedTests(root: string, args: readonly string[]): Pr
   const concurrency = testParallelism();
   const plan = planTestSuites(root, UNIFIED_TEST_SUITES, concurrency);
   console.log(`[unified-agent] parallelism=${concurrency}`);
-  const code = await runTestPlan(root, plan, concurrency);
+  const code = await runTestPlan(root, plan, concurrency, { firstFiles: UNIFIED_FIRST_TEST_FILES });
   if (code === 0)
     console.log(
       `[unified-agent] passed parallel=${plan.counts.parallel} isolated=${plan.counts.isolated} exclusive=${plan.counts.exclusive}`,

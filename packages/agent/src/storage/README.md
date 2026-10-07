@@ -1,5 +1,11 @@
 # Store 边界
 
+## 写锁的有界等待
+
+正式 SQLite 写连接使用原生 `busy_timeout=1000`，只读连接与启动格式 preflight 保留 100ms。两个 Worker 共享 WAL 时，持锁 peer 被调度延迟不应在原 100ms 实验窗口内直接使普通 Run 失败；当前值让短竞争在原具名事务上等待。它是 SQLite busy handler 的累计等待预算，不是 HTTP wall-time 承诺。
+
+等待耗尽仍返回原 `SQLITE_BUSY`，不自动重发 Worker 请求、事务回调、Command 或外部效果。原 `BEGIN IMMEDIATE`、事务失败回滚、原 ID 回执和提交未知时查询规则保持。真实 Store 测试以独立连接持锁 300ms 核一次原 Command 及零重试事件；持续持锁核有限失败、原意图缺席及释放后的准确同 ID 受理。当前取舍见[写锁等待 Note](../../../../.agents/notes/implemented/bug-fix/2026-10-07-bounded-sqlite-writer-lock-wait.md)。这不证明 Worker crash/提交未知的全部 T095 或 formal 连续负载资格。
+
 ## 当前会话视图
 
 `getView` 在同一短只读事务读取原 Session、Store、通知水位与显示投影。Run 选取该 Session 最近200个分配身份，加全部 `is_active=1`；Execution 选取最近200个身份，加全部 `planned/dispatching/running/outcome_unknown` 原事实。两组身份分别去重后按原 rowid 顺序返回，历史数量不能隐藏当前 Run、较早的运行中 Job 或未知结果。未知结果即使另有核实证明，也不在此查询中改写原状态；显示不授予恢复或取消权限。

@@ -59,7 +59,9 @@ export function openDatabase(
       constants.SQLITE_OPEN_NOFOLLOW,
   );
   try {
-    database.run('PRAGMA busy_timeout=100');
+    // A peer writer may be descheduled while holding WAL. Keep the native lock wait
+    // bounded on this dedicated Worker; readonly inspection retains its shorter wait.
+    database.run(readOnly ? 'PRAGMA busy_timeout=100' : 'PRAGMA busy_timeout=1000');
     database.run('PRAGMA foreign_keys=ON');
     if (readOnly) database.run('PRAGMA query_only=ON');
     else {

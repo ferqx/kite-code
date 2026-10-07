@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
@@ -29,10 +30,10 @@ import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { hash } from '../../fixtures/unified-agent/native-artifact-fixture';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
-test.skipIf(process.platform !== 'darwin')(
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'actual full Native archive/install relocates, samebaseline synthetic version upgrades/rolls back, Main/owned Service prohibit uninstall and data remains',
   async () => {
-    const root = realpathSync(mkdtempSync('/private/tmp/kite-native-install-live-')),
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-install-live-'))),
       home = join(root, 'home'),
       workspace = join(home, 'workspace');
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
@@ -171,7 +172,11 @@ test.skipIf(process.platform !== 'darwin')(
       );
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') }),
         req = createRequire(join(repositoryRoot, 'apps/desktop/package.json')),
-        electronDist = resolve(dirname(dirname(req('electron') as string)), '../..');
+        electronExecutable = req('electron') as string,
+        electronDist =
+          process.platform === 'darwin'
+            ? resolve(dirname(dirname(electronExecutable)), '../..')
+            : dirname(electronExecutable);
       const built = await buildNativeCandidate({
         terminalRoot: terminal.root,
         electronDist,
@@ -228,13 +233,13 @@ test.skipIf(process.platform !== 'darwin')(
         format: 'esm',
         packages: 'external',
         outdir: root,
-        naming: 'electron-driver.js',
+        naming: 'electron-driver.mjs',
       });
       expect(result.success).toBe(true);
       driver = Bun.spawn(
         [
           realpathSync(Bun.which('node')!),
-          join(root, 'electron-driver.js'),
+          join(root, 'electron-driver.mjs'),
           join(prefix, 'bin/kite-desktop'),
           home,
           provider.url.href.replace(/\/$/, ''),
@@ -243,7 +248,14 @@ test.skipIf(process.platform !== 'darwin')(
         ],
         {
           cwd: home,
-          env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          env: {
+            HOME: home,
+            PATH: '/usr/bin:/bin',
+            LANG: 'C.UTF-8',
+            ...(process.platform === 'linux'
+              ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+              : {}),
+          },
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',

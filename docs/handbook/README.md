@@ -25,7 +25,7 @@ Kite Code 帮助你在工作区内理解代码、执行任务、检查结果并�
 
 不同入口能力不同，见[能力对照](capabilities.md)。未来客户端不会因为共享产品名称就自动拥有 TUI 的操作或 Web 的限制。
 
-[Electron Native](clients/desktop/README.md)的根入口现已选择完整新候选，macOS 源码外安装、生命周期与标准 CLI/TUI 登记的实际范围见[Native owner](../../apps/desktop/docs/native-release.md)。完整 Linux/Windows、publisher/signing 和全部产品能力仍待资格，不能把当前候选入口称为已完成发行；旧 Tauri/Electron 配套服务结果保留历史，不自动成为新闭包证据。
+[Electron Native](clients/desktop/README.md)的根入口现已选择完整新候选，macOS 源码外安装、标准 CLI/TUI 登记及 Linux arm64 安装生命周期的有限实际范围见[Native owner](../../apps/desktop/docs/native-release.md)。完整 Linux/Windows、publisher/signing 和全部产品能力仍待资格，不能把当前候选入口称为已完成发行；旧 Tauri/Electron 配套服务结果保留历史，不自动成为新闭包证据。
 
 ## 功能全景
 

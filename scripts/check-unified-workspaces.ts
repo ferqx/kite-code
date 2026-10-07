@@ -235,6 +235,17 @@ export function checkUnifiedFormalConsumers(root: string): {
             typeof step.run === 'string' ? [step.run] : [],
           );
           if (
+            name === 'required.yml' &&
+            jobName === 'unit' &&
+            !steps.some(
+              (step) =>
+                step.if === undefined &&
+                typeof step.run === 'string' &&
+                step.run.trim() === 'xvfb-run -a bun run test',
+            )
+          )
+            add('formal-ci-linux-unit-display-missing', location, jobName);
+          if (
             name === 'release-candidate.yml' &&
             !steps.some(
               (step) =>
@@ -245,6 +256,17 @@ export function checkUnifiedFormalConsumers(root: string): {
             )
           )
             add('formal-ci-terminal-lifecycle-missing', location, jobName);
+          if (
+            name === 'release-candidate.yml' &&
+            !steps.some(
+              (step) =>
+                step.if === "runner.os == 'Linux'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  'xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts',
+            )
+          )
+            add('formal-ci-linux-native-lifecycle-missing', location, jobName);
           if (['release-candidate.yml', 'runtime-transport-qualification.yml'].includes(name)) {
             const prepare = steps.findIndex(
               (step) =>

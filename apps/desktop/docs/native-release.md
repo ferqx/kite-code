@@ -41,6 +41,16 @@ Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal
 
 本机有限作业已通过 1 项、374 条 Bun 断言及实际 driver 断言，三次失败与修正、准确候选和阶段完整回归归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-真实代码升级与冷回退)。这证明 macOS 上两个本地真实代码候选的兼容链，不是已发布 predecessor/T029、任意版本回退、远端 Provider 或 Linux/Windows 资格。生产安装和回退逻辑未修改，现有 Windows 限制保持。
 
+## Linux arm64 安装生命周期
+
+[原完整安装文件](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)现对 macOS/Linux 执行，临时目录使用平台 `tmpdir()`，Electron 发行目录按实际平台定位，Node driver 使用明确 `.mjs`。Linux 只转发显示所需 `DISPLAY`/`XAUTHORITY`；`ps` 使用实际 executable argv 列，仍核准确 Main 父 PID。原 120 秒整例、45 秒 driver、10 秒窗口等待及全部业务/双锁/保数据断言保持。
+
+[实际 driver](../../../tests/fixtures/unified-agent/native-install-electron.ts)明确 `chromiumSandbox:true`，两次窗口均核全局没有 `--no-sandbox`，且实际 BrowserWindow 的 sandbox/contextIsolation 为 true、nodeIntegration 为 false。Playwright 的 Linux 默认会关闭 Chromium sandbox，因此不能沿默认值取得资格。自有容器使用 [Playwright 官方 seccomp allowlist](https://playwright.dev/docs/docker#crawling-and-scraping)的 namespace 支持，保留 no-new-privileges、无 privileged/额外 capability；不向产品或默认 Shell 注入该容器配置。
+
+当前有限实测为 Canonical Ubuntu Base 24.04.5、Docker VM 原生 aarch64、UID501、Bun1.4.2、Electron44.3.0、Node driver22.21.1、Xvfb。完整归档/解包/搬迁和删除原输出后，实际 installed `bin/kite-desktop` 经默认 Main/renderer/Service完成一次模型任务、冷读、同源码版本指针升级/回滚、正常退出与双锁强杀窗口、最终卸载保 Core/Native DB/config 原字节。[Store写锁等待修复](../../../packages/agent/src/storage/README.md#写锁的有界等待)后重新生成的当前候选再次通过，Provider 恰1，1pass/25条Bun断言，71.851秒、driver26.455秒；准确 manifest 分别实测独立 builtin `node:sqlite`3.53.4 和 `bun:sqlite`3.53.2。首次76.692秒的原证据另保。它不是 Linux 真实跨代码/已发布 predecessor、Vault、全部 Native 业务、Windows 或 G1 原生 Ubuntu x64 CI 资格。
+
+此前 x64 用户空间经 Rosetta 仿真的三轮实际失败分别为旧 Node/ESM driver、45秒 driver、临时55秒driver仍撞原120秒整例。失败证据保留，55秒更改已撤销，没有用仿真失败换取原预算放宽。补齐 git 前的 arm64 设置失败也保留。准确输入、原始日志和正常 owned 收尾见[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-native-安装生命周期)。release-candidate 的 Linux 步骤执行整个原文件，Required unit 在 Xvfb 内执行整个默认图；CI 守卫拒绝移除/错平台/echo/过滤或静默关闭显示入口。定义不等于 hosted 通过。
+
 ## 验证与限制
 
 [真实 Native archive/install/lifecycle](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)在源码树外删除原候选后启动实际 Electron Main 与所属 Service，验证原数据/cold 读取、升级旧进程固定、双锁强杀窗口、回滚与卸载。[注册验收](../../../tests/isolated/unified-agent/cli-registration-lifecycle.test.ts)核两种 PATH 与真正 80×24 TUI，公共 Store 核三条 Run completed，实际 Provider 3；每次运行中卸载 busy 并保持登记，卸载后原查询、数据库/config/caller bytes 和 cursor 不变。[Files 保护](../../../tests/isolated/unified-agent/native-runtime-protection.test.ts)核 Workspace 中实际 outer/inner 读写保护与邻接正常效果。
@@ -49,6 +59,6 @@ Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal
 
 [有限卸载反例](../../../tests/isolated/unified-agent/native-install.test.ts)使用真实 inner SH 与坏 manifest 验证 busy 优先、失败后的 outer EX 可重新取得、空闲后的完整性拒绝及准确 active/内容保留；两层目录 alias 也拒绝。有限夹具只证明锁与格式合同，真实窗口沿原安装生命周期任务、45 秒 driver 期限与准确退出断言另行运行。
 
-资格限 macOS arm64、当前 Bun/Electron、普通退出及已运行的故障窗口。纯 version smoke 只核 executable/引擎，`mainLifecycleQualified:false`，不能当窗口验收。新 signal fault 窗口、已发布 predecessor、Linux/Windows Native 生命周期、签名/公证/发布者认证及完整 T001—T114/E01—E14 仍需各自实际证据。当前归档 SHA/manifest 只提供完整性。
+macOS arm64 保原 Bun/Electron、普通退出及已运行故障窗口资格；Linux arm64 仅取得上述完整安装文件的有限资格。纯 version smoke 只核 executable/引擎，`mainLifecycleQualified:false`，不能当窗口验收。新 signal fault 窗口、已发布 predecessor、Linux x64/Windows Native 生命周期、签名/公证/发布者认证及完整 T001—T114/E01—E14 仍需各自实际证据。当前归档 SHA/manifest 只提供完整性。
 
 完整闭包、双 prefix nonce CAS 和父 shell cache 的持久理由见[Native 登记决定](../../../.agents/notes/implemented/architecture/2026-10-04-native-complete-closure-and-cli-registration.md)；Node/Bun 引擎独立测量见[SQLite 选择决定](../../../.agents/notes/implemented/architecture/2026-10-04-selected-sqlite-engine-and-worker-identity.md)。Note 状态不能替代上述平台和发布证据。

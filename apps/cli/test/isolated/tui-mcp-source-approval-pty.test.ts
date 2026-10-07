@@ -731,6 +731,16 @@ def wait_new_original(previous):
    note('new-original',commandId=original,frame=normalized()[-32768:]);return original
   if time.monotonic()>deadline:raise RuntimeError('owned_new_original_deadline')
   receive()
+def source_question_ready(question_id,decision):
+ # The original ID was proven in native static history; footer refreshes need not reprint it.
+ # A retained choice alone is not ready while history reloads.
+ deadline=time.monotonic()+10
+ while True:
+  drain(deadline);frame=normalized()
+  if 'Session a · Idle' in frame and 'Up/Down explicit source decision: '+decision in frame and ' · Loading' not in frame:
+   note('source-question-ready',questionId=question_id,decision=decision,frame=frame[-32768:]);return
+  if time.monotonic()>deadline:raise RuntimeError('owned_source_question_ready_deadline:'+question_id)
+  receive()
 def key(value,preserveSelectedFrame=False):
  global buffer
  if not value:return
@@ -783,7 +793,10 @@ try:
  ids=[]
  for n,decision in enumerate(['approved','rejected','cancel'],1):
   sources();wait('Source list ready');key(b'\\r');wait('› Review project source');key(b'\\r');wait('Confirm project source review:');control('before-confirm/'+str(n));key(b'\\r');original_id=wait_new_original(ids);key(b'\\x03');ordinary=control('ordinary/'+str(n));assert ordinary['commandId']==original_id;wait('approval['+ordinary['id']+']originalSessiona',True)
-  key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True);wait('Up/Down explicit source decision: none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n));key(b'\\x1b[B'*n);wait('Up/Down explicit source decision: '+decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
+  key(b'approve');wait('revise feedback / deny. approve');key(b'\\r');question=control('question/'+str(n));wait('question['+question['id']+']originalSessiona',True)
+  source_question_ready(question['id'],'none (Enter has no answer)');key(b'\\r');control('question-blank/'+str(n))
+  source_question_ready(question['id'],'none (Enter has no answer)');key(b'\\x1b[B'*n)
+  source_question_ready(question['id'],decision);key(b'\\r');terminal=control('finish/'+str(n));ids.append(terminal['commandId']);wait('New Run >');sources();wait('Source list ready');choose_source('Check original source decision');key(b'\\r');wait(['Source approval saved','Source rejection saved','Source request cancelled'][n-1]);control('warm-saved/'+str(n));key(b'\\x03');wait('New Run >');control('check')
  control('warm-complete');close('warm')
  for cold in ['cold-removed','cold-missing']:
   control(cold);start(cold);sources();wait('Source list ready' if cold=='cold-removed' else 'Source list unknown; original decisions remain available')

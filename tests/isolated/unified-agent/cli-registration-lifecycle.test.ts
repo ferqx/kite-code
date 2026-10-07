@@ -35,6 +35,17 @@ test.skipIf(process.platform !== 'darwin')(
   'actual installed standard and Native PATH entries run the selected full Native closure; cached standard recovers and Native-path stale hash is explicit',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-cli-registration-live-'));
+    const began = performance.now();
+    const phase = (name: string, detail: Record<string, unknown> = {}) =>
+      console.log(
+        JSON.stringify({
+          stage: 'cli_registration_lifecycle',
+          phase: name,
+          elapsedMs: Math.round(performance.now() - began),
+          root,
+          ...detail,
+        }),
+      );
     const home = join(root, 'home'),
       workspace = join(home, 'workspace');
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
@@ -109,6 +120,8 @@ test.skipIf(process.platform !== 'darwin')(
       },
     });
     const execute = async (argv: string[], path: string) => {
+      const started = performance.now();
+      phase('execute_begin', { executable: argv[0] });
       const child = Bun.spawn(argv, {
         cwd: workspace,
         env: { HOME: home, PATH: path, LANG: 'C.UTF-8', BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
@@ -123,6 +136,11 @@ test.skipIf(process.platform !== 'darwin')(
           new Response(child.stdout).text(),
           new Response(child.stderr).text(),
         ]);
+        phase('execute_complete', {
+          executable: argv[0],
+          code,
+          durationMs: Math.round(performance.now() - started),
+        });
         return { code, stdout, stderr };
       } finally {
         clearTimeout(timer);
@@ -163,6 +181,7 @@ test.skipIf(process.platform !== 'darwin')(
         { mode: 0o600 },
       );
       const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-source') });
+      phase('terminal_built');
       const req = createRequire(join(repositoryRoot, 'apps/desktop/package.json'));
       const electronDist = resolve(dirname(dirname(req('electron') as string)), '../..');
       const native = await buildNativeCandidate({
@@ -170,15 +189,18 @@ test.skipIf(process.platform !== 'darwin')(
         electronDist,
         outdir: join(root, 'native-source'),
       });
+      phase('native_built');
       const standalone = installTerminalBundle({
         bundleRoot: terminal.root,
         prefix: join(root, 'standalone'),
       });
+      phase('standalone_installed');
       const installed = installNativeBundle({
         bundleRoot: native.root,
         prefix: join(root, 'native'),
         cliPrefix: standalone.root,
       });
+      phase('native_installed');
       nativePrefix = installed.root;
       nativeRoot = installed.releaseRoot;
       rmSync(terminal.root, { recursive: true });
@@ -351,11 +373,13 @@ finally:
       expect(snapshots()).toEqual(preserved!);
       expect(calls).toBe(3);
       // Native-first PATH has a distinct parent-shell cache; observe it rather than claiming child uninstall can clear it.
+      phase('native_reinstall_begin');
       const reinstalled = installNativeBundle({
         bundleRoot: native.root,
         prefix: installed.root,
         cliPrefix: standalone.root,
       });
+      phase('native_reinstalled');
       nativeRoot = reinstalled.releaseRoot;
       const nativeFirst = await execute(
         [
@@ -388,6 +412,7 @@ finally:
       assertRuns(after);
       expect(after.metadata.storeId).toBe(storeId);
       expect(after.metadata.lastChangeCursor).toBe(before.lastChangeCursor);
+      phase('complete');
       console.log(
         JSON.stringify({
           qualification: 'native-cli-registration',

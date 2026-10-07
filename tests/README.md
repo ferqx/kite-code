@@ -27,6 +27,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 普通测试与安全 isolated 文件使用共享槽，isolated 每文件独立进程且进程内 concurrency=1；编译、SIGKILL、全局资源和准确分类的 exclusive 文件在并行队列 drain 后逐文件执行。macOS 最多4槽，Linux最多2槽；Windows isolated 逐文件串行。失败停止新派发，已启动任务完成 cleanup。每个测试进程使用独立临时 HOME/USERPROFILE 和准确 KITE_CODE_HOME，清理只覆盖自有目录。
 
+共享队列先派发调用者声明的 `firstFiles`，其余继续按源码大小及label排序；声明只改变顺序，不改变发现、文件分类、槽数、test/child期限或exclusive drain。当前统一计划只将[完整CLI登记生命周期](isolated/unified-agent/cli-registration-lifecycle.test.ts)提前，它复制、校验并持久化大型闭包，源码大小不能代表这项工作成本。该文件仍逐文件进程、进程内concurrency=1，并可与其他作业并行；不是负载下的产品延迟资格。[实际runner测试](isolated/scripts/test-suite-runner.test.ts)用三个独立子进程核小优先文件能在共享槽启动、两大文件仍全部完成，原并发上界和失败drain反例保持；调度取舍归[受控并行Note](../.agents/notes/implemented/testing/2026-09-28-controlled-parallel-isolated-tests.md)。
+
 维护的[Core备份](../packages/agent/test/isolated/maintenance/backup.test.ts)与[Desktop资产](../packages/agent/test/isolated/maintenance/assets.test.ts)在首DB前用[真实引擎夹具](fixtures/unified-agent/qualified-sqlite-fixture.ts)复用正式SQLite builder和公共initializer，核完整资产及发行身份；原业务预算不变，新增setup hook有限60秒。文件最后DB关闭后清理自有selected资产，外部preload资产只复验；loaded selection不能reset，因此这些文件沿原isolated每文件独立进程运行。[独立默认Source资产文件](../packages/agent/test/isolated/maintenance/mcp-source-approval-intents.test.ts)实测默认engine身份，并核严格关闭后实际Core DB/WAL/SHM的presence与完整bytes在create/inspect后保持。两个范围分别记录，单文件绿色不构成完整默认或三平台资格。
 
 ## 当前公共场景与证据
@@ -44,6 +46,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 [独立开发 Web 启动测试](isolated/unified-agent/web-launcher.test.ts)固定已选 profile/配套 entry/API/capabilities 与校验过的资产，经公开 paired Service 和只读 Gateway 验证。有限参数、stdout 仅 endpoint、坏资产零新 profile、浏览器关闭后原 Model 继续，以及真实宿主 EOF/SIGTERM 后所属 PID 和 TCP listener 消失分别断言。隔离 fixture 使用无害固定 Model；不替代正式 daemon/TUI/Electron 或发行安装资格。
 
 [完整 installed Terminal 生命周期](isolated/unified-agent/terminal-bundle.test.ts)保原 120 秒测试预算和全部原断言，平台临时根改用 `tmpdir()`；新增 Linux 分支在实际候选内运行[公共 Store reader](fixtures/unified-agent/terminal-bundle-store.ts)，其裸 imports 只解析 installed node_modules。两个 Worker 的 24 次 WAL 写入、实际 installed maintenance backup/inspect/restore/status 与 cold 原历史/config/fencing 在原最终卸载断言之前执行。升级候选仍是同源码版本指针；当前 Ubuntu x64 仿真实测不代替 Linux 跨代码、原生 CI 或其他平台。准确有限证据归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-当前-terminal-安装与维护链)。
+
+[原完整 Native 安装生命周期](isolated/unified-agent/native-install-lifecycle.test.ts)现覆盖 macOS/Linux，保原120秒整例、45秒driver和全部原断言；平台临时根/发行目录/ps列与明确.mjs支持Linux。driver显式开启Chromium sandbox，并核两次实际窗口安全选项和无no-sandbox；只转发显示环境。当前原生Linux arm64有限实测与x64仿真失败分别保[Native owner](../apps/desktop/docs/native-release.md#linux-arm64-安装生命周期)。release-candidate执行Linux整个文件，Required unit在Xvfb内执行完整默认图，CI守卫拒绝移除/过滤/echo/错平台或静默入口；定义不作为hosted结果。
 
 [Terminal 跨代码版本](isolated/unified-agent/terminal-cross-version.test.ts)由[固定旧提交夹具](fixtures/unified-agent/terminal-predecessor.ts)调用其原 builder，与当前源码分别生成完整候选，保持同一 productVersion、锁输入和SQL基线，搬迁后删除旧source与原输出。实际安装 CLI/daemon A→B→A→B 核同原 Store、新正文完整读回和进入回退后的新模型请求、冷只读零重放、准确普通停止/EX及卸载保数据；[reader](fixtures/unified-agent/terminal-cross-version-read.ts)的裸 imports只解析各自安装候选。它沿原 isolated 每文件进程/进程内 concurrency=1，共享默认槽且不写当前checkout；Required unit完整history缺固定旧commit即失败。本机代码比较不是已发布旧fixture或Native/三平台资格，准确执行与原失败归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
 

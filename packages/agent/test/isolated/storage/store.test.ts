@@ -51,6 +51,72 @@ async function rejects(promise: Promise<unknown>, code: string) {
   }
 }
 describe('real unified SQLite Store', () => {
+  test('short writer contention admits the original command once after the competing transaction releases', async () => {
+    const { store, options, expectedStoreId } = await setup();
+    const competing = new Database(join(options.dataRoot, options.profile, 'core.db'));
+    let held = false;
+    let release: ReturnType<typeof setTimeout> | undefined;
+    try {
+      competing.run('BEGIN IMMEDIATE');
+      held = true;
+      release = setTimeout(() => {
+        competing.run('ROLLBACK');
+        held = false;
+      }, 300);
+      const request = {
+        expectedStoreId,
+        commandId: 'contended',
+        sessionId: 's',
+        subjectId: 'user',
+        request: { kind: 'run.start' as const, content: 'original intent' },
+      };
+      const original = await store.acceptCommand(request);
+      expect(held).toBe(false);
+      const cursor = (await store.getView('s')).snapshotCursor;
+      expect(await store.acceptCommand(request)).toEqual(original);
+      expect((await store.getView('s')).snapshotCursor).toBe(cursor);
+      expect(
+        competing
+          .query<{ count: number }, []>(
+            "SELECT count(*) AS count FROM command WHERE id='contended'",
+          )
+          .get()?.count,
+      ).toBe(1);
+    } finally {
+      clearTimeout(release);
+      if (held) competing.run('ROLLBACK');
+      competing.close(true);
+    }
+  });
+  test('retained writer contention fails within a bounded wait and leaves the unaccepted intent absent', async () => {
+    const { store, options, expectedStoreId } = await setup();
+    const competing = new Database(join(options.dataRoot, options.profile, 'core.db'));
+    let held = false;
+    try {
+      const before = (await store.getView('s')).snapshotCursor;
+      competing.run('BEGIN IMMEDIATE');
+      held = true;
+      const request = {
+        expectedStoreId,
+        commandId: 'blocked',
+        sessionId: 's',
+        subjectId: 'user',
+        request: { kind: 'run.start' as const, content: 'original blocked intent' },
+      };
+      const started = performance.now();
+      await rejects(store.acceptCommand(request), 'SQLITE_BUSY');
+      expect(performance.now() - started).toBeLessThan(2500);
+      expect(await store.getCommand('blocked')).toBeNull();
+      expect((await store.getView('s')).snapshotCursor).toBe(before);
+      competing.run('ROLLBACK');
+      held = false;
+      const original = await store.acceptCommand(request);
+      expect(await store.acceptCommand(request)).toEqual(original);
+    } finally {
+      if (held) competing.run('ROLLBACK');
+      competing.close(true);
+    }
+  });
   test('core tables plus bounded host mutation journal, guarded writes, same command retry, readonly restart preserves results', async () => {
     const { store, options, expectedStoreId } = await setup();
     await rejects(

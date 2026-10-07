@@ -19,7 +19,22 @@ interface Page {
 interface ElectronApp {
   process(): import('node:child_process').ChildProcess;
   firstWindow(): Promise<Page>;
-  evaluate(fn: (input: { app: { quit(): void } }) => void): Promise<void>;
+  evaluate<T>(
+    fn: (input: {
+      app: { quit(): void; commandLine: { hasSwitch(name: string): boolean } };
+      BrowserWindow: {
+        getAllWindows(): {
+          webContents: {
+            getLastWebPreferences(): {
+              sandbox?: boolean;
+              contextIsolation?: boolean;
+              nodeIntegration?: boolean;
+            };
+          };
+        }[];
+      };
+    }) => T,
+  ): Promise<T>;
   close(): Promise<void>;
 }
 const { _electron } = createRequire(process.argv[6]!)('playwright') as {
@@ -30,6 +45,7 @@ const { _electron } = createRequire(process.argv[6]!)('playwright') as {
       cwd: string;
       env: Record<string, string>;
       timeout: number;
+      chromiumSandbox: boolean;
     }): Promise<ElectronApp>;
   };
 };
@@ -39,6 +55,27 @@ const [launcher, home, control, storeId] = process.argv.slice(2) as [
   string,
   string,
 ];
+const displayEnvironment: Record<string, string> =
+  process.platform === 'linux'
+    ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+    : {};
+const security = async (current: ElectronApp) => {
+  const actual = await current.evaluate(({ app, BrowserWindow }) => ({
+    sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
+    windows: BrowserWindow.getAllWindows().map((window) => {
+      const options = window.webContents.getLastWebPreferences();
+      return {
+        sandbox: options.sandbox,
+        contextIsolation: options.contextIsolation,
+        nodeIntegration: options.nodeIntegration,
+      };
+    }),
+  }));
+  assert.deepEqual(actual, {
+    sandboxDisabled: false,
+    windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
+  });
+};
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
 const driverStarted = Date.now();
 const diagnostic = (phase: string, detail: Record<string, unknown> = {}) => {
@@ -84,6 +121,7 @@ try {
     args: [`--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
     env: {
+      ...displayEnvironment,
       HOME: home,
       PATH: '/usr/bin:/bin',
       LANG: 'C.UTF-8',
@@ -93,23 +131,28 @@ try {
       ELECTRON_RUN_AS_NODE: '1',
     },
     timeout: 10000,
+    chromiumSandbox: true,
   });
   diagnostic('first_launch_ready');
   const page = await app.firstWindow();
+  await security(app);
   page.setDefaultTimeout(10000);
   await page.getByRole('button', { name: 'Native installed', exact: true }).click();
   const state = await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   );
   assert.equal((state as NativeState).selection?.storeId, storeId);
-  const ps = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
+  const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';
+  const ps = String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
     .trim()
     .split('\n')
     .map((line) => line.trim().split(/\s+/))
     .filter(
       (parts) =>
         Number(parts[1]) === app!.process().pid &&
-        parts.slice(2).join(' ').endsWith('/terminal/runtime/bun'),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')).endsWith(
+          '/terminal/runtime/bun',
+        ),
     );
   assert.equal(ps.length, 1);
   childPid = Number(ps[0]![0]);
@@ -136,8 +179,9 @@ try {
     executablePath: launcher,
     args: [`--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { ...displayEnvironment, HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 10000,
+    chromiumSandbox: true,
   });
   diagnostic('second_launch_ready');
   app = second;
@@ -146,19 +190,22 @@ try {
     .process()
     .once('close', (code, signal) => diagnostic('second_main_close', { code, signal }));
   const cold = await second.firstWindow();
+  await security(second);
   cold.setDefaultTimeout(10000);
   await cold.getByRole('button', { name: 'Native installed', exact: true }).click();
   await cold.getByText('Native installed complete', { exact: true }).waitFor();
   assert.equal((await query('count')).providerCalls, 1);
   assert.equal((await query('uninstall')).blocked, true);
-  const secondChildren = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
+  const secondChildren = String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
     .trim()
     .split('\n')
     .map((line) => line.trim().split(/\s+/))
     .filter(
       (parts) =>
         Number(parts[1]) === second.process().pid &&
-        parts.slice(2).join(' ').endsWith('/terminal/runtime/bun'),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')).endsWith(
+          '/terminal/runtime/bun',
+        ),
     );
   assert.equal(secondChildren.length, 1);
   childPid = Number(secondChildren[0]![0]);
@@ -187,6 +234,7 @@ try {
   console.log(
     JSON.stringify({
       actualMain: true,
+      chromiumSandbox: true,
       normalClose: true,
       upgradeOriginalMainUnaffected: true,
       coldSecondZeroProvider: true,

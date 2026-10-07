@@ -626,14 +626,27 @@ test('Workflow configuration capture rejects links and nonprivate files without 
 });
 
 test('Desktop current recovery fields and declared actual format are closed; legacy v1 backup stays precisely readable', async () => {
+  const started = performance.now();
+  const phase = (name: string) =>
+    console.log(
+      JSON.stringify({
+        stage: 'desktop_legacy_asset_validation',
+        phase: name,
+        elapsedMs: Math.round(performance.now() - started),
+      }),
+    );
   const f = await fixture();
+  phase('core_fixture_ready');
   try {
     await seedAssets(f.root, f.profile, f.storeId);
+    phase('node_assets_ready');
     const backup = await createProfileBackup(f);
+    phase('current_backup_ready');
     const forged = structuredClone(backup.manifest);
     forged.assets.desktopUi.format!.userVersion = 1;
     writeFileSync(join(backup.directory, 'ready.json'), JSON.stringify(forged), { mode: 0o600 });
     await reject(inspectProfileBackup(backup), 'backup_asset_mismatch');
+    phase('declared_format_rejected');
     const path = join(f.selected.profilePath, 'desktop-private/data.sqlite');
     let db = new Database(path);
     const row = db.query<{ state: string }, []>('SELECT state FROM recovery_intents').get()!;
@@ -643,6 +656,7 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     db.close(true);
     const bytes = readFileSync(path);
     await reject(createProfileBackup(f), 'backup_ui_invalid');
+    phase('forged_recovery_rejected');
     expect(readFileSync(path)).toEqual(bytes);
     db = new Database(path);
     db.exec(
@@ -650,7 +664,9 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     );
     db.close(true);
     rmSync(join(f.selected.profilePath, 'ui/recovery.json'));
+    phase('legacy_database_ready');
     const legacy = await createProfileBackup(f);
+    phase('legacy_backup_ready');
     expect(legacy.manifest.assets.desktopUi.format?.userVersion).toBe(1);
     const v2 = structuredClone(legacy.manifest);
     v2.version = 2;
@@ -658,6 +674,7 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     delete v2.assets.callerIntents;
     writeFileSync(join(legacy.directory, 'ready.json'), JSON.stringify(v2), { mode: 0o600 });
     expect((await inspectProfileBackup(legacy)).manifest).toEqual(v2);
+    phase('legacy_v2_readable');
     v2.assets.tuiRecovery = {
       path: 'ui/recovery.json',
       capturedAt: new Date().toISOString(),
@@ -667,8 +684,10 @@ test('Desktop current recovery fields and declared actual format are closed; leg
     };
     writeFileSync(join(legacy.directory, 'ready.json'), JSON.stringify(v2), { mode: 0o600 });
     await reject(inspectProfileBackup(legacy), 'backup_invalid_manifest');
+    phase('legacy_extras_rejected');
   } finally {
     f.close();
+    phase('closed');
   }
 });
 test('actual CLI pending journal is backed up as original bytes and rejects malformed scope, authority, duplicates and links', async () => {

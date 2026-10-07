@@ -246,7 +246,7 @@ prepared/submitting/pending/unknown 重开后只能查询原 Command 和准确�
 
 根 `release:build --product native` / `release:native` 使用[Native 构建器](scripts/build-native.ts)，物化实际 Electron、完整新 Terminal、main/preload/renderer 与准确目录/框架链接。主进程同时持 outer 和 inner 两个 artifact SH；一次性 Bun helper 只关闭继承的 descriptor 副本，不解锁 Node 原 owner。Service 独立持这两个 root 的使用权，不能由窗口关闭推导已释放。
 
-归档、双 root 卸载、独立 CLI 注册和 shell cache 的当前产品边界见[Native 制品 owner](docs/native-release.md)。Node 私有 UI 数据库在选 Profile 前测量并核对 manifest 的实际 `node:sqlite`；它与 Bun Worker 是独立引擎。当前本机 Electron 44.3.0 / Node 24.20.0 使用 SQLite 3.53.4，Bun Terminal 使用包内 3.51.3；版本与 sourceId 分别固定。类型、纯版本 smoke 与窗口生命周期是不同证据，正式签名及 Linux/Windows Native 安装仍未交付资格。
+归档、双 root 卸载、独立 CLI 注册和 shell cache 的当前产品边界见[Native 制品 owner](docs/native-release.md)。Node 私有 UI 数据库在选 Profile 前测量并核对 manifest 的实际 `node:sqlite`；它与 Bun Worker 是独立引擎。当前本机 Electron 44.3.0 / Node 24.20.0 使用 SQLite 3.53.4，Bun Terminal 使用包内 3.51.3；版本与 sourceId 分别固定。类型、纯版本 smoke 与窗口生命周期是不同证据。Linux arm64 已取得[原完整安装生命周期的有限资格](docs/native-release.md#linux-arm64-安装生命周期)，两次实际窗口均保 Chromium sandbox；Linux x64/Windows、正式签名和完整发布仍待验证。
 
 Native 提供“下一页待决请求（替换当前窗口）”与“停止读取待决后页”。闭合 IPC 只接受 generation、viewGeneration 与实际 afterId，不授予 renderer 注入 Store/Session/工作区或取消 Run 的权限。后页替换最多 20 卡，原实例、Store、Session、工作区、context selection、snapshotCursor 的观察变化使旧页读取失效；它不是 SQLite 跨页快照。显式选择与关闭会 abort 原查询，迟到页不能发布。自动事件 refresh 对同一作用域重新读取当前窗口的起点并发布新 generation/revision；作用域变动回到首页，旧卡 revision 不能作为新回答证据。完整附件 gate、原答案 commandId 与只 GET 查回保留。
 

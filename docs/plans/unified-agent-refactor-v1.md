@@ -1255,10 +1255,10 @@ Bun SQLite 为同步 API，因此每 Service 一个专用 DbWorker 起步；连�
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = FULL;
 PRAGMA foreign_keys = ON;
-PRAGMA busy_timeout = 100;
+PRAGMA busy_timeout = 1000;
 ```
 
-100ms 是实验起点。需要先确认格式兼容，再进入写模式并执行相应设置；未来格式不能先修改数据库再报不支持。WAL 允许读写协作但仍只有一个写者，不能代替 Session owner。[S11]
+100ms 是实验起点。当前真实默认回归在两个 Worker 的持续负载中因该窗口产生 `SQLITE_BUSY` Run 失败；正式写连接改为 SQLite 原生累计等待 1000ms，只读连接与 startup preflight 保留100ms。等待耗尽仍返回原错误，不重发请求或事务回调；准确取舍与有限真实持锁验证归[Store owner](../../packages/agent/src/storage/README.md#写锁的有界等待)。需要先确认格式兼容，再进入写模式并执行相应设置；未来格式不能先修改数据库再报不支持。WAL 允许读写协作但仍只有一个写者，不能代替 Session owner。[S11]
 
 SQLITE_BUSY 只对已确认未提交/已回滚的短事务有界退避。长读分页，避免长期占快照造成 WAL 积压。提交回执未知时查原操作 ID，不盲目重做。
 
@@ -1983,6 +1983,25 @@ raw资产4／129核部分缺失、完整bytes／proof、旧格式／实体拒绝
 原完整 installed Terminal 测试实际完成 Linux 构建归档/搬迁、CLI/TUI、daemon/PTY、同源码版本指针升级/回滚、live lease 与最终卸载保数据；Linux 分支另以实际候选公共 Store 的双 Worker 24 次 WAL 写入，执行安装 CLI backup/inspect/restore/status 和新 Store cold readonly，保原业务历史/config并核原 Session fencing。1 pass/2545 条 Bun 断言/84.250s；原 120 秒期限和全部原断言保持。CI 在 macOS/Linux 调用整个文件并拒绝 Mac-only/echo/过滤命令。第四轮阶段原完整默认612文件/486主作业全部通过，actual0/982.091s、4078 regular与Git保持；前三轮失败及两处原测试修正分别保留，准确证据归[进度](unified-agent-refactor-v1-progress.md#2026-10-07linux-当前-terminal-安装与维护链)，当前完整合同归[Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)。
 
 实际环境为 Ubuntu 24.04.4 x64 用户空间，经 Apple Silicon Docker Linux VM 仿真，Docker 只用于验证。它不接默认 Shell，也不证明 GitHub-hosted 原生 Ubuntu、Linux 真实跨代码/已发布 predecessor/T029、Native/Windows、完整持续负载或全部 §35/T/E。线程额度拒绝 fresh 独立审查，root 自检不替代它。37 能力保持 partial、wholeV13=false；按依赖仍保 Native 真实 Chrome/default OS Vault、默认宿主 Shell/新 Job/formal soak、其余平台与最终退役三项退出缺口。
+
+### 30.2.9 Linux Native 安装生命周期与阶段退出
+
+原完整 Native 安装文件现对 macOS/Linux 执行，修正平台目录、Electron dist、ps executable 列及明确 ESM driver；两次窗口显式开启并核 Chromium sandbox。原45秒driver/120秒整例、Provider1、cold GET、同源码版本指针、双root live lease/强杀与最终保数据卸载保持。Canonical Ubuntu Base24.04.5在Docker VM原生aarch64、UID501、Bun1.4.2/Electron44.3.0/Node driver22.21.1/Xvfb上，Store写锁等待修复后的当前候选再次沿原runTestJob完整1pass/25assert/71.851秒、driver26.455秒；独立builtin Node SQLite3.53.4/Bun3.53.2核实际manifest。首次76.692秒的原证据与默认图SQLITE_BUSY失败另保，取舍归§19.2与Store owner。它仅关闭这个Linux arm64用户链的本机有限缺口，不关闭Linux x64/G1 hosted、真实跨代码/已发布样本或全部Native业务。
+
+x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销，最终原预算不变。补齐git前的arm64设置失败保留。release-candidate在Xvfb执行整个原Native文件，Required unit也在Xvfb执行完整默认图；guard拒绝错误平台、echo/过滤、缺显示或静默关闭。完整合同归[Native owner](../../apps/desktop/docs/native-release.md#linux-arm64-安装生命周期)，准确阶段验证归[进度](unified-agent-refactor-v1-progress.md#2026-10-07linux-native-安装生命周期)。定义与本机有限结果不能替代hosted通过；新独立Reviewer仍被工具线程上限拒绝，root自检不替代它。
+
+本轮第六次阶段原完整默认612文件/486唯一主作业全部通过，actual0/987.380秒、4079 regular与Git状态前后保持。CLI登记仍在原共享槽及120秒预算内完成；原Source PTY观察和维护资产诊断保持业务断言及期限，维护资产前一轮5秒超时未复现但根因未知。当前macOS Native原完整安装107.403秒、driver41.346秒；Linux有限资格的10项选定输入与本轮冻结实现相同。五次真实失败及修正边界、同名临时runner fixture和最终证据分别归进度；完整unit不证明formal持续负载、其他平台或整个V1.3退出。
+
+当前按依赖保留四项阶段退出缺口，彼此不构成等待已确认阶段的新审批：
+
+| 缺口及实际入口 | 完整行为与验收条件 |
+| --- | --- |
+| Native设置→MCP四Auth→系统Chrome/Vault | login/refresh/clear/revoke真实浏览器与默认OS backend、普通Question/原申请、原scope/RPC/凭据状态和准确owned revoke/fresh absence全链；已有HTTPS证书人工接管问题尚未获答，不能绕过浏览器证书警告。 |
+| 默认Shell execute/read/stop与后台目录 | 保留用户确认的macOS宿主工具链及广泛只读宿主视图，可信完整进程子树覆盖fork/setsid，Workspace/私有根/网络约束，cancel/EOF/SIGKILL实际收尾；默认新Job持久输出/缺口/冷读不重跑与formal连续负载通过。现有PGID/deny-fork样本不能代替该入口。 |
+| release install/update/uninstall/标准CLI与maintenance backup/inspect/restore/status | 支持平台的真实制品、GUI/PTY/双lease和保数据卸载，准确独立引擎；Windows安装/维护实现，Linux x64/Windows原生结果、已发布新基线predecessor/T029及其余恢复子场景仍需实际证据。恢复保外置锁、换Store且不改原操作出处、不重放旧副作用；本片Linux arm64有限资格不能扩大到这些范围。 |
+| 正式切换后的旧路径最终退役 | 前三项及全部适用§35/T001—T114/E01—E14有证据，参考功能/既有扩展/未见样本沿公共边界成立；正式consumer无legacy业务carrier，完成必要删除并复验新基线兼容与完整回归。不能以当前无正式旧调用或全量unit通过提前宣布整体退出。 |
+
+37能力保持partial、wholeV13=false、Goal active；本地stage/commit授权不扩大到push/PR/发布。
 
 ### 30.3 第一条执行闭环
 

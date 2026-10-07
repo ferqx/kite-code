@@ -351,6 +351,8 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 
 首个冷原决定本来已选中，只在核准原Command/Store/Session明细后沿用同步完整帧；后两项等待实际明细切换。明确Check已证明的同一unknown明细可沿用无变化帧，不当作新server receipt。观察器的wire记录POST attempt早于受理提交，准确404/command_not_found仅在原10s内继续GET同ID，其他错误立即失败，不重POST。原10/12/6+3/180s与全部业务断言保持。四个TUI正常Ctrl+Q，seed与四窗共五份所属Service退出收据匹配，ownedroot及parentHOME删除。之前的重选、父引擎未选择、原只读维护创建副文件和观察窗口红证据分别保留，不回推未观测的精确因果。本轮未测Store change cursor、异常清理fault、Screen emulator、中文或Linux/Windows；cursor合同由上面的真实Host另核。当前正常Root/八workspace构建与类型检查通过，观察器修正后的CLI类型检查再通过；第27轮534文件/432唯一主任务完整默认实际exit0、734.039s排空，准确冻结和其余未验证范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
+2026-10-07的完整回归另保留一次Source Question Enter发生在Loading帧且没有答案POST的真实失败。当前fixture先核原Question ID/Session静态历史，再在空Enter、选择和一次正式Enter前核最新完整footer的当前Session、准确选择与非Loading；Ink静态历史不要求每次footer刷新重印。原期限、三个独立决定及零重发断言保持，生产输入不改。修正后原完整文件1pass/281assert、14.472s、五份所属Service正常退出；原红、初版错误观察及完整冷/foreign证据归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-native-安装生命周期)。
+
 ## TUI MCP 显式连接与原申请
 
 [connection host](host/tui-mcp-connection.ts)只通过公共Client申请普通 `builtin.mcp/mcp.connect@1`、GET原Command与有限 `mcp.connection@1` Query，不建第二Runtime。新提交核真实serverInfo Store/subject、Session、`listAllWorkspaces`完整目录、物理canonical root/dev/ino、当前完整安全目录等于原observed，并要求准确Server admitted/selected/available。原read-set只核新申请来源观察，不伪装为connect input CAS；最终来源捕获和派发仍由Service核实。历史读取不要求当前Source或物理Workspace仍存在。

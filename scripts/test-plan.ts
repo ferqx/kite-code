@@ -84,11 +84,19 @@ export async function runTestPlan(
   repositoryRoot: string,
   plan: TestPlan,
   concurrency: number,
+  options: { firstFiles?: readonly string[] } = {},
 ): Promise<number> {
+  const first = new Set(options.firstFiles?.map((file) => resolve(repositoryRoot, file)));
+  const priority = (job: TestJob) =>
+    Number(job.files.some((file) => first.has(resolve(repositoryRoot, file))));
   const ordered = [...plan.concurrent].sort((left, right) => {
     const weight = (job: TestJob): number =>
       job.files.reduce((total, file) => total + statSync(file).size, 0);
-    return weight(right) - weight(left) || left.label.localeCompare(right.label);
+    return (
+      priority(right) - priority(left) ||
+      weight(right) - weight(left) ||
+      left.label.localeCompare(right.label)
+    );
   });
   const parallelExit = await runTestJobs(repositoryRoot, ordered, concurrency);
   if (parallelExit !== 0) return parallelExit;

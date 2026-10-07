@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { planTestSuites } from '../../../scripts/test-plan';
 import {
   FINITE_ROOT_SCRIPT_TESTS,
+  UNIFIED_FIRST_TEST_FILES,
   UNIFIED_RUNTIME_WORKSPACES,
   UNIFIED_TEST_SUITES,
   unifiedTestInventory,
@@ -30,6 +31,10 @@ test('default selection covers current public safety and formal lifecycle files 
   ])
     expect(files).toContain(file);
   for (const file of FINITE_ROOT_SCRIPT_TESTS) expect(files).toContain(file);
+  expect(UNIFIED_FIRST_TEST_FILES).toEqual([
+    'tests/isolated/unified-agent/cli-registration-lifecycle.test.ts',
+  ]);
+  for (const file of UNIFIED_FIRST_TEST_FILES) expect(files).toContain(file);
   expect(UNIFIED_RUNTIME_WORKSPACES).toHaveLength(8);
   expect(
     files.some((file) => file.startsWith('apps/kite-') || file.startsWith('packages/runtime-')),

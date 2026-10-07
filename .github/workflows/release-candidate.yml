@@ -72,6 +72,9 @@ jobs:
           bun test --parallel=1 --max-concurrency=1
           tests/isolated/unified-agent/native-install-lifecycle.test.ts
           tests/isolated/unified-agent/cli-registration-lifecycle.test.ts
+      - if: runner.os == 'Linux'
+        name: Actual source-free Linux Native Main, upgrade, rollback, cold history and leases
+        run: xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-install-lifecycle.test.ts
       - run: bun -e "require('node:fs').mkdirSync('dist/unified-evidence',{recursive:true})"
       - name: Actual relocated candidate Files, assets, default capability and lifetime probe
         run: >-
