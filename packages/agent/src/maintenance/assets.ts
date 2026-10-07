@@ -407,6 +407,10 @@ export async function captureAssets(
   const mcpSourceApprovalIntents = await capture('ui/mcp-source-approval-intents.json', false);
   const mcpConnectionIntents = await capture('ui/mcp-connection-intents.json', false);
   const mcpSelectionIntents = await capture('ui/mcp-selection-intents.json', false);
+  const mcpConfiguration = await capture('mcp.json', false);
+  const mcpApprovals = await capture('mcp-approvals.json', false);
+  const mcpAuthBindings = await capture('mcp-auth-bindings.json', false);
+  const rawMcp = mcpConfiguration.present || mcpApprovals.present || mcpAuthBindings.present;
   let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | undefined;
   if (desktopUi.present) {
     const db = openUiDatabase(join(target, desktopUi.path));
@@ -418,10 +422,11 @@ export async function captureAssets(
       db.close(true);
     }
   }
-  const currentDesktop = uiVersion === 6 || uiVersion === 7;
+  const currentAssets = uiVersion === 6 || uiVersion === 7 || rawMcp;
   return {
     configuration: await capture('config.jsonc', false),
     skillWorkflowConfiguration: await capture('skill-workflow.jsonc', false),
+    ...(rawMcp ? { mcpConfiguration, mcpApprovals, mcpAuthBindings } : {}),
     desktopUi: {
       ...desktopUi,
       format: desktopUi.present ? { applicationId: 1263888689, userVersion: uiVersion! } : null,
@@ -438,7 +443,7 @@ export async function captureAssets(
     authCaller ||
     uiVersion === 4 ||
     uiVersion === 5 ||
-    currentDesktop
+    currentAssets
       ? {
           fileRecoveryIntents: {
             ...fileRecoveryIntents,
@@ -450,7 +455,7 @@ export async function captureAssets(
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
     authCaller ||
-    currentDesktop
+    currentAssets
       ? {
           mcpSourceApprovalIntents: {
             ...mcpSourceApprovalIntents,
@@ -461,7 +466,7 @@ export async function captureAssets(
     ...(mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
     authCaller ||
-    currentDesktop
+    currentAssets
       ? {
           mcpReconnectionIntents: {
             ...mcpReconnectionIntents,
@@ -474,7 +479,7 @@ export async function captureAssets(
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
     authCaller ||
-    currentDesktop
+    currentAssets
       ? {
           mcpConnectionIntents: {
             ...mcpConnectionIntents,
@@ -488,7 +493,7 @@ export async function captureAssets(
     mcpReconnectionIntents.present ||
     mcpSourceMutationIntents.present ||
     authCaller ||
-    currentDesktop
+    currentAssets
       ? {
           mcpSelectionIntents: {
             ...mcpSelectionIntents,
@@ -496,7 +501,7 @@ export async function captureAssets(
           },
         }
       : {}),
-    ...(mcpSourceMutationIntents.present || authCaller || currentDesktop
+    ...(mcpSourceMutationIntents.present || authCaller || currentAssets
       ? {
           mcpSourceMutationIntents: {
             ...mcpSourceMutationIntents,
@@ -518,6 +523,9 @@ export function verifyAssets(
   for (const asset of [
     assets.configuration,
     assets.skillWorkflowConfiguration,
+    ...(assets.mcpConfiguration ? [assets.mcpConfiguration] : []),
+    ...(assets.mcpApprovals ? [assets.mcpApprovals] : []),
+    ...(assets.mcpAuthBindings ? [assets.mcpAuthBindings] : []),
     assets.desktopUi,
     assets.tuiUi,
     assets.tuiPreferences,
@@ -651,6 +659,9 @@ export async function restoreAssets(
   for (const asset of [
     assets.configuration,
     assets.skillWorkflowConfiguration,
+    ...(assets.mcpConfiguration ? [assets.mcpConfiguration] : []),
+    ...(assets.mcpApprovals ? [assets.mcpApprovals] : []),
+    ...(assets.mcpAuthBindings ? [assets.mcpAuthBindings] : []),
     assets.desktopUi,
     assets.tuiUi,
     assets.tuiPreferences,

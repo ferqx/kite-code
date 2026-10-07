@@ -98,6 +98,9 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
           'ready.json',
           ...(manifest.assets.configuration.present ? ['config.jsonc'] : []),
           ...(manifest.assets.skillWorkflowConfiguration.present ? ['skill-workflow.jsonc'] : []),
+          ...(manifest.assets.mcpConfiguration?.present ? ['mcp.json'] : []),
+          ...(manifest.assets.mcpApprovals?.present ? ['mcp-approvals.json'] : []),
+          ...(manifest.assets.mcpAuthBindings?.present ? ['mcp-auth-bindings.json'] : []),
           ...(manifest.assets.desktopUi.present ? ['desktop-private'] : []),
           ...(manifest.assets.tuiUi.present ||
           manifest.assets.tuiPreferences.present ||
@@ -255,7 +258,10 @@ async function verify(
       directory,
       manifest.assets,
       signal,
-      manifest.version === 13 || manifest.version === 14 || manifest.version === 15,
+      manifest.version === 13 ||
+        manifest.version === 14 ||
+        manifest.version === 15 ||
+        manifest.version === 16,
     );
     exactTree(directory, database, manifest);
   } finally {
@@ -369,8 +375,9 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     }
     const assets = await captureAssets(access.profilePath, staging, input.signal);
     const manifest = parseManifest({
-      version:
-        assets.desktopUi.format?.userVersion === 7
+      version: assets.mcpConfiguration
+        ? 16
+        : assets.desktopUi.format?.userVersion === 7
           ? 15
           : assets.desktopUi.format?.userVersion === 6
             ? 14

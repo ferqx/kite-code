@@ -71,7 +71,7 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 ## 通用开发入口离线维护
 
-当前通用开发入口 `bun run cli:dev maintenance ...` 提供独立离线维护，不启动 Service 或模型。正式旧 CLI/TUI 入口尚未由此切换。只对调用者明确指定的 data root/profile 操作；路径必须是绝对路径，profile 是有限名称，不读取缺省用户 profile。
+正式 Terminal 的 `kite maintenance ...` 与通用开发入口 `bun run cli:dev maintenance ...` 提供同一独立离线维护，不启动 Service 或模型。只对调用者明确指定的 data root/profile 操作；路径必须是绝对路径，profile 是有限名称，不读取缺省用户 profile。
 
 | 操作 | 参数 |
 | --- | --- |
@@ -85,7 +85,9 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 恢复表示明确回退到选定备份内容；必须提供当前原 StoreId，错误身份拒绝，成功后产生新 Store，旧写身份继续拒绝。原历史 ID 与来源身份保留，旧目录单独保存，路径在结果中输出。恢复不会自动重做旧工作或模型请求。
 
-JSON 中的 `coverage` 列出 Desktop 私有 UI 的 DB1–5 支持范围，以及 MCP 选择意图 `ui/mcp-selection-intents.json@1`。支持范围不表示文件必然存在；选定备份的 manifest 另列实际存在、格式和完整摘要。冷读这些意图不会重发原申请或重新连接 MCP。
+JSON 中的 `coverage` 列出 Desktop 私有 UI 的 DB1–7 支持范围，以及 MCP 选择意图 `ui/mcp-selection-intents.json@1`。支持范围不表示文件必然存在；选定备份的 manifest 另列实际存在、格式和完整摘要。冷读这些意图不会重发原申请或重新连接 MCP。
+
+Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 也按完整原字节备份；存在或缺失如实记录，损坏内容不会被修复。恢复后无认证用户来源继续按原规则可用；项目批准和凭据绑定需重新回答当前问题，旧决定保留原出处。项目文件仍由原工作区提供，凭据正文不在备份内，目标 Vault缺少原凭据时仍不可用。查看来源不会自动连接或读取凭据。
 
 当前范围包括SQLite与被引用不可变媒体，并分别采集实际profile的config.jsonc原字节、Desktop私有UI一致副本、真实TUI未提交文本文件和终端显示偏好 `ui/preferences.jsonc` 原字节；每项记录存在/缺失、采集时间与摘要，不能当作跨介质同一瞬间原子。原配置可能含敏感内容，备份按私有0600保存，不解析vault或自动脱敏。恢复发布备份中存在的这些文件，保留原草稿/创建身份，不重放旧意图。credentials/vault及未采集宿主私有文件仍排除，旧当前字节保存在保留目录。TUI草稿保留原Store/Workspace/Session且不自动发送或改绑，JSON保留 `coverage.profileComplete:false`；本命令尚不满足整个W19或三平台发行资格。实现与实际临时制品验证见 [CLI owner](../../../apps/cli/README.md#开发-cli-离线维护)。
 

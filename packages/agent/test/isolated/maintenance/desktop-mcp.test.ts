@@ -434,6 +434,30 @@ try {
     expect(restored.storeId).not.toBe(storeId);
     expect(await owner('read')).toEqual(produced);
     expect(rawState()).toEqual(padded);
+    const mcpPath = join(selectProfile(profile).profilePath, 'mcp.json'),
+      mcpBytes = Buffer.from('// exact raw Profile MCP source\n{"mcpServers":{}}\n');
+    writeFileSync(mcpPath, mcpBytes, { mode: 0o600 });
+    const currentBackup = await createProfileBackup({
+      profile,
+      destinationRoot: join(root, 'backups'),
+    });
+    expect(currentBackup.manifest.version).toBe(16);
+    expect(currentBackup.manifest.assets.desktopUi.format?.userVersion).toBe(7);
+    expect(currentBackup.manifest.assets.mcpConfiguration?.proof).toEqual({
+      sha256: createHash('sha256').update(mcpBytes).digest('hex'),
+      byteLength: String(mcpBytes.length),
+    });
+    expect((await inspectProfileBackup(currentBackup)).manifest).toEqual(currentBackup.manifest);
+    const currentRestored = await restoreProfileBackup({
+      profile,
+      expectedStoreId: restored.storeId,
+      backup: currentBackup,
+      intent: 'replace_with_selected_backup',
+    });
+    expect(currentRestored.storeId).not.toBe(restored.storeId);
+    expect(readFileSync(mcpPath)).toEqual(mcpBytes);
+    expect(await owner('read')).toEqual(produced);
+    expect(rawState()).toEqual(padded);
     const db = new Database(path);
     try {
       expect(

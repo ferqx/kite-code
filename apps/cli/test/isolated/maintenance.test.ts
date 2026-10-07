@@ -235,6 +235,25 @@ async function fixture() {
 test('built offline maintenance argv create/inspect/restore is independent of Service and retains original identities', async () => {
   const f = await fixture();
   try {
+    const mcpAssets = [
+      [
+        'mcpConfiguration',
+        'mcp.json',
+        '// exact raw source\r\n{"mcpServers":{},"unknown":"原文🔐"}\r\n',
+      ],
+      [
+        'mcpApprovals',
+        'mcp-approvals.json',
+        '// original source decisions\n{"version":1,"records":{}}\n',
+      ],
+      [
+        'mcpAuthBindings',
+        'mcp-auth-bindings.json',
+        '// opaque refs are raw configuration\n{"version":1,"records":{}}\n',
+      ],
+    ] as const;
+    for (const [, path, bytes] of mcpAssets)
+      writeFileSync(join(f.selected.profilePath, path), bytes, { mode: 0o600 });
     const before = readFileSync(f.selected.databasePath),
       created = await argv(f.entry, [
         'maintenance',
@@ -259,8 +278,22 @@ test('built offline maintenance argv create/inspect/restore is independent of Se
     });
     expect(result.coverage.desktopUi).toEqual({
       path: 'desktop-private/data.sqlite',
-      supportedUserVersions: [1, 2, 3, 4, 5],
+      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7],
     });
+    expect(result.backup.manifest.version).toBe(16);
+    for (const [key, path, text] of mcpAssets) {
+      const bytes = Buffer.from(text);
+      expect(result.coverage[key]).toEqual({ path, rawBytes: true });
+      expect(result.backup.manifest.assets[key]).toMatchObject({
+        path,
+        present: true,
+        proof: {
+          sha256: createHash('sha256').update(bytes).digest('hex'),
+          byteLength: String(bytes.length),
+        },
+      });
+      expect(readFileSync(join(result.backup.directory, path))).toEqual(bytes);
+    }
     expect(result.coverage.included).toContain('mcp_selection_intents');
     expect(result.coverage.mcpSelectionIntents).toEqual({
       path: 'ui/mcp-selection-intents.json',
@@ -330,6 +363,8 @@ test('built offline maintenance argv create/inspect/restore is independent of Se
     expect(receipt.previousDirectoryPreserved).toBe(true);
     expect(existsSync(join(receipt.preservedDirectory, 'core.db'))).toBe(true);
     expect(receipt.newProfileOmits).toContain('credential_vault');
+    for (const [, path, bytes] of mcpAssets)
+      expect(readFileSync(join(f.selected.profilePath, path))).toEqual(Buffer.from(bytes));
     expect(readFileSync(join(f.selected.profilePath, 'config.jsonc'))).toEqual(
       Buffer.from(configBytes),
     );

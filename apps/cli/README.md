@@ -127,6 +127,10 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 ## 开发 CLI 离线维护
 
+正式 installed Terminal 与开发入口均使用同一离线 maintenance leaf。coverage 新增 `mcpConfiguration`／`mcpApprovals`／`mcpAuthBindings` 三个 raw Profile 文件；至少一个实际存在时输出 closed v16，三者均无时保持既有条件版本。恢复保原字节与缺失状态，项目文件和 Vault 不采集；新 Store 后无认证用户来源按原规则读取，项目批准和 credential binding 需当前实际 Question。它们不授连接或 Tool 权。完整资产与原 grammar由[maintenance](../../packages/agent/src/maintenance/README.md#profile-mcp-配置资产与-manifest-v16)负责。
+
+[源码外安装恢复](../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)已实际执行正式 builder→install→删除原 candidate→CLI create/inspect/restore→默认 Service A/B/B-cold。公开 Client 保原决定和 C/E、重新回答当前两份 Question并显式启动/停止 stdio；冷读取 GET-only／cursor保持、Provider0、项目原文和旧目录保留、准确 owned退出与卸载保 Profile。credential transport 未派发，不作为 OS Vault／OAuth 或三平台资格。
+
 Workflow 的独立开关文件 `skill-workflow.jsonc` 作为 `skillWorkflowConfiguration` 原字节资产采集。JSON coverage 明确列出该项，保留注释、未知字段及损坏 JSONC，不解析或启用特性；缺失保持 absent，恢复保原字节。它不改变 `profileComplete:false` 或凭据排除范围。
 
 [host/maintenance.ts](host/maintenance.ts) 接入公开 `@kite-ai/agent/maintenance`，不启动 Service、Provider 或执行任务。命令及用户操作见[手册](../../docs/handbook/cli/commands.md#通用开发入口离线维护)。[纯参数层](src/arguments.ts) 要求显式绝对 data root/profile、选定备份与原观察身份；恢复及 journal 完成/回退另要求独立 `--confirm-data-loss`，未知、重复、缺值及相对路径在 I/O 前拒绝。help 和只读 status 不初始化 profile 或 coordination；开发 selector 原样转发这些参数，无需 Service 资产。
@@ -135,7 +139,7 @@ backup/restore/reconcile 复用 Agent 外置 profile-use exclusive OS 锁；busy
 
 当前 JSON 明确 `coverage.profileComplete:false`：包括SQLite、被引用不可变媒体，以及分别采集的实际config.jsonc原字节和Desktop私有UI一致副本；缺文件如实记录absent，TUI未提交文本由真实 `ui/tui.json` owner 纳入采集，终端显示偏好 `ui/preferences.jsonc` 也按完整原字节采集（含损坏 JSONC，不静默修复）。原配置可能含敏感内容，0600保存，不解析vault或自动redact。恢复保留旧目录，发布备份中实际存在的config/UI，保留原草稿和创建身份；credentials/vault及未采集私有文件仍缺失，不能把该命令解释为完整W19/profile资格。底层身份、fencing、目录发布与 engine/platform 资格见 [maintenance owner](../../packages/agent/src/maintenance/README.md)。
 
-coverage 的 Desktop 支持版本为 DB1–5，并明确列出 `mcpSelectionIntents` 的 `ui/mcp-selection-intents.json@1`；这是现行严格资产 codec 的支持范围，实际文件存在与完整摘要仍由所选 backup manifest 证明。源码外 maintenance fixture 沿正式 `packages:external` 构建公开入口并复制真实 npm 闭包，构造失败先确认 Store 关闭才清理所属目录；实际四个 argv 场景验证原字节、身份、busy 和准确 journal 决定，不要求安装 Ink 的开发 optional peer，也不借源码别名补路径。
+coverage 的 Desktop 支持版本为 DB1–7，并明确列出 `mcpSelectionIntents` 的 `ui/mcp-selection-intents.json@1`；这是现行严格资产 codec 的支持范围，实际文件存在与完整摘要仍由所选 backup manifest 证明。源码外 maintenance fixture 沿正式 `packages:external` 构建公开入口并复制真实 npm 闭包，构造失败先确认 Store 关闭才清理所属目录；实际四个 argv 场景验证原字节、身份、busy 和准确 journal 决定，不要求安装 Ink 的开发 optional peer，也不借源码别名补路径。
 
 [test/maintenance-arguments.test.ts](test/maintenance-arguments.test.ts) 核对闭合词汇；[真实离线 argv](test/isolated/maintenance.test.ts) 在源码树外临时 built workspace 包、真实 SQLite 与第二进程验证 create/inspect/restore、旧 Store 拒绝、冷读零 Run/Execution、busy、失败不建库及 exact journal complete/rollback。消费进程没有 Service 运行资产，未使用 source fallback、收费 Provider 或用户数据。此本机 macOS/Bun 证据不建立 Linux/Windows 或完整发行资格。
 

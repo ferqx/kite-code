@@ -98,7 +98,10 @@ try {
   await page.getByRole('combobox', { name: '凭据处理', exact: true }).selectOption('none');
   await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('owned-mcp-model');
   await page.getByRole('button', { name: '保存提供商配置', exact: true }).click();
-  await page.getByText('已保存', { exact: false }).first().waitFor();
+  await page
+    .getByRole('region', { name: '提供商设置', exact: true })
+    .getByText('已保存提供商配置。', { exact: true })
+    .waitFor();
   await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
   const model = JSON.parse(
     readFileSync(join(home!, '.kite-code/unified-agent/default/config.jsonc'), 'utf8'),

@@ -131,3 +131,10 @@ provider version 绑定 source identity、Server 名称和规范化配置。即�
 `/mcp` 不接受参数或管理子命令；管理动作只由 Overlay 的可见 Select 产生。List 只导航，Detail 才可调用 controller。Add 收集 name、HTTP URL 或 STDIO command、transport 和 project/user availability；不收集 arguments、cwd、env/header、timeout、required、auth metadata 或 Tool policy。
 
 Add、set_enabled 和 remove 都使用 Repository typed mutation 与 snapshot expected revision。冲突保留当前 UI 状态并显示 App controller 投影的稳定 message，不覆盖外部变化。TUI 只写两个规范路径、不编辑其他配置位置；项目 transport 前置决定在 Detail 的独立 Review route 完成，不与 config mutation 合并。
+
+
+## Profile MCP 原配置恢复
+
+离线 maintenance 以 closed v16收集实际 Profile `mcp.json`／`mcp-approvals.json`／`mcp-auth-bindings.json` 三 raw资产，至少一个 present才创建，旧 v2–v15不扩大。完整原文／缺失／proof与旧 Profile沿[maintenance owner](../../packages/agent/src/maintenance/README.md#profile-mcp-配置资产与-manifest-v16)保存，项目文件／Vault／locks排除。
+
+恢复的新 Store和 physical Profile继续现有完整 binding scope核验，无认证用户来源按原信任规则可用，项目和 credential旧决定不匹配；当前普通 Action／Question追加新记录，旧 proof保持原 Store／Session／Interaction。冷 source GET不连接、查 Vault或重放。源码外 installed CLI→默认 Service A/B/B-cold的实际范围与 credential transport未派发限制归 owner和[进度](../plans/unified-agent-refactor-v1-progress.md#2026-10-07profile-mcp-配置备份恢复)。此新资产不扩大普通 caller grammar或把原申请升级为当前权限。

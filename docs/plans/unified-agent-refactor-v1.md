@@ -1914,7 +1914,7 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 | --- | --- |
 | 1．正式 Native MCP 设置／真实 Chrome 登录 | 人工接管自有HTTPS证书提示后，完成四项固定Auth、默认OS Vault及原身份冷查回；真实浏览器、凭据和所属进程证据分别保持。 |
 | 2．默认 CLI/TUI/Native 的普通开发Shell／Job | 装配具普通开发FS/network边界且可靠监管全部子树的后端；实际默认新producer、完整保存输出、准确停止与empty证明、宿主退出及持续负载资格齐全，不以PGID或deny-fork替代。 |
-| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复（含profile MCP声明／批准／auth-ref配置）、完整§35与适用T/E、三平台、Native跨代码冷回退和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者和本机Terminal代码组合见§30.2.4／30.2.5。 |
+| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复、完整§35与适用T/E、三平台、Native跨代码冷回退和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者、本机Terminal代码组合及Profile MCP配置恢复见§30.2.4／30.2.5／30.2.6。 |
 
 ### 30.2.2 当前 Native Job 完整已保存输出消费者
 
@@ -1953,6 +1953,16 @@ renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断�
 已执行原 isolated 作业1pass/335assert/0，原 Store和三条原 Command/Run/Model 身份、352041 UTF-8 字节完整正文及其hash/ref保持，回退后的新模型实际收到B全文。冷GET零Provider增量、只读Store游标不增长，四实例准确普通退出及全部候选EX通过，卸载保数据库inode/完整bytes/配置，回退未恢复数据。当前原完整默认609文件／483作业全部通过，actual0／正常drain902.586s，4071regular／Git前后保持；本片原图129396ms通过、同候选digest及全部收尾断言。Root及八workspace类型／八workspacebuild和强制门禁通过，fresh独立只读审查无必要代码修改；文档复核要求准确区分同步前后门禁，最终交付前另核新证据。当前负责范围见[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)，原失败、独立审查及阶段完整回归归[进度](unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
 
 这是本地两个真实代码候选的兼容资格；已发布旧制品／T029、Native跨代码冷回退、其他平台和全部§35/T/E未因此完成。当前优先退出依赖仍为真实Chrome/default OS Vault四Auth人工接管、默认可信普通开发Shell与新Job producer／正式持续负载、支持范围内其余维护恢复及制品兼容／三平台，齐全后才能最终退役旧路径。37能力仍partial、wholeV13=false。
+
+### 30.2.6 Profile MCP 配置备份恢复
+
+当前已实施支持范围内的 Profile MCP 原配置恢复入口。Agent maintenance 独立采集 `mcp.json`／`mcp-approvals.json`／`mcp-auth-bindings.json`，只在任一实际存在时创建 closed v16，三项 presence／capturedAt／完整 proof必须准确；原 v2–v15白名单保持。v16继承原 UI严格 codec并接纳无 Desktop或准确 DB1–7，不把v14／v15的特定 DB要求扩大。原配置可含敏感内容，原全文／坏JSONC／UTF8不解析修补；Vault、项目文件与锁排除，原当前 Profile沿journal保留。
+
+实际 Terminal builder→install→删除原candidate后，installed CLI backup／inspect／restore A→B及默认 Service A/B/B-cold已通过1pass／128assert。公开Client核无认证用户来源仍admitted、旧项目批准pending及credential binding required，冷7次HTTP全GET、cursor／原文件／View保持、Model0；旧 C/E和Core Question完整原行保A。当前两份真实Question追加B记录，旧记录不删除或retag；明确stdio connect才initialize/tools-list，准确server／guardian／Service普通退出，冷不重启，卸载保Profile。credential transport未派发，不作为OS Vault／OAuth资格。
+
+raw资产4／129核部分缺失、完整bytes／proof、旧格式／实体拒绝、private守卫和取消无ready；实际Node DB7原v15与新增v16第二次新Store恢复4／40保16MiB完整state。CLI源码外DB5离线argv、既有Source Host／PTY及connection／reconnection恢复依各实际fixture验证：批准文件或source文件仍在时v16，无三文件的原Source mutation／reconnection PTY保持v12／v11。connection实际原文件的v9断言已随v16修正并保全部原37断言，新增三raw proof／bytes断言后1／40通过；首轮完整默认的真实1fail及343unrun保留。阶段完整默认和门禁结果归[进度](unified-agent-refactor-v1-progress.md#2026-10-07profile-mcp-配置备份恢复)，当前负责合同见[maintenance](../../packages/agent/src/maintenance/README.md#profile-mcp-配置资产与-manifest-v16)与[CLI](../../apps/cli/README.md#开发-cli-离线维护)，取舍见[implemented决定](../../.agents/notes/implemented/architecture/2026-10-07-profile-mcp-configuration-assets.md)。
+
+该入口的本机完整用户链已验证；当前阶段原完整默认611文件／485主作业全部通过，actual0／normal drain899.891s，4074regular与Git保持，三个真实主红和其修正证据保留。`profileComplete:false`保持，Windows maintenance仍未实现，Linux／Windows发行资格、真实Chrome/default OS Vault、默认可信Shell／新Job／formal soak、Native跨代码冷回退／已发布旧样本／完整§35/T/E和最后旧路径退役仍未闭合。37能力仍partial，wholeV13=false，Goal active。工具线程上限拒绝新的独立Reviewer，本片尚未取得独立审查，root自检不替代它。
 
 ### 30.3 第一条执行闭环
 

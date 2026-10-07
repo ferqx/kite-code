@@ -14,6 +14,9 @@ export interface CapturedAsset {
   path:
     | 'config.jsonc'
     | 'skill-workflow.jsonc'
+    | 'mcp.json'
+    | 'mcp-approvals.json'
+    | 'mcp-auth-bindings.json'
     | 'desktop-private/data.sqlite'
     | 'ui/tui.json'
     | 'ui/preferences.jsonc'
@@ -30,7 +33,7 @@ export interface CapturedAsset {
   proof: { sha256: string; byteLength: string } | null;
 }
 export interface BackupManifest {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16;
   kind: 'profile_backup';
   createdAt: string;
   source: {
@@ -52,6 +55,9 @@ export interface BackupManifest {
   assets: {
     configuration: CapturedAsset;
     skillWorkflowConfiguration: CapturedAsset;
+    mcpConfiguration?: CapturedAsset;
+    mcpApprovals?: CapturedAsset;
+    mcpAuthBindings?: CapturedAsset;
     desktopUi: CapturedAsset & {
       format: { applicationId: 1263888689; userVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 } | null;
     };

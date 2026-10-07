@@ -21,7 +21,7 @@ beforeAll(async () => {
 afterAll(() => engine?.close());
 const signal = () => new AbortController().signal;
 
-test('public v11 offline restore preserves original A bytes while actual admitted B refuses every original request before HTTP', async () => {
+test('public v16 offline restore preserves original A bytes while actual admitted B refuses every original request before HTTP', async () => {
   const f = await reconnectionHostFixture();
   try {
     const a = await f.ordinary('restore_A');
@@ -41,7 +41,8 @@ test('public v11 offline restore preserves original A bytes while actual admitte
       profile: f.profile,
       destinationRoot: join(f.root, 'backups'),
     });
-    expect(backup.manifest.version).toBe(11);
+    expect(backup.manifest.version).toBe(16);
+    expect(backup.manifest.assets.mcpConfiguration?.present).toBe(true);
     expect(backup.manifest.assets.mcpReconnectionIntents?.proof?.sha256).toBe(sha);
     expect(readFileSync(join(backup.directory, 'ui/mcp-reconnection-intents.json'))).toEqual(bytes);
     expect((await inspectProfileBackup(backup)).manifest).toEqual(backup.manifest);

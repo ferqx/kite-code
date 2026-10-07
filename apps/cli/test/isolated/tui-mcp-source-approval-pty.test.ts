@@ -555,7 +555,8 @@ test('80x24 Source Review independently confirms Action and original Question de
             destinationRoot: join(root, 'source-backups'),
             signal: closing.signal,
           });
-          expect(backup.manifest.version).toBe(10);
+          expect(backup.manifest.version).toBe(16);
+          expect(backup.manifest.assets.mcpApprovals?.present).toBe(true);
           expect(backup.manifest.assets.mcpSourceApprovalIntents?.proof?.sha256).toBe(journalHash);
           maintenanceStage = 'backup_inspect';
           expect((await inspectProfileBackup(backup)).manifest).toEqual(backup.manifest);

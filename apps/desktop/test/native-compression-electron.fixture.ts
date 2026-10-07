@@ -89,6 +89,23 @@ try {
       trusted: true,
     });
   });
+  await page.getByText('当前模式：full；默认模式：auto', { exact: true }).waitFor();
+  await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
+  await page
+    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
+    .waitFor();
+  await page.evaluate(() => {
+    const events: string[] = [];
+    Object.defineProperty(window, '__compressionInputEvents', { value: events });
+    document.addEventListener(
+      'submit',
+      (event) => {
+        if ((event.target as HTMLFormElement).textContent?.includes('当前会话私有草稿'))
+          events.push(event.type);
+      },
+      { capture: true },
+    );
+  });
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('Original actual user source');
   // One real click waits for current actionability; a prior trial does not reserve the read gate.
   eq(
@@ -96,6 +113,10 @@ try {
     'Original actual user source',
   );
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
+  eq(
+    await page.evaluate(() => (Reflect.get(window, '__compressionInputEvents') as string[]).length),
+    1,
+  );
   const submitted = await waitState(page, (state) =>
     state.inputSubmissions.some(
       (item) => item.intent.kind === 'run.start' && item.phase === 'accepted',

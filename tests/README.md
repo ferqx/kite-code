@@ -31,6 +31,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 当前公共场景与证据
 
+[Profile MCP 恢复](isolated/unified-agent/profile-mcp-restore.test.ts)沿原 isolated共享槽，使用公开 builder/install与默认 Service，删除原 candidate后通过实际 installed CLI create/inspect/restore A→B，公开 Client核原 C/E、Core Question原行、当前来源准入、新 Question和显式 owned stdio连接／停止；冷 GET-only／cursor保持，Model0，原项目文件／配置／opaque refs保持。credential transport未派发，不证明 OS Vault／OAuth。对应[raw资产](../packages/agent/test/isolated/maintenance/mcp-configuration.test.ts)和[实际 Node DB7](../packages/agent/test/isolated/maintenance/desktop-mcp.test.ts)分别核 private/proof/absent／旧白名单及 v15/v16真实物理恢复；旧无 MCP文件的来源变更PTY仍为 v12。完整默认与有限结果单列于当前进度。
+
 通用 Agent V1.3 的当前切片通过 `bun run test:unified-agent` 验证：新包 owner、真实 HTTP/SSE 与双 Service、外部计数工具/mini-review、[两真实进程](isolated/unified-agent/persistence.test.ts)、取消、来源刷新、显式恢复与[目标依赖边界](isolated/scripts/unified-agent-boundary.test.ts)。runner 复用默认 isolated/exclusive 分类，编译与强杀场景按逐文件隔离运行。新 `ai/agent/client/ui` 与 `apps/service/cli/desktop/web` 已纳入默认发现和 build/typecheck，根正式/default/CI已选择新闭包，原客户端测试仅作历史参考；完整能力替代与平台仍待验收。平台、完整交互、维护恢复与制品结果按[进度](../docs/plans/unified-agent-refactor-v1-progress.md)记录，部分子场景不代表完整 T/E 场景通过。
 
 [未见 label-station 样本](isolated/unified-agent/evolution-unseen-sample.test.ts)由独立 owner 在公共接口固定后选择并实现，只有独立 manifest、资源、实现和测试。实际 manifest 构建到源外，以公共包消费真实通用 DOM 卡片→Client HTTP→无模型 Action→受控 Tool→自有 CAS 回执→Query→第二次明确操作；先等原 Execution 终态核 Action/Tool 两种拒绝零效果，两次允许效果与原 parent/rootWork 绑定，Model/Run为零。六文件 diff 和12个核心/公开基线 hash 未变支持本机有限 E01/E02/E03/E14，完整 Evolution Record 与未验证范围保留在[当前进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-04mcp-冷原申请备份-v8-与未见扩展样本)。此处不是全部核心冻结、独立 npm 安装、实际浏览器布局或全部 E01–E14 通过；异常初始化/cleanup 由20秒所属 child kill/await 与临时根清理兜底，绿色运行不证明所有异常路径逐资源 close。

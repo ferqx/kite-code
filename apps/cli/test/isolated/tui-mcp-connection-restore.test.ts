@@ -378,7 +378,7 @@ async function fixture(ask = false) {
   }
 }
 
-test('public backup v9 and restore A→B retain original connection journal; current B Host foreign intent admission precedes all HTTP', async () => {
+test('public backup v16 and restore A→B retain original source and connection journal; current B Host foreign intent admission precedes all HTTP', async () => {
   const f = await fixture();
   let passed = false;
   try {
@@ -406,7 +406,16 @@ test('public backup v9 and restore A→B retain original connection journal; cur
       profile: f.profile,
       destinationRoot: join(f.root, 'backups'),
     });
-    expect(backup.manifest.version).toBe(9);
+    expect(backup.manifest.version).toBe(16);
+    expect(backup.manifest.assets.mcpConfiguration).toMatchObject({
+      path: 'mcp.json',
+      present: true,
+      proof: {
+        byteLength: String(Buffer.byteLength(f.source)),
+        sha256: createHash('sha256').update(f.source).digest('hex'),
+      },
+    });
+    expect(readFileSync(join(backup.directory, 'mcp.json'), 'utf8')).toBe(f.source);
     expect(backup.manifest.assets.mcpConnectionIntents).toMatchObject({
       path: 'ui/mcp-connection-intents.json',
       present: true,
@@ -426,6 +435,7 @@ test('public backup v9 and restore A→B retain original connection journal; cur
     });
     expect(restored.storeId).not.toBe(storeA);
     expect(readFileSync(path)).toEqual(bytes);
+    expect(readFileSync(f.sourcePath, 'utf8')).toBe(f.source);
     await f.reopen();
     const storeB = f.client.serverInfo!.storeId;
     if (!storeB) throw Error('actual_restored_server_identity_missing');

@@ -786,7 +786,8 @@ test('public backup v10 A→B preserves original Source bytes and real current B
       profile: f.profile,
       destinationRoot: join(f.root, 'backups'),
     });
-    expect(backup.manifest.version).toBe(10);
+    expect(backup.manifest.version).toBe(16);
+    expect(backup.manifest.assets.mcpApprovals?.present).toBe(true);
     expect(backup.manifest.assets.mcpSourceApprovalIntents?.proof?.sha256).toBe(
       mcpShaFromBytes(bytes),
     );

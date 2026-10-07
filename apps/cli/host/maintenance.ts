@@ -1,7 +1,7 @@
 import type { MaintenanceCLIArguments } from '../src/arguments';
 
 export const maintenanceHelp = [
-  'Development offline maintenance (DB/media + separate raw config/Desktop UI/TUI drafts; vault excluded):',
+  'Development offline maintenance (DB/media + separate raw config/MCP sources/Desktop UI/TUI drafts; vault excluded):',
   'maintenance backup --data-root <absolute> --profile <name> --destination <absolute>',
   'maintenance inspect <absolute-backup-directory>',
   'maintenance status --data-root <absolute> --profile <name>',
@@ -30,6 +30,9 @@ export async function runSelectedMaintenance(input: {
       'sqlite_database',
       'referenced_immutable_media',
       'raw_profile_configuration',
+      'raw_profile_mcp_configuration',
+      'raw_profile_mcp_source_approvals',
+      'raw_profile_mcp_auth_bindings',
       'desktop_private_sqlite',
       'tui_recovery_intents',
       'caller_intents',
@@ -51,7 +54,13 @@ export async function runSelectedMaintenance(input: {
       'locks',
     ],
     profileComplete: false,
-    desktopUi: { path: 'desktop-private/data.sqlite', supportedUserVersions: [1, 2, 3, 4, 5] },
+    desktopUi: {
+      path: 'desktop-private/data.sqlite',
+      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7],
+    },
+    mcpConfiguration: { path: 'mcp.json', rawBytes: true },
+    mcpApprovals: { path: 'mcp-approvals.json', rawBytes: true },
+    mcpAuthBindings: { path: 'mcp-auth-bindings.json', rawBytes: true },
     tuiRecovery: { path: 'ui/recovery.json', format: { version: 1 } },
     callerIntents: { path: 'ui/caller-intents.json', format: { version: 1 } },
     fileRecoveryIntents: { path: 'ui/file-recovery-intents.json', format: { version: 1 } },
