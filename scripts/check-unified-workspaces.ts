@@ -234,6 +234,17 @@ export function checkUnifiedFormalConsumers(root: string): {
           const runs = (steps as Record<string, unknown>[]).flatMap((step) =>
             typeof step.run === 'string' ? [step.run] : [],
           );
+          if (
+            name === 'release-candidate.yml' &&
+            !steps.some(
+              (step) =>
+                step.if === "runner.os == 'macOS' || runner.os == 'Linux'" &&
+                typeof step.run === 'string' &&
+                step.run.trim().replace(/\s+/g, ' ') ===
+                  'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts',
+            )
+          )
+            add('formal-ci-terminal-lifecycle-missing', location, jobName);
           if (['release-candidate.yml', 'runtime-transport-qualification.yml'].includes(name)) {
             const prepare = steps.findIndex(
               (step) =>

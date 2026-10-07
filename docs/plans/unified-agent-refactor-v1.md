@@ -1914,7 +1914,9 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 | --- | --- |
 | 1．正式 Native MCP 设置／真实 Chrome 登录 | 人工接管自有HTTPS证书提示后，完成四项固定Auth、默认OS Vault及原身份冷查回；真实浏览器、凭据和所属进程证据分别保持。 |
 | 2．默认 CLI/TUI/Native 的普通开发Shell／Job | 装配具普通开发FS/network边界且可靠监管全部子树的后端；实际默认新producer、完整保存输出、准确停止与empty证明、宿主退出及持续负载资格齐全，不以PGID或deny-fork替代。 |
-| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复、完整§35与适用T/E、三平台和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者、本机Terminal/Native代码组合及Profile MCP配置恢复见§30.2.4／30.2.5／30.2.6／30.2.7。 |
+| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复、完整§35与适用T/E、三平台和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者、本机Terminal/Native代码组合及Profile MCP配置恢复见§30.2.4／30.2.5／30.2.6／30.2.7；Linux 当前 Terminal 有限安装维护链见§30.2.8，原生 CI 等剩余资格仍保留。 |
+
+2026-10-07 用户已确认普通 Shell 保留 macOS 宿主工具链与广泛只读宿主视图，不将 Linux 容器设为默认。Docker 已取得可运行的独立 Linux 测试环境，但该环境不接入产品 Shell。有限原语核对发现当前 SDK 明示 NOTE_TRACK/NOTE_CHILD 自 macOS 10.5 不再支持；[XNU coalition syscall](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/sys_coalition.c)的管理要求 privileged coalition，终止请求等待自行清空且允许现有成员继续 fork，不提供本轮所需整树强制停止证据。这只界定本轮候选原语，默认宿主 Shell 的完整后代树、FS/network、输出及正式负载阻塞仍保持，不能据此宣布所有 macOS 实现方案不可行。
 
 ### 30.2.2 当前 Native Job 完整已保存输出消费者
 
@@ -1973,6 +1975,14 @@ raw资产4／129核部分缺失、完整bytes／proof、旧格式／实体拒绝
 有限原 isolated 作业 1pass/374 条 Bun 断言及实际 driver 断言通过，166.215s；三次真实失败和对应测试修正保留，生产安装/回退逻辑未改。阶段原完整默认612文件/486主作业全部通过，actual0/正常排空992.320s，4077regular与Git前后一致；图内本片Native244256ms、原Terminal跨代码156504ms及原Native lifecycle93656ms均通过。当前根包/八workspace types、API/依赖/边界/测试归属与根readonlyformat通过，最终文档门禁按本地交付范围复核。工具线程额度拒绝新独立 Agent，本片尚无 fresh 独立审查，root 自检不替代它。完整当前合同见[Native owner](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)，执行与剩余条件归[进度](unified-agent-refactor-v1-progress.md#2026-10-07native-真实代码升级与冷回退)。
 
 本机 Native 真实代码冷回退不再列为未实施缺口；已发布 predecessor/T029、其他平台、真实 Chrome/default OS Vault 四Auth、默认可信 Shell/新 Job producer/正式持续负载、其余维护恢复及全部 §35/T/E 仍 pending，齐全后才能最终退役旧路径。37能力 status 仍 partial，wholeV13=false，Goal active，本地授权不扩大到 push/PR/发布。
+
+### 30.2.8 Linux 当前 Terminal 安装与维护链
+
+当前 Bun 1.4.2 Linux x64 实测官方 SQLite 3.53.2 的准确 source ID；原 reviewed 集合缺该来源导致真实 builder 拒绝，现按官方 WAL-reset 修复证据加入准确来源，未知版本/近似哈希/额外 metadata 仍拒绝。没有新 schema、API、Shell 后端或生产恢复机制。
+
+原完整 installed Terminal 测试实际完成 Linux 构建归档/搬迁、CLI/TUI、daemon/PTY、同源码版本指针升级/回滚、live lease 与最终卸载保数据；Linux 分支另以实际候选公共 Store 的双 Worker 24 次 WAL 写入，执行安装 CLI backup/inspect/restore/status 和新 Store cold readonly，保原业务历史/config并核原 Session fencing。1 pass/2545 条 Bun 断言/84.250s；原 120 秒期限和全部原断言保持。CI 在 macOS/Linux 调用整个文件并拒绝 Mac-only/echo/过滤命令。第四轮阶段原完整默认612文件/486主作业全部通过，actual0/982.091s、4078 regular与Git保持；前三轮失败及两处原测试修正分别保留，准确证据归[进度](unified-agent-refactor-v1-progress.md#2026-10-07linux-当前-terminal-安装与维护链)，当前完整合同归[Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)。
+
+实际环境为 Ubuntu 24.04.4 x64 用户空间，经 Apple Silicon Docker Linux VM 仿真，Docker 只用于验证。它不接默认 Shell，也不证明 GitHub-hosted 原生 Ubuntu、Linux 真实跨代码/已发布 predecessor/T029、Native/Windows、完整持续负载或全部 §35/T/E。线程额度拒绝 fresh 独立审查，root 自检不替代它。37 能力保持 partial、wholeV13=false；按依赖仍保 Native 真实 Chrome/default OS Vault、默认宿主 Shell/新 Job/formal soak、其余平台与最终退役三项退出缺口。
 
 ### 30.3 第一条执行闭环
 

@@ -10,9 +10,12 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
+import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 function verifyLocalLinks(root: string) {
@@ -58,7 +61,7 @@ async function execute(argv: string[], cwd: string, home: string) {
 }
 
 test('sealed terminal bundle remains independent after archive relocation and temporary installation', async () => {
-  const root = realpathSync(mkdtempSync('/private/tmp/kite-terminal-bundle-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-bundle-')));
   const home = join(root, 'home');
   mkdirSync(home, { mode: 0o700 });
   mkdirSync(join(home, '.kite-code'), { mode: 0o700 });
@@ -355,6 +358,116 @@ finally:
         expect(providerCalls).toBe(1);
       } finally {
         writeFileSync(dependencyPath, bytes);
+      }
+      if (process.platform === 'linux') {
+        const readerRoot = join(home, 'engine-reader');
+        const reader = await Bun.build({
+          entrypoints: [
+            join(repositoryRoot, 'tests/fixtures/unified-agent/terminal-bundle-store.ts'),
+          ],
+          target: 'bun',
+          packages: 'external',
+          outdir: readerRoot,
+          naming: 'read.js',
+        });
+        expect(reader.success).toBe(true);
+        symlinkSync(join(candidate, 'node_modules'), join(readerRoot, 'node_modules'), 'dir');
+        const inspect = async (mode: 'prepare' | 'cold') => {
+          const value = await execute(
+            [runtime, join(readerRoot, 'read.js'), mode, dataRoot, workspace],
+            workspace,
+            home,
+          );
+          if (value.code) console.error(value.stdout, value.stderr);
+          expect(value.code).toBe(0);
+          return JSON.parse(value.stdout) as {
+            storeId: string;
+            engine: { qualification: string; linkage: string; version: string; sourceId: string };
+            workspaces: string[];
+            session: { id: string; ownerGeneration: string; ownerInstanceId: string | null };
+            messages: unknown[];
+            executions: unknown[];
+          };
+        };
+        const before = await inspect('prepare');
+        expect(before.engine).toMatchObject({
+          qualification: 'selected',
+          linkage: built.manifest.sqlite.linkage,
+          version: built.manifest.sqlite.version,
+          sourceId: built.manifest.sqlite.sourceId,
+        });
+        expect(before.workspaces.filter((id) => id.startsWith('bundle-wal-'))).toHaveLength(24);
+        expect(before.session.id).toBe('bundle-session');
+        expect(before.executions).toHaveLength(1);
+        const database = readFileSync(profile.databasePath);
+        const configuration = readFileSync(join(profile.profilePath, 'config.jsonc'));
+        const scope = ['--data-root', dataRoot, '--profile', 'default'];
+        const backup = await execute(
+          [cli, 'maintenance', 'backup', ...scope, '--destination', join(root, 'backups')],
+          workspace,
+          home,
+        );
+        if (backup.code) console.error(backup.stdout, backup.stderr);
+        expect(backup.code).toBe(0);
+        const selected = (JSON.parse(backup.stdout) as { backup: ProfileBackup }).backup;
+        expect(selected.manifest.source.storeId).toBe(before.storeId);
+        expect(selected.manifest.engine.version).toBe(before.engine.version);
+        expect(selected.manifest.engine.sourceId).toBe(before.engine.sourceId);
+        expect(readFileSync(profile.databasePath)).toEqual(database);
+        const checked = await execute(
+          [cli, 'maintenance', 'inspect', selected.directory],
+          workspace,
+          home,
+        );
+        expect(checked.code).toBe(0);
+        expect(JSON.parse(checked.stdout).backup.manifest).toEqual(selected.manifest);
+        expect(readFileSync(profile.databasePath)).toEqual(database);
+        const restore = await execute(
+          [
+            cli,
+            'maintenance',
+            'restore',
+            selected.directory,
+            ...scope,
+            '--expected-store',
+            before.storeId,
+            '--confirm-data-loss',
+          ],
+          workspace,
+          home,
+        );
+        if (restore.code) console.error(restore.stdout, restore.stderr);
+        expect(restore.code).toBe(0);
+        const receipt = JSON.parse(restore.stdout) as ProfileRestoreResult;
+        expect(receipt.outcome).toBe('restored');
+        const cold = await inspect('cold');
+        expect(cold.storeId).toBe(receipt.storeId);
+        expect(cold.storeId).not.toBe(before.storeId);
+        expect(cold.engine).toEqual(before.engine);
+        expect(cold.workspaces).toEqual(before.workspaces);
+        expect(cold.session).toEqual({
+          ...before.session,
+          ownerGeneration: (BigInt(before.session.ownerGeneration) + 1n).toString(),
+          ownerInstanceId: null,
+        });
+        expect(cold.messages).toEqual(before.messages);
+        expect(cold.executions).toEqual(before.executions);
+        expect(readFileSync(join(profile.profilePath, 'config.jsonc'))).toEqual(configuration);
+        const status = await execute([cli, 'maintenance', 'status', ...scope], workspace, home);
+        expect(status.code).toBe(0);
+        expect(JSON.parse(status.stdout).restore).toBeNull();
+        expect(providerCalls).toBe(1);
+        console.log(
+          `TERMINAL_LINUX_SELECTED_ENGINE ${JSON.stringify({
+            engine: before.engine,
+            walWrites: 24,
+            beforeStoreId: before.storeId,
+            restoredStoreId: cold.storeId,
+            originalHistoryRetained: true,
+            providerCalls,
+            installedMaintenance: true,
+          })}`,
+        );
       }
       const originalDatabase = readFileSync(profile.databasePath);
       const originalConfiguration = readFileSync(join(profile.profilePath, 'config.jsonc'));

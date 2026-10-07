@@ -242,7 +242,7 @@ def read_until(text, seconds):
   if time.monotonic()>end:raise RuntimeError('registered PTY deadline '+buffer[-4000:].decode(errors='replace'))
   if select.select([master],[],[],.05)[0]:buffer+=os.read(master,65536)
 try:
- read_until('Registered Native complete',10)
+ read_until('Registered Native complete',20)
  os.write(master,b'Registered TUI task')
  read_until('Registered TUI task',10)
  os.write(master,b'\\r')
@@ -255,6 +255,7 @@ try:
  p.wait(timeout=3);assert p.returncode==0;open(${JSON.stringify(join(root, 'registered-pty-output'))},'wb').write(buffer);print('REGISTERED_PTY_COMPLETE')
 finally:
  if p.poll() is None:os.killpg(p.pid,signal.SIGKILL);p.wait()
+ open(${JSON.stringify(join(root, 'registered-pty-output'))},'wb').write(buffer)
  os.close(master)
 `;
       const pty = await execute(['/usr/bin/python3', '-c', program], '/usr/bin:/bin');

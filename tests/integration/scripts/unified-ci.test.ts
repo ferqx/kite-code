@@ -185,6 +185,35 @@ test('Windows Native environment precedes both consumers and transport results s
   }
 });
 
+test('release candidate must execute the complete installed Terminal lifecycle on both POSIX platforms', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  for (const mutate of [
+    (s: string) =>
+      s.replace("runner.os == 'macOS' || runner.os == 'Linux'", "runner.os == 'macOS'"),
+    (s: string) =>
+      s.replace(
+        'run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts',
+        'run: echo tests/isolated/unified-agent/terminal-bundle.test.ts',
+      ),
+    (s: string) =>
+      s.replace(
+        'run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts',
+        'run: bun test --parallel=1 --max-concurrency=1 --test-name-pattern=never-match tests/isolated/unified-agent/terminal-bundle.test.ts',
+      ),
+  ]) {
+    const root = fixture();
+    put(root, '.github/workflows/release-candidate.yml', mutate(source));
+    expect(
+      checkUnifiedFormalConsumers(root).violations.some(
+        (v) => v.code === 'formal-ci-terminal-lifecycle-missing',
+      ),
+    ).toBe(true);
+  }
+});
+
 test('a platform slice must retain the formal verifier, not only a diagnostic report', () => {
   const root = fixture('bun run scripts/release/unified-platform-probe.ts --output=owned.json');
   expect(

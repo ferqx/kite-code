@@ -54,6 +54,9 @@ jobs:
         run: bun run release:verify --directory dist/unified-terminal --source-commit "${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}" --clean-source true
       - name: Actual Terminal lifecycle and Web smoke
         run: bun run release:smoke --directory dist/unified-terminal
+      - if: runner.os == 'macOS' || runner.os == 'Linux'
+        name: Actual installed Terminal CLI, TUI, upgrade, rollback and data retention
+        run: bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-bundle.test.ts
       - if: runner.os == 'Windows'
         name: Prepare installed Windows x64 Native compiler
         run: bun run scripts/release/prepare-windows-native-ci.ts

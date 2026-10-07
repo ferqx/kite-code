@@ -43,7 +43,7 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 
 ## 验证边界
 
-当前真实资格为 macOS arm64、Bun 1.4.2：搬迁后删除原输出、独立 HOME/PATH、两个安装入口、固定模型一次实际 Run、SQLite Worker 读回原历史、共享 daemon/TUI PTY、升级/回滚原实例固定、live 使用时拒绝卸载、停止后卸载和独立用户数据保持。测试入口：
+原有本机资格为 macOS arm64、Bun 1.4.2；新增 Linux 当前安装链见下节。macOS 实际验证包括：搬迁后删除原输出、独立 HOME/PATH、两个安装入口、固定模型一次实际 Run、SQLite Worker 读回原历史、共享 daemon/TUI PTY、升级/回滚原实例固定、live 使用时拒绝卸载、停止后卸载和独立用户数据保持。测试入口：
 
 - [真实 bundle 与生命周期](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)
 - [真实代码升级与冷回退](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)
@@ -54,7 +54,17 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 
 实际安装前门依次完成 A 任务、升级 B 后新任务、正常停止后回退 A 并冷读 B 的完整正文、A 继续原会话、再切换 B 冷读全部原记录。公共 Client 与各自候选内只读 Store 核同一 Store、原 Command/Run/Model 身份和正文/ref/hash；352041 UTF-8 字节 Unicode 正文也完整进入回退后的新模型请求。冷 GET 不增加模型请求或持久游标，四次启动为不同实例；公开 stop 核准确 PID/startIdentity 已退出、全部安装候选 EX 可取，卸载保留原数据库 inode、完整字节和配置。没有恢复旧数据库。当前本机有限验收1pass/335assert，原失败和阶段完整默认结果归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
 
-上述新测试沿默认 isolated 每文件进程、进程内 concurrency=1 运行，可与其他隔离文件共享槽；构建输出、旧 clone、reader、安装和数据均位于自有临时根。当前安装分支支持 POSIX，Linux 尚待真实资格，Windows 安装明确拒绝。Native 跨代码冷回退、已发布旧样本、断电恢复、平台签名、生产 sandbox/exporter、全部平台资格及完整 T/E 仍未由本机 Terminal 组合证明。
+上述新测试沿默认 isolated 每文件进程、进程内 concurrency=1 运行，可与其他隔离文件共享槽；构建输出、旧 clone、reader、安装和数据均位于自有临时根。当前安装分支支持 POSIX；Linux 当前引擎与安装维护链已有下述有限实测，原生平台 CI 仍待执行，Windows 安装明确拒绝。Native 跨代码冷回退、已发布旧样本、断电恢复、平台签名、生产 sandbox/exporter、全部平台资格及完整 T/E 仍未由本机 Terminal 组合证明。
+
+## Linux 当前引擎与安装维护链
+
+当前 Bun 1.4.2 Linux x64 实测 builtin SQLite 3.53.2，sourceId 为 `2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24`。[官方发布说明](https://sqlite.org/releaselog/3_53_2.html)确认该准确来源包含 WAL-reset 修复；[release identity](../../service/src/sqlite-release-assets.ts)将其加入已审查集合，未知版本、近似哈希和不符 linkage 仍拒绝，不用版本区间代替来源核验。
+
+原[完整 bundle 测试](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)以平台 `tmpdir()` 创建自有根，保留原 120 秒预算和全部断言。在 Ubuntu 24.04.4 x64 用户环境实际完成构建、归档搬迁与删除原输出、installed CLI/TUI、一次固定模型任务、daemon/PTY、升级和回滚指针、live lease 拒绝卸载、正常停止及最终卸载保数据。其升级候选仍来自同源码改 productVersion，不能由此认定 Linux 真实跨代码冷回退。
+
+Linux 分支的[源码外公共 Store reader](../../../tests/fixtures/unified-agent/terminal-bundle-store.ts)由 installed candidate 的 Bun 执行，裸 imports 只解析该候选。两个真实 Worker 交替并发完成 24 次 WAL 写入，再以实际 `bin/kite maintenance backup/inspect/restore/status` 核原 Store、manifest 引擎和源数据库完整字节。恢复生成新 Store，cold readonly 核原 Workspace/Session/Message/Execution、Session owner generation 精确加一且 owner 清空、配置原字节及无残留 restore journal；维护与冷查回不增加原一次模型调用。原最终卸载保数据库和配置断言继续执行。
+
+本机有限结果为 1 pass、2545 条 Bun 断言、84.250 秒，运行于 Apple Silicon Docker Linux VM 中的 x64 仿真环境。它不替代 GitHub-hosted 原生 Ubuntu CI、Native、Windows、已发布 predecessor/T029、真实跨代码组合或完整持续负载。release candidate CI 已在 macOS 和 Linux 调用整个原测试，守卫拒绝 Mac-only、echo 和过滤到零案例；实际执行与原失败归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-当前-terminal-安装与维护链)。该 Linux 测试环境不接入默认 Shell，普通 Shell 保留宿主执行语义。
 
 ## 发布引擎与双发行包选择
 

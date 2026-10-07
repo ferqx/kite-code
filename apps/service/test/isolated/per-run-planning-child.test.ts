@@ -633,6 +633,7 @@ test('original parent head/proof drift during child approval refuses dispatch an
       expect(card.definitionId).toBe('files.write');
       const db = new Database(join(f.profile.profilePath, 'core.db'));
       try {
+        db.run('PRAGMA busy_timeout=100');
         if (scenario === 'head_drift') {
           const pointer = (await f.record('plan.current'))!.value as Record<string, Json>;
           pointer.digest = '0'.repeat(64);

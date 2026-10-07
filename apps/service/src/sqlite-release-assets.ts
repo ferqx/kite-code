@@ -1,6 +1,7 @@
 /** Exact upstream identities reviewed for the release WAL-reset fix; not a minimum-version rule. */
 export const reviewedSqliteSources = Object.freeze({
   '3.51.3': '2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6d618',
+  '3.53.2': '2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24',
   '3.53.4': '2026-07-24 19:02:57 bf7c7f30031888f4e796e429ab3978879485813aaca6f641c7b33e4e09459bcc',
 });
 

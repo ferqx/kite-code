@@ -2,11 +2,42 @@ import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  assertSqliteReleaseIdentity,
+  parseSqliteReleaseIdentity,
+} from '@kite-ai/service/sqlite-release-assets';
 import { runNativeRelease } from '../../../scripts/release/native';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
 import { runUnifiedRelease } from '../../../scripts/release/unified';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
+test('reviewed Linux builtin source is exact; version ranges, near hashes and extra metadata cannot approve an engine', () => {
+  const identity = {
+    driver: 'bun:sqlite',
+    linkage: 'builtin',
+    version: '3.53.2',
+    sourceId:
+      '2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24',
+  } as const;
+  expect(parseSqliteReleaseIdentity(identity)).toEqual(identity);
+  assertSqliteReleaseIdentity(identity, identity);
+  for (const value of [
+    { ...identity, sourceId: `${identity.sourceId.slice(0, -1)}0` },
+    { ...identity, version: '3.53.1' },
+    { ...identity, version: '3.53.3' },
+    { ...identity, version: '999.0.0' },
+    { ...identity, linkage: 'system' },
+    { ...identity, driver: 'node:sqlite', linkage: 'dynamic' },
+    { ...identity, reviewed: true },
+  ])
+    expect(() => parseSqliteReleaseIdentity(value)).toThrow('sqlite_release_identity_invalid');
+  expect(() =>
+    assertSqliteReleaseIdentity(identity, {
+      version: identity.version,
+      sourceId: `${identity.sourceId.slice(0, -1)}0`,
+    }),
+  ).toThrow('sqlite_release_identity_mismatch');
+});
 async function execute(entry: string, argv: string[], cwd: string, home: string) {
   const child = Bun.spawn(
     [process.execPath, join(repositoryRoot, 'scripts/release', entry), ...argv],

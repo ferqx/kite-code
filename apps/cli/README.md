@@ -131,6 +131,8 @@ SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基�
 
 [源码外安装恢复](../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)已实际执行正式 builder→install→删除原 candidate→CLI create/inspect/restore→默认 Service A/B/B-cold。公开 Client 保原决定和 C/E、重新回答当前两份 Question并显式启动/停止 stdio；冷读取 GET-only／cursor保持、Provider0、项目原文和旧目录保留、准确 owned退出与卸载保 Profile。credential transport 未派发，不作为 OS Vault／OAuth 或三平台资格。
 
+Linux 当前安装候选也已通过实际 `bin/kite maintenance backup/inspect/restore/status` 与源码外公共 Store 冷读取，保原历史和配置、生成新 Store、正确 fencing 且不增加模型调用。完整断言与 x64 仿真环境限制由 [Terminal owner](docs/terminal-release.md#linux-当前引擎与安装维护链)维护；原生 Ubuntu CI 和三平台发行资格仍待验。
+
 Workflow 的独立开关文件 `skill-workflow.jsonc` 作为 `skillWorkflowConfiguration` 原字节资产采集。JSON coverage 明确列出该项，保留注释、未知字段及损坏 JSONC，不解析或启用特性；缺失保持 absent，恢复保原字节。它不改变 `profileComplete:false` 或凭据排除范围。
 
 [host/maintenance.ts](host/maintenance.ts) 接入公开 `@kite-ai/agent/maintenance`，不启动 Service、Provider 或执行任务。命令及用户操作见[手册](../../docs/handbook/cli/commands.md#通用开发入口离线维护)。[纯参数层](src/arguments.ts) 要求显式绝对 data root/profile、选定备份与原观察身份；恢复及 journal 完成/回退另要求独立 `--confirm-data-loss`，未知、重复、缺值及相对路径在 I/O 前拒绝。help 和只读 status 不初始化 profile 或 coordination；开发 selector 原样转发这些参数，无需 Service 资产。

@@ -14,6 +14,8 @@
 
 候选 workflow 显式 checkout PR head repository/head SHA，只读权限、关闭持久凭据，verify 传 `--source-commit <实际head> --clean-source true`。第三方 actions 固定40位 commit，Bun 固定1.4.2。工作树 dirty、源提交不符或实际文件/链接/目录/引擎变化拒绝，不把 merge ref、版本文字或旧三平台记录作为当前候选身份。
 
+release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试](../../tests/isolated/unified-agent/terminal-bundle.test.ts)，包含实际 CLI/TUI、升级/回滚、lease 与卸载保数据；Linux 分支继续核 selected 引擎、双 Worker WAL 和实际安装 maintenance。正式消费者守卫要求双方平台及准确完整命令，拒绝 Mac-only、echo 与过滤到零案例。workflow 接入不表示该原生平台已执行通过。
+
 Windows Native 构建与 transport 原生后端测试在消费编译器前调用[有限 CI 准备脚本](../../scripts/release/prepare-windows-native-ci.ts)。脚本只使用 runner 已安装的固定 vswhere/VsDevCmd、明确 x64 host/target、实际 canonical `cl.exe` 和对应 SDK header/library；缺项失败，不下载或从 PATH 查编译器。vswhere 按 UTF-8、CMD `SET` 按 `/u` 的 UTF-16LE 完整解码，坏字节拒绝；只向 `GITHUB_ENV` 保存十个构建变量、编译器及清空的 `CL`/`_CL_`，不打印原环境。transport 也固定原 PR head/repository 和完整历史。静态守卫核准备顺序及完整三文件 Windows 命令，`echo` 或过滤到零案例不能代替五项 Node 后端执行。本机18项80断言证明解码与调度负例，未运行 Windows 编译；准备成功不改变正式 Main 的加载前身份拒绝或平台完成条件。
 
 ## 安装、登记与使用权
@@ -34,13 +36,13 @@ Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核�
 
 Terminal 保存实际 `bun:sqlite` driver/linkage/version/sourceId/engine manifest SHA，Native 保存独立 `node:sqlite` 身份。构建测量复制后 runtime，正式启动在首次数据库前选择并核包内 metadata，Worker 核同一 process-global 引擎。完全无选定资产的开发模式 unqualified；损坏/不完整资产拒绝，不查系统库 fallback。
 
-WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。
+WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多连接 WAL/备份恢复为依据，不以“最新”或永久 minimum 放行。当前已审查来源为 [SQLite3.51.3](https://www.sqlite.org/releaselog/3_51_3.html)、[SQLite3.53.2](https://sqlite.org/releaselog/3_53_2.html)与[SQLite3.53.4](https://www.sqlite.org/releaselog/3_53_4.html)；精确集合由[release identity](../../apps/service/src/sqlite-release-assets.ts)负责。macOS 构建复制已安装且审查的动态库，Linux/Windows 核 Bun builtin；任一实际引擎不符合集合即拒绝资格。
 
 默认生产 Shell 当前 `shell_unavailable`，无 Provider/Job；可信进程组监督与 macOS confined 样本不冒称跨平台生产 sandbox。Files runtime assets 保护、原权限/read-set 和不盲重放仍强制。通用OS keyring平台smoke保CI双gate和实际随机namespace；Native本机资格只使用自有临时Profile派生的准确独立account，保存后准确revoke/remove，再由fresh backend核absence，不读取或清理其他用户账户。实际MCP外部联网仍只在明确live gate开启时执行；自有loopback测试资格与限制归[Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。
 
 ## 平台与完成约束
 
-G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX安装/继承使用锁只有本机macOS资格，Windows Profile/Store/配置原生场景已实现但未本机运行，Windows制品安装/maintenance仍有未实现边界。
+G0 需要当前产品正确性、安全、安装/取消/恢复的实际证据；G1 仍要求 GitHub-hosted macOS、Ubuntu、Windows 原生 build/install/process/PTY。workflow 定义、artifact 上传或本机单平台结果不能替代三平台通过。当前 POSIX 安装/继承使用锁保原本机 macOS 资格，Linux 当前 Terminal 安装维护链已取得 Ubuntu x64 用户空间在 Apple Silicon Docker VM 仿真的有限实测；准确范围归 [Terminal owner](../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)，原生 Ubuntu CI 仍未验。Windows Profile/Store/配置原生场景已实现但未本机运行，Windows 制品安装/maintenance 仍有未实现边界。
 
 平台 workflow 的当前源码外 Files/资产/SQLite/锁诊断通过，只证明报告所列范围；formal verifier 仍拒绝完整默认 effectful platform 缺资格。正式 soak 保固定8外层/≥60分钟/168分钟全局上界、必要混合场景、资源观测与后代身份要求；bounded diagnostic 不能冒充 formal。V1.3 D17 明确退役旧隐式累计预算账本，替代场景必须证明实际显式并发、取消和输出保留策略，不能重建旧资金账本作为运行前提。当前 runner 已使用闭合v2七类CI与正确显式策略场景，旧budget条件已删除；稳定资源点、持续组合负载及原生资格仍未闭合，见[韧性owner](runtime-resilience-qualification.md)。失败和不确定清理保原证据。
 
