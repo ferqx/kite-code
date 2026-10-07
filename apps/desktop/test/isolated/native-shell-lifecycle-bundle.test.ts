@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -7,6 +8,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -25,14 +27,18 @@ import {
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'default Native creates host Shell Jobs, stops the exact full tree and cold reads original output after Main and Service faults',
+  'installed default Native creates host Shell Jobs, stops the exact full tree and cold reads original output after Main and Service faults',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-shell-lifecycle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated'),
+      prefix = join(root, 'installed'),
       workspace = join(home, 'workspace'),
       executable = join(workspace, 'tree'),
       effects = join(workspace, 'effects');
+    const { installNativeBundle, uninstallNativeBundle } = await import(
+      resolve(import.meta.dir, '../../../../scripts/release/native-install.ts')
+    );
     mkdirSync(workspace, { recursive: true, mode: 0o700 });
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
@@ -42,11 +48,11 @@ test.skipIf(process.platform !== 'darwin')(
       trees = new Map<string, NativeShellProcessIdentity[]>(),
       processes = new Map<number, NativeShellProcessIdentity>(),
       calls: { marker: string; tools: number }[] = [],
-      controlEvidence: unknown[] = [],
-      leases: ReturnType<typeof acquireArtifactAccess>[] = [];
+      controlEvidence: unknown[] = [];
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
       stdout: Promise<string> | undefined,
       stderr: Promise<string> | undefined,
+      candidateRoot = '',
       storeId = '',
       failure: unknown,
       qualification: unknown,
@@ -95,6 +101,31 @@ test.skipIf(process.platform !== 'darwin')(
             const operation = url.pathname.slice('/control/'.length),
               label = url.searchParams.get('label') ?? '';
             if (operation === 'count') return Response.json({ calls: calls.length });
+            if (operation === 'leases') {
+              const held = { outer: false, inner: false };
+              for (const [name, path] of [
+                ['outer', candidateRoot],
+                ['inner', join(candidateRoot, 'terminal')],
+              ] as const) {
+                try {
+                  acquireArtifactAccess({ root: path, mode: 'exclusive' }).release();
+                } catch (cause) {
+                  expect(String(cause)).toContain('Lock is busy');
+                  held[name] = true;
+                }
+              }
+              controlEvidence.push({ stage: 'installed_candidate_leases', ...held });
+              return Response.json(held);
+            }
+            if (operation === 'uninstall-busy') {
+              const active = readFileSync(join(prefix, 'active'), 'utf8');
+              expect(() => uninstallNativeBundle(prefix)).toThrow('Lock is busy');
+              expect(readFileSync(join(prefix, 'active'), 'utf8')).toBe(active);
+              expect(existsSync(candidateRoot)).toBe(true);
+              const evidence = { stage: 'installed_uninstall_busy', active };
+              controlEvidence.push(evidence);
+              return Response.json(evidence);
+            }
             if (operation === 'tree') return Response.json(await readTree(label));
             if (operation === 'flush') {
               const stream = url.searchParams.get('stream'),
@@ -151,7 +182,7 @@ test.skipIf(process.platform !== 'darwin')(
               const pid = Number(url.searchParams.get('pid'));
               const identity = observation.observe(pid);
               expect(identity).toBeDefined();
-              expect(identity!.executable.startsWith(`${moved}/`)).toBe(true);
+              expect(identity!.executable.startsWith(`${candidateRoot}/`)).toBe(true);
               processes.set(pid, identity!);
               return Response.json(identity);
             }
@@ -264,12 +295,15 @@ test.skipIf(process.platform !== 'darwin')(
       rmSync(terminal.root, { recursive: true, force: true });
       expect(existsSync(join(root, 'source'))).toBe(false);
       expect(existsSync(terminal.root)).toBe(false);
-      const candidate = verifyNativeRuntimeBundle(moved);
+      expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
+      const installed = installNativeBundle({ bundleRoot: moved, prefix });
+      candidateRoot = installed.releaseRoot;
+      const candidate = verifyNativeRuntimeBundle(candidateRoot);
       expect(candidate.digest).toBe(built.digest);
-      leases.push(
-        acquireArtifactAccess({ root: moved, mode: 'shared' }),
-        acquireArtifactAccess({ root: candidate.terminal.root, mode: 'shared' }),
-      );
+      expect(installed.candidateId).toBe(candidate.digest);
+      expect(readFileSync(join(prefix, 'active'), 'utf8')).toBe(`${candidate.digest}\n\n`);
+      rmSync(moved, { recursive: true, force: true });
+      expect(existsSync(moved)).toBe(false);
       initializeSqliteEngine({
         root: join(candidate.terminal.root, 'node_modules/@kite-ai/agent/storage/engine'),
         manifestSha256: candidate.terminal.manifest.sqlite.manifestSha256,
@@ -319,6 +353,8 @@ test.skipIf(process.platform !== 'darwin')(
           productionDefaultService: true,
           productionDefaultShell: true,
           productionDefaultNetwork: true,
+          installedLauncher: join(prefix, 'bin/kite-desktop'),
+          installedCandidateRoot: candidateRoot,
           storeId,
           producer:
             'ordinary workspace native program via actual Native Full selection and shell.launch',
@@ -351,10 +387,11 @@ test.skipIf(process.platform !== 'darwin')(
         [
           realpathSync(Bun.which('node')!),
           join(root, 'driver.js'),
-          moved,
+          candidateRoot,
           home,
           storeId,
           provider.url.href.replace(/\/$/, ''),
+          join(prefix, 'bin/kite-desktop'),
         ],
         {
           cwd: home,
@@ -395,7 +432,33 @@ test.skipIf(process.platform !== 'darwin')(
       const cold = await snapshot(profile);
       expect(cold).toEqual(report.finalSnapshot);
       expect(cold.storeId).toBe(storeId);
-      qualification = { status: 'passed', report, controlEvidence, calls };
+      expect([...processes.values()].every((identity) => !observation.present(identity))).toBe(
+        true,
+      );
+      for (const path of [candidateRoot, candidate.terminal.root])
+        acquireArtifactAccess({ root: path, mode: 'exclusive' }).release();
+      const preservedPaths = [
+        profile.databasePath,
+        join(profile.profilePath, 'desktop-private/data.sqlite'),
+        join(profile.profilePath, 'config.jsonc'),
+      ];
+      const preserved = () =>
+        preservedPaths.map((path) => ({
+          path,
+          inode: statSync(path).ino,
+          sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+        }));
+      const beforeUninstall = preserved();
+      uninstallNativeBundle(prefix);
+      expect(existsSync(prefix)).toBe(false);
+      expect(preserved()).toEqual(beforeUninstall);
+      qualification = {
+        status: 'passed',
+        report,
+        controlEvidence,
+        calls,
+        installation: { ...installed, uninstalled: true, preserved: beforeUninstall },
+      };
       completed = true;
     } catch (cause) {
       failure = cause;
@@ -406,16 +469,16 @@ test.skipIf(process.platform !== 'darwin')(
       }
       if (stdout) writeFileSync(join(root, 'driver.stdout.log'), await stdout);
       if (stderr) writeFileSync(join(root, 'driver.stderr.log'), await stderr);
-      // These paths belong exclusively to this moved candidate/workspace. Each
+      // These paths belong exclusively to this installed candidate/workspace. Each
       // signal is kernel-matched to the observed original PID version.
       const cleanupFailures: unknown[] = [];
       let remaining: ReturnType<typeof observation.owned> | undefined;
       try {
-        const owned = observation.owned([executable], [moved]);
+        const owned = observation.owned([executable], candidateRoot ? [candidateRoot] : []);
         for (const identity of owned.identities) observation.signal(identity, 9);
         remaining = owned;
         await until(() => {
-          remaining = observation.owned([executable], [moved]);
+          remaining = observation.owned([executable], candidateRoot ? [candidateRoot] : []);
           return remaining.identities.length === 0 && remaining.unconfirmed.length === 0;
         });
         expect([...processes.values()].every((identity) => !observation.present(identity))).toBe(
@@ -446,14 +509,9 @@ test.skipIf(process.platform !== 'darwin')(
         );
       }
       provider.stop(true);
-      for (const lease of leases.reverse()) {
-        try {
-          lease.release();
-        } catch (cause) {
-          cleanupFailures.push(cause);
-        }
-      }
-      for (const path of [moved, join(moved, 'terminal')].filter(existsSync)) {
+      for (const path of [candidateRoot, join(candidateRoot, 'terminal')].filter(
+        (path) => candidateRoot && existsSync(path),
+      )) {
         try {
           acquireArtifactAccess({ root: path, mode: 'exclusive' }).release();
         } catch (cause) {

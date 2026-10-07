@@ -32,7 +32,7 @@ type Physical = {
   highWaterSeq?: string;
 };
 type FixtureGlobals = typeof globalThis & { shellPhysical: Physical[] };
-const [candidate, home, storeId, control] = process.argv.slice(2) as string[],
+const [candidate, home, storeId, control, launcher] = process.argv.slice(2) as string[],
   started = Date.now(),
   servicePids: number[] = [],
   mainPids: number[] = [],
@@ -70,10 +70,18 @@ const state = () =>
     async () =>
       (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
   );
+async function released() {
+  const leases = await until(
+    () => read<{ outer: boolean; inner: boolean }>('leases'),
+    (value) => !value.outer && !value.inner,
+    'installed candidate leases released',
+  );
+  assert.deepEqual(leases, { outer: false, inner: false });
+}
 async function launch() {
   app = await _electron.launch({
-    executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
-    args: [join(candidate!, 'app'), `--user-data-dir=${join(home!, 'electron-data')}`],
+    executablePath: launcher!,
+    args: [`--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: home,
     env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
@@ -100,6 +108,8 @@ async function launch() {
     service = await read<{ parent: number }>('process', { pid: String(servicePid) });
   assert.equal(service.parent, mainPid);
   assert.equal(main.parent, process.pid);
+  assert.deepEqual(await read('leases'), { outer: true, inner: true });
+  await read('uninstall-busy');
   await page.context().tracing.start({ screenshots: true, snapshots: true });
   assert.deepEqual(
     await app
@@ -184,6 +194,7 @@ async function close() {
   await read('process-absent', { pid: String(servicePid) });
   await read('process-absent', { pid: String(pid) });
   app = undefined;
+  await released();
   stage('ordinary_native_exit', { mainPid: pid, servicePid });
 }
 async function send(marker: string, count: number) {
@@ -378,6 +389,7 @@ try {
   await read('process-absent', { pid: String(mainPid) });
   await read('process-absent', { pid: String(servicePid) });
   await read('absent', { label: 'main' });
+  await released();
   const afterMain = await read<Snapshot>('snapshot'),
     afterMainCalls = (await read<{ calls: number }>('count')).calls;
   assert.equal(afterMainCalls, 2);
@@ -394,6 +406,8 @@ try {
   await read('process-absent', { pid: String(servicePid) });
   await read('absent', { label: 'service' });
   assert.equal(app!.windows().length, 1);
+  assert.deepEqual(await read('leases'), { outer: true, inner: true });
+  await read('uninstall-busy');
   await close();
   const afterService = await read<Snapshot>('snapshot'),
     afterServiceCalls = (await read<{ calls: number }>('count')).calls,

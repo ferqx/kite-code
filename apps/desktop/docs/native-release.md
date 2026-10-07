@@ -63,7 +63,7 @@ Linux使用实际Electron dist和manifest executable路径、Node `.mjs`、准�
 
 ## 验证与限制
 
-[默认宿主 Shell 生命周期](../test/isolated/native-shell-lifecycle-bundle.test.ts)在 macOS 搬迁、删除构建源的完整候选核页面实际新建后台 Job、完整保存输出、准确停止、Main/Service SIGKILL 后本次 coalition 全树消失及两次冷读零重放；候选 outer/inner EX 在最终全部普通/异常退出后可取得。它使用生产默认 Service/宿主 Shell；Service 崩溃后的原未完成状态不改写为停止成功。该窗口运行 relocated candidate，不补齐 installed 故障/升级样本或 G1，准确结果归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08native-默认宿主-shell-完整用户路径)。
+[默认宿主 Shell 生命周期](../test/isolated/native-shell-lifecycle-bundle.test.ts)在 macOS 真实安装并删除全部原候选后，三次沿 installed `bin/kite-desktop` 核页面新建后台 Job、完整保存输出、准确停止、Main/Service SIGKILL 后本次 coalition 全树消失及两次冷读零重放。测试不持 fixture SH，实际 Main/Service 持 outer/inner 使用锁；Service 强杀但 Main 仍在时卸载准确 busy，全部退出后两层 EX 均可取得，成功卸载保 Core/Native DB/config 原 inode 和完整字节。它使用生产默认 Service/宿主 Shell；Service 崩溃后的原未完成状态不改写为停止成功。本机安装入口的 Shell 故障组合已有实际证据，不补齐已发布升级样本、其他安装故障或 G1，准确结果归[安装入口进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08默认-shell-实际安装入口与保数据卸载)。
 
 [真实 Native archive/install/lifecycle](../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)在源码树外删除原候选后启动实际 Electron Main 与所属 Service，验证原数据/cold 读取、升级旧进程固定、双锁强杀窗口、回滚与卸载。[注册验收](../../../tests/isolated/unified-agent/cli-registration-lifecycle.test.ts)核两种 PATH 与真正 80×24 TUI，公共 Store 核三条 Run completed，实际 Provider 3；每次运行中卸载 busy 并保持登记，卸载后原查询、数据库/config/caller bytes 和 cursor 不变。[Files 保护](../../../tests/isolated/unified-agent/native-runtime-protection.test.ts)核 Workspace 中实际 outer/inner 读写保护与邻接正常效果。
 
@@ -71,6 +71,6 @@ Linux使用实际Electron dist和manifest executable路径、Node `.mjs`、准�
 
 [有限卸载反例](../../../tests/isolated/unified-agent/native-install.test.ts)使用真实 inner SH 与坏 manifest 验证 busy 优先、失败后的 outer EX 可重新取得、空闲后的完整性拒绝及准确 active/内容保留；两层目录 alias 也拒绝。有限夹具只证明锁与格式合同，真实窗口沿原安装生命周期任务、45 秒 driver 期限与准确退出断言另行运行。
 
-macOS arm64 保原 Bun/Electron、普通退出及已运行故障窗口资格；Linux arm64 仅取得上述完整安装文件的有限资格。纯 version smoke 只核 executable/引擎，`mainLifecycleQualified:false`，不能当窗口验收。新 signal fault 窗口、已发布 predecessor、Linux x64/Windows Native 生命周期、签名/公证/发布者认证及完整 T001—T114/E01—E14 仍需各自实际证据。当前归档 SHA/manifest 只提供完整性。
+macOS arm64 保原 Bun/Electron、普通退出及上述安装 Shell 故障窗口资格；Linux arm64 仅取得上述完整安装文件的有限资格。纯 version smoke 只核 executable/引擎，`mainLifecycleQualified:false`，不能当窗口验收。其余必要安装故障、已发布 predecessor、Linux x64/Windows Native 生命周期、签名/公证/发布者认证及完整 T001—T114/E01—E14 仍需各自实际证据。当前归档 SHA/manifest 只提供完整性。
 
 完整闭包、双 prefix nonce CAS 和父 shell cache 的持久理由见[Native 登记决定](../../../.agents/notes/implemented/architecture/2026-10-04-native-complete-closure-and-cli-registration.md)；Node/Bun 引擎独立测量见[SQLite 选择决定](../../../.agents/notes/implemented/architecture/2026-10-04-selected-sqlite-engine-and-worker-identity.md)。Note 状态不能替代上述平台和发布证据。
