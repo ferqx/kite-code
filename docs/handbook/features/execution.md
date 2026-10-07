@@ -26,7 +26,7 @@
 
 开发统一 caller 的普通申请与执行终态分开。start、steer、follow-up、原 Command cancel 和准确 Execution cancel 都在首次 POST 前保存完整原请求；单次 Plan/Workflow 不变成永久权限。崩溃或回执丢失后只读原 Command，未知不重投，详见[普通申请恢复](recovery.md#开发统一调用者的普通申请恢复)。`applied` Work 仍须读取实际 Run，`cancel_requested` 仍须读取准确 Job 状态；它们不能作为模型完成、工具效果成功或清理完成的证明。
 
-开发 CLI 的 JSON Work start/follow-up 核原 Command 与实际 Run 后，继续原审批、问题及输出生命周期，completed 才成功退出。排队期间只查询原关系，不借另一个活动 Run；EOF、未知原答案或结束本地观察保留未完成事实。共享连接结束只 detach，配对服务收尾可能中断仍活动的工作，不能把先前受理回执改称完成。Native 沿原 controller 观察执行，原申请面板的冷查回不重开业务；准确单 Job stop 先核原新鲜 Execution。当前双 Job 窗口证明的是明确配置的 `shell.launch`/`shell.command` policy 下父 Run 已完成后只停止一项，另一项未取消，不是默认所有 Shell 获授权或 Workflow verifier 资格。
+开发 CLI 的 JSON Work start/follow-up 核原 Command 与实际 Run 后，继续原审批、问题及输出生命周期，completed 才成功退出。排队期间只查询原关系，不借另一个活动 Run；EOF、未知原答案或结束本地观察保留未完成事实。共享连接结束只 detach，配对服务收尾可能中断仍活动的工作，不能把先前受理回执改称完成。Native 沿原 controller 观察执行，原申请面板的冷查回不重开业务；准确单 Job stop 先核原新鲜 Execution。原双 Job 窗口证明明确配置的 `shell.launch`/`shell.command` policy 下父 Run 已完成后只停止一项，另一项未取消。当前 macOS 默认 Native 已另验从页面明确选择 Full 后新建后台 Job、同一准确停止、完整输出及 Main/Service fault 的清理和冷读零重放；普通命令仍按现行权限准入，Workflow verifier 资格保持独立，具体范围见[Native owner](../../../apps/desktop/README.md#native-job-完整已保存输出)。
 
 各客户端可采用不同展示：TUI 有活动过程与终端历史，Web 按页面读取快照及增量，CLI 输出事件。共享的是结果含义，而不是布局和刷新频率。
 

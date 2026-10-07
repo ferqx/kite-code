@@ -109,7 +109,9 @@ const query = async (path: string) => {
   const started = Date.now();
   diagnostic('query_begin', { path });
   try {
-    return (await (await fetch(`${control}/${path}`)).json()) as Record<string, unknown>;
+    return (await (
+      await fetch(`${control}/${path}`, { headers: { connection: 'close' } })
+    ).json()) as Record<string, unknown>;
   } finally {
     diagnostic('query_end', { path, durationMs: Date.now() - started });
   }
@@ -168,7 +170,7 @@ try {
   assert.equal((await query('uninstall')).blocked, true);
   const pid = childPid!;
   diagnostic('first_normal_close_begin');
-  await app.evaluate(({ app }) => app.quit());
+  // Playwright close requests app.quit and waits for the actual Main exit.
   await app.close();
   diagnostic('first_normal_close_complete');
   app = undefined;

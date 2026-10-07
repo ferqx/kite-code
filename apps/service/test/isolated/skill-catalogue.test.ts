@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { createSkillSource } from '@kite-ai/agent/skills';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
@@ -10,6 +11,18 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createConfiguredSkillSource } from '../../src/skill-source';
 
 test('default scoped Skill HTTP catalogue is complete, locally unavailable and strictly read only', async () => {
+  const started = Date.now();
+  const timing = (phase: string, detail = {}) =>
+    console.log(
+      JSON.stringify({
+        stage: 'skill_catalogue_http',
+        phase,
+        elapsedMs: Date.now() - started,
+        ...detail,
+      }),
+    );
+  const startedAt = performance.now();
+  let catalogueReads = 0;
   const root = realpathSync(mkdtempSync('/private/tmp/kite-skills-http-'));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -82,9 +95,30 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     name: 'owned',
     rootUri: `file://${workspace}`,
   });
+  timing('workspace_ready');
   const service = await startService({
     runtime,
-    skillCatalogue: host.skillCatalogue,
+    skillCatalogue: {
+      ...host.skillCatalogue!,
+      async list(context) {
+        const read = ++catalogueReads;
+        const readStartedAt = performance.now();
+        try {
+          return await host.skillCatalogue!.list(context);
+        } finally {
+          console.log(
+            JSON.stringify({
+              case: 'skill_catalogue_read',
+              read,
+              afterId: context.afterId ?? null,
+              limit: context.limit ?? null,
+              durationMs: Math.round(performance.now() - readStartedAt),
+              elapsedMs: Math.round(performance.now() - startedAt),
+            }),
+          );
+        }
+      },
+    },
     permissionManagement: permissions,
     subjectId: 'owner',
     buildId: 'owned-skills',
@@ -123,6 +157,13 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       ifRevision: trust.revision,
     });
     const before = await runtime.getChanges({ after: '0' });
+    timing('paging_begin');
+    console.log(
+      JSON.stringify({
+        case: 'skill_catalogue_setup',
+        elapsedMs: Math.round(performance.now() - startedAt),
+      }),
+    );
     const first = await client.listSkills('w', { storeId, limit: 37 });
     expect(first.entries).toHaveLength(37);
     expect(first.complete).toBe(false);
@@ -137,6 +178,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       });
       all.push(...page.entries);
     }
+    timing('paging_complete', { entries: all.length });
     expect(all).toHaveLength(skills.length);
     expect(new Set(all.map((e) => e.id)).size).toBe(skills.length);
     expect(all.every((entry) => Object.hasOwn(entry, 'source'))).toBe(true);
@@ -169,7 +211,12 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       state: 'unavailable',
       reason: 'duplicate_skill_location',
     });
+    expect(all.find((e) => e.id === 'skill-001')).toMatchObject({
+      state: 'unavailable',
+      reason: 'duplicate_skill_location',
+    });
     expect((await client.listAllSkills('w', { storeId })).entries).toEqual(all);
+    timing('all_pages_complete');
     for (const hidden of [
       root,
       'private-body',
@@ -254,6 +301,7 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
       expect(model).toBe(0);
       expect(vault).toBe(0);
       expect(client.lastAppliedCursor).toBeUndefined();
+      timing('all_assertions_complete');
     } finally {
       await unavailable.close();
     }
@@ -262,6 +310,69 @@ test('default scoped Skill HTTP catalogue is complete, locally unavailable and s
     await service.close();
     await runtime.close();
     await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('configured aliases keep the first configured identity and reject both bindings even when its digest is invalid', async () => {
+  const root = realpathSync(mkdtempSync('/private/tmp/kite-skill-ordered-'));
+  const workspace = join(root, 'workspace');
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
+  mkdirSync(workspace);
+  for (const name of ['shared', 'independent']) {
+    mkdirSync(join(workspace, name));
+    writeFileSync(
+      join(workspace, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${name} metadata\n---\noriginal ${name} body`,
+    );
+  }
+  symlinkSync('shared', join(workspace, 'alias'));
+  try {
+    const source = createConfiguredSkillSource({
+      workspaceRoot: workspace,
+      profile,
+      toolIds: [],
+      skills: [
+        { id: 'first-pinned', path: 'shared', digest: 'f'.repeat(64) },
+        { id: 'independent', path: 'independent' },
+        { id: 'later-alias', path: 'alias' },
+        { id: 'disabled', path: 'missing', enabled: false },
+      ],
+    });
+    const shared = (
+      await createSkillSource({
+        trustedRoots: [workspace],
+        locations: [join(workspace, 'shared')],
+      }).list()
+    ).entries[0]!;
+    const listed = await source.list();
+    for (const id of ['first-pinned', 'later-alias'])
+      expect(listed.states.find((entry) => entry.id === id)).toMatchObject({
+        state: 'unavailable',
+        reason: 'duplicate_skill_location',
+        version: shared.version,
+      });
+    expect(source.configuredId(shared)).toBe('first-pinned');
+    expect(listed.entries).toHaveLength(1);
+    expect(source.configuredId(listed.entries[0]!)).toBe('independent');
+    expect(listed.states.find((entry) => entry.id === 'disabled')).toMatchObject({
+      state: 'disabled',
+      reason: null,
+      version: null,
+    });
+    expect(() => source.load({ id: shared.id, version: shared.version })).toThrow(
+      'skill_not_discovered',
+    );
+    const independent = listed.entries[0]!;
+    writeFileSync(join(workspace, 'independent', 'SKILL.md'), 'changed body');
+    await expect(source.load({ id: independent.id, version: independent.version })).rejects.toThrow(
+      'skill_version_changed',
+    );
+    const fresh = await source.list();
+    expect(fresh.entries).toHaveLength(1);
+    expect(fresh.entries[0]!.version).not.toBe(independent.version);
+    expect(source.configuredId(fresh.entries[0]!)).toBe('independent');
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

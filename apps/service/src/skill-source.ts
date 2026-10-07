@@ -62,7 +62,7 @@ export function createConfiguredSkillSource(options: {
       const summaries = new Map<string, SkillSummary>();
       const nextSources = new Map<string, ReturnType<typeof createSkillSource>>();
       const nextIds = new Map<string, string>();
-      for (const skill of configured) {
+      const locations = configured.map((skill) => {
         if (typeof skill.id !== 'string' || !skill.id || states.has(skill.id))
           throw new AgentError('invalid_skill_configuration');
         const state: ConfiguredSkillState = {
@@ -103,56 +103,81 @@ export function createConfiguredSkillSource(options: {
                       : 'configured',
                 };
         }
-        if (!state.enabled) continue;
-        try {
-          if (!path) throw new AgentError('invalid_skill_configuration');
-          if (!trustedRoots.some((trusted) => inside(trusted, path)))
-            throw new AgentError('skill_path_denied');
-          if (
-            skill.options !== undefined &&
-            (!skill.options ||
-              typeof skill.options !== 'object' ||
-              Array.isArray(skill.options) ||
-              Object.keys(skill.options).length)
-          )
-            throw new AgentError('unsupported_skill_options');
-          const target = await realpath(path.endsWith('SKILL.md') ? path : join(path, 'SKILL.md'));
-          if (!trustedRoots.some((trusted) => inside(trusted, target)))
-            throw new AgentError('skill_path_denied');
-          const source = createSkillSource({ trustedRoots, locations: [path] });
-          const listed = await source.list();
-          if (listed.errors.length) throw new SkillError(listed.errors[0]!.code);
-          const summary = listed.entries[0];
-          if (!summary) throw new SkillError('skill_unavailable');
-          Object.assign(state, {
-            name: summary.name,
-            description: summary.description,
-            version: summary.version,
-            requiredCapabilities: summary.requiredCapabilities,
-            missingCapabilities: summary.requiredCapabilities.filter((id) => !allowed.includes(id)),
-          });
+        return { skill, state, path };
+      });
+      // Re-read every location, but bound independent I/O. Fold in configured
+      // order so completion order cannot choose a duplicate location's owner.
+      for (let offset = 0; offset < locations.length; offset += 4) {
+        const discovered = await Promise.all(
+          locations.slice(offset, offset + 4).map(async ({ skill, state, path }) => {
+            if (!state.enabled) return;
+            try {
+              if (!path) throw new AgentError('invalid_skill_configuration');
+              if (!trustedRoots.some((trusted) => inside(trusted, path)))
+                throw new AgentError('skill_path_denied');
+              if (
+                skill.options !== undefined &&
+                (!skill.options ||
+                  typeof skill.options !== 'object' ||
+                  Array.isArray(skill.options) ||
+                  Object.keys(skill.options).length)
+              )
+                throw new AgentError('unsupported_skill_options');
+              const target = await realpath(
+                path.endsWith('SKILL.md') ? path : join(path, 'SKILL.md'),
+              );
+              if (!trustedRoots.some((trusted) => inside(trusted, target)))
+                throw new AgentError('skill_path_denied');
+              const source = createSkillSource({ trustedRoots, locations: [path] });
+              const listed = await source.list();
+              if (listed.errors.length) throw new SkillError(listed.errors[0]!.code);
+              const summary = listed.entries[0];
+              if (!summary) throw new SkillError('skill_unavailable');
+              Object.assign(state, {
+                name: summary.name,
+                description: summary.description,
+                version: summary.version,
+                requiredCapabilities: summary.requiredCapabilities,
+                missingCapabilities: summary.requiredCapabilities.filter(
+                  (id) => !allowed.includes(id),
+                ),
+              });
+              return { skill, state, summary, source };
+            } catch (error) {
+              if (error instanceof AgentError && error.code === 'skill_path_denied')
+                state.source = null;
+              state.reason =
+                error instanceof AgentError || error instanceof SkillError
+                  ? error.code
+                  : 'skill_unavailable';
+              return;
+            }
+          }),
+        );
+        for (const entry of discovered) {
+          if (!entry) continue;
+          const { skill, state, summary, source } = entry;
           const duplicate = nextIds.get(summary.id);
           if (duplicate) {
             states.get(duplicate)!.state = 'unavailable';
             states.get(duplicate)!.reason = 'duplicate_skill_location';
             summaries.delete(summary.id);
             nextSources.delete(summary.id);
-            throw new SkillError('duplicate_skill_location');
+            state.reason = 'duplicate_skill_location';
+            continue;
           }
-          nextIds.set(summary.id, skill.id);
-          if (skill.digest !== undefined && skill.digest !== summary.version)
-            throw new SkillError('skill_version_changed');
-          if (state.missingCapabilities.length) throw new SkillError('skill_capability_missing');
+          nextIds.set(summary.id, state.id);
+          if (skill.digest !== undefined && skill.digest !== summary.version) {
+            state.reason = 'skill_version_changed';
+            continue;
+          }
+          if (state.missingCapabilities.length) {
+            state.reason = 'skill_capability_missing';
+            continue;
+          }
           state.state = 'available';
           summaries.set(summary.id, summary);
           nextSources.set(summary.id, source);
-        } catch (error) {
-          if (error instanceof AgentError && error.code === 'skill_path_denied')
-            state.source = null;
-          state.reason =
-            error instanceof AgentError || error instanceof SkillError
-              ? error.code
-              : 'skill_unavailable';
         }
       }
       sources = nextSources;

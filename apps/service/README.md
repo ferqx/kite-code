@@ -368,6 +368,8 @@ fork 从原 parent Execution 和封存 parent Run 选择可信角色与准确版
 
 [skill-source.ts](src/skill-source.ts) 为目录读取和 Run 装配提供同一真实配置解析。禁用项不读文件；缺文件、路径越界、重复物理位置、digest 变化、不支持 options 与缺能力按配置 ID 标记局部不可用。默认 Run 只绑定实际可用项并保存相同配置子集，显式名称/ID选择基于全部已知条目消歧，不能因坏项而悄悄改选同名可用项。child 继承准确原 ID；原项失效必须拒绝。绑定后的 canonical 文件目标变化同样拒绝，不能静默删掉原选择。单命令 requested 最多256项保持公开契约，默认解析出的 resolvedIds 不套此请求数量限制。
 
+每次发现仍重新读取全部启用位置及内容版本；独立位置的 I/O 每批最多四项并发，结果按原配置顺序汇总后才发布绑定。完成顺序不决定重复物理位置的配置身份，原首项即使 digest 不匹配也保留其 ID，并将双方标为重复不可用。分页不缓存发现结果，后续页仍核当前字节与完整 revision。[目录测试](test/isolated/skill-catalogue.test.ts)覆盖同批别名、跨批重复、禁用项及新版本拒绝旧绑定；[Run 选择测试](test/isolated/skill-selection.test.ts)核准确 root/child 继承。
+
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
 默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。

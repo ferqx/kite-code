@@ -1996,10 +1996,10 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 
 | 缺口及实际入口 | 完整行为与验收条件 |
 | --- | --- |
-| Native设置→MCP四Auth→系统Chrome/Vault | 本机macOS已取得login/refresh/clear/revoke、准确取消、默认OS backend、普通Question/原申请、原scope/RPC/凭据状态及准确owned cleanup/fresh absence全链，见§30.2.13；其他平台、外部AS/账号与整片独立审查仍保各自边界。 |
-| 默认Shell execute/read/stop与后台目录 | 保留用户确认的macOS宿主工具链及广泛只读宿主视图，可信完整进程子树覆盖fork/setsid，Workspace/私有根/网络约束，cancel/EOF/SIGKILL实际收尾；默认新Job持久输出/缺口/冷读不重跑与formal连续负载通过。现有PGID/deny-fork样本不能代替该入口。 |
-| release install/update/uninstall/标准CLI与maintenance backup/inspect/restore/status | 支持平台的真实制品、GUI/PTY/双lease和保数据卸载，准确独立引擎；Windows安装/维护实现，Linux x64/Windows原生结果、已发布新基线predecessor/T029及其余恢复子场景仍需实际证据。恢复保外置锁、换Store且不改原操作出处、不重放旧副作用；本片Linux arm64有限资格不能扩大到这些范围。 |
-| 正式切换后的旧路径最终退役 | 前三项及全部适用§35/T001—T114/E01—E14有证据，参考功能/既有扩展/未见样本沿公共边界成立；正式consumer无legacy业务carrier，完成必要删除并复验新基线兼容与完整回归。不能以当前无正式旧调用或全量unit通过提前宣布整体退出。 |
+| macOS 完整混合负载与全局资源 | 默认宿主 Shell 的 execute/read/stop、持久输出、单组件 formal continuous 及 Native 完整用户路径已实际通过。完整 8outer/60分钟仍缺 activeResources、handles 和整个 Runtime 全部所属后代的可信观测；单次 Shell coalition 不替代全局指标。 |
+| release install/update/uninstall/标准CLI与maintenance backup/inspect/restore/status | macOS 既有真实制品、GUI/PTY/双lease和保数据卸载、独立引擎与真实代码前驱证据保持。已发布新基线 predecessor/T029、剩余恢复/installed fault 子场景仍需实际证据；Windows/Linux 按用户顺序留到重构完成后由 GitHub Actions 验证。 |
+| 完整能力与整片独立审查 | Native MCP Chrome/default Vault 和默认后台 Shell 用户路径已有本机组合证据；全部适用 §35/T/E、参考功能/既有扩展/未见样本和整片独立审查仍须按原退出条件闭合，root 自检不替代独立审查。 |
+| 正式切换后的旧路径最终退役 | 前三项达到实际退出条件后完成必要 legacy 删除，并复验新基线兼容与完整回归；不能以当前无正式旧调用或全量 unit 通过提前宣布整体退出。 |
 
 默认宿主 Shell 的原候选接口核验保留：本机 SDK 27 声明的后代范围 Endpoint Security 接口最低要求 macOS 27.0 和对应 entitlement，当前 macOS 26.7.1 运行库没有该符号；后续实际交付的launchd/coalition方案见§30.2.12。原接口探针与未验条件归 [Jobs owner](../../packages/agent/src/jobs/README.md)及[进度](unified-agent-refactor-v1-progress.md#2026-10-07宿主-shell-完整后代接口的运行资格)。用户后续已授权本任务Chrome认证测试，原入口passed见§30.2.13；Windows/Linux按用户要求留到重构完成后由GitHub Actions验证，原浏览器状态读取拒绝不再作为本机资格的待答项。
 
@@ -2046,6 +2046,14 @@ release candidate现另执行整个POSIX Terminal、Mac Native及Xvfb Linux Nati
 四Auth与准确取消均取得原C/E/binding终态：两次成功Login、一次cancelled Login、一次Refresh、两次Clear和一次Revoke；三次真实document/navigation对应两次code exchange和一次held取消。fresh Service复用现有材料，冷列表零POST、明确Check只查原IDs，其后独立连接不增长authorize/DCR/code exchange。Clear没有远端revoke，原cancel没有额外code exchange，Revoke实际一次；清理后第三Service再次核absence，fresh backend absence与三个Service正常退出及所属进程无残留成立。
 
 本机组合缺口已关闭，原报告/制品身份/输入与日志SHA归[进度](unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)，完整当前边界归[Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。`productionDefaultNetwork:false`，不外推真实外部AS/账号或其他平台；新的整片独立审查仍未取得，37能力partial、wholeV13=false。Windows/Linux仍按用户要求在重构完成后由GitHub Actions验证，没有dispatch/push/PR。
+
+### 30.2.14 Native 默认宿主 Shell 完整用户路径
+
+macOS 默认 Native 的后台 Shell 用户路径已由[源码外生命周期验收](../../apps/desktop/test/isolated/native-shell-lifecycle-bundle.test.ts)覆盖：实际页面信任与 Full 选择、普通 compatible Model/shell.launch 配置、默认宿主 Shell 产生三项后台工作、两个父 Run 实际 completed、完整 stdout/stderr 原文、准确单项停止及另一项继续。原 PID unique/version、真实不同组/orphan、所属 coalition 空与持久 processTreeStopped 各保独立证明。没有 configure/Job/权限/backend fixture 注入，原 cold consumer 与突发缺口断言保持。
+
+Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 清空全树，丢失的持久停止结果仍未确认。两次冷 Native 保原 Store/Command/Job/输出/游标、零 POST/Model/文件效果重放，普通退出和准确候选双 EX 通过。外部 C producer 按真实只读落盘回执节流，输出每流 198000 字节、全文大于 64KiB 预览；它不作为突发吞吐或 60分钟 formal 证据。当前冻结、五次 fixture 失败与运行数据归[进度](unified-agent-refactor-v1-progress.md#2026-10-08native-默认宿主-shell-完整用户路径)，负责边界归[Native owner](../../apps/desktop/README.md#native-job-完整已保存输出)。
+
+本片 Native 资格不修改生产 Shell/权限/API/Runtime 或旧默认断言。当前完整回归暴露的 Skill 目录超时另由[Service 同源目录](../../apps/service/README.md#同源-skill-知识目录)保全校验并限制独立 I/O 并发，准确原失败和最终输入结果归进度。macOS 完整资源三项、installed/已发布样本与剩余恢复、整片独立审查及最后旧路径退役继续按§30.2.9的四项依赖推进；Windows/Linux仍依用户安排后交GitHub Actions。37能力保持partial、wholeV13=false，本地stage/commit不扩大到push/PR/发布。
 
 ### 30.3 第一条执行闭环
 

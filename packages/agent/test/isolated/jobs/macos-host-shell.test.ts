@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -476,13 +477,38 @@ for (const mode of ['eof', 'kill'] as const)
         if (mode === 'eof') parent.stdin.end();
         else parent.kill('SIGKILL');
         await parent.exited;
-        await until(
-          () =>
-            !alive(pids[0]!) &&
-            !alive(pids[1]!) &&
-            readdirSync(control).length === 0 &&
-            readdirSync(tempBase).length === 0,
-        );
+        try {
+          await until(
+            () =>
+              !alive(pids[0]!) &&
+              !alive(pids[1]!) &&
+              readdirSync(control).length === 0 &&
+              readdirSync(tempBase).length === 0,
+          );
+        } catch (cause) {
+          const state = {
+            stage: 'host_shell_parent_cleanup_unconfirmed',
+            mode,
+            root,
+            coalitionId: reference.coalitionId,
+            pids: pids.slice(0, 2).map((pid) => ({ pid, alive: alive(pid) })),
+            control: readdirSync(control),
+            temporary: readdirSync(tempBase),
+          };
+          const snapshot = spawnSync(
+            '/bin/ps',
+            ['-p', pids.slice(0, 2).join(','), '-o', 'pid=,ppid=,stat=,comm='],
+            { encoding: 'utf8', timeout: 500, maxBuffer: 8192 },
+          );
+          console.error(
+            JSON.stringify({
+              ...state,
+              processSnapshot: snapshot.status === 0 ? snapshot.stdout : null,
+              snapshotCode: snapshot.status,
+            }),
+          );
+          throw cause;
+        }
         expect(readdirSync(control)).toEqual([]);
       } finally {
         parent.kill('SIGKILL');
