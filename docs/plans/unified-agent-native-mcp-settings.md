@@ -35,10 +35,10 @@
 
 必要验收覆盖：全目录/空与坏源/完整 descriptor；换 scope/关闭/迟到隔离与阅读零业务 I/O；user/project 选择及来源 Add/Remove/approve/bind 的原 CAS/注释/独立结果；真实 stdio/HTTP 连接 Job、目录刷新和强制重连旧 stop fence；四个 Auth Action 与准确取消；下一真实 Model schema/独立 Tool Ask/一次效果；丢回执后原 GET、重开与 foreign 零重发；实际 Node DB7 公共维护 v15 与历史拒绝边界。
 
-实际系统浏览器/default OS vault 组合单独取得本机资格：自有 HTTPS AS/MCP、真实默认 opener 与默认 backend，浏览器导航到原 callback、PKCE/code exchange、fresh Service 读取已有材料且 browser/DCR 不增长，准确 cleanup 后再 fresh reopen 验证 absence。可信 fixture 网络组合必须在构建前固定并计入制品身份，不改正式网络策略、不注入 opener/backend，也不把直调 callback 当浏览器证据。当前本机默认Chrome；CUA未暴露该浏览器控制，且浏览器生成的证书警告明确要求用户操作。人工资格先由用户处理自有HTTPS准备页，再启动保持原120秒callback的正式Login；没有opener/backend替身、fetch callback或系统信任修改。
+实际系统浏览器/default OS vault 组合单独取得本机资格：自有 HTTPS AS/MCP、真实默认 opener 与默认 backend，浏览器导航到原 callback、PKCE/code exchange、fresh Service 读取已有材料且 browser/DCR 不增长，准确 cleanup 后再 fresh reopen 验证 absence。可信 fixture 网络组合必须在构建前固定并计入制品身份，不改正式网络策略、不注入 opener/backend，也不把直调 callback 当浏览器证据。当前本机默认Chrome；CUA未暴露该浏览器控制，若浏览器生成证书警告，必须由用户处理。自有HTTPS准备页到达后再启动保持原120秒callback的正式Login；没有opener/backend替身、fetch callback或系统信任修改。原入口已经取得本机组合passed，准确证据归[进度](unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)。
 
 代码、数据或接口改变后重新判断旧证据；不扩已闭合 Provider/Plan/普通问卷矩阵。必要有限测试、正常 types/build/API/边界/文档门禁与阶段收束当前原完整默认保持。当前方案不证明外部账号/AS、签名发行、其他平台、正式持续 Soak、完整 §35 或旧源码最终退役。
 
 ## 当前状态
 
-公共 Client leaf、有限 Native Main/renderer 与 Source Review、DB7/manifest15 已完成集成。纯合同、DOM、实际 Node 公共维护备份/恢复、真实 Service/HTTP 61条断言与 macOS 源码外 source/transport 窗口18条Bun断言已通过；窗口另核完整Unicode descriptor零额外RPC、独立Ask、下一Model schema/一次效果和冷原GET零POST。本轮第四次原完整默认595文件/474任务全部通过，实际exit0/812.063s、4032regular输入与Git前后保持，前三次真实失败及修复证据保留于[进度](unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-完整设置集成与实际窗口实施中)。实际系统浏览器/default OS vault组合仍待人工验收，本地实现检查点不代表完整能力交付。本方案保留至全部验收、事实归位与本地交付后删除。没有需要改变现有产品语义的待决事项；真实系统权限或工具阻断以实际结果记录。
+公共 Client leaf、有限 Native Main/renderer 与 Source Review、DB7/manifest15 已完成集成。纯合同、DOM、实际 Node 公共维护备份/恢复、真实 Service/HTTP 61条断言与 macOS 源码外 source/transport 窗口18条Bun断言已通过；窗口另核完整Unicode descriptor零额外RPC、独立Ask、下一Model schema/一次效果和冷原GET零POST。最初595文件/474任务的完整默认及前三次真实失败保留于[集成进度](unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-完整设置集成与实际窗口实施中)；当前615文件/489主作业完整默认通过的运行输入未变，本机实际Chrome/default OS vault四Auth、准确取消与重启复用/清理后absence另以原入口passed取得资格。新的整片独立审查仍受工具线程额度限制，root自检不替代；本方案保留至独立审查与阶段收束完成，之后归位并删除。其他平台、外部AS/账号与整个重构不由本机结果关闭。没有需要改变现有产品语义的待决事项。

@@ -6,7 +6,7 @@
 
 [通用 Agent 一体化重构与持续演进方案](unified-agent-refactor-v1.md)：以完整用户能力迁移、统一公共边界、正式旧路径退役和阶段退出为主线；执行目标与阶段边界见[总体进度](unified-agent-refactor-v1-progress.md#执行目标与阶段边界)。外部工具、真实 SQLite Worker、唯一 Loop 和两进程重启读取已有最小闭环。实际调用者切换、完整 T/E 场景与发行资格按[进度证据](unified-agent-refactor-v1-progress.md)及[能力映射](unified-agent-refactor-v1-capabilities.tsv)核对；总体尚未完成。
 
-[通用 Native MCP 完整设置与原操作](unified-agent-native-mcp-settings.md)：已确认设计，实施中；正式 Native 的来源、认证、连接、原工具详情与实际系统浏览器/default OS vault 联合资格，保现行公共合同与冷零重发。
+[通用 Native MCP 完整设置与原操作](unified-agent-native-mcp-settings.md)：已确认设计，已集成本机来源、认证、连接与原工具详情，并取得Chrome/default OS vault联合资格；保现行公共合同与冷零重发，整片独立审查尚未取得。
 
 [客户端启动、服务生命周期与发布升级规范](daemon-upgrade-lifecycle.md)：阶段 1、2 已完成本机实现与验证，阶段 3 的发布门禁已接入；Linux/Windows hosted 资格仍待验证。覆盖默认 TUI/CLI 配套服务、共享 daemon 与 Web；未来桌面端仅规定接入边界。
 

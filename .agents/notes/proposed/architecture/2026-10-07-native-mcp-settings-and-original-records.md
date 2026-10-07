@@ -32,9 +32,9 @@ Select、Refresh 与手工绑定按各自原 C/E/Interaction/HostMutation 的闭
 
 ## Risks
 
-Main 的固定请求与多类原证明需要独立审查。设置关闭和 scope 变化必须丢弃迟到读取，不能影响原业务。本机HTTPS通信、TLS拒绝和普通OS引用清理已实证；当前CUA未暴露默认Chrome且安全提示必须交给用户，四Auth的实际browser/defaultVault组合仍待验收。完整平台、持续 Soak、§35 与最终退役不由本片单独证明。
+Main 的固定请求与多类原证明需要独立审查，当前新的整片独立Reviewer仍受工具线程额度限制。设置关闭和 scope 变化必须丢弃迟到读取，不能影响原业务。本机HTTPS通信、TLS拒绝和普通OS引用清理已实证；四Auth的实际Chrome/defaultVault组合、准确取消与重启恢复已通过原入口。CUA仍未暴露Chrome控制，真实导航由默认opener发起并由原wire验证；若出现浏览器安全提示仍交给用户。完整平台、持续 Soak、§35 与最终退役不由本片单独证明。
 
 
 ## Current evidence
 
-方案仍实施中，不将部分资格记为implemented：实际Main HTTP1项61断言、源码外Native Source/transport窗口1项18Bun断言、实际Node DB7/v15公共维护4项32断言已通过。窗口保独立许可、完整Unicode descriptor零额外RPC、下一Model schema/一次效果、冷原GET零POST及准确普通credential fresh absence。TLS8项78断言核不信任/错误DNS/缺IP SAN拒绝与正确IP SAN实际协议；独立审查确认固定测试装配没有覆盖生产浏览器、Vault或权限。当前浏览器候选保原timeout与失败清理，未获得用户处理后的实际回调；本轮原完整默认595文件/474任务已通过（actual0/812.063s、4032regular与Git保持）；真实浏览器验收仍阻碍完整交付，本地实现检查点保留proposed状态，当前结果与失败见[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-完整设置集成与实际窗口实施中)。
+实际Main HTTP1项61断言、源码外Native Source/transport窗口1项18Bun断言、实际Node DB7/v15公共维护4项32断言已通过。窗口保独立许可、完整Unicode descriptor零额外RPC、下一Model schema/一次效果、冷原GET零POST及准确普通credential fresh absence。TLS8项78断言核不信任/错误DNS/缺IP SAN拒绝与正确IP SAN实际协议；此前独立审查确认固定测试装配没有覆盖生产浏览器、Vault或权限。当前原完整默认615文件/489主作业通过；同一运行输入另在macOS26.7.1 arm64、Chrome154.0.8037.98以实际默认opener/backend完成四Auth、原取消、PKCE/document导航、fresh Service复用和清理后fresh absence，原入口actual0/58.396秒、4089regular/Git保持、最终qualification passed。本机组合缺口已关闭，固定loopback/测试证书不证明生产默认网络、外部AS/账号或其他平台。新的整片独立审查尚未取得，方案仍保proposed，不以root自检替代；原集成失败与当前准确资格分别见[集成进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-完整设置集成与实际窗口实施中)和[Chrome验收](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)。

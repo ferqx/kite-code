@@ -279,7 +279,7 @@ Profile 无三项 raw MCP 文件时，DB6 离线备份使用专属 manifest v14�
 
 ## Native MCP 完整设置
 
-已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；本轮原完整默认595文件/474任务通过，四个 Auth Action 的实际系统浏览器/default OS vault 组合资格仍待人工验收。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责安全目录/来源操作/四项认证/连接与重连/原工具详情的完整用户旅程和验收；自动回归通过不能代替实际浏览器组合或完整客户端资格。
+已确认设计，实施中：[设置页](src/native-mcp-settings.tsx)、[Main manager](electron/mcp-settings.ts)、闭合 Source Review 与 DB7 原申请已集成。真实 Service/HTTP 联调与 macOS 源码外正式窗口已核来源、连接、工具全文、下一 Model schema 和一次效果；当前原完整默认615文件/489主作业通过，同一运行输入另取得本机 Chrome/default OS vault 的四项 Auth、准确取消与重启恢复资格。[实施方案](../../docs/plans/unified-agent-native-mcp-settings.md)负责完整用户旅程和验收；本机组合通过不代表外部账号、其他平台或整个重构已完成，整片新的独立审查仍未取得。
 
 Main 冻结真实 Store/subject/Session/Workspace identity、read-set 和观察代次；renderer 仅提交来源 ID、有限操作与显式范围。换 scope/关闭释放自己的 Reader，不取消业务 Execution。工具页固定原 snapshot，Main 最多两份在途 descriptor、每次至多64KiB chunk；完整 EOF/size/hash 和严格 UTF-8 核验后才显示全文，读取零额外连接或远端 RPC。来源批准/既有 Ref binding 由独立 Source Review 答复，普通父 Action、连接 Job 和远端 Tool 的 Ask 各自保留。
 
@@ -291,4 +291,6 @@ Profile 无三项 raw MCP 文件时 DB7 创建 v15；`mcp.json`、`mcp-approvals
 
 窗口Host只在已验证候选的shared lease内，使用packaged runtime/config的默认OS backend准备准确自有引用；helper沿正式paired Service的有限PATH/LANG环境，父测试与Native driver仍保隔离HOME。引用ID在put前保存，失败也可准确remove；独立新helper/backend核absence后才释放shared lease并复核exclusive权。不发现用户Kite配置、枚举其他Ref或修改系统keychain设置。
 
-[人工浏览器资格](scripts/qualify-native-mcp-browser.ts)用独立临时Profile、自有HTTPS AS/MCP和构建前固定的公开证书，保持实际默认Chrome、默认OS backend与普通Ask。先让用户处理浏览器生成的证书提示，再启动原120秒OAuth callback期限；脚本不绕过提示或修改系统信任。四项Auth、原cancel、真实document导航/PKCE、fresh Service复用与清理后absence必须全部通过最终 `qualification.json` 才成立；`candidate_ready`只描述装配，尚未完成的窗口不能作资格。这个显式人工入口不放入自动默认调度。
+[人工浏览器资格](scripts/qualify-native-mcp-browser.ts)用独立临时Profile、自有HTTPS AS/MCP和构建前固定的公开证书，保持实际默认Chrome、默认OS backend与普通Ask。准备页到达后才启动原120秒OAuth callback期限；若出现浏览器证书提示，由用户处理，脚本不绕过提示或修改系统信任。这个显式人工入口不放入自动默认调度。
+
+2026-10-07 在 macOS26.7.1 arm64、Chrome154.0.8037.98 上，原入口 actual0/58.396秒，最终 `qualification.json` 为 passed：真实document/navigation三次、PKCE/code exchange两次、refresh一次、remote revoke一次；Clear只删本地材料，取消原Login没有交换code。三次独立Service启动核默认Vault持久复用、冷原GET零POST，以及清除后再次重开absence；准确测试材料fresh backend absence、三Service正常退出和所属进程无残留均成立。该候选网络固定为自有loopback与测试证书，`productionDefaultNetwork:false`，不证明外部AS或账号。原证据、制品摘要和4089regular/Git保持见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)。CUA仍未暴露Chrome控制，实际导航由正式默认opener发起并由原wire验证；没有用fetch callback替代浏览器，也未读取其他浏览器页面。
