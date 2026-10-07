@@ -105,6 +105,7 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
   try {
     const predecessor = await materializeTerminalPredecessor({ root, repositoryRoot });
     expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+    expect(predecessor.provenance.platform).toBe(process.platform);
     expect(predecessor.provenance.sourceRemoved).toBe(true);
     expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
     const currentHead = (await execute(['git', 'rev-parse', 'HEAD'], repositoryRoot, home)).trim();

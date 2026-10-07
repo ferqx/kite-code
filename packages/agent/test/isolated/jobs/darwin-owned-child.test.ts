@@ -1,6 +1,6 @@
 import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -225,29 +225,80 @@ darwinTest(
   10000,
 );
 
-darwinTest('failed executable/cwd starts leave no child and close every pipe descriptor', () => {
-  const descriptors = () => readdirSync('/dev/fd').sort();
-  const before = descriptors();
-  for (let attempt = 0; attempt < 20; attempt++) {
-    expect(() =>
-      startDarwinOwnedChild({ executable: `${root}/absent`, argv: [], cwd: root, env: {} }),
-    ).toThrow('darwin_owned_child_spawn');
-    expect(() =>
-      startDarwinOwnedChild({ executable, argv: ['sleep'], cwd: `${root}/absent`, env: {} }),
-    ).toThrow('darwin_owned_child_spawn');
-  }
-  expect(descriptors()).toEqual(before);
-  const library = native();
-  try {
-    const info = Buffer.alloc(104);
-    expect(library.symbols.waitid(0, 0, ptr(info), 0x25)).toBe(-1);
-    expect(new DataView(toArrayBuffer(library.symbols.__error()!, 0, 4)).getInt32(0, true)).toBe(
-      10,
-    );
-  } finally {
-    library.close();
-  }
+darwinTest(
+  'failed executable/cwd starts leave no child and close every pipe descriptor',
+  async () => {
+    const script = join(root, 'failed-starts.ts');
+    writeFileSync(
+      script,
+      `import {dlopen,ptr,toArrayBuffer} from 'bun:ffi';
+import {expect} from 'bun:test';
+import {readdirSync} from 'node:fs';
+import {startDarwinOwnedChild} from ${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))};
+const root=${JSON.stringify(root)},executable=${JSON.stringify(executable)};
+const descriptors=()=>readdirSync('/dev/fd').sort();
+const before=descriptors();
+for(let attempt=0;attempt<20;attempt++) {
+ expect(()=>startDarwinOwnedChild({executable:root+'/absent',argv:[],cwd:root,env:{}})).toThrow('darwin_owned_child_spawn');
+ expect(()=>startDarwinOwnedChild({executable,argv:['sleep'],cwd:root+'/absent',env:{}})).toThrow('darwin_owned_child_spawn');
+}
+expect(descriptors()).toEqual(before);
+const library=dlopen('/usr/lib/libSystem.B.dylib',{
+ waitid:{args:['i32','u32','ptr','i32'],returns:'i32'},
+ __error:{args:[],returns:'ptr'},
 });
+try {
+ const info=Buffer.alloc(104);
+ const result=library.symbols.waitid(0,0,ptr(info),0x25);
+ if(result!==-1)console.error('OWNED_FAILED_START_CHILD_OBSERVATION',{
+  result,pid:info.readInt32LE(12),code:info.readInt32LE(8),status:info.readInt32LE(20),
+ });
+ expect(result).toBe(-1);
+ expect(new DataView(toArrayBuffer(library.symbols.__error(),0,4)).getInt32(0,true)).toBe(10);
+ console.log(JSON.stringify({failedStarts:40,descriptorsUnchanged:true,childless:true}));
+} finally {library.close();}
+`,
+    );
+    // P_ALL must inspect only the failed-start owner's namespace. A live unrelated
+    // harness child legitimately makes the parent's global waitid return zero.
+    const unrelated = Bun.spawn(['/bin/sleep', '10'], {
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    let probe: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      expect(waitable(unrelated.pid)).toMatchObject({ result: 0, pid: 0 });
+      const child = Bun.spawn([process.execPath, script], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      probe = child;
+      timer = setTimeout(() => child.kill('SIGKILL'), 3000);
+      const outputs = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(await child.exited, outputs[1]).toBe(0);
+      expect(JSON.parse(outputs[0])).toEqual({
+        failedStarts: 40,
+        descriptorsUnchanged: true,
+        childless: true,
+      });
+      expect(waitable(unrelated.pid)).toMatchObject({ result: 0, pid: 0 });
+    } finally {
+      if (timer) clearTimeout(timer);
+      if (probe?.exitCode === null) {
+        probe.kill('SIGKILL');
+        await probe.exited;
+      }
+      unrelated.kill();
+      await unrelated.exited;
+    }
+  },
+);
 
 darwinTest(
   'real native signals and waitpid occur only once, with no signal after reap',

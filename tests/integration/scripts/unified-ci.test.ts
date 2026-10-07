@@ -242,6 +242,54 @@ test('Linux release must execute the whole installed Native lifecycle in an actu
   }
 });
 
+test('release must execute complete real-code Terminal and Native comparisons on the selected platforms', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '../../../.github/workflows/release-candidate.yml'),
+    'utf8',
+  );
+  for (const [platform, name, command, code] of [
+    [
+      "runner.os == 'macOS' || runner.os == 'Linux'",
+      'Actual installed Terminal real code upgrade and cold rollback',
+      'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/terminal-cross-version.test.ts',
+      'formal-ci-terminal-real-code-missing',
+    ],
+    [
+      "runner.os == 'macOS'",
+      'Actual installed macOS Native real code upgrade and cold rollback',
+      'bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
+      'formal-ci-macos-native-real-code-missing',
+    ],
+    [
+      "runner.os == 'Linux'",
+      'Actual installed Linux Native real code upgrade and cold rollback',
+      'xvfb-run -a bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts',
+      'formal-ci-linux-native-real-code-missing',
+    ],
+  ] as const) {
+    const step = `- if: ${platform}\n        name: ${name}`;
+    const mutations = [
+      (s: string) => s.replace(step, `- if: false\n        name: ${name}`),
+      (s: string) => s.replace(step, `- if: runner.os == 'Windows'\n        name: ${name}`),
+      (s: string) => s.replace(`run: ${command}`, `run: echo ${command}`),
+      (s: string) =>
+        s.replace(
+          `run: ${command}`,
+          `run: ${command.replace('bun test', 'bun test --test-name-pattern=never-match')}`,
+        ),
+    ];
+    if (command.startsWith('xvfb-run'))
+      mutations.push((s) => s.replace(`run: ${command}`, `run: ${command.slice(12)}`));
+    for (const mutate of mutations) {
+      const root = fixture();
+      put(root, '.github/workflows/release-candidate.yml', mutate(source));
+      expect(
+        checkUnifiedFormalConsumers(root).violations.some((value) => value.code === code),
+      ).toBe(true);
+    }
+  }
+});
+
 test('Required unit gives the whole Linux default graph an actual display', () => {
   const source = readFileSync(
     resolve(import.meta.dir, '../../../.github/workflows/required.yml'),

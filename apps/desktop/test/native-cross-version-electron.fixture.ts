@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
+import type { WebPreferences } from 'electron';
 import type { ElectronApplication, Page } from 'playwright';
 import type {
   NativeModelOutputChunk,
@@ -18,7 +19,7 @@ const { _electron } = createRequire(desktopPackage!)('playwright') as typeof imp
 const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) as {
   storeId: string;
   sessionId: string;
-  candidates: { root: string; id: string }[];
+  candidates: { root: string; id: string; electron: string }[];
   tasks: string[];
   bodies: string[];
 };
@@ -73,23 +74,52 @@ async function launch(index: number) {
     executablePath: launcher!,
     args: [`--user-data-dir=${join(home!, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: {
+      HOME: home!,
+      PATH: '/usr/bin:/bin',
+      LANG: 'C.UTF-8',
+      ...(process.platform === 'linux'
+        ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+        : {}),
+    },
     timeout: 15000,
+    chromiumSandbox: true,
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'Native real versions', exact: true }).waitFor();
   assert.equal(
     await app.evaluate(() => process.execPath),
-    join(candidate.root, 'electron/Electron.app/Contents/MacOS/Electron'),
+    join(candidate.root, candidate.electron),
   );
-  const children = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
+  const security = await app.evaluate(({ app, BrowserWindow }) => ({
+    sandboxDisabled: app.commandLine.hasSwitch('no-sandbox'),
+    windows: BrowserWindow.getAllWindows().map((window) => {
+      const preferences = (
+        window.webContents as typeof window.webContents & {
+          getLastWebPreferences(): WebPreferences;
+        }
+      ).getLastWebPreferences();
+      return {
+        sandbox: preferences.sandbox,
+        contextIsolation: preferences.contextIsolation,
+        nodeIntegration: preferences.nodeIntegration,
+      };
+    }),
+  }));
+  assert.deepEqual(security, {
+    sandboxDisabled: false,
+    windows: [{ sandbox: true, contextIsolation: true, nodeIntegration: false }],
+  });
+  const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';
+  const children = String(execFileSync('/bin/ps', ['-axo', `pid=,ppid=,${processColumn}`]))
     .split('\n')
     .map((line) => line.trim().split(/\s+/))
     .filter(
       (parts) =>
         Number(parts[1]) === app!.process().pid &&
-        parts.slice(2).join(' ') === join(candidate.root, 'terminal/runtime/bun'),
+        (process.platform === 'linux' ? parts[2]! : parts.slice(2).join(' ')) ===
+          join(candidate.root, 'terminal/runtime/bun'),
     );
   assert.equal(children.length, 1);
   childPid = Number(children[0]![0]);
@@ -131,7 +161,13 @@ async function launch(index: number) {
   assert.ok(
     !phases.some((value) => (value as { instanceId?: string }).instanceId === server.instanceId),
   );
-  stage('launch', { index, candidateId: candidate.id, instanceId: server.instanceId, ...identity });
+  stage('launch', {
+    index,
+    candidateId: candidate.id,
+    instanceId: server.instanceId,
+    security,
+    ...identity,
+  });
   return { page, server };
 }
 async function read(page: Page, count: number) {
@@ -337,7 +373,7 @@ try {
   assert.equal(upgraded.previousCandidateId, expected.candidates[0]!.id);
   assert.equal(
     await app!.evaluate(() => process.execPath),
-    join(expected.candidates[0]!.root, 'electron/Electron.app/Contents/MacOS/Electron'),
+    join(expected.candidates[0]!.root, expected.candidates[0]!.electron),
   );
   assert.equal((await query<{ blocked: boolean }>('busy')).blocked, true);
   const held = await query<{ outer: boolean; inner: boolean }[]>('locks');

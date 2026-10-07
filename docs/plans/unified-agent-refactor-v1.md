@@ -2003,6 +2003,18 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 
 37能力保持partial、wholeV13=false、Goal active；本地stage/commit授权不扩大到push/PR/发布。
 
+### 30.2.10 Linux 真实代码升级与冷回退
+
+本轮沿实际installed CLI/Native入口补齐Linux arm64的A→B→A→B完整代码兼容链。Mac仍固定3140原提交及原前端差异断言；Linux固定首个准确builtin SQLite3.53.2已准入的原提交1b796e30，由各自原始Terminal/Native builder构建，锁文件/八workspace/补丁/SQLformat1保持。原Mac前驱在Linux的准确来源拒绝保留，不修改旧源码、引擎白名单或版本文字；取舍归[平台前驱决定](../../.agents/notes/implemented/testing/2026-10-07-platform-real-code-predecessors.md)。
+
+Canonical Ubuntu Base24.04.5、Docker VM原生aarch64、UID501、Bun1.4.2/Electron44.3.0/Node22.21.1/Xvfb上，完整Terminal文件actual0/336条Bun断言/60.741秒；完整Native文件actual0/374条Bun断言及窗口断言/171.298秒、driver80.070秒。四次普通退出、全部候选双EX、原Store/Command/Run/Model/caller、352041B正文/hash/ref、冷GET零Provider/游标保持、回退后新任务含B全文与卸载保DB/config/inode均核。Linux实际Agent worker字节变更，Main制品hash不同、renderer相同，不能认定renderer逻辑演进已验收。原360/420秒整例、30秒命令、120秒driver和15秒窗口期限保持。
+
+release candidate现另执行整个POSIX Terminal、Mac Native及Xvfb Linux Native跨代码文件；守卫拒绝关闭、错平台、echo、过滤或缺显示。Required unit仍完整发现及完整历史。最终合同分别归[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)、[Native owner](../../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)和[发行约束](../active/release-control.md)，原失败、准确输入与阶段默认回归归[进度](unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。本轮新的独立Reviewer再次被线程上限拒绝，root自检不替代它。
+
+本轮第三次原完整默认612文件/486唯一主作业全部通过，actual0/1019.747秒，4080 regular与HEAD/status保持；原并发4、集合、预算及断言保持。Mac Native/Terminal真实代码分别278704/151140ms，Darwin失败启动修正整个原文件在同图1310ms通过，严格40次throw/FD集合/ECHILD断言归准确owner子进程，原生产端口与停止证明不变。原wrapper的同名临时fixture26ms另核来源，正式作业只运行一次；两次真实红、精确修正和完整审计归进度。当前Root与八workspace types0，完整默认之后仅补三份阶段证据文档；这不关闭formal连续负载、其他平台或已发布样本。
+
+§30.2.9的四项退出缺口继续按依赖成立，本轮仅关闭Linux arm64这条本地真实代码链；G1 hosted Linux x64/Windows、已发布predecessor/T029、Native四Auth/default Vault、默认宿主Shell/新Job/formal连续负载、其余维护及完整§35/T/E、最后旧路径退役均未由本片关闭。用户已确认保留macOS宿主工具链和广泛只读宿主视图，Linux容器只用于验证。37能力仍partial、wholeV13=false、Goal active；本地授权不扩大到push/PR/发布。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

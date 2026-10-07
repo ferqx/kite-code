@@ -37,6 +37,6 @@ Native 安装可显式向合法独立 Terminal prefix 登记。两个 prefix 以
 
 2026-10-06 [有限卸载反例](../../../../tests/isolated/unified-agent/native-install.test.ts)核真实 inner SH+坏 manifest 时 busy 优先、部分 outer 租约释放、释放 holder 后空闲完整性拒绝、原 active/内容保留及两层目录 alias。原源码4pass/1fail，修复后5pass/51assert/0fail；有限夹具只证明锁和格式合同。[实际安装窗口](../../../../tests/isolated/unified-agent/native-install-lifecycle.test.ts)保原45秒、原安装/升级/回滚/数据和准确退出断言，整体结果按[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)的实际窗口记录；单项绿色不覆盖完整默认或平台资格。
 
-父 shell 缓存 Native-bin-first 路径并删除安装后，原缓存返回 127；独立前门本身缓存仍可按登记撤销恢复。安装器不修改 PATH/RC，不控制用户进程或数据。Windows 安装、Linux/Windows Native lifecycle、新的 signal fault、真实已发布 predecessor、signing/公证/发布者认证仍缺对应资格。manifest/archive SHA 只证明完整性，不证明 publisher。
+父 shell 缓存 Native-bin-first 路径并删除安装后，原缓存返回 127；独立前门本身缓存仍可按登记撤销恢复。安装器不修改 PATH/RC，不控制用户进程或数据。Linux arm64完整安装及本地真实代码冷回退已有有限实测，平台前驱与原源码理由归[平台前驱决定](../testing/2026-10-07-platform-real-code-predecessors.md)，准确范围仍以Native owner为准。Windows安装、Linux x64/Windows Native lifecycle、新的signal fault、真实已发布predecessor、signing/公证/发布者认证仍缺对应资格。manifest/archive SHA 只证明完整性，不证明 publisher。
 
 本决定补充[终端生命周期](2026-10-02-terminal-bundle-lifetime.md)，不改变 Profile/业务 Store 的准入权，也不宣称完整 §35 完成。

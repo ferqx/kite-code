@@ -82,7 +82,7 @@ async function execute(argv: string[], cwd: string, home: string, timeoutMs = 30
   }
 }
 
-test.skipIf(process.platform !== 'darwin')(
+test.skipIf(!['darwin', 'linux'].includes(process.platform))(
   'real Native code upgrade and cold rollback retain original complete data and continue through the installed window',
   async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-versions-'))),
@@ -114,7 +114,11 @@ test.skipIf(process.platform !== 'darwin')(
       | undefined;
     try {
       const req = createRequire(join(repositoryRoot, 'apps/desktop/package.json')),
-        electronDist = resolve(dirname(dirname(req('electron') as string)), '../..');
+        electronPath = req('electron') as string,
+        electronDist =
+          process.platform === 'darwin'
+            ? resolve(dirname(dirname(electronPath)), '../..')
+            : dirname(electronPath);
       const predecessor = await materializeTerminalPredecessor({
         root,
         repositoryRoot,
@@ -122,6 +126,7 @@ test.skipIf(process.platform !== 'darwin')(
       });
       const oldNative = predecessor.nativeCandidate!;
       expect(predecessor.provenance.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
+      expect(predecessor.provenance.platform).toBe(process.platform);
       expect(predecessor.provenance.sourceRemoved).toBe(true);
       expect(existsSync(predecessor.provenance.sourceRoot)).toBe(false);
       expect(oldNative.terminal.manifest.source.commit).toBe(TERMINAL_PREDECESSOR_COMMIT);
@@ -146,10 +151,24 @@ test.skipIf(process.platform !== 'darwin')(
       );
       expect(current.digest).not.toBe(oldNative.digest);
       expect(current.terminal.digest).not.toBe(oldNative.terminal.digest);
-      for (const path of ['app/main.cjs', 'app/renderer.js'])
-        expect(hash(readFileSync(join(current.root, path)))).not.toBe(
-          hash(readFileSync(join(oldNative.root, path))),
-        );
+      const oldFiles = new Map(
+        oldNative.terminal.manifest.files.map((file) => [file.path, file.sha256]),
+      );
+      const changedAgentFiles = current.terminal.manifest.files.filter(
+        (file) =>
+          file.path.startsWith('node_modules/@kite-ai/agent/') &&
+          oldFiles.get(file.path) !== file.sha256,
+      );
+      expect(changedAgentFiles.length).toBeGreaterThan(0);
+      const entrypointHashes = ['app/main.cjs', 'app/renderer.js'].map((path) => ({
+        path,
+        prior: hash(readFileSync(join(oldNative.root, path))),
+        current: hash(readFileSync(join(current.root, path))),
+      }));
+      // Preserve both original macOS frontend-code assertions. The first admitted Linux
+      // predecessor is newer: its real change is in the paired Agent, not a fabricated UI.
+      if (process.platform === 'darwin')
+        for (const entry of entrypointHashes) expect(entry.current).not.toBe(entry.prior);
       const candidates: ReturnType<typeof verifyNativeRuntimeBundle>[] = [];
       const archives: { candidateId: string; sha256: string }[] = [];
       for (const [name, source] of [
@@ -373,6 +392,7 @@ test.skipIf(process.platform !== 'darwin')(
           candidates: candidates.map((value, index) => ({
             id: value.digest,
             root: index === 0 ? installed[0]!.releaseRoot : join(prefix, 'releases', value.digest),
+            electron: value.manifest.entries.electron,
           })),
           tasks,
           bodies,
@@ -388,14 +408,14 @@ test.skipIf(process.platform !== 'darwin')(
         packages: 'bundle',
         external: ['playwright'],
         outdir: root,
-        naming: 'electron-driver.js',
+        naming: 'electron-driver.mjs',
       });
       expect(compiled.success).toBe(true);
-      const driverHash = hash(readFileSync(join(root, 'electron-driver.js')));
+      const driverHash = hash(readFileSync(join(root, 'electron-driver.mjs')));
       driver = Bun.spawn(
         [
           realpathSync(Bun.which('node')!),
-          join(root, 'electron-driver.js'),
+          join(root, 'electron-driver.mjs'),
           join(prefix, 'bin/kite-desktop'),
           home,
           provider.url.href.replace(/\/$/, ''),
@@ -403,7 +423,14 @@ test.skipIf(process.platform !== 'darwin')(
         ],
         {
           cwd: home,
-          env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+          env: {
+            HOME: home,
+            PATH: '/usr/bin:/bin',
+            LANG: 'C.UTF-8',
+            ...(process.platform === 'linux'
+              ? { DISPLAY: process.env.DISPLAY ?? '', XAUTHORITY: process.env.XAUTHORITY ?? '' }
+              : {}),
+          },
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',
@@ -454,7 +481,7 @@ test.skipIf(process.platform !== 'darwin')(
       for (const candidate of candidates)
         expect(verifyNativeRuntimeBundle(candidate.root).digest).toBe(candidate.digest);
       console.log(
-        `NATIVE_REAL_CODE_COMPATIBILITY ${JSON.stringify({ prior: predecessor.provenance, current: current.terminal.manifest.source, candidates: candidates.map((value) => ({ native: value.digest, terminal: value.terminal.digest })), archives, probeHash, driverHash, storeId: originalStoreId, commands: facts.at(-1)!.commands.map((value) => value.id), runs: facts.at(-1)!.runs.map((value) => value.id), fullBodyBytes: Buffer.byteLength(bodies[1]!), fullBodyHash: hash(bodies[1]!), requests, instances: report.phases.map((value) => value.instanceId), owned: report.owned, normalExits: 4, exclusiveAfterStops: true, coreAndNativeInodesRetained: true, dataRestored: false, cleanup: 'confirmed' })}`,
+        `NATIVE_REAL_CODE_COMPATIBILITY ${JSON.stringify({ prior: predecessor.provenance, current: current.terminal.manifest.source, changedAgentFiles: changedAgentFiles.map((file) => file.path), entrypointHashes, candidates: candidates.map((value) => ({ native: value.digest, terminal: value.terminal.digest })), archives, probeHash, driverHash, storeId: originalStoreId, commands: facts.at(-1)!.commands.map((value) => value.id), runs: facts.at(-1)!.runs.map((value) => value.id), fullBodyBytes: Buffer.byteLength(bodies[1]!), fullBodyHash: hash(bodies[1]!), requests, instances: report.phases.map((value) => value.instanceId), owned: report.owned, normalExits: 4, exclusiveAfterStops: true, coreAndNativeInodesRetained: true, dataRestored: false, cleanup: 'confirmed' })}`,
       );
       success = true;
     } finally {

@@ -35,11 +35,19 @@ Native 自带 `bin/kite`、`bin/kite-tui`、`bin/kite-desktop`；独立 Terminal
 
 ## 真实代码升级与冷回退
 
-[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。固定旧提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 由自己的 Terminal 和 Native builder 构建，与当前代码保持相同锁文件、八 workspace 清单、补丁、Core format 1 与 Native DB7；两者 productVersion 都是 `0.1.0`，inner、Main、renderer 的实际字节及候选 ID 不同。[物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)在删除旧源码前完成旧 Native 构建，随后两个候选均归档、解包、搬迁并删除原输出。临时旧 clone 仅是验证输入，不承载当前实现或 Git 交付。
+[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。macOS固定旧提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 由自己的 Terminal 和 Native builder 构建，与当前代码保持相同锁文件、八 workspace 清单、补丁、Core format 1 与 Native DB7；两者 productVersion 都是 `0.1.0`，inner、Main、renderer 的实际字节及候选 ID 不同，两个原前端字节断言保持。[物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)在删除旧源码前完成旧 Native 构建，随后两个候选均归档、解包、搬迁并删除原输出。临时旧 clone 仅是验证输入，不承载当前实现或 Git 交付。
 
 实际 installed `bin/kite-desktop` 启动默认 Main 和配对 Service，经窗口完成 A 原任务、升级 B 并产生新完整正文、冷回退 A 读取 B 正文并继续原会话，再切回 B 冷读三条原任务。升级时运行中的 A 仍持原 outer/inner，卸载 busy；四次普通退出后全部候选两层可独占。Core 和 Native 私有数据库的 inode/完整字节、原配置在指针切换与卸载时保持，回退不恢复旧备份。完整正文经过实际窗口按钮与 Main/HTTP 读取；短回答以内联全文显示，同时经 Main 完整读取边界核对。每次冷读保持原 Command/Run/Model、正文/hash/ref 与 Store 游标，Provider 不增长。持久 caller 目录保原记录，冷记录不恢复为当前进程输入绑定；回退后的新模型实际收到 B 全文。
 
 本机有限作业已通过 1 项、374 条 Bun 断言及实际 driver 断言，三次失败与修正、准确候选和阶段完整回归归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-真实代码升级与冷回退)。这证明 macOS 上两个本地真实代码候选的兼容链，不是已发布 predecessor/T029、任意版本回退、远端 Provider 或 Linux/Windows 资格。生产安装和回退逻辑未修改，现有 Windows 限制保持。
+
+## Linux 真代码升级与冷回退
+
+同一完整跨代码文件现对macOS/Linux执行，Linux使用首次接受准确builtin SQLite3.53.2来源的原提交 `1b796e30ab0f3638767095d86d4afd374eae662a`，由该源码自己的Terminal和Native builder生成候选。Mac前驱在Linux的原来源拒绝保留；不修改旧源码、白名单、版本文字或数据库。相同依赖/基线、源码前后干净及成功删除原源码的守卫继续适用，取舍归[平台前驱决定](../../../.agents/notes/implemented/testing/2026-10-07-platform-real-code-predecessors.md)。所有平台都核实际Agent字节与inner/outer候选不同；Mac两个前端差异断言原样保留。Linux本轮实际变化为包内Agent worker，Main制品hash不同、renderer字节相同，不能据此认定renderer逻辑演进已验收。
+
+Linux使用实际Electron dist和manifest executable路径、Node `.mjs`、准确`ps` argv/父PID，仅转发`DISPLAY`/`XAUTHORITY`。[窗口driver](../test/native-cross-version-electron.fixture.ts)四次均显式开启Chromium sandbox并核实际sandbox/contextIsolation=true、nodeIntegration=false及没有no-sandbox。原420秒整例、120秒driver、15秒窗口和上述原Store/Command/Run/Model/正文/caller/零重放/双lease/数据保留断言不变。Canonical Ubuntu Base24.04.5、Docker VM原生arm64、UID501、Bun1.4.2/Electron44.3.0/Node22.21.1/Xvfb实际整文件1pass/374条Bun断言及driver断言，actual0/171.298秒，四次窗口普通退出结束于driver80.070秒。回退后的新任务实收到352041字节B全文，最终卸载保Core/Native DB/config原字节和inode。
+
+准确候选、失败、摘要和阶段回归归[本轮进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07linux-真实代码升级与冷回退)。release candidate另在macOS和Linux调用整个文件，Linux在Xvfb中执行，静态守卫拒绝平台缩减、关闭、echo、过滤或缺显示。此处为Linux arm64两个本地原始代码候选的有限兼容链，不替代已发布predecessor/T029、G1 hosted Ubuntu x64、Windows、四Auth/Vault、新signal故障窗口或全部§35/T/E；生产安装、回退和默认宿主Shell语义没有修改。
 
 ## Linux arm64 安装生命周期
 

@@ -7,7 +7,12 @@ import { pathToFileURL } from 'node:url';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 
-export const TERMINAL_PREDECESSOR_COMMIT = '3140fe6d37131050033c66ffd9637fe7cd967da9';
+// The original macOS comparison predates Linux SQLite qualification. Keep its source intact;
+// Linux uses the first committed, admitted Linux source, never a patched older checkout.
+export const TERMINAL_PREDECESSOR_COMMIT =
+  process.platform === 'linux'
+    ? '1b796e30ab0f3638767095d86d4afd374eae662a'
+    : '3140fe6d37131050033c66ffd9637fe7cd967da9';
 const baseline = 'packages/agent/src/storage/migrations/0001-baseline.sql';
 const baselineSha256 = '92773869c4d4e68947e9721d5bb6d28e10567c6dc3a82b56726b1a0fb7adee42';
 const workspaces = [
@@ -284,6 +289,7 @@ for (const path of JSON.parse(workspaceJSON)) {
     ...(nativeCandidate ? { nativeCandidate } : {}),
     provenance: {
       kind: 'local-real-code-comparison' as const,
+      platform: process.platform,
       commit: TERMINAL_PREDECESSOR_COMMIT,
       dirty: false as const,
       builder: 'scripts/release/terminal-bundle.ts',

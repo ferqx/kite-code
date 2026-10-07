@@ -16,6 +16,8 @@
 
 release candidate 在 macOS 与 Linux 运行原[完整 installed Terminal 测试](../../tests/isolated/unified-agent/terminal-bundle.test.ts)，包含实际 CLI/TUI、升级/回滚、lease 与卸载保数据；Linux 分支继续核 selected 引擎、双 Worker WAL 和实际安装 maintenance。正式消费者守卫要求双方平台及准确完整命令，拒绝 Mac-only、echo 与过滤到零案例。workflow 接入不表示该原生平台已执行通过。
 
+真实代码比较另调用完整[Terminal文件](../../tests/isolated/unified-agent/terminal-cross-version.test.ts)，条件覆盖macOS/Linux；完整[Native文件](../../tests/isolated/unified-agent/native-cross-version.test.ts)分别在macOS和Linux执行，Linux使用Xvfb。Required unit保原完整历史、显示环境和全部默认发现。正式守卫要求三项准确命令与平台条件，关闭、错平台、echo、过滤或Linux缺显示均失败；这些定义不能替代hosted运行结果，也不能替代已发布predecessor资格。
+
 Windows Native 构建与 transport 原生后端测试在消费编译器前调用[有限 CI 准备脚本](../../scripts/release/prepare-windows-native-ci.ts)。脚本只使用 runner 已安装的固定 vswhere/VsDevCmd、明确 x64 host/target、实际 canonical `cl.exe` 和对应 SDK header/library；缺项失败，不下载或从 PATH 查编译器。vswhere 按 UTF-8、CMD `SET` 按 `/u` 的 UTF-16LE 完整解码，坏字节拒绝；只向 `GITHUB_ENV` 保存十个构建变量、编译器及清空的 `CL`/`_CL_`，不打印原环境。transport 也固定原 PR head/repository 和完整历史。静态守卫核准备顺序及完整三文件 Windows 命令，`echo` 或过滤到零案例不能代替五项 Node 后端执行。本机18项80断言证明解码与调度负例，未运行 Windows 编译；准备成功不改变正式 Main 的加载前身份拒绝或平台完成条件。
 
 ## 安装、登记与使用权
@@ -30,7 +32,7 @@ Native 可显式向合法独立 Terminal prefix 注册完整 CLI/TUI 闭包。�
 
 Terminal 已有本机真实跨代码版本冷回退资格：固定新基线旧提交由其原 builder 构建，与当前代码保持相同依赖输入及 format=1 SQL 基线；经源码外安装前门 A→B→A→B 四个冷实例核原 Store、原任务身份、B 新完整正文和后续真实工作。回退仅交换候选指针，数据库未恢复；正常 stop 核准确进程退出和所有候选 EX，卸载保独立 Profile。完整测试与范围由[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)维护；本地代码比较不等于已发布 predecessor、Native 或三平台资格。Required 默认测试 checkout 保完整历史，以读取固定真实旧提交，缺旧对象直接失败。
 
-Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核对：旧源码使用自己的两层 builder，与当前格式兼容而 Main/renderer/inner 字节不同；四次默认窗口和配对 Service 普通退出，原数据、完整正文/hash/ref、持久 caller 及回退后的新工作保持正确。指针操作保 Core/Native 私有数据库 inode/bytes 和配置，不恢复数据；运行中的旧窗口保持原闭包。准确资格及限制归[Native owner](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退)。两项本地代码比较均不替代已发布 predecessor/T029、任意版本或其他平台的实际证据。
+Native 的本机真实跨代码组合也已沿 installed `bin/kite-desktop` 核对：旧源码使用自己的两层builder，macOS固定原前驱并核Main/renderer/inner字节不同；Linux固定首个准确引擎已准入的原始前驱，核真实Agent字节变化并记录前端hash关系，本轮renderer相同。四次默认窗口和配对Service普通退出，原数据、完整正文/hash/ref、持久caller及回退后的新工作保持正确。指针操作保Core/Native私有数据库inode/bytes和配置，不恢复数据；运行中的旧窗口保持原闭包。准确资格及限制归[Native owner](../../apps/desktop/docs/native-release.md#linux-真代码升级与冷回退)与[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)。当前本机macOS与Docker VM原生arm64 Linux两项本地代码比较均不替代已发布predecessor/T029、任意版本或其他平台的实际证据。
 
 ## SQLite 与可选能力
 
