@@ -2015,6 +2015,18 @@ release candidate现另执行整个POSIX Terminal、Mac Native及Xvfb Linux Nati
 
 §30.2.9的四项退出缺口继续按依赖成立，本轮仅关闭Linux arm64这条本地真实代码链；G1 hosted Linux x64/Windows、已发布predecessor/T029、Native四Auth/default Vault、默认宿主Shell/新Job/formal连续负载、其余维护及完整§35/T/E、最后旧路径退役均未由本片关闭。用户已确认保留macOS宿主工具链和广泛只读宿主视图，Linux容器只用于验证。37能力仍partial、wholeV13=false、Goal active；本地授权不扩大到push/PR/发布。
 
+### 30.2.11 Windows 完整维护入口的文件端口
+
+沿§30.2.9第三项的实际 maintenance backup/inspect/restore/status/reconcile，已接入Windows Bun x64 private文件策略、原FD/readonly SQL pin、FA metadata/FR immutable media与原source身份的same-volume write-through发布。完整既有v2–v16 grammar、源DB/WAL配对复制、外部稳定EX、新Storefencing、保旧目录、原请求不改标/不重放、profileComplete:false保持。installer内部锁位于被移动root、Windows deny-delete sharing、标准PATH及Native加载前身份仍是独立设计与验收边界，不只翻平台guard，也不调用旧install-oss-candidate路径。
+
+实际代码和用户入口归[maintenance owner](../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)，验收用[Windows维护完整CLI argv](../../packages/agent/test/isolated/maintenance/windows.test.ts)与[原生文件pin](../../packages/agent/test/isolated/windows-path-security/default.test.ts)。actual Windows x64须核实际Bun/selected engine/DACL/HANDLE/sharing、17MiB完整media、超过8MiB caller、源presence/bytes、busy、原身份/newStore冷读、准确journal complete/rollback及原private/readonly拒绝；backend/engine不可用不能skip。开发CLI代码接入不代表installed、WindowsNode或NativeUI资格，journal确定性中断不冒称SIGKILL全矩阵。持久取舍仍为[proposed](../../.agents/notes/proposed/architecture/2026-10-07-windows-maintenance-file-publication.md)，需要原生结果才能升级资格。
+
+本机仅macOS arm64，现有PATH未发现Windows VM/兼容执行工具，已询问现成原生Windows环境，尚未收到方式；没有安装VM或从非Windows结果推定实际ABI。首轮完整维护邻接22文件/22作业、108pass/1762assert/10平台skip，actual0/43.026秒，4081regular与Git保持。新增跨包测试首次放CLI owner导致TS6059/rootDir红，原CLI失败日志保留；测试已归Agent维护owner，使用实际CLI argv且生产依赖未放宽。主Agent新增原source移动前后FileID核验后，最终冻结输入已执行原完整默认和必要门禁，结果如下；准确版本、失败、最终范围归[进度](unified-agent-refactor-v1-progress.md#2026-10-07windows-维护完整入口接入)。新的独立Reviewer仍受线程限额，root自检不替代它。
+
+最终第二轮原完整默认613文件/487主作业全通过，actual0/997.523秒、4082regular和HEAD/status保持，原并发4/预算/断言不变；首轮沙箱loopback即时红、Python EPERM与授权同Bun探针分别保留。raw formal-terminal的27ms同名事件来自原临时TUI fixture，正式作业仅一次28453ms，main审计487逐项一次成功；五个故意负例子不删除。Root与八workspace types、API/边界/runtime及docs/impact/plan-evidence通过，Windows两维护案例仍平台skip。实际源码外CLI维护及Mac Native/Terminal全代码链通过不外推原生Windows，准确范围归同进度。
+
+本片只关闭Windows维护文件端口的源码接入，原生实际验收尚未闭合。四项退出缺口继续成立：Native四Auth/Chrome/defaultVault、默认宿主Shell与完整fork/setsid/持久Job/formal负载、完整release与维护各平台/发布样本/恢复场景、最后legacy删除。37能力仍partial、wholeV13=false、Goal active；保留用户确认的macOS宿主执行语义，容器只作为独立验证；本地授权不扩大到push/PR/发布。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

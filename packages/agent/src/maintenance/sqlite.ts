@@ -1,8 +1,12 @@
 import { constants, Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
-import { closeSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import {
+  defaultWindowsPathSecurity,
+  type WindowsPrivateRead,
+} from '../platform/windows-path-security';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
-import { decimal, openPrivate } from './files';
+import { closePrivate as closeSync, decimal, openPrivate } from './files';
 import { MaintenanceError } from './types';
 
 const schemaQuery =
@@ -27,10 +31,48 @@ function baseline() {
     db.close(true);
   }
 }
+/** Windows keeps the original private file/ancestry alive through the SQL connection. */
+export function openPrivateDatabase(path: string): Database {
+  if (process.platform !== 'win32') {
+    closeSync(openPrivate(path));
+    initializeDefaultSqliteEngine();
+    return new Database(path, constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW);
+  }
+  let held: WindowsPrivateRead | undefined = defaultWindowsPathSecurity()!.retainPrivateFile(path);
+  try {
+    initializeDefaultSqliteEngine();
+    const db = new Database(path, constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW);
+    const close = db.close.bind(db);
+    let databaseClosed = false;
+    db.close = (throwOnError?: boolean) => {
+      if (!databaseClosed) {
+        close(throwOnError);
+        databaseClosed = true;
+      }
+      if (!held) return;
+      let error: unknown;
+      try {
+        held.verify();
+      } catch (caught) {
+        error = caught;
+      }
+      // A failed native close leaves its remaining handles available for another close.
+      held.close();
+      held = undefined;
+      if (error) throw error;
+    };
+    return db;
+  } catch (error) {
+    try {
+      held.close();
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'backup_database_cleanup_failed');
+    }
+    throw error;
+  }
+}
 export function openBackupDatabase(path: string): Database {
-  closeSync(openPrivate(path));
-  initializeDefaultSqliteEngine();
-  const db = new Database(path, constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW);
+  const db = openPrivateDatabase(path);
   try {
     db.run('PRAGMA busy_timeout=100');
     db.run('PRAGMA synchronous=FULL');

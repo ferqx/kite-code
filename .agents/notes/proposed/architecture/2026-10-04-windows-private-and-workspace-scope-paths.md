@@ -12,7 +12,7 @@ Windows 的 POSIX mode 位不能证明 owner-only ACL。Profile、Store、协调
 
 可信 host 按实际角色选择 scope/private：Workspace JSONC/MCP 原声明采用 bounded scope read，Profile/user/approval/auth、host key、Skill flags 和 TUI preferences 明确 private。选择不来自 Model、HTTP 或 JSONC。实际 scope read 在同 HANDLE 有限读取并核前后路径；私有 sibling 锁、publication temporary 和 repair backup 仍使用 strict private policy，不修改 Workspace ACL。
 
-代码已实现这些部分，POSIX 邻接已通过；本提案保持 proposed，因为实际 native Windows CI 场景尚未执行。本提案只负责 Profile/Workspace 分角色路径；Windows ArtifactStore 已有独立原生实现但尚未取得实际 Windows 资格，见[媒体发布提案](2026-10-04-windows-artifact-handle-publication.md)。Node/Electron 独立使用权正在实施，原因与资格边界见[各进程原生使用锁提案](2026-10-04-windows-node-owned-profile-and-artifact-leases.md)；maintenance 和安装器仍有独立未实现范围。当前合同见 [Windows leaf](../../../../packages/agent/src/platform/windows-path-security.README.md)。
+代码已实现这些部分，POSIX 邻接已通过；本提案保持 proposed，因为实际 native Windows CI 场景尚未执行。本提案只负责 Profile/Workspace 分角色路径；Windows ArtifactStore 已有独立原生实现但尚未取得实际 Windows 资格，见[媒体发布提案](2026-10-04-windows-artifact-handle-publication.md)。Node/Electron 独立使用权正在实施，原因与资格边界见[各进程原生使用锁提案](2026-10-04-windows-node-owned-profile-and-artifact-leases.md)；maintenance 原生运行与完整安装器仍有独立未验或未实现范围。当前合同见 [Windows leaf](../../../../packages/agent/src/platform/windows-path-security.README.md)。
 
 ## Alternatives considered
 
@@ -31,3 +31,5 @@ Windows 的 POSIX mode 位不能证明 owner-only ACL。Profile、Store、协调
 ## Risks
 
 Bun FFI 属实验接口，ABI 和 Windows x64 资格依赖实际运行时；ARM64 尚不支持。最后 path/ETag/活锁检查与 rename 仍不是对不合作编辑器的原子 CAS；filesystem 与 SQLite 回执不是同一媒体，未知发布保原意图，不重做。该分角色合同不能据此放行其他 Windows 文件/锁实现。
+
+Windows维护文件端口现已接入原API与开发CLI，完整角色、原HANDLE/FD/SQL生命周期、发布屏障与未验范围见[维护提案](2026-10-07-windows-maintenance-file-publication.md)。本篇其余角色与安全理由保持，实际原生资格仍未取得。

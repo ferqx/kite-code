@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   linkSync,
@@ -17,11 +18,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConfigurationFile, updateConfigurationFile } from '../../../src/config/files';
 import { readMcpSources } from '../../../src/config/mcp-sources';
+import { closePrivate, fingerprint, openPrivate } from '../../../src/maintenance/files';
 import {
   acquireProfileAccess,
   acquireSessionLock,
   resolveProfile,
 } from '../../../src/platform/profile';
+import { createWindowsArtifactTemporary } from '../../../src/platform/windows-artifact-files';
 import {
   defaultWindowsPathSecurity,
   privateDirectory,
@@ -171,6 +174,81 @@ test.skipIf(process.platform !== 'win32')(
     }
   },
   10000,
+);
+
+test.skipIf(process.platform !== 'win32')(
+  'maintenance native readers pin the original file and ancestors, retain readonly media and release after close',
+  () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-windows-maintenance-pins-'));
+    const directory = join(root, 'private');
+    const native = defaultWindowsPathSecurity()!;
+    try {
+      privateDirectory(directory);
+      const path = join(directory, 'metadata');
+      native.writePrivateFile(path, Buffer.from('original metadata'));
+      const fd = openPrivate(path);
+      try {
+        expect(() => writeFileSync(path, 'changed')).toThrow();
+        expect(() => renameSync(path, join(directory, 'replaced'))).toThrow();
+        expect(() => renameSync(directory, join(root, 'moved'))).toThrow();
+        expect(fingerprint(path).byteLength).toBe('17');
+        expect(readFileSync(path, 'utf8')).toBe('original metadata');
+      } finally {
+        closePrivate(fd);
+      }
+      native.syncPrivateFile(path);
+      native.movePrivateEntry(path, join(directory, 'moved'));
+      expect(existsSync(path)).toBe(false);
+      expect(readFileSync(join(directory, 'moved'), 'utf8')).toBe('original metadata');
+      native.writePrivateFile(path, Buffer.from('replacement'));
+      expect(() => native.movePrivateEntry(path, join(directory, 'moved'))).toThrow();
+      native.movePrivateEntry(path, join(directory, 'moved'), true);
+      expect(readFileSync(join(directory, 'moved'), 'utf8')).toBe('replacement');
+
+      const bytes = Buffer.from('immutable media');
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      const output = createWindowsArtifactTemporary(directory);
+      try {
+        output.write(bytes);
+        output.publish(hash, String(bytes.length));
+      } finally {
+        output.close();
+      }
+      const media = join(directory, 'blobs', hash.slice(0, 2), hash);
+      expect(() => native.retainPrivateFile(media)).toThrow();
+      expect(() => native.syncPrivateFile(media)).toThrow();
+      expect(fingerprint(media, undefined, true)).toEqual({
+        sha256: hash,
+        byteLength: String(bytes.length),
+      });
+      const pin = native.retainReadOnlyFile(media);
+      try {
+        expect(() => writeFileSync(media, 'mutable')).toThrow();
+        expect(() => renameSync(media, join(directory, 'foreign'))).toThrow();
+        pin.verify();
+      } finally {
+        pin.close();
+      }
+      expect(readFileSync(media)).toEqual(bytes);
+
+      const metadata = join(directory, 'moved');
+      linkSync(metadata, join(directory, 'alias'));
+      try {
+        expect(() => openPrivate(metadata)).toThrow();
+      } finally {
+        unlinkSync(join(directory, 'alias'));
+      }
+      const widened = spawnSync('icacls.exe', [metadata, '/grant', '*S-1-1-0:(F)'], {
+        encoding: 'utf8',
+      });
+      expect(widened.status).toBe(0);
+      expect(() => openPrivate(metadata)).toThrow();
+      expect(() => native.syncPrivateFile(metadata)).toThrow();
+      expect(readFileSync(metadata, 'utf8')).toBe('replacement');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
 );
 
 test.skipIf(process.platform !== 'win32')(

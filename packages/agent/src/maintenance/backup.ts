@@ -2,15 +2,12 @@ import { Database, constants as sqliteConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
-  closeSync,
   constants,
   existsSync,
   fchmodSync,
   fsyncSync,
-  mkdirSync,
   opendirSync,
   openSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -24,9 +21,12 @@ import { captureAssets, verifyAssets } from './assets';
 import { verifyCallerIntentsDocument } from './caller-intents';
 import {
   checkpoint,
+  closePrivate as closeSync,
   contains,
+  copyWindowsMedia,
   decimal,
   fingerprint,
+  movePrivateEntry,
   openPrivate,
   privateDirectory,
   syncDirectory,
@@ -45,7 +45,7 @@ import {
 } from './types';
 
 function platform(): void {
-  if (process.platform !== 'darwin' && process.platform !== 'linux')
+  if (!['darwin', 'linux', 'win32'].includes(process.platform))
     throw new MaintenanceError('maintenance_platform_unsupported');
 }
 function sourceFiles(databasePath: string, signal?: AbortSignal) {
@@ -60,6 +60,10 @@ async function copyMedia(
   size: string,
   signal?: AbortSignal,
 ) {
+  if (process.platform === 'win32') {
+    await copyWindowsMedia(source, target, hash, size, signal);
+    return;
+  }
   closeSync(openPrivate(artifactPath(source, hash)));
   const path = artifactPath(target, hash);
   privateDirectory(dirname(path), true);
@@ -231,7 +235,7 @@ async function verify(
           throw new MaintenanceError('backup_inventory_mismatch');
         decimal(row.size);
         decimal(row.referenceCount);
-        closeSync(openPrivate(artifactPath(directory, row.hash)));
+        closeSync(openPrivate(artifactPath(directory, row.hash), true));
         let work = 0;
         for (const chunk of readPublishedArtifactChunks(directory, row.hash, row.size)) {
           work += chunk.byteLength;
@@ -305,7 +309,7 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
     const before = sourceFiles(access.databasePath, input.signal);
     const parent = privateDirectory(destination, true);
     staging = join(parent, `.backup-${randomUUID()}`);
-    mkdirSync(staging, { mode: 0o700 });
+    privateDirectory(staging, true);
     const candidatePath = join(staging, 'core.db');
     for (const suffix of ['-wal', '-shm']) assertNoSymlinkPath(access.databasePath + suffix);
     const { sourceCapture, engine } = await withPrivateDatabaseSnapshot(
@@ -427,12 +431,12 @@ export async function createProfileBackup(input: CreateProfileBackupInput): Prom
       flag: 'wx',
     });
     syncFile(join(staging, 'ready.json.tmp'));
-    renameSync(join(staging, 'ready.json.tmp'), join(staging, 'ready.json'));
+    movePrivateEntry(join(staging, 'ready.json.tmp'), join(staging, 'ready.json'));
     syncDirectory(staging);
     const directory = join(parent, `backup-${randomUUID()}`);
     // A unique generated name avoids replacing a caller's existing backup.
     if (existsSync(directory)) throw new MaintenanceError('backup_destination_invalid');
-    renameSync(staging, directory);
+    movePrivateEntry(staging, directory);
     staging = directory;
     syncDirectory(parent);
     published = true;

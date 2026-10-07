@@ -1,6 +1,6 @@
 import { Database, constants as sqlConstants } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, fstatSync, lstatSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { canonicalJson } from '../json';
 import { initializeDefaultSqliteEngine } from '../sqlite-engine';
@@ -14,6 +14,7 @@ import {
   verifyFileRecoveryIntentsDocument,
 } from './file-recovery-intents';
 import {
+  closePrivate as closeSync,
   copyAssetFile,
   fingerprint,
   openPrivate,
@@ -27,6 +28,7 @@ import { verifyMcpReconnectionIntentsDocument } from './mcp-reconnection-intents
 import { verifyMcpSelectionIntentsDocument } from './mcp-selection-intents';
 import { verifyMcpSourceApprovalIntentsDocument } from './mcp-source-approval-intents';
 import { verifyMcpSourceMutationIntentsDocument } from './mcp-source-mutation-intents';
+import { openPrivateDatabase } from './sqlite';
 import { verifyTuiDocument } from './tui';
 import { type BackupManifest, type CapturedAsset, MaintenanceError } from './types';
 
@@ -148,15 +150,10 @@ function uiFiles(path: string, signal?: AbortSignal) {
 }
 export function openUiDatabase(path: string): Database {
   privateDirectory(dirname(path));
-  closeSync(openPrivate(path));
   for (const suffix of ['-wal', '-shm'])
     if (present(path + suffix)) closeSync(openPrivate(path + suffix));
   if (present(`${path}-journal`)) throw new MaintenanceError('backup_ui_journal_present');
-  initializeDefaultSqliteEngine();
-  const db = new Database(
-    path,
-    sqlConstants.SQLITE_OPEN_READONLY | sqlConstants.SQLITE_OPEN_NOFOLLOW,
-  );
+  const db = openPrivateDatabase(path);
   try {
     db.run('PRAGMA busy_timeout=100');
     const actual = db

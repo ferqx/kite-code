@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { closeSync, fstatSync, readFileSync } from 'node:fs';
+import { fstatSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { openPrivate, privateDirectory } from './files';
+import { closePrivate as closeSync, openPrivate, privateDirectory } from './files';
 import { MaintenanceError } from './types';
 /** Exact owner v1 JSON contract. Text and original associations are never re-labelled. */
 export function verifyTuiDocument(path: string) {

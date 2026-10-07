@@ -1,6 +1,6 @@
-import { closeSync, fstatSync, readSync } from 'node:fs';
+import { fstatSync, readSync } from 'node:fs';
 import { canonicalJson } from '../json';
-import { decimal, openPrivate } from './files';
+import { closePrivate as closeSync, decimal, openPrivate } from './files';
 import { type BackupManifest, MaintenanceError } from './types';
 
 export const excluded = [

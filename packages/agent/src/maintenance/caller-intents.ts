@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, readSync } from 'node:fs';
+import { constants, fstatSync, readSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { canonicalJson } from '../json';
 import type { Json } from '../storage/types';
-import { openPrivate, privateDirectory } from './files';
+import { closePrivate as closeSync, openPrivate, privateDirectory } from './files';
 import { MaintenanceError } from './types';
 
 const invalid = () => new MaintenanceError('backup_caller_intents_invalid');
@@ -249,14 +249,17 @@ export function verifyCallerIntentRecords(
 }
 /** Caller metadata bytes only. Digests are retained, never interpreted as a receipt or grant. */
 export function verifyCallerIntentsDocument(path: string, allowAuth = false): boolean {
-  if (typeof constants.O_NOFOLLOW !== 'number' || constants.O_NOFOLLOW === 0)
+  if (
+    process.platform !== 'win32' &&
+    (typeof constants.O_NOFOLLOW !== 'number' || constants.O_NOFOLLOW === 0)
+  )
     throw new MaintenanceError('maintenance_platform_unsupported');
   privateDirectory(dirname(path));
   const fd = openPrivate(path);
   try {
     const before = fstatSync(fd, { bigint: true });
     if (
-      (Number(before.mode) & 0o777) !== 0o600 ||
+      (process.platform !== 'win32' && (Number(before.mode) & 0o777) !== 0o600) ||
       before.nlink !== 1n ||
       (process.getuid && before.uid !== BigInt(process.getuid())) ||
       before.size > 16n * 1024n * 1024n

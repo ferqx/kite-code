@@ -2,16 +2,13 @@ import { Database, constants as sqliteConstants } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
-  closeSync,
   constants,
   existsSync,
   fsyncSync,
   lstatSync,
-  mkdirSync,
   opendirSync,
   openSync,
   readSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -29,7 +26,10 @@ import { restoreAssets } from './assets';
 import { inspectProfileBackup } from './backup';
 import {
   checkpoint,
+  closePrivate as closeSync,
+  copyWindowsMedia,
   fingerprint,
+  movePrivateEntry,
   openPrivate,
   privateDirectory,
   syncDirectory,
@@ -46,7 +46,7 @@ import {
 } from './types';
 
 function supported() {
-  if (process.platform !== 'darwin' && process.platform !== 'linux')
+  if (!['darwin', 'linux', 'win32'].includes(process.platform))
     throw new MaintenanceError('maintenance_platform_unsupported');
 }
 function digestTree(directory: string): string {
@@ -64,34 +64,42 @@ function digestTree(directory: string): string {
     for (const name of names.sort()) {
       const target = join(path, name),
         key = `${relative}${name}`;
-      const fd = opendirOrFile(target);
+      const readOnly = /^blobs\/[a-f0-9]{2}\/[a-f0-9]{64}$/.test(key);
+      const fd = opendirOrFile(target, readOnly);
       if (fd === 'directory') {
         privateDirectory(target);
         digest.update(JSON.stringify([key, 'directory', lstatSync(target).mode & 0o777]));
         visit(target, `${key}/`);
       } else {
-        digest.update(JSON.stringify([key, lstatSync(target).mode & 0o777, fingerprint(target)]));
+        digest.update(
+          JSON.stringify([
+            key,
+            lstatSync(target).mode & 0o777,
+            fingerprint(target, undefined, readOnly),
+          ]),
+        );
       }
     }
   }
   visit(directory, '');
   return digest.digest('hex');
 }
-function opendirOrFile(path: string): 'directory' | 'file' {
+function opendirOrFile(path: string, readOnly: boolean): 'directory' | 'file' {
   // lstat does not follow a replacement or authorize a file read.
   const stat = lstatSync(path);
   if (stat.isDirectory()) return 'directory';
-  closeSync(openPrivate(path));
+  closeSync(openPrivate(path, readOnly));
   return 'file';
 }
 async function copyFile(source: string, destination: string, signal?: AbortSignal) {
-  const input = openPrivate(source),
+  const input = openPrivate(source);
+  let output: number | undefined;
+  try {
     output = openSync(
       destination,
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
       0o600,
     );
-  try {
     const bytes = Buffer.alloc(65536);
     let sinceYield = 0;
     for (;;) {
@@ -107,9 +115,13 @@ async function copyFile(source: string, destination: string, signal?: AbortSigna
     }
     fsyncSync(output);
   } finally {
-    closeSync(output);
-    closeSync(input);
+    try {
+      if (output !== undefined) closeSync(output);
+    } finally {
+      closeSync(input);
+    }
   }
+  if (process.platform === 'win32') syncFile(destination);
 }
 function journalPath(profile: ReturnType<typeof selectProfile>) {
   return join(profile.coordinationPath, 'restore-journal.json');
@@ -118,7 +130,7 @@ function saveJournal(profile: ReturnType<typeof selectProfile>, journal: Profile
   const temporary = join(profile.coordinationPath, `restore-${randomUUID()}.tmp`);
   writeFileSync(temporary, `${JSON.stringify(journal)}\n`, { mode: 0o600, flag: 'wx' });
   syncFile(temporary);
-  renameSync(temporary, journalPath(profile));
+  movePrivateEntry(temporary, journalPath(profile), true);
   syncDirectory(profile.coordinationPath);
 }
 function readJournal(profile: ReturnType<typeof selectProfile>): ProfileRestoreJournal | null {
@@ -239,11 +251,15 @@ export async function runProfileRestore(
       newStoreId = randomUUID();
     staging = join(profile.dataRoot, `.restore-${restoreId}`);
     const preserved = join(profile.dataRoot, `.preserved-${restoreId}`);
-    mkdirSync(staging, { mode: 0o700 });
+    privateDirectory(staging, true);
     await copyFile(join(selected.directory, 'core.db'), join(staging, 'core.db'), input.signal);
     const db = openBackupDatabase(join(staging, 'core.db'));
     try {
       for (const row of mediaRows(db)) {
+        if (process.platform === 'win32') {
+          await copyWindowsMedia(selected.directory, staging, row.hash, row.size, input.signal);
+          continue;
+        }
         const prefix = join(staging, 'blobs', row.hash.slice(0, 2));
         privateDirectory(prefix, true);
         await copyFile(
@@ -267,7 +283,7 @@ export async function runProfileRestore(
     const copied = openBackupDatabase(join(staging, 'core.db'));
     try {
       for (const row of mediaRows(copied))
-        if (fingerprint(artifactPath(staging, row.hash)).sha256 !== row.hash)
+        if (fingerprint(artifactPath(staging, row.hash), undefined, true).sha256 !== row.hash)
           throw new MaintenanceError('backup_content_changed');
     } finally {
       copied.close(true);
@@ -328,13 +344,13 @@ export async function runProfileRestore(
     journalWritten = true;
     await observe?.('prepared');
     input.signal?.throwIfAborted();
-    renameSync(profile.profilePath, preserved);
+    movePrivateEntry(profile.profilePath, preserved);
     syncDirectory(profile.dataRoot);
     await observe?.('old_directory_moved');
     journal.phase = 'old_moved';
     saveJournal(profile, journal);
     await observe?.('old_moved');
-    renameSync(staging, profile.profilePath);
+    movePrivateEntry(staging, profile.profilePath);
     syncDirectory(profile.dataRoot);
     await observe?.('candidate_published');
     journal.phase = 'published';
@@ -398,11 +414,11 @@ export async function reconcileProfileRestore(input: {
       throw new MaintenanceError('restore_content_changed');
     if (input.decision === 'complete') {
       if (originalHere) {
-        renameSync(profile.profilePath, preserved);
+        movePrivateEntry(profile.profilePath, preserved);
         syncDirectory(profile.dataRoot);
       }
       if (!candidateHere) {
-        renameSync(staging, profile.profilePath);
+        movePrivateEntry(staging, profile.profilePath);
         syncDirectory(profile.dataRoot);
       }
       if (!matches(profile.profilePath, journal.candidateDigest, journal.newStoreId))
@@ -418,11 +434,11 @@ export async function reconcileProfileRestore(input: {
       };
     }
     if (candidateHere) {
-      renameSync(profile.profilePath, staging);
+      movePrivateEntry(profile.profilePath, staging);
       syncDirectory(profile.dataRoot);
     }
     if (!originalHere) {
-      renameSync(preserved, profile.profilePath);
+      movePrivateEntry(preserved, profile.profilePath);
       syncDirectory(profile.dataRoot);
     }
     if (!matches(profile.profilePath, journal.originalDigest, journal.expectedStoreId))

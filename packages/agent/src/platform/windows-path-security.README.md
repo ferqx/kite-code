@@ -12,4 +12,10 @@ General configuration options expose the trusted host-only `windowsPathPolicy: '
 
 Neither handle verification nor the final byte check and rename forms an atomic compare-and-swap against non-cooperating editors. Path changes observed during a native read or at the final publication recheck fail locally; an editor racing after the last check can still conflict with publication. Filesystem and SQLite notification remain separate media; publication uncertainty must retain the original operation identity rather than automatically retrying.
 
-The Windows tests execute on actual win32 and do not have an availability skip. macOS results prove lazy Node/Bun imports and POSIX compatibility only. Windows ARM64, Node inherited locks/artifacts and Windows maintenance are outside this leaf's current implementation. Bun FFI is experimental; release qualification must bind the actual runtime and native Windows results, rather than treating type/build success as OS evidence.
+## 维护原文件与发布端口
+
+`retainPrivateFile` 返回不暴露 HANDLE 的 verify/close 能力：原文件持有 GENERIC_READ，允许 read sharing、拒绝 write/delete sharing；整条祖先链保留原 identity 并拒绝 delete sharing。普通文件仍核 current SID/FA；`retainReadOnlyFile` 单独要求 protected、无继承 flag 的精确 FR，供不可变 blob 使用，不放宽配置或协调锁政策。关闭失败仅移除成功关闭的 HANDLE，剩余对象可重试；verify 拒绝已关闭的原文件或身份/ACL/时间变化。[维护 FD 与 SQL owner](../maintenance/README.md#windows-维护文件端口与验收边界)负责将 pin 保留至实际读者关闭。
+
+`syncPrivateFile` 使用实际 GENERIC_WRITE、write-through 文件 HANDLE 与 FlushFileBuffers，既有对象只验证、不改 ACL。`movePrivateEntry` 保留 source/target 父祖先，原 source HANDLE 允许本次 rename；MoveFileExW 使用 WRITE_THROUGH，拒绝跨卷复制和延迟重启，成功路径重核 published FileID 是原 source。它不构成对同 owner 不合作编辑器的原子 CAS，也不授予目录 fsync 或断电持久性证明。平台依据为 [CreateFileW sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)、[FlushFileBuffers access](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)与 [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw)。
+
+Windows 测试在 actual win32 没有 availability skip；macOS 结果只证明 Node/Bun 惰性 import 和 POSIX 邻接。Windows ARM64、原生维护验收、Node inherited locks/artifacts、完整安装与 Native 加载前身份仍未取得资格。Bun FFI 是实验接口；必须绑定实际运行时与原生 Windows 结果，类型或构建成功不能代替 OS 证据。

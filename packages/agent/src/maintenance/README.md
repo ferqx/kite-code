@@ -28,7 +28,7 @@ Service 显式 Workflow flags 的 `skill-workflow.jsonc` 是独立受控资产�
 
 清单排除 credentials、credential vault、未列入白名单的宿主私有文件、coordination 和 locks。Desktop私有库是明确的采集例外，不复制该目录其他文件。TUI 的真实用户数据由 CLI host 持久 owner 写入 `ui/tui.json`；清单分别记录存在、采集时间、完整摘要及 `{version:1}` 格式。严格核对完整 JSON、Decimal64、原 Store/Workspace/Session 与 scope hash；完整文本原字节保存，不改绑新 Store。真实终端偏好由 CLI host 的独立 owner 写入 `ui/preferences.jsonc`；备份按原始 JSONC 字节记录存在、采集时间和 proof，包括注释、未知字段及损坏文件，不解析或修复偏好，不创建缺失文件。恢复仍保原字节。`ui` 目录仅白名单采集 `tui.json`、`preferences.jsonc`、`recovery.json`、仅 v4–v16 的 `caller-intents.json`、仅 v6–v16 的 `file-recovery-intents.json`、仅 v8–v16 的 `mcp-selection-intents.json`、仅 v9–v16 的 `mcp-connection-intents.json`、仅 v10–v16 的 `mcp-source-approval-intents.json`、仅 v11–v16 的 `mcp-reconnection-intents.json` 和仅 v12–v16 的 `mcp-source-mutation-intents.json`，不复制其他文件；新增偏好资产不放宽 `tui.json` 的严格格式验证。未发布基线的 closed v2 manifest 必须带独立 `tuiPreferences` 项；旧缺项清单拒绝，不猜测偏好存在或提供旧格式兼容。本入口不派发旧任务或提供在线GC。完整并发安全要求每个打开UI库的Node宿主也持同外置profile共享使用权至库关闭；该宿主生命周期与平台资格由Desktop/平台owner独立实际验证，不能仅据复制测试认定完成。
 
-SQLite 官方 [VACUUM 说明](https://www.sqlite.org/lang_vacuum.html) 定义 `VACUUM INTO` 为一致快照，提示中断可能留下损坏候选、非整数主键 rowid 可变，并说明 synchronous FULL 的输出同步。实现仍独立验证与 fsync，不以命令完成代替发布证明。实际发行 SQLite/驱动版本、已知缺陷、Linux/Windows、安装包和强杀发布窗口仍需 W19/W20 资格验证；Windows 当前明确返回 `maintenance_platform_unsupported`。
+SQLite 官方 [VACUUM 说明](https://www.sqlite.org/lang_vacuum.html) 定义 `VACUUM INTO` 为一致快照，提示中断可能留下损坏候选、非整数主键 rowid 可变，并说明 synchronous FULL 的输出同步。实现仍独立验证与同步，不以命令完成代替发布证明。实际发行 SQLite/驱动版本、已知缺陷、Linux/Windows、安装包和强杀发布窗口仍需 W19/W20 资格验证；Windows Bun x64 文件端口已接入，原生验收与正式安装资格尚未取得，具体见下节。
 
 Linux 当前 installed Terminal 的有限验证使用准确 selected Bun builtin SQLite 3.53.2：两个公共 Worker 完成 24 次并发 WAL 写，实际安装 CLI 的 backup/inspect 保源 DB 完整字节，restore 后 cold readonly 核新 Store、原业务历史、配置原字节和 Session fencing，status 无未完成 journal。维护不增加模型调用，`profileComplete:false` 保持。环境、完整安装链与原生 CI 未验范围见 [Terminal owner](../../../../apps/cli/docs/terminal-release.md#linux-当前引擎与安装维护链)；它不替代 Native 私有资产、Windows 或全部 W19/W20 资格。
 
@@ -43,6 +43,18 @@ SQLite 的[只读 WAL 说明](https://www.sqlite.org/wal.html#read_only_database
 [隔离验证](../../test/isolated/maintenance/backup.test.ts) 在 macOS、Bun 1.4.2 使用真实 SQLite/WAL、17MiB 媒体、超过 2^53 的业务序列和未知原文；验证原文件未变、媒体完整性、第二进程占锁、其他 profile 可取得锁、缺媒体/硬链接/取消失败无 ready、restore journal 和 SQL journal 拒绝、数据库/清单/媒体篡改拒绝。测试不打开用户旧数据、凭据库或 Provider。执行：`bun test packages/agent/test/isolated/maintenance/backup.test.ts`。
 
 同一测试还按 `root=src` 构建独立 maintenance leaf，并复制现行 `storage/migrations/0001-baseline.sql`，从源码树外 consumer 通过包名导入实际创建和检查备份。这证明源码与 bundle 下的迁移资产相对位置；临时制品不替代完整发行包、安装和平台资格。关闭及失败预检回归加入后，2026-10-02 备份、恢复、同 Store 显式 recovery/强杀及取消组合实际通过 28 项测试、306 个断言。
+
+## Windows 维护文件端口与验收边界
+
+同一公开 maintenance leaf 和 CLI 开发入口现接入 Windows Bun x64；备份、完整检查、新 Store 恢复、status 和显式 complete/rollback 沿原清单与 journal 合同。普通宿主共享使用权与维护排他权继续在 Profile 外的稳定 LockFileEx 文件上，不随目录移动。Windows ARM64 仍不支持；Node/Electron 的私有库、正式 Windows launcher/installer 与 Native 加载前身份门禁由各 owner 独立负责。
+
+[files.ts](files.ts) 的私有读端口在 Node/Bun FD 生命周期内保留 [Windows 原文件与祖先 HANDLE](../platform/windows-path-security.ts)：实际 current SID、FA DACL、regular、nlink1、非 reparse 和 volume/file identity 决定准入，祖先拒绝 delete sharing，文件拒绝 write/delete sharing。关闭前重核身份、ACL、完整长度和时间；Native close 失败保留未关闭资源以便重试。读取完整资产不使用配置 scope reader 的 8MiB 上限，各资产原有 128 records/16MiB、fatal UTF-8、闭合字段及内部摘要校验仍独立执行。只读 Core/UI SQL 连接另保留同一原文件 pin 至 `Database.close(true)`；SQL 仍只打开维护 scratch 或候选，原库及其 WAL 不由 SQL 打开。
+
+媒体采用已有的 [Windows immutable publisher](../platform/windows-artifact-files.ts)，完整 64KiB 流、EOF/hash/size 与精确 protected current-SID FR DACL 保持；仅新 temporary 可减权，既有 blob 不修 ACL。普通 metadata 仍要求 FA，不能借只读媒体政策放宽配置、journal 或锁。新媒体 writer 使用 write-through 原 HANDLE，在关闭前完成 flush 和相对 no-overwrite rename。
+
+私有 metadata 以具有 GENERIC_WRITE 的原生文件句柄调用 [FlushFileBuffers](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers)。ready、journal 和 Profile 目录切换使用 [MoveFileExW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw) 的 WRITE_THROUGH，保持 same-volume，不允许 COPY_ALLOWED 或 deferred reboot；祖先保留至移动结束，发布路径须仍对应原 source HANDLE。`syncDirectory` 在 Windows 只核私有目录，持久发布依赖上述文件和 move 屏障，没有 POSIX directory-fsync 或断电资格承诺。最后 path 核验和路径 move 仍不构成对不合作编辑器的原子 CAS；失败或未知发布保原 journal 和目录，不自动选择恢复决定。
+
+[Windows 维护测试](../../test/isolated/maintenance/windows.test.ts) 通过实际 CLI argv 设计覆盖 backup/inspect/restore/status、17MiB 原媒体、超过8MiB完整 caller 元数据、源 DB/副文件 presence 与 bytes、busy、原 Store fencing、旧目录与凭据排除、准确 journal digest 的 complete/rollback。它使用开发 CLI 和自有 selected engine，journal 中断来自内部确定性窗口，不冒称 installed、Native UI 或 SIGKILL 全矩阵。与 [原生 pin 测试](../../test/isolated/windows-path-security/default.test.ts) 一起仅按平台 skip；在 Windows 不因 backend/engine 不可用跳过。本机 macOS 的运行结果只证明 POSIX 行为与惰性 import，Windows 案例未执行。当前取舍和剩余验收见[维护提案](../../../../.agents/notes/proposed/architecture/2026-10-07-windows-maintenance-file-publication.md)。
 
 ## 显式恢复与 journal
 

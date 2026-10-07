@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  closeSync,
+  closeSync as closeDescriptor,
   constants,
   fstatSync,
   fsyncSync,
@@ -9,12 +9,20 @@ import {
   openSync,
   readSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeSync,
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { readPublishedArtifactChunks } from '../artifacts-files';
 import { canonicalJson } from '../json';
 import { assertNoSymlinkPath } from '../platform/profile';
+import { createWindowsArtifactTemporary } from '../platform/windows-artifact-files';
+import {
+  privateDirectory as createWindowsPrivateDirectory,
+  defaultWindowsPathSecurity,
+  type WindowsPrivateRead,
+} from '../platform/windows-path-security';
 import { MaintenanceError } from './types';
 
 export const maximumInteger = 9223372036854775807n;
@@ -29,6 +37,12 @@ export function contains(parent: string, path: string): boolean {
   return part === '' || (part !== '..' && !part.startsWith(`..${sep}`) && !part.startsWith(sep));
 }
 export function privateDirectory(path: string, create = false): string {
+  if (process.platform === 'win32') {
+    const requested = resolve(path);
+    if (create) createWindowsPrivateDirectory(requested);
+    else defaultWindowsPathSecurity()!.verifyDirectory(requested);
+    return realpathSync(requested);
+  }
   assertNoSymlinkPath(path);
   if (create) mkdirSync(path, { recursive: true, mode: 0o700 });
   const stat = lstatSync(path);
@@ -40,13 +54,62 @@ export function privateDirectory(path: string, create = false): string {
     throw new MaintenanceError('backup_access_denied');
   return realpathSync(resolve(path));
 }
-export function openPrivate(path: string): number {
+const reads = new Map<number, WindowsPrivateRead>();
+/** Release the same native pin only after all descriptor consumers have finished. */
+export function closePrivate(fd: number): void {
+  const held = reads.get(fd);
+  if (held) {
+    let error: unknown;
+    try {
+      held.verify();
+    } catch (caught) {
+      error = caught;
+    }
+    // Failed native close keeps the still-open descriptor and its original pin available.
+    held.close();
+    closeDescriptor(fd);
+    reads.delete(fd);
+    if (error) throw error;
+    return;
+  }
+  closeDescriptor(fd);
+}
+export function openPrivate(path: string, readOnly = false): number {
+  if (process.platform === 'win32') {
+    const native = defaultWindowsPathSecurity()!;
+    const held = readOnly ? native.retainReadOnlyFile(path) : native.retainPrivateFile(path);
+    let fd: number | undefined;
+    try {
+      const before = lstatSync(path, { bigint: true });
+      fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      const opened = fstatSync(fd, { bigint: true });
+      held.verify();
+      if (
+        !opened.isFile() ||
+        opened.nlink !== 1n ||
+        opened.dev !== before.dev ||
+        opened.ino !== before.ino ||
+        opened.size !== before.size
+      )
+        throw new MaintenanceError('backup_content_changed');
+      reads.set(fd, held);
+      return fd;
+    } catch (error) {
+      try {
+        held.close();
+      } finally {
+        if (fd !== undefined) closeDescriptor(fd);
+      }
+      throw error;
+    }
+  }
   assertNoSymlinkPath(path);
   const before = lstatSync(path, { bigint: true });
   if (
     !before.isFile() ||
     before.nlink !== 1n ||
     (Number(before.mode) & 0o077) !== 0 ||
+    (readOnly && (Number(before.mode) & 0o222) !== 0) ||
     (process.getuid && before.uid !== BigInt(process.getuid()))
   )
     throw new MaintenanceError('backup_access_denied');
@@ -57,12 +120,12 @@ export function openPrivate(path: string): number {
       throw new MaintenanceError('backup_content_changed');
     return fd;
   } catch (error) {
-    closeSync(fd);
+    closePrivate(fd);
     throw error;
   }
 }
-export function fingerprint(path: string, signal?: AbortSignal) {
-  const fd = openPrivate(path);
+export function fingerprint(path: string, signal?: AbortSignal, readOnly = false) {
+  const fd = openPrivate(path, readOnly);
   try {
     const before = fstatSync(fd, { bigint: true });
     const hash = createHash('sha256');
@@ -80,24 +143,65 @@ export function fingerprint(path: string, signal?: AbortSignal) {
       throw new MaintenanceError('backup_content_changed');
     return { sha256: hash.digest('hex'), byteLength: decimal(String(bytes)) };
   } finally {
-    closeSync(fd);
+    closePrivate(fd);
   }
 }
 export function syncFile(path: string): void {
+  if (process.platform === 'win32') {
+    defaultWindowsPathSecurity()!.syncPrivateFile(path);
+    return;
+  }
   const fd = openPrivate(path);
   try {
     fsyncSync(fd);
   } finally {
-    closeSync(fd);
+    closePrivate(fd);
   }
 }
 export function syncDirectory(path: string): void {
   privateDirectory(path);
+  // Windows publication uses explicit write-through file flushes and same-volume moves.
+  // It has no POSIX directory-fsync operation; this call verifies its private directory.
+  if (process.platform === 'win32') return;
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try {
     fsyncSync(fd);
   } finally {
-    closeSync(fd);
+    closePrivate(fd);
+  }
+}
+export function movePrivateEntry(source: string, target: string, replace = false): void {
+  if (process.platform === 'win32') {
+    defaultWindowsPathSecurity()!.movePrivateEntry(source, target, replace);
+    return;
+  }
+  renameSync(source, target);
+}
+/** The immutable Windows media publisher owns its original write/flush/rename handle. */
+export async function copyWindowsMedia(
+  source: string,
+  target: string,
+  hash: string,
+  size: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (process.platform !== 'win32') throw new MaintenanceError('maintenance_platform_unsupported');
+  const output = createWindowsArtifactTemporary(target);
+  try {
+    let sinceYield = 0;
+    for (const chunk of readPublishedArtifactChunks(source, hash, size)) {
+      signal?.throwIfAborted();
+      output.write(chunk);
+      sinceYield += chunk.byteLength;
+      if (sinceYield >= 1024 * 1024) {
+        await checkpoint(signal);
+        sinceYield = 0;
+      }
+    }
+    signal?.throwIfAborted();
+    output.publish(hash, size);
+  } finally {
+    output.close();
   }
 }
 export function writeAll(fd: number, bytes: Uint8Array): void {
@@ -177,9 +281,9 @@ export async function copyAssetFile(source: string, target: string, signal?: Abo
     fsyncSync(writer);
   } finally {
     try {
-      closeSync(reader);
+      closePrivate(reader);
     } finally {
-      if (writer !== undefined) closeSync(writer);
+      if (writer !== undefined) closePrivate(writer);
     }
   }
   if (
@@ -187,6 +291,7 @@ export async function copyAssetFile(source: string, target: string, signal?: Abo
     canonicalJson(fingerprint(target, signal)) !== canonicalJson(before)
   )
     throw new MaintenanceError('backup_content_changed');
+  if (process.platform === 'win32') syncFile(target);
   syncDirectory(dirname(target));
   return before;
 }
@@ -212,7 +317,7 @@ export async function withPrivateDatabaseSnapshot<T>(
         nlink: String(stat.nlink),
       };
     } finally {
-      closeSync(fd);
+      closePrivate(fd);
     }
   };
   const files = () =>
@@ -232,7 +337,7 @@ export async function withPrivateDatabaseSnapshot<T>(
     });
   const before = files();
   privateDirectory(dirname(scratch));
-  mkdirSync(scratch, { mode: 0o700 });
+  privateDirectory(scratch, true);
   let outcome: { ok: true; value: T } | { ok: false; error: unknown } = {
     ok: false,
     error: new MaintenanceError('backup_content_changed'),

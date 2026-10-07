@@ -26,7 +26,7 @@ Windows Bun 使用独立的 [public candidate scope](windows-artifact-scope.ts)�
 
 scope 保留已核验的整个原目录祖先链 HANDLE，允许 read/write sharing、拒绝 delete sharing，直到该候选的原 shared/exclusive lease 结束；root/parent 另外复核 owner/DACL。既有固定 sibling lock 仍使用 private 文件策略与真实 LockFileEx。内部 attachment 保留原 FileLock 对象和 live authority；失败只清理自己已经打开的句柄，scope 关闭失败不报告完整释放，后续 release 重试未关闭的资源。原 Profile 父子锁及无 attachment 的 OS 锁释放合同保持。scope 不验证 immutable inventory 或授予执行权限，完整制品校验仍由消费 owner 负责。
 
-本机 [Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)仅实测 POSIX/Node 惰性 import 与伪造 attachment 拒绝；实际 Windows 的普通读 ACL、原 ancestry rename 阻止、宽写/错 owner/junction/hardlink 拒绝、双独立 Bun holder 生命周期必须在 Windows 执行，不能因 backend 缺失跳过。此实现不补齐 Windows installer、维护或 Node/Electron inherited 使用权。原生权限与共享模式依据 [Microsoft 文件安全与访问权](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)、[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)和 [ACCESS_MASK](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask)。
+本机 [Windows scope 测试](../../test/isolated/artifact-access/windows-scope.test.ts)仅实测 POSIX/Node 惰性 import 与伪造 attachment 拒绝；实际 Windows 的普通读 ACL、原 ancestry rename 阻止、宽写/错 owner/junction/hardlink 拒绝、双独立 Bun holder 生命周期必须在 Windows 执行，不能因 backend 缺失跳过。此 candidate scope 不补齐 Windows installer 或 Node/Electron inherited 使用权；维护 private 文件端口由其 owner 独立核验。原生权限与共享模式依据 [Microsoft 文件安全与访问权](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)、[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)和 [ACCESS_MASK](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-mask)。
 
 
 `acquireInheritedArtifactAccess({root,fd})` 为可信一次性 Bun helper 提供固定 shared 使用权。它与普通入口共用 canonical root、原 owner、root/parent 禁止组或其他用户写入与安全 basename 检查；目标仍是固定 sibling `.use-<basename>.lock`，不接任意 lock path、mode、Profile、Store 或执行参数。仅采用 darwin/linux 的 inherited fd；非法 root/alias、foreign inode、symlink、hardlink、宽 lock mode、busy 或 unsupported 平台均关闭 helper 已接管的有效 fd。非法数字 descriptor 在接管前拒绝。
@@ -35,6 +35,8 @@ Node/Electron 宿主以 no-follow 打开准确 sibling fd，通过 child stdio �
 
 [Artifact 隔离测试](../../test/isolated/artifact-access/artifact-access.test.ts) 使用实际 Node→Bun fd 继承，验证 helper release/exit/SIGKILL、两个 holder 的 close/父 SIGKILL 隔离、same-basename foreign scope、替换 inode、alias/links/mode 与所有有效 fd 失败关闭；源码树外 public `@kite-ai/agent/artifact-access` compiled leaf 的 shared/exclusive probes 亦无 TS fallback。unsupported platform 仅做受控分支关闭反例，不是 Windows 资格。当前真实 OS 资格为本机 macOS；Linux 虽有实现分支尚未在本轮运行，Windows inherited fd 不支持。测试不授予 Profile、SQLite、Model 或执行权限，不代替完整 installer/Native 生命周期验收。
 
+
+Windows 维护使用独立的 private Profile 文件政策和原稳定排他锁，已接入原文件/祖先 pin、FA metadata 与 FR media 分角色验证、GENERIC_WRITE flush 与 same-volume write-through move；它不借 public candidate scope 授权。完整行为、SQL/FD 生命周期和原生未验范围归[maintenance owner](../maintenance/README.md#windows-维护文件端口与验收边界)；当前 macOS 类型与邻接通过不能证明 Windows 运行或安装资格。
 
 ## Shell guardian 与 macOS confinement
 

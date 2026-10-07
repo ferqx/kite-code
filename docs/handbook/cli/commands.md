@@ -92,6 +92,8 @@ Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 也按�
 当前范围包括SQLite与被引用不可变媒体，并分别采集实际profile的config.jsonc原字节、Desktop私有UI一致副本、真实TUI未提交文本文件和终端显示偏好 `ui/preferences.jsonc` 原字节；每项记录存在/缺失、采集时间与摘要，不能当作跨介质同一瞬间原子。原配置可能含敏感内容，备份按私有0600保存，不解析vault或自动脱敏。恢复发布备份中存在的这些文件，保留原草稿/创建身份，不重放旧意图。credentials/vault及未采集宿主私有文件仍排除，旧当前字节保存在保留目录。TUI草稿保留原Store/Workspace/Session且不自动发送或改绑，JSON保留 `coverage.profileComplete:false`；本命令尚不满足整个W19或三平台发行资格。实现与实际临时制品验证见 [CLI owner](../../../apps/cli/README.md#开发-cli-离线维护)。
 
 
+Windows Bun x64 的开发维护入口已接入同一备份、检查、恢复和明确 journal 决定；私有权限由当前用户 SID/DACL 核验，既有不安全文件会拒绝且不修权限。实际原生 Windows 流程尚未验收，完整 Windows 安装及标准命令入口仍未完成；macOS 或 Linux 结果不代表 Windows 通过。准确实现与平台范围见[维护 owner](../../../packages/agent/src/maintenance/README.md#windows-维护文件端口与验收边界)。
+
 ## 通用开发入口核实原 Job
 
 `bun run cli:dev job reconcile <根会话ID> --input '<JSON>' [--server <本地socket>]` 核实原外部任务；JSON 必须提供 `kind:"job.reconcile"`、原 `expectedStoreId`、新的 `commandId`、原 `executionId` 和观察到的 `expectedResultRevision`。不传server时使用所选profile的配套Service，传入时只连接该工作区的原共享Service。

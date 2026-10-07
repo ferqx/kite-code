@@ -31,3 +31,5 @@ actual Windows x64必须执行原生完整正文、取消和close drain、真实
 ## Risks
 
 Bun FFI和Windows x64 ABI仍待actual CI。FlushFileBuffers原文件回执与进程强杀不证明断电后的directory durability；本方案不声称SQLite与文件系统原子事务。ARM64尚unsupported，且该媒体政策不能被套用于普通Workspace或安装candidate根目录。原生HANDLE、读共享、碰撞错误码和所有失败关闭路径必须由实际平台证据核对。
+
+Windows维护文件端口现已接入原API与开发CLI，完整角色、原HANDLE/FD/SQL生命周期、发布屏障与未验范围见[维护提案](2026-10-07-windows-maintenance-file-publication.md)。本篇其余角色与安全理由保持，实际原生资格仍未取得。

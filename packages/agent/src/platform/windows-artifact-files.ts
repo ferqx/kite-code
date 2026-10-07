@@ -171,7 +171,7 @@ function native() {
       share,
       sd ? ptr(sa) : null,
       create ? 1 : 3,
-      0x02200000,
+      0x02200000 | (create ? 0x80000000 : 0),
       0,
     );
     if (!handle || BigInt(handle) === 18446744073709551615n) fail();

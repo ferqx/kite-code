@@ -4,6 +4,10 @@ import type { WindowsPathSecurity } from './locks';
 
 /** Fixed OS policy; no caller supplied SID, descriptor, DLL or privilege escalation. */
 let cached: NativeWindowsPathSecurity | undefined;
+export interface WindowsPrivateRead {
+  verify(): void;
+  close(): void;
+}
 export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   verifyScopeDirectory(path: string): void;
   readScopeFile(path: string, maxBytes: number, privateFile?: boolean): Uint8Array | null;
@@ -12,6 +16,10 @@ export interface NativeWindowsPathSecurity extends WindowsPathSecurity {
   createFile(path: string): void;
   verifyPath(path: string): void;
   verifyHandle(handle: bigint | number, path: string, directory: boolean): void;
+  retainPrivateFile(path: string): WindowsPrivateRead;
+  retainReadOnlyFile(path: string): WindowsPrivateRead;
+  syncPrivateFile(path: string): void;
+  movePrivateEntry(source: string, target: string, replace?: boolean): void;
 }
 export function defaultWindowsPathSecurity(): NativeWindowsPathSecurity | undefined {
   if (process.platform !== 'win32') return undefined;
@@ -60,6 +68,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     ReadFile: { args: ['u64', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'bool' },
     WriteFile: { args: ['u64', 'ptr', 'u32', 'ptr', 'ptr'], returns: 'bool' },
     FlushFileBuffers: { args: ['u64'], returns: 'bool' },
+    MoveFileExW: { args: ['ptr', 'ptr', 'u32'], returns: 'bool' },
   });
   const system = new Uint16Array(32768);
   const systemLength = kernel.symbols.GetSystemDirectoryW(ptr(system), system.length);
@@ -138,6 +147,8 @@ function createNativeWindowsPathSecurity(): Implementation {
     sd?: import('bun:ffi').Pointer,
     access = 0x20000,
     reuse = true,
+    share = 7,
+    flags = 0x02200000,
   ): bigint | number => {
     const sa = new Uint8Array(24);
     if (sd) {
@@ -148,10 +159,10 @@ function createNativeWindowsPathSecurity(): Implementation {
     const handle = kernel.symbols.CreateFileW(
       ptr(wide(path)),
       access,
-      7,
+      share,
       sd ? ptr(sa) : null,
       create ? 1 : 3,
-      0x02200000,
+      flags,
       0,
     );
     if (!handle || BigInt(handle) === invalid) {
@@ -168,7 +179,7 @@ function createNativeWindowsPathSecurity(): Implementation {
   };
   const identity = (value: DataView) =>
     `${value.getUint32(28, true)}:${value.getUint32(44, true)}:${value.getUint32(48, true)}`;
-  const verifyAcl = (handle: bigint | number, directory: boolean) => {
+  const verifyAcl = (handle: bigint | number, directory: boolean, readOnly = false) => {
     const owner = out(),
       dacl = out(),
       sd = out();
@@ -180,7 +191,7 @@ function createNativeWindowsPathSecurity(): Implementation {
         revision = new Uint32Array(1);
       if (!adv.symbols.GetSecurityDescriptorControl(pointer(sd[0]!), ptr(control), ptr(revision)))
         fail();
-      if (!(control[0]! & 4) || (directory && !(control[0]! & 0x1000))) fail();
+      if (!(control[0]! & 4) || ((directory || readOnly) && !(control[0]! & 0x1000))) fail();
       const acl = new DataView(toArrayBuffer(pointer(dacl[0]!), 0, 8));
       if (acl.getUint16(4, true) !== 1) fail();
       const ace = out();
@@ -191,8 +202,8 @@ function createNativeWindowsPathSecurity(): Implementation {
       if (
         header.getUint8(0) !== 0 ||
         header.getUint16(2, true) < 12 ||
-        (flags & ~0x13) !== 0 ||
-        header.getUint32(4, true) !== 0x1f01ff ||
+        (readOnly ? flags !== 0 : (flags & ~0x13) !== 0) ||
+        header.getUint32(4, true) !== (readOnly ? 0x120089 : 0x1f01ff) ||
         (directory && (flags & 3) !== 3) ||
         !adv.symbols.EqualSid(pointer(BigInt(address) + 8n), sid)
       )
@@ -206,6 +217,7 @@ function createNativeWindowsPathSecurity(): Implementation {
     path: string,
     directory: boolean,
     privateObject = true,
+    readOnly = false,
   ) => {
     const original = info(handle);
     if (
@@ -214,11 +226,11 @@ function createNativeWindowsPathSecurity(): Implementation {
       (!directory && original.getUint32(40, true) !== 1)
     )
       fail();
-    if (privateObject) verifyAcl(handle, directory);
+    if (privateObject) verifyAcl(handle, directory, readOnly);
     const current = open(path, false);
     try {
       if (identity(info(current)) !== identity(original)) fail();
-      if (privateObject) verifyAcl(current, directory);
+      if (privateObject) verifyAcl(current, directory, readOnly);
     } finally {
       if (!kernel.symbols.CloseHandle(current)) fail();
     }
@@ -230,6 +242,70 @@ function createNativeWindowsPathSecurity(): Implementation {
       verifyHandle(handle, path, directory, privateObject);
     } finally {
       if (!kernel.symbols.CloseHandle(handle)) fail();
+    }
+  };
+  type Held = { path: string; handle: bigint | number; directory: boolean };
+  const closeHeld = (held: Held[]) => {
+    let error: unknown;
+    for (let index = held.length - 1; index >= 0; index--) {
+      if (kernel.symbols.CloseHandle(held[index]!.handle)) held.splice(index, 1);
+      else error ??= Error('windows_path_security_close_failed');
+    }
+    if (error) throw error;
+  };
+  const retainParents = (paths: string[], held: Held[]) => {
+    const parents = new Set<string>();
+    for (const path of paths) {
+      const chain: string[] = [];
+      for (let current = dirname(path); ; ) {
+        chain.unshift(current);
+        const parent = dirname(current);
+        if (parent === current) break;
+        current = parent;
+      }
+      for (const entry of chain) {
+        if (parents.has(entry)) continue;
+        const handle = open(entry, false, undefined, 0x20080, false, 3);
+        held.push({ path: entry, handle, directory: true });
+        parents.add(entry);
+        verifyHandle(handle, entry, true, false);
+      }
+    }
+  };
+  const retain = (path: string, readOnly: boolean): WindowsPrivateRead => {
+    path = resolve(path);
+    api.verifyPath(path);
+    api.verifyDirectory(dirname(path));
+    const held: Held[] = [];
+    const close = () => closeHeld(held);
+    try {
+      retainParents([path], held);
+      // Deny new write and delete opens while a Node/Bun descriptor reads the pinned file.
+      // Parent handles deny rename; no caller receives or supplies a native HANDLE.
+      const handle = open(path, false, undefined, 0x80020000, false, 1);
+      held.push({ path, handle, directory: false });
+      verifyHandle(handle, path, false, true, readOnly);
+      const original = info(handle);
+      const stamp = (value: DataView) =>
+        [0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48].map((offset) => value.getUint32(offset, true));
+      const expected = stamp(original).join(':');
+      return Object.freeze({
+        verify() {
+          if (!held.some((entry) => entry.handle === handle)) fail();
+          for (const entry of held)
+            verifyHandle(entry.handle, entry.path, entry.directory, !entry.directory, readOnly);
+          api.verifyDirectory(dirname(path));
+          if (stamp(info(handle)).join(':') !== expected) fail();
+        },
+        close,
+      });
+    } catch (error) {
+      try {
+        close();
+      } catch (cleanup) {
+        throw new AggregateError([error, cleanup], 'windows_path_security_close_failed');
+      }
+      throw error;
     }
   };
   const api: Implementation = {
@@ -341,6 +417,54 @@ function createNativeWindowsPathSecurity(): Implementation {
       verify(path, false);
     },
     verifyHandle,
+    retainPrivateFile(path) {
+      return retain(path, false);
+    },
+    retainReadOnlyFile(path) {
+      return retain(path, true);
+    },
+    syncPrivateFile(path) {
+      api.verifyPath(path);
+      const handle = open(path, false, undefined, 0xc0020000, false, 7, 0x82200000);
+      try {
+        verifyHandle(handle, path, false);
+        if (!kernel.symbols.FlushFileBuffers(handle)) fail();
+        verifyHandle(handle, path, false);
+      } finally {
+        if (!kernel.symbols.CloseHandle(handle)) fail();
+      }
+    },
+    movePrivateEntry(source, target, replace = false) {
+      source = resolve(source);
+      target = resolve(target);
+      api.verifyPath(source);
+      api.verifyPath(target);
+      const held: Held[] = [];
+      try {
+        retainParents([source, target], held);
+        api.verifyDirectory(dirname(source));
+        api.verifyDirectory(dirname(target));
+        const directory = lstatSync(source).isDirectory();
+        // This source handle allows our own rename; parent handles still deny ancestor
+        // replacement. The published path must identify this original source object.
+        const handle = open(source, false);
+        held.push({ path: source, handle, directory });
+        verifyHandle(handle, source, directory);
+        if (existsSync(target)) {
+          if (!replace || directory) fail();
+          api.verifyFile(target);
+        }
+        const from = wide(source),
+          to = wide(target);
+        // No COPY_ALLOWED or delayed reboot: only a synchronous same-volume publication.
+        if (!kernel.symbols.MoveFileExW(ptr(from), ptr(to), 8 | (replace ? 1 : 0))) fail();
+        verifyHandle(handle, target, directory);
+        for (const parent of held.slice(0, -1))
+          verifyHandle(parent.handle, parent.path, true, false);
+      } finally {
+        closeHeld(held);
+      }
+    },
     createDirectory(path) {
       const sd = descriptor(true),
         sa = new Uint8Array(24);
