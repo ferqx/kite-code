@@ -1908,13 +1908,13 @@ Main 从实际选中 Session 取得 Workspace，封存 attach generation、view 
 
 已运行验收覆盖原公共 HTTP 的来源分类与局部状态、Main/IPC 准入和迟到读取、实际 DOM 的完整分页及切换/关闭；搬迁、删除构建源后的默认 Native 窗口验证了 306 项完整目录、不同 Workspace、冷重启和零 Run/Execution。当前原完整默认 598 文件/475 任务全部通过，正常类型/制品/文档/边界门禁保持；准确范围及原失败见[进度](unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)。当前负责说明见 [Desktop](../../apps/desktop/README.md)、[Service](../../apps/service/README.md)、[Client](../../packages/client/README.md)，设计理由另记 [Native Skills 决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。
 
-当前 Native 后台 Job 输出、长会话当前投影及同原 Store 跨会话后台总览的交付与证据见下节。总览已迁移到公开完整目录，原父／child Run、非选中完整读取、准确停止和冷 GET 保持各自身份；恢复为新 Store 的旧来源条目仍须按兼容范围核验。按依赖保留三项退出缺口：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程、默认新 Job 输出生产及正式持续负载资格未闭合；支持范围的 §35/T/E、三平台与兼容制品／新链路数据资格齐全后才能最终退役旧路径。当前选中会话的有限投影不承担完整后台目录。不能以静态入口已切换、显式 Shell 生产端资格或原完整默认通过替代默认后端能力证据。
+当前 Native 后台 Job 输出、长会话当前投影及同原 Store 跨会话后台总览的交付与证据见下节。总览已迁移到公开完整目录，原父／child Run、非选中完整读取、准确停止和冷 GET 保持各自身份；恢复为新 Store 的旧来源历史已按 §30.2.4 验收，本机 Terminal 真实代码回退按 §30.2.5 验收。按依赖保留三项退出缺口：Native MCP 的真实 Chrome/default OS Vault 四项 Auth 验收待人工证书接管；默认可信 Shell 尚未装配，普通开发子进程、默认新 Job 输出生产及正式持续负载资格未闭合；支持范围的其余维护恢复、§35/T/E、三平台与兼容制品／新链路数据资格齐全后才能最终退役旧路径。当前选中会话的有限投影不承担完整后台目录。不能以静态入口已切换、显式 Shell 生产端资格或原完整默认通过替代默认后端能力证据。
 
 | 依赖顺序与入口 | 完整行为和退出验收 |
 | --- | --- |
 | 1．正式 Native MCP 设置／真实 Chrome 登录 | 人工接管自有HTTPS证书提示后，完成四项固定Auth、默认OS Vault及原身份冷查回；真实浏览器、凭据和所属进程证据分别保持。 |
 | 2．默认 CLI/TUI/Native 的普通开发Shell／Job | 装配具普通开发FS/network边界且可靠监管全部子树的后端；实际默认新producer、完整保存输出、准确停止与empty证明、宿主退出及持续负载资格齐全，不以PGID或deny-fork替代。 |
-| 3．正式制品切换与旧路径退役 | 支持范围的完整§35与适用T/E、三平台、兼容制品／新链路数据和回退分别取得真实证据；恢复为新Store的旧来源后台目录与完整详情须另核，再验证正式调用者独立并最终退役历史旧路径。 |
+| 3．正式制品切换与旧路径退役 | 支持范围的其余维护恢复（含profile MCP声明／批准／auth-ref配置）、完整§35与适用T/E、三平台、Native跨代码冷回退和已发布旧样本分别取得真实证据，再验证正式调用者独立并最终退役历史旧路径；已闭合的恢复后台消费者和本机Terminal代码组合见§30.2.4／30.2.5。 |
 
 ### 30.2.2 当前 Native Job 完整已保存输出消费者
 
@@ -1945,6 +1945,14 @@ renderer 只有覆盖全部 H 后才发布完整内容，不设总页数截断�
 本轮已补齐上述总览的恢复历史读取：公开物理 backup／restore 从 A 生成 B，当前准入与快照仍为 B，原 Job／Command／Run／child 与输出出处保持 A。只在准确已恢复根会话及真实来源／root-work／child-start 血缘内接纳旧来源；重复恢复也须保留期间新 B 工作的原出处。Native Main 同时固定当前连接与原执行来源，完整输出／子消息及 ModelOutput 沿现有 GET 读取，历史项明确显示只读。底层取消在任何写入前核目标及扩展范围属于当前 Store，不能因新取消命令而修改旧执行；当前 B 工作仍按原明确停止入口控制。
 
 已执行的同一公开恢复 fixture 证明完整目录、原输出／子轮次、历史取消零写入及当前工作正常控制，既有源码外默认 Native 窗口的 cold 阶段已改为真实恢复后的新 Store，1pass／27Bun断言及实际driver断言通过。读取前后的 Provider、cursor、Session／Run／Execution 和物理 HTTP 方法必须保持只读；恢复本身的合法保守状态变更单独作 cold 基线。该范围仍不包括诊断 SessionLog 的 replayFloor 重放、新 producer 或其他平台；完整子日志指现有固定消息上界的子会话消息与完整 ModelOutput。阶段收束原完整608文件／482任务全部通过，actual0／857.470s、4068regular／Git前后一致，原恢复窗口47774ms再次通过，制品digest同有限窗口。类型／八workspacebuild／API与文档／边界门禁通过；完整证据归[进度](unified-agent-refactor-v1-progress.md#2026-10-07恢复后的正式-native-后台历史)，沿已有本地提交授权交付。
+
+### 30.2.5 Terminal 真实代码升级与冷回退
+
+当前已实施 §35 新基线兼容代码回退的本机 Terminal 用户链路。固定历史提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 使用其原 builder，当前代码另建完整候选；保持相同 productVersion、锁输入与 format=1 SQL 基线，核实际 Agent 字节不同。旧源码在运行前删除，两候选归档搬迁并删除原输出；通过实际安装 CLI/daemon 完成 A任务→升级B新任务→正常停止→回退A冷读B新数据并继续同原会话→切换B冷读全部原记录→正常停止与卸载。
+
+已执行原 isolated 作业1pass/335assert/0，原 Store和三条原 Command/Run/Model 身份、352041 UTF-8 字节完整正文及其hash/ref保持，回退后的新模型实际收到B全文。冷GET零Provider增量、只读Store游标不增长，四实例准确普通退出及全部候选EX通过，卸载保数据库inode/完整bytes/配置，回退未恢复数据。当前原完整默认609文件／483作业全部通过，actual0／正常drain902.586s，4071regular／Git前后保持；本片原图129396ms通过、同候选digest及全部收尾断言。Root及八workspace类型／八workspacebuild和强制门禁通过，fresh独立只读审查无必要代码修改；文档复核要求准确区分同步前后门禁，最终交付前另核新证据。当前负责范围见[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)，原失败、独立审查及阶段完整回归归[进度](unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
+
+这是本地两个真实代码候选的兼容资格；已发布旧制品／T029、Native跨代码冷回退、其他平台和全部§35/T/E未因此完成。当前优先退出依赖仍为真实Chrome/default OS Vault四Auth人工接管、默认可信普通开发Shell与新Job producer／正式持续负载、支持范围内其余维护恢复及制品兼容／三平台，齐全后才能最终退役旧路径。37能力仍partial、wholeV13=false。
 
 ### 30.3 第一条执行闭环
 

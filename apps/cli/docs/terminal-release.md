@@ -46,10 +46,15 @@ stable shell launcher 固定一次 active，清除 NODE_PATH/NODE_OPTIONS/BUN_OP
 当前真实资格为 macOS arm64、Bun 1.4.2：搬迁后删除原输出、独立 HOME/PATH、两个安装入口、固定模型一次实际 Run、SQLite Worker 读回原历史、共享 daemon/TUI PTY、升级/回滚原实例固定、live 使用时拒绝卸载、停止后卸载和独立用户数据保持。测试入口：
 
 - [真实 bundle 与生命周期](../../../tests/isolated/unified-agent/terminal-bundle.test.ts)
+- [真实代码升级与冷回退](../../../tests/isolated/unified-agent/terminal-cross-version.test.ts)
 - [安装负例](../../../tests/isolated/unified-agent/terminal-install.test.ts)、[归档负例](../../../tests/isolated/unified-agent/terminal-archive.test.ts)
 - [依赖闭包](../../../tests/isolated/unified-agent/terminal-dependencies.test.ts)、[完整选择器](../../../tests/isolated/unified-agent/terminal-artifact.test.ts)
 
-测试升级候选由同一实际 bundle 改 productVersion 产生，仅证明生命周期与指针机制，不冒充已发布 predecessor。当前安装分支支持 POSIX，Linux 尚待本轮真实资格，Windows 安装明确拒绝。断电恢复、平台签名、生产 sandbox/exporter、全部平台资格及完整 T/E 仍未由这些测试证明。
+原 bundle 生命周期测试的升级候选由同一实际 bundle 改 productVersion 产生，只证明指针机制。独立跨代码版本测试使用固定新基线提交 `3140fe6d37131050033c66ffd9637fe7cd967da9` 的原源码和原 builder，与当前源码分别生成完整候选；两者 productVersion 均为 `0.1.0`，实际 Agent 字节与 candidate ID 不同。[旧候选物化夹具](../../../tests/fixtures/unified-agent/terminal-predecessor.ts)先核相同锁文件、八 workspace 清单、补丁及 format=1 SQL 基线，复制当前准确已安装 npm 依赖并将 workspace 链接指向旧源码，旧 builder 的闭包守卫保持；构建后删除旧源码，再归档、搬迁和删除原候选输出。它证明本地真实代码组合，不代表已发布 predecessor 或 npm 发布来源资格。
+
+实际安装前门依次完成 A 任务、升级 B 后新任务、正常停止后回退 A 并冷读 B 的完整正文、A 继续原会话、再切换 B 冷读全部原记录。公共 Client 与各自候选内只读 Store 核同一 Store、原 Command/Run/Model 身份和正文/ref/hash；352041 UTF-8 字节 Unicode 正文也完整进入回退后的新模型请求。冷 GET 不增加模型请求或持久游标，四次启动为不同实例；公开 stop 核准确 PID/startIdentity 已退出、全部安装候选 EX 可取，卸载保留原数据库 inode、完整字节和配置。没有恢复旧数据库。当前本机有限验收1pass/335assert，原失败和阶段完整默认结果归[进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
+
+上述新测试沿默认 isolated 每文件进程、进程内 concurrency=1 运行，可与其他隔离文件共享槽；构建输出、旧 clone、reader、安装和数据均位于自有临时根。当前安装分支支持 POSIX，Linux 尚待真实资格，Windows 安装明确拒绝。Native 跨代码冷回退、已发布旧样本、断电恢复、平台签名、生产 sandbox/exporter、全部平台资格及完整 T/E 仍未由本机 Terminal 组合证明。
 
 ## 发布引擎与双发行包选择
 

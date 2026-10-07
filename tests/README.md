@@ -41,6 +41,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 [独立开发 Web 启动测试](isolated/unified-agent/web-launcher.test.ts)固定已选 profile/配套 entry/API/capabilities 与校验过的资产，经公开 paired Service 和只读 Gateway 验证。有限参数、stdout 仅 endpoint、坏资产零新 profile、浏览器关闭后原 Model 继续，以及真实宿主 EOF/SIGTERM 后所属 PID 和 TCP listener 消失分别断言。隔离 fixture 使用无害固定 Model；不替代正式 daemon/TUI/Electron 或发行安装资格。
 
+[Terminal 跨代码版本](isolated/unified-agent/terminal-cross-version.test.ts)由[固定旧提交夹具](fixtures/unified-agent/terminal-predecessor.ts)调用其原 builder，与当前源码分别生成完整候选，保持同一 productVersion、锁输入和SQL基线，搬迁后删除旧source与原输出。实际安装 CLI/daemon A→B→A→B 核同原 Store、新正文完整读回和进入回退后的新模型请求、冷只读零重放、准确普通停止/EX及卸载保数据；[reader](fixtures/unified-agent/terminal-cross-version-read.ts)的裸 imports只解析各自安装候选。它沿原 isolated 每文件进程/进程内 concurrency=1，共享默认槽且不写当前checkout；Required unit完整history缺固定旧commit即失败。本机代码比较不是已发布旧fixture或Native/三平台资格，准确执行与原失败归[进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07terminal-真实代码升级与冷回退)。
+
 [Model Inspector Core](../packages/agent/test/isolated/model-input/inspector.test.ts)、[Client 完整流](../packages/client/test/isolated/model-input.test.ts)、[实际 Service/Gateway](isolated/unified-agent/model-input.test.ts)和[Web DOM](../apps/web/test/model-input.test.tsx)分别验证准确原调用、完整交接和展示。>200 目录压力通过具名 Store 建立 planned intents，不称发生了相同数量的 Provider 调用；实际17MiB内容经过原scope Artifact/固定Model与Native/Browser，成功EOF/hash前不发布正文。真实流在首块后停住仍能取消，非法metadata先释放body；UI确认前零正文GET，隐藏/关闭/切换清正文，缺失settings明确unavailable。IAB验收固定无害内容，关闭后Model计数保持，不将当前Context或Runtime logs导航等同该原请求入口。
 
 ## 显式命令与 CI
