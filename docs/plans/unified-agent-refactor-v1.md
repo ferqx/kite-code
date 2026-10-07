@@ -2001,6 +2001,8 @@ x64仿真三次失败保留；临时55秒driver在原120秒仍失败后已撤销
 | release install/update/uninstall/标准CLI与maintenance backup/inspect/restore/status | 支持平台的真实制品、GUI/PTY/双lease和保数据卸载，准确独立引擎；Windows安装/维护实现，Linux x64/Windows原生结果、已发布新基线predecessor/T029及其余恢复子场景仍需实际证据。恢复保外置锁、换Store且不改原操作出处、不重放旧副作用；本片Linux arm64有限资格不能扩大到这些范围。 |
 | 正式切换后的旧路径最终退役 | 前三项及全部适用§35/T001—T114/E01—E14有证据，参考功能/既有扩展/未见样本沿公共边界成立；正式consumer无legacy业务carrier，完成必要删除并复验新基线兼容与完整回归。不能以当前无正式旧调用或全量unit通过提前宣布整体退出。 |
 
+默认宿主 Shell 的候选接口新增实际核验：本机 SDK 27 声明的后代范围 Endpoint Security 接口最低要求 macOS 27.0 和对应 entitlement，当前 macOS 26.7.1 运行库没有该符号，尚不能取得普通宿主完整后代资格。原 guardian、产品宿主语义和默认装配保持；接口范围、已执行探针与未验条件分别归 [Jobs owner](../../packages/agent/src/jobs/README.md)及[进度](unified-agent-refactor-v1-progress.md#2026-10-07宿主-shell-完整后代接口的运行资格)。Native 四Auth 的实际 Chrome 访问另遭自动审批拒绝，已请求仅本任务自有测试页的明确授权；原人工证书处理和 Windows x64 环境问题仍待回复。
+
 37能力保持partial、wholeV13=false、Goal active；本地stage/commit授权不扩大到push/PR/发布。
 
 ### 30.2.10 Linux 真实代码升级与冷回退
