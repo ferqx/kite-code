@@ -2324,3 +2324,16 @@ Store/Service、宿主Shell和Chrome/Vault实现输入未改；Core正文读取�
 Root+八 workspace 类型实际0，最终 UI 类型0、改动源码/测试 Biome0；按用户随后“TUI不要过度验证，目前重点在客户端”的要求，本切片保留上述必要验证并执行文档检查和正常提交 hook，不再扩展 TUI 矩阵或追加原整套默认；完整阶段退出仍保留原回归要求。前一语句释放切片的492任务通过不覆盖本次新 UI。当前只是正式单会话选择/确认消费者交付，37能力仍partial、wholeV13=false、Goal active；新独立审查此前因 agent thread limit 未能创建，主 Agent 自检不替代它。
 
 主线剩余缺口按退出依赖维持五项：① Workspace 批量移除及物理 GC 的公共边界与实际用户入口；② 剩余恢复/installed 维护与已发布样本的方案验收；③ macOS RSS 原增长失败、原八轮稳定性与三项全局资源；④ 完整迁移的独立审查；⑤ 前置全部满足后最终删除旧路径并验证 Win/Linux Actions。第二至五项不由当前 D 按键通过关闭；只保现有本地 stage/commit 授权，无 push、PR、发布或 dispatch。
+
+
+## 2026-10-08：PC 客户端项目会话目录
+
+用户进一步明确当前重点是 PC 客户端。TUI 的必要界面/正式终端证据与文档已本地提交 `6dc1317e111168332a4c69c4d5b48f5c3be53dbe`；正常 api-contract/docs/docs-impact/format/protected-branch/typecheck/unified-boundary hooks 全部通过，16个owned提交blob与工作树SHA逐项相等，AGENTS.md原改动保持。遵守最新要求未追加TUI矩阵、完整默认或Chrome资格复跑，当前阶段退出门禁没有因局部通过改为完成。
+
+正式 Native 原目录把全部 Workspace 与 Session 分别平铺，尚未提供手册的项目归属、独立展开收起和空项目状态。现将原 renderer 接到 `NativeDirectory`：按准确 workspaceId 分组，项目默认展开，收起只改本地显示，上下只移动可见焦点，确认沿原 Session ID 读取。创建等待期间只禁用新建，阅读继续；原创建回调保点击时 Workspace/Store、Command、新 Session 和 view intent，迟到回执不能改选后来阅读目标。选择标记核同 Store，目录 Store 更换重置本地折叠。
+
+Workspace/Session完整目录仍由原Main分别读取；两次读取之间出现的新项目对应会话继续显示在项目待读取分组，保全部原ID，不猜名称或丢条目。本改动不加IPC、SDK/API、Store schema、Runtime或持久UI字段。公开Session没有更新时间，未补造最新排序；批量移除/GC、原完整侧栏视觉与后续正式PC验收仍pending。产品预期与新当前范围分别同步手册和Desktop owner；不以历史旧页面或这个局部展示冒称完整客户端迁移已完成。
+
+实际 DOM 两个完整文件 actual0/2pass/26assert/695ms，日志 `/private/tmp/kite-pc-directory-dom-final-20261008.log`：同名会话准确分组/原ID，空项目、独立折叠零业务调用，上下焦点零选择，创建期间仍可点击其他会话，未进入项目上界的原会话保留；原 NativeDesktop 草稿场景保持后选视图和文本。首次提取创建函数使 TypeScript 函数内 bridge narrowing 缺失，actual2/三条TS18048，原日志保留；函数内显式核 bridge 后复验。最终三文件Biome actual0/no fixes。类型与正常提交hook按最终输入记录；此次没有增加TUI、Web、资源或跨平台测试范围。
+
+当前 PC 主线仍须闭合项目批量移除/物理GC、其余正式PC能力和installed恢复维护，再按原资源、独立审查及旧路径退出条件收束；现有RSS失败保持，Windows/Linux仍按用户安排重构完成后由Actions验证。wholeV13=false、Goal active，授权仍仅本地stage/commit，无push/PR/发布/dispatch。

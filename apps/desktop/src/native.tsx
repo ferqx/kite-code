@@ -16,6 +16,7 @@ import { NativeBackgroundPanel } from './native-background-panel';
 import type { NativeDraft, NativeGrantFacts, NativeResult, NativeState } from './native-bridge';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
+import { NativeDirectory } from './native-directory';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
@@ -369,6 +370,34 @@ export function NativeDesktop() {
       await report(refresh);
     }
   }
+  async function createSession(workspaceId: string) {
+    if (!bridge) return;
+    await write(async () => {
+      const sessionId = crypto.randomUUID(),
+        commandId = crypto.randomUUID(),
+        current = generation.current,
+        selectionAtClick = viewIntent.current;
+      const value = await bridge.request({
+        method: 'createSession',
+        generation: current,
+        workspaceId,
+        sessionId,
+        commandId,
+        title: '新对话',
+        expectedStoreId: (
+          (await bridge.request({ method: 'directory', generation: current })) as {
+            storeId: string;
+          }
+        ).storeId,
+      });
+      apply(await bridge.request({ method: 'state', generation: current }));
+      if (!value || !('phase' in value) || value.phase !== 'created')
+        throw Error('session_receipt_unknown');
+      await readDirectory();
+      if (generation.current === current && viewIntent.current === selectionAtClick)
+        await select(sessionId);
+    });
+  }
   return (
     <main style={{ padding: 24, maxWidth: 1100, margin: 'auto', fontFamily: 'system-ui' }}>
       <h1>kite</h1>
@@ -559,53 +588,17 @@ export function NativeDesktop() {
             )}
           </section>
         ))}
-        {(directory?.workspaces ?? []).map((workspace) => (
-          <div key={workspace.id}>
-            <strong>{workspace.name}</strong>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                void write(async () => {
-                  const sessionId = crypto.randomUUID(),
-                    commandId = crypto.randomUUID(),
-                    current = generation.current,
-                    selectionAtClick = viewIntent.current;
-                  const value = await bridge.request({
-                    method: 'createSession',
-                    generation: current,
-                    workspaceId: workspace.id,
-                    sessionId,
-                    commandId,
-                    title: '新对话',
-                    expectedStoreId: (
-                      (await bridge.request({ method: 'directory', generation: current })) as {
-                        storeId: string;
-                      }
-                    ).storeId,
-                  });
-                  apply(await bridge.request({ method: 'state', generation: current }));
-                  if (!value || !('phase' in value) || value.phase !== 'created')
-                    throw Error('session_receipt_unknown');
-                  await readDirectory();
-                  if (generation.current === current && viewIntent.current === selectionAtClick)
-                    await select(sessionId);
-                })
-              }
-            >
-              新建会话
-            </button>
-          </div>
-        ))}
-        {(directory?.sessions ?? []).map((session) => (
-          <button
-            type="button"
-            key={session.id}
-            onClick={() => void report(() => select(session.id))}
-          >
-            {session.title}
-          </button>
-        ))}
+        {directory && (
+          <NativeDirectory
+            key={directory.storeId}
+            workspaces={directory.workspaces}
+            sessions={directory.sessions}
+            selectedId={selection?.storeId === directory.storeId ? selection.session.id : undefined}
+            creating={pending}
+            onCreate={(workspaceId) => void createSession(workspaceId)}
+            onSelect={(sessionId) => void report(() => select(sessionId))}
+          />
+        )}
       </section>
       {state && directory && (
         <NativeBackgroundPanel

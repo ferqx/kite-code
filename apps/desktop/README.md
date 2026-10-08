@@ -1,5 +1,13 @@
 # Desktop 与 Native 制品
 
+## Native 项目会话目录
+
+正式 renderer 的 [NativeDirectory](src/native-directory.tsx) 按公共 `workspaceId` 将原 Session 放入对应项目，项目默认展开，可独立收起；空项目显示“暂无聊天”。收起只改变本地展示，不调用 bridge、不选择项目，也不取消工作。上下键只移动当前可见目录焦点，按钮确认仍调用原 Session ID。新建期间只禁用新建入口，会话阅读仍可切换；[NativeDesktop](src/native.tsx) 沿原创建/选择回调处理，迟到创建回执不能改选后来查看的会话或搬移草稿。当前选择标记先核相同 Store。展开状态随目录 Store 重建，不写入 Core 或私有 UI 数据库。
+
+Workspace 与 Session 的公共完整目录是分别读取的；读取之间新登记的项目可能尚未出现在前一上界。相应 Session 保留在“项目待读取的会话”，不猜项目名称、不丢条目，下一次明确目录读取再更新归属。公开 Session 目前没有更新时间字段，展示保当前完整目录顺序，不补造最近更新时间或已实现旧侧栏状态。项目移除/批量删除、物理 GC 与剩余旧视觉行为仍是未闭合能力。
+
+[目录 DOM](test/native-directory.test.tsx) 核同名会话的准确项目/原 ID、空项目、独立折叠零业务调用、上下焦点零选择、创建期间继续阅读和晚项目的完整保留；[原页面草稿 DOM](test/native-drafts-dom.test.tsx) 继续核实际 NativeDesktop 创建回执迟到时保后来选择和原草稿。两文件实际 2pass/26assert，类型和提交检查按当前进度记录；没有将有限 DOM 结果宣称为完整 installed/跨平台界面资格。
+
 ## Native 跨会话后台总览
 
 [当前会话](src/native.tsx)在原 Run 状态旁显示当前 Session/Store 的未结束 Job 与 outcome_unknown 数量；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。观察或视图不可用时保留上次事实并标明，数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束，原完整输出、Main/Service fault、冷读与保数据卸载断言保持；准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
