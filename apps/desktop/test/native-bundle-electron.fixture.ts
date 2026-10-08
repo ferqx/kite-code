@@ -17,6 +17,8 @@ const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
 ];
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
+let conversationId = 's',
+  conversationTitle = 'Native bundled';
 const lockState = async () =>
   (await (await fetch(`${control}/locks`)).json()) as { outer: boolean; inner: boolean };
 async function launch() {
@@ -33,10 +35,10 @@ async function launch() {
   console.log('native_driver_stage: window');
   page.setDefaultTimeout(10000);
   await page
-    .getByRole('button', { name: 'Native bundled', exact: true })
+    .getByRole('button', { name: conversationTitle, exact: true })
     .and(page.locator('button.session-row'))
     .click();
-  await page.locator('.session-header').getByTitle('Native bundled', { exact: true }).waitFor();
+  await page.locator('.session-header').getByTitle(conversationTitle, { exact: true }).waitFor();
   await openSessionTools(page);
   const layout = await page.evaluate(async () => {
     await document.fonts.ready;
@@ -168,19 +170,43 @@ try {
       'submit',
       (event) => {
         if (
-          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+          (event.target as HTMLFormElement).querySelector(
+            'textarea[aria-label="当前会话私有草稿"], textarea[aria-label="新对话草稿"]',
+          )
         )
           events.push({ type: event.type, focused: document.hasFocus() });
       },
       { capture: true },
     );
   });
-  await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('write one real bundled file');
+  const prepareButton = page.getByRole('button', {
+    name: '在 Native bundled 中新建对话',
+    exact: true,
+  });
+  await prepareButton.focus();
+  await prepareButton.press('Enter');
+  await page.getByRole('button', { name: '研究与理解资料', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    '研究与理解资料：',
+  );
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  assert.equal(
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    '研究与理解资料：',
+  );
+  const beforeFirst = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  assert.equal(beforeFirst.creationSubmissions.length, 0);
+  assert.equal(beforeFirst.inputSubmissions.length, 0);
+  await page.getByRole('textbox', { name: '新对话草稿' }).fill('write one real bundled file');
+  assert.equal(
+    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
     'write one real bundled file',
   );
-  await page.getByRole('button', { name: '发送明确的新轮次' }).click();
+  await page.getByRole('button', { name: '发送首条消息' }).click();
   assert.equal(
     await page.evaluate(() => (Reflect.get(window, '__bundleInputEvents') as unknown[]).length),
     1,
@@ -252,6 +278,20 @@ try {
     'actual bundled bytes\r\n',
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), '2');
+  const afterFirst = await page.evaluate(
+    async () =>
+      (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
+  );
+  assert.equal(afterFirst.creationSubmissions.length, 1);
+  assert.equal(afterFirst.creationSubmissions[0]!.phase, 'created');
+  conversationId = afterFirst.creationSubmissions[0]!.input.sessionId;
+  conversationTitle = '新对话';
+  assert.equal(afterFirst.selection?.session.id, conversationId);
+  assert.equal(afterFirst.inputSubmissions.length, 1);
+  assert.equal(afterFirst.callerSubmissions?.length, 1);
+  assert.equal(await page.getByText('write one real bundled file', { exact: true }).count(), 1);
+  assert.equal(await page.getByText('正在发送', { exact: true }).count(), 0);
+  console.log('native_driver_stage: deferred original preparation and one exact first send');
   const old = childPid!;
   await app!.evaluate(({ app }) => app.quit());
   await app!.close();
@@ -263,13 +303,14 @@ try {
   page = await launch();
   assert.equal(await (await fetch(`${control}/count`)).text(), '2');
   await page.evaluate(
-    async () =>
+    async (sessionId) =>
       await window.kiteNative!.request({
         method: 'messages',
         generation: 1,
-        sessionId: 's',
+        sessionId,
         limit: 50,
       }),
+    conversationId,
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), '2');
   process.kill(childPid!, 'SIGSTOP');

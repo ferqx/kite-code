@@ -2,10 +2,30 @@ import { expect, test } from 'bun:test';
 import type { Session } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { NativeDesktop } from '../src/native';
-import type { NativeBridge, NativeCreation, NativeDraft, NativeState } from '../src/native-bridge';
-import { prepareDesktopDom } from './native-page-dom.fixture';
+import type {
+  NativeBridge,
+  NativeConversationResult,
+  NativeDraft,
+  NativeRequest,
+  NativeState,
+} from '../../src/native-bridge';
+import { prepareDesktopDom } from '../native-page-dom.fixture';
+
+const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
+const previous = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
+const { createRoot } = await import('react-dom/client');
+const { NativeDesktop } = await import('../../src/native');
+Object.assign(globalThis, previous);
+bootstrap.window.close();
 
 test('actual React DOM keeps the new selected view when an original creation receipt arrives late; no draft is moved', async () => {
   const dom = new JSDOM('<div id="test-root"></div>', {
@@ -25,9 +45,10 @@ test('actual React DOM keeps the new selected view when an original creation rec
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   let selected = 'a',
-    release!: (value: NativeCreation) => void,
-    posts = 0;
-  const creation = new Promise<NativeCreation>((r) => {
+    release!: (value: NativeConversationResult) => void,
+    posts = 0,
+    submitted: Extract<NativeRequest, { method: 'conversation.send' }> | undefined;
+  const creation = new Promise<NativeConversationResult>((r) => {
     release = r;
   });
   const sessions = ['a', 'b'].map((id) => ({
@@ -83,7 +104,28 @@ test('actual React DOM keeps the new selected view when an original creation rec
           revision: 1,
           content: input.sessionId === 'a' ? 'original text' : 'other text',
         } as NativeDraft;
-      if (input.method === 'createSession') {
+      if (input.method === 'conversation.branch')
+        return {
+          kind: 'conversation.branch',
+          storeId: 'store',
+          workspaceId: 'w',
+          repository: false,
+          branches: [],
+          label: '本地目录',
+        };
+      if (input.method === 'conversation.models.read')
+        return {
+          kind: 'settings.models',
+          storeId: 'store',
+          scope: 'user',
+          observationId: 1,
+          canWrite: false,
+          errors: [],
+          defaultModelId: 'model',
+          models: [{ id: 'model', enabled: true, configured: true, diagnostics: [] }],
+        };
+      if (input.method === 'conversation.send') {
+        submitted = input;
         posts++;
         return creation;
       }
@@ -105,19 +147,19 @@ test('actual React DOM keeps the new selected view when an original creation rec
     await click('Original A');
     expect(dom.window.document.querySelector('textarea')!.value).toBe('original text');
     await click('在 Workspace 中新建对话');
+    expect(posts).toBe(0);
+    await click('研究与理解资料');
+    await click('发送首条消息');
     expect(posts).toBe(1);
     await click('Other B');
     expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
     await act(async () =>
       release({
-        phase: 'created',
-        input: {
-          expectedStoreId: 'store',
-          workspaceId: 'w',
-          commandId: 'original',
-          sessionId: 'created',
-          title: 'new',
-        },
+        kind: 'conversation',
+        commandId: submitted!.intent.commandId,
+        phase: 'accepted',
+        stage: 'input',
+        creation: { phase: 'created', input: submitted!.creation },
       }),
     );
     expect(
@@ -144,17 +186,15 @@ test('actual React DOM keeps the new selected view when an original creation rec
     expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
     expect(posts).toBe(1);
   } finally {
-    release({
-      phase: 'unknown',
-      input: {
-        expectedStoreId: 'store',
-        workspaceId: 'w',
-        commandId: 'original',
-        sessionId: 'created',
-        title: 'new',
-      },
-    });
+    if (submitted)
+      release({
+        kind: 'conversation',
+        commandId: submitted.intent.commandId,
+        phase: 'unknown',
+        stage: 'create',
+      });
     await act(async () => root.unmount());
+    await new Promise((resolve) => setTimeout(resolve, 0));
     restoreLayoutGlobals();
     dom.window.close();
     Object.assign(globalThis, prior);

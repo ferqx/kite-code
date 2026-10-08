@@ -132,6 +132,10 @@ async function openCaller(): Promise<NativeCaller> {
         if (window && !window.isDestroyed()) window.webContents.send(nativeEventChannel, event);
       },
       privateData,
+      [
+        profile.profilePath,
+        ...(formalAssets ? [formalAssets.candidateRoot, formalAssets.terminalRoot] : []),
+      ],
     );
     return caller;
   })().catch(async (error) => {
@@ -206,6 +210,7 @@ void app
           rootUri: pathToFileURL(path).href,
           name: basename(path),
         });
+        return { workspaceId: id };
       },
     });
     window.on('close', (event) => {

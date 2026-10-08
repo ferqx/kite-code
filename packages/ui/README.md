@@ -12,6 +12,8 @@
 
 原 [ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)已由正式 Native 消费，沿原页面与右侧栏布局维护字段草稿。任务事实与保存/启禁/删除均只来自宿主显式参数；缺少保存回调时，页面和编辑器说明不可保存及后台运行，保存禁用，表单 submit 不推造持久任务。实际项目、页面导航、Session 草稿与窗口证据归 [Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
 
+原 SessionPage 欢迎区、建议、项目／分支菜单与 Composer 已接正式 Native 新对话准备。纯 UI 只追加／聚焦草稿和回调宿主选择，项目字段承载宿主 ID，不据此读取目录或执行 Git。创建、权限、实际模型及首次消息接管归 [Desktop owner](../../apps/desktop/README.md#native-新对话准备与首次发送)；不将准备页状态转为 Session 或执行 authority。
+
 ## 公共表单与观察
 
 普通问题共用中立的 [原 schema 解析器](src/question.ts)。DOM [Questionnaire](src/questionnaire.tsx) 为完整可表达的标量或浅 object 提供单选、闭合自由输入与多步骤；可以先浏览未回答的题目，最终明确点击提交时才发送完整答案。原字段和 choice 值、Unicode codepoint 长度与非空白约束保持；仅闭合浅 object 加明确 null alternative 的根 oneOf 可作为整份问卷的另一项决定，其他未知或重叠约束仍回退原 JSON。选项说明以悬停／聚焦浮层展示完整原文，不推移翻页按钮；翻页和最终提交保留不同按钮身份，避免浏览器将末次翻页解释为提交。

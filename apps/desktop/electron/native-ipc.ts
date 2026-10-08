@@ -47,6 +47,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'interactions.close': ['viewGeneration'],
   'settings.models.read': ['scope'],
   'input.models.read': [],
+  'conversation.models.read': [],
+  'conversation.branch': ['workspaceId'],
+  'conversation.send': ['creation', 'intent', 'permissionMode', 'targetBranch'],
+  'conversation.lookup': ['commandId'],
   'settings.providers.read': [],
   'settings.providers.close': [],
   'settings.providers.save': ['observationId', 'operation', 'secret'],
@@ -391,7 +395,28 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'permission.trust' && typeof input.trusted !== 'boolean')
     throw Error('invalid_native_request');
-  if (method === 'submit' || method === 'caller.prepare') {
+  if (method === 'conversation.send') {
+    const creation = record(input.creation);
+    exact(creation, ['commandId', 'sessionId', 'workspaceId', 'expectedStoreId', 'title']);
+    if (
+      ![
+        creation.commandId,
+        creation.sessionId,
+        creation.workspaceId,
+        creation.expectedStoreId,
+      ].every(resourceId) ||
+      typeof creation.title !== 'string' ||
+      Buffer.byteLength(creation.title) > 8192 ||
+      (input.permissionMode !== undefined &&
+        !['ask', 'accept_edits', 'auto', 'full'].includes(String(input.permissionMode))) ||
+      (input.targetBranch !== undefined &&
+        (typeof input.targetBranch !== 'string' ||
+          !input.targetBranch.length ||
+          Buffer.byteLength(input.targetBranch) > 1024))
+    )
+      throw Error('invalid_native_request');
+  }
+  if (method === 'submit' || method === 'caller.prepare' || method === 'conversation.send') {
     const intent = record(input.intent);
     try {
       canonicalCallerCommandRequest(intent as CallerCommandRequest);
@@ -401,6 +426,11 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     if (
       method === 'submit' &&
       !['run.start', 'input.steer', 'input.follow_up'].includes(String(intent.kind))
+    )
+      throw Error('invalid_native_request');
+    if (
+      method === 'conversation.send' &&
+      (intent.kind !== 'run.start' || typeof intent.content !== 'string' || !intent.content.trim())
     )
       throw Error('invalid_native_request');
     if (input.draft !== undefined) {
@@ -504,7 +534,10 @@ export function registerNativeIpc(options: {
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
   caller: () => Promise<NativeCaller>;
-  pickWorkspace?: (generation: number, caller: NativeCaller) => Promise<void>;
+  pickWorkspace?: (
+    generation: number,
+    caller: NativeCaller,
+  ) => Promise<void | { workspaceId: string }>;
 }) {
   options.ipcMain.handle(nativeChannel, async (event, payload: unknown): Promise<NativeReply> => {
     try {
@@ -516,8 +549,8 @@ export function registerNativeIpc(options: {
       let value: NativeResult;
       if (request.method === 'workspace.pick') {
         if (!options.pickWorkspace) throw Error('native_host_operation_unavailable');
-        await options.pickWorkspace(request.generation, caller);
-        value = null;
+        const picked = await options.pickWorkspace(request.generation, caller);
+        value = picked ? { kind: 'workspace.picked', workspaceId: picked.workspaceId } : null;
       } else value = await caller.invoke(request);
       if (Buffer.byteLength(JSON.stringify(value)) > responseBytes)
         throw Error('native_response_too_large');

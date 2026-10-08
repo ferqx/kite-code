@@ -241,13 +241,22 @@ try {
   }
   async function send(marker: string) {
     await closeSettings(page);
-    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(marker);
-    const button = page.getByRole('button', { name: '发送明确的新轮次', exact: true });
+    const preparing =
+      (await page.getByRole('textbox', { name: '新对话草稿', exact: true }).count()) > 0;
+    await page
+      .getByRole('textbox', { name: preparing ? '新对话草稿' : '当前会话私有草稿', exact: true })
+      .fill(marker);
+    const button = page.getByRole('button', {
+      name: preparing ? '发送首条消息' : '发送明确的新轮次',
+      exact: true,
+    });
     await button.click();
     const v = await until(
       state,
       (v) =>
-        v.selection!.runs.some((r) => r.status === 'completed' && !runs.some((x) => x.id === r.id)),
+        !!v.selection?.runs.some(
+          (r) => r.status === 'completed' && !runs.some((x) => x.id === r.id),
+        ),
       `${marker} run missing`,
     );
     const run = v.selection!.runs.find(
@@ -328,6 +337,7 @@ try {
   await send('NATIVE_openai_next');
   await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
+  await page.getByRole('button', { name: '读取用户模型配置', exact: true }).click();
   await page.getByRole('button', { name: `设为默认 ${id('compatible')}`, exact: true }).click();
   await until(
     async () => JSON.parse(readFileSync(configPath, 'utf8')).modelId,
@@ -336,20 +346,20 @@ try {
   );
   const beforeCreate = Number(await (await fetch(`${control}/count`)).text());
   await closeSettings(page);
-  await page.getByRole('button', { name: '在 Providers 中新建对话', exact: true }).click();
-  await page.locator('.session-header').getByTitle('新对话', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '在 Providers 中新建对话', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await page.locator('.session-header').getByText('新对话', { exact: true }).waitFor();
   await openSessionTools(page);
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), beforeCreate);
-  await page
-    .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
-    .waitFor();
+  assert.equal(await page.getByRole('textbox', { name: '新对话草稿', exact: true }).count(), 1);
   // This inspection replaces the reader's observation; let the picker finish its own GET first.
   await page
     .getByRole('region', { name: '下一轮模型选择', exact: true })
     .getByRole('button', { name: /^模型：model-a/ })
     .waitFor();
   const unbound = await page.evaluate(
-    async () => await window.kiteNative!.request({ method: 'input.models.read', generation: 1 }),
+    async () =>
+      await window.kiteNative!.request({ method: 'conversation.models.read', generation: 1 }),
   );
   assert.equal((unbound as { selectedModelId?: string }).selectedModelId, undefined);
   await choose('openai');
@@ -433,9 +443,16 @@ try {
   );
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), before);
   await closeSettings(page);
-  assert.match(
-    await page.getByRole('region', { name: '下一轮模型选择' }).innerText(),
-    /思考：默认/,
+  await page
+    .getByRole('region', { name: '下一轮模型选择' })
+    .getByRole('button', { name: '模型：model-openai，思考程度：默认', exact: true })
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole('region', { name: '下一轮模型选择' })
+      .getByRole('button', { name: '模型：model-openai，思考程度：默认', exact: true })
+      .count(),
+    1,
   );
   // Only revoke this fixture's exact generated opaque references through the owned Service.
   const refs = models.flatMap((m) => (m.credentialRef ? [m.credentialRef] : []));

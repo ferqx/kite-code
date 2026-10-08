@@ -2484,3 +2484,101 @@ Service无保存/调度/运行记录/通知协议，因此直接迁原 Scheduled
 新只读recon Agent创建仍被thread数量限制拒绝，Root完成本片核查，不宣称新增独立迁移审查。
 未复跑Chrome/Vault、TUI或本片完整默认；本片不是全PC或阶段收束，剩余新对话准备/全局目录状态与时间、
 其余退出依赖继续pending，37能力partial、wholeV13=false、Goal active，无外部交付。
+
+
+## 2026-10-08：原 PC 新对话准备与首次发送
+
+基于 durable HEAD `5515dbeb03f0e95648c11ff982817b5d83b8cb05` 加本片 owned diff 继续原 PC 迁移。
+按用户要求复用 kite-desktop，读取现行桌面手册、Desktop/UI owner、当前通用边界和原 App/Git leaf；
+不重新开发准备页、Composer、模型／权限菜单或原提交链。只为现有 Native 身份边界适配调用。
+退出依赖按顺序仍为：剩余 PC 页面／全局目录状态与时间；Workspace 批量移除和物理 GC；
+installed 恢复及已发布前版本样本；macOS 原资源退出；独立迁移审查、阶段完整回归及最终 legacy 删除。
+本片闭合第一项中的新对话准备和首次发送，未将整个依赖标为完成。
+
+正式 Native 全局／项目新对话入口进入原 SessionPage 准备页，重复进入、建议和项目分支选择零创建。
+原建议追加／聚焦／光标、独立已有会话草稿、全局模型与思考档位、本次 Plan 和权限选择保留。
+独立只读全局目录不随项目选择重挂；原 Full 风险确认仍显式，首次原输入前核实际项目配置与支持档位。
+迁入原 Git leaf，仅移除旧展示类型；Main 从同 Store／代次已观察的规范 Workspace 解析目录，
+renderer 不能传路径或控制句柄。显式首次切换核根／HEAD／dirty／本地 ref、完整活动 Run/Job 与
+trusted Main 的 Profile／Native／Terminal 保护根；普通目录与缺 Git 不妨碍准备。
+未显式换分支按发送时的真实环境；新 Run 的现有配置读取／冻结替代旧单项目 Service 重启。
+
+新的有限 Main 编排复用原创建意图、PrivateData 草稿、permission controller、caller journal 和 DesktopInput。
+先保存未来准确 Session 原文，再沿原创建／权限／输入，创建和输入 Command 分开冻结；
+权限观察与阅读选择分开，迟到结果保后来页面。额外宿主只读范围保已有明确确认，不能由选择项目代替。
+失败保已创建 Session 与原文，同 Session 明确重试使用原创建身份和新输入 Command；
+未知只查询原创建／权限／输入，核实预备步骤成功不自动续写，冷创建不获得热首次权限。
+首次消息立即显示等待，真实消息通过原 Command 或 sourceIds 加实际 Run 原 Command 证明接管。
+真实 producer 的 start user message 没有 originCommandId；只按该字段匹配导致重复显示，现已修复。
+发送后切到安排任务仍保当前页面；返回准备页正确显示已提交，明确打开原 Session，消除假发送中状态。
+等待项同 Store，未迁移到后来 Store；私有 SQLite／维护格式及公开 HTTP API 没有扩展。
+
+错误提示核现行手册：2026-09-29 的空间／Git／分支／命令 AlertDialog 约定晚于
+2026-09-17 的 Toast 段落，而原 App 仍使用 Toast。Native 按较新已确认约定接现有 shadcn AlertDialog；
+手册明确旧路径范围，没有仅凭旧源码覆盖产品承诺。刷新和 SSE 不清除未确认错误。
+原 Provider/Session route Note 的首次持久意图、临时 effort 与冷 GET 理由仍适用，已核对，未新建重复 Note。
+
+限定验证均在 macOS durable owned diff 上执行，不作为当前 whole graph 或三平台资格：
+
+- `bun test --parallel=1 --max-concurrency=1` 的 Main 4文件组合：native-conversation、native-configuration、
+  native-caller、native-permissions，actual0/20pass/187assert/1402ms，
+  日志 /private/tmp/kite-pc-new-conversation-main-current-20261008.log；其中真实临时 Git 仓库验证读分支不切换、
+  active/dirty/保护根拒绝与空闲准确 dev 切换，未 stage 本仓库或其他任务文件。
+- 新准备页 isolated DOM 最终5项，包括原建议、Full取消／确认、迟到失败与成功、原 Session 重试、
+  丢首次回复／丢重试回复只查原提交及实际 sourceIds+Run 接管，actual0/5pass/106assert/1294ms，结果见
+  /private/tmp/kite-pc-new-conversation-dom-completion-20261008.log。
+- 原草稿 DOM actual0/1pass/23assert；安排任务 DOM actual0/2pass/41assert；原模型浮层 DOM
+  actual0/5pass/63assert；原页面／目录／问卷／Plan 邻接4文件 actual0/15pass/176assert。
+  日志为 /private/tmp/kite-pc-new-conversation-{drafts,scheduled,model,neighbors}-dom-current-20261008.log。
+  原草稿 DOM 移入 isolated 并在 ReactDOM import 前建立浏览器环境，原断言和默认发现保留；
+  不把测试环境的输入事件初始化问题当作业务失败，也不排除该原例。
+- 源码外默认 Native 候选先按真实窗口核零空会话、建议、一次创建／输入、文件审批1／Provider2、
+  原消息接管、冷读、正常退出及 Main kill 后 child 两层锁，actual0/1pass/7Bun断言/49.19秒，
+  日志 /private/tmp/kite-pc-new-conversation-sourcefree-current-20261008.log。
+  早期物理点击隐于 hover 的项目按钮失败，改用原键盘焦点+Enter；新增单消息断言发现真实重复，
+  修正 sourceIds+Run 证明后通过。原失败分别见 sourcefree-20261008.log 和 sourcefree-final-20261008.log，
+  未删除断言或扩大45秒 driver／120秒整例预算。最终 renderer 的复验另记 closure 日志。
+- 真实冷草稿窗口 actual0/1pass/1Bun断言/28.14秒，日志
+  /private/tmp/kite-pc-new-conversation-drafts-window-second-20261008.log。
+  实际 TCP 在原创建提交后丢回复，刷新／重启只查原 ID，原创建 POST1／后来新增POST0／Provider0，
+  换 Store 原草稿保留只读，所属 PID 真退出。首次 driver 未确认新错误 Dialog 后点击被遮挡的工具而失败，
+  按现行单次“确定”操作修正，原业务断言和期限保持；drafts-window-20261008.log 原红保留。
+  最后 renderer 消息接管／已提交展示变化不触及该例没有 input POST 的未知创建与冷草稿路径，复用范围仅此。
+- 受影响原 Provider 全窗口 actual0/1pass/190Bun断言/55.33秒，日志
+  /private/tmp/kite-pc-new-conversation-provider-window-closure-20261008.log。
+  四 family／一次发现／7根Run和8SDK请求、首次新 Session 原选择／临时档位、活动冻结、
+  五实际保存POST、冷原GET1／POST0、准确测试凭据revoke2与两个所属Service PID退出保持。
+  三次原红分别为重开设置未读取目录、首次新 Session 读取切换瞬间 selection 缺席、
+  冷档位断言仍匹配旧文字前缀；修正真实读取／精确完成等待／原浮层可访问名称，全部原业务断言保持，
+  日志 provider-window、provider-window-current、provider-window-final-20261008.log 均保留。
+
+当前默认发现625文件，新 Main／新 isolated DOM／迁位原草稿各恰好一次、旧路径零次，
+原调度与发现规则不变；Test ownership actual0。Root与八workspace types、当前Desktop types、
+静态边界／八workspace／唯一API graph已通过，最终正常门禁按下方收尾记录；
+Biome原 fixture 的既有 any 等 warning/info 不扩优化，未用 unsafe fixes。
+[Desktop owner](../../apps/desktop/README.md#native-新对话准备与首次发送)、[UI owner](../../packages/ui/README.md#原桌面展示层)、
+[桌面手册](../handbook/clients/desktop/README.md)、[当前边界](../active/unified-agent-boundary.md)与§30.2.15同步。
+原 Goal active／37能力partial／wholeV13=false；未运行本片阶段完整默认、TUI或无关Chrome矩阵，
+未重新扩大历史 Vault 资格。独立迁移审查仍待取得，当前线程数量限制下由Root核查，不宣称新增独立审查。
+原 RSS 退出失败保持，其他退出依赖仍待完成；无 push／PR／发布／Actions dispatch。
+
+本片最终 renderer 源码外原候选复验 actual0/1pass/7Bun断言/48.29秒，
+日志 /private/tmp/kite-pc-new-conversation-sourcefree-closure-20261008.log，首次原消息唯一、审批1／Provider2、
+冷读与正常退出／Main kill后两层锁的原断言通过；不再扩故障矩阵。
+最终 Root与八workspace正常typecheck actual0，日志 all-types-closure-20261008.log；
+15个owned代码文件readonly Biome actual0/no fixes，保留20warnings/2infos，日志 biome-completion-20261008.log。
+当前 docs／scope=all impact／plan-evidence 均actual0，日志 docs-closure、impact-closure、plan-evidence-20261008.log。
+这些日志的完整前缀均为 /private/tmp/kite-pc-new-conversation-；当前默认625文件只核发现与归属，未运行完整图。
+iteration_complete 的产品与技术同步就绪；stage／commit按最终准确owned内容和正常hooks核，
+本地交付证明记录在 /private/tmp/kite-pc-new-conversation-delivery-20261008.json。
+Root是唯一Git owner，无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258` 保持且不暂存。
+
+最后交付核对发现同一次渲染内连续激活首次发送虽然由现有 write mutex 阻止第二次POST，
+但 UI 在门禁前生成第二份首次意图，导致原迟到结果无法接管。原迟到失败 DOM 中加入连续两次点击，
+准确原红4pass/1fail/95assert，日志 double-submit-red-20261008.log；sendFirst现在先核既有写门禁及项目准备状态，
+再生成／清空本次意图，既有 write/caller 门禁保持。该例复验及当前Desktop类型／Biome单列
+double-submit-green、types-completion、double-submit-biome-20261008.log（完整前缀同上）。
+该同步只改重复触发路径；之前最终实际窗口的单次输入／消息接管、冷未知创建与Provider scope仍适用，
+不再重复物理矩阵。Git交付证明按这三项实际收尾后重新冻结，正常hooks仍独立执行。
+
+最后连续提交修复的原5项DOM、当前Desktop类型和两文件readonly Biome均actual0；原控件存在与业务断言保留，未增加新测试文件或调度例外。

@@ -16,6 +16,7 @@ export function NativeModelPicker({
   bridge,
   generation,
   selection,
+  preparing,
   revision,
   value,
   onChange,
@@ -24,6 +25,7 @@ export function NativeModelPicker({
   bridge: NativeBridge;
   generation: number;
   selection?: NativeSelection;
+  preparing?: { storeId: string };
   revision?: string;
   value: NativeModelChoice;
   onChange: (value: NativeModelChoice) => void;
@@ -32,7 +34,9 @@ export function NativeModelPicker({
   const [facts, setFacts] = useState<NativeModelSettingsFacts>();
   const [error, setError] = useState(''),
     [reading, setReading] = useState(false);
-  const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
+  const identity = preparing
+    ? `${generation}/${preparing.storeId}/new-conversation`
+    : `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
   const current = useRef(identity);
   current.current = identity;
   const sequence = useRef(0),
@@ -70,7 +74,7 @@ export function NativeModelPicker({
     setReading(true);
     readyCallback.current(false);
     void bridge
-      .request({ method: 'input.models.read', generation })
+      .request({ method: preparing ? 'conversation.models.read' : 'input.models.read', generation })
       .then((response) => {
         if (current.current !== original || sequence.current !== request) return;
         if (
@@ -81,6 +85,8 @@ export function NativeModelPicker({
         )
           throw Error('model_selection_unavailable');
         if (selection && response.storeId !== selection.storeId)
+          throw Error('store_identity_mismatch');
+        if (preparing && response.storeId !== preparing.storeId)
           throw Error('store_identity_mismatch');
         setFacts(response);
       })

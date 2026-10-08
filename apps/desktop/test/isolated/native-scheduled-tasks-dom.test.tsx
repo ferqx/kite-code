@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type {
   NativeBridge,
-  NativeCreation,
+  NativeConversationResult,
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
@@ -56,8 +56,8 @@ function fixture() {
     deletedAt: null,
   }));
   let selected = 'a',
-    release!: (value: NativeCreation) => void;
-  const creation = new Promise<NativeCreation>((resolve) => {
+    release!: (value: NativeConversationResult) => void;
+  const creation = new Promise<NativeConversationResult>((resolve) => {
     release = resolve;
   });
   const state = (): NativeState => ({
@@ -106,7 +106,27 @@ function fixture() {
           revision: 1,
           content: input.sessionId === 'a' ? 'saved original' : 'saved other',
         };
-      if (input.method === 'createSession') return creation;
+      if (input.method === 'conversation.branch')
+        return {
+          kind: 'conversation.branch',
+          storeId: 'store',
+          workspaceId: input.workspaceId,
+          repository: false,
+          branches: [],
+          label: '本地目录',
+        };
+      if (input.method === 'conversation.models.read')
+        return {
+          kind: 'settings.models',
+          storeId: 'store',
+          scope: 'user',
+          observationId: 1,
+          canWrite: false,
+          errors: [],
+          defaultModelId: 'model',
+          models: [{ id: 'model', enabled: true, configured: true, diagnostics: [] }],
+        };
+      if (input.method === 'conversation.send') return creation;
       return null;
     },
   };
@@ -144,17 +164,14 @@ function fixture() {
         );
       }),
     releaseCreation() {
-      const input = calls.find((input) => input.method === 'createSession');
-      if (!input || input.method !== 'createSession') return;
+      const input = calls.find((input) => input.method === 'conversation.send');
+      if (!input || input.method !== 'conversation.send') return;
       release({
-        phase: 'created',
-        input: {
-          expectedStoreId: input.expectedStoreId,
-          workspaceId: input.workspaceId,
-          commandId: input.commandId,
-          sessionId: input.sessionId,
-          title: input.title,
-        },
+        kind: 'conversation',
+        commandId: input.intent.commandId,
+        phase: 'accepted',
+        stage: 'input',
+        creation: { phase: 'created', input: input.creation },
       });
     },
     async close() {
@@ -239,17 +256,24 @@ test('a late creation receipt cannot replace the scheduled page or the original 
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.click('在 Actual Workspace 中新建对话');
-    expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(0);
+    await f.edit(
+      f.host.querySelector<HTMLTextAreaElement>('[aria-label="新对话草稿"]')!,
+      'first new input',
+    );
+    await f.click('发送首条消息');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     await f.click('安排任务');
     await act(async () => f.releaseCreation());
     expect(f.host.querySelector('.scheduled-tasks-page')).not.toBeNull();
     expect(f.selected()).toBe('a');
     expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(1);
-    await f.click('返回会话');
+    await f.click('Original A');
     expect(
       f.host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]')?.value,
     ).toBe('saved original');
-    expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);
   } finally {
     f.releaseCreation();
     await f.close();

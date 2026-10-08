@@ -125,6 +125,12 @@ try {
   const create = page.getByRole('button', { name: '在 Native fixture 中新建对话', exact: true });
   await create.focus();
   await create.press('Enter');
+  assert.equal(await app.evaluate('globalThis.__creationPosts'), 0);
+  await page
+    .getByRole('textbox', { name: '新对话草稿', exact: true })
+    .fill('first original draft after unknown creation');
+  await page.getByRole('button', { name: '发送首条消息', exact: true }).click();
+  await page.getByRole('button', { name: '确定', exact: true }).click();
   await openDraftTools(page);
   await page.getByRole('button', { name: '核实原创建命令', exact: true }).waitFor();
   assert.equal(await app.evaluate('globalThis.__creationPosts'), 1);

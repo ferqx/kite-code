@@ -17,6 +17,7 @@ import type {
   SelectContextRequest,
   SelectedContextPage,
   Session,
+  StartCommandRequest,
   Workspace,
 } from '@kite-ai/client';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
@@ -119,6 +120,25 @@ export type NativeCreation = {
     title: string;
   };
   phase: 'pending' | 'unknown' | 'created' | 'rejected';
+  code?: string;
+};
+export type NativeBranchFacts = {
+  kind: 'conversation.branch';
+  storeId: string;
+  workspaceId: string;
+  repository: boolean;
+  current?: string;
+  branches: readonly string[];
+  label: string;
+};
+export type NativeConversationResult = {
+  kind: 'conversation';
+  commandId: string;
+  phase: 'sending' | 'accepted' | 'failed' | 'unknown';
+  stage: 'create' | 'permission' | 'input';
+  creation?: NativeCreation;
+  input?: InputMetadata;
+  permissionCommandId?: string;
   code?: string;
 };
 export type NativeGrantFacts = { observationId: number; page: PermissionGrantPage };
@@ -353,7 +373,17 @@ export type NativeRequest =
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
   | { method: 'settings.models.read'; generation: number; scope: 'user' | 'workspace' }
-  | { method: 'input.models.read'; generation: number }
+  | { method: 'input.models.read' | 'conversation.models.read'; generation: number }
+  | { method: 'conversation.branch'; generation: number; workspaceId: string }
+  | {
+      method: 'conversation.send';
+      generation: number;
+      creation: NativeCreation['input'];
+      intent: StartCommandRequest;
+      permissionMode?: 'ask' | 'accept_edits' | 'auto' | 'full';
+      targetBranch?: string;
+    }
+  | { method: 'conversation.lookup'; generation: number; commandId: string }
   | { method: 'settings.providers.read'; generation: number }
   | { method: 'settings.providers.close'; generation: number }
   | {
@@ -597,6 +627,9 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeBranchFacts
+  | NativeConversationResult
+  | { kind: 'workspace.picked'; workspaceId: string }
   | NativeBackgroundResult
   | NativeSkillsPage
   | NativeJobOutputPage

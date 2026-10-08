@@ -6,6 +6,7 @@ import {
   interactionAttachment,
   type Message,
   requiresInteractionAttachment,
+  type Workspace,
 } from '@kite-ai/client';
 import {
   createDesktopController,
@@ -30,6 +31,7 @@ import {
 } from './caller-journal';
 import { NativeConfiguration } from './configuration';
 import { NativeContext } from './context';
+import { NativeConversation } from './conversation';
 import { NativeFileRecovery } from './file-recovery';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
 import { NativeJobOutputReads } from './job-output-reads';
@@ -68,6 +70,9 @@ export class NativeCaller {
   private readonly sessions: NativeSessionManagement;
   private readonly configuration: NativeConfiguration;
   private readonly inputConfiguration: NativeConfiguration;
+  private readonly preparationConfiguration: NativeConfiguration;
+  private readonly conversation: NativeConversation;
+  private workspaceObservation?: { generation: number; storeId: string; workspaces: Workspace[] };
   private readonly providers: NativeProviderSettings;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
@@ -93,7 +98,12 @@ export class NativeCaller {
   private readonly client: AgentClient;
   private readonly emit: (event: NativeEvent) => void;
   private readonly privateData: PrivateData | undefined;
-  constructor(client: AgentClient, emit: (event: NativeEvent) => void, privateData?: PrivateData) {
+  constructor(
+    client: AgentClient,
+    emit: (event: NativeEvent) => void,
+    privateData?: PrivateData,
+    protectedRoots: readonly string[] = [],
+  ) {
     this.client = client;
     this.emit = emit;
     this.privateData = privateData;
@@ -151,6 +161,35 @@ export class NativeCaller {
         lookup: (commandId) => this.requireCaller().lookup(commandId),
       },
     });
+    const preparationScope = () =>
+      !this.closed && !this.observationUnavailable && this.generation > 0
+        ? { generation: this.generation, storeId: this.client.serverInfo!.storeId! }
+        : undefined;
+    this.preparationConfiguration = new NativeConfiguration(client, () => {
+      const scope = preparationScope();
+      return scope ? { ...scope, selection: 0 } : undefined;
+    });
+    this.conversation = new NativeConversation(
+      client,
+      preparationScope,
+      (id) => {
+        const scope = preparationScope(),
+          observed = this.workspaceObservation;
+        return scope &&
+          observed?.generation === scope.generation &&
+          observed.storeId === scope.storeId
+          ? observed.workspaces.find((workspace) => workspace.id === id)
+          : undefined;
+      },
+      () => this.requirePrivateData(),
+      (input, onFirst) => this.create(input, onFirst),
+      (commandId) => this.lookupCreation(commandId),
+      () => this.requireCaller(),
+      this.input,
+      () => this.hasActiveWork(),
+      () => this.changed(),
+      protectedRoots,
+    );
     const current = () =>
       !this.closed && this.selected
         ? {
@@ -581,7 +620,10 @@ export class NativeCaller {
       mcpUnavailable: this.mcp.storageUnavailable,
       inputSubmissions: this.input.submissions.map(inputMetadata),
       ...this.callerState(),
-      permissionSubmissions: this.controller.permissionSubmissions,
+      permissionSubmissions: [
+        ...this.controller.permissionSubmissions,
+        ...this.conversation.permissionSubmissions,
+      ],
       interactionSubmissions: this.controller.interactionSubmissions,
       ...this.answerState(snapshot?.view),
     };
@@ -593,7 +635,7 @@ export class NativeCaller {
       return { answerSubmissions: [], answerUnavailable: true };
     }
   }
-  private create(input: NativeCreation['input']): Promise<NativeCreation> {
+  private create(input: NativeCreation['input'], onFirst?: () => void): Promise<NativeCreation> {
     if (input.expectedStoreId !== this.client.serverInfo!.storeId)
       throw new ClientError('store_identity_mismatch');
     const saved = this.requirePrivateData().begin(structuredClone(input));
@@ -603,6 +645,7 @@ export class NativeCaller {
       this.creations.set(input.commandId, saved.value);
       return Promise.resolve(saved.value);
     }
+    onFirst?.();
     this.creations.set(input.commandId, saved.value);
     this.changed();
     const work = (async () => {
@@ -965,6 +1008,18 @@ export class NativeCaller {
         };
         break;
       }
+      case 'conversation.models.read':
+        result = { ...(await this.preparationConfiguration.read('user')), canWrite: false };
+        break;
+      case 'conversation.branch':
+        result = await this.conversation.branch(request.workspaceId);
+        break;
+      case 'conversation.send':
+        result = await this.conversation.send(request);
+        break;
+      case 'conversation.lookup':
+        result = await this.conversation.lookup(request.commandId);
+        break;
       case 'settings.providers.read':
         result = await this.providers.read();
         break;
@@ -1008,6 +1063,12 @@ export class NativeCaller {
           storeId: this.client.serverInfo!.storeId!,
           workspaces: await this.client.listAllWorkspaces(),
           sessions: await this.client.listAllSessions(),
+        };
+        this.check(generation);
+        this.workspaceObservation = {
+          generation,
+          storeId: result.storeId,
+          workspaces: result.workspaces,
         };
         break;
       case 'select': {
@@ -1408,12 +1469,22 @@ export class NativeCaller {
         break;
       }
       case 'lookupPermission':
-        result = await this.controller.lookupPermissionMutation(request.commandId);
+        result = this.conversation.permissionSubmissions.some(
+          (row) => row.intent.commandId === request.commandId,
+        )
+          ? await this.conversation.lookupPermission(request.commandId)
+          : await this.controller.lookupPermissionMutation(request.commandId);
         break;
       case 'permission.mode':
       case 'permission.trust': {
         this.writableScope(this.selected ?? '');
         if (this.permissionUnavailable) throw new ClientError('permission_facts_unavailable');
+        if (
+          this.conversation.permissionSubmissions.some((row) =>
+            ['saved', 'submitting', 'unknown'].includes(row.phase),
+          )
+        )
+          throw new ClientError('permission_intent_pending');
         result =
           request.method === 'permission.mode'
             ? await this.controller.setPermissionMode(
@@ -1524,6 +1595,8 @@ export class NativeCaller {
   detach() {
     this.releaseReads();
     this.background.release();
+    this.preparationConfiguration.release();
+    this.workspaceObservation = undefined;
     this.selection++;
     this.generation++;
     this.selected = undefined;
@@ -1545,6 +1618,7 @@ export class NativeCaller {
     this.detach();
     await this.disposeNetwork();
     await Promise.allSettled(this.creating.values());
+    await this.conversation.close();
     this.input.disposeObserver();
     this.controller.disposeNetwork();
   }
