@@ -37,6 +37,8 @@ Owner-local tests 可读自己非公开源码；root integration 使用公开 pa
 
 ## 当前公共场景与证据
 
+原[窗口 IPC](../apps/desktop/test/native-window-ipc.test.ts)核文本原文、1 MiB UTF-8 边界、闭合 payload、准确 frame 和零业务 caller；[实际 Native header DOM](../apps/desktop/test/isolated/native-window-actions-dom.test.tsx)核左键／双击／控件过滤、双栏回调、失败提示与草稿保持，原轮次 DOM 保完整正文复制门禁。原[源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)使用实际 Main 系统剪贴板核首次／冷读正文，浏览器 fallback 明确抛错；[JXA 保护进程](../apps/desktop/test/native-clipboard-guard.fixture.jxa)在内存保留原剪贴板各格式，stdin EOF 时恢复，不向日志或文件导出内容。header DOM 回调核实际 BrowserWindow 的 maximize／unmaximize，不代证物理双击或拖拽；保原任务、审批、冷读、双锁收尾与 120／45／10 秒预算。准确结果与未验范围归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原消息复制与标题栏缩放)。
+
 原四项[主题 DOM](../apps/desktop/test/isolated/native-theme-dom.test.tsx)迁至当前 Native Hook，保全部原断言；[主题 IPC](../apps/desktop/test/native-theme-ipc.test.ts)核三档、闭合输入、当前主 frame、销毁窗口和 Service 连接失败时仍不打开业务 caller。原[默认源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)操作原菜单，核真实 nativeTheme、窗口／页面底色、引擎变化和冷启动偏好。Playwright 默认浅色媒体覆盖须通过 `emulateMedia({colorScheme:null})` 取消；保颜色一致、10秒 UI、45秒driver和全部原业务断言。引擎信号不冒称真实 OS 设置切换，高速人工拉伸与完整视觉资格仍未由本测试证明。准确输入、原失败与结果归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原主题与窗口背景联动)。
 
 原[启动 DOM](../apps/desktop/test/isolated/native-startup-dom.test.tsx)使用实际 NativeDesktop 与原共享 UI，核 attach／完整目录等待、未核实目录、空项目／无模型进入、初始化失败后一次明确重试、旧代次隔离及进入后断线保原草稿，有限 bridge 不代证实际服务故障。原[默认源码外 macOS 整窗口](../apps/desktop/test/isolated/native-bundle.test.ts)核启动 CSS 打包、首次与冷启动完成后进入页面，原任务／审批／业务／双锁退出断言及期限保持，不直接验证短暂启动页或真实初始化故障。准确输入、实际执行结果和未验范围归[本轮进度](../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原启动页与初始化重试)。

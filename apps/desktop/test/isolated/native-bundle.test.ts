@@ -24,6 +24,10 @@ test.skipIf(process.platform !== 'darwin')(
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-bundle-')),
       home = join(root, 'home');
     mkdirSync(home, { mode: 0o700 });
+    writeFileSync(
+      join(root, 'clipboard-guard.jxa'),
+      readFileSync(resolve(import.meta.dir, '../native-clipboard-guard.fixture.jxa')),
+    );
     const profile = selectProfile({
         dataRoot: join(home, '.kite-code/unified-agent'),
         profile: 'default',

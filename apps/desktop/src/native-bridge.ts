@@ -72,10 +72,16 @@ export type NativeAnswerMetadata = {
 export const nativeChannel = 'kite:native:request';
 export const nativeEventChannel = 'kite:native:changed';
 export const nativeThemeChannel = 'kite:native:theme';
+export const nativeClipboardChannel = 'kite:native:clipboard';
+export const nativeWindowMaximizeChannel = 'kite:native:window-maximize';
 export type NativeThemePreference = 'dark' | 'light' | 'system';
 /** Window appearance is a host port, independent of the Service observation. */
 export interface NativeThemeBridge {
   setTheme(preference: NativeThemePreference): Promise<void>;
+}
+export interface NativeWindowBridge {
+  writeClipboardText(text: string): Promise<void>;
+  toggleWindowMaximize(): Promise<void>;
 }
 export type NativeCallerIntent = {
   scope: { storeId: string; sessionId: string; workspaceId: string };
@@ -737,6 +743,6 @@ export interface NativeBridge {
 }
 declare global {
   interface Window {
-    readonly kiteNative?: Readonly<NativeBridge & Partial<NativeThemeBridge>>;
+    readonly kiteNative?: Readonly<NativeBridge & Partial<NativeThemeBridge & NativeWindowBridge>>;
   }
 }

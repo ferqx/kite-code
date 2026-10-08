@@ -5,12 +5,23 @@ import {
   type NativeReply,
   type NativeRequest,
   type NativeThemeBridge,
+  type NativeWindowBridge,
   nativeChannel,
+  nativeClipboardChannel,
   nativeEventChannel,
   nativeThemeChannel,
+  nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 
-const bridge: NativeBridge & NativeThemeBridge = {
+const bridge: NativeBridge & NativeThemeBridge & NativeWindowBridge = {
+  async writeClipboardText(text) {
+    const reply = (await ipcRenderer.invoke(nativeClipboardChannel, { text })) as NativeReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  },
+  async toggleWindowMaximize() {
+    const reply = (await ipcRenderer.invoke(nativeWindowMaximizeChannel)) as NativeReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+  },
   async setTheme(theme) {
     const reply = (await ipcRenderer.invoke(nativeThemeChannel, { theme })) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

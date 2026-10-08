@@ -1,0 +1,32 @@
+ObjC.import('AppKit');
+ObjC.import('Foundation');
+
+function run() {
+  const board = $.NSPasteboard.generalPasteboard;
+  const originals = $.NSMutableArray.array;
+  const current = board.pasteboardItems;
+  if (!current.isNil()) {
+    for (let i = 0; i < current.count; i++) {
+      const source = current.objectAtIndex(i);
+      const saved = $.NSPasteboardItem.alloc.init;
+      const types = source.types;
+      for (let j = 0; j < types.count; j++) {
+        const type = types.objectAtIndex(j);
+        const data = source.dataForType(type);
+        if (!data.isNil()) saved.setDataForType(data, type);
+      }
+      originals.addObject(saved);
+    }
+  }
+  // Original clipboard bytes remain only in this process, never in stdout or a file.
+  $.NSFileHandle.fileHandleWithStandardOutput.writeData(
+    $('clipboard_saved\n').dataUsingEncoding($.NSUTF8StringEncoding),
+  );
+  try {
+    $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+  } finally {
+    board.clearContents;
+    if (originals.count && !board.writeObjects(originals)) throw Error('clipboard_restore_failed');
+  }
+  return 'clipboard_restored';
+}

@@ -8,7 +8,9 @@ import {
   type NativeResult,
   type NativeThemePreference,
   nativeChannel,
+  nativeClipboardChannel,
   nativeThemeChannel,
+  nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import { openEditor } from './editor';
 import { parseNativeMcpOperation } from './mcp-input';
@@ -631,6 +633,52 @@ export function registerNativeThemeIpc(options: {
     }
   });
   return () => options.ipcMain.removeHandler(nativeThemeChannel);
+}
+
+/** Retained native clipboard and zoom actions; these never open the Service caller. */
+export function registerNativeWindowIpc(options: {
+  ipcMain: IpcMain;
+  window: () => BrowserWindow | undefined;
+  rendererUrl: string;
+  writeClipboardText: (text: string) => void;
+}) {
+  options.ipcMain.handle(nativeClipboardChannel, (event, payload: unknown): NativeReply => {
+    try {
+      assertNativeSender(event, options.window(), options.rendererUrl);
+      const input = record(payload);
+      exact(input, ['text']);
+      if (typeof input.text !== 'string' || Buffer.byteLength(input.text, 'utf8') > 1048576)
+        throw Error('invalid_native_clipboard_text');
+      options.writeClipboardText(input.text);
+      return { ok: true, value: null };
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      return {
+        ok: false,
+        code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_clipboard_failed',
+      };
+    }
+  });
+  options.ipcMain.handle(nativeWindowMaximizeChannel, (event, payload: unknown): NativeReply => {
+    try {
+      const window = options.window();
+      assertNativeSender(event, window, options.rendererUrl);
+      if (payload !== undefined) throw Error('invalid_native_request');
+      if (window!.isMaximized()) window!.unmaximize();
+      else window!.maximize();
+      return { ok: true, value: null };
+    } catch (error) {
+      const code = error instanceof Error ? error.message : '';
+      return {
+        ok: false,
+        code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_window_failed',
+      };
+    }
+  });
+  return () => {
+    options.ipcMain.removeHandler(nativeClipboardChannel);
+    options.ipcMain.removeHandler(nativeWindowMaximizeChannel);
+  };
 }
 
 export function registerNativeIpc(options: {

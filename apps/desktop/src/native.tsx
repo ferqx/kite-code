@@ -1998,6 +1998,15 @@ function NativeDesktopContent({ bridge }: { bridge: NativeBridge }) {
   return (
     <SessionPage
       key={directory?.storeId ?? 'connecting'}
+      writeClipboardText={window.kiteNative?.writeClipboardText}
+      onHeaderMouseDown={(clickCount) => {
+        if (clickCount === 2)
+          void window.kiteNative?.toggleWindowMaximize?.().catch((cause) =>
+            report(async () => {
+              throw cause;
+            }, false),
+          );
+      }}
       workspaces={workspaceModels}
       selected={
         !scheduledTasksView && !preparing && selection?.storeId === directory?.storeId

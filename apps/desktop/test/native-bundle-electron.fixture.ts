@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
@@ -55,12 +55,14 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
     true,
   );
   await history.locator(':scope > summary').click();
+  const sentinel = `owned_native_clipboard_${Date.now()}`;
+  await app!.evaluate(({ clipboard }, value) => clipboard.writeText(value), sentinel);
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
-        writeText: async (text: string) => {
-          (window as unknown as { nativeCopied?: string }).nativeCopied = text;
+        writeText: async () => {
+          throw Error('browser_clipboard_fallback_forbidden');
         },
       },
     });
@@ -78,7 +80,7 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   );
   await copy.click();
   assert.equal(
-    await page.evaluate(() => (window as unknown as { nativeCopied?: string }).nativeCopied),
+    await app!.evaluate(({ clipboard }) => clipboard.readText()),
     'bundled complete\n\n[查看文件](bundled.txt) [查看缺失文件](missing.txt)',
   );
   await page.getByRole('button', { name: 'bundled.txt', exact: true }).waitFor();
@@ -165,6 +167,85 @@ let conversationId = 's',
 const lockState = async () =>
   (await (await fetch(`${control}/locks`)).json()) as { outer: boolean; inner: boolean };
 let themeLaunches = 0;
+async function preserveClipboard() {
+  const guard = spawn(
+    '/usr/bin/osascript',
+    ['-l', 'JavaScript', join(dirname(home), 'clipboard-guard.jxa')],
+    {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    },
+  );
+  let output = '',
+    diagnostic = '';
+  const done = new Promise<{ code: number | null; error?: Error }>((resolve) => {
+    guard.once('error', (error) => resolve({ code: null, error }));
+    guard.once('close', (code) => resolve({ code }));
+  });
+  guard.stderr.on('data', (value) => {
+    diagnostic += String(value);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      guard.stdout.on('data', (value) => {
+        output += String(value);
+        if (output.includes('clipboard_saved\n')) resolve();
+      });
+      guard.once('error', reject);
+      guard.once('close', (code) => {
+        if (!output.includes('clipboard_saved\n'))
+          reject(Error(`clipboard_guard_unavailable:${code}`));
+      });
+    });
+  } catch (cause) {
+    guard.stdin.end();
+    await done;
+    throw cause;
+  }
+  return async () => {
+    guard.stdin.end();
+    const result = await done;
+    assert.equal(result.code, 0, result.error?.message ?? diagnostic);
+    assert.ok(output.includes('clipboard_restored'));
+    console.log(
+      'native_driver_stage: original OS clipboard contents restored without exporting bytes',
+    );
+  };
+}
+
+async function readOriginalWindowActions(page: import('playwright').Page) {
+  assert.equal(await page.evaluate(() => typeof window.kiteNative?.writeClipboardText), 'function');
+  assert.equal(
+    await page.evaluate(() => typeof window.kiteNative?.toggleWindowMaximize),
+    'function',
+  );
+  const before = await (await fetch(`${control}/count`)).text();
+  const initial = await app!.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]!.isMaximized(),
+  );
+  await page.locator('.session-header').dispatchEvent('mousedown', { button: 0, detail: 1 });
+  assert.equal(
+    await app!.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isMaximized()),
+    initial,
+  );
+  for (const target of [!initial, initial]) {
+    await page.locator('.session-header').dispatchEvent('mousedown', { button: 0, detail: 2 });
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      if (
+        (await app!.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]!.isMaximized(),
+        )) === target
+      )
+        break;
+      assert.ok(Date.now() < deadline, 'original header zoom did not settle');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  assert.equal(await (await fetch(`${control}/count`)).text(), before);
+  console.log(
+    'native_driver_stage: original header callback and actual window maximize/unmaximize with zero Model work',
+  );
+}
 async function readOriginalTheme(page: import('playwright').Page, cold: boolean) {
   assert.equal(await page.evaluate(() => typeof window.kiteNative?.setTheme), 'function');
   console.log('native_theme_before_unemulated', {
@@ -297,6 +378,7 @@ async function launch() {
   assert.equal(layout.nativeBridge, true);
   assert.equal(layout.legacyBridge, false);
   await readOriginalTheme(page, themeLaunches++ > 0);
+  await readOriginalWindowActions(page);
   console.log(
     'native_driver_stage: retained startup styles, completed directory, desktop layout, compiled CSS/fonts and current bridge',
   );
@@ -327,7 +409,10 @@ async function launch() {
   console.log('native_driver_stage: locks held');
   return page;
 }
+let restoreClipboard: (() => Promise<void>) | undefined;
+let clipboardFailure: unknown;
 try {
+  restoreClipboard = await preserveClipboard();
   let page = await launch();
   const retainedDraft = 'source-free retained draft\n雪🙂';
   await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(retainedDraft);
@@ -684,6 +769,12 @@ try {
     }),
   );
 } finally {
+  try {
+    await restoreClipboard?.();
+  } catch (cause) {
+    clipboardFailure = cause;
+    console.error('native_clipboard_restore_failed');
+  }
   if (childPid) {
     try {
       process.kill(childPid, 'SIGKILL');
@@ -707,3 +798,4 @@ try {
     }
   }
 }
+if (clipboardFailure) throw clipboardFailure;

@@ -164,6 +164,8 @@ Native 原启动页的进入条件只消费当前 attach generation 与已经核
 
 Native 原主题属于窗口 Host。preload 的固定主题端口只传暗／亮／系统枚举，Main 在同一同步调用内核准确窗口、主 frame、renderer URL 和闭合 payload 后更新原外观引擎与底色；它没有 Store／Session／generation 或路径参数，不打开业务 caller，不取得服务或执行权。renderer 的本机偏好和 media 监听沿原 Hook，Main 的 updated 监听由窗口 closed 释放；业务观察和持久提交保持原边界。当前实现与实际 macOS 首次／冷读范围见[Native owner](../../apps/desktop/README.md#原主题与窗口背景联动)。
 
+Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固定文本复制／无参数缩放端口，Main 在宿主动作前核当前窗口、准确主 frame、renderer URL 和闭合 payload；复制保原 1 MiB UTF-8 上限，超限失败、不截断，缩放只按实际窗口状态切换。端口不取得 Store／Session／Service 或执行 authority，正文是否完整及当前可复制仍归原共享 UI／原 reader。失败不重发业务或丢弃草稿；实现与分层验证归[Native owner](../../apps/desktop/README.md#原消息复制与标题栏缩放)。
+
 ## 授权观察与执行资格
 
 Native 的通用交互历史沿原公共只读页核相同 snapshotCursor、准确来源／展示关系和 EOF；它不建立新的原卡回答观察。完整历史附件与当前审批分别持有 reader／loaded proof，前者不能授权后者；关闭、刷新或切范围只释放所属读取。记录与受理、执行成功分开，当前接口的变化拒绝与恢复限制归 [Native owner](../../apps/desktop/README.md#原交互记录只读历史)。

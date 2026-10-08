@@ -5,12 +5,12 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme } from 'electron';
 import { nativeEventChannel } from '../src/native-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
 import { NativeCaller } from './native-caller';
-import { registerNativeIpc, registerNativeThemeIpc } from './native-ipc';
+import { registerNativeIpc, registerNativeThemeIpc, registerNativeWindowIpc } from './native-ipc';
 import { spawnNodePairedChild } from './node-process';
 import { openPrivateData, type PrivateData } from './private-data';
 import { acquireDesktopProfileAccess, type DesktopProfileAccess } from './profile-access';
@@ -208,6 +208,12 @@ void app
         nativeTheme.themeSource = theme;
         updateSystemBackground();
       },
+    });
+    registerNativeWindowIpc({
+      ipcMain,
+      window: () => window,
+      rendererUrl,
+      writeClipboardText: (text) => clipboard.writeText(text),
     });
     registerNativeIpc({
       ipcMain,
