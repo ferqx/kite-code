@@ -1,10 +1,12 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { BackgroundExecutionItem, ExecutionOutputPage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
-import { act } from 'react';
+import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NativeBackgroundPanel } from '../src/native-background-panel';
-import type { NativeBridge, NativeRequest } from '../src/native-bridge';
+import type { NativeBridge, NativeRequest, NativeSelection } from '../src/native-bridge';
+import { environmentDisplay, useNativeEnvironment } from '../src/native-environment';
 import { backgroundItem } from './background-item.fixture';
 
 async function fixture(
@@ -12,6 +14,7 @@ async function fixture(
     host: HTMLElement,
     render: (port: NativeBridge, scope?: { generation: number; storeId: string }) => Promise<void>,
   ) => Promise<void>,
+  surface?: (bridge: NativeBridge, scope: { generation: number; storeId: string }) => ReactNode,
 ) {
   const dom = new JSDOM('<div id="root"></div>'),
     prior = {
@@ -33,13 +36,17 @@ async function fixture(
     await run(host, async (bridge, scope = { generation: 1, storeId: 'store' }) => {
       await act(async () =>
         root.render(
-          <NativeBackgroundPanel
-            bridge={bridge}
-            generation={scope.generation}
-            storeId={scope.storeId}
-            unavailable={false}
-            onChanged={async () => undefined}
-          />,
+          surface ? (
+            surface(bridge, scope)
+          ) : (
+            <NativeBackgroundPanel
+              bridge={bridge}
+              generation={scope.generation}
+              storeId={scope.storeId}
+              unavailable={false}
+              onChanged={async () => undefined}
+            />
+          ),
         ),
       );
     });
@@ -53,6 +60,199 @@ const click = (host: HTMLElement, name: string) =>
   act(async () => {
     [...host.querySelectorAll('button')].find((button) => button.textContent === name)!.click();
   });
+
+test('retained environment card separates Shell and named children, exact stop, read-only child return and stale presentation', async () => {
+  const shell = backgroundItem(1),
+    child = backgroundItem(2, true),
+    other = backgroundItem(3);
+  shell.execution.definitionId = 'shell.command';
+  other.execution.definitionId = 'mcp.job';
+  child.childSession!.title = '原子智能体';
+  child.execution.status = 'succeeded';
+  const items = [shell, child, other],
+    calls: NativeRequest[] = [];
+  const selection: NativeSelection = {
+    viewGeneration: 1,
+    viewSelection: 1,
+    storeId: 'store',
+    session: shell.rootSession,
+    runs: [],
+    executions: [],
+    interactions: [],
+    interactionsAfterId: null,
+    canReadModelOutput: false,
+    permissions: undefined,
+  };
+  const message = {
+    id: 'child-message',
+    sessionId: child.childSession!.id,
+    seq: '1',
+    role: 'assistant',
+    content: '原子会话全文🙂',
+    contentFormat: 'plain',
+    complete: true,
+    runId: child.childRun?.id ?? null,
+  };
+  const body = Buffer.from(
+    JSON.stringify({
+      item: child,
+      session: child.childSession,
+      upperSeq: '1',
+      messages: [message],
+      modelOutputs: [],
+    }),
+  );
+  let failed = false;
+  const port: NativeBridge = {
+    watch: () => () => undefined,
+    request: async (request) => {
+      calls.push(request);
+      if (request.method.startsWith('background.'))
+        expect('surface' in request && request.surface).toBe('environment');
+      if (request.method === 'background.open') {
+        if (failed) throw Error('directory_changed');
+        return {
+          kind: 'background.page',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          startIndex: 0,
+          nextIndex: items.length,
+          total: items.length,
+          complete: true,
+          entries: structuredClone(items),
+        };
+      }
+      if (request.method === 'background.stop') {
+        expect(request.executionId).toBe(shell.execution.id);
+        shell.execution.cancelRequested = true;
+        return { id: request.commandId, status: 'accepted' } as never;
+      }
+      if (request.method === 'background.child.open')
+        return {
+          kind: 'background.child.opened',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          executionId: child.execution.id,
+          childSessionId: child.childSession!.id,
+          childRunId: child.childRun?.id ?? null,
+          wireBytes: String(body.length),
+          wireHash: createHash('sha256').update(body).digest('hex'),
+        };
+      if (request.method === 'background.child.read')
+        return {
+          kind: 'background.child.chunk',
+          readId: request.readId,
+          offset: 0,
+          nextOffset: body.length,
+          eof: true,
+          data: body.toString('base64'),
+        };
+      if (request.method === 'background.close' || request.method === 'background.child.close')
+        return null;
+      throw Error('unexpected_operation');
+    },
+  };
+  function Surface() {
+    const [draft, setDraft] = useState('原父会话草稿');
+    const environment = useNativeEnvironment({
+      bridge: port,
+      generation: 1,
+      selection,
+      revision: 0,
+      unavailable: false,
+      onChanged: async () => undefined,
+    });
+    return environment.child ? (
+      <section aria-label="只读子详情">
+        <p>子 Agent 会话仅供查看。</p>
+        {environment.child.facts?.messages.map((entry) => (
+          <p key={entry.id}>{entry.content}</p>
+        ))}
+        {environment.child.error && <p>{environment.child.error}</p>}
+        <button type="button" onClick={environment.closeChild}>
+          返回主会话
+        </button>
+      </section>
+    ) : (
+      <>
+        {environment.card}
+        <input
+          aria-label="父草稿"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </>
+    );
+  }
+  await fixture(
+    async (host, render) => {
+      // The shared fixture mounts the real hook and retained card; no effect is created by navigation.
+      await render(port);
+      const region = host.querySelector('[aria-label="环境信息"]')!;
+      expect(region.textContent).toContain('当前运行的 Shell');
+      expect(region.textContent).toContain(shell.execution.id);
+      expect(region.textContent).toContain('原子智能体');
+      expect(region.textContent).not.toContain(other.execution.id);
+      await act(async () =>
+        (
+          region.querySelector('[aria-label="查看子 Agent 详情：原子智能体"]') as HTMLElement
+        ).click(),
+      );
+      expect(host.textContent).toContain('原子会话全文🙂');
+      expect(host.querySelector('input')).toBeNull();
+      expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(0);
+      await click(host, '返回主会话');
+      expect((host.querySelector('[aria-label="父草稿"]') as HTMLInputElement).value).toBe(
+        '原父会话草稿',
+      );
+      await act(async () => {
+        const stop = [...host.querySelectorAll('button')].find(
+          (button) => button.textContent === '停止',
+        )!;
+        stop.click();
+        stop.click();
+      });
+      expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
+      expect(host.textContent).toContain('正在停止');
+      failed = true;
+      await act(async () =>
+        (host.querySelector('[aria-label="刷新子 Agent"]') as HTMLElement).click(),
+      );
+      expect(host.textContent).toContain('上次状态 · 正在核对');
+      expect(host.textContent).toContain('原子智能体');
+      expect(host.textContent).toContain('directory_changed');
+      expect(
+        [...host.querySelectorAll('button')].some((button) => button.textContent === '停止'),
+      ).toBe(false);
+    },
+    () => <Surface />,
+  );
+});
+
+test('environment adapter keeps unknown and restored child facts distinct and never infers cleanup', () => {
+  const child = backgroundItem(1, true);
+  child.execution.status = 'outcome_unknown';
+  expect(environmentDisplay([child], 'store').rows[0]).toMatchObject({
+    status: 'unknown',
+    cleanupConfirmed: false,
+    canStop: false,
+  });
+  child.execution.status = 'running';
+  child.execution.originStoreId = 'original';
+  expect(environmentDisplay([child], 'store').rows[0]).toMatchObject({
+    status: 'restored',
+    cleanupConfirmed: false,
+    canStop: false,
+  });
+});
 test('Native background DOM publishes only complete pages, shows original parent/child lifecycle, reads nonselected output and submits one exact stop', async () =>
   fixture(async (host, render) => {
     const items = [backgroundItem(1, true), backgroundItem(2)],

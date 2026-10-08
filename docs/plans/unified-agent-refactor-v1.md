@@ -2072,6 +2072,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 原安排任务页与右侧编辑表单已接入 Native，沿现行手册仅提供页面草稿、禁用保存，不以 UI 状态补造服务调度；工作台仍隐藏。实际入口与原草稿往返、晚创建隔离及源码外窗口结果见[安排任务进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。原新对话准备与首次发送亦已接正式 Native，沿原页面／建议／项目分支／模型权限选择、已有创建和输入链完成，未知只查原提交，失败保原 Session 和草稿；真实窗口及消息接管修复见[新对话进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-新对话准备与首次发送)。原全局目录状态／时间排序亦已接公共同快照 activity 并复用 Sidebar，未选中原会话的 pending、真实事件时间、分页冲突／失败保事实和 macOS 冷读已核；见[目录进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)。剩余 PC 页面细节及后序依赖仍按原计划推进，完整阶段退出未通过。
 
+原环境信息卡和只读子详情已接入当前会话，保留原卡布局、准确停止、完整日志与返回主会话的草稿／等待提示；全局总览继续独立读取。实际 scope、目录 reset 与 macOS 窗口证据见[环境卡进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-环境信息卡与只读子详情)。后续按原依赖推进 Workspace 批量移除／物理 GC、installed 恢复与发布样本、macOS 原资源退出、独立审查及阶段完整回归后最终旧路径退役；本片局部通过不关闭这些依赖。
+
 ### 30.3 第一条执行闭环
 
 第一条生产语义闭环必须是：

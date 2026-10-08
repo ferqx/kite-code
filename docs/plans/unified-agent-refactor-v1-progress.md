@@ -2653,3 +2653,30 @@ iteration_complete 产品与技术同步就绪；stage／commit按最终准确ow
 本地交付证明记录在 `/private/tmp/kite-pc-directory-delivery-20261008.json`。
 Root唯一Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`
 保持且不暂存。本片不改变整体迁移、原资源退出或完整回归的未完成结论。
+
+
+## 2026-10-08：原 PC 环境信息卡与只读子详情
+
+基于 durable HEAD `36185c020ee347ee3e174b9d64b254fe626dd3bc` 加本片 owned diff，继续用户确认的原 kite-desktop 迁移。最高缺口为原环境卡及 child 详情的完整实际入口；复用原 BackgroundExecutions、SessionPage 的 environmentInformation／宽窄窗口布局和已有 NativeBackground／完整 child reader／durable caller，没有第二条控制或 I/O 链。
+
+当前会话只从 Main 实际选中根固定 generation／Store／subject／root／viewSelection，有限 surface 不接受 renderer 根或路径。当前环境与全局总览分别持观察，选择变化只释放当前环境，旧停止资格失效。Shell 与 child 名称／状态来自完整公共目录，旧 Store 只读，unknown 不冒充失败或清理；SSE／显式刷新只 GET，旧展示缓存有界且不持 observation 或原提交意图。子详情沿原页面显示固定上界完整消息／ModelOutput，隐藏输入、审批和父工具，Main 阅读根保持，返回恢复原草稿和 required 等待提示。停止仍 fresh 核原目标并保存原准确取消，受理不当终态，未知／在途不换 ID 重发。
+
+本机实际验证，最终生产输入为上述基线加本片最终 owned diff：
+
+- Main／IPC、完整目录、环境卡 DOM、原页面与目录五文件 actual0／37pass／321assert／1440ms，日志 `/private/tmp/kite-pc-environment-contracts-delivery-20261008.log`。核第200项后、全局／当前独立读、旧选择拒绝控制、准确停止一 POST、完整 child／只读返回、草稿、失败保旧状态与 reset 所有共同等待者的明确失效。有限 fixture 不代表实际平台。
+- 新对话／安排任务相邻 DOM 分别 actual0／5pass／106assert、2pass／41assert，日志 `kite-pc-environment-new-conversation-dom-20261008.log`、`kite-pc-environment-scheduled-dom-20261008.log`，均在 `/private/tmp/`；普通问题与计划相邻结果按收尾记录。没有扩大 TUI／Chrome／Vault 矩阵或运行阶段完整默认。
+- 源码外默认 macOS Native／真实 Electron 背景窗口 actual0／1pass／27Bunassert／61.78秒，日志 `/private/tmp/kite-pc-environment-background-window-ready-20261008.log`。新环境卡打开原已完成 child、Main 仍选 original-root、详情无 Composer、完整252000B Unicode正文、返回恢复父 required 提示、导航 Provider 不增；原全局单目标停止、sibling、public backup v15 A→B 原出处／原 caller／cold cursor150／Provider9／全GET与完整日志断言保持。两所属 Service 正常退出、owned 进程集合为空，两层制品 EX 可重取。
+- 原 installed macOS 默认宿主 Shell 生命周期 actual0／1pass／830Bunassert／85.94秒，日志 `/private/tmp/kite-pc-environment-shell-window-20261008.log`。准确 stop 改从原环境卡按钮进入，物理一POST原 Execution、目标完整进程树消失、sibling仍运行，后台2→1；原全部输出、Main／Service fault、两次冷重开原GET／零POST、Provider4、两层使用锁、busy uninstall及保数据卸载断言保留。测试自有 HOME／installed 目录，不更改用户 Profile。
+- Root与八workspace类型 actual0，日志 `/private/tmp/kite-pc-environment-types-ready-20261008.log`。默认发现仍625文件，两个原真实窗口各恰好一次；没有新测试文件或调度例外，发现日志 `/private/tmp/kite-pc-environment-discovery-20261008.log`。
+
+实际背景窗口四个原红均保留，前缀 `/private/tmp/kite-pc-environment-background-window-`，分别 first、diagnosis、final、closure-20261008.log。暖入口均通过；冷启动 observer reset 正常 abort 旧全局目录，被初始页面误弹成失败。诊断只在专属测试制品临时记录，最终源码已移除。Main 将共用 GET 的取消统一为 directory_observation_changed，页面同时核 message／code；Electron contextBridge 仅保 Error message 时也不误弹，其他失败仍报错。没有确认掉弹窗来绕过失败，没有增加预算或删断言。有限 reset fixture 第一轮过早 reset 未等 invoke 加入旧 GET，次轮真实 abort 证明共享 raw promise 绕过外层错误归一，最终归一移入共同 promise；原 red、ready、closure 及成功日志保留。类型检查两次定位新 DOM fixture 不完整的 NativeSelection，改用完整类型与独立后台事实，最终八types通过。
+
+[Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)、[UI owner](../../packages/ui/README.md#原桌面展示层)、[桌面手册](../handbook/clients/desktop/README.md)、[当前边界](../active/unified-agent-boundary.md)、§30.2.15和既有[后台取舍](../../.agents/notes/implemented/architecture/2026-10-07-native-background-overview.md)同步，保留原全局观察独立选择的适用理由。
+
+后续退出依赖仍按最多五项推进：① Workspace 批量移除与物理GC；② installed恢复维护与已发布前版样本；③ macOS 原RSS／八轮稳定性及全局资源退出；④ 完整迁移独立审查；⑤ 前置满足后阶段完整默认、最终旧路径删除和Win／Linux Actions验收。RSS原失败仍在，37能力partial、wholeV13=false、Goal active；新独立 Agent 本逻辑轮仅尝试一次而因thread limit失败，Root自检不替代独立审查。无push／PR／发布／dispatch。
+
+
+普通问题／计划相邻 DOM 分别 actual0／1pass／38assert、1pass／41assert，保原 revision 草稿、缺页／失败保留和准确 accepted／Run cancelled 清理；日志 `/private/tmp/kite-pc-environment-questionnaire-neighbor-20261008.log`、`/private/tmp/kite-pc-environment-plan-neighbor-20261008.log`。最终源码／测试只读 Biome、静态边界／八workspace／唯一API graph、docs、scope=all impact、plan-evidence、ownership及正常 Git hooks按准确 owned 范围执行；本片不改生产 Store／Service／Client／私有DB格式。iteration_complete 仅收束本片，原完整阶段门禁保持。Root是唯一 Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258` 保持且不暂存。实际本地交付核验归 `/private/tmp/kite-pc-environment-delivery-20261008.json`，不以文档提前宣称整阶段或独立审查完成。
+
+
+收尾门禁实际均0：docs-final、impact-final（scope=all）、plan-evidence-final、architecture、ownership和biome-final-20261008.log，完整前缀为 `/private/tmp/kite-pc-environment-`；14个owned代码文件Biome无fix，保1既有warning／1info。最后将停止后的只读 state 刷新接到页面既有 report，避免异步失败无处理；正常读取／控制路径不变，Desktop类型与新对话DOM（5/106）再次actual0，日志 desktop-types-delivery、page-delivery及final-callback-biome-20261008.log。上述两真实窗口在这次错误报告包装之前，复用其未变化的完整读取、原目标停止及实际正常退出断言，未声称又运行一次窗口。document-before-commit 的 iteration_complete 就绪；stage／commit核最终冻结owned内容，正常hooks仍须独立通过。

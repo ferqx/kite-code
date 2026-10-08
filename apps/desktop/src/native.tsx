@@ -41,6 +41,7 @@ import type {
 } from './native-bridge';
 import { NativeCallerView } from './native-caller';
 import { NativeContextView } from './native-context';
+import { useNativeEnvironment } from './native-environment';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
@@ -241,7 +242,15 @@ export function NativeDesktop() {
   async function readDirectory() {
     if (!bridge) return;
     const current = generation.current;
-    const value = await bridge.request({ method: 'directory', generation: current });
+    let value: NativeResult;
+    try {
+      value = await bridge.request({ method: 'directory', generation: current });
+    } catch (cause) {
+      // Main's observer reset replaces this GET; the next directory state owns the display.
+      const code = (cause as { code?: string; message?: string }).code ?? (cause as Error).message;
+      if (code === 'directory_observation_changed') return;
+      throw cause;
+    }
     if (current === generation.current && value && 'workspaces' in value) setDirectory(value);
   }
   async function readGrants(nextPage = false) {
@@ -418,6 +427,25 @@ export function NativeDesktop() {
         selected.current === inputSession,
     });
   }, [inputStore, inputSession, inputEnabled, inputGeneration, inputView]);
+  const environment = useNativeEnvironment({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection: !preparing && !scheduledTasksView ? selection : undefined,
+    revision: state?.environmentRevision ?? 0,
+    unavailable: !!(
+      selection?.viewLoading ||
+      selection?.permissionUnavailable ||
+      state?.backgroundUnavailable
+    ),
+    controlUnavailable: !!state?.callerUnavailable,
+    submissions: state?.callerSubmissions,
+    onChanged: async () => {
+      await report(refresh, false);
+    },
+  });
+  const childDetail = environment.child,
+    childFacts = childDetail?.facts,
+    childMessages = childFacts ? desktopMessages(childFacts.messages) : [];
   if (!bridge) return <p>原生桥不可用。此页面不连接替代服务器。</p>;
   async function write(action: () => Promise<unknown>, requiresHistory = true) {
     if (
@@ -1484,12 +1512,40 @@ export function NativeDesktop() {
           ? selection?.session.id
           : undefined
       }
-      sessionLabel={preparing ? '新对话' : (selection?.session.title ?? 'kite')}
-      readingKey={
-        preparing ? 'new-conversation' : JSON.stringify([selection?.storeId, selection?.session.id])
+      sessionLabel={
+        childDetail
+          ? (childFacts?.session.title ?? childDetail.sessionId)
+          : preparing
+            ? '新对话'
+            : (selection?.session.title ?? 'kite')
       }
-      messages={messageModels}
+      readingKey={
+        preparing
+          ? 'new-conversation'
+          : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
+      }
+      messages={childDetail ? childMessages : messageModels}
       renderMessage={(model) => {
+        if (childDetail) {
+          const message = childFacts?.messages.find((entry) => entry.id === model.id),
+            snapshot = childFacts?.modelOutputs.find(
+              (entry) => entry.messageId === model.id,
+            )?.snapshot;
+          return message ? (
+            <ModelOutputMessage
+              message={message}
+              storeId={selection!.storeId}
+              onRead={
+                snapshot
+                  ? async ({ signal }) => {
+                      signal.throwIfAborted();
+                      return snapshot;
+                    }
+                  : undefined
+              }
+            />
+          ) : null;
+        }
         if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
           return (
             <>
@@ -1539,7 +1595,33 @@ export function NativeDesktop() {
           />
         );
       }}
-      loading={!preparing && !!selection && historyState.phase === 'loading'}
+      loading={
+        childDetail
+          ? childDetail.loading && !childFacts
+          : !preparing && !!selection && historyState.phase === 'loading'
+      }
+      environmentInformation={!childDetail ? environment.card : undefined}
+      requiredSubagentWait={
+        !childDetail &&
+        !preparing &&
+        historyState.phase === 'complete' &&
+        !selection?.viewLoading &&
+        !selection?.permissionUnavailable &&
+        !!selection?.runs.some(
+          (run) =>
+            run.isActive &&
+            run.status === 'waiting_execution' &&
+            run.waitingForResults?.some((id) =>
+              selection.executions.some(
+                (execution) =>
+                  execution.id === id &&
+                  execution.childSessionId !== null &&
+                  execution.originStoreId === selection.storeId &&
+                  ['planned', 'dispatching', 'running'].includes(execution.status),
+              ),
+            ),
+        )
+      }
       connected={generation.current > 0}
       connectionLabel={
         generation.current > 0
@@ -1608,7 +1690,20 @@ export function NativeDesktop() {
       }
       headerActions={
         <>
-          {scheduledTasksView ? (
+          {childDetail ? (
+            <>
+              <DesktopButton variant="ghost" onClick={environment.closeChild}>
+                返回主会话
+              </DesktopButton>
+              <DesktopButton
+                variant="ghost"
+                onClick={environment.refreshChild}
+                disabled={childDetail.loading}
+              >
+                刷新子日志
+              </DesktopButton>
+            </>
+          ) : scheduledTasksView ? (
             (selection || preparing) && (
               <DesktopButton
                 variant="ghost"
@@ -1635,7 +1730,23 @@ export function NativeDesktop() {
         </>
       }
       beforeConversation={
-        firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
+        childDetail ? (
+          <>
+            {childDetail.loading && <p role="status">正在读取完整子会话日志…</p>}
+            {childDetail.error && (
+              <p role="alert">
+                子日志读取失败：{childDetail.error}。
+                {childFacts ? '保留上次完整内容。' : '尚未取得完整内容。'}
+              </p>
+            )}
+            {childFacts && (
+              <p>
+                已完整读取子日志至固定序号 {childFacts.upperSeq}，原子轮次{' '}
+                {childFacts.item.childRun?.id ?? '尚未确认'}。
+              </p>
+            )}
+          </>
+        ) : firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
           <DesktopButton
             onClick={() =>
               void write(async () => {
@@ -1670,6 +1781,7 @@ export function NativeDesktop() {
         ) : undefined
       }
       statusNotice={
+        !childDetail &&
         !preparing &&
         selection && (
           <>
@@ -1699,165 +1811,175 @@ export function NativeDesktop() {
           </>
         )
       }
-      interaction={!preparing && hasPendingInteraction ? interactionCards : undefined}
+      interaction={
+        !childDetail && !preparing && hasPendingInteraction ? interactionCards : undefined
+      }
       composer={
-        preparing && state && directory
-          ? {
-              draft: newDraft,
-              onChange: setNewDraft,
-              onSend: sendFirst,
-              active: false,
-              stopping: false,
-              disabled: pending,
-              sending: pending,
-              sendDisabled:
-                !newWorkspace ||
-                contextBusy ||
-                !newModelReady.ready ||
-                firstSubmission?.result?.phase === 'unknown',
-              inputLabel: '新对话草稿',
-              sendLabel: '发送首条消息',
-              permission: preparedPermission === 'ask' ? 'accept_edits' : preparedPermission,
-              fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
-              onPermissionChange: (mode) =>
-                setNewPermission(mode === 'accept_edits' ? 'ask' : mode),
-              permissionDisabled: pending,
-              options: (
-                <>
-                  <NativeModelPicker
-                    bridge={bridge}
-                    generation={state.generation}
-                    preparing={{ storeId: directory.storeId }}
-                    revision={String(settingsRevision)}
-                    value={newChoice}
-                    onChange={setNewChoice}
-                    onReady={(ready, choice) =>
-                      setNewModelReady((previous) =>
-                        JSON.stringify(previous) === JSON.stringify({ ready, choice })
-                          ? previous
-                          : { ready, choice },
-                      )
-                    }
-                  />
-                  <label>
-                    <input
-                      type="checkbox"
-                      aria-label="先审核计划"
-                      checked={newPlanMode}
-                      onChange={(event) => setNewPlanMode(event.target.checked)}
-                      disabled={pending}
-                    />
-                    先审核计划
-                  </label>
-                </>
-              ),
-            }
-          : canCompose && selection && state
+        childDetail
+          ? undefined
+          : preparing && state && directory
             ? {
-                draft,
-                onChange: setDraft,
-                onSend: sendInput,
-                active: !!activeInputRun,
+                draft: newDraft,
+                onChange: setNewDraft,
+                onSend: sendFirst,
+                active: false,
                 stopping: false,
                 disabled: pending,
                 sending: pending,
                 sendDisabled:
-                  historyState.phase !== 'complete' ||
-                  selection.permissionUnavailable ||
-                  (firstSubmission?.creation.sessionId === selection.session.id &&
-                    firstSubmission.result?.phase === 'unknown') ||
-                  (needsNextModel && !nextModelReady),
-                inputLabel: '当前会话私有草稿',
-                sendLabel: activeInputRun
-                  ? planMode
-                    ? '排队新的计划任务'
-                    : ['context.compress', 'context.compression.reset'].includes(
-                          selection.activeCommand?.kind ?? '',
-                        )
-                      ? '排队压缩后的输入'
-                      : '引导当前轮次'
-                  : planMode
-                    ? '发送计划任务'
-                    : '发送明确的新轮次',
+                  !newWorkspace ||
+                  contextBusy ||
+                  !newModelReady.ready ||
+                  firstSubmission?.result?.phase === 'unknown',
+                inputLabel: '新对话草稿',
+                sendLabel: '发送首条消息',
+                permission: preparedPermission === 'ask' ? 'accept_edits' : preparedPermission,
+                fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
+                onPermissionChange: (mode) =>
+                  setNewPermission(mode === 'accept_edits' ? 'ask' : mode),
+                permissionDisabled: pending,
                 options: (
                   <>
                     <NativeModelPicker
                       bridge={bridge}
                       generation={state.generation}
-                      selection={selection}
+                      preparing={{ storeId: directory.storeId }}
                       revision={String(settingsRevision)}
-                      value={modelChoices.current.get(choiceKey) ?? {}}
-                      onChange={(choice) => {
-                        modelChoices.current.set(choiceKey, choice);
-                        choiceChanged((value) => value + 1);
-                      }}
+                      value={newChoice}
+                      onChange={setNewChoice}
                       onReady={(ready, choice) =>
-                        setResolvedChoice((previous) => {
-                          const value = { identity: choiceIdentity, choice, ready };
-                          return JSON.stringify(previous) === JSON.stringify(value)
+                        setNewModelReady((previous) =>
+                          JSON.stringify(previous) === JSON.stringify({ ready, choice })
                             ? previous
-                            : value;
-                        })
+                            : { ready, choice },
+                        )
                       }
                     />
                     <label>
                       <input
                         type="checkbox"
                         aria-label="先审核计划"
-                        checked={planMode}
+                        checked={newPlanMode}
+                        onChange={(event) => setNewPlanMode(event.target.checked)}
                         disabled={pending}
-                        onChange={(event) => {
-                          setPlanMode(event.target.checked);
-                          planModes.current.set(
-                            JSON.stringify([
-                              selection.storeId,
-                              selection.session.workspaceId,
-                              selection.session.id,
-                            ]),
-                            event.target.checked,
-                          );
-                        }}
                       />
                       先审核计划
                     </label>
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() =>
-                        void write(async () => {
-                          const original = {
-                            generation: generation.current,
-                            view: viewIntent.current,
-                            sessionId: selection.session.id,
-                          };
-                          const saved = await bridge.request({
-                            method: 'draft.write',
-                            generation: original.generation,
-                            sessionId: original.sessionId,
-                            revision: draftRevision.current,
-                            content: draft,
-                          });
-                          if (
-                            saved &&
-                            'content' in saved &&
-                            generation.current === original.generation &&
-                            viewIntent.current === original.view &&
-                            selected.current === original.sessionId
-                          )
-                            draftRevision.current = saved.revision;
-                        })
-                      }
-                    >
-                      保留草稿
-                    </button>
                   </>
                 ),
               }
+            : canCompose && selection && state
+              ? {
+                  draft,
+                  onChange: setDraft,
+                  onSend: sendInput,
+                  active: !!activeInputRun,
+                  stopping: false,
+                  disabled: pending,
+                  sending: pending,
+                  sendDisabled:
+                    historyState.phase !== 'complete' ||
+                    selection.permissionUnavailable ||
+                    (firstSubmission?.creation.sessionId === selection.session.id &&
+                      firstSubmission.result?.phase === 'unknown') ||
+                    (needsNextModel && !nextModelReady),
+                  inputLabel: '当前会话私有草稿',
+                  sendLabel: activeInputRun
+                    ? planMode
+                      ? '排队新的计划任务'
+                      : ['context.compress', 'context.compression.reset'].includes(
+                            selection.activeCommand?.kind ?? '',
+                          )
+                        ? '排队压缩后的输入'
+                        : '引导当前轮次'
+                    : planMode
+                      ? '发送计划任务'
+                      : '发送明确的新轮次',
+                  options: (
+                    <>
+                      <NativeModelPicker
+                        bridge={bridge}
+                        generation={state.generation}
+                        selection={selection}
+                        revision={String(settingsRevision)}
+                        value={modelChoices.current.get(choiceKey) ?? {}}
+                        onChange={(choice) => {
+                          modelChoices.current.set(choiceKey, choice);
+                          choiceChanged((value) => value + 1);
+                        }}
+                        onReady={(ready, choice) =>
+                          setResolvedChoice((previous) => {
+                            const value = { identity: choiceIdentity, choice, ready };
+                            return JSON.stringify(previous) === JSON.stringify(value)
+                              ? previous
+                              : value;
+                          })
+                        }
+                      />
+                      <label>
+                        <input
+                          type="checkbox"
+                          aria-label="先审核计划"
+                          checked={planMode}
+                          disabled={pending}
+                          onChange={(event) => {
+                            setPlanMode(event.target.checked);
+                            planModes.current.set(
+                              JSON.stringify([
+                                selection.storeId,
+                                selection.session.workspaceId,
+                                selection.session.id,
+                              ]),
+                              event.target.checked,
+                            );
+                          }}
+                        />
+                        先审核计划
+                      </label>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() =>
+                          void write(async () => {
+                            const original = {
+                              generation: generation.current,
+                              view: viewIntent.current,
+                              sessionId: selection.session.id,
+                            };
+                            const saved = await bridge.request({
+                              method: 'draft.write',
+                              generation: original.generation,
+                              sessionId: original.sessionId,
+                              revision: draftRevision.current,
+                              content: draft,
+                            });
+                            if (
+                              saved &&
+                              'content' in saved &&
+                              generation.current === original.generation &&
+                              viewIntent.current === original.view &&
+                              selected.current === original.sessionId
+                            )
+                              draftRevision.current = saved.revision;
+                          })
+                        }
+                      >
+                        保留草稿
+                      </button>
+                    </>
+                  ),
+                }
+              : undefined
+      }
+      readOnlyReason={
+        childDetail
+          ? '子 Agent 会话仅供查看。'
+          : selection?.session.parentSessionId
+            ? '子会话只读'
             : undefined
       }
-      readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
       detailPanel={
-        toolsOpen
+        !childDetail && toolsOpen
           ? { label: '会话与任务', content: sessionTools, onClose: () => setToolsOpen(false) }
           : undefined
       }

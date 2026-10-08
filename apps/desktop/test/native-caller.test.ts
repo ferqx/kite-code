@@ -615,6 +615,60 @@ test('global activity refresh follows non-selected changes, retains failed obser
   }
 });
 
+test('cold observer reset invalidates the old directory read explicitly and publishes the new observation without effects', async () => {
+  const port = client();
+  let reset!: () => void,
+    reads = 0,
+    held: AbortSignal | undefined;
+  Object.assign(port, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      await options.onReady?.({} as never);
+      await new Promise<void>((resolve) => {
+        reset = () => {
+          void options.onReset?.({} as never);
+          resolve();
+        };
+        options.signal!.addEventListener('abort', () => resolve(), { once: true });
+      });
+    },
+    async listWorkspaceDirectory() {
+      return { snapshotCursor: '10' };
+    },
+    async listAllWorkspaces(options: { signal: AbortSignal }) {
+      if (++reads === 1) {
+        held = options.signal;
+        await new Promise<void>((_resolve, reject) =>
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+            once: true,
+          }),
+        );
+      }
+      return [{ id: 'w', name: 'Restored project', rootUri: 'file:///w' }];
+    },
+  });
+  const caller = new NativeCaller(port, () => {}, memoryPrivateData());
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const reading = code(caller.invoke({ method: 'directory', generation }));
+    for (let i = 0; i < 100 && !held; i++) await Bun.sleep(1);
+    expect(held).toBeDefined();
+    // invoke first drains Main refresh; allow it to join the existing held GET before reset.
+    await Bun.sleep(1);
+    reset();
+    expect(await reading).toBe('directory_observation_changed');
+    expect(held!.aborted).toBe(true);
+    for (let i = 0; i < 100 && caller.state().directory?.unavailable !== false; i++)
+      await Bun.sleep(5);
+    expect(caller.state().directory).toMatchObject({
+      unavailable: false,
+      workspaces: [{ id: 'w', name: 'Restored project' }],
+    });
+    expect(port.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
 test('same creation command shares one in-flight POST across view switches; cold pending intent only queries', async () => {
   const port = client(),
     data = memoryPrivateData();

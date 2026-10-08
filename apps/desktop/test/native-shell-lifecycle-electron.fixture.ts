@@ -353,8 +353,12 @@ try {
     .getByRole('status', { name: '当前会话后台状态', exact: true })
     .filter({ hasText: /^后台状态：2 项未结束，0 项未知$/ })
     .waitFor();
-  await card(exact.id)
-    .getByRole('button', { name: `停止后台执行 · ${exact.id}`, exact: true })
+  const showEnvironment = page.getByRole('button', { name: '显示环境信息', exact: true });
+  if (await showEnvironment.isVisible()) await showEnvironment.click();
+  await page
+    .getByRole('region', { name: '环境信息', exact: true })
+    .locator(`[data-execution-id="${exact.id}"]`)
+    .getByRole('button', { name: '停止', exact: true })
     .click();
   await until(
     state,
@@ -389,6 +393,7 @@ try {
   assert.equal(stops.length, 1);
   assert.equal(JSON.parse(stops[0]!.body!).executionId, exact.id);
   stage('exact_default_job_stopped_other_job_running', {
+    entry: 'retained_environment_card',
     executionId: exact.id,
     result: stopped.result,
     survivingExecutionId: main.id,

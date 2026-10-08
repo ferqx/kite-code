@@ -308,6 +308,7 @@ export type NativeDirectory = {
   unavailable?: boolean;
 };
 export type NativeState = {
+  readonly environmentRevision?: number;
   readonly directory?: NativeDirectory;
   readonly backgroundUnavailable?: boolean;
   readonly generation: number;

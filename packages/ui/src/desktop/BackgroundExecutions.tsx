@@ -7,6 +7,10 @@ export interface BackgroundExecutionSummary {
   readonly displayName?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
   readonly status:
+    | 'queued'
+    | 'starting'
+    | 'unknown'
+    | 'restored'
     | 'running'
     | 'stopping'
     | 'completed'
@@ -15,6 +19,7 @@ export interface BackgroundExecutionSummary {
     | 'unavailable'
     | 'unconfirmed';
   readonly cleanupConfirmed: boolean;
+  readonly canStop?: boolean;
   readonly cursor?: number;
   readonly sessionId?: string;
   readonly sessionRevision?: number;
@@ -163,7 +168,7 @@ function ExecutionGroup({
               execution.executionId,
             );
             return (
-              <li key={execution.executionId}>
+              <li key={execution.executionId} data-execution-id={execution.executionId}>
                 <span className="background-execution-identity">
                   {childSessionId ? (
                     <button
@@ -183,7 +188,7 @@ function ExecutionGroup({
                   )}
                 </span>
                 <span className="background-execution-status">{statusLabel(execution.status)}</span>
-                {onStop && execution.status === 'running' && (
+                {onStop && execution.status === 'running' && execution.canStop !== false && (
                   <Button
                     className="background-execution-stop"
                     size="xs"
@@ -219,6 +224,10 @@ function kindLabel(kind: BackgroundExecutionSummary['kind']): string {
 }
 
 function statusLabel(status: BackgroundExecutionSummary['status']): string {
+  if (status === 'queued') return '排队中';
+  if (status === 'starting') return '正在启动';
+  if (status === 'unknown') return '结果未知';
+  if (status === 'restored') return '恢复历史，只读';
   if (status === 'unconfirmed') return '状态待确认';
   if (status === 'running') return '运行中';
   if (status === 'stopping') return '正在停止';

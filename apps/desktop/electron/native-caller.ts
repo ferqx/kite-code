@@ -91,6 +91,8 @@ export class NativeCaller {
   private readonly skills: NativeSkillCatalogueReads;
   private readonly jobOutput: NativeJobOutputReads;
   private readonly background: NativeBackground;
+  private readonly environment: NativeBackground;
+  private environmentRevision = 0;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
   private observationUnavailable = false;
@@ -155,6 +157,34 @@ export class NativeCaller {
           info?.storeId &&
           info.subjectId
           ? { generation: this.generation, storeId: info.storeId, subjectId: info.subjectId }
+          : undefined;
+      },
+      {
+        prepare: (item, commandId) => this.requireCaller().prepareBackgroundStop(item, commandId),
+        submit: (commandId) => this.requireCaller().submit(commandId),
+      },
+    );
+    this.environment = new NativeBackground(
+      client,
+      () => {
+        const info = this.client.serverInfo,
+          snapshot = this.controller.snapshot;
+        return !this.closed &&
+          !this.observationUnavailable &&
+          this.generation > 0 &&
+          info?.storeId &&
+          info.subjectId &&
+          snapshot?.sessionId === this.selected &&
+          snapshot?.view.storeId === info.storeId &&
+          snapshot.view.session.parentSessionId === null &&
+          snapshot.view.session.deletedAt === null
+          ? {
+              generation: this.generation,
+              storeId: info.storeId,
+              subjectId: info.subjectId,
+              rootSessionId: snapshot.sessionId,
+              viewSelection: this.selection,
+            }
           : undefined;
       },
       {
@@ -402,6 +432,7 @@ export class NativeCaller {
     return snapshot;
   }
   private releaseReads() {
+    this.environment.release();
     this.controller.cancelInteractionRead();
     this.callerReads.clear();
     this.configuration.release();
@@ -463,15 +494,17 @@ export class NativeCaller {
       this.directoryUnavailable = false;
       this.workspaceObservation = { generation, storeId, workspaces };
       return this.directory;
-    })();
+    })().catch((error) => {
+      if (generation === this.generation && epoch === this.directoryEpoch)
+        this.directoryUnavailable = true;
+      if (abort.signal.aborted && epoch !== this.directoryEpoch)
+        throw new ClientError('directory_observation_changed');
+      throw error;
+    });
     const reading = { generation, epoch, abort, promise };
     this.directoryRead = reading;
     try {
       return await promise;
-    } catch (error) {
-      if (generation === this.generation && epoch === this.directoryEpoch)
-        this.directoryUnavailable = true;
-      throw error;
     } finally {
       if (this.directoryRead === reading) this.directoryRead = undefined;
     }
@@ -541,6 +574,7 @@ export class NativeCaller {
     const invalidate = () => {
       this.invalidateDirectory();
       this.background.release();
+      this.environment.release();
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
       this.historyEpoch++;
@@ -595,12 +629,16 @@ export class NativeCaller {
             signal: signal.signal,
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
             onReady: () => {
+              this.environmentRevision++;
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
               this.scheduleRefresh(signal.signal);
             },
-            onChange: () => this.scheduleRefresh(signal.signal),
+            onChange: () => {
+              this.environmentRevision++;
+              this.scheduleRefresh(signal.signal);
+            },
             onReset: () => {
               reset = true;
               invalidate();
@@ -689,6 +727,7 @@ export class NativeCaller {
         : undefined;
     return {
       generation: this.generation,
+      environmentRevision: this.environmentRevision,
       directory: this.directoryState(),
       backgroundUnavailable: this.observationUnavailable,
       selection,
@@ -846,20 +885,24 @@ export class NativeCaller {
       await this.drainRefresh();
     this.check(request.generation);
     const generation = request.generation;
+    const background =
+      'surface' in request && request.surface === 'environment'
+        ? this.environment
+        : this.background;
     let result: NativeResult;
     switch (request.method) {
       case 'background.open':
-        result = await this.background.open(request.readId);
+        result = await background.open(request.readId);
         break;
       case 'background.next':
-        result = this.background.next(request.readId);
+        result = background.next(request.readId);
         break;
       case 'background.close':
-        this.background.close(request.readId);
+        background.close(request.readId);
         result = null;
         break;
       case 'background.stop':
-        result = await this.background.stop(
+        result = await background.stop(
           request.observationId,
           request.executionId,
           request.commandId,
@@ -867,23 +910,23 @@ export class NativeCaller {
         this.changed();
         break;
       case 'background.output.open':
-        result = await this.background.outputOpen(request);
+        result = await background.outputOpen(request);
         break;
       case 'background.output.next':
-        result = await this.background.outputNext(request.readId);
+        result = await background.outputNext(request.readId);
         break;
       case 'background.output.close':
-        this.background.outputClose(request.readId);
+        background.outputClose(request.readId);
         result = null;
         break;
       case 'background.child.open':
-        result = await this.background.childOpen(request);
+        result = await background.childOpen(request);
         break;
       case 'background.child.read':
-        result = this.background.childRead(request);
+        result = background.childRead(request);
         break;
       case 'background.child.close':
-        this.background.childClose(request.readId);
+        background.childClose(request.readId);
         result = null;
         break;
       case 'jobOutput.open':

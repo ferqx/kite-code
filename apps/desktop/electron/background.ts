@@ -15,7 +15,13 @@ import {
 import type { NativeJobOutputScope } from '../src/job-output-bridge';
 import { NativeJobOutputReads } from './job-output-reads';
 
-type Scope = { generation: number; storeId: string; subjectId: string };
+type Scope = {
+  generation: number;
+  storeId: string;
+  subjectId: string;
+  rootSessionId?: string;
+  viewSelection?: number;
+};
 type Directory = {
   readId: string;
   scope: Scope;
@@ -72,7 +78,7 @@ export function backgroundIdentity(item: BackgroundExecutionItem) {
   ]);
 }
 
-/** Complete authenticated observations are independent of the selected conversation. */
+/** Each Main-owned scope has its own complete authenticated observation and detail readers. */
 export class NativeBackground {
   private directory: Directory | undefined;
   private observed:
@@ -137,8 +143,16 @@ export class NativeBackground {
     try {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
-      const items = await this.client.listAllBackgroundExecutions({ signal: lease.abort.signal });
+      const items = await this.client.listAllBackgroundExecutions({
+        signal: lease.abort.signal,
+        rootSessionId: lease.scope.rootSessionId,
+      });
       this.check(lease);
+      if (
+        lease.scope.rootSessionId &&
+        items.some((item) => item.rootSession.id !== lease.scope.rootSessionId)
+      )
+        throw new ClientError('background_identity_mismatch');
       if (this.directory !== lease) throw new ClientError('background_observation_changed');
       lease.items = items;
       this.observed = {
@@ -171,6 +185,9 @@ export class NativeBackground {
         storeId: lease.scope.storeId,
         readId: lease.readId,
         observationId: lease.observationId,
+        ...(lease.scope.rootSessionId
+          ? { rootSessionId: lease.scope.rootSessionId, viewSelection: lease.scope.viewSelection }
+          : {}),
         startIndex: offset,
         nextIndex: offset + count,
         total: all.length,
@@ -451,6 +468,9 @@ export class NativeBackground {
         readId: lease.readId,
         observationId: lease.observationId,
         executionId: item.execution.id,
+        ...(lease.scope.rootSessionId
+          ? { rootSessionId: lease.scope.rootSessionId, viewSelection: lease.scope.viewSelection }
+          : {}),
         childSessionId: childId,
         childRunId: item.childRun?.id ?? null,
         wireBytes: String(bytes.length),

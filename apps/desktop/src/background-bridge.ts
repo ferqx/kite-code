@@ -7,7 +7,7 @@ import type {
 import type { NativeJobOutputPage } from './job-output-bridge';
 
 export const nativeBackgroundPageBytes = 524288;
-export type NativeBackgroundRequest =
+export type NativeBackgroundRequest = (
   | { method: 'background.open'; generation: number; readId: string }
   | { method: 'background.next' | 'background.close'; generation: number; readId: string }
   | {
@@ -35,13 +35,16 @@ export type NativeBackgroundRequest =
       readId: string;
       offset: number;
       limit: number;
-    };
+    }
+) & { surface?: 'environment' };
 export type NativeBackgroundPage = {
   kind: 'background.page';
   viewGeneration: number;
   storeId: string;
   readId: string;
   observationId: number;
+  rootSessionId?: string;
+  viewSelection?: number;
   startIndex: number;
   nextIndex: number;
   total: number;
@@ -61,6 +64,8 @@ export type NativeBackgroundChildOpen = {
   storeId: string;
   readId: string;
   observationId: number;
+  rootSessionId?: string;
+  viewSelection?: number;
   executionId: string;
   childSessionId: string;
   childRunId: string | null;

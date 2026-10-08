@@ -17,7 +17,8 @@ import { memoryPrivateData } from './private-data.fixture';
 
 function fixture(items: BackgroundExecutionItem[]) {
   const calls: string[] = [],
-    current = { generation: 1, storeId: 'store', subjectId: 'user' };
+    current = { generation: 1, storeId: 'store', subjectId: 'user' },
+    selected = { rootSessionId: 'root', viewSelection: 1 };
   const port = {
     serverInfo: {
       storeId: 'store',
@@ -28,9 +29,13 @@ function fixture(items: BackgroundExecutionItem[]) {
       calls.push('GET server');
       return port.serverInfo;
     },
-    listAllBackgroundExecutions: async () => {
+    listAllBackgroundExecutions: async (options: { rootSessionId?: string }) => {
       calls.push('GET directory');
-      return structuredClone(items);
+      return structuredClone(
+        items.filter(
+          (item) => !options.rootSessionId || item.rootSession.id === options.rootSessionId,
+        ),
+      );
     },
     listBackgroundExecutions: async (input: { executionId: string }) => {
       calls.push(`GET exact ${input.executionId}`);
@@ -83,39 +88,96 @@ function fixture(items: BackgroundExecutionItem[]) {
       return { id: commandId, status: 'applied' } as Command;
     },
   });
+  const environment = new NativeBackground(port, () => ({ ...current, ...selected }), {
+    prepare: async (item, commandId) => {
+      calls.push(`PREPARE ${item.execution.id}/${commandId}`);
+    },
+    submit: async (commandId) => {
+      calls.push(`POST ${commandId}`);
+      return { id: commandId, status: 'applied' } as Command;
+    },
+  });
   const bridge: NativeBridge = {
     watch: () => () => undefined,
     request: async (request) => {
       decodeNativeRequest(request);
+      const owner = 'surface' in request && request.surface === 'environment' ? environment : main;
       switch (request.method) {
         case 'background.open':
-          return main.open(request.readId);
+          return owner.open(request.readId);
         case 'background.next':
-          return main.next(request.readId);
+          return owner.next(request.readId);
         case 'background.close':
-          main.close(request.readId);
+          owner.close(request.readId);
           return null;
         case 'background.output.open':
-          return main.outputOpen(request);
+          return owner.outputOpen(request);
         case 'background.output.next':
-          return main.outputNext(request.readId);
+          return owner.outputNext(request.readId);
         case 'background.output.close':
-          main.outputClose(request.readId);
+          owner.outputClose(request.readId);
           return null;
         case 'background.child.open':
-          return main.childOpen(request);
+          return owner.childOpen(request);
         case 'background.child.read':
-          return main.childRead(request);
+          return owner.childRead(request);
         case 'background.child.close':
-          main.childClose(request.readId);
+          owner.childClose(request.readId);
           return null;
+        case 'background.stop':
+          return owner.stop(request.observationId, request.executionId, request.commandId);
         default:
           throw Error('unexpected_operation');
       }
     },
   };
-  return { main, bridge, port, calls, current };
+  return { main, environment, bridge, port, calls, current, selected };
 }
+
+test('selected environment exhausts the original root independently of the open global overview, and old selection loses control', async () => {
+  const items = Array.from({ length: 206 }, (_, i) => backgroundItem(i + 1)),
+    foreign = backgroundItem(207);
+  foreign.rootSession = { ...foreign.rootSession, id: 'other', rootSessionId: 'other' };
+  foreign.session = { ...foreign.session, id: 'other', rootSessionId: 'other' };
+  foreign.execution = { ...foreign.execution, sessionId: 'other', rootSessionId: 'other' };
+  const f = fixture([...items, foreign]);
+  try {
+    const global = await f.main.open('global');
+    const read = () =>
+      readNativeBackground({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+      });
+    const selected = await read();
+    expect(selected.items.map((item) => item.execution.id)).toEqual(
+      items.map((item) => item.execution.id),
+    );
+    expect(f.main.next('global').observationId).toBe(global.observationId);
+    await f.environment.stop(selected.observationId, items[205]!.execution.id, 'exact-stop');
+    expect(f.calls.filter((call) => call.startsWith('POST'))).toEqual(['POST exact-stop']);
+    f.selected.viewSelection = 2;
+    await expect(
+      f.environment.stop(selected.observationId, items[0]!.execution.id, 'late-stop'),
+    ).rejects.toMatchObject({ code: 'background_observation_changed' });
+    await expect(read()).rejects.toMatchObject({ code: 'background_page_invalid' });
+    expect(f.calls.filter((call) => call.startsWith('POST'))).toEqual(['POST exact-stop']);
+    expect(() =>
+      decodeNativeRequest({
+        method: 'background.open',
+        generation: 1,
+        readId: 'wrong',
+        surface: 'other',
+      }),
+    ).toThrow('invalid_native_request');
+  } finally {
+    f.environment.release();
+    f.main.release();
+  }
+});
 test('complete Main/renderer background directory and pinned original output survive a new overview observation without truncation or mutations', async () => {
   const items = Array.from({ length: 241 }, (_, i) => backgroundItem(i + 1)),
     f = fixture(items);

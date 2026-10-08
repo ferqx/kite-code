@@ -245,6 +245,43 @@ try {
     (row) => stillRequired?.includes(row.id) && row.id !== completed.id,
   )!.id;
   const detachedId = tasks.find((row) => row.id !== completed.id && row.id !== stopId)!.id;
+  const beforeEnvironment = (await count()).count;
+  const showEnvironment = page.getByRole('button', { name: '显示环境信息', exact: true });
+  if (await showEnvironment.isVisible()) await showEnvironment.click();
+  const environment = page.getByRole('region', { name: '环境信息', exact: true });
+  await environment.locator(`[data-execution-id="${completed.id}"]`).getByRole('button').click();
+  await page.getByText('子 Agent 会话仅供查看。', { exact: true }).waitFor();
+  await page.getByText(/^已完整读取子日志至固定序号 /).waitFor();
+  assert.equal(
+    (await state()).selection!.session.id,
+    'original-root',
+    'child navigation retains original control target',
+  );
+  assert.equal(
+    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
+    0,
+  );
+  await page
+    .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
+    .click();
+  await page.getByText('Complete Model output', { exact: true }).waitFor();
+  assert.ok(
+    (await page.locator('.model-output-message').allTextContents()).some((text) =>
+      text.includes(unicode.trimEnd()),
+    ),
+    'retained child conversation renders the complete original Unicode body',
+  );
+  await page.getByRole('button', { name: '返回主会话', exact: true }).click();
+  await page.getByText('正在等待子 Agent 结果', { exact: true }).waitFor();
+  assert.equal(
+    (await count()).count,
+    beforeEnvironment,
+    'environment and child return create no Provider work',
+  );
+  stage('retained_environment_child_navigation', {
+    childSessionId: completed.childSessionId,
+    provider: beforeEnvironment,
+  });
   await select('Newer Background', 'newer-root');
   await authorize();
   await send('NEWER_PARENT');

@@ -157,6 +157,12 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (
+    method.startsWith('background.') &&
+    input.surface !== undefined &&
+    input.surface !== 'environment'
+  )
+    throw Error('invalid_native_request');
   if (method.startsWith('settings.mcp.')) {
     if (method === 'settings.mcp.submit') parseNativeMcpOperation(input.operation);
     if (method === 'settings.mcp.removePreview')
@@ -269,6 +275,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     'method',
     ...(method === 'attach' ? [] : ['generation']),
     ...fields[method as NativeRequest['method']],
+    ...(method.startsWith('background.') ? ['surface'] : []),
   ]);
   if (
     method !== 'attach' &&

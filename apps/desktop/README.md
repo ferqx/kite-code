@@ -6,7 +6,7 @@
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
-“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序已迁入，Workspace 批量移除/GC 等剩余旧页面细节仍待迁移。
+“会话工具”将已有后台目录、Runtime logs、Context、恢复、权限、管理、原命令与草稿面板接到原可调整宽度的右侧栏。侧栏开关不卸载对话区，管理操作保留本视图已读的完整正文；关闭读取仍只 abort 所属 GET。全屏设置复用原 Dialog、双栏布局和主题偏好，模型/提供商/MCP/Skills 数据仍沿新 Main 的准确观察与原 mutation。只有真实端口提供操作 callback；工作台仍按手册隐藏。原安排任务草稿页、新对话准备与首次发送、全局目录状态和时间排序、环境信息卡与只读子详情已迁入，Workspace 批量移除/GC 等剩余旧页面细节仍待迁移。
 
 [原页面契约测试](../../packages/ui/test/desktop-page.test.tsx)迁回原 12 项展示断言；现有 Native 目录、草稿、问答与计划 DOM 只调整控件/浏览器 API，保留业务断言。源码外 [Native 候选](test/isolated/native-bundle.test.ts)与[driver](test/native-bundle-electron.fixture.ts)已核编译 CSS/字体、可操作 Composer、新 preload bridge、实际审批/任务、冷读和两层使用锁收尾。准确输入、原失败与结果归[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不代表完整客户端、installed 全量、独立审查或 Windows/Linux 阶段退出。
 
@@ -39,6 +39,16 @@ Workspace/Session 完整目录分别读取；其间新登记的项目可能还�
 页面导航保留当前准确 Session 及主输入／交互草稿，隐藏会话工具。返回会话或点击同一原会话只恢复页面，不重读持久草稿覆盖未保存原文；点击其他会话仍走原 select/历史/草稿路径。独立页面意图只阻止迟到创建回执抢占后来页面，不替换正在读取的 Session 代次。回到输入区重新挂载模型控件可读取目录，不产生新工作。
 
 [实际 DOM](test/isolated/native-scheduled-tasks-dom.test.tsx)核真实项目、disabled/submit 零调用、原未保存草稿与晚创建；[问卷 DOM](test/native-questionnaire-dom.test.tsx)核页面往返保原答案。源码外默认 [Native 候选](test/isolated/native-bundle.test.ts)及 [driver](test/native-bundle-electron.fixture.ts)沿实际窗口核同一入口、完整字段、禁用保存、原草稿和零工作；准确输入及结果见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。这项迁移完成原手册已有的页面能力，不声明新增定时运行能力。
+
+## Native 当前会话环境信息与子详情
+
+正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)只展示实际 `shell.command` 或有准确 child Session 的执行，名称取公开 child title；Shell 沿原 currentOnly 契约只列运行／停止中，子列表另保 queued／starting／unknown／restored 状态，不把终态或受理回执当作进程清理证明。
+
+Main 从实际选中根的 controller snapshot 固定 Store／subject／generation／rootSessionId／viewSelection，复用 [NativeBackground](electron/background.ts)与原完整 reader。封闭 IPC 的 `surface: environment` 仅选择这份 Main 观察，不接收 renderer 根 ID 或路径；它与全局总览有独立读取生命周期，选中根变化只释放环境读取，旧停止资格失效。SSE 或显式刷新触发 GET，完整成功后才发布。页面仅缓存最多八个同代次／Store／根的展示快照，每份最多512KiB；没有 observation、完整输出或提交意图。失败保旧名称和状态，停用停止入口；准确停止继续走原 durable caller，未知／在途原取消不换 ID 重发。
+
+子详情复用原 SessionPage 与现有完整 child reader，固定原消息上界并核全部 ModelOutput 的 EOF／SHA／UTF-8 后显示。打开、刷新或返回不改变 Main 阅读根、不取得 child 写权；详情隐藏父输入、审批和工具动作，返回恢复原草稿与父轮次提示。普通目录刷新不取消已经固定的子日志 GET；真实选中根变化或 reset 才释放所属读取。冷启动 observer reset 正常取消旧目录时，Main 给所有共同等待者同一个 `directory_observation_changed`；页面等待新观察，不将旧 GET 的取消弹成失败，真实读取失败仍保错误。
+
+[Main／IPC](test/native-background.test.ts)、[环境卡 DOM](test/native-background-panel.test.tsx)、[目录 reset](test/native-caller.test.ts)及[原页面](../../packages/ui/test/desktop-page.test.tsx)核准确作用域、全局／当前独立读取、完整分页、只读往返、旧快照与重复停止抑制。实际 [子详情／恢复窗口](test/isolated/native-background-bundle.test.ts)和[宿主 Shell 窗口](test/isolated/native-shell-lifecycle-bundle.test.ts)沿原业务断言验入口；准确结果、原失败和阶段限制见[本片进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原-pc-环境信息卡与只读子详情)。
 
 ## Native 跨会话后台总览
 

@@ -17,8 +17,10 @@ export type BackgroundRead = {
   storeId: string;
   signal: AbortSignal;
   isCurrent: () => boolean;
+  environment?: { rootSessionId: string; viewSelection: number };
 };
 export async function readNativeBackground(input: BackgroundRead) {
+  const surface = input.environment ? { surface: 'environment' as const } : {};
   const readId = crypto.randomUUID(),
     items: BackgroundExecutionItem[] = [],
     ids = new Set<string>();
@@ -28,7 +30,7 @@ export async function readNativeBackground(input: BackgroundRead) {
     lastSeq = 0n;
   const close = () =>
     input.bridge
-      .request({ method: 'background.close', generation: input.generation, readId })
+      .request({ method: 'background.close', generation: input.generation, readId, ...surface })
       .catch(() => undefined);
   const check = () => {
     input.signal.throwIfAborted();
@@ -45,6 +47,7 @@ export async function readNativeBackground(input: BackgroundRead) {
         method: offset ? 'background.next' : 'background.open',
         generation: input.generation,
         readId,
+        ...surface,
       });
       check();
       if (
@@ -54,6 +57,9 @@ export async function readNativeBackground(input: BackgroundRead) {
         page.viewGeneration !== input.generation ||
         page.storeId !== input.storeId ||
         page.readId !== readId ||
+        (input.environment &&
+          (page.rootSessionId !== input.environment.rootSessionId ||
+            page.viewSelection !== input.environment.viewSelection)) ||
         !Number.isSafeInteger(page.observationId) ||
         page.observationId < 1 ||
         (observationId !== undefined && page.observationId !== observationId) ||
@@ -80,6 +86,7 @@ export async function readNativeBackground(input: BackgroundRead) {
           item.execution.rootSessionId !== item.rootSession.id ||
           item.session.rootSessionId !== item.rootSession.id ||
           item.rootSession.parentSessionId !== null ||
+          (input.environment && item.rootSession.id !== input.environment.rootSessionId) ||
           item.rootSession.rootSessionId !== item.rootSession.id ||
           item.session.workspaceId !== item.rootSession.workspaceId ||
           item.session.deletedAt !== null ||
@@ -119,12 +126,18 @@ export async function readNativeBackground(input: BackgroundRead) {
 export async function readNativeBackgroundChild(
   input: BackgroundRead & { observationId: number; item: BackgroundExecutionItem },
 ): Promise<NativeBackgroundChild> {
+  const surface = input.environment ? { surface: 'environment' as const } : {};
   const readId = crypto.randomUUID(),
     executionId = input.item.execution.id,
     childId = input.item.execution.childSessionId;
   const close = () =>
     input.bridge
-      .request({ method: 'background.child.close', generation: input.generation, readId })
+      .request({
+        method: 'background.child.close',
+        generation: input.generation,
+        readId,
+        ...surface,
+      })
       .catch(() => undefined);
   const check = () => {
     input.signal.throwIfAborted();
@@ -142,6 +155,7 @@ export async function readNativeBackgroundChild(
       observationId: input.observationId,
       executionId,
       readId,
+      ...surface,
     });
     check();
     if (
@@ -149,6 +163,9 @@ export async function readNativeBackgroundChild(
       !('readId' in opened) ||
       opened.kind !== 'background.child.opened' ||
       opened.readId !== readId ||
+      (input.environment &&
+        (opened.rootSessionId !== input.environment.rootSessionId ||
+          opened.viewSelection !== input.environment.viewSelection)) ||
       opened.viewGeneration !== input.generation ||
       opened.storeId !== input.storeId ||
       opened.observationId !== input.observationId ||
@@ -171,6 +188,7 @@ export async function readNativeBackgroundChild(
         readId,
         offset,
         limit: 65536,
+        ...surface,
       });
       check();
       if (
