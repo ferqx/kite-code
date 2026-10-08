@@ -40,7 +40,7 @@ const stage = (name: string, facts = {}) => {
 };
 let storeId = originalStoreId!;
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
-async function launch() {
+async function launch(removalPending = false) {
   app = await _electron.launch({
     executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
     args: [join(candidate!, 'app'), `--user-data-dir=${join(home!, 'electron-data')}`],
@@ -50,8 +50,11 @@ async function launch() {
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
-  await page.getByRole('button', { name: 'Original Background', exact: true }).waitFor();
-  await openSessionTools(page);
+  if (removalPending) await page.getByRole('button', { name: '查询原移除', exact: true }).waitFor();
+  else {
+    await page.getByRole('button', { name: 'Original Background', exact: true }).waitFor();
+    await openSessionTools(page);
+  }
   childPid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()
@@ -522,6 +525,183 @@ try {
   const coldProviderCalls = (await count()).count;
   assert.equal(coldProviderCalls, callsBeforeCold);
   await page.context().tracing.stop({ path: join(home!, 'cold-trace.zip') });
+  const baselineProofResponse = await fetch(`${control}/verify-cold-baseline`);
+  assert.equal(baselineProofResponse.status, 200);
+  const beforeRemovalSnapshot = await baselineProofResponse.json();
+  const removedDirectory = (await state()).directory!;
+  const workspace = removedDirectory.workspaces.find((w) => w.id === 'w')!;
+  assert.ok(removedDirectory.workspaces.some((w) => w.id === 'other-workspace'));
+  const targetRoots = removedDirectory.sessions.filter((s) => s.workspaceId === workspace.id);
+  assert.ok(targetRoots.length >= 2);
+  writeFileSync(join(home!, 'workspace', 'retained-project-file'), 'original project bytes');
+  await app!.evaluate(({ dialog }) => {
+    const global = globalThis as typeof globalThis & {
+      removeDialogs: unknown[];
+      removeResponse: number;
+    };
+    global.removeDialogs = [];
+    global.removeResponse = 0;
+    dialog.showMessageBox = async (...args: unknown[]) => {
+      global.removeDialogs.push(args.at(-1));
+      return { response: global.removeResponse, checkboxChecked: false };
+    };
+  });
+  await page
+    .getByRole('button', { name: `移除 ${workspace.name}`, exact: true })
+    .locator('..')
+    .hover();
+  await page.getByRole('button', { name: `移除 ${workspace.name}`, exact: true }).click();
+  await until(
+    async () =>
+      app!.evaluate(
+        () => (globalThis as typeof globalThis & { removeDialogs: unknown[] }).removeDialogs.length,
+      ),
+    (n) => n === 1,
+    'default keep confirmation',
+  );
+  const cancellation = await app!.evaluate(() => ({
+    dialogs: (
+      globalThis as typeof globalThis & {
+        removeDialogs: { defaultId: number; cancelId: number; buttons: string[] }[];
+      }
+    ).removeDialogs,
+    physical: (globalThis as Globals).backgroundPhysical,
+  }));
+  assert.equal(cancellation.dialogs[0]!.defaultId, 0);
+  assert.equal(cancellation.dialogs[0]!.cancelId, 0);
+  assert.deepEqual(cancellation.dialogs[0]!.buttons, ['保留空间', '移除空间']);
+  assert.equal(cancellation.physical.filter((r) => r.method === 'POST').length, 0);
+  assert.ok((await state()).directory!.workspaces.some((w) => w.id === workspace.id));
+  await app!.evaluate(() => {
+    const global = globalThis as typeof globalThis & { removeResponse: number };
+    global.removeResponse = 1;
+    const original = globalThis.fetch;
+    let drop = true;
+    globalThis.fetch = Object.assign(
+      async (...args: Parameters<typeof fetch>) => {
+        const response = await original(...args);
+        if (drop && new URL(String(args[0])).pathname.endsWith('/remove') && response.ok) {
+          drop = false;
+          throw Error('owned lost removal reply');
+        }
+        return response;
+      },
+      { preconnect: original.preconnect },
+    );
+  });
+  await page
+    .getByRole('button', { name: `移除 ${workspace.name}`, exact: true })
+    .locator('..')
+    .hover();
+  await page.getByRole('button', { name: `移除 ${workspace.name}`, exact: true }).click();
+  await page.getByRole('button', { name: '查询原移除', exact: true }).waitFor();
+  const unknown = (await state()).workspaceRemovalSubmissions!.find(
+    (r) => r.workspaceId === workspace.id,
+  )!;
+  assert.equal(unknown.phase, 'unknown');
+  assert.equal(unknown.storeId, storeId);
+  assert.ok(unknown.commandId);
+  const removalPhysical = await app!.evaluate(() => (globalThis as Globals).backgroundPhysical);
+  const removePosts = removalPhysical.filter((r) => r.method === 'POST');
+  assert.equal(removePosts.length, 1);
+  assert.equal(removePosts[0]!.path, `/v1/workspaces/${workspace.id}/remove`);
+  assert.deepEqual(JSON.parse(removePosts[0]!.body!), {
+    expectedStoreId: storeId,
+    commandId: unknown.commandId,
+  });
+  await close();
+  page = await launch(true);
+  const coldRemoval = (await state()).workspaceRemovalSubmissions!.find(
+    (r) => r.commandId === unknown.commandId,
+  )!;
+  assert.equal(coldRemoval.phase, 'unknown');
+  assert.equal(coldRemoval.storeId, storeId);
+  assert.equal(coldRemoval.workspaceId, workspace.id);
+  assert.equal(
+    (await app!.evaluate(() => (globalThis as Globals).backgroundPhysical)).filter(
+      (r) => r.method === 'POST',
+    ).length,
+    0,
+  );
+  await page.getByRole('button', { name: '查询原移除', exact: true }).click();
+  await until(
+    state,
+    (value) =>
+      value.workspaceRemovalSubmissions?.some(
+        (r) => r.commandId === unknown.commandId && r.phase === 'applied',
+      ) === true,
+    'cold original removal receipt',
+  );
+  const applied = (await state()).workspaceRemovalSubmissions!.find(
+    (r) => r.commandId === unknown.commandId,
+  )!;
+  assert.equal(applied.receipt!.deletedRoots, targetRoots.length);
+  assert.ok(applied.receipt!.deletedSessions > targetRoots.length);
+  assert.equal(applied.receipt!.stopConfirmed, false);
+  assert.equal(applied.receipt!.originStoreId, storeId);
+  await until(
+    state,
+    (value) =>
+      value.directory?.unavailable === false &&
+      !value.directory.workspaces.some((w) => w.id === workspace.id),
+    'removed directory',
+  );
+  const removed = (await state()).directory!;
+  assert.ok(removed.workspaces.some((w) => w.id !== workspace.id));
+  assert.ok(removed.sessions.every((s) => s.workspaceId !== workspace.id));
+  assert.equal(
+    await page.getByRole('button', { name: 'Original Background', exact: true }).count(),
+    0,
+  );
+  const lookupPhysical = await app!.evaluate(() => (globalThis as Globals).backgroundPhysical);
+  assert.equal(lookupPhysical.filter((r) => r.method === 'POST').length, 0);
+  assert.ok(
+    lookupPhysical.some(
+      (r) => r.path === `/v1/workspaces/${workspace.id}/removals/${unknown.commandId}`,
+    ),
+  );
+  await app!.evaluate(
+    ({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    },
+    join(home!, 'workspace'),
+  );
+  await page.getByRole('button', { name: '添加空间', exact: true }).locator('..').hover();
+  await page.getByRole('button', { name: '添加空间', exact: true }).click();
+  await until(
+    state,
+    (value) =>
+      value.directory?.workspaces.some(
+        (w) => w.rootUri === workspace.rootUri && w.id !== workspace.id,
+      ) === true,
+    're-add same directory with a fresh identity',
+  );
+  assert.equal(
+    readFileSync(join(home!, 'workspace', 'retained-project-file'), 'utf8'),
+    'original project bytes',
+  );
+  assert.equal((await count()).count, coldProviderCalls);
+  const removalReport = {
+    beforeRemovalSnapshot,
+    unknown,
+    applied,
+    removePosts,
+    lookupPhysical,
+    targetRoots: targetRoots.map((s) => s.id),
+    retainedFiles: true,
+    providerCalls: coldProviderCalls,
+    normalColdReopen: true,
+  };
+  writeFileSync(join(home!, 'workspace-removal-report.json'), JSON.stringify(removalReport));
+  stage('workspace_removal_original_sidebar_cold_GET_and_readd', {
+    commandId: applied.commandId,
+    deletedRoots: applied.receipt!.deletedRoots,
+    deletedSessions: applied.receipt!.deletedSessions,
+    posts: removePosts.length,
+    retainedFiles: true,
+    providerCalls: coldProviderCalls,
+  });
+  await page.context().tracing.stop({ path: join(home!, 'workspace-removal-cold-trace.zip') });
   await close();
   writeFileSync(
     join(home!, 'background-report.json'),

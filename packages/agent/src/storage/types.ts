@@ -33,6 +33,18 @@ export interface WorkspaceRecord {
   rootUri: string;
   name: string;
 }
+export interface WorkspaceRemoval {
+  commandId: string;
+  originStoreId: string;
+  subjectId: string;
+  workspaceId: string;
+  requestDigest: string;
+  removedAt: number;
+  deletedRoots: number;
+  deletedSessions: number;
+  outcome: 'workspace_removed';
+  stopConfirmed: false;
+}
 export interface SessionRecord {
   id: string;
   workspaceId: string;

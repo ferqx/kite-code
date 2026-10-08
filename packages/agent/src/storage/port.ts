@@ -54,6 +54,7 @@ import type {
   StoreMetadata,
   WorkspaceDirectoryPage,
   WorkspaceRecord,
+  WorkspaceRemoval,
 } from './types';
 
 export interface WriteContext {
@@ -478,6 +479,20 @@ export interface Store {
     input: WriteContext & { id: string; rootUri: string; name: string },
   ): Promise<WorkspaceRecord>;
   getWorkspace(id: string): Promise<WorkspaceRecord | null>;
+  removeWorkspace(
+    input: WriteContext & {
+      workspaceId: string;
+      commandId: string;
+      subjectId: string;
+    },
+  ): Promise<WorkspaceRemoval>;
+  getWorkspaceRemoval(
+    input: WriteContext & {
+      workspaceId: string;
+      commandId: string;
+      subjectId: string;
+    },
+  ): Promise<WorkspaceRemoval | null>;
   listBackgroundExecutions(input: {
     expectedStoreId: string;
     subjectId: string;

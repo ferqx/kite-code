@@ -162,6 +162,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       'cancelCommand',
       'cancelWork',
       'deleteSession',
+      'removeWorkspace',
       'finishExecution',
       'markRunning',
       'finishRun',

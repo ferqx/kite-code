@@ -48,8 +48,15 @@ import {
 } from './profile-access';
 import { recoveryPending, validateRecoveryIntent } from './recovery-journal';
 
+import {
+  parseWorkspaceRemovalIntent,
+  type WorkspaceRemovalData,
+  type WorkspaceRemovalIntent,
+} from './workspace-removal';
+
 export type DraftScope = { storeId: string; workspaceId: string; rootSessionId: string };
-export type PrivateData = NativeFileRecoveryJournal &
+export type PrivateData = WorkspaceRemovalData &
+  NativeFileRecoveryJournal &
   NativeAnswerData & {
     read(scope: DraftScope): NativeDraft;
     save(scope: DraftScope, revision: number, content: string): NativeDraft;
@@ -146,7 +153,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 4 &&
       version !== 5 &&
       version !== 6 &&
-      version !== 7
+      version !== 7 &&
+      version !== 8
     )
       failure();
     if (
@@ -203,6 +211,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'mcp_intents',
         'model_routes',
         'recovery_intents',
+        ...(version === 8 ? ['workspace_removal_intents'] : []),
       ])
     )
       failure();
@@ -230,6 +239,13 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='model_routes'").get()
         ?.sql !==
         'CREATE TABLE model_routes(store_id TEXT NOT NULL,session_id TEXT NOT NULL,model_id TEXT NOT NULL,PRIMARY KEY(store_id,session_id))'
+    )
+      failure();
+    if (
+      version === 8 &&
+      db.prepare("SELECT sql FROM sqlite_master WHERE name='workspace_removal_intents'").get()
+        ?.sql !==
+        'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)'
     )
       failure();
     db.prepare('SELECT command_id,state FROM recovery_intents LIMIT 0').all();
@@ -301,6 +317,38 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       result.push(record);
     }
     return result;
+  }
+  function workspaceRemovalRows(): WorkspaceRemovalIntent[] {
+    if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 8) return [];
+    const rows: WorkspaceRemovalIntent[] = [];
+    let bytes = 0;
+    for (const row of database()
+      .prepare(
+        'SELECT command_id,state,hex(CAST(state AS BLOB)) AS state_hex FROM workspace_removal_intents ORDER BY command_id',
+      )
+      .iterate()) {
+      if (typeof row.state !== 'string' || typeof row.state_hex !== 'string')
+        throw Error('workspace_storage_unavailable');
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(
+        Buffer.from(row.state_hex, 'hex'),
+      );
+      const intent = parseWorkspaceRemovalIntent(JSON.parse(text));
+      bytes += Buffer.byteLength(text);
+      if (
+        text !== row.state ||
+        intent.request.commandId !== row.command_id ||
+        rows.length >= 128 ||
+        bytes > 262144 ||
+        rows.some(
+          (r) =>
+            r.request.expectedStoreId === intent.request.expectedStoreId &&
+            r.workspaceId === intent.workspaceId,
+        )
+      )
+        throw Error('workspace_storage_unavailable');
+      rows.push(intent);
+    }
+    return rows;
   }
   function callerRows() {
     const rows: NativeCallerRecord[] = [];
@@ -444,6 +492,57 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     return row ? draft(row) : { id, ...scope, revision: 0, content: '' };
   };
   const port: PrivateData = {
+    workspaceRemovals: workspaceRemovalRows,
+    saveWorkspaceRemoval(input) {
+      const intent = parseWorkspaceRemovalIntent(input);
+      transaction(() => {
+        const rows = workspaceRemovalRows();
+        const prior = rows.find((r) => r.request.commandId === intent.request.commandId);
+        if (
+          prior &&
+          JSON.stringify({ ...prior, phase: 'unknown' }) !==
+            JSON.stringify({ ...intent, phase: 'unknown' })
+        )
+          throw Error('workspace_storage_unavailable');
+        if (
+          !prior &&
+          rows.some(
+            (r) =>
+              r.request.expectedStoreId === intent.request.expectedStoreId &&
+              r.workspaceId === intent.workspaceId,
+          )
+        )
+          throw Error('workspace_removal_pending');
+        if (
+          (!prior && rows.length >= 128) ||
+          rows
+            .filter((r) => r !== prior)
+            .reduce(
+              (n, r) => n + Buffer.byteLength(JSON.stringify(r)),
+              Buffer.byteLength(JSON.stringify(intent)),
+            ) > 262144
+        )
+          throw Error('workspace_storage_unavailable');
+        if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 8)
+          database().exec(
+            'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); PRAGMA user_version=8;',
+          );
+        database()
+          .prepare(
+            'INSERT INTO workspace_removal_intents VALUES(?,?) ON CONFLICT(command_id) DO UPDATE SET state=excluded.state',
+          )
+          .run(intent.request.commandId, JSON.stringify(intent));
+      });
+    },
+    clearWorkspaceRemoval(commandId) {
+      transaction(() => {
+        if (!workspaceRemovalRows().some((r) => r.request.commandId === commandId))
+          throw Error('workspace_storage_unavailable');
+        database()
+          .prepare('DELETE FROM workspace_removal_intents WHERE command_id=?')
+          .run(commandId);
+      });
+    },
     configurations: configurationRows,
     saveConfiguration(input) {
       const record = parseConfigurationRecord(input);

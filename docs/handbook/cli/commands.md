@@ -76,6 +76,7 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 | 操作 | 参数 |
 | --- | --- |
 | 创建 DB/媒体及配置/UI 备份 | `backup --data-root <绝对根路径> --profile <名称> --destination <绝对备份根路径>` |
+| 显式回收无引用附件 | `gc --data-root <绝对根路径> --profile <名称> --expected-store <原观察StoreId> [--grace-period-ms <毫秒>]` |
 | 完整验证所选备份 | `inspect <绝对备份目录>` |
 | 只读未完成恢复观察 | `status --data-root <绝对根路径> --profile <名称>` |
 | 显式替换当前数据 | `restore <绝对备份目录> --data-root <绝对根路径> --profile <名称> --expected-store <原观察StoreId> --confirm-data-loss` |
@@ -83,9 +84,11 @@ Workflow 的 replan/waive 问题使用普通 stdin JSON 答案，例如 `{"decis
 
 `maintenance --help` 不触碰 profile。未知、重复、缺值、相对路径及缺少恢复确认的参数直接非零失败。成功输出 JSON，失败输出有限错误码；busy 不杀进程、不升级共享锁，不改变当前数据。只读 status 在没有 journal 时输出 null，不创建空 profile。未完成 journal 阻止普通开库；调用者核对 status 的准确 restoreId/digest，再明确选择 complete 或 rollback，入口不会自动选择。
 
+GC 默认保留最近7天发布或修改的无引用附件，宽限可显式设为1–365天。只有核原 Store、取得离线排他权并完整核内容后才删除；被历史引用的正文保留，不清工作目录或物理删除会话。运行中的客户端会使维护返回 busy，需普通退出后再明确调用。本机 macOS 已验证，Windows 该 GC 端口尚未支持。
+
 恢复表示明确回退到选定备份内容；必须提供当前原 StoreId，错误身份拒绝，成功后产生新 Store，旧写身份继续拒绝。原历史 ID 与来源身份保留，旧目录单独保存，路径在结果中输出。恢复不会自动重做旧工作或模型请求。
 
-JSON 中的 `coverage` 列出 Desktop 私有 UI 的 DB1–7 支持范围，以及 MCP 选择意图 `ui/mcp-selection-intents.json@1`。支持范围不表示文件必然存在；选定备份的 manifest 另列实际存在、格式和完整摘要。冷读这些意图不会重发原申请或重新连接 MCP。
+JSON 中的 `coverage` 列出 Desktop 私有 UI 的 DB1–8 支持范围，以及 MCP 选择意图 `ui/mcp-selection-intents.json@1`。支持范围不表示文件必然存在；选定备份的 manifest 另列实际存在、格式和完整摘要。冷读这些意图不会重发原申请或重新连接 MCP。
 
 Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 也按完整原字节备份；存在或缺失如实记录，损坏内容不会被修复。恢复后无认证用户来源继续按原规则可用；项目批准和凭据绑定需重新回答当前问题，旧决定保留原出处。项目文件仍由原工作区提供，凭据正文不在备份内，目标 Vault缺少原凭据时仍不可用。查看来源不会自动连接或读取凭据。
 

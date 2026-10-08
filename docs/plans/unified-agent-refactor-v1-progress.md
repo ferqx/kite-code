@@ -2680,3 +2680,33 @@ Root唯一Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e9
 
 
 收尾门禁实际均0：docs-final、impact-final（scope=all）、plan-evidence-final、architecture、ownership和biome-final-20261008.log，完整前缀为 `/private/tmp/kite-pc-environment-`；14个owned代码文件Biome无fix，保1既有warning／1info。最后将停止后的只读 state 刷新接到页面既有 report，避免异步失败无处理；正常读取／控制路径不变，Desktop类型与新对话DOM（5/106）再次actual0，日志 desktop-types-delivery、page-delivery及final-callback-biome-20261008.log。上述两真实窗口在这次错误报告包装之前，复用其未变化的完整读取、原目标停止及实际正常退出断言，未声称又运行一次窗口。document-before-commit 的 iteration_complete 就绪；stage／commit核最终冻结owned内容，正常hooks仍须独立通过。
+
+
+## 2026-10-08：原 PC 空间批量移除与显式附件 GC
+
+基于 durable HEAD `a2b6441fde28d9c0f895a26e6a9d2471d2b1b242` 加本轮 owned diff，继续复用原 kite-desktop 的 Sidebar／确认／SessionPage。最高依赖的当前增量是一次 Workspace 批量 tombstone／新工作封锁、Main 原移除意图和显式离线无引用附件回收。没有新 PC 页面／TUI选择器或第二条执行链，macOS保持宿主 Shell；Win／Linux按用户安排重构后 Actions验，无dispatch／push／PR／发布。
+
+一次事务先核全部根的原创建主体，再保存原 Workspace metadata receipt、整组 root／child tombstone、原 stop_boundary、取消／delivery／Interaction及一个全局事件；任一失败整体回滚。饱和 root revision 不能阻止空间封锁。原 receipt 独立于准确 Session，规范摘要／原 Command／Store／主体／计数保持，重试不重做。真实 Runtime只通知 owned资源，不等待或抢另一owner，`stopConfirmed:false`保持。普通目录隐藏与准确旧历史保留是不同事实。
+
+原侧栏默认保留的 Main 原生确认后 fresh 核准确目录身份，Node先以FULL事务持久保存闭合原申请，再唯一POST。正常4xx说明未移除；不可信／丢回复保 unknown。冷重开只展示，明确「查询原移除」才GET原 Store／Workspace／Command；恢复到新Store保原字节，原身份不匹配在HTTP前拒绝。首次使用惰性增加DB8，正常未移除路径仍DB7；public维护以closed v17保存DB8，并保旧v2–v16各自白名单。新 SDK lookup只需sessions，不误依赖permission_controls；发送与校验都使用冻结原输入。
+
+显式离线GC需准确Store与同外置Profile排他权，私有DB/WAL副本核baseline／完整性／FK，只扫描生成附件namespace，先完整实体／权限预检。原引用一律保留，最近对象保宽限；过期无引用published须全量SHA及同实体复核才unlink，temporary沿同宽限。默认7天，可选1–365天。真实CLI参数与Host直接调用公开maintenance，零Service／Provider。取消／失败不返回完成，原Core与工作目录不改。
+
+当前未闭合：产品永久删除历史承诺尚未完成，准确旧ID历史／正文引用／私有草稿仍保留，当前GC不清关系数据。确认框明确这一限制；目录隐藏或附件回收不能证明永久擦除。DB8旧builder回退／已发布样本、installed GC和全部维护资格、macOS原RSS失败／稳定性、独立审查、完整阶段回归／旧路径最终删除、Win／Linux Actions继续保留，不借本片局部通过退出。37能力仍partial、wholeV13=false、Goal active。
+
+本轮本机macOS arm64、Bun1.4.2、Electron44.3.0／Node22.21.1，实际执行：
+
+- 原Core管理与真实Workspace双Worker／Runtime资源三文件actual0／7pass／124assert，日志 `/private/tmp/kite-workspace-removal-core-pass-20261008.log`。整批／饱和修订／原同ID／其他空间、迟到拒绝、真实SQL trigger rollback和owned Tool／detached Job／child／remote Runtime保持；没有fake终态或新增Provider。
+- 实际GC／CLI argv actual0／2pass／17assert，日志 `/private/tmp/kite-workspace-gc-pass-20261008.log`。selected SQLite3.51.3真实引用／备份／Core完整bytes、owner busy、错误Store、recent／过期orphan、hostile目录预检和取消。宽限的时间由测试时钟推进，真实对象mtime／ctime不重写。
+- 真Node DB8公开backup／restore／cold actual0／1pass／12assert，日志 `/private/tmp/kite-workspace-removal-maintenance-final-20261008.log`。核manifest17／DB8、原unknown字节、新Store HTTP零、旧版本重标／伪replay字段拒绝；selected3.51.3。
+- Main／IPC／原新对话DOM／原移除port／Client权限及配置相邻五文件actual0／22pass／310assert，日志 `/private/tmp/kite-workspace-removal-neighbors-20261008.log`。最终SDK原申请与原权限／配置三文件再验actual0／7pass／111assert，日志 `/private/tmp/kite-workspace-removal-sdk-ready-20261008.log`。真实受控HTTP核异步alias修改、错摘要／主体／空间和伪停止确认，不以宽松decode放行。
+- 原backup单独进程actual0／9pass／84assert，原NodeDB7维护actual0／4pass／40assert，日志 backup-regression、db7-regression-20261008.log，完整前缀 `/private/tmp/kite-workspace-removal-`；新v17不扩大旧v15／16 grammar，DB/WAL完整源证明保留。
+- 源码外默认Native真实窗口actual0／1pass／54Bunassert／69.84秒，日志 `/private/tmp/kite-workspace-removal-window-closure-20261008.log`。原Provider9、准确后台停止、252000B完整Unicode子详情、v15 A→B冷GET／原出处／原cursor151保持。原只读baseline在移除之前完整相等；随后原Sidebar默认保留零POST、提交后丢reply单POST、第三冷窗口显式原GET-only查回2根／6Session、其他空间、同目录freshUUID、文件原bytes。退出后真实readonly核tombstone／原cancel，当前public backup为v17／DB8；三所属Service均普通退出，owned进程集合为空、两制品root EX可重取。OS确认由测试callback返回选择，生产defaultId／cancelId0和按钮顺序仍真实核验，不冒称人工OS点击。原driver／整例预算保持。
+- Root与八workspace类型此前actual0，日志 `/private/tmp/kite-workspace-removal-types-20261008.log`；最后SDK／fixture格式后的最终类型及所有门禁结果按下面收尾记录。未运行整个阶段完整默认或无关TUI／Chrome／Vault矩阵。
+
+原红保留，完整前缀 `/private/tmp/kite-workspace-removal-`：window-20261008.log为受限端口绑定失败；window-local、window-final为新driver误直接点击／hover尚隐藏的原按钮，现先正常悬浮其父行，不force、不改CSS；window-ready漏登记真实对照Workspace，现实际create并保对照断言；window-delivery遗漏原添加按钮父行悬浮，现同样沿原交互。maintenance、maintenance-pass为新Nodefixture先后错误传profile结构／误从opaque lease取path，改用公开selectProfile后通过；原SDK-20261008.log发现复用readPermission误依赖permission_controls，现只对新Workspace查回使用sessions，原权限控制门禁保持。Core初次session_deleted期望与实际session_not_found不符，修正为现行公开拒绝码且保tombstone／迟到拒绝断言；GC初次漏全局valued argv flag及错误busy文本期望均修正，原红contracts与workspace-gc日志保留。没有删业务断言、扩大预算或跳过真实失败。
+
+[Desktop owner](../../apps/desktop/README.md#native-空间批量移除)、[Store owner](../../packages/agent/src/storage/sqlite/session-management/README.md#workspace-原子移除)、[maintenance owner](../../packages/agent/src/maintenance/README.md#desktop-db8-与-manifest-v17)、Service／Client／CLI owner、桌面／会话／命令手册、当前边界、§30.2.15及[持久决定](../../.agents/notes/implemented/architecture/2026-10-08-workspace-removal-and-orphan-gc.md)同步。Independent Agent仅尝试一次而因thread limit失败，Root源码／diff核验不替代独立审查。Root唯一Git owner；无关AGENTS.md原SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保持且不暂存。
+
+
+收尾门禁 actual0：Root与八workspace最终typecheck，日志 types-final；边界／八workspace／唯一API graph／ownership，日志 boundary、packages、api-final、ownership-final；docs／scope=all impact／plan-evidence，日志 docs、impact、plan-evidence-20261008.log。完整前缀均为 `/private/tmp/kite-workspace-removal-`。40个owned TS只读Biome actual0／无fix，保1既有warning与2info；默认发现630个唯一文件，新五文件与原Window各恰好一次，无调度例外。窗口通过后只缩减fixture的进度输出，完整removal报告与原业务断言保留；没有重标为又一次Window运行。受影响Agent导航核当前maintenance职责；tests入口／发现规则未变化，现有自动owner机制覆盖新增文件。iteration_complete仅收束当前增量，stage／commit按最终准确owned范围和正常hooks独立核，不关闭原永久删除／§35资格。本轮本地交付冻结及Git核验记录在 `/private/tmp/kite-workspace-removal-delivery-20261008.json`。

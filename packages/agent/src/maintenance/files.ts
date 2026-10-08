@@ -300,7 +300,7 @@ export async function copyAssetFile(source: string, target: string, signal?: Abo
 export async function withPrivateDatabaseSnapshot<T>(
   source: string,
   scratch: string,
-  read: (databasePath: string) => T,
+  read: (databasePath: string) => T | Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
   const entity = (path: string) => {
@@ -360,7 +360,7 @@ export async function withPrivateDatabaseSnapshot<T>(
     if (canonicalJson(files()) !== canonicalJson(before))
       throw new MaintenanceError('backup_content_changed');
     signal?.throwIfAborted();
-    const result = read(databasePath);
+    const result = await read(databasePath);
     signal?.throwIfAborted();
     if (canonicalJson(files()) !== canonicalJson(before))
       throw new MaintenanceError('backup_content_changed');

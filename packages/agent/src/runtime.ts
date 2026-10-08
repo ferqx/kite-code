@@ -655,6 +655,8 @@ export class AgentRuntime {
     this.resetCompressionContext = this.accountEntry(this.resetCompressionContext, 'admission');
     this.renameSession = this.accountEntry(this.renameSession, 'admission');
     this.deleteSession = this.accountEntry(this.deleteSession, 'admission');
+    this.removeWorkspace = this.accountEntry(this.removeWorkspace, 'admission');
+    this.getWorkspaceRemoval = this.accountEntry(this.getWorkspaceRemoval, 'observation');
     this.forkSession = this.accountEntry(this.forkSession, 'admission');
     this.includeResult = this.accountEntry(this.includeResult, 'admission');
     this.answerInteraction = this.accountEntry(this.answerInteraction, 'admission');
@@ -2083,6 +2085,15 @@ export class AgentRuntime {
     const result = await this.options.store.deleteSession(input);
     await this.observeOwnedCancellation();
     return result;
+  }
+  async removeWorkspace(input: Parameters<Store['removeWorkspace']>[0]) {
+    if (this.closing) throw new AgentError('runtime_draining');
+    const receipt = await this.options.store.removeWorkspace(input);
+    await this.observeOwnedCancellation();
+    return receipt;
+  }
+  getWorkspaceRemoval(input: Parameters<Store['getWorkspaceRemoval']>[0]) {
+    return this.options.store.getWorkspaceRemoval(input);
   }
   getMessageOrigin(input: Parameters<Store['getMessageOrigin']>[0]) {
     return this.options.store.getMessageOrigin(input);

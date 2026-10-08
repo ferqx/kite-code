@@ -2,6 +2,7 @@ import type * as API from './generated/api';
 import { queryInput, requestValidators, responseValidators } from './generated/validators.js';
 
 export interface Responses {
+  WorkspaceRemoval: API.WorkspaceRemoval;
   FileCheckpointPage: API.FileCheckpointPage;
   FileCheckpointDetail: API.FileCheckpointDetail;
   FileRestoreStatus: API.FileRestoreStatus;
@@ -137,6 +138,7 @@ export function validateRequest(
     | 'AnswerInteractionRequest'
     | 'InteractionListQuery'
     | 'CreateWorkspaceRequest'
+    | 'RemoveWorkspaceRequest'
     | 'CreateSessionRequest'
     | 'ResumeRunRequest'
     | 'ResumeRunTarget'

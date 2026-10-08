@@ -1,6 +1,6 @@
 import type { Database, Statement } from 'bun:sqlite';
 import { createHash, randomUUID } from 'node:crypto';
-import { asc, eq, gt } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { canonicalJson } from '../../json';
 import { bodyReference } from '../../model-body';
@@ -102,10 +102,11 @@ import { registerRunRequirements } from './requirement-operations';
 import { assertRequirementReadSet } from './requirement-read-set';
 import { readRunExecutionSafetySnapshot } from './run-execution-safety';
 import { callRunResume } from './run-resume-operations';
-import { storageMeta, workspaces } from './schema';
+import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
+import { readWorkspaceRemoval, removeWorkspace, workspaceRemoval } from './workspace-removal';
 
 type Input = { modelOutput?: import('../../model-output').ModelOutputReference } & OwnedWrite &
   AcceptCommandInput &
@@ -752,14 +753,16 @@ export class SqliteOperations {
         );
       case 'getMetadata':
         return this.metadata();
-      case 'getWorkspace':
-        return (
-          drizzle(this.db)
-            .select({ id: workspaces.id, rootUri: workspaces.rootUri, name: workspaces.name })
-            .from(workspaces)
-            .where(eq(workspaces.id, String(args[0])))
-            .get() ?? null
-        );
+      case 'getWorkspace': {
+        const row = this.row('SELECT * FROM workspace WHERE id=?', String(args[0]));
+        return !row || workspaceRemoval(row.metadata_json)
+          ? null
+          : { id: String(row.id), rootUri: String(row.root_uri), name: String(row.name) };
+      }
+      case 'removeWorkspace':
+        return removeWorkspace(this, args[0] as Parameters<Store['removeWorkspace']>[0]);
+      case 'getWorkspaceRemoval':
+        return readWorkspaceRemoval(this, args[0] as Parameters<Store['getWorkspaceRemoval']>[0]);
       case 'listWorkspaceDirectory':
         return readDirectory(
           this,
@@ -778,17 +781,21 @@ export class SqliteOperations {
           args[0] as Parameters<Store['listSessionDirectory']>[0],
         );
       case 'listWorkspaces':
-        return drizzle(this.db)
-          .select({ id: workspaces.id, rootUri: workspaces.rootUri, name: workspaces.name })
-          .from(workspaces)
-          .where(gt(workspaces.id, input?.afterId ?? ''))
-          .orderBy(asc(workspaces.id))
-          .limit(limit(input?.limit))
-          .all();
+        return this.rows(
+          "SELECT id,root_uri,name FROM workspace WHERE id>? AND json_type(metadata_json,'$.removal') IS NULL ORDER BY id LIMIT ?",
+          input?.afterId ?? '',
+          limit(input?.limit),
+        ).map((row) => ({
+          id: String(row.id),
+          rootUri: String(row.root_uri),
+          name: String(row.name),
+        }));
       case 'createWorkspace':
         return this.tx(() => {
           this.identity(input.expectedStoreId);
           const prior = this.row('SELECT * FROM workspace WHERE id=?', input.id);
+          if (prior && workspaceRemoval(prior.metadata_json))
+            throw new AgentError('workspace_removed');
           if (prior && (prior.root_uri !== input.rootUri || prior.name !== input.name))
             throw new AgentError('identity_conflict');
           if (!prior) {
@@ -821,6 +828,12 @@ export class SqliteOperations {
               throw new AgentError('command_conflict');
             return this.session(this.row('SELECT * FROM session WHERE id=?', input.sessionId)!);
           }
+          const workspace = this.row(
+            'SELECT metadata_json FROM workspace WHERE id=?',
+            input.workspaceId,
+          );
+          if (!workspace) throw new AgentError('workspace_not_found');
+          if (workspaceRemoval(workspace.metadata_json)) throw new AgentError('workspace_removed');
           this.run(
             'INSERT INTO session(id,workspace_id,root_id,title,context_selection_id) VALUES(?,?,?,?,?)',
             input.sessionId,

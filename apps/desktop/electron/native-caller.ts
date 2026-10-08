@@ -45,6 +45,7 @@ import { NativeProviderSettings } from './provider-settings';
 import { NativeRecovery } from './recovery';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
+import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
 export class NativeCaller {
   private generation = 0;
@@ -69,6 +70,7 @@ export class NativeCaller {
   private readonly recovery: NativeRecovery;
   private readonly fileRecovery: NativeFileRecovery;
   private readonly sessions: NativeSessionManagement;
+  private readonly workspaceRemoval: NativeWorkspaceRemovalPort;
   private readonly configuration: NativeConfiguration;
   private readonly inputConfiguration: NativeConfiguration;
   private readonly preparationConfiguration: NativeConfiguration;
@@ -147,6 +149,25 @@ export class NativeCaller {
       },
     });
     this.callerJournal = privateData ? new NativeCallerJournal(client, privateData) : undefined;
+    this.workspaceRemoval = new NativeWorkspaceRemovalPort(
+      client,
+      () => this.privateData,
+      () => {
+        const info = this.client.serverInfo;
+        return !this.closed && this.generation > 0 && info?.storeId && info.subjectId
+          ? { generation: this.generation, storeId: info.storeId, subjectId: info.subjectId }
+          : undefined;
+      },
+      (id) => {
+        const observed = this.workspaceObservation;
+        return !this.observationUnavailable &&
+          observed?.generation === this.generation &&
+          observed.storeId === this.client.serverInfo?.storeId
+          ? observed.workspaces.find((w) => w.id === id)
+          : undefined;
+      },
+      () => this.changed(),
+    );
     this.background = new NativeBackground(
       client,
       () => {
@@ -739,6 +760,8 @@ export class NativeCaller {
       recoverySubmissions: this.recovery.submissions,
       compressionSubmissions: this.context.compressionSubmissions,
       sessionSubmissions: this.sessions.submissions,
+      workspaceRemovalSubmissions: this.workspaceRemoval.submissions,
+      workspaceRemovalUnavailable: this.workspaceRemoval.storageUnavailable,
       modelSettingsSubmissions: this.configuration.submissions,
       providerSettingsSubmissions: this.providers.submissions,
       mcpSubmissions: this.mcp.submissions,
@@ -866,6 +889,7 @@ export class NativeCaller {
       ![
         'select',
         'detach',
+        'workspace.removal.lookup',
         'messages.close',
         'modelInputs.close',
         'modelOutput.close',
@@ -1184,6 +1208,11 @@ export class NativeCaller {
         this.configuration.release();
         result = null;
         break;
+      case 'workspace.removal.lookup':
+        result = await this.workspaceRemoval.lookup(request.commandId);
+        this.acceptWorkspaceRemoval(result);
+        break;
+      case 'workspace.remove':
       case 'workspace.pick':
         throw new ClientError('native_host_operation_required');
       case 'detach':
@@ -1747,15 +1776,48 @@ export class NativeCaller {
     this.input.disposeObserver();
     this.controller.disposeNetwork();
   }
+  private acceptWorkspaceRemoval(result: import('../src/native-bridge').NativeWorkspaceRemoval) {
+    if (result.phase !== 'applied' || result.storeId !== this.client.serverInfo?.storeId) return;
+    if (
+      this.directory?.sessions.find((s) => s.id === this.selected)?.workspaceId ===
+        result.workspaceId ||
+      this.lastView?.snapshot.view.session.workspaceId === result.workspaceId
+    ) {
+      this.releaseReads();
+      this.selected = undefined;
+      this.lastView = undefined;
+      this.contextWorkspace = undefined;
+      this.selection++;
+    }
+    this.invalidateDirectory();
+    this.changed();
+  }
+  async removeWorkspace(
+    generation: number,
+    workspaceId: string,
+    confirm: (label: string) => Promise<boolean>,
+  ) {
+    this.check(generation);
+    const result = await this.workspaceRemoval.remove(workspaceId, confirm);
+    this.check(generation);
+    this.acceptWorkspaceRemoval(result);
+    return result;
+  }
   async registerWorkspace(
     generation: number,
     workspace: Omit<CreateWorkspaceRequest, 'expectedStoreId'>,
   ) {
     this.check(generation);
-    const result = await this.client.createWorkspace({
-      ...workspace,
-      expectedStoreId: this.client.serverInfo!.storeId!,
-    });
+    const existing = (await this.client.listAllWorkspaces()).find(
+      (w) => w.rootUri === workspace.rootUri,
+    );
+    this.check(generation);
+    const result =
+      existing ??
+      (await this.client.createWorkspace({
+        ...workspace,
+        expectedStoreId: this.client.serverInfo!.storeId!,
+      }));
     this.check(generation);
     return result;
   }

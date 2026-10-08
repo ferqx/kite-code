@@ -42,3 +42,8 @@ Fork 和历史读取不初始化 Provider。普通 Model output snapshot 的 bod
 删除失回复沿既有管理意图保存原 Command ID，重开只展示未知，显式 R 才查询原结果；确认当前会话已受理删除后，新建回调最多一次。意图仍在当前进程的有限管理 map，不建立另一个冷恢复协议。新建／重发一条删除去“恢复确认”会改变原意图；先选中目标再确认会改变前台和草稿作用域，均未采用。`delete_requested` 保留停止未确认，工作区批量删除和物理 GC 仍是独立的未实现范围。
 
 验证由[选择器测试](../../../../packages/ui/test/tui/session-chooser.test.tsx)和[正式共享终端](../../../../tests/isolated/unified-agent/formal-terminal-entrypoints.test.ts)覆盖。后者使用源码外完整候选、真实 80×24 PTY 和实际 SQLite，核默认零删除、仅 B 的原 Command、A 的活动 Run／取消标志保持和两个原 Run 最终完成；平台、完整阶段与剩余删除能力仍回到当前进度。
+
+
+## PC Workspace 批量与显式附件回收
+
+[Workspace 原回执与离线回收](2026-10-08-workspace-removal-and-orphan-gc.md)补齐一次批量 tombstone／工作封锁、Native 原申请冷 GET-only及无引用附件 GC。本文的单 Session 控制 CAS、旧 ID历史、unknown与真实 owner边界保持；TUI仍使用本文原单会话端口。永久关系历史清理尚未交付，当前范围回到 owner与实施进度，不由原“待实现”历史描述推定全部 Workspace／GC退出。

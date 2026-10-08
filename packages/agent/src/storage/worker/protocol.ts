@@ -34,6 +34,8 @@ export const storeMethods: readonly (keyof Store)[] = [
   'verifySessionExport',
   'createWorkspace',
   'getWorkspace',
+  'removeWorkspace',
+  'getWorkspaceRemoval',
   'listWorkspaces',
   'listWorkspaceDirectory',
   'listSessionDirectory',

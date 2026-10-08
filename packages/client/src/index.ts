@@ -50,6 +50,7 @@ import type {
   ReconcileJobRequest,
   RecoverSessionRequest,
   RecoverSessionResponse,
+  RemoveWorkspaceRequest,
   RenameSessionRequest,
   ResetCompressionRequest,
   ResumeJobReportRequest,
@@ -69,8 +70,14 @@ import type {
   StreamCheckpoint,
   StreamReady,
   VerifySessionExportQuery,
+  WorkspaceRemoval,
 } from './generated/api';
-import { canonicalModelBody, readModelInputResponse, verifyModelInputPage } from './model-input';
+import {
+  canonicalModelBody,
+  digestModelBody,
+  readModelInputResponse,
+  verifyModelInputPage,
+} from './model-input';
 import { readModelOutputResponse } from './model-output';
 import {
   sessionExportParameters,
@@ -775,8 +782,11 @@ export class AgentClient {
     );
   }
 
-  private permissionStore(storeId: string): void {
-    this.requireCapability('permission_controls');
+  private permissionStore(
+    storeId: string,
+    capability: 'permission_controls' | 'sessions' = 'permission_controls',
+  ): void {
+    this.requireCapability(capability);
     validateRequest('PermissionControlQuery', { storeId });
     if (storeId !== this.lastServer!.storeId) throw new ClientError('store_identity_mismatch');
   }
@@ -790,22 +800,27 @@ export class AgentClient {
   }
 
   private async readPermission<
-    K extends 'PermissionModeState' | 'WorkspaceTrustState' | 'PermissionMutation',
+    K extends
+      | 'PermissionModeState'
+      | 'WorkspaceTrustState'
+      | 'PermissionMutation'
+      | 'WorkspaceRemoval',
   >(
     path: string,
     shape: K,
     storeId: string,
-    verify: (result: Responses[K]) => void,
+    verify: (result: Responses[K]) => void | Promise<void>,
     signal?: AbortSignal,
+    capability: 'permission_controls' | 'sessions' = 'permission_controls',
   ): Promise<Responses[K]> {
-    this.permissionStore(storeId);
+    this.permissionStore(storeId, capability);
     const generation = this.connectionGeneration;
     await this.verifyConnection({ signal });
     const result = await this.fetchJSON(`${path}?${new URLSearchParams({ storeId })}`, shape, {
       signal,
     });
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
-    verify(result);
+    await verify(result);
     await this.verifyConnection({ signal });
     if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
     return result;
@@ -1048,6 +1063,14 @@ export class AgentClient {
     );
   }
 
+  getWorkspace(workspaceId: string, options: { signal?: AbortSignal } = {}) {
+    this.requireConnection();
+    return this.fetchJSON(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+      'Workspace',
+      options,
+    );
+  }
   createWorkspace(input: CreateWorkspaceRequest, options: { signal?: AbortSignal } = {}) {
     return this.mutate(
       '/v1/workspaces',
@@ -1055,6 +1078,62 @@ export class AgentClient {
       'Workspace',
       input,
       options.signal,
+    );
+  }
+  private async verifyWorkspaceRemoval(
+    result: WorkspaceRemoval,
+    workspaceId: string,
+    commandId: string,
+    storeId: string,
+  ) {
+    const digest = await digestModelBody(
+      new TextEncoder().encode(canonicalModelBody({ kind: 'workspace.remove', workspaceId })),
+    );
+    if (
+      result.requestDigest !== digest ||
+      result.workspaceId !== workspaceId ||
+      result.commandId !== commandId ||
+      result.originStoreId !== storeId ||
+      result.subjectId !== this.lastServer?.subjectId ||
+      result.deletedSessions < result.deletedRoots
+    )
+      throw new ClientError('workspace_scope_mismatch');
+  }
+  async removeWorkspace(
+    workspaceId: string,
+    input: RemoveWorkspaceRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('sessions');
+    const intent = structuredClone(input);
+    const result = await this.mutate(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/remove`,
+      'RemoveWorkspaceRequest',
+      'WorkspaceRemoval',
+      intent,
+      options.signal,
+    );
+    await this.verifyWorkspaceRemoval(
+      result,
+      workspaceId,
+      intent.commandId,
+      intent.expectedStoreId,
+    );
+    return result;
+  }
+  getWorkspaceRemoval(
+    workspaceId: string,
+    commandId: string,
+    options: { storeId: string; signal?: AbortSignal },
+  ) {
+    const { storeId, signal } = options;
+    return this.readPermission(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/removals/${encodeURIComponent(commandId)}`,
+      'WorkspaceRemoval',
+      storeId,
+      (result) => this.verifyWorkspaceRemoval(result, workspaceId, commandId, storeId),
+      signal,
+      'sessions',
     );
   }
   createSession(input: CreateSessionRequest, options: { signal?: AbortSignal } = {}) {

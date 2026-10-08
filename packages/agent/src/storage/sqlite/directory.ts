@@ -67,7 +67,7 @@ export function readDirectory(
     const rows =
       kind === 'workspace'
         ? db.rows(
-            'SELECT *,CAST(rowid AS TEXT) AS directory_seq FROM workspace WHERE rowid>? AND rowid<=? ORDER BY rowid LIMIT ?',
+            "SELECT *,CAST(rowid AS TEXT) AS directory_seq FROM workspace WHERE rowid>? AND rowid<=? AND json_type(metadata_json,'$.removal') IS NULL ORDER BY rowid LIMIT ?",
             afterSeq,
             upperSeq,
             limit + 1,

@@ -57,6 +57,7 @@ const schemas = Object.fromEntries(
 ) as Record<string, Schema>;
 // Schema selection only; all actual validation rules still come from the Service schema.
 const responseNames = [
+  'WorkspaceRemoval',
   'FileCheckpointPage',
   'FileCheckpointDetail',
   'FileRestoreStatus',
@@ -121,6 +122,7 @@ const responseNames = [
   'QueryResponse',
 ];
 const requestNames = [
+  'RemoveWorkspaceRequest',
   'FileCheckpointListQuery',
   'SessionLogQuery',
   'BrowserSessionLogQuery',
@@ -213,6 +215,7 @@ for (const [prefix, names] of [
     const key = `${prefix}_${name}`;
     validatorCompiler.addSchema(
       (prefix === 'response' &&
+      name !== 'WorkspaceRemoval' &&
       name !== 'HostStatus' &&
       name !== 'SkillCataloguePage' &&
       name !== 'SessionLogPage' &&

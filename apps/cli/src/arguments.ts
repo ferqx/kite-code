@@ -28,6 +28,14 @@ export type MaintenanceCLIArguments =
   | { kind: 'maintenance'; action: 'status'; dataRoot: string; profile: string }
   | {
       kind: 'maintenance';
+      action: 'gc';
+      dataRoot: string;
+      profile: string;
+      expectedStoreId: string;
+      gracePeriodMs: number;
+    }
+  | {
+      kind: 'maintenance';
       action: 'restore';
       dataRoot: string;
       profile: string;
@@ -157,6 +165,7 @@ const valued = new Set([
   '--profile',
   '--destination',
   '--expected-store',
+  '--grace-period-ms',
   '--restore-id',
   '--journal-digest',
   '--decision',
@@ -315,7 +324,7 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
   }
   if (command === 'maintenance') {
     const action = words[1];
-    if (!['backup', 'inspect', 'status', 'restore', 'reconcile'].includes(action ?? ''))
+    if (!['backup', 'inspect', 'status', 'restore', 'reconcile', 'gc'].includes(action ?? ''))
       fail('maintenance_action_invalid');
     const allowed = new Set(
       action === 'inspect'
@@ -325,11 +334,13 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
             '--profile',
             ...(action === 'backup'
               ? ['--destination']
-              : action === 'restore'
-                ? ['--expected-store', '--confirm-data-loss']
-                : action === 'reconcile'
-                  ? ['--restore-id', '--journal-digest', '--decision', '--confirm-data-loss']
-                  : []),
+              : action === 'gc'
+                ? ['--expected-store', '--grace-period-ms']
+                : action === 'restore'
+                  ? ['--expected-store', '--confirm-data-loss']
+                  : action === 'reconcile'
+                    ? ['--restore-id', '--journal-digest', '--decision', '--confirm-data-loss']
+                    : []),
           ],
     );
     for (const flag of values.keys()) if (!allowed.has(flag)) fail('option_not_supported', flag);
@@ -345,6 +356,20 @@ export function parseCLIArguments(argv: readonly string[]): CLIArguments {
       fail('maintenance_profile_required');
     const base = { kind: 'maintenance' as const, dataRoot, profile };
     if (action === 'status') return { ...base, action };
+    if (action === 'gc') {
+      const expectedStoreId = value('--expected-store');
+      if (!expectedStoreId || !/^[A-Za-z0-9_-]{1,128}$/.test(expectedStoreId))
+        fail('maintenance_expected_store_required');
+      const grace = value('--grace-period-ms') ?? String(7 * 86400000);
+      if (
+        !/^[1-9][0-9]*$/.test(grace) ||
+        !Number.isSafeInteger(Number(grace)) ||
+        Number(grace) < 86400000 ||
+        Number(grace) > 365 * 86400000
+      )
+        fail('maintenance_gc_grace_invalid');
+      return { ...base, action, expectedStoreId, gracePeriodMs: Number(grace) };
+    }
     if (action === 'backup') {
       const destinationRoot = value('--destination');
       if (!destinationRoot || !absolute(destinationRoot)) fail('absolute_destination_required');

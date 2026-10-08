@@ -9,6 +9,7 @@ import { verifyDesktopAnswerRows } from './desktop-answers';
 import { verifyDesktopCallerRows } from './desktop-callers';
 import { verifyDesktopConfigurationRows } from './desktop-configurations';
 import { verifyDesktopMcpRows } from './desktop-mcp';
+import { verifyDesktopWorkspaceRows } from './desktop-workspaces';
 import {
   verifyDesktopFileRecoveryRows,
   verifyFileRecoveryIntentsDocument,
@@ -165,16 +166,24 @@ export function openUiDatabase(path: string): Database {
       .query<{ user_version: number }, []>('PRAGMA user_version')
       .get()?.user_version;
     const schema =
-      version === 6 || version === 7
+      version === 6 || version === 7 || version === 8
         ? [
             answerSchema,
             callerSchema,
             configurationSchema,
             ...uiSchema,
             fileRecoverySchema,
-            ...(version === 7 ? [mcpSchema] : []),
+            ...(version === 7 || version === 8 ? [mcpSchema] : []),
             routeSchema,
             recoverySchema,
+            ...(version === 8
+              ? [
+                  [
+                    'workspace_removal_intents',
+                    'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+                  ],
+                ]
+              : []),
           ]
         : version === 5
           ? [answerSchema, callerSchema, ...uiSchema, fileRecoverySchema, recoverySchema]
@@ -194,7 +203,8 @@ export function openUiDatabase(path: string): Database {
         version !== 4 &&
         version !== 5 &&
         version !== 6 &&
-        version !== 7) ||
+        version !== 7 &&
+        version !== 8) ||
       actual.length !== schema.length ||
       actual.some(
         (row, i) =>
@@ -216,16 +226,26 @@ export function openUiDatabase(path: string): Database {
       version === 4 ||
       version === 5 ||
       version === 6 ||
-      version === 7
+      version === 7 ||
+      version === 8
     )
       verifyRecoveryRows(db);
-    if (version === 3 || version === 4 || version === 5 || version === 6 || version === 7)
-      verifyDesktopCallerRows(db, version === 6 || version === 7);
-    if (version === 4 || version === 5 || version === 6 || version === 7)
+    if (
+      version === 3 ||
+      version === 4 ||
+      version === 5 ||
+      version === 6 ||
+      version === 7 ||
+      version === 8
+    )
+      verifyDesktopCallerRows(db, version === 6 || version === 7 || version === 8);
+    if (version === 4 || version === 5 || version === 6 || version === 7 || version === 8)
       verifyDesktopFileRecoveryRows(db);
-    if (version === 5 || version === 6 || version === 7) verifyDesktopAnswerRows(db);
-    if (version === 6 || version === 7) verifyDesktopConfigurationRows(db);
-    if (version === 7) verifyDesktopMcpRows(db);
+    if (version === 5 || version === 6 || version === 7 || version === 8)
+      verifyDesktopAnswerRows(db);
+    if (version === 6 || version === 7 || version === 8) verifyDesktopConfigurationRows(db);
+    if (version === 7 || version === 8) verifyDesktopMcpRows(db);
+    if (version === 8) verifyDesktopWorkspaceRows(db);
     return db;
   } catch (error) {
     db.close(true);
@@ -408,22 +428,22 @@ export async function captureAssets(
   const mcpApprovals = await capture('mcp-approvals.json', false);
   const mcpAuthBindings = await capture('mcp-auth-bindings.json', false);
   const rawMcp = mcpConfiguration.present || mcpApprovals.present || mcpAuthBindings.present;
-  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | undefined;
+  let uiVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | undefined;
   if (desktopUi.present) {
     const db = openUiDatabase(join(target, desktopUi.path));
     try {
       uiVersion = db
-        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 | 7 }, []>('PRAGMA user_version')
+        .query<{ user_version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 }, []>('PRAGMA user_version')
         .get()!.user_version;
     } finally {
       db.close(true);
     }
   }
-  const currentAssets = uiVersion === 6 || uiVersion === 7 || rawMcp;
+  const currentAssets = uiVersion === 6 || uiVersion === 7 || uiVersion === 8 || rawMcp;
   return {
     configuration: await capture('config.jsonc', false),
     skillWorkflowConfiguration: await capture('skill-workflow.jsonc', false),
-    ...(rawMcp ? { mcpConfiguration, mcpApprovals, mcpAuthBindings } : {}),
+    ...(rawMcp || uiVersion === 8 ? { mcpConfiguration, mcpApprovals, mcpAuthBindings } : {}),
     desktopUi: {
       ...desktopUi,
       format: desktopUi.present ? { applicationId: 1263888689, userVersion: uiVersion! } : null,

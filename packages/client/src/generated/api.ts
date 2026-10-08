@@ -1550,6 +1550,19 @@ export type Problem = {
   outcome?: string;
 };
 export type Workspace = { id: string; rootUri: string; name: string };
+export type WorkspaceRemoval = {
+  commandId: string;
+  originStoreId: string;
+  subjectId: string;
+  workspaceId: string;
+  requestDigest: string;
+  removedAt: number;
+  deletedRoots: number;
+  deletedSessions: number;
+  outcome: 'workspace_removed';
+  stopConfirmed: false;
+};
+export type RemoveWorkspaceRequest = { expectedStoreId: string; commandId: string };
 export type Session = {
   id: string;
   workspaceId: string;

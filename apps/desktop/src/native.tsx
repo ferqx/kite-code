@@ -127,6 +127,7 @@ export function NativeDesktop() {
   const planModes = useRef(new Map<string, boolean>());
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
+  const [removingWorkspace, setRemovingWorkspace] = useState<string>();
   const [expandedExecutions, setExpandedExecutions] = useState<{
     identity: string;
     ids: Set<string>;
@@ -509,6 +510,67 @@ export function NativeDesktop() {
       setNewPermission(selection.permissions.mode.mode);
     if (firstRef.current?.result?.phase !== 'unknown' && !pending) setFirstSubmission(undefined);
     if (workspaceId) void report(() => chooseWorkspace(workspaceId));
+  }
+  async function acceptWorkspaceRemoval(value: NativeResult) {
+    if (
+      !value ||
+      !('kind' in value) ||
+      value.kind !== 'workspace.removal' ||
+      !('phase' in value) ||
+      !('storeId' in value) ||
+      value.phase !== 'applied' ||
+      value.storeId !== directory?.storeId
+    )
+      return;
+    if (
+      selection?.session.workspaceId === value.workspaceId ||
+      newWorkspace === value.workspaceId
+    ) {
+      pageIntent.current++;
+      viewIntent.current++;
+      contextIntent.current++;
+      selected.current = undefined;
+      history.current?.close();
+      setMessages([]);
+      setDraft('');
+      setPreparing(true);
+      setScheduledTasksView(false);
+      setToolsOpen(false);
+      setNewWorkspace('');
+      setNewBranch(undefined);
+      setTargetBranch(undefined);
+      if (firstRef.current?.creation.workspaceId === value.workspaceId)
+        setFirstSubmission(undefined);
+    }
+    await readDirectory();
+    await refresh();
+  }
+  async function removeWorkspace(workspaceId: string) {
+    if (!bridge || removingWorkspace) return;
+    const current = generation.current,
+      label = directory?.workspaces.find((w) => w.id === workspaceId)?.name ?? workspaceId;
+    setRemovingWorkspace(label);
+    try {
+      const value = await bridge.request({
+        method: 'workspace.remove',
+        generation: current,
+        workspaceId,
+      });
+      if (generation.current === current) await acceptWorkspaceRemoval(value);
+    } finally {
+      setRemovingWorkspace(undefined);
+      await report(refresh, false);
+    }
+  }
+  async function lookupWorkspaceRemoval(commandId: string) {
+    if (!bridge) return;
+    const value = await bridge.request({
+      method: 'workspace.removal.lookup',
+      generation: generation.current,
+      commandId,
+    });
+    await acceptWorkspaceRemoval(value);
+    await refresh();
   }
   async function addWorkspace() {
     if (!bridge) return;
@@ -1595,6 +1657,43 @@ export function NativeDesktop() {
           />
         );
       }}
+      notices={
+        <>
+          {removingWorkspace &&
+            state?.workspaceRemovalSubmissions?.some(
+              (r) => r.phase === 'submitting' && r.label === removingWorkspace,
+            ) && <p role="status">正在移除空间“{removingWorkspace}”…</p>}
+          {state?.workspaceRemovalUnavailable && (
+            <p role="alert">空间移除记录不可用，无法确认原操作。</p>
+          )}
+          {state?.workspaceRemovalSubmissions
+            ?.filter(
+              (r) => r.phase === 'unknown' || r.phase === 'submitting' || r.phase === 'failed',
+            )
+            .map((r) => (
+              <p role="status" key={r.commandId}>
+                空间“{r.label}”
+                {r.phase === 'submitting'
+                  ? '正在移除'
+                  : r.phase === 'failed'
+                    ? '未移除'
+                    : '移除结果待确认'}
+                。
+                {r.phase === 'failed' &&
+                  (r.error === 'permission_denied'
+                    ? '当前用户无权移除此空间。'
+                    : '本地服务拒绝了此次移除。')}
+                {r.phase === 'unknown' && r.commandId && (
+                  <DesktopButton
+                    onClick={() => void report(() => lookupWorkspaceRemoval(r.commandId!))}
+                  >
+                    查询原移除
+                  </DesktopButton>
+                )}
+              </p>
+            ))}
+        </>
+      }
       loading={
         childDetail
           ? childDetail.loading && !childFacts
@@ -1630,12 +1729,15 @@ export function NativeDesktop() {
             : '本地 Agent'
           : '正在连接'
       }
-      mutationBusy={pending}
+      mutationBusy={pending || !!removingWorkspace}
       defaultExpanded
       actions={{
         newSession: () => prepareConversation(),
         newWorkspaceSession: prepareConversation,
         addWorkspace: () => void addWorkspace(),
+        removeWorkspace: directory?.unavailable
+          ? undefined
+          : (id) => void report(() => removeWorkspace(id)),
         settings: () => setSettingsOpen(true),
         scheduledTasks: () => {
           pageIntent.current++;

@@ -852,6 +852,19 @@ export const schemas = {
     outcome: z.string().optional(),
   }),
   Workspace: z.object({ id, rootUri: z.string(), name: z.string() }),
+  WorkspaceRemoval: z.strictObject({
+    commandId: id,
+    originStoreId: id,
+    subjectId: z.string().min(1).max(256),
+    workspaceId: id,
+    requestDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    removedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    deletedRoots: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    deletedSessions: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    outcome: z.literal('workspace_removed'),
+    stopConfirmed: z.literal(false),
+  }),
+  RemoveWorkspaceRequest: z.strictObject({ expectedStoreId: id, commandId: id }),
   Session: z.object({
     id,
     workspaceId: id,
@@ -1805,6 +1818,18 @@ export const apiRoutes = [
   },
   { method: 'get', path: '/v1/workspaces', response: 'WorkspaceList' },
   { method: 'get', path: '/v1/workspaces/{id}', response: 'Workspace' },
+  {
+    method: 'post',
+    path: '/v1/workspaces/{id}/remove',
+    request: 'RemoveWorkspaceRequest',
+    response: 'WorkspaceRemoval',
+  },
+  {
+    method: 'get',
+    path: '/v1/workspaces/{id}/removals/{commandId}',
+    query: 'PermissionControlQuery',
+    response: 'WorkspaceRemoval',
+  },
   {
     method: 'get',
     path: '/v1/workspaces/{id}/skills',

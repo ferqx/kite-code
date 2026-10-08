@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -198,19 +198,33 @@ void app
       window: () => window,
       rendererUrl,
       caller: openCaller,
+      async confirmWorkspaceRemoval(label) {
+        const result = await dialog.showMessageBox(window!, {
+          type: 'warning',
+          title: `移除空间“${label}”？`,
+          message: `移除空间“${label}”？`,
+          detail:
+            '将移除本地项目登记及全部会话列表，并请求停止运行中的任务。当前版本仍保留历史数据，物理清理尚未完成。不会删除工作目录中的文件。',
+          buttons: ['保留空间', '移除空间'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        return result.response === 1;
+      },
       async pickWorkspace(generation, host) {
         await host.invoke({ method: 'state', generation });
         const selected = await dialog.showOpenDialog(window!, { properties: ['openDirectory'] });
         if (selected.canceled || selected.filePaths.length !== 1) return;
         await host.invoke({ method: 'state', generation });
         const path = realpathSync(selected.filePaths[0]!);
-        const id = createHash('sha256').update(path).digest('hex');
-        await host.registerWorkspace(generation, {
+        const id = randomUUID();
+        const workspace = await host.registerWorkspace(generation, {
           id,
           rootUri: pathToFileURL(path).href,
           name: basename(path),
         });
-        return { workspaceId: id };
+        return { workspaceId: workspace.id };
       },
     });
     window.on('close', (event) => {

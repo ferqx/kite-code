@@ -1272,6 +1272,38 @@ export async function startService(options: ServiceOptions) {
       ),
     );
   });
+  app.post('/v1/workspaces/:id/remove', async (context) => {
+    const request = await readBusinessBody(context.req.raw, schemas.RemoveWorkspaceRequest, 4096);
+    return context.json(
+      schemas.WorkspaceRemoval.parse(
+        await runtime.removeWorkspace({
+          ...request,
+          workspaceId: context.req.param('id'),
+          subjectId,
+        }),
+      ),
+    );
+  });
+  app.get('/v1/workspaces/:id/removals/:commandId', async (context) => {
+    const parsed = schemas.PermissionControlQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(context.req.queries()).map(([key, values]) => [
+          key,
+          values.length === 1 ? values[0] : values,
+        ]),
+      ),
+    );
+    if (!parsed.success) throw new HttpFailure('invalid_request', 400);
+    const result = await runtime.getWorkspaceRemoval({
+      expectedStoreId: parsed.data.storeId,
+      workspaceId: context.req.param('id'),
+      commandId: context.req.param('commandId'),
+      subjectId,
+    });
+    if (!result) throw new HttpFailure('workspace_removal_not_found', 404);
+    context.header('cache-control', 'no-store');
+    return context.json(schemas.WorkspaceRemoval.parse(result));
+  });
   app.post('/v1/workspaces', async (context) => {
     const request = await readBusinessBody(
       context.req.raw,

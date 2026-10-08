@@ -2,7 +2,9 @@
 
 项目来源的专用答案 schema、可信 observer 和有限原决定 Query 已实施；当前证明与历史读取边界见[Source owner](#项目来源决定的有限历史事实)，本片取舍与已完成的有限验收见[Source 决定](../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-source-approval-intent-assets.md)。
 
-Session 管理提供 `POST /v1/sessions/{id}/fork`、`/rename`、`/delete`，输入为有限 closed schema，主体由可信宿主填入。Fork 核原 Store/selection/稳定配对边界，只复制历史与出处；未登记 namespace 规则默认 omit，可信注册可选择 copy/rebuild。有限 `namespaceReport` 与原命令 receipt 一致，`omittedExtensionState` 如实表示省略，HTTP 不接受内部准备计划。重命名和删除按 `ifRevision` 控制 CAS，原 command ID 查回原 Session 快照。删除原子保存整组 tombstone 和停止边界，关闭迟到创建/派发，异步通知真实 owner 收尾；回执不声称资源已停止，准确旧 ID 历史继续可读。物理 GC、Workspace 批量删除和完整恢复维护尚待实施。
+Session 管理提供 `POST /v1/sessions/{id}/fork`、`/rename`、`/delete`，输入为有限 closed schema，主体由可信宿主填入。Fork 核原 Store/selection/稳定配对边界，只复制历史与出处；未登记 namespace 规则默认 omit，可信注册可选择 copy/rebuild。有限 `namespaceReport` 与原命令 receipt 一致，`omittedExtensionState` 如实表示省略，HTTP 不接受内部准备计划。重命名和删除按 `ifRevision` 控制 CAS，原 command ID 查回原 Session 快照。删除原子保存整组 tombstone 和停止边界，关闭迟到创建/派发，异步通知真实 owner 收尾；回执不声称资源已停止，准确旧 ID 历史继续可读。历史物理清理和完整恢复资格尚未闭合。
+
+空间批量入口为 `POST /v1/workspaces/{id}/remove`，闭合 body 只含 `expectedStoreId/commandId`，主体由宿主填入；`GET /v1/workspaces/{id}/removals/{commandId}?storeId=...` 只查原受理回执。一次事务核全部根的原创建主体并保存整组 tombstone、停止边界和不可变 receipt，拒绝部分先删后失败。原 receipt 的 Store／subject／Workspace／Command／规范请求 SHA 和计数保持；`stopConfirmed:false` 不代表资源终止。当前目录隐藏与新工作封锁不物理删除历史，Browser 不获得写入入口。实现与真实证据见 [Store owner](../../packages/agent/src/storage/sqlite/session-management/README.md)。
 
 Fork 的 view、history 和 Context 通过 readonly `getMessageOrigin` 核 sealed SQL 出处，公开有限 `originMessage` 原 Store/Session/Message/Run。原 Model output BodyRef/Execution scope 不变，正文从原 Session 的具名 GET 完整读取；未来 Part 保预览并标 `unsupported`，不能猜测解释或自动调用模型。每次 GET 的 `snapshotCursor` 是该次一致读水位，正文/hash/原请求身份保持不可变。[真实 HTTP/SDK 管理](../../tests/isolated/unified-agent/client-session-management.test.ts)和[17MiB Fork](../../tests/isolated/unified-agent/client-fork.test.ts)记录相应资格。
 

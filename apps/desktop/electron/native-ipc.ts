@@ -104,6 +104,8 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   directory: [],
   detach: [],
   'workspace.pick': [],
+  'workspace.remove': ['workspaceId'],
+  'workspace.removal.lookup': ['commandId'],
   select: ['sessionId'],
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
   messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit'],
@@ -541,6 +543,7 @@ export function registerNativeIpc(options: {
   window: () => BrowserWindow | undefined;
   rendererUrl: string;
   caller: () => Promise<NativeCaller>;
+  confirmWorkspaceRemoval?: (label: string) => Promise<boolean>;
   pickWorkspace?: (
     generation: number,
     caller: NativeCaller,
@@ -558,6 +561,17 @@ export function registerNativeIpc(options: {
         if (!options.pickWorkspace) throw Error('native_host_operation_unavailable');
         const picked = await options.pickWorkspace(request.generation, caller);
         value = picked ? { kind: 'workspace.picked', workspaceId: picked.workspaceId } : null;
+      } else if (request.method === 'workspace.remove') {
+        if (!options.confirmWorkspaceRemoval) throw Error('native_host_operation_unavailable');
+        value = await caller.removeWorkspace(
+          request.generation,
+          request.workspaceId,
+          async (label) => {
+            const confirmed = await options.confirmWorkspaceRemoval!(label);
+            assertNativeSender(event, options.window(), options.rendererUrl);
+            return confirmed;
+          },
+        );
       } else value = await caller.invoke(request);
       if (Buffer.byteLength(JSON.stringify(value)) > responseBytes)
         throw Error('native_response_too_large');

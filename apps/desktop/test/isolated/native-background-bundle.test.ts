@@ -23,7 +23,7 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen',
+  'source-free default Native background overview retains original tasks, full child logs and exact stop across actual backup restore cold reopen plus original PC Workspace removal',
   async () => {
     const root = realpathSync(mkdtempSync('/private/tmp/kite-native-background-bundle-')),
       home = join(root, 'home'),
@@ -49,6 +49,11 @@ test.skipIf(process.platform !== 'darwin')(
       port: 0,
       async fetch(request) {
         const url = new URL(request.url);
+        if (url.pathname === '/verify-cold-baseline') {
+          const current = await snapshot(profile);
+          expect(current).toEqual(baseline!);
+          return Response.json(current);
+        }
         if (url.pathname === '/count')
           return Response.json({ count: calls.length, held: [...releases.keys()] });
         if (url.pathname.startsWith('/release/')) {
@@ -225,6 +230,12 @@ test.skipIf(process.platform !== 'darwin')(
           name: 'Background',
           rootUri: pathToFileURL(workspace).href,
         });
+        await store.createWorkspace({
+          expectedStoreId: storeId,
+          id: 'other-workspace',
+          name: 'Retained workspace',
+          rootUri: pathToFileURL(secondWorkspace).href,
+        });
         for (const [sessionId, title] of [
           ['original-root', 'Original Background'],
           ['newer-root', 'Newer Background'],
@@ -345,14 +356,60 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.originalStoreId).toBe(storeId!);
       expect(report.restoredStoreId).toBe(restoredStoreId!);
       expect(report.restoredStoreId).not.toBe(report.originalStoreId);
-      expect(report.pids).toHaveLength(2);
+      expect(report.pids).toHaveLength(3);
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
       expect(report.coldPhysical.every((row) => row.method === 'GET')).toBe(true);
       expect(report.coldProviderCalls).toBe(report.callsBeforeCold);
       expect(calls.length).toBe(report.callsBeforeCold);
       expect(report.executionIds).toHaveLength(4);
       expect(baseline).toBeDefined();
-      expect(await snapshot(profile)).toEqual(baseline!);
+      const removal = JSON.parse(readFileSync(join(home, 'workspace-removal-report.json'), 'utf8'));
+      expect(removal.beforeRemovalSnapshot).toEqual(baseline!);
+      expect(await snapshot(profile)).toEqual({
+        ...baseline!,
+        cursor: String(BigInt(baseline!.cursor) + 2n),
+        sessions: [],
+      });
+      expect(removal.applied.receipt).toMatchObject({
+        workspaceId: 'w',
+        deletedRoots: 2,
+        deletedSessions: 6,
+        originStoreId: report.restoredStoreId,
+        stopConfirmed: false,
+      });
+      expect(removal.removePosts).toHaveLength(1);
+      expect(removal.lookupPhysical.every((r: { method: string }) => r.method === 'GET')).toBe(
+        true,
+      );
+      const removedStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      try {
+        for (const original of baseline!.sessions) {
+          expect((await removedStore.getSession(original.id))!.deletedAt).toBe(
+            removal.applied.receipt.removedAt,
+          );
+          for (const execution of original.executions) {
+            expect(
+              (await removedStore.getExecution(execution.id))!.cancelRequestedAt,
+            ).not.toBeNull();
+            if (execution.childSessionId)
+              expect((await removedStore.getSession(execution.childSessionId))!.deletedAt).toBe(
+                removal.applied.receipt.removedAt,
+              );
+          }
+        }
+      } finally {
+        await removedStore.close();
+      }
+      const currentBackup = await createProfileBackup({
+        profile,
+        destinationRoot: join(root, 'db8-backup'),
+      });
+      expect(currentBackup.manifest.version).toBe(17);
+      expect(currentBackup.manifest.assets.desktopUi.format!.userVersion).toBe(8);
       const original = baseline!.sessions.find((row) => row.id === 'original-root')!;
       const task = original.executions.find((row) => row.id === report.stoppedId)!;
       expect(task.cancelRequestedAt).not.toBeNull();

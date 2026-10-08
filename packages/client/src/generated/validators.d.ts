@@ -1,4 +1,5 @@
 // Generated from apps/service/src/http/schema.
+export declare function response_WorkspaceRemoval(value: unknown): boolean;
 export declare function response_FileCheckpointPage(value: unknown): boolean;
 export declare function response_FileCheckpointDetail(value: unknown): boolean;
 export declare function response_FileRestoreStatus(value: unknown): boolean;
@@ -61,6 +62,7 @@ export declare function response_StreamReady(value: unknown): boolean;
 export declare function response_StreamCheckpoint(value: unknown): boolean;
 export declare function response_ExtensionList(value: unknown): boolean;
 export declare function response_QueryResponse(value: unknown): boolean;
+export declare function request_RemoveWorkspaceRequest(value: unknown): boolean;
 export declare function request_FileCheckpointListQuery(value: unknown): boolean;
 export declare function request_SessionLogQuery(value: unknown): boolean;
 export declare function request_BrowserSessionLogQuery(value: unknown): boolean;
@@ -128,6 +130,7 @@ export declare function request_CancelSessionRequest(value: unknown): boolean;
 export declare function request_ExtensionCommandRequest(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
 export declare const responseValidators: {
+  WorkspaceRemoval: (value: unknown) => boolean;
   FileCheckpointPage: (value: unknown) => boolean;
   FileCheckpointDetail: (value: unknown) => boolean;
   FileRestoreStatus: (value: unknown) => boolean;
@@ -192,6 +195,7 @@ export declare const responseValidators: {
   QueryResponse: (value: unknown) => boolean;
 };
 export declare const requestValidators: {
+  RemoveWorkspaceRequest: (value: unknown) => boolean;
   FileCheckpointListQuery: (value: unknown) => boolean;
   SessionLogQuery: (value: unknown) => boolean;
   BrowserSessionLogQuery: (value: unknown) => boolean;

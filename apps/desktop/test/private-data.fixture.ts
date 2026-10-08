@@ -24,6 +24,10 @@ import {
   parseNativeMcpRecord,
 } from '../electron/mcp-journal';
 import type { DraftScope, PrivateData } from '../electron/private-data';
+import {
+  parseWorkspaceRemovalIntent,
+  type WorkspaceRemovalIntent,
+} from '../electron/workspace-removal';
 import type {
   NativeCallerRecord,
   NativeCreation,
@@ -33,6 +37,7 @@ import type {
 /** Explicit unit port. Production main always opens the Node private file. */
 export function memoryPrivateData(): PrivateData {
   const files = new Map<string, FileRecoveryIntent>();
+  const removals = new Map<string, WorkspaceRemovalIntent>();
   const mcps = new Map<string, NativeMcpRecord>();
   const configurations = new Map<string, NativeConfigurationRecord>();
   const routes = new Map<string, string>();
@@ -49,6 +54,14 @@ export function memoryPrivateData(): PrivateData {
       revision: 0,
     };
   return {
+    workspaceRemovals: () => [...removals.values()].map((r) => structuredClone(r)),
+    saveWorkspaceRemoval(raw) {
+      const r = parseWorkspaceRemovalIntent(raw);
+      removals.set(r.request.commandId, r);
+    },
+    clearWorkspaceRemoval(id) {
+      removals.delete(id);
+    },
     mcps: () => [...mcps.values()].map((row) => structuredClone(row)),
     beginMcp(raw) {
       const value = parseNativeMcpRecord(raw),

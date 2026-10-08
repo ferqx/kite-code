@@ -20,6 +20,7 @@ import type {
   SessionDirectoryActivity,
   StartCommandRequest,
   Workspace,
+  WorkspaceRemoval,
 } from '@kite-ai/client';
 import type { FileRecoveryIntent } from '@kite-ai/client/file-recovery-intent';
 import type { NativeBackgroundRequest, NativeBackgroundResult } from './background-bridge';
@@ -307,7 +308,19 @@ export type NativeDirectory = {
   sessions: (Session & { activity?: SessionDirectoryActivity })[];
   unavailable?: boolean;
 };
+export type NativeWorkspaceRemoval = {
+  kind: 'workspace.removal';
+  storeId: string;
+  workspaceId: string;
+  label: string;
+  commandId?: string;
+  phase: 'cancelled' | 'submitting' | 'unknown' | 'applied' | 'failed';
+  receipt?: WorkspaceRemoval;
+  error?: string;
+};
 export type NativeState = {
+  readonly workspaceRemovalSubmissions?: readonly NativeWorkspaceRemoval[];
+  readonly workspaceRemovalUnavailable?: boolean;
   readonly environmentRevision?: number;
   readonly directory?: NativeDirectory;
   readonly backgroundUnavailable?: boolean;
@@ -553,6 +566,8 @@ export type NativeRequest =
   | { method: 'interactionAttachment.close'; generation: number; readId: string }
   | { method: 'attach' }
   | { method: 'state' | 'directory' | 'detach' | 'workspace.pick'; generation: number }
+  | { method: 'workspace.remove'; generation: number; workspaceId: string }
+  | { method: 'workspace.removal.lookup'; generation: number; commandId: string }
   | { method: 'select'; generation: number; sessionId: string }
   | {
       method: 'createSession';
@@ -636,6 +651,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeWorkspaceRemoval
   | NativeBranchFacts
   | NativeConversationResult
   | { kind: 'workspace.picked'; workspaceId: string }

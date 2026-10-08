@@ -4,6 +4,7 @@ export const maintenanceHelp = [
   'Development offline maintenance (DB/media + separate raw config/MCP sources/Desktop UI/TUI drafts; vault excluded):',
   'maintenance backup --data-root <absolute> --profile <name> --destination <absolute>',
   'maintenance inspect <absolute-backup-directory>',
+  'maintenance gc --data-root <absolute> --profile <name> --expected-store <observed-id> [--grace-period-ms <at-least-86400000>]',
   'maintenance status --data-root <absolute> --profile <name>',
   'maintenance restore <absolute-backup-directory> --data-root <absolute> --profile <name> --expected-store <observed-id> --confirm-data-loss',
   'maintenance reconcile --data-root <absolute> --profile <name> --restore-id <observed-id> --journal-digest <observed-sha256> --decision complete|rollback --confirm-data-loss',
@@ -20,6 +21,7 @@ export async function runSelectedMaintenance(input: {
   input.signal?.throwIfAborted();
   const {
     createProfileBackup,
+    collectProfileGarbage,
     inspectProfileBackup,
     inspectProfileRestore,
     restoreProfileBackup,
@@ -56,7 +58,7 @@ export async function runSelectedMaintenance(input: {
     profileComplete: false,
     desktopUi: {
       path: 'desktop-private/data.sqlite',
-      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7],
+      supportedUserVersions: [1, 2, 3, 4, 5, 6, 7, 8],
     },
     mcpConfiguration: { path: 'mcp.json', rawBytes: true },
     mcpApprovals: { path: 'mcp-approvals.json', rawBytes: true },
@@ -93,6 +95,16 @@ export async function runSelectedMaintenance(input: {
     return 0;
   }
   const profile = { dataRoot: args.dataRoot, profile: args.profile };
+  if (args.action === 'gc') {
+    const gc = await collectProfileGarbage({
+      profile,
+      expectedStoreId: args.expectedStoreId,
+      gracePeriodMs: args.gracePeriodMs,
+      signal: input.signal,
+    });
+    emit({ status: 'collected', gc });
+    return 0;
+  }
   if (args.action === 'status') {
     emit({ status: 'observed', restore: inspectProfileRestore({ profile }) });
     return 0;
