@@ -1888,11 +1888,13 @@ export function NativeDesktop() {
         selection && (
           <>
             <p role="status">
-              {historyState.phase === 'complete'
-                ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
-                : historyState.phase === 'loading'
-                  ? '正在完整校准历史；已有正文仍可阅读。'
-                  : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
+              {selection.session.historyPurgedAt !== undefined
+                ? '此空间的历史正文已由离线维护清理；原移除回执和执行边界仍保留。'
+                : historyState.phase === 'complete'
+                  ? '历史已完整读取至固定高水位；当前执行事实仍须核实。'
+                  : historyState.phase === 'loading'
+                    ? '正在完整校准历史；已有正文仍可阅读。'
+                    : '历史尚未完整校准；已有正文仍可阅读，当前执行事实不可用。'}
             </p>
             {historyState.phase === 'unavailable' && (
               <button type="button" onClick={() => void report(refresh)}>

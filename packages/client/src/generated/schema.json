@@ -8725,6 +8725,11 @@
             "type": "null"
           }
         ]
+      },
+      "historyPurgedAt": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
       }
     },
     "required": [
@@ -10521,6 +10526,11 @@
               }
             ]
           },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
           "ownerInstanceId": {
             "anyOf": [
               {
@@ -10614,6 +10624,11 @@
                 "type": "null"
               }
             ]
+          },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "ownerInstanceId": {
             "anyOf": [
@@ -10964,6 +10979,11 @@
                     "type": "null"
                   }
                 ]
+              },
+              "historyPurgedAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               },
               "ownerInstanceId": {
                 "anyOf": [
@@ -11328,6 +11348,11 @@
                     }
                   ]
                 },
+                "historyPurgedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
                 "ownerInstanceId": {
                   "anyOf": [
                     {
@@ -11421,6 +11446,11 @@
                       "type": "null"
                     }
                   ]
+                },
+                "historyPurgedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 },
                 "ownerInstanceId": {
                   "anyOf": [
@@ -11772,6 +11802,11 @@
                         }
                       ]
                     },
+                    "historyPurgedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
                     "ownerInstanceId": {
                       "anyOf": [
                         {
@@ -12115,6 +12150,11 @@
                       "type": "null"
                     }
                   ]
+                },
+                "historyPurgedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -12550,6 +12590,11 @@
               "type": "null"
             }
           ]
+        },
+        "historyPurgedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -12629,6 +12674,11 @@
                 "type": "null"
               }
             ]
+          },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13755,6 +13805,11 @@
                 "type": "null"
               }
             ]
+          },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14099,6 +14154,11 @@
                 "type": "null"
               }
             ]
+          },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14930,6 +14990,11 @@
               "type": "null"
             }
           ]
+        },
+        "historyPurgedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -15193,6 +15258,11 @@
                 "type": "null"
               }
             ]
+          },
+          "historyPurgedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": [

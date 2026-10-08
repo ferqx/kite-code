@@ -735,6 +735,42 @@ test('SDK routes decode generated resources, bounded history and snapshots leave
   }
 });
 
+test('SDK preserves explicit collected history availability and rejects malformed collection time', async () => {
+  let collectedAt: number = 123;
+  const f = fixture((request) => {
+    if (new URL(request.url).pathname === '/v1/server') return json(identity);
+    return json({
+      session: {
+        id: 's',
+        workspaceId: 'w',
+        parentSessionId: null,
+        rootSessionId: 's',
+        title: 'removed',
+        controlRevision: '1',
+        contextSelectionId: 'ctx',
+        nextSeq: '1',
+        deletedAt: 1,
+        historyPurgedAt: collectedAt,
+      },
+      runs: [],
+      executions: [],
+      messages: [],
+      snapshotCursor: '10',
+      storeId: 'store-a',
+    });
+  });
+  try {
+    await f.client.connect();
+    expect((await f.client.getView('s')).session.historyPurgedAt).toBe(123);
+    expect(f.client.lastAppliedCursor).toBeUndefined();
+    collectedAt = -1;
+    await expect(f.client.getView('s')).rejects.toBeDefined();
+    expect(f.requests.every((r) => r.method === 'GET')).toBe(true);
+  } finally {
+    f.stop();
+  }
+});
+
 test('stream reconnect checks identity; Store change requests snapshot without rebinding or mutation', async () => {
   let serverReads = 0;
   let streamReads = 0;

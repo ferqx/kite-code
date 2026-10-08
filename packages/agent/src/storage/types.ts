@@ -57,6 +57,8 @@ export interface SessionRecord {
   ownerGeneration: string;
   nextSeq: string;
   deletedAt: number | null;
+  /** Explicit offline collection removed history bodies; original safety facts remain. */
+  historyPurgedAt?: number;
 }
 export interface OwnerRef {
   sessionId: string;

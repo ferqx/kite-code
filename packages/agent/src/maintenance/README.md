@@ -1,6 +1,6 @@
 # 显式离线备份
 
-实际 Desktop DB8 优先使用专属 closed manifest v17；原 Workspace 移除申请与旧格式隔离见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8 的 Profile 才按下面 v5–v16 条件选择。显式无引用附件回收见[GC 合同](#显式无引用附件-gc)。
+实际 Desktop DB8 优先使用专属 closed manifest v17；原 Workspace 移除申请与旧格式隔离见[DB8 合同](#desktop-db8-与-manifest-v17)。未升级 DB8 的 Profile 才按下面 v5–v16 条件选择。空间历史与无引用附件的显式清理见[GC 合同](#显式无引用附件-gc)。
 
 Profile 的 `mcp.json`、`mcp-approvals.json`、`mcp-auth-bindings.json` 任一实际存在时，当前创建 closed manifest v16；准确 raw 资产与恢复后消费者合同见[Profile MCP 配置资产](#profile-mcp-配置资产与-manifest-v16)。三者均不存在时才使用下述 v5–v15 条件，旧 v2–v15 白名单不扩大。
 
@@ -218,8 +218,14 @@ Node [private-data](../../../../apps/desktop/electron/private-data.ts)首次持�
 
 ## 显式无引用附件 GC
 
-公开 [collectProfileGarbage](gc.ts)只接明确 Profile、准确 `expectedStoreId` 和可选 `gracePeriodMs`／signal，默认7天、可选1–365天。它取得与 Service／Native／backup 相同的外置稳定 profile-use 排他权；busy立即失败，不升级共享锁或强杀进程，未完成恢复／rollback journal拒绝。私有 DB/WAL副本核基线、完整性／FK 和当前 Store；异步扫描结束前原副本及源证明保持，不由 SQL打开或修改原库。
+公开 [collectProfileGarbage](gc.ts)接明确 Profile、准确 `expectedStoreId` 和可选 `gracePeriodMs`／signal，默认7天、可选1–365天。它取得与 Service／Native／backup 相同的外置稳定 profile-use 排他权；busy立即失败，不升级共享锁或强杀进程，未完成恢复／rollback journal拒绝。私有 DB/WAL副本核基线、完整性／FK 和当前 Store；副本回调及原源证明结束后，才允许以验证过的无跟随读写连接修改原 Core。
 
-只扫描生成的 `blobs/<2hex>/<64hex>` 和 `.publish-UUID` temporary；先完整预检私有目录、当前用户、无软链及单硬链，再决定删除。`blob_ref` 或 `execution_output` 仍有引用的一律保留，包括已 tombstone Session 的历史。ctime／mtime均过宽限、不可变 published 内容全量 SHA及原实体再核通过才 unlink并同步父目录。仅未发布 temporary沿相同宽限／实体规则清理。取消或错误不返回 collected，已完成的 unlink 不承诺跨文件回滚；原 Core和工作目录文件不修改。
+[历史清理事务](gc-history.ts)仅处理具有原 `removal@1`、全部成员 tombstone且超过宽限期的 Workspace。活动 Run、planned／dispatching／running／outcome_unknown Execution或accepted／needs_review Command保留整个空间的原证据，结果以 `retainedUnsettledWorkspaces` 说明；最近空间以 `retainedRecentWorkspaces` 说明。正常 Fork沿同一 Workspace创建，整空间内的来源链可一起清理；空间外的实际关系引用及未支持的扩展 scope明确拒绝，不能破坏存活数据或扫描任意JSON猜引用。
 
-[真实 GC／离线 argv 测试](../../test/isolated/maintenance/gc.test.ts)核 shared owner busy、错误 Store、最近对象、原引用与备份完整字节、过期孤儿、hostile symlink预检零删除以及取消。当前代码与 macOS证据覆盖 POSIX端口；Windows尚不支持该 GC。它不清 relational历史／控制回执／私有草稿，不能证明产品永久历史删除或整个 W19／三平台完成。
+一个SQL事务删除 Message／parts、Context、Interaction／grant、Session扩展记录、输出与Blob授权引用，并清除保留 Command／Run／Execution中的输入、配置、结果和恢复正文。保留 Session tombstone／stop boundary、原申请ID／subject／Store／digest／receipt、运行与执行终态及去重事实；不改写 unknown，也不把受理变成停止确认。原 Workspace receipt不变，metadata另存闭合 `historyCollection@1`；准确 Session读返回可选 `historyPurgedAt`，公开 DTO与PC旧页槽位可说明正文已清理。删除通知正文时同时提高 `replay_floor` 并发布一个全局维护事件，旧游标须重新取快照；其他空间的业务历史保留。
+
+事务开启 `secure_delete`，提交后checkpoint／VACUUM／再次truncate WAL并同步文件和目录；已清理标记也让后续显式调用重做这段物理收尾。SQL错误回滚，提交后的取消或后续文件错误不返回 collected；已提交正文清理和已完成unlink不承诺跨介质回滚。该过程清除当前Core的历史页与WAL，不擦除独立备份、系统快照或项目文件。原不可变回执中的必要小型控制信息仍保留；Desktop私有未发送草稿和原意图资产不修改。
+
+附件只扫描生成的 `blobs/<2hex>/<64hex>` 和 `.publish-UUID` temporary；先完整预检私有目录、当前用户、无软链及单硬链，再允许任何SQL／unlink删除。清理后仍被 `blob_ref` 或 `execution_output` 引用的附件保留，包括其他空间与未结束执行的正文。ctime／mtime均过宽限、published内容全量SHA及原实体再核通过才unlink并同步父目录；temporary沿同宽限／实体规则清理。未移除空间的孤儿回收不写原Core。
+
+[真实 GC／离线 argv 测试](../../test/isolated/maintenance/gc.test.ts)用选定SQLite3.51.3核原owner busy／Store／宽限／引用／备份／Core字节、hostile预检零SQL和文件删除、取消，以及实际Runtime完成正文和同空间Fork清理、外部关系拒绝、原回执与去重／迟到新建封锁、未知Execution原证据完整保留。测试只推进维护时钟，不改真实mtime／ctime。当前 macOS证据覆盖POSIX端口；Windows GC尚未支持。单独删除Session、installed维护、前版样本与完整W19／三平台资格仍按[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)闭合。

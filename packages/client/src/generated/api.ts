@@ -1573,6 +1573,7 @@ export type Session = {
   contextSelectionId: string;
   nextSeq: string;
   deletedAt: number | null;
+  historyPurgedAt?: number;
 };
 type Command___schema0 =
   | string
@@ -1891,6 +1892,7 @@ export type BackgroundExecutionItem = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
     ownerInstanceId: string | null;
     ownerGeneration: string;
   };
@@ -1904,6 +1906,7 @@ export type BackgroundExecutionItem = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
     ownerInstanceId: string | null;
     ownerGeneration: string;
   };
@@ -1965,6 +1968,7 @@ export type BackgroundExecutionItem = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
     ownerInstanceId: string | null;
     ownerGeneration: string;
   } | null;
@@ -2022,6 +2026,7 @@ export type BackgroundExecutionPage = {
       contextSelectionId: string;
       nextSeq: string;
       deletedAt: number | null;
+      historyPurgedAt?: number;
       ownerInstanceId: string | null;
       ownerGeneration: string;
     };
@@ -2035,6 +2040,7 @@ export type BackgroundExecutionPage = {
       contextSelectionId: string;
       nextSeq: string;
       deletedAt: number | null;
+      historyPurgedAt?: number;
       ownerInstanceId: string | null;
       ownerGeneration: string;
     };
@@ -2096,6 +2102,7 @@ export type BackgroundExecutionPage = {
       contextSelectionId: string;
       nextSeq: string;
       deletedAt: number | null;
+      historyPurgedAt?: number;
       ownerInstanceId: string | null;
       ownerGeneration: string;
     } | null;
@@ -2153,6 +2160,7 @@ export type SessionDirectoryPage = {
       contextSelectionId: string;
       nextSeq: string;
       deletedAt: number | null;
+      historyPurgedAt?: number;
     };
     activity?: {
       updatedAt: number | null;
@@ -2243,6 +2251,7 @@ export type BrowserSessionList = Array<{
   contextSelectionId: string;
   nextSeq: string;
   deletedAt: number | null;
+  historyPurgedAt?: number;
 }>;
 export type BrowserView = {
   session: {
@@ -2255,6 +2264,7 @@ export type BrowserView = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
   };
   runs: Array<{
     id: string;
@@ -2437,6 +2447,7 @@ export type ForkSessionResponse = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
   };
   selection: {
     id: string;
@@ -2489,6 +2500,7 @@ export type SessionMutationResponse = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
   };
 };
 type IncludeResultResponse___schema0 =
@@ -2634,6 +2646,7 @@ export type SessionList = Array<{
   contextSelectionId: string;
   nextSeq: string;
   deletedAt: number | null;
+  historyPurgedAt?: number;
 }>;
 export type MessageList = Array<{
   id: string;
@@ -2679,6 +2692,7 @@ export type SessionView = {
     contextSelectionId: string;
     nextSeq: string;
     deletedAt: number | null;
+    historyPurgedAt?: number;
   };
   runs: Array<{
     id: string;

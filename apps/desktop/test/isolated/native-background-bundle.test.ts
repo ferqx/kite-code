@@ -14,7 +14,11 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
-import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
+import {
+  collectProfileGarbage,
+  createProfileBackup,
+  restoreProfileBackup,
+} from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
@@ -410,6 +414,55 @@ test.skipIf(process.platform !== 'darwin')(
       });
       expect(currentBackup.manifest.version).toBe(17);
       expect(currentBackup.manifest.assets.desktopUi.format!.userVersion).toBe(8);
+      const privatePath = join(profile.profilePath, 'desktop-private/data.sqlite'),
+        privateBytes = readFileSync(privatePath),
+        backupBytes = readFileSync(join(currentBackup.directory, 'core.db'));
+      const originalNow = Date.now;
+      let gc: Awaited<ReturnType<typeof collectProfileGarbage>>;
+      try {
+        // Only maintenance observes a future grace clock; real filesystem timestamps stay intact.
+        Date.now = () => originalNow() + 8 * 86400000;
+        gc = await collectProfileGarbage({ profile, expectedStoreId: report.restoredStoreId });
+      } finally {
+        Date.now = originalNow;
+      }
+      expect(gc).toMatchObject({
+        purgedWorkspaces: 1,
+        purgedSessions: 6,
+        retainedUnsettledWorkspaces: 0,
+      });
+      expect(gc.removedFiles).toBeGreaterThan(0);
+      expect(readFileSync(privatePath)).toEqual(privateBytes);
+      expect(readFileSync(join(currentBackup.directory, 'core.db'))).toEqual(backupBytes);
+      expect(calls.length).toBe(report.callsBeforeCold);
+      const collectedStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      try {
+        expect(
+          await collectedStore.getWorkspaceRemoval({
+            expectedStoreId: report.restoredStoreId,
+            subjectId: 'local-user',
+            workspaceId: 'w',
+            commandId: removal.applied.receipt.commandId,
+          }),
+        ).toEqual(removal.applied.receipt);
+        for (const id of [
+          ...baseline!.sessions.map((s) => s.id),
+          ...baseline!.sessions.flatMap((s) =>
+            s.executions.flatMap((e) => (e.childSessionId ? [e.childSessionId] : [])),
+          ),
+        ]) {
+          const view = await collectedStore.getView(id);
+          expect(view.session.historyPurgedAt).toBeGreaterThan(0);
+          expect(view.messages).toEqual([]);
+        }
+      } finally {
+        await collectedStore.close();
+      }
+      expect((await snapshot(profile)).sessions).toEqual([]);
       const original = baseline!.sessions.find((row) => row.id === 'original-root')!;
       const task = original.executions.find((row) => row.id === report.stoppedId)!;
       expect(task.cancelRequestedAt).not.toBeNull();
@@ -438,6 +491,7 @@ test.skipIf(process.platform !== 'darwin')(
           executionIds: report.executionIds,
           stoppedId: report.stoppedId,
           pids: report.pids,
+          gc,
         }),
       );
       completed = true;

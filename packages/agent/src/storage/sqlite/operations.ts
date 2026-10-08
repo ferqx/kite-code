@@ -106,7 +106,12 @@ import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
-import { readWorkspaceRemoval, removeWorkspace, workspaceRemoval } from './workspace-removal';
+import {
+  readWorkspaceRemoval,
+  removeWorkspace,
+  workspaceHistoryCollectedAt,
+  workspaceRemoval,
+} from './workspace-removal';
 
 type Input = { modelOutput?: import('../../model-output').ModelOutputReference } & OwnedWrite &
   AcceptCommandInput &
@@ -471,6 +476,12 @@ export class SqliteOperations {
   session(row: Row): SessionRecord {
     const authority =
       row.parent_id === null ? row : this.row('SELECT * FROM session WHERE id=?', row.root_id!)!;
+    const historyPurgedAt = row.delete_requested
+      ? workspaceHistoryCollectedAt(
+          this.row('SELECT metadata_json FROM workspace WHERE id=?', row.workspace_id!)!
+            .metadata_json,
+        )
+      : null;
     return {
       id: String(row.id),
       workspaceId: String(row.workspace_id),
@@ -487,6 +498,7 @@ export class SqliteOperations {
           ? 0
           : Number(row.deleted_at)
         : null,
+      ...(historyPurgedAt === null ? {} : { historyPurgedAt }),
     };
   }
   command(row: Row): CommandRecord {

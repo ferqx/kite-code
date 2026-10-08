@@ -2710,3 +2710,28 @@ Root唯一Git owner；无关 AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e9
 
 
 收尾门禁 actual0：Root与八workspace最终typecheck，日志 types-final；边界／八workspace／唯一API graph／ownership，日志 boundary、packages、api-final、ownership-final；docs／scope=all impact／plan-evidence，日志 docs、impact、plan-evidence-20261008.log。完整前缀均为 `/private/tmp/kite-workspace-removal-`。40个owned TS只读Biome actual0／无fix，保1既有warning与2info；默认发现630个唯一文件，新五文件与原Window各恰好一次，无调度例外。窗口通过后只缩减fixture的进度输出，完整removal报告与原业务断言保留；没有重标为又一次Window运行。受影响Agent导航核当前maintenance职责；tests入口／发现规则未变化，现有自动owner机制覆盖新增文件。iteration_complete仅收束当前增量，stage／commit按最终准确owned范围和正常hooks独立核，不关闭原永久删除／§35资格。本轮本地交付冻结及Git核验记录在 `/private/tmp/kite-workspace-removal-delivery-20261008.json`。
+
+
+## 2026-10-08：已移除空间的显式历史正文清理
+
+在durable HEAD `22544178f0d066b9216ceac90218934697b3c3a7` 加本轮owned diff，最高依赖继续沿原PC空间移除、默认保留的Main确认与既有公开离线GC实施，没有另建客户端。macOS宿主Shell语义保持；Win／Linux仍按用户安排在重构后交Actions，本轮没有dispatch／push／PR／发布。
+
+当前GC不再仅处理孤儿附件。全部成员tombstone、过宽限、无活动Run／未结束或unknown Execution／accepted或needs_review Command的已移除Workspace可清理全部关系正文及保留C/R/E中的输入／配置／结果正文。空间内的Fork一起清理；外部真实关系或未知扩展scope明确拒绝。保留删除边界、原ID／Store／主体／request digest／receipt和终态，不修改unknown。原Workspace receipt不变，独立 `historyCollection@1` 经可选Session `historyPurgedAt`进入生成API与原PC状态槽位。私有草稿、项目文件和独立备份保留。
+
+同一外置Profile排他权覆盖只读源证明、原Core单SQL事务、secure_delete／checkpoint／VACUUM／truncate WAL和附件删除；不升级锁、不抢owner、不启动Service或Provider。全附件namespace在任何SQL／unlink删除前预检。通知正文删除同时提高replay floor并新增一个维护事件；过期cursor必须重新取快照，其他空间业务事实仍保留。未移除空间的孤儿清理继续保持原Core完整bytes。中断或错误不返回collected，已提交SQL／已完成unlink不承诺跨介质回滚；后续显式调用为已清理标记重做物理页／WAL收尾。
+
+本轮本机macOS arm64、Bun1.4.2、选定SQLite3.51.3、Electron44.3.0／Node22.21.1，实际有限验证：
+
+- GC实际Runtime完成／unknown、内部Fork、公共CLI和原负例，最终actual0／4pass／53assert，日志 `/private/tmp/kite-workspace-history-gc-delivery-20261008.log`。核当前Core／WAL目标sentinel正文消失、原同ID／receipt／requestDigest、旧cursor拒绝及新维护event、外部关系预检、其他空间引用／项目和私有数据保留；unknown空间Core完整bytes及执行证据保持。宽限仅推进维护时钟，不改真实文件mtime／ctime。
+- Core原管理／Workspace／Session logs／original Run selection四文件actual0／17pass／267assert，日志 `/private/tmp/kite-workspace-history-core-20261008.log`，保实际事务rollback、原unknown、迟到封锁与Fork来源契约。
+- Client实际受控HTTP、目录与Native原移除／管理DOM／准备端口五文件actual0／40pass／484assert，日志 `/private/tmp/kite-workspace-history-neighbors-local-20261008.log`；生成DTO保 `historyPurgedAt`且坏时间拒绝，GET不变成写入，不挪replay cursor。沙箱内端口绑定失败的原日志 neighbors保留，本机同范围重跑通过，不排除原断言。
+- 原源码外默认Native窗口actual0／1pass／73Bunassert／73.84秒，日志 `/private/tmp/kite-workspace-history-window-20261008.log`。原真实任务／准确停止／252000B Unicode子详情／v15 A→B冷GET baseline和cursor151／原Sidebar未知单POST与明确原GET保持；Main新确认说明宽限与未知证据保留。三个所属Service均普通退出后，公开GC清1Workspace／6Session／5附件775263B，真实Node DB8完整bytes和独立v17备份Core bytes不变，原Workspace receipt保持；其他空间／新目录身份保留。Provider仍9，owned进程为空，两制品root EX可再取。GC由Root公开maintenance调用，未冒称安装选择器调用资格；原driver／整例预算和原54业务assert均保持。原生确认由测试callback控制，不称人工OS点击。
+
+原红和诊断日志完整保留，前缀 `/private/tmp/kite-workspace-history-`：gc、gc-second为新增fixture错误返回ToolResult或手工派发不满足协议；gc-third为误调用不存在的listCommands和关闭Runtime后读Store。现改为实际Runtime生成完成／unknown事实，准确原getCommand查询，并在close前保存对照。gc-fourth／gc-fifth／gc-debug及debug-second／debug-third为新Worker拒绝的Bun `rejects.toThrow`匹配超时；diagnostic实际ACK显示 `getChanges`已返回cursor_expired，采用仓库已有catch后核准确error code形式，仍断言原Workspace新建被拒绝。未扩大5秒test预算、删除业务assert或放宽生产协议。最终无debug注入。
+
+[maintenance合同](../../packages/agent/src/maintenance/README.md#显式无引用附件-gc)、[Store owner](../../packages/agent/src/storage/sqlite/session-management/README.md#workspace-原子移除)、[Desktop owner](../../apps/desktop/README.md#native-空间批量移除)、会话／桌面／CLI手册、当前边界、§30.2.15和[原持久决定](../../.agents/notes/implemented/architecture/2026-10-08-workspace-removal-and-orphan-gc.md)同步。Core基线／checksum、私有DB8与manifest17 grammar未变；行为不变的Service／Client导航沿现有生成API和maintenance owner核对，不制造重复说明。
+
+剩余退出缺口最多五项：① 单会话物理清理及存活Fork来源依赖；② installed维护／已发布前版样本与DB8回退资格；③ macOS原RSS失败／八轮稳定性及全局资源退出；④ 完整迁移独立审查（本逻辑轮新Agent仅尝试一次，thread limit拒绝，Root核验不替代）；⑤ 前置闭合后的完整默认回归／旧路径最终退役及Win／Linux Actions。原产品永久历史删除承诺仍需按该范围收束，37能力保持partial、wholeV13=false、Goal active。Root唯一Git owner，无关AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保持且不暂存。iteration_complete只收束本增量，最终门禁与准确本地commit结果按下文记录。
+
+
+当前收尾强制门禁actual0：Root与八workspace typecheck（types-delivery）、边界（boundary）、精确八workspace（packages）、唯一生成API（api）、ownership、docs-final、scope=all impact、plan-evidence，日志完整前缀 `/private/tmp/kite-workspace-history-`、后缀 `-20261008.log`。源码与测试的最终只读Biome及正常Git hooks仍按冻结owned范围单独核验；完整阶段默认回归未在此增量运行，原退出门禁不放宽。本地交付冻结、原AGENTS保护与实际commit核验归 `/private/tmp/kite-workspace-history-delivery-20261008.json`，不以文档提前宣称整体或独立审查完成。

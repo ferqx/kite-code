@@ -875,6 +875,7 @@ export const schemas = {
     contextSelectionId: id,
     nextSeq: sequence,
     deletedAt: z.number().nullable(),
+    historyPurgedAt: z.number().int().nonnegative().optional(),
   }),
   Command: z.object({
     id,

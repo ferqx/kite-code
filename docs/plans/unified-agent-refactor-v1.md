@@ -2064,7 +2064,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.15 回到完整用户能力迁移主线
 
-原 PC 空间行现已接一次 Workspace 批量移除、默认保留的 Main 原生确认与持久原申请查询；显式离线 GC 只回收过宽限期的无引用附件。当前准确旧 ID 历史与草稿仍保留，永久历史清理承诺尚未完成，不能据局部目录移除关闭 Workspace／GC 退出依赖。DB8／manifest v17 仅为该原申请维护的当前范围，详见[本片进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-空间批量移除与显式附件-gc)。
+原PC空间行已接一次Workspace批量移除、默认保留的Main原生确认与持久原申请查询；显式离线GC进一步清理过宽限且任务全部终态的已移除空间正文，同空间Fork一起清理，原receipt／删除边界／Command去重事实保持。活动、未知或待核对工作保留证据，私有未发送草稿保留。单会话物理清理、installed维护与完整永久删除资格仍未闭合，不能据局部通过关闭Workspace／GC退出依赖。DB8／manifest v17仍只承载原申请资产，Core基线未变，详见[当前增量](unified-agent-refactor-v1-progress.md#2026-10-08已移除空间的显式历史正文清理)。
 
 用户要求先执行方案主线，停止追加资源优化切片。正式 TUI 的 `/resume` 搜索与 D 默认保留确认现已接公共单 Session 删除；实际完整候选/共享80×24终端核默认零写、只删除另一原 Session、当前活动 Run 保持及最终完成。实现和当前验证范围归[阶段进度](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-会话搜索与删除确认)，不重复已闭合的 Native Chrome 与默认 Shell 资格。
 

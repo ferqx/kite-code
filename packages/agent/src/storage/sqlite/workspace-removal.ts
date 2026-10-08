@@ -5,6 +5,23 @@ import { AgentError, type Json, type WorkspaceRemoval } from '../types';
 import type { SqliteOperations } from './operations';
 
 type Input = Parameters<Store['removeWorkspace']>[0];
+/** Collection never changes the original removal receipt or its cancellation evidence. */
+export function workspaceHistoryCollectedAt(metadata: unknown): number | null {
+  const value = JSON.parse(String(metadata)) as { historyCollection?: unknown };
+  if (!Object.hasOwn(value, 'historyCollection')) return null;
+  const marker = value.historyCollection as { version?: unknown; collectedAt?: unknown };
+  if (
+    !marker ||
+    Object.keys(marker).sort().join(',') !== 'collectedAt,version' ||
+    marker.version !== 1 ||
+    typeof marker.collectedAt !== 'number' ||
+    !Number.isSafeInteger(marker.collectedAt) ||
+    marker.collectedAt < 0 ||
+    !workspaceRemoval(metadata)
+  )
+    throw new AgentError('workspace_history_invalid');
+  return marker.collectedAt;
+}
 /** Reserved metadata is an immutable Store receipt, independent of any deleted Session. */
 export function workspaceRemoval(metadata: unknown): WorkspaceRemoval | null {
   const value = JSON.parse(String(metadata)) as { removal?: unknown };

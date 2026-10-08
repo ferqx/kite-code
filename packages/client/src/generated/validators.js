@@ -36747,6 +36747,7 @@ var schema52 = {
               },
               nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
               deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+              historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
             },
             required: [
               'id',
@@ -37955,6 +37956,96 @@ function validate45(
                                                             } else {
                                                               var valid4 = true;
                                                             }
+                                                            if (valid4) {
+                                                              if (
+                                                                data8.historyPurgedAt !== undefined
+                                                              ) {
+                                                                let data18 = data8.historyPurgedAt;
+                                                                const _errs52 = errors;
+                                                                if (
+                                                                  !(
+                                                                    typeof data18 == 'number' &&
+                                                                    !(data18 % 1) &&
+                                                                    !isNaN(data18) &&
+                                                                    isFinite(data18)
+                                                                  )
+                                                                ) {
+                                                                  validate45.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/items/' +
+                                                                        i0 +
+                                                                        '/session/historyPurgedAt',
+                                                                      schemaPath:
+                                                                        '#/properties/items/items/properties/session/properties/historyPurgedAt/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'integer' },
+                                                                      message: 'must be integer',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                                if (errors === _errs52) {
+                                                                  if (
+                                                                    typeof data18 == 'number' &&
+                                                                    isFinite(data18)
+                                                                  ) {
+                                                                    if (
+                                                                      data18 > 9007199254740991 ||
+                                                                      isNaN(data18)
+                                                                    ) {
+                                                                      validate45.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/items/' +
+                                                                            i0 +
+                                                                            '/session/historyPurgedAt',
+                                                                          schemaPath:
+                                                                            '#/properties/items/items/properties/session/properties/historyPurgedAt/maximum',
+                                                                          keyword: 'maximum',
+                                                                          params: {
+                                                                            comparison: '<=',
+                                                                            limit: 9007199254740991,
+                                                                          },
+                                                                          message:
+                                                                            'must be <= 9007199254740991',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    } else {
+                                                                      if (
+                                                                        data18 < 0 ||
+                                                                        isNaN(data18)
+                                                                      ) {
+                                                                        validate45.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/items/' +
+                                                                              i0 +
+                                                                              '/session/historyPurgedAt',
+                                                                            schemaPath:
+                                                                              '#/properties/items/items/properties/session/properties/historyPurgedAt/minimum',
+                                                                            keyword: 'minimum',
+                                                                            params: {
+                                                                              comparison: '>=',
+                                                                              limit: 0,
+                                                                            },
+                                                                            message: 'must be >= 0',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                                var valid4 = _errs52 === errors;
+                                                              } else {
+                                                                var valid4 = true;
+                                                              }
+                                                            }
                                                           }
                                                         }
                                                       }
@@ -37985,22 +38076,22 @@ function validate45(
                                     }
                                     if (valid3) {
                                       if (data6.activity !== undefined) {
-                                        let data18 = data6.activity;
-                                        const _errs52 = errors;
-                                        if (errors === _errs52) {
+                                        let data19 = data6.activity;
+                                        const _errs54 = errors;
+                                        if (errors === _errs54) {
                                           if (
-                                            data18 &&
-                                            typeof data18 == 'object' &&
-                                            !Array.isArray(data18)
+                                            data19 &&
+                                            typeof data19 == 'object' &&
+                                            !Array.isArray(data19)
                                           ) {
                                             let missing3;
                                             if (
-                                              (data18.updatedAt === undefined &&
+                                              (data19.updatedAt === undefined &&
                                                 (missing3 = 'updatedAt')) ||
-                                              (data18.run === undefined && (missing3 = 'run')) ||
-                                              (data18.queued === undefined &&
+                                              (data19.run === undefined && (missing3 = 'run')) ||
+                                              (data19.queued === undefined &&
                                                 (missing3 = 'queued')) ||
-                                              (data18.pendingInteractions === undefined &&
+                                              (data19.pendingInteractions === undefined &&
                                                 (missing3 = 'pendingInteractions'))
                                             ) {
                                               validate45.errors = [
@@ -38019,18 +38110,18 @@ function validate45(
                                               ];
                                               return false;
                                             } else {
-                                              if (data18.updatedAt !== undefined) {
-                                                let data19 = data18.updatedAt;
-                                                const _errs55 = errors;
-                                                const _errs56 = errors;
-                                                let valid8 = false;
+                                              if (data19.updatedAt !== undefined) {
+                                                let data20 = data19.updatedAt;
                                                 const _errs57 = errors;
+                                                const _errs58 = errors;
+                                                let valid8 = false;
+                                                const _errs59 = errors;
                                                 if (
                                                   !(
-                                                    typeof data19 == 'number' &&
-                                                    !(data19 % 1) &&
-                                                    !isNaN(data19) &&
-                                                    isFinite(data19)
+                                                    typeof data20 == 'number' &&
+                                                    !(data20 % 1) &&
+                                                    !isNaN(data20) &&
+                                                    isFinite(data20)
                                                   )
                                                 ) {
                                                   const err13 = {
@@ -38052,14 +38143,14 @@ function validate45(
                                                   }
                                                   errors++;
                                                 }
-                                                if (errors === _errs57) {
+                                                if (errors === _errs59) {
                                                   if (
-                                                    typeof data19 == 'number' &&
-                                                    isFinite(data19)
+                                                    typeof data20 == 'number' &&
+                                                    isFinite(data20)
                                                   ) {
                                                     if (
-                                                      data19 > 8640000000000000 ||
-                                                      isNaN(data19)
+                                                      data20 > 8640000000000000 ||
+                                                      isNaN(data20)
                                                     ) {
                                                       const err14 = {
                                                         instancePath:
@@ -38083,7 +38174,7 @@ function validate45(
                                                       }
                                                       errors++;
                                                     } else {
-                                                      if (data19 < 0 || isNaN(data19)) {
+                                                      if (data20 < 0 || isNaN(data20)) {
                                                         const err15 = {
                                                           instancePath:
                                                             instancePath +
@@ -38106,10 +38197,10 @@ function validate45(
                                                     }
                                                   }
                                                 }
-                                                var _valid3 = _errs57 === errors;
+                                                var _valid3 = _errs59 === errors;
                                                 valid8 = valid8 || _valid3;
-                                                const _errs59 = errors;
-                                                if (data19 !== null) {
+                                                const _errs61 = errors;
+                                                if (data20 !== null) {
                                                   const err16 = {
                                                     instancePath:
                                                       instancePath +
@@ -38129,7 +38220,7 @@ function validate45(
                                                   }
                                                   errors++;
                                                 }
-                                                var _valid3 = _errs59 === errors;
+                                                var _valid3 = _errs61 === errors;
                                                 valid8 = valid8 || _valid3;
                                                 if (!valid8) {
                                                   const err17 = {
@@ -38153,41 +38244,41 @@ function validate45(
                                                   validate45.errors = vErrors;
                                                   return false;
                                                 } else {
-                                                  errors = _errs56;
+                                                  errors = _errs58;
                                                   if (vErrors !== null) {
-                                                    if (_errs56) {
-                                                      vErrors.length = _errs56;
+                                                    if (_errs58) {
+                                                      vErrors.length = _errs58;
                                                     } else {
                                                       vErrors = null;
                                                     }
                                                   }
                                                 }
-                                                var valid7 = _errs55 === errors;
+                                                var valid7 = _errs57 === errors;
                                               } else {
                                                 var valid7 = true;
                                               }
                                               if (valid7) {
-                                                if (data18.run !== undefined) {
-                                                  let data20 = data18.run;
-                                                  const _errs61 = errors;
-                                                  const _errs62 = errors;
-                                                  let valid9 = false;
+                                                if (data19.run !== undefined) {
+                                                  let data21 = data19.run;
                                                   const _errs63 = errors;
-                                                  if (errors === _errs63) {
+                                                  const _errs64 = errors;
+                                                  let valid9 = false;
+                                                  const _errs65 = errors;
+                                                  if (errors === _errs65) {
                                                     if (
-                                                      data20 &&
-                                                      typeof data20 == 'object' &&
-                                                      !Array.isArray(data20)
+                                                      data21 &&
+                                                      typeof data21 == 'object' &&
+                                                      !Array.isArray(data21)
                                                     ) {
                                                       let missing4;
                                                       if (
-                                                        (data20.id === undefined &&
+                                                        (data21.id === undefined &&
                                                           (missing4 = 'id')) ||
-                                                        (data20.status === undefined &&
+                                                        (data21.status === undefined &&
                                                           (missing4 = 'status')) ||
-                                                        (data20.isActive === undefined &&
+                                                        (data21.isActive === undefined &&
                                                           (missing4 = 'isActive')) ||
-                                                        (data20.waitingForResults === undefined &&
+                                                        (data21.waitingForResults === undefined &&
                                                           (missing4 = 'waitingForResults'))
                                                       ) {
                                                         const err18 = {
@@ -38212,12 +38303,12 @@ function validate45(
                                                         }
                                                         errors++;
                                                       } else {
-                                                        if (data20.id !== undefined) {
-                                                          let data21 = data20.id;
-                                                          const _errs66 = errors;
-                                                          if (errors === _errs66) {
-                                                            if (typeof data21 === 'string') {
-                                                              if (func2(data21) > 128) {
+                                                        if (data21.id !== undefined) {
+                                                          let data22 = data21.id;
+                                                          const _errs68 = errors;
+                                                          if (errors === _errs68) {
+                                                            if (typeof data22 === 'string') {
+                                                              if (func2(data22) > 128) {
                                                                 const err19 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -38238,7 +38329,7 @@ function validate45(
                                                                 }
                                                                 errors++;
                                                               } else {
-                                                                if (func2(data21) < 1) {
+                                                                if (func2(data22) < 1) {
                                                                   const err20 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -38259,7 +38350,7 @@ function validate45(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (!pattern4.test(data21)) {
+                                                                  if (!pattern4.test(data22)) {
                                                                     const err21 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -38307,15 +38398,15 @@ function validate45(
                                                               errors++;
                                                             }
                                                           }
-                                                          var valid10 = _errs66 === errors;
+                                                          var valid10 = _errs68 === errors;
                                                         } else {
                                                           var valid10 = true;
                                                         }
                                                         if (valid10) {
-                                                          if (data20.status !== undefined) {
-                                                            let data22 = data20.status;
-                                                            const _errs68 = errors;
-                                                            if (typeof data22 !== 'string') {
+                                                          if (data21.status !== undefined) {
+                                                            let data23 = data21.status;
+                                                            const _errs70 = errors;
+                                                            if (typeof data23 !== 'string') {
                                                               const err23 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -38337,14 +38428,14 @@ function validate45(
                                                             }
                                                             if (
                                                               !(
-                                                                data22 === 'running' ||
-                                                                data22 === 'waiting_interaction' ||
-                                                                data22 === 'waiting_execution' ||
-                                                                data22 === 'cancelling' ||
-                                                                data22 === 'completed' ||
-                                                                data22 === 'failed' ||
-                                                                data22 === 'cancelled' ||
-                                                                data22 === 'interrupted'
+                                                                data23 === 'running' ||
+                                                                data23 === 'waiting_interaction' ||
+                                                                data23 === 'waiting_execution' ||
+                                                                data23 === 'cancelling' ||
+                                                                data23 === 'completed' ||
+                                                                data23 === 'failed' ||
+                                                                data23 === 'cancelled' ||
+                                                                data23 === 'interrupted'
                                                               )
                                                             ) {
                                                               const err24 = {
@@ -38373,15 +38464,15 @@ function validate45(
                                                               }
                                                               errors++;
                                                             }
-                                                            var valid10 = _errs68 === errors;
+                                                            var valid10 = _errs70 === errors;
                                                           } else {
                                                             var valid10 = true;
                                                           }
                                                           if (valid10) {
-                                                            if (data20.isActive !== undefined) {
-                                                              const _errs70 = errors;
+                                                            if (data21.isActive !== undefined) {
+                                                              const _errs72 = errors;
                                                               if (
-                                                                typeof data20.isActive !== 'boolean'
+                                                                typeof data21.isActive !== 'boolean'
                                                               ) {
                                                                 const err25 = {
                                                                   instancePath:
@@ -38402,18 +38493,18 @@ function validate45(
                                                                 }
                                                                 errors++;
                                                               }
-                                                              var valid10 = _errs70 === errors;
+                                                              var valid10 = _errs72 === errors;
                                                             } else {
                                                               var valid10 = true;
                                                             }
                                                             if (valid10) {
                                                               if (
-                                                                data20.waitingForResults !==
+                                                                data21.waitingForResults !==
                                                                 undefined
                                                               ) {
-                                                                const _errs72 = errors;
+                                                                const _errs74 = errors;
                                                                 if (
-                                                                  typeof data20.waitingForResults !==
+                                                                  typeof data21.waitingForResults !==
                                                                   'boolean'
                                                                 ) {
                                                                   const err26 = {
@@ -38435,7 +38526,7 @@ function validate45(
                                                                   }
                                                                   errors++;
                                                                 }
-                                                                var valid10 = _errs72 === errors;
+                                                                var valid10 = _errs74 === errors;
                                                               } else {
                                                                 var valid10 = true;
                                                               }
@@ -38464,10 +38555,10 @@ function validate45(
                                                       errors++;
                                                     }
                                                   }
-                                                  var _valid4 = _errs63 === errors;
+                                                  var _valid4 = _errs65 === errors;
                                                   valid9 = valid9 || _valid4;
-                                                  const _errs74 = errors;
-                                                  if (data20 !== null) {
+                                                  const _errs76 = errors;
+                                                  if (data21 !== null) {
                                                     const err28 = {
                                                       instancePath:
                                                         instancePath +
@@ -38487,7 +38578,7 @@ function validate45(
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid4 = _errs74 === errors;
+                                                  var _valid4 = _errs76 === errors;
                                                   valid9 = valid9 || _valid4;
                                                   if (!valid9) {
                                                     const err29 = {
@@ -38511,23 +38602,23 @@ function validate45(
                                                     validate45.errors = vErrors;
                                                     return false;
                                                   } else {
-                                                    errors = _errs62;
+                                                    errors = _errs64;
                                                     if (vErrors !== null) {
-                                                      if (_errs62) {
-                                                        vErrors.length = _errs62;
+                                                      if (_errs64) {
+                                                        vErrors.length = _errs64;
                                                       } else {
                                                         vErrors = null;
                                                       }
                                                     }
                                                   }
-                                                  var valid7 = _errs61 === errors;
+                                                  var valid7 = _errs63 === errors;
                                                 } else {
                                                   var valid7 = true;
                                                 }
                                                 if (valid7) {
-                                                  if (data18.queued !== undefined) {
-                                                    const _errs76 = errors;
-                                                    if (typeof data18.queued !== 'boolean') {
+                                                  if (data19.queued !== undefined) {
+                                                    const _errs78 = errors;
+                                                    if (typeof data19.queued !== 'boolean') {
                                                       validate45.errors = [
                                                         {
                                                           instancePath:
@@ -38544,20 +38635,20 @@ function validate45(
                                                       ];
                                                       return false;
                                                     }
-                                                    var valid7 = _errs76 === errors;
+                                                    var valid7 = _errs78 === errors;
                                                   } else {
                                                     var valid7 = true;
                                                   }
                                                   if (valid7) {
-                                                    if (data18.pendingInteractions !== undefined) {
-                                                      let data26 = data18.pendingInteractions;
-                                                      const _errs78 = errors;
+                                                    if (data19.pendingInteractions !== undefined) {
+                                                      let data27 = data19.pendingInteractions;
+                                                      const _errs80 = errors;
                                                       if (
                                                         !(
-                                                          typeof data26 == 'number' &&
-                                                          !(data26 % 1) &&
-                                                          !isNaN(data26) &&
-                                                          isFinite(data26)
+                                                          typeof data27 == 'number' &&
+                                                          !(data27 % 1) &&
+                                                          !isNaN(data27) &&
+                                                          isFinite(data27)
                                                         )
                                                       ) {
                                                         validate45.errors = [
@@ -38576,14 +38667,14 @@ function validate45(
                                                         ];
                                                         return false;
                                                       }
-                                                      if (errors === _errs78) {
+                                                      if (errors === _errs80) {
                                                         if (
-                                                          typeof data26 == 'number' &&
-                                                          isFinite(data26)
+                                                          typeof data27 == 'number' &&
+                                                          isFinite(data27)
                                                         ) {
                                                           if (
-                                                            data26 > 9007199254740991 ||
-                                                            isNaN(data26)
+                                                            data27 > 9007199254740991 ||
+                                                            isNaN(data27)
                                                           ) {
                                                             validate45.errors = [
                                                               {
@@ -38605,7 +38696,7 @@ function validate45(
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (data26 < 0 || isNaN(data26)) {
+                                                            if (data27 < 0 || isNaN(data27)) {
                                                               validate45.errors = [
                                                                 {
                                                                   instancePath:
@@ -38628,7 +38719,7 @@ function validate45(
                                                           }
                                                         }
                                                       }
-                                                      var valid7 = _errs78 === errors;
+                                                      var valid7 = _errs80 === errors;
                                                     } else {
                                                       var valid7 = true;
                                                     }
@@ -38651,7 +38742,7 @@ function validate45(
                                             return false;
                                           }
                                         }
-                                        var valid3 = _errs52 === errors;
+                                        var valid3 = _errs54 === errors;
                                       } else {
                                         var valid3 = true;
                                       }
@@ -38892,6 +38983,7 @@ var schema53 = {
               },
               nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
               deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+              historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
               ownerInstanceId: {
                 anyOf: [
                   { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
@@ -38947,6 +39039,7 @@ var schema53 = {
               },
               nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
               deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+              historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
               ownerInstanceId: {
                 anyOf: [
                   { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
@@ -39176,6 +39269,7 @@ var schema53 = {
                   },
                   nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
                   deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+                  historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
                   ownerInstanceId: {
                     anyOf: [
                       { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
@@ -43533,203 +43627,100 @@ function validate46(
                                                                     }
                                                                     if (valid13) {
                                                                       if (
-                                                                        data35.ownerInstanceId !==
+                                                                        data35.historyPurgedAt !==
                                                                         undefined
                                                                       ) {
                                                                         let data45 =
-                                                                          data35.ownerInstanceId;
+                                                                          data35.historyPurgedAt;
                                                                         const _errs139 = errors;
-                                                                        const _errs140 = errors;
-                                                                        let valid16 = false;
-                                                                        const _errs141 = errors;
-                                                                        if (errors === _errs141) {
-                                                                          if (
-                                                                            typeof data45 ===
-                                                                            'string'
-                                                                          ) {
-                                                                            if (
-                                                                              func2(data45) > 128
-                                                                            ) {
-                                                                              const err53 = {
-                                                                                instancePath:
-                                                                                  instancePath +
-                                                                                  '/items/' +
-                                                                                  i0 +
-                                                                                  '/session/ownerInstanceId',
-                                                                                schemaPath:
-                                                                                  '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/maxLength',
-                                                                                keyword:
-                                                                                  'maxLength',
-                                                                                params: {
-                                                                                  limit: 128,
-                                                                                },
-                                                                                message:
-                                                                                  'must NOT have more than 128 characters',
-                                                                              };
-                                                                              if (
-                                                                                vErrors === null
-                                                                              ) {
-                                                                                vErrors = [err53];
-                                                                              } else {
-                                                                                vErrors.push(err53);
-                                                                              }
-                                                                              errors++;
-                                                                            } else {
-                                                                              if (
-                                                                                func2(data45) < 1
-                                                                              ) {
-                                                                                const err54 = {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/items/' +
-                                                                                    i0 +
-                                                                                    '/session/ownerInstanceId',
-                                                                                  schemaPath:
-                                                                                    '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/minLength',
-                                                                                  keyword:
-                                                                                    'minLength',
-                                                                                  params: {
-                                                                                    limit: 1,
-                                                                                  },
-                                                                                  message:
-                                                                                    'must NOT have fewer than 1 characters',
-                                                                                };
-                                                                                if (
-                                                                                  vErrors === null
-                                                                                ) {
-                                                                                  vErrors = [err54];
-                                                                                } else {
-                                                                                  vErrors.push(
-                                                                                    err54,
-                                                                                  );
-                                                                                }
-                                                                                errors++;
-                                                                              } else {
-                                                                                if (
-                                                                                  !pattern4.test(
-                                                                                    data45,
-                                                                                  )
-                                                                                ) {
-                                                                                  const err55 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/items/' +
-                                                                                      i0 +
-                                                                                      '/session/ownerInstanceId',
-                                                                                    schemaPath:
-                                                                                      '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/pattern',
-                                                                                    keyword:
-                                                                                      'pattern',
-                                                                                    params: {
-                                                                                      pattern:
-                                                                                        '^[A-Za-z0-9_-]+$',
-                                                                                    },
-                                                                                    message:
-                                                                                      'must match pattern "' +
-                                                                                      '^[A-Za-z0-9_-]+$' +
-                                                                                      '"',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err55,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err55,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
-                                                                                }
-                                                                              }
-                                                                            }
-                                                                          } else {
-                                                                            const err56 = {
+                                                                        if (
+                                                                          !(
+                                                                            typeof data45 ==
+                                                                              'number' &&
+                                                                            !(data45 % 1) &&
+                                                                            !isNaN(data45) &&
+                                                                            isFinite(data45)
+                                                                          )
+                                                                        ) {
+                                                                          validate46.errors = [
+                                                                            {
                                                                               instancePath:
                                                                                 instancePath +
                                                                                 '/items/' +
                                                                                 i0 +
-                                                                                '/session/ownerInstanceId',
+                                                                                '/session/historyPurgedAt',
                                                                               schemaPath:
-                                                                                '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/type',
+                                                                                '#/properties/items/items/properties/session/properties/historyPurgedAt/type',
                                                                               keyword: 'type',
                                                                               params: {
-                                                                                type: 'string',
+                                                                                type: 'integer',
                                                                               },
                                                                               message:
-                                                                                'must be string',
-                                                                            };
-                                                                            if (vErrors === null) {
-                                                                              vErrors = [err56];
-                                                                            } else {
-                                                                              vErrors.push(err56);
-                                                                            }
-                                                                            errors++;
-                                                                          }
-                                                                        }
-                                                                        var _valid11 =
-                                                                          _errs141 === errors;
-                                                                        valid16 =
-                                                                          valid16 || _valid11;
-                                                                        const _errs143 = errors;
-                                                                        if (data45 !== null) {
-                                                                          const err57 = {
-                                                                            instancePath:
-                                                                              instancePath +
-                                                                              '/items/' +
-                                                                              i0 +
-                                                                              '/session/ownerInstanceId',
-                                                                            schemaPath:
-                                                                              '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/1/type',
-                                                                            keyword: 'type',
-                                                                            params: {
-                                                                              type: 'null',
+                                                                                'must be integer',
                                                                             },
-                                                                            message: 'must be null',
-                                                                          };
-                                                                          if (vErrors === null) {
-                                                                            vErrors = [err57];
-                                                                          } else {
-                                                                            vErrors.push(err57);
-                                                                          }
-                                                                          errors++;
-                                                                        }
-                                                                        var _valid11 =
-                                                                          _errs143 === errors;
-                                                                        valid16 =
-                                                                          valid16 || _valid11;
-                                                                        if (!valid16) {
-                                                                          const err58 = {
-                                                                            instancePath:
-                                                                              instancePath +
-                                                                              '/items/' +
-                                                                              i0 +
-                                                                              '/session/ownerInstanceId',
-                                                                            schemaPath:
-                                                                              '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf',
-                                                                            keyword: 'anyOf',
-                                                                            params: {},
-                                                                            message:
-                                                                              'must match a schema in anyOf',
-                                                                          };
-                                                                          if (vErrors === null) {
-                                                                            vErrors = [err58];
-                                                                          } else {
-                                                                            vErrors.push(err58);
-                                                                          }
-                                                                          errors++;
-                                                                          validate46.errors =
-                                                                            vErrors;
+                                                                          ];
                                                                           return false;
-                                                                        } else {
-                                                                          errors = _errs140;
-                                                                          if (vErrors !== null) {
-                                                                            if (_errs140) {
-                                                                              vErrors.length =
-                                                                                _errs140;
+                                                                        }
+                                                                        if (errors === _errs139) {
+                                                                          if (
+                                                                            typeof data45 ==
+                                                                              'number' &&
+                                                                            isFinite(data45)
+                                                                          ) {
+                                                                            if (
+                                                                              data45 >
+                                                                                9007199254740991 ||
+                                                                              isNaN(data45)
+                                                                            ) {
+                                                                              validate46.errors = [
+                                                                                {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/items/' +
+                                                                                    i0 +
+                                                                                    '/session/historyPurgedAt',
+                                                                                  schemaPath:
+                                                                                    '#/properties/items/items/properties/session/properties/historyPurgedAt/maximum',
+                                                                                  keyword:
+                                                                                    'maximum',
+                                                                                  params: {
+                                                                                    comparison:
+                                                                                      '<=',
+                                                                                    limit: 9007199254740991,
+                                                                                  },
+                                                                                  message:
+                                                                                    'must be <= 9007199254740991',
+                                                                                },
+                                                                              ];
+                                                                              return false;
                                                                             } else {
-                                                                              vErrors = null;
+                                                                              if (
+                                                                                data45 < 0 ||
+                                                                                isNaN(data45)
+                                                                              ) {
+                                                                                validate46.errors =
+                                                                                  [
+                                                                                    {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/items/' +
+                                                                                        i0 +
+                                                                                        '/session/historyPurgedAt',
+                                                                                      schemaPath:
+                                                                                        '#/properties/items/items/properties/session/properties/historyPurgedAt/minimum',
+                                                                                      keyword:
+                                                                                        'minimum',
+                                                                                      params: {
+                                                                                        comparison:
+                                                                                          '>=',
+                                                                                        limit: 0,
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be >= 0',
+                                                                                    },
+                                                                                  ];
+                                                                                return false;
+                                                                              }
                                                                             }
                                                                           }
                                                                         }
@@ -43740,22 +43731,264 @@ function validate46(
                                                                       }
                                                                       if (valid13) {
                                                                         if (
-                                                                          data35.ownerGeneration !==
+                                                                          data35.ownerInstanceId !==
                                                                           undefined
                                                                         ) {
                                                                           let data46 =
-                                                                            data35.ownerGeneration;
-                                                                          const _errs145 = errors;
-                                                                          if (errors === _errs145) {
+                                                                            data35.ownerInstanceId;
+                                                                          const _errs141 = errors;
+                                                                          const _errs142 = errors;
+                                                                          let valid16 = false;
+                                                                          const _errs143 = errors;
+                                                                          if (errors === _errs143) {
                                                                             if (
                                                                               typeof data46 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
-                                                                                !pattern18.test(
-                                                                                  data46,
-                                                                                )
+                                                                                func2(data46) > 128
                                                                               ) {
+                                                                                const err53 = {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/items/' +
+                                                                                    i0 +
+                                                                                    '/session/ownerInstanceId',
+                                                                                  schemaPath:
+                                                                                    '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/maxLength',
+                                                                                  keyword:
+                                                                                    'maxLength',
+                                                                                  params: {
+                                                                                    limit: 128,
+                                                                                  },
+                                                                                  message:
+                                                                                    'must NOT have more than 128 characters',
+                                                                                };
+                                                                                if (
+                                                                                  vErrors === null
+                                                                                ) {
+                                                                                  vErrors = [err53];
+                                                                                } else {
+                                                                                  vErrors.push(
+                                                                                    err53,
+                                                                                  );
+                                                                                }
+                                                                                errors++;
+                                                                              } else {
+                                                                                if (
+                                                                                  func2(data46) < 1
+                                                                                ) {
+                                                                                  const err54 = {
+                                                                                    instancePath:
+                                                                                      instancePath +
+                                                                                      '/items/' +
+                                                                                      i0 +
+                                                                                      '/session/ownerInstanceId',
+                                                                                    schemaPath:
+                                                                                      '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/minLength',
+                                                                                    keyword:
+                                                                                      'minLength',
+                                                                                    params: {
+                                                                                      limit: 1,
+                                                                                    },
+                                                                                    message:
+                                                                                      'must NOT have fewer than 1 characters',
+                                                                                  };
+                                                                                  if (
+                                                                                    vErrors === null
+                                                                                  ) {
+                                                                                    vErrors = [
+                                                                                      err54,
+                                                                                    ];
+                                                                                  } else {
+                                                                                    vErrors.push(
+                                                                                      err54,
+                                                                                    );
+                                                                                  }
+                                                                                  errors++;
+                                                                                } else {
+                                                                                  if (
+                                                                                    !pattern4.test(
+                                                                                      data46,
+                                                                                    )
+                                                                                  ) {
+                                                                                    const err55 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/items/' +
+                                                                                        i0 +
+                                                                                        '/session/ownerInstanceId',
+                                                                                      schemaPath:
+                                                                                        '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/pattern',
+                                                                                      keyword:
+                                                                                        'pattern',
+                                                                                      params: {
+                                                                                        pattern:
+                                                                                          '^[A-Za-z0-9_-]+$',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must match pattern "' +
+                                                                                        '^[A-Za-z0-9_-]+$' +
+                                                                                        '"',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err55,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err55,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            } else {
+                                                                              const err56 = {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/items/' +
+                                                                                  i0 +
+                                                                                  '/session/ownerInstanceId',
+                                                                                schemaPath:
+                                                                                  '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/0/type',
+                                                                                keyword: 'type',
+                                                                                params: {
+                                                                                  type: 'string',
+                                                                                },
+                                                                                message:
+                                                                                  'must be string',
+                                                                              };
+                                                                              if (
+                                                                                vErrors === null
+                                                                              ) {
+                                                                                vErrors = [err56];
+                                                                              } else {
+                                                                                vErrors.push(err56);
+                                                                              }
+                                                                              errors++;
+                                                                            }
+                                                                          }
+                                                                          var _valid11 =
+                                                                            _errs143 === errors;
+                                                                          valid16 =
+                                                                            valid16 || _valid11;
+                                                                          const _errs145 = errors;
+                                                                          if (data46 !== null) {
+                                                                            const err57 = {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/items/' +
+                                                                                i0 +
+                                                                                '/session/ownerInstanceId',
+                                                                              schemaPath:
+                                                                                '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf/1/type',
+                                                                              keyword: 'type',
+                                                                              params: {
+                                                                                type: 'null',
+                                                                              },
+                                                                              message:
+                                                                                'must be null',
+                                                                            };
+                                                                            if (vErrors === null) {
+                                                                              vErrors = [err57];
+                                                                            } else {
+                                                                              vErrors.push(err57);
+                                                                            }
+                                                                            errors++;
+                                                                          }
+                                                                          var _valid11 =
+                                                                            _errs145 === errors;
+                                                                          valid16 =
+                                                                            valid16 || _valid11;
+                                                                          if (!valid16) {
+                                                                            const err58 = {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/items/' +
+                                                                                i0 +
+                                                                                '/session/ownerInstanceId',
+                                                                              schemaPath:
+                                                                                '#/properties/items/items/properties/session/properties/ownerInstanceId/anyOf',
+                                                                              keyword: 'anyOf',
+                                                                              params: {},
+                                                                              message:
+                                                                                'must match a schema in anyOf',
+                                                                            };
+                                                                            if (vErrors === null) {
+                                                                              vErrors = [err58];
+                                                                            } else {
+                                                                              vErrors.push(err58);
+                                                                            }
+                                                                            errors++;
+                                                                            validate46.errors =
+                                                                              vErrors;
+                                                                            return false;
+                                                                          } else {
+                                                                            errors = _errs142;
+                                                                            if (vErrors !== null) {
+                                                                              if (_errs142) {
+                                                                                vErrors.length =
+                                                                                  _errs142;
+                                                                              } else {
+                                                                                vErrors = null;
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                          var valid13 =
+                                                                            _errs141 === errors;
+                                                                        } else {
+                                                                          var valid13 = true;
+                                                                        }
+                                                                        if (valid13) {
+                                                                          if (
+                                                                            data35.ownerGeneration !==
+                                                                            undefined
+                                                                          ) {
+                                                                            let data47 =
+                                                                              data35.ownerGeneration;
+                                                                            const _errs147 = errors;
+                                                                            if (
+                                                                              errors === _errs147
+                                                                            ) {
+                                                                              if (
+                                                                                typeof data47 ===
+                                                                                'string'
+                                                                              ) {
+                                                                                if (
+                                                                                  !pattern18.test(
+                                                                                    data47,
+                                                                                  )
+                                                                                ) {
+                                                                                  validate46.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/items/' +
+                                                                                          i0 +
+                                                                                          '/session/ownerGeneration',
+                                                                                        schemaPath:
+                                                                                          '#/properties/items/items/properties/session/properties/ownerGeneration/pattern',
+                                                                                        keyword:
+                                                                                          'pattern',
+                                                                                        params: {
+                                                                                          pattern:
+                                                                                            '^(0|[1-9][0-9]*)$',
+                                                                                        },
+                                                                                        message:
+                                                                                          'must match pattern "' +
+                                                                                          '^(0|[1-9][0-9]*)$' +
+                                                                                          '"',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                }
+                                                                              } else {
                                                                                 validate46.errors =
                                                                                   [
                                                                                     {
@@ -43765,46 +43998,24 @@ function validate46(
                                                                                         i0 +
                                                                                         '/session/ownerGeneration',
                                                                                       schemaPath:
-                                                                                        '#/properties/items/items/properties/session/properties/ownerGeneration/pattern',
+                                                                                        '#/properties/items/items/properties/session/properties/ownerGeneration/type',
                                                                                       keyword:
-                                                                                        'pattern',
+                                                                                        'type',
                                                                                       params: {
-                                                                                        pattern:
-                                                                                          '^(0|[1-9][0-9]*)$',
+                                                                                        type: 'string',
                                                                                       },
                                                                                       message:
-                                                                                        'must match pattern "' +
-                                                                                        '^(0|[1-9][0-9]*)$' +
-                                                                                        '"',
+                                                                                        'must be string',
                                                                                     },
                                                                                   ];
                                                                                 return false;
                                                                               }
-                                                                            } else {
-                                                                              validate46.errors = [
-                                                                                {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/items/' +
-                                                                                    i0 +
-                                                                                    '/session/ownerGeneration',
-                                                                                  schemaPath:
-                                                                                    '#/properties/items/items/properties/session/properties/ownerGeneration/type',
-                                                                                  keyword: 'type',
-                                                                                  params: {
-                                                                                    type: 'string',
-                                                                                  },
-                                                                                  message:
-                                                                                    'must be string',
-                                                                                },
-                                                                              ];
-                                                                              return false;
                                                                             }
+                                                                            var valid13 =
+                                                                              _errs147 === errors;
+                                                                          } else {
+                                                                            var valid13 = true;
                                                                           }
-                                                                          var valid13 =
-                                                                            _errs145 === errors;
-                                                                        } else {
-                                                                          var valid13 = true;
                                                                         }
                                                                       }
                                                                     }
@@ -43839,37 +44050,37 @@ function validate46(
                                           }
                                           if (valid3) {
                                             if (data6.rootSession !== undefined) {
-                                              let data47 = data6.rootSession;
-                                              const _errs147 = errors;
-                                              if (errors === _errs147) {
+                                              let data48 = data6.rootSession;
+                                              const _errs149 = errors;
+                                              if (errors === _errs149) {
                                                 if (
-                                                  data47 &&
-                                                  typeof data47 == 'object' &&
-                                                  !Array.isArray(data47)
+                                                  data48 &&
+                                                  typeof data48 == 'object' &&
+                                                  !Array.isArray(data48)
                                                 ) {
                                                   let missing4;
                                                   if (
-                                                    (data47.id === undefined &&
+                                                    (data48.id === undefined &&
                                                       (missing4 = 'id')) ||
-                                                    (data47.workspaceId === undefined &&
+                                                    (data48.workspaceId === undefined &&
                                                       (missing4 = 'workspaceId')) ||
-                                                    (data47.parentSessionId === undefined &&
+                                                    (data48.parentSessionId === undefined &&
                                                       (missing4 = 'parentSessionId')) ||
-                                                    (data47.rootSessionId === undefined &&
+                                                    (data48.rootSessionId === undefined &&
                                                       (missing4 = 'rootSessionId')) ||
-                                                    (data47.title === undefined &&
+                                                    (data48.title === undefined &&
                                                       (missing4 = 'title')) ||
-                                                    (data47.controlRevision === undefined &&
+                                                    (data48.controlRevision === undefined &&
                                                       (missing4 = 'controlRevision')) ||
-                                                    (data47.contextSelectionId === undefined &&
+                                                    (data48.contextSelectionId === undefined &&
                                                       (missing4 = 'contextSelectionId')) ||
-                                                    (data47.nextSeq === undefined &&
+                                                    (data48.nextSeq === undefined &&
                                                       (missing4 = 'nextSeq')) ||
-                                                    (data47.deletedAt === undefined &&
+                                                    (data48.deletedAt === undefined &&
                                                       (missing4 = 'deletedAt')) ||
-                                                    (data47.ownerInstanceId === undefined &&
+                                                    (data48.ownerInstanceId === undefined &&
                                                       (missing4 = 'ownerInstanceId')) ||
-                                                    (data47.ownerGeneration === undefined &&
+                                                    (data48.ownerGeneration === undefined &&
                                                       (missing4 = 'ownerGeneration'))
                                                   ) {
                                                     validate46.errors = [
@@ -43891,8 +44102,8 @@ function validate46(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    const _errs149 = errors;
-                                                    for (const key4 in data47) {
+                                                    const _errs151 = errors;
+                                                    for (const key4 in data48) {
                                                       if (
                                                         !func1.call(
                                                           schema53.properties.items.items.properties
@@ -43919,13 +44130,13 @@ function validate46(
                                                         break;
                                                       }
                                                     }
-                                                    if (_errs149 === errors) {
-                                                      if (data47.id !== undefined) {
-                                                        let data48 = data47.id;
-                                                        const _errs150 = errors;
-                                                        if (errors === _errs150) {
-                                                          if (typeof data48 === 'string') {
-                                                            if (func2(data48) > 128) {
+                                                    if (_errs151 === errors) {
+                                                      if (data48.id !== undefined) {
+                                                        let data49 = data48.id;
+                                                        const _errs152 = errors;
+                                                        if (errors === _errs152) {
+                                                          if (typeof data49 === 'string') {
+                                                            if (func2(data49) > 128) {
                                                               validate46.errors = [
                                                                 {
                                                                   instancePath:
@@ -43943,7 +44154,7 @@ function validate46(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (func2(data48) < 1) {
+                                                              if (func2(data49) < 1) {
                                                                 validate46.errors = [
                                                                   {
                                                                     instancePath:
@@ -43961,7 +44172,7 @@ function validate46(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (!pattern4.test(data48)) {
+                                                                if (!pattern4.test(data49)) {
                                                                   validate46.errors = [
                                                                     {
                                                                       instancePath:
@@ -44003,17 +44214,17 @@ function validate46(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid17 = _errs150 === errors;
+                                                        var valid17 = _errs152 === errors;
                                                       } else {
                                                         var valid17 = true;
                                                       }
                                                       if (valid17) {
-                                                        if (data47.workspaceId !== undefined) {
-                                                          let data49 = data47.workspaceId;
-                                                          const _errs152 = errors;
-                                                          if (errors === _errs152) {
-                                                            if (typeof data49 === 'string') {
-                                                              if (func2(data49) > 128) {
+                                                        if (data48.workspaceId !== undefined) {
+                                                          let data50 = data48.workspaceId;
+                                                          const _errs154 = errors;
+                                                          if (errors === _errs154) {
+                                                            if (typeof data50 === 'string') {
+                                                              if (func2(data50) > 128) {
                                                                 validate46.errors = [
                                                                   {
                                                                     instancePath:
@@ -44031,7 +44242,7 @@ function validate46(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func2(data49) < 1) {
+                                                                if (func2(data50) < 1) {
                                                                   validate46.errors = [
                                                                     {
                                                                       instancePath:
@@ -44049,7 +44260,7 @@ function validate46(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data49)) {
+                                                                  if (!pattern4.test(data50)) {
                                                                     validate46.errors = [
                                                                       {
                                                                         instancePath:
@@ -44092,22 +44303,22 @@ function validate46(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid17 = _errs152 === errors;
+                                                          var valid17 = _errs154 === errors;
                                                         } else {
                                                           var valid17 = true;
                                                         }
                                                         if (valid17) {
                                                           if (
-                                                            data47.parentSessionId !== undefined
+                                                            data48.parentSessionId !== undefined
                                                           ) {
-                                                            let data50 = data47.parentSessionId;
-                                                            const _errs154 = errors;
-                                                            const _errs155 = errors;
-                                                            let valid18 = false;
+                                                            let data51 = data48.parentSessionId;
                                                             const _errs156 = errors;
-                                                            if (errors === _errs156) {
-                                                              if (typeof data50 === 'string') {
-                                                                if (func2(data50) > 128) {
+                                                            const _errs157 = errors;
+                                                            let valid18 = false;
+                                                            const _errs158 = errors;
+                                                            if (errors === _errs158) {
+                                                              if (typeof data51 === 'string') {
+                                                                if (func2(data51) > 128) {
                                                                   const err59 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -44128,7 +44339,7 @@ function validate46(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (func2(data50) < 1) {
+                                                                  if (func2(data51) < 1) {
                                                                     const err60 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -44149,7 +44360,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (!pattern4.test(data50)) {
+                                                                    if (!pattern4.test(data51)) {
                                                                       const err61 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -44198,10 +44409,10 @@ function validate46(
                                                                 errors++;
                                                               }
                                                             }
-                                                            var _valid12 = _errs156 === errors;
+                                                            var _valid12 = _errs158 === errors;
                                                             valid18 = valid18 || _valid12;
-                                                            const _errs158 = errors;
-                                                            if (data50 !== null) {
+                                                            const _errs160 = errors;
+                                                            if (data51 !== null) {
                                                               const err63 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -44221,7 +44432,7 @@ function validate46(
                                                               }
                                                               errors++;
                                                             }
-                                                            var _valid12 = _errs158 === errors;
+                                                            var _valid12 = _errs160 === errors;
                                                             valid18 = valid18 || _valid12;
                                                             if (!valid18) {
                                                               const err64 = {
@@ -44246,28 +44457,28 @@ function validate46(
                                                               validate46.errors = vErrors;
                                                               return false;
                                                             } else {
-                                                              errors = _errs155;
+                                                              errors = _errs157;
                                                               if (vErrors !== null) {
-                                                                if (_errs155) {
-                                                                  vErrors.length = _errs155;
+                                                                if (_errs157) {
+                                                                  vErrors.length = _errs157;
                                                                 } else {
                                                                   vErrors = null;
                                                                 }
                                                               }
                                                             }
-                                                            var valid17 = _errs154 === errors;
+                                                            var valid17 = _errs156 === errors;
                                                           } else {
                                                             var valid17 = true;
                                                           }
                                                           if (valid17) {
                                                             if (
-                                                              data47.rootSessionId !== undefined
+                                                              data48.rootSessionId !== undefined
                                                             ) {
-                                                              let data51 = data47.rootSessionId;
-                                                              const _errs160 = errors;
-                                                              if (errors === _errs160) {
-                                                                if (typeof data51 === 'string') {
-                                                                  if (func2(data51) > 128) {
+                                                              let data52 = data48.rootSessionId;
+                                                              const _errs162 = errors;
+                                                              if (errors === _errs162) {
+                                                                if (typeof data52 === 'string') {
+                                                                  if (func2(data52) > 128) {
                                                                     validate46.errors = [
                                                                       {
                                                                         instancePath:
@@ -44285,7 +44496,7 @@ function validate46(
                                                                     ];
                                                                     return false;
                                                                   } else {
-                                                                    if (func2(data51) < 1) {
+                                                                    if (func2(data52) < 1) {
                                                                       validate46.errors = [
                                                                         {
                                                                           instancePath:
@@ -44303,7 +44514,7 @@ function validate46(
                                                                       ];
                                                                       return false;
                                                                     } else {
-                                                                      if (!pattern4.test(data51)) {
+                                                                      if (!pattern4.test(data52)) {
                                                                         validate46.errors = [
                                                                           {
                                                                             instancePath:
@@ -44346,15 +44557,15 @@ function validate46(
                                                                   return false;
                                                                 }
                                                               }
-                                                              var valid17 = _errs160 === errors;
+                                                              var valid17 = _errs162 === errors;
                                                             } else {
                                                               var valid17 = true;
                                                             }
                                                             if (valid17) {
-                                                              if (data47.title !== undefined) {
-                                                                const _errs162 = errors;
+                                                              if (data48.title !== undefined) {
+                                                                const _errs164 = errors;
                                                                 if (
-                                                                  typeof data47.title !== 'string'
+                                                                  typeof data48.title !== 'string'
                                                                 ) {
                                                                   validate46.errors = [
                                                                     {
@@ -44372,23 +44583,23 @@ function validate46(
                                                                   ];
                                                                   return false;
                                                                 }
-                                                                var valid17 = _errs162 === errors;
+                                                                var valid17 = _errs164 === errors;
                                                               } else {
                                                                 var valid17 = true;
                                                               }
                                                               if (valid17) {
                                                                 if (
-                                                                  data47.controlRevision !==
+                                                                  data48.controlRevision !==
                                                                   undefined
                                                                 ) {
-                                                                  let data53 =
-                                                                    data47.controlRevision;
-                                                                  const _errs164 = errors;
-                                                                  if (errors === _errs164) {
+                                                                  let data54 =
+                                                                    data48.controlRevision;
+                                                                  const _errs166 = errors;
+                                                                  if (errors === _errs166) {
                                                                     if (
-                                                                      typeof data53 === 'string'
+                                                                      typeof data54 === 'string'
                                                                     ) {
-                                                                      if (!pattern18.test(data53)) {
+                                                                      if (!pattern18.test(data54)) {
                                                                         validate46.errors = [
                                                                           {
                                                                             instancePath:
@@ -44431,23 +44642,23 @@ function validate46(
                                                                       return false;
                                                                     }
                                                                   }
-                                                                  var valid17 = _errs164 === errors;
+                                                                  var valid17 = _errs166 === errors;
                                                                 } else {
                                                                   var valid17 = true;
                                                                 }
                                                                 if (valid17) {
                                                                   if (
-                                                                    data47.contextSelectionId !==
+                                                                    data48.contextSelectionId !==
                                                                     undefined
                                                                   ) {
-                                                                    let data54 =
-                                                                      data47.contextSelectionId;
-                                                                    const _errs166 = errors;
-                                                                    if (errors === _errs166) {
+                                                                    let data55 =
+                                                                      data48.contextSelectionId;
+                                                                    const _errs168 = errors;
+                                                                    if (errors === _errs168) {
                                                                       if (
-                                                                        typeof data54 === 'string'
+                                                                        typeof data55 === 'string'
                                                                       ) {
-                                                                        if (func2(data54) > 128) {
+                                                                        if (func2(data55) > 128) {
                                                                           validate46.errors = [
                                                                             {
                                                                               instancePath:
@@ -44467,7 +44678,7 @@ function validate46(
                                                                           ];
                                                                           return false;
                                                                         } else {
-                                                                          if (func2(data54) < 1) {
+                                                                          if (func2(data55) < 1) {
                                                                             validate46.errors = [
                                                                               {
                                                                                 instancePath:
@@ -44489,7 +44700,7 @@ function validate46(
                                                                             return false;
                                                                           } else {
                                                                             if (
-                                                                              !pattern4.test(data54)
+                                                                              !pattern4.test(data55)
                                                                             ) {
                                                                               validate46.errors = [
                                                                                 {
@@ -44538,22 +44749,22 @@ function validate46(
                                                                       }
                                                                     }
                                                                     var valid17 =
-                                                                      _errs166 === errors;
+                                                                      _errs168 === errors;
                                                                   } else {
                                                                     var valid17 = true;
                                                                   }
                                                                   if (valid17) {
                                                                     if (
-                                                                      data47.nextSeq !== undefined
+                                                                      data48.nextSeq !== undefined
                                                                     ) {
-                                                                      let data55 = data47.nextSeq;
-                                                                      const _errs168 = errors;
-                                                                      if (errors === _errs168) {
+                                                                      let data56 = data48.nextSeq;
+                                                                      const _errs170 = errors;
+                                                                      if (errors === _errs170) {
                                                                         if (
-                                                                          typeof data55 === 'string'
+                                                                          typeof data56 === 'string'
                                                                         ) {
                                                                           if (
-                                                                            !pattern18.test(data55)
+                                                                            !pattern18.test(data56)
                                                                           ) {
                                                                             validate46.errors = [
                                                                               {
@@ -44599,26 +44810,26 @@ function validate46(
                                                                         }
                                                                       }
                                                                       var valid17 =
-                                                                        _errs168 === errors;
+                                                                        _errs170 === errors;
                                                                     } else {
                                                                       var valid17 = true;
                                                                     }
                                                                     if (valid17) {
                                                                       if (
-                                                                        data47.deletedAt !==
+                                                                        data48.deletedAt !==
                                                                         undefined
                                                                       ) {
-                                                                        let data56 =
-                                                                          data47.deletedAt;
-                                                                        const _errs170 = errors;
-                                                                        const _errs171 = errors;
-                                                                        let valid19 = false;
+                                                                        let data57 =
+                                                                          data48.deletedAt;
                                                                         const _errs172 = errors;
+                                                                        const _errs173 = errors;
+                                                                        let valid19 = false;
+                                                                        const _errs174 = errors;
                                                                         if (
                                                                           !(
-                                                                            typeof data56 ==
+                                                                            typeof data57 ==
                                                                               'number' &&
-                                                                            isFinite(data56)
+                                                                            isFinite(data57)
                                                                           )
                                                                         ) {
                                                                           const err65 = {
@@ -44644,11 +44855,11 @@ function validate46(
                                                                           errors++;
                                                                         }
                                                                         var _valid13 =
-                                                                          _errs172 === errors;
+                                                                          _errs174 === errors;
                                                                         valid19 =
                                                                           valid19 || _valid13;
-                                                                        const _errs174 = errors;
-                                                                        if (data56 !== null) {
+                                                                        const _errs176 = errors;
+                                                                        if (data57 !== null) {
                                                                           const err66 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -44671,7 +44882,7 @@ function validate46(
                                                                           errors++;
                                                                         }
                                                                         var _valid13 =
-                                                                          _errs174 === errors;
+                                                                          _errs176 === errors;
                                                                         valid19 =
                                                                           valid19 || _valid13;
                                                                         if (!valid19) {
@@ -44698,256 +44909,403 @@ function validate46(
                                                                             vErrors;
                                                                           return false;
                                                                         } else {
-                                                                          errors = _errs171;
+                                                                          errors = _errs173;
                                                                           if (vErrors !== null) {
-                                                                            if (_errs171) {
+                                                                            if (_errs173) {
                                                                               vErrors.length =
-                                                                                _errs171;
+                                                                                _errs173;
                                                                             } else {
                                                                               vErrors = null;
                                                                             }
                                                                           }
                                                                         }
                                                                         var valid17 =
-                                                                          _errs170 === errors;
+                                                                          _errs172 === errors;
                                                                       } else {
                                                                         var valid17 = true;
                                                                       }
                                                                       if (valid17) {
                                                                         if (
-                                                                          data47.ownerInstanceId !==
+                                                                          data48.historyPurgedAt !==
                                                                           undefined
                                                                         ) {
-                                                                          let data57 =
-                                                                            data47.ownerInstanceId;
-                                                                          const _errs176 = errors;
-                                                                          const _errs177 = errors;
-                                                                          let valid20 = false;
+                                                                          let data58 =
+                                                                            data48.historyPurgedAt;
                                                                           const _errs178 = errors;
+                                                                          if (
+                                                                            !(
+                                                                              typeof data58 ==
+                                                                                'number' &&
+                                                                              !(data58 % 1) &&
+                                                                              !isNaN(data58) &&
+                                                                              isFinite(data58)
+                                                                            )
+                                                                          ) {
+                                                                            validate46.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/items/' +
+                                                                                  i0 +
+                                                                                  '/rootSession/historyPurgedAt',
+                                                                                schemaPath:
+                                                                                  '#/properties/items/items/properties/rootSession/properties/historyPurgedAt/type',
+                                                                                keyword: 'type',
+                                                                                params: {
+                                                                                  type: 'integer',
+                                                                                },
+                                                                                message:
+                                                                                  'must be integer',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          }
                                                                           if (errors === _errs178) {
                                                                             if (
-                                                                              typeof data57 ===
-                                                                              'string'
+                                                                              typeof data58 ==
+                                                                                'number' &&
+                                                                              isFinite(data58)
                                                                             ) {
                                                                               if (
-                                                                                func2(data57) > 128
+                                                                                data58 >
+                                                                                  9007199254740991 ||
+                                                                                isNaN(data58)
                                                                               ) {
-                                                                                const err68 = {
-                                                                                  instancePath:
-                                                                                    instancePath +
-                                                                                    '/items/' +
-                                                                                    i0 +
-                                                                                    '/rootSession/ownerInstanceId',
-                                                                                  schemaPath:
-                                                                                    '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/maxLength',
-                                                                                  keyword:
-                                                                                    'maxLength',
-                                                                                  params: {
-                                                                                    limit: 128,
-                                                                                  },
-                                                                                  message:
-                                                                                    'must NOT have more than 128 characters',
-                                                                                };
-                                                                                if (
-                                                                                  vErrors === null
-                                                                                ) {
-                                                                                  vErrors = [err68];
-                                                                                } else {
-                                                                                  vErrors.push(
-                                                                                    err68,
-                                                                                  );
-                                                                                }
-                                                                                errors++;
+                                                                                validate46.errors =
+                                                                                  [
+                                                                                    {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/items/' +
+                                                                                        i0 +
+                                                                                        '/rootSession/historyPurgedAt',
+                                                                                      schemaPath:
+                                                                                        '#/properties/items/items/properties/rootSession/properties/historyPurgedAt/maximum',
+                                                                                      keyword:
+                                                                                        'maximum',
+                                                                                      params: {
+                                                                                        comparison:
+                                                                                          '<=',
+                                                                                        limit: 9007199254740991,
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be <= 9007199254740991',
+                                                                                    },
+                                                                                  ];
+                                                                                return false;
                                                                               } else {
                                                                                 if (
-                                                                                  func2(data57) < 1
+                                                                                  data58 < 0 ||
+                                                                                  isNaN(data58)
                                                                                 ) {
-                                                                                  const err69 = {
+                                                                                  validate46.errors =
+                                                                                    [
+                                                                                      {
+                                                                                        instancePath:
+                                                                                          instancePath +
+                                                                                          '/items/' +
+                                                                                          i0 +
+                                                                                          '/rootSession/historyPurgedAt',
+                                                                                        schemaPath:
+                                                                                          '#/properties/items/items/properties/rootSession/properties/historyPurgedAt/minimum',
+                                                                                        keyword:
+                                                                                          'minimum',
+                                                                                        params: {
+                                                                                          comparison:
+                                                                                            '>=',
+                                                                                          limit: 0,
+                                                                                        },
+                                                                                        message:
+                                                                                          'must be >= 0',
+                                                                                      },
+                                                                                    ];
+                                                                                  return false;
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                          var valid17 =
+                                                                            _errs178 === errors;
+                                                                        } else {
+                                                                          var valid17 = true;
+                                                                        }
+                                                                        if (valid17) {
+                                                                          if (
+                                                                            data48.ownerInstanceId !==
+                                                                            undefined
+                                                                          ) {
+                                                                            let data59 =
+                                                                              data48.ownerInstanceId;
+                                                                            const _errs180 = errors;
+                                                                            const _errs181 = errors;
+                                                                            let valid20 = false;
+                                                                            const _errs182 = errors;
+                                                                            if (
+                                                                              errors === _errs182
+                                                                            ) {
+                                                                              if (
+                                                                                typeof data59 ===
+                                                                                'string'
+                                                                              ) {
+                                                                                if (
+                                                                                  func2(data59) >
+                                                                                  128
+                                                                                ) {
+                                                                                  const err68 = {
                                                                                     instancePath:
                                                                                       instancePath +
                                                                                       '/items/' +
                                                                                       i0 +
                                                                                       '/rootSession/ownerInstanceId',
                                                                                     schemaPath:
-                                                                                      '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/minLength',
+                                                                                      '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/maxLength',
                                                                                     keyword:
-                                                                                      'minLength',
+                                                                                      'maxLength',
                                                                                     params: {
-                                                                                      limit: 1,
+                                                                                      limit: 128,
                                                                                     },
                                                                                     message:
-                                                                                      'must NOT have fewer than 1 characters',
+                                                                                      'must NOT have more than 128 characters',
                                                                                   };
                                                                                   if (
                                                                                     vErrors === null
                                                                                   ) {
                                                                                     vErrors = [
-                                                                                      err69,
+                                                                                      err68,
                                                                                     ];
                                                                                   } else {
                                                                                     vErrors.push(
-                                                                                      err69,
+                                                                                      err68,
                                                                                     );
                                                                                   }
                                                                                   errors++;
                                                                                 } else {
                                                                                   if (
-                                                                                    !pattern4.test(
-                                                                                      data57,
-                                                                                    )
+                                                                                    func2(data59) <
+                                                                                    1
                                                                                   ) {
-                                                                                    const err70 = {
+                                                                                    const err69 = {
                                                                                       instancePath:
                                                                                         instancePath +
                                                                                         '/items/' +
                                                                                         i0 +
                                                                                         '/rootSession/ownerInstanceId',
                                                                                       schemaPath:
-                                                                                        '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/pattern',
+                                                                                        '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/minLength',
                                                                                       keyword:
-                                                                                        'pattern',
+                                                                                        'minLength',
                                                                                       params: {
-                                                                                        pattern:
-                                                                                          '^[A-Za-z0-9_-]+$',
+                                                                                        limit: 1,
                                                                                       },
                                                                                       message:
-                                                                                        'must match pattern "' +
-                                                                                        '^[A-Za-z0-9_-]+$' +
-                                                                                        '"',
+                                                                                        'must NOT have fewer than 1 characters',
                                                                                     };
                                                                                     if (
                                                                                       vErrors ===
                                                                                       null
                                                                                     ) {
                                                                                       vErrors = [
-                                                                                        err70,
+                                                                                        err69,
                                                                                       ];
                                                                                     } else {
                                                                                       vErrors.push(
-                                                                                        err70,
+                                                                                        err69,
                                                                                       );
                                                                                     }
                                                                                     errors++;
+                                                                                  } else {
+                                                                                    if (
+                                                                                      !pattern4.test(
+                                                                                        data59,
+                                                                                      )
+                                                                                    ) {
+                                                                                      const err70 =
+                                                                                        {
+                                                                                          instancePath:
+                                                                                            instancePath +
+                                                                                            '/items/' +
+                                                                                            i0 +
+                                                                                            '/rootSession/ownerInstanceId',
+                                                                                          schemaPath:
+                                                                                            '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/pattern',
+                                                                                          keyword:
+                                                                                            'pattern',
+                                                                                          params: {
+                                                                                            pattern:
+                                                                                              '^[A-Za-z0-9_-]+$',
+                                                                                          },
+                                                                                          message:
+                                                                                            'must match pattern "' +
+                                                                                            '^[A-Za-z0-9_-]+$' +
+                                                                                            '"',
+                                                                                        };
+                                                                                      if (
+                                                                                        vErrors ===
+                                                                                        null
+                                                                                      ) {
+                                                                                        vErrors = [
+                                                                                          err70,
+                                                                                        ];
+                                                                                      } else {
+                                                                                        vErrors.push(
+                                                                                          err70,
+                                                                                        );
+                                                                                      }
+                                                                                      errors++;
+                                                                                    }
                                                                                   }
                                                                                 }
+                                                                              } else {
+                                                                                const err71 = {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/items/' +
+                                                                                    i0 +
+                                                                                    '/rootSession/ownerInstanceId',
+                                                                                  schemaPath:
+                                                                                    '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/type',
+                                                                                  keyword: 'type',
+                                                                                  params: {
+                                                                                    type: 'string',
+                                                                                  },
+                                                                                  message:
+                                                                                    'must be string',
+                                                                                };
+                                                                                if (
+                                                                                  vErrors === null
+                                                                                ) {
+                                                                                  vErrors = [err71];
+                                                                                } else {
+                                                                                  vErrors.push(
+                                                                                    err71,
+                                                                                  );
+                                                                                }
+                                                                                errors++;
                                                                               }
-                                                                            } else {
-                                                                              const err71 = {
+                                                                            }
+                                                                            var _valid14 =
+                                                                              _errs182 === errors;
+                                                                            valid20 =
+                                                                              valid20 || _valid14;
+                                                                            const _errs184 = errors;
+                                                                            if (data59 !== null) {
+                                                                              const err72 = {
                                                                                 instancePath:
                                                                                   instancePath +
                                                                                   '/items/' +
                                                                                   i0 +
                                                                                   '/rootSession/ownerInstanceId',
                                                                                 schemaPath:
-                                                                                  '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/0/type',
+                                                                                  '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/1/type',
                                                                                 keyword: 'type',
                                                                                 params: {
-                                                                                  type: 'string',
+                                                                                  type: 'null',
                                                                                 },
                                                                                 message:
-                                                                                  'must be string',
+                                                                                  'must be null',
                                                                               };
                                                                               if (
                                                                                 vErrors === null
                                                                               ) {
-                                                                                vErrors = [err71];
+                                                                                vErrors = [err72];
                                                                               } else {
-                                                                                vErrors.push(err71);
+                                                                                vErrors.push(err72);
                                                                               }
                                                                               errors++;
                                                                             }
-                                                                          }
-                                                                          var _valid14 =
-                                                                            _errs178 === errors;
-                                                                          valid20 =
-                                                                            valid20 || _valid14;
-                                                                          const _errs180 = errors;
-                                                                          if (data57 !== null) {
-                                                                            const err72 = {
-                                                                              instancePath:
-                                                                                instancePath +
-                                                                                '/items/' +
-                                                                                i0 +
-                                                                                '/rootSession/ownerInstanceId',
-                                                                              schemaPath:
-                                                                                '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf/1/type',
-                                                                              keyword: 'type',
-                                                                              params: {
-                                                                                type: 'null',
-                                                                              },
-                                                                              message:
-                                                                                'must be null',
-                                                                            };
-                                                                            if (vErrors === null) {
-                                                                              vErrors = [err72];
-                                                                            } else {
-                                                                              vErrors.push(err72);
-                                                                            }
-                                                                            errors++;
-                                                                          }
-                                                                          var _valid14 =
-                                                                            _errs180 === errors;
-                                                                          valid20 =
-                                                                            valid20 || _valid14;
-                                                                          if (!valid20) {
-                                                                            const err73 = {
-                                                                              instancePath:
-                                                                                instancePath +
-                                                                                '/items/' +
-                                                                                i0 +
-                                                                                '/rootSession/ownerInstanceId',
-                                                                              schemaPath:
-                                                                                '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf',
-                                                                              keyword: 'anyOf',
-                                                                              params: {},
-                                                                              message:
-                                                                                'must match a schema in anyOf',
-                                                                            };
-                                                                            if (vErrors === null) {
-                                                                              vErrors = [err73];
-                                                                            } else {
-                                                                              vErrors.push(err73);
-                                                                            }
-                                                                            errors++;
-                                                                            validate46.errors =
-                                                                              vErrors;
-                                                                            return false;
-                                                                          } else {
-                                                                            errors = _errs177;
-                                                                            if (vErrors !== null) {
-                                                                              if (_errs177) {
-                                                                                vErrors.length =
-                                                                                  _errs177;
+                                                                            var _valid14 =
+                                                                              _errs184 === errors;
+                                                                            valid20 =
+                                                                              valid20 || _valid14;
+                                                                            if (!valid20) {
+                                                                              const err73 = {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/items/' +
+                                                                                  i0 +
+                                                                                  '/rootSession/ownerInstanceId',
+                                                                                schemaPath:
+                                                                                  '#/properties/items/items/properties/rootSession/properties/ownerInstanceId/anyOf',
+                                                                                keyword: 'anyOf',
+                                                                                params: {},
+                                                                                message:
+                                                                                  'must match a schema in anyOf',
+                                                                              };
+                                                                              if (
+                                                                                vErrors === null
+                                                                              ) {
+                                                                                vErrors = [err73];
                                                                               } else {
-                                                                                vErrors = null;
+                                                                                vErrors.push(err73);
+                                                                              }
+                                                                              errors++;
+                                                                              validate46.errors =
+                                                                                vErrors;
+                                                                              return false;
+                                                                            } else {
+                                                                              errors = _errs181;
+                                                                              if (
+                                                                                vErrors !== null
+                                                                              ) {
+                                                                                if (_errs181) {
+                                                                                  vErrors.length =
+                                                                                    _errs181;
+                                                                                } else {
+                                                                                  vErrors = null;
+                                                                                }
                                                                               }
                                                                             }
+                                                                            var valid17 =
+                                                                              _errs180 === errors;
+                                                                          } else {
+                                                                            var valid17 = true;
                                                                           }
-                                                                          var valid17 =
-                                                                            _errs176 === errors;
-                                                                        } else {
-                                                                          var valid17 = true;
-                                                                        }
-                                                                        if (valid17) {
-                                                                          if (
-                                                                            data47.ownerGeneration !==
-                                                                            undefined
-                                                                          ) {
-                                                                            let data58 =
-                                                                              data47.ownerGeneration;
-                                                                            const _errs182 = errors;
+                                                                          if (valid17) {
                                                                             if (
-                                                                              errors === _errs182
+                                                                              data48.ownerGeneration !==
+                                                                              undefined
                                                                             ) {
+                                                                              let data60 =
+                                                                                data48.ownerGeneration;
+                                                                              const _errs186 =
+                                                                                errors;
                                                                               if (
-                                                                                typeof data58 ===
-                                                                                'string'
+                                                                                errors === _errs186
                                                                               ) {
                                                                                 if (
-                                                                                  !pattern18.test(
-                                                                                    data58,
-                                                                                  )
+                                                                                  typeof data60 ===
+                                                                                  'string'
                                                                                 ) {
+                                                                                  if (
+                                                                                    !pattern18.test(
+                                                                                      data60,
+                                                                                    )
+                                                                                  ) {
+                                                                                    validate46.errors =
+                                                                                      [
+                                                                                        {
+                                                                                          instancePath:
+                                                                                            instancePath +
+                                                                                            '/items/' +
+                                                                                            i0 +
+                                                                                            '/rootSession/ownerGeneration',
+                                                                                          schemaPath:
+                                                                                            '#/properties/items/items/properties/rootSession/properties/ownerGeneration/pattern',
+                                                                                          keyword:
+                                                                                            'pattern',
+                                                                                          params: {
+                                                                                            pattern:
+                                                                                              '^(0|[1-9][0-9]*)$',
+                                                                                          },
+                                                                                          message:
+                                                                                            'must match pattern "' +
+                                                                                            '^(0|[1-9][0-9]*)$' +
+                                                                                            '"',
+                                                                                        },
+                                                                                      ];
+                                                                                    return false;
+                                                                                  }
+                                                                                } else {
                                                                                   validate46.errors =
                                                                                     [
                                                                                       {
@@ -44957,48 +45315,24 @@ function validate46(
                                                                                           i0 +
                                                                                           '/rootSession/ownerGeneration',
                                                                                         schemaPath:
-                                                                                          '#/properties/items/items/properties/rootSession/properties/ownerGeneration/pattern',
+                                                                                          '#/properties/items/items/properties/rootSession/properties/ownerGeneration/type',
                                                                                         keyword:
-                                                                                          'pattern',
+                                                                                          'type',
                                                                                         params: {
-                                                                                          pattern:
-                                                                                            '^(0|[1-9][0-9]*)$',
+                                                                                          type: 'string',
                                                                                         },
                                                                                         message:
-                                                                                          'must match pattern "' +
-                                                                                          '^(0|[1-9][0-9]*)$' +
-                                                                                          '"',
+                                                                                          'must be string',
                                                                                       },
                                                                                     ];
                                                                                   return false;
                                                                                 }
-                                                                              } else {
-                                                                                validate46.errors =
-                                                                                  [
-                                                                                    {
-                                                                                      instancePath:
-                                                                                        instancePath +
-                                                                                        '/items/' +
-                                                                                        i0 +
-                                                                                        '/rootSession/ownerGeneration',
-                                                                                      schemaPath:
-                                                                                        '#/properties/items/items/properties/rootSession/properties/ownerGeneration/type',
-                                                                                      keyword:
-                                                                                        'type',
-                                                                                      params: {
-                                                                                        type: 'string',
-                                                                                      },
-                                                                                      message:
-                                                                                        'must be string',
-                                                                                    },
-                                                                                  ];
-                                                                                return false;
                                                                               }
+                                                                              var valid17 =
+                                                                                _errs186 === errors;
+                                                                            } else {
+                                                                              var valid17 = true;
                                                                             }
-                                                                            var valid17 =
-                                                                              _errs182 === errors;
-                                                                          } else {
-                                                                            var valid17 = true;
                                                                           }
                                                                         }
                                                                       }
@@ -45030,52 +45364,52 @@ function validate46(
                                                   return false;
                                                 }
                                               }
-                                              var valid3 = _errs147 === errors;
+                                              var valid3 = _errs149 === errors;
                                             } else {
                                               var valid3 = true;
                                             }
                                             if (valid3) {
                                               if (data6.run !== undefined) {
-                                                let data59 = data6.run;
-                                                const _errs184 = errors;
-                                                const _errs185 = errors;
+                                                let data61 = data6.run;
+                                                const _errs188 = errors;
+                                                const _errs189 = errors;
                                                 let valid21 = false;
-                                                const _errs186 = errors;
-                                                if (errors === _errs186) {
+                                                const _errs190 = errors;
+                                                if (errors === _errs190) {
                                                   if (
-                                                    data59 &&
-                                                    typeof data59 == 'object' &&
-                                                    !Array.isArray(data59)
+                                                    data61 &&
+                                                    typeof data61 == 'object' &&
+                                                    !Array.isArray(data61)
                                                   ) {
                                                     let missing5;
                                                     if (
-                                                      (data59.id === undefined &&
+                                                      (data61.id === undefined &&
                                                         (missing5 = 'id')) ||
-                                                      (data59.sessionId === undefined &&
+                                                      (data61.sessionId === undefined &&
                                                         (missing5 = 'sessionId')) ||
-                                                      (data59.originCommandId === undefined &&
+                                                      (data61.originCommandId === undefined &&
                                                         (missing5 = 'originCommandId')) ||
-                                                      (data59.originStoreId === undefined &&
+                                                      (data61.originStoreId === undefined &&
                                                         (missing5 = 'originStoreId')) ||
-                                                      (data59.rootWorkCommandId === undefined &&
+                                                      (data61.rootWorkCommandId === undefined &&
                                                         (missing5 = 'rootWorkCommandId')) ||
-                                                      (data59.rootWorkSeq === undefined &&
+                                                      (data61.rootWorkSeq === undefined &&
                                                         (missing5 = 'rootWorkSeq')) ||
-                                                      (data59.contextSelectionId === undefined &&
+                                                      (data61.contextSelectionId === undefined &&
                                                         (missing5 = 'contextSelectionId')) ||
-                                                      (data59.waitingForResults === undefined &&
+                                                      (data61.waitingForResults === undefined &&
                                                         (missing5 = 'waitingForResults')) ||
-                                                      (data59.status === undefined &&
+                                                      (data61.status === undefined &&
                                                         (missing5 = 'status')) ||
-                                                      (data59.isActive === undefined &&
+                                                      (data61.isActive === undefined &&
                                                         (missing5 = 'isActive')) ||
-                                                      (data59.createdAt === undefined &&
+                                                      (data61.createdAt === undefined &&
                                                         (missing5 = 'createdAt')) ||
-                                                      (data59.deadlineAt === undefined &&
+                                                      (data61.deadlineAt === undefined &&
                                                         (missing5 = 'deadlineAt')) ||
-                                                      (data59.finishedAt === undefined &&
+                                                      (data61.finishedAt === undefined &&
                                                         (missing5 = 'finishedAt')) ||
-                                                      (data59.reason === undefined &&
+                                                      (data61.reason === undefined &&
                                                         (missing5 = 'reason'))
                                                     ) {
                                                       const err74 = {
@@ -45097,8 +45431,8 @@ function validate46(
                                                       }
                                                       errors++;
                                                     } else {
-                                                      const _errs188 = errors;
-                                                      for (const key5 in data59) {
+                                                      const _errs192 = errors;
+                                                      for (const key5 in data61) {
                                                         if (
                                                           !func1.call(
                                                             schema53.properties.items.items
@@ -45128,13 +45462,13 @@ function validate46(
                                                           break;
                                                         }
                                                       }
-                                                      if (_errs188 === errors) {
-                                                        if (data59.id !== undefined) {
-                                                          let data60 = data59.id;
-                                                          const _errs189 = errors;
-                                                          if (errors === _errs189) {
-                                                            if (typeof data60 === 'string') {
-                                                              if (func2(data60) > 128) {
+                                                      if (_errs192 === errors) {
+                                                        if (data61.id !== undefined) {
+                                                          let data62 = data61.id;
+                                                          const _errs193 = errors;
+                                                          if (errors === _errs193) {
+                                                            if (typeof data62 === 'string') {
+                                                              if (func2(data62) > 128) {
                                                                 const err76 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -45155,7 +45489,7 @@ function validate46(
                                                                 }
                                                                 errors++;
                                                               } else {
-                                                                if (func2(data60) < 1) {
+                                                                if (func2(data62) < 1) {
                                                                   const err77 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -45176,7 +45510,7 @@ function validate46(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (!pattern4.test(data60)) {
+                                                                  if (!pattern4.test(data62)) {
                                                                     const err78 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -45224,17 +45558,17 @@ function validate46(
                                                               errors++;
                                                             }
                                                           }
-                                                          var valid22 = _errs189 === errors;
+                                                          var valid22 = _errs193 === errors;
                                                         } else {
                                                           var valid22 = true;
                                                         }
                                                         if (valid22) {
-                                                          if (data59.sessionId !== undefined) {
-                                                            let data61 = data59.sessionId;
-                                                            const _errs191 = errors;
-                                                            if (errors === _errs191) {
-                                                              if (typeof data61 === 'string') {
-                                                                if (func2(data61) > 128) {
+                                                          if (data61.sessionId !== undefined) {
+                                                            let data63 = data61.sessionId;
+                                                            const _errs195 = errors;
+                                                            if (errors === _errs195) {
+                                                              if (typeof data63 === 'string') {
+                                                                if (func2(data63) > 128) {
                                                                   const err80 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -45255,7 +45589,7 @@ function validate46(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (func2(data61) < 1) {
+                                                                  if (func2(data63) < 1) {
                                                                     const err81 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -45276,7 +45610,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (!pattern4.test(data61)) {
+                                                                    if (!pattern4.test(data63)) {
                                                                       const err82 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -45325,19 +45659,19 @@ function validate46(
                                                                 errors++;
                                                               }
                                                             }
-                                                            var valid22 = _errs191 === errors;
+                                                            var valid22 = _errs195 === errors;
                                                           } else {
                                                             var valid22 = true;
                                                           }
                                                           if (valid22) {
                                                             if (
-                                                              data59.originCommandId !== undefined
+                                                              data61.originCommandId !== undefined
                                                             ) {
-                                                              let data62 = data59.originCommandId;
-                                                              const _errs193 = errors;
-                                                              if (errors === _errs193) {
-                                                                if (typeof data62 === 'string') {
-                                                                  if (func2(data62) > 128) {
+                                                              let data64 = data61.originCommandId;
+                                                              const _errs197 = errors;
+                                                              if (errors === _errs197) {
+                                                                if (typeof data64 === 'string') {
+                                                                  if (func2(data64) > 128) {
                                                                     const err84 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -45358,7 +45692,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (func2(data62) < 1) {
+                                                                    if (func2(data64) < 1) {
                                                                       const err85 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -45379,7 +45713,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (!pattern4.test(data62)) {
+                                                                      if (!pattern4.test(data64)) {
                                                                         const err86 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -45428,19 +45762,19 @@ function validate46(
                                                                   errors++;
                                                                 }
                                                               }
-                                                              var valid22 = _errs193 === errors;
+                                                              var valid22 = _errs197 === errors;
                                                             } else {
                                                               var valid22 = true;
                                                             }
                                                             if (valid22) {
                                                               if (
-                                                                data59.originStoreId !== undefined
+                                                                data61.originStoreId !== undefined
                                                               ) {
-                                                                let data63 = data59.originStoreId;
-                                                                const _errs195 = errors;
-                                                                if (errors === _errs195) {
-                                                                  if (typeof data63 === 'string') {
-                                                                    if (func2(data63) > 128) {
+                                                                let data65 = data61.originStoreId;
+                                                                const _errs199 = errors;
+                                                                if (errors === _errs199) {
+                                                                  if (typeof data65 === 'string') {
+                                                                    if (func2(data65) > 128) {
                                                                       const err88 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -45461,7 +45795,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (func2(data63) < 1) {
+                                                                      if (func2(data65) < 1) {
                                                                         const err89 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -45483,7 +45817,7 @@ function validate46(
                                                                         errors++;
                                                                       } else {
                                                                         if (
-                                                                          !pattern4.test(data63)
+                                                                          !pattern4.test(data65)
                                                                         ) {
                                                                           const err90 = {
                                                                             instancePath:
@@ -45533,23 +45867,23 @@ function validate46(
                                                                     errors++;
                                                                   }
                                                                 }
-                                                                var valid22 = _errs195 === errors;
+                                                                var valid22 = _errs199 === errors;
                                                               } else {
                                                                 var valid22 = true;
                                                               }
                                                               if (valid22) {
                                                                 if (
-                                                                  data59.rootWorkCommandId !==
+                                                                  data61.rootWorkCommandId !==
                                                                   undefined
                                                                 ) {
-                                                                  let data64 =
-                                                                    data59.rootWorkCommandId;
-                                                                  const _errs197 = errors;
-                                                                  if (errors === _errs197) {
+                                                                  let data66 =
+                                                                    data61.rootWorkCommandId;
+                                                                  const _errs201 = errors;
+                                                                  if (errors === _errs201) {
                                                                     if (
-                                                                      typeof data64 === 'string'
+                                                                      typeof data66 === 'string'
                                                                     ) {
-                                                                      if (func2(data64) > 128) {
+                                                                      if (func2(data66) > 128) {
                                                                         const err92 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -45570,7 +45904,7 @@ function validate46(
                                                                         }
                                                                         errors++;
                                                                       } else {
-                                                                        if (func2(data64) < 1) {
+                                                                        if (func2(data66) < 1) {
                                                                           const err93 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -45592,7 +45926,7 @@ function validate46(
                                                                           errors++;
                                                                         } else {
                                                                           if (
-                                                                            !pattern4.test(data64)
+                                                                            !pattern4.test(data66)
                                                                           ) {
                                                                             const err94 = {
                                                                               instancePath:
@@ -45642,22 +45976,22 @@ function validate46(
                                                                       errors++;
                                                                     }
                                                                   }
-                                                                  var valid22 = _errs197 === errors;
+                                                                  var valid22 = _errs201 === errors;
                                                                 } else {
                                                                   var valid22 = true;
                                                                 }
                                                                 if (valid22) {
                                                                   if (
-                                                                    data59.rootWorkSeq !== undefined
+                                                                    data61.rootWorkSeq !== undefined
                                                                   ) {
-                                                                    let data65 = data59.rootWorkSeq;
-                                                                    const _errs199 = errors;
-                                                                    if (errors === _errs199) {
+                                                                    let data67 = data61.rootWorkSeq;
+                                                                    const _errs203 = errors;
+                                                                    if (errors === _errs203) {
                                                                       if (
-                                                                        typeof data65 === 'string'
+                                                                        typeof data67 === 'string'
                                                                       ) {
                                                                         if (
-                                                                          !pattern18.test(data65)
+                                                                          !pattern18.test(data67)
                                                                         ) {
                                                                           const err96 = {
                                                                             instancePath:
@@ -45708,23 +46042,23 @@ function validate46(
                                                                       }
                                                                     }
                                                                     var valid22 =
-                                                                      _errs199 === errors;
+                                                                      _errs203 === errors;
                                                                   } else {
                                                                     var valid22 = true;
                                                                   }
                                                                   if (valid22) {
                                                                     if (
-                                                                      data59.contextSelectionId !==
+                                                                      data61.contextSelectionId !==
                                                                       undefined
                                                                     ) {
-                                                                      let data66 =
-                                                                        data59.contextSelectionId;
-                                                                      const _errs201 = errors;
-                                                                      if (errors === _errs201) {
+                                                                      let data68 =
+                                                                        data61.contextSelectionId;
+                                                                      const _errs205 = errors;
+                                                                      if (errors === _errs205) {
                                                                         if (
-                                                                          typeof data66 === 'string'
+                                                                          typeof data68 === 'string'
                                                                         ) {
-                                                                          if (func2(data66) > 128) {
+                                                                          if (func2(data68) > 128) {
                                                                             const err98 = {
                                                                               instancePath:
                                                                                 instancePath +
@@ -45747,7 +46081,7 @@ function validate46(
                                                                             }
                                                                             errors++;
                                                                           } else {
-                                                                            if (func2(data66) < 1) {
+                                                                            if (func2(data68) < 1) {
                                                                               const err99 = {
                                                                                 instancePath:
                                                                                   instancePath +
@@ -45775,7 +46109,7 @@ function validate46(
                                                                             } else {
                                                                               if (
                                                                                 !pattern4.test(
-                                                                                  data66,
+                                                                                  data68,
                                                                                 )
                                                                               ) {
                                                                                 const err100 = {
@@ -45837,43 +46171,43 @@ function validate46(
                                                                         }
                                                                       }
                                                                       var valid22 =
-                                                                        _errs201 === errors;
+                                                                        _errs205 === errors;
                                                                     } else {
                                                                       var valid22 = true;
                                                                     }
                                                                     if (valid22) {
                                                                       if (
-                                                                        data59.waitingForResults !==
+                                                                        data61.waitingForResults !==
                                                                         undefined
                                                                       ) {
-                                                                        let data67 =
-                                                                          data59.waitingForResults;
-                                                                        const _errs203 = errors;
-                                                                        if (errors === _errs203) {
+                                                                        let data69 =
+                                                                          data61.waitingForResults;
+                                                                        const _errs207 = errors;
+                                                                        if (errors === _errs207) {
                                                                           if (
-                                                                            Array.isArray(data67)
+                                                                            Array.isArray(data69)
                                                                           ) {
                                                                             var valid23 = true;
                                                                             const len1 =
-                                                                              data67.length;
+                                                                              data69.length;
                                                                             for (
                                                                               let i1 = 0;
                                                                               i1 < len1;
                                                                               i1++
                                                                             ) {
-                                                                              let data68 =
-                                                                                data67[i1];
-                                                                              const _errs205 =
+                                                                              let data70 =
+                                                                                data69[i1];
+                                                                              const _errs209 =
                                                                                 errors;
                                                                               if (
-                                                                                errors === _errs205
+                                                                                errors === _errs209
                                                                               ) {
                                                                                 if (
-                                                                                  typeof data68 ===
+                                                                                  typeof data70 ===
                                                                                   'string'
                                                                                 ) {
                                                                                   if (
-                                                                                    func2(data68) >
+                                                                                    func2(data70) >
                                                                                     128
                                                                                   ) {
                                                                                     const err102 = {
@@ -45909,7 +46243,7 @@ function validate46(
                                                                                   } else {
                                                                                     if (
                                                                                       func2(
-                                                                                        data68,
+                                                                                        data70,
                                                                                       ) < 1
                                                                                     ) {
                                                                                       const err103 =
@@ -45946,7 +46280,7 @@ function validate46(
                                                                                     } else {
                                                                                       if (
                                                                                         !pattern4.test(
-                                                                                          data68,
+                                                                                          data70,
                                                                                         )
                                                                                       ) {
                                                                                         const err104 =
@@ -46020,7 +46354,7 @@ function validate46(
                                                                                 }
                                                                               }
                                                                               var valid23 =
-                                                                                _errs205 === errors;
+                                                                                _errs209 === errors;
                                                                               if (!valid23) {
                                                                                 break;
                                                                               }
@@ -46050,20 +46384,20 @@ function validate46(
                                                                           }
                                                                         }
                                                                         var valid22 =
-                                                                          _errs203 === errors;
+                                                                          _errs207 === errors;
                                                                       } else {
                                                                         var valid22 = true;
                                                                       }
                                                                       if (valid22) {
                                                                         if (
-                                                                          data59.status !==
+                                                                          data61.status !==
                                                                           undefined
                                                                         ) {
-                                                                          let data69 =
-                                                                            data59.status;
-                                                                          const _errs207 = errors;
+                                                                          let data71 =
+                                                                            data61.status;
+                                                                          const _errs211 = errors;
                                                                           if (
-                                                                            typeof data69 !==
+                                                                            typeof data71 !==
                                                                             'string'
                                                                           ) {
                                                                             const err107 = {
@@ -46090,20 +46424,20 @@ function validate46(
                                                                           }
                                                                           if (
                                                                             !(
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'running' ||
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'waiting_interaction' ||
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'waiting_execution' ||
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'cancelling' ||
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'completed' ||
-                                                                              data69 === 'failed' ||
-                                                                              data69 ===
+                                                                              data71 === 'failed' ||
+                                                                              data71 ===
                                                                                 'cancelled' ||
-                                                                              data69 ===
+                                                                              data71 ===
                                                                                 'interrupted'
                                                                             )
                                                                           ) {
@@ -46137,18 +46471,18 @@ function validate46(
                                                                             errors++;
                                                                           }
                                                                           var valid22 =
-                                                                            _errs207 === errors;
+                                                                            _errs211 === errors;
                                                                         } else {
                                                                           var valid22 = true;
                                                                         }
                                                                         if (valid22) {
                                                                           if (
-                                                                            data59.isActive !==
+                                                                            data61.isActive !==
                                                                             undefined
                                                                           ) {
-                                                                            const _errs209 = errors;
+                                                                            const _errs213 = errors;
                                                                             if (
-                                                                              typeof data59.isActive !==
+                                                                              typeof data61.isActive !==
                                                                               'boolean'
                                                                             ) {
                                                                               const err109 = {
@@ -46178,24 +46512,24 @@ function validate46(
                                                                               errors++;
                                                                             }
                                                                             var valid22 =
-                                                                              _errs209 === errors;
+                                                                              _errs213 === errors;
                                                                           } else {
                                                                             var valid22 = true;
                                                                           }
                                                                           if (valid22) {
                                                                             if (
-                                                                              data59.createdAt !==
+                                                                              data61.createdAt !==
                                                                               undefined
                                                                             ) {
-                                                                              let data71 =
-                                                                                data59.createdAt;
-                                                                              const _errs211 =
+                                                                              let data73 =
+                                                                                data61.createdAt;
+                                                                              const _errs215 =
                                                                                 errors;
                                                                               if (
                                                                                 !(
-                                                                                  typeof data71 ==
+                                                                                  typeof data73 ==
                                                                                     'number' &&
-                                                                                  isFinite(data71)
+                                                                                  isFinite(data73)
                                                                                 )
                                                                               ) {
                                                                                 const err110 = {
@@ -46227,29 +46561,29 @@ function validate46(
                                                                                 errors++;
                                                                               }
                                                                               var valid22 =
-                                                                                _errs211 === errors;
+                                                                                _errs215 === errors;
                                                                             } else {
                                                                               var valid22 = true;
                                                                             }
                                                                             if (valid22) {
                                                                               if (
-                                                                                data59.deadlineAt !==
+                                                                                data61.deadlineAt !==
                                                                                 undefined
                                                                               ) {
-                                                                                let data72 =
-                                                                                  data59.deadlineAt;
-                                                                                const _errs213 =
+                                                                                let data74 =
+                                                                                  data61.deadlineAt;
+                                                                                const _errs217 =
                                                                                   errors;
-                                                                                const _errs214 =
+                                                                                const _errs218 =
                                                                                   errors;
                                                                                 let valid24 = false;
-                                                                                const _errs215 =
+                                                                                const _errs219 =
                                                                                   errors;
                                                                                 if (
                                                                                   !(
-                                                                                    typeof data72 ==
+                                                                                    typeof data74 ==
                                                                                       'number' &&
-                                                                                    isFinite(data72)
+                                                                                    isFinite(data74)
                                                                                   )
                                                                                 ) {
                                                                                   const err111 = {
@@ -46281,15 +46615,15 @@ function validate46(
                                                                                   errors++;
                                                                                 }
                                                                                 var _valid16 =
-                                                                                  _errs215 ===
+                                                                                  _errs219 ===
                                                                                   errors;
                                                                                 valid24 =
                                                                                   valid24 ||
                                                                                   _valid16;
-                                                                                const _errs217 =
+                                                                                const _errs221 =
                                                                                   errors;
                                                                                 if (
-                                                                                  data72 !== null
+                                                                                  data74 !== null
                                                                                 ) {
                                                                                   const err112 = {
                                                                                     instancePath:
@@ -46320,7 +46654,7 @@ function validate46(
                                                                                   errors++;
                                                                                 }
                                                                                 var _valid16 =
-                                                                                  _errs217 ===
+                                                                                  _errs221 ===
                                                                                   errors;
                                                                                 valid24 =
                                                                                   valid24 ||
@@ -46353,13 +46687,13 @@ function validate46(
                                                                                   }
                                                                                   errors++;
                                                                                 } else {
-                                                                                  errors = _errs214;
+                                                                                  errors = _errs218;
                                                                                   if (
                                                                                     vErrors !== null
                                                                                   ) {
-                                                                                    if (_errs214) {
+                                                                                    if (_errs218) {
                                                                                       vErrors.length =
-                                                                                        _errs214;
+                                                                                        _errs218;
                                                                                     } else {
                                                                                       vErrors =
                                                                                         null;
@@ -46367,31 +46701,31 @@ function validate46(
                                                                                   }
                                                                                 }
                                                                                 var valid22 =
-                                                                                  _errs213 ===
+                                                                                  _errs217 ===
                                                                                   errors;
                                                                               } else {
                                                                                 var valid22 = true;
                                                                               }
                                                                               if (valid22) {
                                                                                 if (
-                                                                                  data59.finishedAt !==
+                                                                                  data61.finishedAt !==
                                                                                   undefined
                                                                                 ) {
-                                                                                  let data73 =
-                                                                                    data59.finishedAt;
-                                                                                  const _errs219 =
+                                                                                  let data75 =
+                                                                                    data61.finishedAt;
+                                                                                  const _errs223 =
                                                                                     errors;
-                                                                                  const _errs220 =
+                                                                                  const _errs224 =
                                                                                     errors;
                                                                                   let valid25 = false;
-                                                                                  const _errs221 =
+                                                                                  const _errs225 =
                                                                                     errors;
                                                                                   if (
                                                                                     !(
-                                                                                      typeof data73 ==
+                                                                                      typeof data75 ==
                                                                                         'number' &&
                                                                                       isFinite(
-                                                                                        data73,
+                                                                                        data75,
                                                                                       )
                                                                                     )
                                                                                   ) {
@@ -46426,15 +46760,15 @@ function validate46(
                                                                                     errors++;
                                                                                   }
                                                                                   var _valid17 =
-                                                                                    _errs221 ===
+                                                                                    _errs225 ===
                                                                                     errors;
                                                                                   valid25 =
                                                                                     valid25 ||
                                                                                     _valid17;
-                                                                                  const _errs223 =
+                                                                                  const _errs227 =
                                                                                     errors;
                                                                                   if (
-                                                                                    data73 !== null
+                                                                                    data75 !== null
                                                                                   ) {
                                                                                     const err115 = {
                                                                                       instancePath:
@@ -46467,7 +46801,7 @@ function validate46(
                                                                                     errors++;
                                                                                   }
                                                                                   var _valid17 =
-                                                                                    _errs223 ===
+                                                                                    _errs227 ===
                                                                                     errors;
                                                                                   valid25 =
                                                                                     valid25 ||
@@ -46502,16 +46836,16 @@ function validate46(
                                                                                     errors++;
                                                                                   } else {
                                                                                     errors =
-                                                                                      _errs220;
+                                                                                      _errs224;
                                                                                     if (
                                                                                       vErrors !==
                                                                                       null
                                                                                     ) {
                                                                                       if (
-                                                                                        _errs220
+                                                                                        _errs224
                                                                                       ) {
                                                                                         vErrors.length =
-                                                                                          _errs220;
+                                                                                          _errs224;
                                                                                       } else {
                                                                                         vErrors =
                                                                                           null;
@@ -46519,27 +46853,27 @@ function validate46(
                                                                                     }
                                                                                   }
                                                                                   var valid22 =
-                                                                                    _errs219 ===
+                                                                                    _errs223 ===
                                                                                     errors;
                                                                                 } else {
                                                                                   var valid22 = true;
                                                                                 }
                                                                                 if (valid22) {
                                                                                   if (
-                                                                                    data59.reason !==
+                                                                                    data61.reason !==
                                                                                     undefined
                                                                                   ) {
-                                                                                    let data74 =
-                                                                                      data59.reason;
-                                                                                    const _errs225 =
+                                                                                    let data76 =
+                                                                                      data61.reason;
+                                                                                    const _errs229 =
                                                                                       errors;
-                                                                                    const _errs226 =
+                                                                                    const _errs230 =
                                                                                       errors;
                                                                                     let valid26 = false;
-                                                                                    const _errs227 =
+                                                                                    const _errs231 =
                                                                                       errors;
                                                                                     if (
-                                                                                      typeof data74 !==
+                                                                                      typeof data76 !==
                                                                                       'string'
                                                                                     ) {
                                                                                       const err117 =
@@ -46574,15 +46908,15 @@ function validate46(
                                                                                       errors++;
                                                                                     }
                                                                                     var _valid18 =
-                                                                                      _errs227 ===
+                                                                                      _errs231 ===
                                                                                       errors;
                                                                                     valid26 =
                                                                                       valid26 ||
                                                                                       _valid18;
-                                                                                    const _errs229 =
+                                                                                    const _errs233 =
                                                                                       errors;
                                                                                     if (
-                                                                                      data74 !==
+                                                                                      data76 !==
                                                                                       null
                                                                                     ) {
                                                                                       const err118 =
@@ -46617,7 +46951,7 @@ function validate46(
                                                                                       errors++;
                                                                                     }
                                                                                     var _valid18 =
-                                                                                      _errs229 ===
+                                                                                      _errs233 ===
                                                                                       errors;
                                                                                     valid26 =
                                                                                       valid26 ||
@@ -46654,16 +46988,16 @@ function validate46(
                                                                                       errors++;
                                                                                     } else {
                                                                                       errors =
-                                                                                        _errs226;
+                                                                                        _errs230;
                                                                                       if (
                                                                                         vErrors !==
                                                                                         null
                                                                                       ) {
                                                                                         if (
-                                                                                          _errs226
+                                                                                          _errs230
                                                                                         ) {
                                                                                           vErrors.length =
-                                                                                            _errs226;
+                                                                                            _errs230;
                                                                                         } else {
                                                                                           vErrors =
                                                                                             null;
@@ -46671,7 +47005,7 @@ function validate46(
                                                                                       }
                                                                                     }
                                                                                     var valid22 =
-                                                                                      _errs225 ===
+                                                                                      _errs229 ===
                                                                                       errors;
                                                                                   } else {
                                                                                     var valid22 = true;
@@ -46709,10 +47043,10 @@ function validate46(
                                                     errors++;
                                                   }
                                                 }
-                                                var _valid15 = _errs186 === errors;
+                                                var _valid15 = _errs190 === errors;
                                                 valid21 = valid21 || _valid15;
-                                                const _errs231 = errors;
-                                                if (data59 !== null) {
+                                                const _errs235 = errors;
+                                                if (data61 !== null) {
                                                   const err121 = {
                                                     instancePath:
                                                       instancePath + '/items/' + i0 + '/run',
@@ -46729,7 +47063,7 @@ function validate46(
                                                   }
                                                   errors++;
                                                 }
-                                                var _valid15 = _errs231 === errors;
+                                                var _valid15 = _errs235 === errors;
                                                 valid21 = valid21 || _valid15;
                                                 if (!valid21) {
                                                   const err122 = {
@@ -46750,61 +47084,61 @@ function validate46(
                                                   validate46.errors = vErrors;
                                                   return false;
                                                 } else {
-                                                  errors = _errs185;
+                                                  errors = _errs189;
                                                   if (vErrors !== null) {
-                                                    if (_errs185) {
-                                                      vErrors.length = _errs185;
+                                                    if (_errs189) {
+                                                      vErrors.length = _errs189;
                                                     } else {
                                                       vErrors = null;
                                                     }
                                                   }
                                                 }
-                                                var valid3 = _errs184 === errors;
+                                                var valid3 = _errs188 === errors;
                                               } else {
                                                 var valid3 = true;
                                               }
                                               if (valid3) {
                                                 if (data6.childRun !== undefined) {
-                                                  let data75 = data6.childRun;
-                                                  const _errs233 = errors;
-                                                  const _errs234 = errors;
+                                                  let data77 = data6.childRun;
+                                                  const _errs237 = errors;
+                                                  const _errs238 = errors;
                                                   let valid27 = false;
-                                                  const _errs235 = errors;
-                                                  if (errors === _errs235) {
+                                                  const _errs239 = errors;
+                                                  if (errors === _errs239) {
                                                     if (
-                                                      data75 &&
-                                                      typeof data75 == 'object' &&
-                                                      !Array.isArray(data75)
+                                                      data77 &&
+                                                      typeof data77 == 'object' &&
+                                                      !Array.isArray(data77)
                                                     ) {
                                                       let missing6;
                                                       if (
-                                                        (data75.id === undefined &&
+                                                        (data77.id === undefined &&
                                                           (missing6 = 'id')) ||
-                                                        (data75.sessionId === undefined &&
+                                                        (data77.sessionId === undefined &&
                                                           (missing6 = 'sessionId')) ||
-                                                        (data75.originCommandId === undefined &&
+                                                        (data77.originCommandId === undefined &&
                                                           (missing6 = 'originCommandId')) ||
-                                                        (data75.originStoreId === undefined &&
+                                                        (data77.originStoreId === undefined &&
                                                           (missing6 = 'originStoreId')) ||
-                                                        (data75.rootWorkCommandId === undefined &&
+                                                        (data77.rootWorkCommandId === undefined &&
                                                           (missing6 = 'rootWorkCommandId')) ||
-                                                        (data75.rootWorkSeq === undefined &&
+                                                        (data77.rootWorkSeq === undefined &&
                                                           (missing6 = 'rootWorkSeq')) ||
-                                                        (data75.contextSelectionId === undefined &&
+                                                        (data77.contextSelectionId === undefined &&
                                                           (missing6 = 'contextSelectionId')) ||
-                                                        (data75.waitingForResults === undefined &&
+                                                        (data77.waitingForResults === undefined &&
                                                           (missing6 = 'waitingForResults')) ||
-                                                        (data75.status === undefined &&
+                                                        (data77.status === undefined &&
                                                           (missing6 = 'status')) ||
-                                                        (data75.isActive === undefined &&
+                                                        (data77.isActive === undefined &&
                                                           (missing6 = 'isActive')) ||
-                                                        (data75.createdAt === undefined &&
+                                                        (data77.createdAt === undefined &&
                                                           (missing6 = 'createdAt')) ||
-                                                        (data75.deadlineAt === undefined &&
+                                                        (data77.deadlineAt === undefined &&
                                                           (missing6 = 'deadlineAt')) ||
-                                                        (data75.finishedAt === undefined &&
+                                                        (data77.finishedAt === undefined &&
                                                           (missing6 = 'finishedAt')) ||
-                                                        (data75.reason === undefined &&
+                                                        (data77.reason === undefined &&
                                                           (missing6 = 'reason'))
                                                       ) {
                                                         const err123 = {
@@ -46829,8 +47163,8 @@ function validate46(
                                                         }
                                                         errors++;
                                                       } else {
-                                                        const _errs237 = errors;
-                                                        for (const key6 in data75) {
+                                                        const _errs241 = errors;
+                                                        for (const key6 in data77) {
                                                           if (
                                                             !func1.call(
                                                               schema53.properties.items.items
@@ -46861,13 +47195,13 @@ function validate46(
                                                             break;
                                                           }
                                                         }
-                                                        if (_errs237 === errors) {
-                                                          if (data75.id !== undefined) {
-                                                            let data76 = data75.id;
-                                                            const _errs238 = errors;
-                                                            if (errors === _errs238) {
-                                                              if (typeof data76 === 'string') {
-                                                                if (func2(data76) > 128) {
+                                                        if (_errs241 === errors) {
+                                                          if (data77.id !== undefined) {
+                                                            let data78 = data77.id;
+                                                            const _errs242 = errors;
+                                                            if (errors === _errs242) {
+                                                              if (typeof data78 === 'string') {
+                                                                if (func2(data78) > 128) {
                                                                   const err125 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -46888,7 +47222,7 @@ function validate46(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (func2(data76) < 1) {
+                                                                  if (func2(data78) < 1) {
                                                                     const err126 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -46909,7 +47243,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (!pattern4.test(data76)) {
+                                                                    if (!pattern4.test(data78)) {
                                                                       const err127 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -46958,17 +47292,17 @@ function validate46(
                                                                 errors++;
                                                               }
                                                             }
-                                                            var valid28 = _errs238 === errors;
+                                                            var valid28 = _errs242 === errors;
                                                           } else {
                                                             var valid28 = true;
                                                           }
                                                           if (valid28) {
-                                                            if (data75.sessionId !== undefined) {
-                                                              let data77 = data75.sessionId;
-                                                              const _errs240 = errors;
-                                                              if (errors === _errs240) {
-                                                                if (typeof data77 === 'string') {
-                                                                  if (func2(data77) > 128) {
+                                                            if (data77.sessionId !== undefined) {
+                                                              let data79 = data77.sessionId;
+                                                              const _errs244 = errors;
+                                                              if (errors === _errs244) {
+                                                                if (typeof data79 === 'string') {
+                                                                  if (func2(data79) > 128) {
                                                                     const err129 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -46989,7 +47323,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (func2(data77) < 1) {
+                                                                    if (func2(data79) < 1) {
                                                                       const err130 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -47010,7 +47344,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (!pattern4.test(data77)) {
+                                                                      if (!pattern4.test(data79)) {
                                                                         const err131 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -47059,19 +47393,19 @@ function validate46(
                                                                   errors++;
                                                                 }
                                                               }
-                                                              var valid28 = _errs240 === errors;
+                                                              var valid28 = _errs244 === errors;
                                                             } else {
                                                               var valid28 = true;
                                                             }
                                                             if (valid28) {
                                                               if (
-                                                                data75.originCommandId !== undefined
+                                                                data77.originCommandId !== undefined
                                                               ) {
-                                                                let data78 = data75.originCommandId;
-                                                                const _errs242 = errors;
-                                                                if (errors === _errs242) {
-                                                                  if (typeof data78 === 'string') {
-                                                                    if (func2(data78) > 128) {
+                                                                let data80 = data77.originCommandId;
+                                                                const _errs246 = errors;
+                                                                if (errors === _errs246) {
+                                                                  if (typeof data80 === 'string') {
+                                                                    if (func2(data80) > 128) {
                                                                       const err133 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -47092,7 +47426,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (func2(data78) < 1) {
+                                                                      if (func2(data80) < 1) {
                                                                         const err134 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -47114,7 +47448,7 @@ function validate46(
                                                                         errors++;
                                                                       } else {
                                                                         if (
-                                                                          !pattern4.test(data78)
+                                                                          !pattern4.test(data80)
                                                                         ) {
                                                                           const err135 = {
                                                                             instancePath:
@@ -47164,21 +47498,21 @@ function validate46(
                                                                     errors++;
                                                                   }
                                                                 }
-                                                                var valid28 = _errs242 === errors;
+                                                                var valid28 = _errs246 === errors;
                                                               } else {
                                                                 var valid28 = true;
                                                               }
                                                               if (valid28) {
                                                                 if (
-                                                                  data75.originStoreId !== undefined
+                                                                  data77.originStoreId !== undefined
                                                                 ) {
-                                                                  let data79 = data75.originStoreId;
-                                                                  const _errs244 = errors;
-                                                                  if (errors === _errs244) {
+                                                                  let data81 = data77.originStoreId;
+                                                                  const _errs248 = errors;
+                                                                  if (errors === _errs248) {
                                                                     if (
-                                                                      typeof data79 === 'string'
+                                                                      typeof data81 === 'string'
                                                                     ) {
-                                                                      if (func2(data79) > 128) {
+                                                                      if (func2(data81) > 128) {
                                                                         const err137 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -47199,7 +47533,7 @@ function validate46(
                                                                         }
                                                                         errors++;
                                                                       } else {
-                                                                        if (func2(data79) < 1) {
+                                                                        if (func2(data81) < 1) {
                                                                           const err138 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -47221,7 +47555,7 @@ function validate46(
                                                                           errors++;
                                                                         } else {
                                                                           if (
-                                                                            !pattern4.test(data79)
+                                                                            !pattern4.test(data81)
                                                                           ) {
                                                                             const err139 = {
                                                                               instancePath:
@@ -47271,23 +47605,23 @@ function validate46(
                                                                       errors++;
                                                                     }
                                                                   }
-                                                                  var valid28 = _errs244 === errors;
+                                                                  var valid28 = _errs248 === errors;
                                                                 } else {
                                                                   var valid28 = true;
                                                                 }
                                                                 if (valid28) {
                                                                   if (
-                                                                    data75.rootWorkCommandId !==
+                                                                    data77.rootWorkCommandId !==
                                                                     undefined
                                                                   ) {
-                                                                    let data80 =
-                                                                      data75.rootWorkCommandId;
-                                                                    const _errs246 = errors;
-                                                                    if (errors === _errs246) {
+                                                                    let data82 =
+                                                                      data77.rootWorkCommandId;
+                                                                    const _errs250 = errors;
+                                                                    if (errors === _errs250) {
                                                                       if (
-                                                                        typeof data80 === 'string'
+                                                                        typeof data82 === 'string'
                                                                       ) {
-                                                                        if (func2(data80) > 128) {
+                                                                        if (func2(data82) > 128) {
                                                                           const err141 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -47308,7 +47642,7 @@ function validate46(
                                                                           }
                                                                           errors++;
                                                                         } else {
-                                                                          if (func2(data80) < 1) {
+                                                                          if (func2(data82) < 1) {
                                                                             const err142 = {
                                                                               instancePath:
                                                                                 instancePath +
@@ -47330,7 +47664,7 @@ function validate46(
                                                                             errors++;
                                                                           } else {
                                                                             if (
-                                                                              !pattern4.test(data80)
+                                                                              !pattern4.test(data82)
                                                                             ) {
                                                                               const err143 = {
                                                                                 instancePath:
@@ -47387,24 +47721,24 @@ function validate46(
                                                                       }
                                                                     }
                                                                     var valid28 =
-                                                                      _errs246 === errors;
+                                                                      _errs250 === errors;
                                                                   } else {
                                                                     var valid28 = true;
                                                                   }
                                                                   if (valid28) {
                                                                     if (
-                                                                      data75.rootWorkSeq !==
+                                                                      data77.rootWorkSeq !==
                                                                       undefined
                                                                     ) {
-                                                                      let data81 =
-                                                                        data75.rootWorkSeq;
-                                                                      const _errs248 = errors;
-                                                                      if (errors === _errs248) {
+                                                                      let data83 =
+                                                                        data77.rootWorkSeq;
+                                                                      const _errs252 = errors;
+                                                                      if (errors === _errs252) {
                                                                         if (
-                                                                          typeof data81 === 'string'
+                                                                          typeof data83 === 'string'
                                                                         ) {
                                                                           if (
-                                                                            !pattern18.test(data81)
+                                                                            !pattern18.test(data83)
                                                                           ) {
                                                                             const err145 = {
                                                                               instancePath:
@@ -47456,25 +47790,25 @@ function validate46(
                                                                         }
                                                                       }
                                                                       var valid28 =
-                                                                        _errs248 === errors;
+                                                                        _errs252 === errors;
                                                                     } else {
                                                                       var valid28 = true;
                                                                     }
                                                                     if (valid28) {
                                                                       if (
-                                                                        data75.contextSelectionId !==
+                                                                        data77.contextSelectionId !==
                                                                         undefined
                                                                       ) {
-                                                                        let data82 =
-                                                                          data75.contextSelectionId;
-                                                                        const _errs250 = errors;
-                                                                        if (errors === _errs250) {
+                                                                        let data84 =
+                                                                          data77.contextSelectionId;
+                                                                        const _errs254 = errors;
+                                                                        if (errors === _errs254) {
                                                                           if (
-                                                                            typeof data82 ===
+                                                                            typeof data84 ===
                                                                             'string'
                                                                           ) {
                                                                             if (
-                                                                              func2(data82) > 128
+                                                                              func2(data84) > 128
                                                                             ) {
                                                                               const err147 = {
                                                                                 instancePath:
@@ -47504,7 +47838,7 @@ function validate46(
                                                                               errors++;
                                                                             } else {
                                                                               if (
-                                                                                func2(data82) < 1
+                                                                                func2(data84) < 1
                                                                               ) {
                                                                                 const err148 = {
                                                                                   instancePath:
@@ -47537,7 +47871,7 @@ function validate46(
                                                                               } else {
                                                                                 if (
                                                                                   !pattern4.test(
-                                                                                    data82,
+                                                                                    data84,
                                                                                   )
                                                                                 ) {
                                                                                   const err149 = {
@@ -47599,45 +47933,45 @@ function validate46(
                                                                           }
                                                                         }
                                                                         var valid28 =
-                                                                          _errs250 === errors;
+                                                                          _errs254 === errors;
                                                                       } else {
                                                                         var valid28 = true;
                                                                       }
                                                                       if (valid28) {
                                                                         if (
-                                                                          data75.waitingForResults !==
+                                                                          data77.waitingForResults !==
                                                                           undefined
                                                                         ) {
-                                                                          let data83 =
-                                                                            data75.waitingForResults;
-                                                                          const _errs252 = errors;
-                                                                          if (errors === _errs252) {
+                                                                          let data85 =
+                                                                            data77.waitingForResults;
+                                                                          const _errs256 = errors;
+                                                                          if (errors === _errs256) {
                                                                             if (
-                                                                              Array.isArray(data83)
+                                                                              Array.isArray(data85)
                                                                             ) {
                                                                               var valid29 = true;
                                                                               const len2 =
-                                                                                data83.length;
+                                                                                data85.length;
                                                                               for (
                                                                                 let i2 = 0;
                                                                                 i2 < len2;
                                                                                 i2++
                                                                               ) {
-                                                                                let data84 =
-                                                                                  data83[i2];
-                                                                                const _errs254 =
+                                                                                let data86 =
+                                                                                  data85[i2];
+                                                                                const _errs258 =
                                                                                   errors;
                                                                                 if (
                                                                                   errors ===
-                                                                                  _errs254
+                                                                                  _errs258
                                                                                 ) {
                                                                                   if (
-                                                                                    typeof data84 ===
+                                                                                    typeof data86 ===
                                                                                     'string'
                                                                                   ) {
                                                                                     if (
                                                                                       func2(
-                                                                                        data84,
+                                                                                        data86,
                                                                                       ) > 128
                                                                                     ) {
                                                                                       const err151 =
@@ -47674,7 +48008,7 @@ function validate46(
                                                                                     } else {
                                                                                       if (
                                                                                         func2(
-                                                                                          data84,
+                                                                                          data86,
                                                                                         ) < 1
                                                                                       ) {
                                                                                         const err152 =
@@ -47713,7 +48047,7 @@ function validate46(
                                                                                       } else {
                                                                                         if (
                                                                                           !pattern4.test(
-                                                                                            data84,
+                                                                                            data86,
                                                                                           )
                                                                                         ) {
                                                                                           const err153 =
@@ -47789,7 +48123,7 @@ function validate46(
                                                                                   }
                                                                                 }
                                                                                 var valid29 =
-                                                                                  _errs254 ===
+                                                                                  _errs258 ===
                                                                                   errors;
                                                                                 if (!valid29) {
                                                                                   break;
@@ -47824,20 +48158,20 @@ function validate46(
                                                                             }
                                                                           }
                                                                           var valid28 =
-                                                                            _errs252 === errors;
+                                                                            _errs256 === errors;
                                                                         } else {
                                                                           var valid28 = true;
                                                                         }
                                                                         if (valid28) {
                                                                           if (
-                                                                            data75.status !==
+                                                                            data77.status !==
                                                                             undefined
                                                                           ) {
-                                                                            let data85 =
-                                                                              data75.status;
-                                                                            const _errs256 = errors;
+                                                                            let data87 =
+                                                                              data77.status;
+                                                                            const _errs260 = errors;
                                                                             if (
-                                                                              typeof data85 !==
+                                                                              typeof data87 !==
                                                                               'string'
                                                                             ) {
                                                                               const err156 = {
@@ -47868,21 +48202,21 @@ function validate46(
                                                                             }
                                                                             if (
                                                                               !(
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'running' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'waiting_interaction' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'waiting_execution' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'cancelling' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'completed' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'failed' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'cancelled' ||
-                                                                                data85 ===
+                                                                                data87 ===
                                                                                   'interrupted'
                                                                               )
                                                                             ) {
@@ -47921,19 +48255,19 @@ function validate46(
                                                                               errors++;
                                                                             }
                                                                             var valid28 =
-                                                                              _errs256 === errors;
+                                                                              _errs260 === errors;
                                                                           } else {
                                                                             var valid28 = true;
                                                                           }
                                                                           if (valid28) {
                                                                             if (
-                                                                              data75.isActive !==
+                                                                              data77.isActive !==
                                                                               undefined
                                                                             ) {
-                                                                              const _errs258 =
+                                                                              const _errs262 =
                                                                                 errors;
                                                                               if (
-                                                                                typeof data75.isActive !==
+                                                                                typeof data77.isActive !==
                                                                                 'boolean'
                                                                               ) {
                                                                                 const err158 = {
@@ -47965,24 +48299,24 @@ function validate46(
                                                                                 errors++;
                                                                               }
                                                                               var valid28 =
-                                                                                _errs258 === errors;
+                                                                                _errs262 === errors;
                                                                             } else {
                                                                               var valid28 = true;
                                                                             }
                                                                             if (valid28) {
                                                                               if (
-                                                                                data75.createdAt !==
+                                                                                data77.createdAt !==
                                                                                 undefined
                                                                               ) {
-                                                                                let data87 =
-                                                                                  data75.createdAt;
-                                                                                const _errs260 =
+                                                                                let data89 =
+                                                                                  data77.createdAt;
+                                                                                const _errs264 =
                                                                                   errors;
                                                                                 if (
                                                                                   !(
-                                                                                    typeof data87 ==
+                                                                                    typeof data89 ==
                                                                                       'number' &&
-                                                                                    isFinite(data87)
+                                                                                    isFinite(data89)
                                                                                   )
                                                                                 ) {
                                                                                   const err159 = {
@@ -48014,31 +48348,31 @@ function validate46(
                                                                                   errors++;
                                                                                 }
                                                                                 var valid28 =
-                                                                                  _errs260 ===
+                                                                                  _errs264 ===
                                                                                   errors;
                                                                               } else {
                                                                                 var valid28 = true;
                                                                               }
                                                                               if (valid28) {
                                                                                 if (
-                                                                                  data75.deadlineAt !==
+                                                                                  data77.deadlineAt !==
                                                                                   undefined
                                                                                 ) {
-                                                                                  let data88 =
-                                                                                    data75.deadlineAt;
-                                                                                  const _errs262 =
+                                                                                  let data90 =
+                                                                                    data77.deadlineAt;
+                                                                                  const _errs266 =
                                                                                     errors;
-                                                                                  const _errs263 =
+                                                                                  const _errs267 =
                                                                                     errors;
                                                                                   let valid30 = false;
-                                                                                  const _errs264 =
+                                                                                  const _errs268 =
                                                                                     errors;
                                                                                   if (
                                                                                     !(
-                                                                                      typeof data88 ==
+                                                                                      typeof data90 ==
                                                                                         'number' &&
                                                                                       isFinite(
-                                                                                        data88,
+                                                                                        data90,
                                                                                       )
                                                                                     )
                                                                                   ) {
@@ -48073,15 +48407,15 @@ function validate46(
                                                                                     errors++;
                                                                                   }
                                                                                   var _valid20 =
-                                                                                    _errs264 ===
+                                                                                    _errs268 ===
                                                                                     errors;
                                                                                   valid30 =
                                                                                     valid30 ||
                                                                                     _valid20;
-                                                                                  const _errs266 =
+                                                                                  const _errs270 =
                                                                                     errors;
                                                                                   if (
-                                                                                    data88 !== null
+                                                                                    data90 !== null
                                                                                   ) {
                                                                                     const err161 = {
                                                                                       instancePath:
@@ -48114,7 +48448,7 @@ function validate46(
                                                                                     errors++;
                                                                                   }
                                                                                   var _valid20 =
-                                                                                    _errs266 ===
+                                                                                    _errs270 ===
                                                                                     errors;
                                                                                   valid30 =
                                                                                     valid30 ||
@@ -48149,16 +48483,16 @@ function validate46(
                                                                                     errors++;
                                                                                   } else {
                                                                                     errors =
-                                                                                      _errs263;
+                                                                                      _errs267;
                                                                                     if (
                                                                                       vErrors !==
                                                                                       null
                                                                                     ) {
                                                                                       if (
-                                                                                        _errs263
+                                                                                        _errs267
                                                                                       ) {
                                                                                         vErrors.length =
-                                                                                          _errs263;
+                                                                                          _errs267;
                                                                                       } else {
                                                                                         vErrors =
                                                                                           null;
@@ -48166,31 +48500,31 @@ function validate46(
                                                                                     }
                                                                                   }
                                                                                   var valid28 =
-                                                                                    _errs262 ===
+                                                                                    _errs266 ===
                                                                                     errors;
                                                                                 } else {
                                                                                   var valid28 = true;
                                                                                 }
                                                                                 if (valid28) {
                                                                                   if (
-                                                                                    data75.finishedAt !==
+                                                                                    data77.finishedAt !==
                                                                                     undefined
                                                                                   ) {
-                                                                                    let data89 =
-                                                                                      data75.finishedAt;
-                                                                                    const _errs268 =
+                                                                                    let data91 =
+                                                                                      data77.finishedAt;
+                                                                                    const _errs272 =
                                                                                       errors;
-                                                                                    const _errs269 =
+                                                                                    const _errs273 =
                                                                                       errors;
                                                                                     let valid31 = false;
-                                                                                    const _errs270 =
+                                                                                    const _errs274 =
                                                                                       errors;
                                                                                     if (
                                                                                       !(
-                                                                                        typeof data89 ==
+                                                                                        typeof data91 ==
                                                                                           'number' &&
                                                                                         isFinite(
-                                                                                          data89,
+                                                                                          data91,
                                                                                         )
                                                                                       )
                                                                                     ) {
@@ -48226,15 +48560,15 @@ function validate46(
                                                                                       errors++;
                                                                                     }
                                                                                     var _valid21 =
-                                                                                      _errs270 ===
+                                                                                      _errs274 ===
                                                                                       errors;
                                                                                     valid31 =
                                                                                       valid31 ||
                                                                                       _valid21;
-                                                                                    const _errs272 =
+                                                                                    const _errs276 =
                                                                                       errors;
                                                                                     if (
-                                                                                      data89 !==
+                                                                                      data91 !==
                                                                                       null
                                                                                     ) {
                                                                                       const err164 =
@@ -48269,7 +48603,7 @@ function validate46(
                                                                                       errors++;
                                                                                     }
                                                                                     var _valid21 =
-                                                                                      _errs272 ===
+                                                                                      _errs276 ===
                                                                                       errors;
                                                                                     valid31 =
                                                                                       valid31 ||
@@ -48306,16 +48640,16 @@ function validate46(
                                                                                       errors++;
                                                                                     } else {
                                                                                       errors =
-                                                                                        _errs269;
+                                                                                        _errs273;
                                                                                       if (
                                                                                         vErrors !==
                                                                                         null
                                                                                       ) {
                                                                                         if (
-                                                                                          _errs269
+                                                                                          _errs273
                                                                                         ) {
                                                                                           vErrors.length =
-                                                                                            _errs269;
+                                                                                            _errs273;
                                                                                         } else {
                                                                                           vErrors =
                                                                                             null;
@@ -48323,27 +48657,27 @@ function validate46(
                                                                                       }
                                                                                     }
                                                                                     var valid28 =
-                                                                                      _errs268 ===
+                                                                                      _errs272 ===
                                                                                       errors;
                                                                                   } else {
                                                                                     var valid28 = true;
                                                                                   }
                                                                                   if (valid28) {
                                                                                     if (
-                                                                                      data75.reason !==
+                                                                                      data77.reason !==
                                                                                       undefined
                                                                                     ) {
-                                                                                      let data90 =
-                                                                                        data75.reason;
-                                                                                      const _errs274 =
+                                                                                      let data92 =
+                                                                                        data77.reason;
+                                                                                      const _errs278 =
                                                                                         errors;
-                                                                                      const _errs275 =
+                                                                                      const _errs279 =
                                                                                         errors;
                                                                                       let valid32 = false;
-                                                                                      const _errs276 =
+                                                                                      const _errs280 =
                                                                                         errors;
                                                                                       if (
-                                                                                        typeof data90 !==
+                                                                                        typeof data92 !==
                                                                                         'string'
                                                                                       ) {
                                                                                         const err166 =
@@ -48380,15 +48714,15 @@ function validate46(
                                                                                         errors++;
                                                                                       }
                                                                                       var _valid22 =
-                                                                                        _errs276 ===
+                                                                                        _errs280 ===
                                                                                         errors;
                                                                                       valid32 =
                                                                                         valid32 ||
                                                                                         _valid22;
-                                                                                      const _errs278 =
+                                                                                      const _errs282 =
                                                                                         errors;
                                                                                       if (
-                                                                                        data90 !==
+                                                                                        data92 !==
                                                                                         null
                                                                                       ) {
                                                                                         const err167 =
@@ -48425,7 +48759,7 @@ function validate46(
                                                                                         errors++;
                                                                                       }
                                                                                       var _valid22 =
-                                                                                        _errs278 ===
+                                                                                        _errs282 ===
                                                                                         errors;
                                                                                       valid32 =
                                                                                         valid32 ||
@@ -48465,16 +48799,16 @@ function validate46(
                                                                                         errors++;
                                                                                       } else {
                                                                                         errors =
-                                                                                          _errs275;
+                                                                                          _errs279;
                                                                                         if (
                                                                                           vErrors !==
                                                                                           null
                                                                                         ) {
                                                                                           if (
-                                                                                            _errs275
+                                                                                            _errs279
                                                                                           ) {
                                                                                             vErrors.length =
-                                                                                              _errs275;
+                                                                                              _errs279;
                                                                                           } else {
                                                                                             vErrors =
                                                                                               null;
@@ -48482,7 +48816,7 @@ function validate46(
                                                                                         }
                                                                                       }
                                                                                       var valid28 =
-                                                                                        _errs274 ===
+                                                                                        _errs278 ===
                                                                                         errors;
                                                                                     } else {
                                                                                       var valid28 = true;
@@ -48523,10 +48857,10 @@ function validate46(
                                                       errors++;
                                                     }
                                                   }
-                                                  var _valid19 = _errs235 === errors;
+                                                  var _valid19 = _errs239 === errors;
                                                   valid27 = valid27 || _valid19;
-                                                  const _errs280 = errors;
-                                                  if (data75 !== null) {
+                                                  const _errs284 = errors;
+                                                  if (data77 !== null) {
                                                     const err170 = {
                                                       instancePath:
                                                         instancePath + '/items/' + i0 + '/childRun',
@@ -48543,7 +48877,7 @@ function validate46(
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid19 = _errs280 === errors;
+                                                  var _valid19 = _errs284 === errors;
                                                   valid27 = valid27 || _valid19;
                                                   if (!valid27) {
                                                     const err171 = {
@@ -48564,56 +48898,56 @@ function validate46(
                                                     validate46.errors = vErrors;
                                                     return false;
                                                   } else {
-                                                    errors = _errs234;
+                                                    errors = _errs238;
                                                     if (vErrors !== null) {
-                                                      if (_errs234) {
-                                                        vErrors.length = _errs234;
+                                                      if (_errs238) {
+                                                        vErrors.length = _errs238;
                                                       } else {
                                                         vErrors = null;
                                                       }
                                                     }
                                                   }
-                                                  var valid3 = _errs233 === errors;
+                                                  var valid3 = _errs237 === errors;
                                                 } else {
                                                   var valid3 = true;
                                                 }
                                                 if (valid3) {
                                                   if (data6.childSession !== undefined) {
-                                                    let data91 = data6.childSession;
-                                                    const _errs282 = errors;
-                                                    const _errs283 = errors;
+                                                    let data93 = data6.childSession;
+                                                    const _errs286 = errors;
+                                                    const _errs287 = errors;
                                                     let valid33 = false;
-                                                    const _errs284 = errors;
-                                                    if (errors === _errs284) {
+                                                    const _errs288 = errors;
+                                                    if (errors === _errs288) {
                                                       if (
-                                                        data91 &&
-                                                        typeof data91 == 'object' &&
-                                                        !Array.isArray(data91)
+                                                        data93 &&
+                                                        typeof data93 == 'object' &&
+                                                        !Array.isArray(data93)
                                                       ) {
                                                         let missing7;
                                                         if (
-                                                          (data91.id === undefined &&
+                                                          (data93.id === undefined &&
                                                             (missing7 = 'id')) ||
-                                                          (data91.workspaceId === undefined &&
+                                                          (data93.workspaceId === undefined &&
                                                             (missing7 = 'workspaceId')) ||
-                                                          (data91.parentSessionId === undefined &&
+                                                          (data93.parentSessionId === undefined &&
                                                             (missing7 = 'parentSessionId')) ||
-                                                          (data91.rootSessionId === undefined &&
+                                                          (data93.rootSessionId === undefined &&
                                                             (missing7 = 'rootSessionId')) ||
-                                                          (data91.title === undefined &&
+                                                          (data93.title === undefined &&
                                                             (missing7 = 'title')) ||
-                                                          (data91.controlRevision === undefined &&
+                                                          (data93.controlRevision === undefined &&
                                                             (missing7 = 'controlRevision')) ||
-                                                          (data91.contextSelectionId ===
+                                                          (data93.contextSelectionId ===
                                                             undefined &&
                                                             (missing7 = 'contextSelectionId')) ||
-                                                          (data91.nextSeq === undefined &&
+                                                          (data93.nextSeq === undefined &&
                                                             (missing7 = 'nextSeq')) ||
-                                                          (data91.deletedAt === undefined &&
+                                                          (data93.deletedAt === undefined &&
                                                             (missing7 = 'deletedAt')) ||
-                                                          (data91.ownerInstanceId === undefined &&
+                                                          (data93.ownerInstanceId === undefined &&
                                                             (missing7 = 'ownerInstanceId')) ||
-                                                          (data91.ownerGeneration === undefined &&
+                                                          (data93.ownerGeneration === undefined &&
                                                             (missing7 = 'ownerGeneration'))
                                                         ) {
                                                           const err172 = {
@@ -48638,8 +48972,8 @@ function validate46(
                                                           }
                                                           errors++;
                                                         } else {
-                                                          const _errs286 = errors;
-                                                          for (const key7 in data91) {
+                                                          const _errs290 = errors;
+                                                          for (const key7 in data93) {
                                                             if (
                                                               !func1.call(
                                                                 schema53.properties.items.items
@@ -48672,13 +49006,13 @@ function validate46(
                                                               break;
                                                             }
                                                           }
-                                                          if (_errs286 === errors) {
-                                                            if (data91.id !== undefined) {
-                                                              let data92 = data91.id;
-                                                              const _errs287 = errors;
-                                                              if (errors === _errs287) {
-                                                                if (typeof data92 === 'string') {
-                                                                  if (func2(data92) > 128) {
+                                                          if (_errs290 === errors) {
+                                                            if (data93.id !== undefined) {
+                                                              let data94 = data93.id;
+                                                              const _errs291 = errors;
+                                                              if (errors === _errs291) {
+                                                                if (typeof data94 === 'string') {
+                                                                  if (func2(data94) > 128) {
                                                                     const err174 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -48699,7 +49033,7 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    if (func2(data92) < 1) {
+                                                                    if (func2(data94) < 1) {
                                                                       const err175 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -48720,7 +49054,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (!pattern4.test(data92)) {
+                                                                      if (!pattern4.test(data94)) {
                                                                         const err176 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -48769,19 +49103,19 @@ function validate46(
                                                                   errors++;
                                                                 }
                                                               }
-                                                              var valid34 = _errs287 === errors;
+                                                              var valid34 = _errs291 === errors;
                                                             } else {
                                                               var valid34 = true;
                                                             }
                                                             if (valid34) {
                                                               if (
-                                                                data91.workspaceId !== undefined
+                                                                data93.workspaceId !== undefined
                                                               ) {
-                                                                let data93 = data91.workspaceId;
-                                                                const _errs289 = errors;
-                                                                if (errors === _errs289) {
-                                                                  if (typeof data93 === 'string') {
-                                                                    if (func2(data93) > 128) {
+                                                                let data95 = data93.workspaceId;
+                                                                const _errs293 = errors;
+                                                                if (errors === _errs293) {
+                                                                  if (typeof data95 === 'string') {
+                                                                    if (func2(data95) > 128) {
                                                                       const err178 = {
                                                                         instancePath:
                                                                           instancePath +
@@ -48802,7 +49136,7 @@ function validate46(
                                                                       }
                                                                       errors++;
                                                                     } else {
-                                                                      if (func2(data93) < 1) {
+                                                                      if (func2(data95) < 1) {
                                                                         const err179 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -48824,7 +49158,7 @@ function validate46(
                                                                         errors++;
                                                                       } else {
                                                                         if (
-                                                                          !pattern4.test(data93)
+                                                                          !pattern4.test(data95)
                                                                         ) {
                                                                           const err180 = {
                                                                             instancePath:
@@ -48874,26 +49208,26 @@ function validate46(
                                                                     errors++;
                                                                   }
                                                                 }
-                                                                var valid34 = _errs289 === errors;
+                                                                var valid34 = _errs293 === errors;
                                                               } else {
                                                                 var valid34 = true;
                                                               }
                                                               if (valid34) {
                                                                 if (
-                                                                  data91.parentSessionId !==
+                                                                  data93.parentSessionId !==
                                                                   undefined
                                                                 ) {
-                                                                  let data94 =
-                                                                    data91.parentSessionId;
-                                                                  const _errs291 = errors;
-                                                                  const _errs292 = errors;
+                                                                  let data96 =
+                                                                    data93.parentSessionId;
+                                                                  const _errs295 = errors;
+                                                                  const _errs296 = errors;
                                                                   let valid35 = false;
-                                                                  const _errs293 = errors;
-                                                                  if (errors === _errs293) {
+                                                                  const _errs297 = errors;
+                                                                  if (errors === _errs297) {
                                                                     if (
-                                                                      typeof data94 === 'string'
+                                                                      typeof data96 === 'string'
                                                                     ) {
-                                                                      if (func2(data94) > 128) {
+                                                                      if (func2(data96) > 128) {
                                                                         const err182 = {
                                                                           instancePath:
                                                                             instancePath +
@@ -48914,7 +49248,7 @@ function validate46(
                                                                         }
                                                                         errors++;
                                                                       } else {
-                                                                        if (func2(data94) < 1) {
+                                                                        if (func2(data96) < 1) {
                                                                           const err183 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -48936,7 +49270,7 @@ function validate46(
                                                                           errors++;
                                                                         } else {
                                                                           if (
-                                                                            !pattern4.test(data94)
+                                                                            !pattern4.test(data96)
                                                                           ) {
                                                                             const err184 = {
                                                                               instancePath:
@@ -48987,10 +49321,10 @@ function validate46(
                                                                     }
                                                                   }
                                                                   var _valid24 =
-                                                                    _errs293 === errors;
+                                                                    _errs297 === errors;
                                                                   valid35 = valid35 || _valid24;
-                                                                  const _errs295 = errors;
-                                                                  if (data94 !== null) {
+                                                                  const _errs299 = errors;
+                                                                  if (data96 !== null) {
                                                                     const err186 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -49011,7 +49345,7 @@ function validate46(
                                                                     errors++;
                                                                   }
                                                                   var _valid24 =
-                                                                    _errs295 === errors;
+                                                                    _errs299 === errors;
                                                                   valid35 = valid35 || _valid24;
                                                                   if (!valid35) {
                                                                     const err187 = {
@@ -49034,32 +49368,32 @@ function validate46(
                                                                     }
                                                                     errors++;
                                                                   } else {
-                                                                    errors = _errs292;
+                                                                    errors = _errs296;
                                                                     if (vErrors !== null) {
-                                                                      if (_errs292) {
-                                                                        vErrors.length = _errs292;
+                                                                      if (_errs296) {
+                                                                        vErrors.length = _errs296;
                                                                       } else {
                                                                         vErrors = null;
                                                                       }
                                                                     }
                                                                   }
-                                                                  var valid34 = _errs291 === errors;
+                                                                  var valid34 = _errs295 === errors;
                                                                 } else {
                                                                   var valid34 = true;
                                                                 }
                                                                 if (valid34) {
                                                                   if (
-                                                                    data91.rootSessionId !==
+                                                                    data93.rootSessionId !==
                                                                     undefined
                                                                   ) {
-                                                                    let data95 =
-                                                                      data91.rootSessionId;
-                                                                    const _errs297 = errors;
-                                                                    if (errors === _errs297) {
+                                                                    let data97 =
+                                                                      data93.rootSessionId;
+                                                                    const _errs301 = errors;
+                                                                    if (errors === _errs301) {
                                                                       if (
-                                                                        typeof data95 === 'string'
+                                                                        typeof data97 === 'string'
                                                                       ) {
-                                                                        if (func2(data95) > 128) {
+                                                                        if (func2(data97) > 128) {
                                                                           const err188 = {
                                                                             instancePath:
                                                                               instancePath +
@@ -49080,7 +49414,7 @@ function validate46(
                                                                           }
                                                                           errors++;
                                                                         } else {
-                                                                          if (func2(data95) < 1) {
+                                                                          if (func2(data97) < 1) {
                                                                             const err189 = {
                                                                               instancePath:
                                                                                 instancePath +
@@ -49102,7 +49436,7 @@ function validate46(
                                                                             errors++;
                                                                           } else {
                                                                             if (
-                                                                              !pattern4.test(data95)
+                                                                              !pattern4.test(data97)
                                                                             ) {
                                                                               const err190 = {
                                                                                 instancePath:
@@ -49159,17 +49493,17 @@ function validate46(
                                                                       }
                                                                     }
                                                                     var valid34 =
-                                                                      _errs297 === errors;
+                                                                      _errs301 === errors;
                                                                   } else {
                                                                     var valid34 = true;
                                                                   }
                                                                   if (valid34) {
                                                                     if (
-                                                                      data91.title !== undefined
+                                                                      data93.title !== undefined
                                                                     ) {
-                                                                      const _errs299 = errors;
+                                                                      const _errs303 = errors;
                                                                       if (
-                                                                        typeof data91.title !==
+                                                                        typeof data93.title !==
                                                                         'string'
                                                                       ) {
                                                                         const err192 = {
@@ -49194,26 +49528,26 @@ function validate46(
                                                                         errors++;
                                                                       }
                                                                       var valid34 =
-                                                                        _errs299 === errors;
+                                                                        _errs303 === errors;
                                                                     } else {
                                                                       var valid34 = true;
                                                                     }
                                                                     if (valid34) {
                                                                       if (
-                                                                        data91.controlRevision !==
+                                                                        data93.controlRevision !==
                                                                         undefined
                                                                       ) {
-                                                                        let data97 =
-                                                                          data91.controlRevision;
-                                                                        const _errs301 = errors;
-                                                                        if (errors === _errs301) {
+                                                                        let data99 =
+                                                                          data93.controlRevision;
+                                                                        const _errs305 = errors;
+                                                                        if (errors === _errs305) {
                                                                           if (
-                                                                            typeof data97 ===
+                                                                            typeof data99 ===
                                                                             'string'
                                                                           ) {
                                                                             if (
                                                                               !pattern18.test(
-                                                                                data97,
+                                                                                data99,
                                                                               )
                                                                             ) {
                                                                               const err193 = {
@@ -49270,25 +49604,25 @@ function validate46(
                                                                           }
                                                                         }
                                                                         var valid34 =
-                                                                          _errs301 === errors;
+                                                                          _errs305 === errors;
                                                                       } else {
                                                                         var valid34 = true;
                                                                       }
                                                                       if (valid34) {
                                                                         if (
-                                                                          data91.contextSelectionId !==
+                                                                          data93.contextSelectionId !==
                                                                           undefined
                                                                         ) {
-                                                                          let data98 =
-                                                                            data91.contextSelectionId;
-                                                                          const _errs303 = errors;
-                                                                          if (errors === _errs303) {
+                                                                          let data100 =
+                                                                            data93.contextSelectionId;
+                                                                          const _errs307 = errors;
+                                                                          if (errors === _errs307) {
                                                                             if (
-                                                                              typeof data98 ===
+                                                                              typeof data100 ===
                                                                               'string'
                                                                             ) {
                                                                               if (
-                                                                                func2(data98) > 128
+                                                                                func2(data100) > 128
                                                                               ) {
                                                                                 const err195 = {
                                                                                   instancePath:
@@ -49320,7 +49654,7 @@ function validate46(
                                                                                 errors++;
                                                                               } else {
                                                                                 if (
-                                                                                  func2(data98) < 1
+                                                                                  func2(data100) < 1
                                                                                 ) {
                                                                                   const err196 = {
                                                                                     instancePath:
@@ -49353,7 +49687,7 @@ function validate46(
                                                                                 } else {
                                                                                   if (
                                                                                     !pattern4.test(
-                                                                                      data98,
+                                                                                      data100,
                                                                                     )
                                                                                   ) {
                                                                                     const err197 = {
@@ -49420,28 +49754,28 @@ function validate46(
                                                                             }
                                                                           }
                                                                           var valid34 =
-                                                                            _errs303 === errors;
+                                                                            _errs307 === errors;
                                                                         } else {
                                                                           var valid34 = true;
                                                                         }
                                                                         if (valid34) {
                                                                           if (
-                                                                            data91.nextSeq !==
+                                                                            data93.nextSeq !==
                                                                             undefined
                                                                           ) {
-                                                                            let data99 =
-                                                                              data91.nextSeq;
-                                                                            const _errs305 = errors;
+                                                                            let data101 =
+                                                                              data93.nextSeq;
+                                                                            const _errs309 = errors;
                                                                             if (
-                                                                              errors === _errs305
+                                                                              errors === _errs309
                                                                             ) {
                                                                               if (
-                                                                                typeof data99 ===
+                                                                                typeof data101 ===
                                                                                 'string'
                                                                               ) {
                                                                                 if (
                                                                                   !pattern18.test(
-                                                                                    data99,
+                                                                                    data101,
                                                                                   )
                                                                                 ) {
                                                                                   const err199 = {
@@ -49507,29 +49841,29 @@ function validate46(
                                                                               }
                                                                             }
                                                                             var valid34 =
-                                                                              _errs305 === errors;
+                                                                              _errs309 === errors;
                                                                           } else {
                                                                             var valid34 = true;
                                                                           }
                                                                           if (valid34) {
                                                                             if (
-                                                                              data91.deletedAt !==
+                                                                              data93.deletedAt !==
                                                                               undefined
                                                                             ) {
-                                                                              let data100 =
-                                                                                data91.deletedAt;
-                                                                              const _errs307 =
+                                                                              let data102 =
+                                                                                data93.deletedAt;
+                                                                              const _errs311 =
                                                                                 errors;
-                                                                              const _errs308 =
+                                                                              const _errs312 =
                                                                                 errors;
                                                                               let valid36 = false;
-                                                                              const _errs309 =
+                                                                              const _errs313 =
                                                                                 errors;
                                                                               if (
                                                                                 !(
-                                                                                  typeof data100 ==
+                                                                                  typeof data102 ==
                                                                                     'number' &&
-                                                                                  isFinite(data100)
+                                                                                  isFinite(data102)
                                                                                 )
                                                                               ) {
                                                                                 const err201 = {
@@ -49561,13 +49895,13 @@ function validate46(
                                                                                 errors++;
                                                                               }
                                                                               var _valid25 =
-                                                                                _errs309 === errors;
+                                                                                _errs313 === errors;
                                                                               valid36 =
                                                                                 valid36 || _valid25;
-                                                                              const _errs311 =
+                                                                              const _errs315 =
                                                                                 errors;
                                                                               if (
-                                                                                data100 !== null
+                                                                                data102 !== null
                                                                               ) {
                                                                                 const err202 = {
                                                                                   instancePath:
@@ -49598,7 +49932,7 @@ function validate46(
                                                                                 errors++;
                                                                               }
                                                                               var _valid25 =
-                                                                                _errs311 === errors;
+                                                                                _errs315 === errors;
                                                                               valid36 =
                                                                                 valid36 || _valid25;
                                                                               if (!valid36) {
@@ -49628,87 +49962,203 @@ function validate46(
                                                                                 }
                                                                                 errors++;
                                                                               } else {
-                                                                                errors = _errs308;
+                                                                                errors = _errs312;
                                                                                 if (
                                                                                   vErrors !== null
                                                                                 ) {
-                                                                                  if (_errs308) {
+                                                                                  if (_errs312) {
                                                                                     vErrors.length =
-                                                                                      _errs308;
+                                                                                      _errs312;
                                                                                   } else {
                                                                                     vErrors = null;
                                                                                   }
                                                                                 }
                                                                               }
                                                                               var valid34 =
-                                                                                _errs307 === errors;
+                                                                                _errs311 === errors;
                                                                             } else {
                                                                               var valid34 = true;
                                                                             }
                                                                             if (valid34) {
                                                                               if (
-                                                                                data91.ownerInstanceId !==
+                                                                                data93.historyPurgedAt !==
                                                                                 undefined
                                                                               ) {
-                                                                                let data101 =
-                                                                                  data91.ownerInstanceId;
-                                                                                const _errs313 =
-                                                                                  errors;
-                                                                                const _errs314 =
-                                                                                  errors;
-                                                                                let valid37 = false;
-                                                                                const _errs315 =
+                                                                                let data103 =
+                                                                                  data93.historyPurgedAt;
+                                                                                const _errs317 =
                                                                                   errors;
                                                                                 if (
+                                                                                  !(
+                                                                                    typeof data103 ==
+                                                                                      'number' &&
+                                                                                    !(
+                                                                                      data103 % 1
+                                                                                    ) &&
+                                                                                    !isNaN(
+                                                                                      data103,
+                                                                                    ) &&
+                                                                                    isFinite(
+                                                                                      data103,
+                                                                                    )
+                                                                                  )
+                                                                                ) {
+                                                                                  const err204 = {
+                                                                                    instancePath:
+                                                                                      instancePath +
+                                                                                      '/items/' +
+                                                                                      i0 +
+                                                                                      '/childSession/historyPurgedAt',
+                                                                                    schemaPath:
+                                                                                      '#/properties/items/items/properties/childSession/anyOf/0/properties/historyPurgedAt/type',
+                                                                                    keyword: 'type',
+                                                                                    params: {
+                                                                                      type: 'integer',
+                                                                                    },
+                                                                                    message:
+                                                                                      'must be integer',
+                                                                                  };
+                                                                                  if (
+                                                                                    vErrors === null
+                                                                                  ) {
+                                                                                    vErrors = [
+                                                                                      err204,
+                                                                                    ];
+                                                                                  } else {
+                                                                                    vErrors.push(
+                                                                                      err204,
+                                                                                    );
+                                                                                  }
+                                                                                  errors++;
+                                                                                }
+                                                                                if (
                                                                                   errors ===
-                                                                                  _errs315
+                                                                                  _errs317
                                                                                 ) {
                                                                                   if (
-                                                                                    typeof data101 ===
-                                                                                    'string'
+                                                                                    typeof data103 ==
+                                                                                      'number' &&
+                                                                                    isFinite(
+                                                                                      data103,
+                                                                                    )
                                                                                   ) {
                                                                                     if (
-                                                                                      func2(
-                                                                                        data101,
-                                                                                      ) > 128
+                                                                                      data103 >
+                                                                                        9007199254740991 ||
+                                                                                      isNaN(data103)
                                                                                     ) {
-                                                                                      const err204 =
+                                                                                      const err205 =
                                                                                         {
                                                                                           instancePath:
                                                                                             instancePath +
                                                                                             '/items/' +
                                                                                             i0 +
-                                                                                            '/childSession/ownerInstanceId',
+                                                                                            '/childSession/historyPurgedAt',
                                                                                           schemaPath:
-                                                                                            '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/maxLength',
+                                                                                            '#/properties/items/items/properties/childSession/anyOf/0/properties/historyPurgedAt/maximum',
                                                                                           keyword:
-                                                                                            'maxLength',
+                                                                                            'maximum',
                                                                                           params: {
-                                                                                            limit: 128,
+                                                                                            comparison:
+                                                                                              '<=',
+                                                                                            limit: 9007199254740991,
                                                                                           },
                                                                                           message:
-                                                                                            'must NOT have more than 128 characters',
+                                                                                            'must be <= 9007199254740991',
                                                                                         };
                                                                                       if (
                                                                                         vErrors ===
                                                                                         null
                                                                                       ) {
                                                                                         vErrors = [
-                                                                                          err204,
+                                                                                          err205,
                                                                                         ];
                                                                                       } else {
                                                                                         vErrors.push(
-                                                                                          err204,
+                                                                                          err205,
                                                                                         );
                                                                                       }
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        func2(
-                                                                                          data101,
-                                                                                        ) < 1
+                                                                                        data103 <
+                                                                                          0 ||
+                                                                                        isNaN(
+                                                                                          data103,
+                                                                                        )
                                                                                       ) {
-                                                                                        const err205 =
+                                                                                        const err206 =
+                                                                                          {
+                                                                                            instancePath:
+                                                                                              instancePath +
+                                                                                              '/items/' +
+                                                                                              i0 +
+                                                                                              '/childSession/historyPurgedAt',
+                                                                                            schemaPath:
+                                                                                              '#/properties/items/items/properties/childSession/anyOf/0/properties/historyPurgedAt/minimum',
+                                                                                            keyword:
+                                                                                              'minimum',
+                                                                                            params:
+                                                                                              {
+                                                                                                comparison:
+                                                                                                  '>=',
+                                                                                                limit: 0,
+                                                                                              },
+                                                                                            message:
+                                                                                              'must be >= 0',
+                                                                                          };
+                                                                                        if (
+                                                                                          vErrors ===
+                                                                                          null
+                                                                                        ) {
+                                                                                          vErrors =
+                                                                                            [
+                                                                                              err206,
+                                                                                            ];
+                                                                                        } else {
+                                                                                          vErrors.push(
+                                                                                            err206,
+                                                                                          );
+                                                                                        }
+                                                                                        errors++;
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                                var valid34 =
+                                                                                  _errs317 ===
+                                                                                  errors;
+                                                                              } else {
+                                                                                var valid34 = true;
+                                                                              }
+                                                                              if (valid34) {
+                                                                                if (
+                                                                                  data93.ownerInstanceId !==
+                                                                                  undefined
+                                                                                ) {
+                                                                                  let data104 =
+                                                                                    data93.ownerInstanceId;
+                                                                                  const _errs319 =
+                                                                                    errors;
+                                                                                  const _errs320 =
+                                                                                    errors;
+                                                                                  let valid37 = false;
+                                                                                  const _errs321 =
+                                                                                    errors;
+                                                                                  if (
+                                                                                    errors ===
+                                                                                    _errs321
+                                                                                  ) {
+                                                                                    if (
+                                                                                      typeof data104 ===
+                                                                                      'string'
+                                                                                    ) {
+                                                                                      if (
+                                                                                        func2(
+                                                                                          data104,
+                                                                                        ) > 128
+                                                                                      ) {
+                                                                                        const err207 =
                                                                                           {
                                                                                             instancePath:
                                                                                               instancePath +
@@ -49716,15 +50166,15 @@ function validate46(
                                                                                               i0 +
                                                                                               '/childSession/ownerInstanceId',
                                                                                             schemaPath:
-                                                                                              '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/minLength',
+                                                                                              '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/maxLength',
                                                                                             keyword:
-                                                                                              'minLength',
+                                                                                              'maxLength',
                                                                                             params:
                                                                                               {
-                                                                                                limit: 1,
+                                                                                                limit: 128,
                                                                                               },
                                                                                             message:
-                                                                                              'must NOT have fewer than 1 characters',
+                                                                                              'must NOT have more than 128 characters',
                                                                                           };
                                                                                         if (
                                                                                           vErrors ===
@@ -49732,21 +50182,21 @@ function validate46(
                                                                                         ) {
                                                                                           vErrors =
                                                                                             [
-                                                                                              err205,
+                                                                                              err207,
                                                                                             ];
                                                                                         } else {
                                                                                           vErrors.push(
-                                                                                            err205,
+                                                                                            err207,
                                                                                           );
                                                                                         }
                                                                                         errors++;
                                                                                       } else {
                                                                                         if (
-                                                                                          !pattern4.test(
-                                                                                            data101,
-                                                                                          )
+                                                                                          func2(
+                                                                                            data104,
+                                                                                          ) < 1
                                                                                         ) {
-                                                                                          const err206 =
+                                                                                          const err208 =
                                                                                             {
                                                                                               instancePath:
                                                                                                 instancePath +
@@ -49754,18 +50204,15 @@ function validate46(
                                                                                                 i0 +
                                                                                                 '/childSession/ownerInstanceId',
                                                                                               schemaPath:
-                                                                                                '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/pattern',
+                                                                                                '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/minLength',
                                                                                               keyword:
-                                                                                                'pattern',
+                                                                                                'minLength',
                                                                                               params:
                                                                                                 {
-                                                                                                  pattern:
-                                                                                                    '^[A-Za-z0-9_-]+$',
+                                                                                                  limit: 1,
                                                                                                 },
                                                                                               message:
-                                                                                                'must match pattern "' +
-                                                                                                '^[A-Za-z0-9_-]+$' +
-                                                                                                '"',
+                                                                                                'must NOT have fewer than 1 characters',
                                                                                             };
                                                                                           if (
                                                                                             vErrors ===
@@ -49773,209 +50220,68 @@ function validate46(
                                                                                           ) {
                                                                                             vErrors =
                                                                                               [
-                                                                                                err206,
+                                                                                                err208,
                                                                                               ];
                                                                                           } else {
                                                                                             vErrors.push(
-                                                                                              err206,
+                                                                                              err208,
                                                                                             );
                                                                                           }
                                                                                           errors++;
-                                                                                        }
-                                                                                      }
-                                                                                    }
-                                                                                  } else {
-                                                                                    const err207 = {
-                                                                                      instancePath:
-                                                                                        instancePath +
-                                                                                        '/items/' +
-                                                                                        i0 +
-                                                                                        '/childSession/ownerInstanceId',
-                                                                                      schemaPath:
-                                                                                        '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/type',
-                                                                                      keyword:
-                                                                                        'type',
-                                                                                      params: {
-                                                                                        type: 'string',
-                                                                                      },
-                                                                                      message:
-                                                                                        'must be string',
-                                                                                    };
-                                                                                    if (
-                                                                                      vErrors ===
-                                                                                      null
-                                                                                    ) {
-                                                                                      vErrors = [
-                                                                                        err207,
-                                                                                      ];
-                                                                                    } else {
-                                                                                      vErrors.push(
-                                                                                        err207,
-                                                                                      );
-                                                                                    }
-                                                                                    errors++;
-                                                                                  }
-                                                                                }
-                                                                                var _valid26 =
-                                                                                  _errs315 ===
-                                                                                  errors;
-                                                                                valid37 =
-                                                                                  valid37 ||
-                                                                                  _valid26;
-                                                                                const _errs317 =
-                                                                                  errors;
-                                                                                if (
-                                                                                  data101 !== null
-                                                                                ) {
-                                                                                  const err208 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/items/' +
-                                                                                      i0 +
-                                                                                      '/childSession/ownerInstanceId',
-                                                                                    schemaPath:
-                                                                                      '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/1/type',
-                                                                                    keyword: 'type',
-                                                                                    params: {
-                                                                                      type: 'null',
-                                                                                    },
-                                                                                    message:
-                                                                                      'must be null',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err208,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err208,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
-                                                                                }
-                                                                                var _valid26 =
-                                                                                  _errs317 ===
-                                                                                  errors;
-                                                                                valid37 =
-                                                                                  valid37 ||
-                                                                                  _valid26;
-                                                                                if (!valid37) {
-                                                                                  const err209 = {
-                                                                                    instancePath:
-                                                                                      instancePath +
-                                                                                      '/items/' +
-                                                                                      i0 +
-                                                                                      '/childSession/ownerInstanceId',
-                                                                                    schemaPath:
-                                                                                      '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf',
-                                                                                    keyword:
-                                                                                      'anyOf',
-                                                                                    params: {},
-                                                                                    message:
-                                                                                      'must match a schema in anyOf',
-                                                                                  };
-                                                                                  if (
-                                                                                    vErrors === null
-                                                                                  ) {
-                                                                                    vErrors = [
-                                                                                      err209,
-                                                                                    ];
-                                                                                  } else {
-                                                                                    vErrors.push(
-                                                                                      err209,
-                                                                                    );
-                                                                                  }
-                                                                                  errors++;
-                                                                                } else {
-                                                                                  errors = _errs314;
-                                                                                  if (
-                                                                                    vErrors !== null
-                                                                                  ) {
-                                                                                    if (_errs314) {
-                                                                                      vErrors.length =
-                                                                                        _errs314;
-                                                                                    } else {
-                                                                                      vErrors =
-                                                                                        null;
-                                                                                    }
-                                                                                  }
-                                                                                }
-                                                                                var valid34 =
-                                                                                  _errs313 ===
-                                                                                  errors;
-                                                                              } else {
-                                                                                var valid34 = true;
-                                                                              }
-                                                                              if (valid34) {
-                                                                                if (
-                                                                                  data91.ownerGeneration !==
-                                                                                  undefined
-                                                                                ) {
-                                                                                  let data102 =
-                                                                                    data91.ownerGeneration;
-                                                                                  const _errs319 =
-                                                                                    errors;
-                                                                                  if (
-                                                                                    errors ===
-                                                                                    _errs319
-                                                                                  ) {
-                                                                                    if (
-                                                                                      typeof data102 ===
-                                                                                      'string'
-                                                                                    ) {
-                                                                                      if (
-                                                                                        !pattern18.test(
-                                                                                          data102,
-                                                                                        )
-                                                                                      ) {
-                                                                                        const err210 =
-                                                                                          {
-                                                                                            instancePath:
-                                                                                              instancePath +
-                                                                                              '/items/' +
-                                                                                              i0 +
-                                                                                              '/childSession/ownerGeneration',
-                                                                                            schemaPath:
-                                                                                              '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerGeneration/pattern',
-                                                                                            keyword:
-                                                                                              'pattern',
-                                                                                            params:
-                                                                                              {
-                                                                                                pattern:
-                                                                                                  '^(0|[1-9][0-9]*)$',
-                                                                                              },
-                                                                                            message:
-                                                                                              'must match pattern "' +
-                                                                                              '^(0|[1-9][0-9]*)$' +
-                                                                                              '"',
-                                                                                          };
-                                                                                        if (
-                                                                                          vErrors ===
-                                                                                          null
-                                                                                        ) {
-                                                                                          vErrors =
-                                                                                            [
-                                                                                              err210,
-                                                                                            ];
                                                                                         } else {
-                                                                                          vErrors.push(
-                                                                                            err210,
-                                                                                          );
+                                                                                          if (
+                                                                                            !pattern4.test(
+                                                                                              data104,
+                                                                                            )
+                                                                                          ) {
+                                                                                            const err209 =
+                                                                                              {
+                                                                                                instancePath:
+                                                                                                  instancePath +
+                                                                                                  '/items/' +
+                                                                                                  i0 +
+                                                                                                  '/childSession/ownerInstanceId',
+                                                                                                schemaPath:
+                                                                                                  '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/pattern',
+                                                                                                keyword:
+                                                                                                  'pattern',
+                                                                                                params:
+                                                                                                  {
+                                                                                                    pattern:
+                                                                                                      '^[A-Za-z0-9_-]+$',
+                                                                                                  },
+                                                                                                message:
+                                                                                                  'must match pattern "' +
+                                                                                                  '^[A-Za-z0-9_-]+$' +
+                                                                                                  '"',
+                                                                                              };
+                                                                                            if (
+                                                                                              vErrors ===
+                                                                                              null
+                                                                                            ) {
+                                                                                              vErrors =
+                                                                                                [
+                                                                                                  err209,
+                                                                                                ];
+                                                                                            } else {
+                                                                                              vErrors.push(
+                                                                                                err209,
+                                                                                              );
+                                                                                            }
+                                                                                            errors++;
+                                                                                          }
                                                                                         }
-                                                                                        errors++;
                                                                                       }
                                                                                     } else {
-                                                                                      const err211 =
+                                                                                      const err210 =
                                                                                         {
                                                                                           instancePath:
                                                                                             instancePath +
                                                                                             '/items/' +
                                                                                             i0 +
-                                                                                            '/childSession/ownerGeneration',
+                                                                                            '/childSession/ownerInstanceId',
                                                                                           schemaPath:
-                                                                                            '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerGeneration/type',
+                                                                                            '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/0/type',
                                                                                           keyword:
                                                                                             'type',
                                                                                           params: {
@@ -49989,14 +50295,107 @@ function validate46(
                                                                                         null
                                                                                       ) {
                                                                                         vErrors = [
-                                                                                          err211,
+                                                                                          err210,
                                                                                         ];
                                                                                       } else {
                                                                                         vErrors.push(
-                                                                                          err211,
+                                                                                          err210,
                                                                                         );
                                                                                       }
                                                                                       errors++;
+                                                                                    }
+                                                                                  }
+                                                                                  var _valid26 =
+                                                                                    _errs321 ===
+                                                                                    errors;
+                                                                                  valid37 =
+                                                                                    valid37 ||
+                                                                                    _valid26;
+                                                                                  const _errs323 =
+                                                                                    errors;
+                                                                                  if (
+                                                                                    data104 !== null
+                                                                                  ) {
+                                                                                    const err211 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/items/' +
+                                                                                        i0 +
+                                                                                        '/childSession/ownerInstanceId',
+                                                                                      schemaPath:
+                                                                                        '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf/1/type',
+                                                                                      keyword:
+                                                                                        'type',
+                                                                                      params: {
+                                                                                        type: 'null',
+                                                                                      },
+                                                                                      message:
+                                                                                        'must be null',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err211,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err211,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  }
+                                                                                  var _valid26 =
+                                                                                    _errs323 ===
+                                                                                    errors;
+                                                                                  valid37 =
+                                                                                    valid37 ||
+                                                                                    _valid26;
+                                                                                  if (!valid37) {
+                                                                                    const err212 = {
+                                                                                      instancePath:
+                                                                                        instancePath +
+                                                                                        '/items/' +
+                                                                                        i0 +
+                                                                                        '/childSession/ownerInstanceId',
+                                                                                      schemaPath:
+                                                                                        '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerInstanceId/anyOf',
+                                                                                      keyword:
+                                                                                        'anyOf',
+                                                                                      params: {},
+                                                                                      message:
+                                                                                        'must match a schema in anyOf',
+                                                                                    };
+                                                                                    if (
+                                                                                      vErrors ===
+                                                                                      null
+                                                                                    ) {
+                                                                                      vErrors = [
+                                                                                        err212,
+                                                                                      ];
+                                                                                    } else {
+                                                                                      vErrors.push(
+                                                                                        err212,
+                                                                                      );
+                                                                                    }
+                                                                                    errors++;
+                                                                                  } else {
+                                                                                    errors =
+                                                                                      _errs320;
+                                                                                    if (
+                                                                                      vErrors !==
+                                                                                      null
+                                                                                    ) {
+                                                                                      if (
+                                                                                        _errs320
+                                                                                      ) {
+                                                                                        vErrors.length =
+                                                                                          _errs320;
+                                                                                      } else {
+                                                                                        vErrors =
+                                                                                          null;
+                                                                                      }
                                                                                     }
                                                                                   }
                                                                                   var valid34 =
@@ -50004,6 +50403,106 @@ function validate46(
                                                                                     errors;
                                                                                 } else {
                                                                                   var valid34 = true;
+                                                                                }
+                                                                                if (valid34) {
+                                                                                  if (
+                                                                                    data93.ownerGeneration !==
+                                                                                    undefined
+                                                                                  ) {
+                                                                                    let data105 =
+                                                                                      data93.ownerGeneration;
+                                                                                    const _errs325 =
+                                                                                      errors;
+                                                                                    if (
+                                                                                      errors ===
+                                                                                      _errs325
+                                                                                    ) {
+                                                                                      if (
+                                                                                        typeof data105 ===
+                                                                                        'string'
+                                                                                      ) {
+                                                                                        if (
+                                                                                          !pattern18.test(
+                                                                                            data105,
+                                                                                          )
+                                                                                        ) {
+                                                                                          const err213 =
+                                                                                            {
+                                                                                              instancePath:
+                                                                                                instancePath +
+                                                                                                '/items/' +
+                                                                                                i0 +
+                                                                                                '/childSession/ownerGeneration',
+                                                                                              schemaPath:
+                                                                                                '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerGeneration/pattern',
+                                                                                              keyword:
+                                                                                                'pattern',
+                                                                                              params:
+                                                                                                {
+                                                                                                  pattern:
+                                                                                                    '^(0|[1-9][0-9]*)$',
+                                                                                                },
+                                                                                              message:
+                                                                                                'must match pattern "' +
+                                                                                                '^(0|[1-9][0-9]*)$' +
+                                                                                                '"',
+                                                                                            };
+                                                                                          if (
+                                                                                            vErrors ===
+                                                                                            null
+                                                                                          ) {
+                                                                                            vErrors =
+                                                                                              [
+                                                                                                err213,
+                                                                                              ];
+                                                                                          } else {
+                                                                                            vErrors.push(
+                                                                                              err213,
+                                                                                            );
+                                                                                          }
+                                                                                          errors++;
+                                                                                        }
+                                                                                      } else {
+                                                                                        const err214 =
+                                                                                          {
+                                                                                            instancePath:
+                                                                                              instancePath +
+                                                                                              '/items/' +
+                                                                                              i0 +
+                                                                                              '/childSession/ownerGeneration',
+                                                                                            schemaPath:
+                                                                                              '#/properties/items/items/properties/childSession/anyOf/0/properties/ownerGeneration/type',
+                                                                                            keyword:
+                                                                                              'type',
+                                                                                            params:
+                                                                                              {
+                                                                                                type: 'string',
+                                                                                              },
+                                                                                            message:
+                                                                                              'must be string',
+                                                                                          };
+                                                                                        if (
+                                                                                          vErrors ===
+                                                                                          null
+                                                                                        ) {
+                                                                                          vErrors =
+                                                                                            [
+                                                                                              err214,
+                                                                                            ];
+                                                                                        } else {
+                                                                                          vErrors.push(
+                                                                                            err214,
+                                                                                          );
+                                                                                        }
+                                                                                        errors++;
+                                                                                      }
+                                                                                    }
+                                                                                    var valid34 =
+                                                                                      _errs325 ===
+                                                                                      errors;
+                                                                                  } else {
+                                                                                    var valid34 = true;
+                                                                                  }
                                                                                 }
                                                                               }
                                                                             }
@@ -50018,7 +50517,7 @@ function validate46(
                                                           }
                                                         }
                                                       } else {
-                                                        const err212 = {
+                                                        const err215 = {
                                                           instancePath:
                                                             instancePath +
                                                             '/items/' +
@@ -50031,18 +50530,18 @@ function validate46(
                                                           message: 'must be object',
                                                         };
                                                         if (vErrors === null) {
-                                                          vErrors = [err212];
+                                                          vErrors = [err215];
                                                         } else {
-                                                          vErrors.push(err212);
+                                                          vErrors.push(err215);
                                                         }
                                                         errors++;
                                                       }
                                                     }
-                                                    var _valid23 = _errs284 === errors;
+                                                    var _valid23 = _errs288 === errors;
                                                     valid33 = valid33 || _valid23;
-                                                    const _errs321 = errors;
-                                                    if (data91 !== null) {
-                                                      const err213 = {
+                                                    const _errs327 = errors;
+                                                    if (data93 !== null) {
+                                                      const err216 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/items/' +
@@ -50055,16 +50554,16 @@ function validate46(
                                                         message: 'must be null',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err213];
+                                                        vErrors = [err216];
                                                       } else {
-                                                        vErrors.push(err213);
+                                                        vErrors.push(err216);
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid23 = _errs321 === errors;
+                                                    var _valid23 = _errs327 === errors;
                                                     valid33 = valid33 || _valid23;
                                                     if (!valid33) {
-                                                      const err214 = {
+                                                      const err217 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/items/' +
@@ -50077,24 +50576,24 @@ function validate46(
                                                         message: 'must match a schema in anyOf',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err214];
+                                                        vErrors = [err217];
                                                       } else {
-                                                        vErrors.push(err214);
+                                                        vErrors.push(err217);
                                                       }
                                                       errors++;
                                                       validate46.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs283;
+                                                      errors = _errs287;
                                                       if (vErrors !== null) {
-                                                        if (_errs283) {
-                                                          vErrors.length = _errs283;
+                                                        if (_errs287) {
+                                                          vErrors.length = _errs287;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid3 = _errs282 === errors;
+                                                    var valid3 = _errs286 === errors;
                                                   } else {
                                                     var valid3 = true;
                                                   }
@@ -69895,6 +70394,67 @@ function validate61(
                               } else {
                                 var valid1 = true;
                               }
+                              if (valid1) {
+                                if (data0.historyPurgedAt !== undefined) {
+                                  let data10 = data0.historyPurgedAt;
+                                  const _errs30 = errors;
+                                  if (
+                                    !(
+                                      typeof data10 == 'number' &&
+                                      !(data10 % 1) &&
+                                      !isNaN(data10) &&
+                                      isFinite(data10)
+                                    )
+                                  ) {
+                                    validate61.errors = [
+                                      {
+                                        instancePath: instancePath + '/' + i0 + '/historyPurgedAt',
+                                        schemaPath: '#/items/properties/historyPurgedAt/type',
+                                        keyword: 'type',
+                                        params: { type: 'integer' },
+                                        message: 'must be integer',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                  if (errors === _errs30) {
+                                    if (typeof data10 == 'number' && isFinite(data10)) {
+                                      if (data10 > 9007199254740991 || isNaN(data10)) {
+                                        validate61.errors = [
+                                          {
+                                            instancePath:
+                                              instancePath + '/' + i0 + '/historyPurgedAt',
+                                            schemaPath:
+                                              '#/items/properties/historyPurgedAt/maximum',
+                                            keyword: 'maximum',
+                                            params: { comparison: '<=', limit: 9007199254740991 },
+                                            message: 'must be <= 9007199254740991',
+                                          },
+                                        ];
+                                        return false;
+                                      } else {
+                                        if (data10 < 0 || isNaN(data10)) {
+                                          validate61.errors = [
+                                            {
+                                              instancePath:
+                                                instancePath + '/' + i0 + '/historyPurgedAt',
+                                              schemaPath:
+                                                '#/items/properties/historyPurgedAt/minimum',
+                                              keyword: 'minimum',
+                                              params: { comparison: '>=', limit: 0 },
+                                              message: 'must be >= 0',
+                                            },
+                                          ];
+                                          return false;
+                                        }
+                                      }
+                                    }
+                                  }
+                                  var valid1 = _errs30 === errors;
+                                } else {
+                                  var valid1 = true;
+                                }
+                              }
                             }
                           }
                         }
@@ -69971,6 +70531,7 @@ var schema66 = {
         },
         nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
         deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
       },
       required: [
         'id',
@@ -70725,6 +71286,68 @@ function validate62(
                                 } else {
                                   var valid1 = true;
                                 }
+                                if (valid1) {
+                                  if (data0.historyPurgedAt !== undefined) {
+                                    let data10 = data0.historyPurgedAt;
+                                    const _errs31 = errors;
+                                    if (
+                                      !(
+                                        typeof data10 == 'number' &&
+                                        !(data10 % 1) &&
+                                        !isNaN(data10) &&
+                                        isFinite(data10)
+                                      )
+                                    ) {
+                                      validate62.errors = [
+                                        {
+                                          instancePath: instancePath + '/session/historyPurgedAt',
+                                          schemaPath:
+                                            '#/properties/session/properties/historyPurgedAt/type',
+                                          keyword: 'type',
+                                          params: { type: 'integer' },
+                                          message: 'must be integer',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    if (errors === _errs31) {
+                                      if (typeof data10 == 'number' && isFinite(data10)) {
+                                        if (data10 > 9007199254740991 || isNaN(data10)) {
+                                          validate62.errors = [
+                                            {
+                                              instancePath:
+                                                instancePath + '/session/historyPurgedAt',
+                                              schemaPath:
+                                                '#/properties/session/properties/historyPurgedAt/maximum',
+                                              keyword: 'maximum',
+                                              params: { comparison: '<=', limit: 9007199254740991 },
+                                              message: 'must be <= 9007199254740991',
+                                            },
+                                          ];
+                                          return false;
+                                        } else {
+                                          if (data10 < 0 || isNaN(data10)) {
+                                            validate62.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/session/historyPurgedAt',
+                                                schemaPath:
+                                                  '#/properties/session/properties/historyPurgedAt/minimum',
+                                                keyword: 'minimum',
+                                                params: { comparison: '>=', limit: 0 },
+                                                message: 'must be >= 0',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                      }
+                                    }
+                                    var valid1 = _errs31 === errors;
+                                  } else {
+                                    var valid1 = true;
+                                  }
+                                }
                               }
                             }
                           }
@@ -70753,28 +71376,28 @@ function validate62(
         }
         if (valid0) {
           if (data.runs !== undefined) {
-            let data10 = data.runs;
-            const _errs31 = errors;
-            if (errors === _errs31) {
-              if (Array.isArray(data10)) {
+            let data11 = data.runs;
+            const _errs33 = errors;
+            if (errors === _errs33) {
+              if (Array.isArray(data11)) {
                 var valid4 = true;
-                const len0 = data10.length;
+                const len0 = data11.length;
                 for (let i0 = 0; i0 < len0; i0++) {
-                  let data11 = data10[i0];
-                  const _errs33 = errors;
-                  if (errors === _errs33) {
-                    if (data11 && typeof data11 == 'object' && !Array.isArray(data11)) {
+                  let data12 = data11[i0];
+                  const _errs35 = errors;
+                  if (errors === _errs35) {
+                    if (data12 && typeof data12 == 'object' && !Array.isArray(data12)) {
                       let missing2;
                       if (
-                        (data11.id === undefined && (missing2 = 'id')) ||
-                        (data11.sessionId === undefined && (missing2 = 'sessionId')) ||
-                        (data11.originCommandId === undefined && (missing2 = 'originCommandId')) ||
-                        (data11.originStoreId === undefined && (missing2 = 'originStoreId')) ||
-                        (data11.status === undefined && (missing2 = 'status')) ||
-                        (data11.isActive === undefined && (missing2 = 'isActive')) ||
-                        (data11.createdAt === undefined && (missing2 = 'createdAt')) ||
-                        (data11.finishedAt === undefined && (missing2 = 'finishedAt')) ||
-                        (data11.reason === undefined && (missing2 = 'reason'))
+                        (data12.id === undefined && (missing2 = 'id')) ||
+                        (data12.sessionId === undefined && (missing2 = 'sessionId')) ||
+                        (data12.originCommandId === undefined && (missing2 = 'originCommandId')) ||
+                        (data12.originStoreId === undefined && (missing2 = 'originStoreId')) ||
+                        (data12.status === undefined && (missing2 = 'status')) ||
+                        (data12.isActive === undefined && (missing2 = 'isActive')) ||
+                        (data12.createdAt === undefined && (missing2 = 'createdAt')) ||
+                        (data12.finishedAt === undefined && (missing2 = 'finishedAt')) ||
+                        (data12.reason === undefined && (missing2 = 'reason'))
                       ) {
                         validate62.errors = [
                           {
@@ -70787,12 +71410,12 @@ function validate62(
                         ];
                         return false;
                       } else {
-                        if (data11.id !== undefined) {
-                          let data12 = data11.id;
-                          const _errs36 = errors;
-                          if (errors === _errs36) {
-                            if (typeof data12 === 'string') {
-                              if (func2(data12) > 128) {
+                        if (data12.id !== undefined) {
+                          let data13 = data12.id;
+                          const _errs38 = errors;
+                          if (errors === _errs38) {
+                            if (typeof data13 === 'string') {
+                              if (func2(data13) > 128) {
                                 validate62.errors = [
                                   {
                                     instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -70804,7 +71427,7 @@ function validate62(
                                 ];
                                 return false;
                               } else {
-                                if (func2(data12) < 1) {
+                                if (func2(data13) < 1) {
                                   validate62.errors = [
                                     {
                                       instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -70816,7 +71439,7 @@ function validate62(
                                   ];
                                   return false;
                                 } else {
-                                  if (!pattern4.test(data12)) {
+                                  if (!pattern4.test(data13)) {
                                     validate62.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -70843,17 +71466,17 @@ function validate62(
                               return false;
                             }
                           }
-                          var valid5 = _errs36 === errors;
+                          var valid5 = _errs38 === errors;
                         } else {
                           var valid5 = true;
                         }
                         if (valid5) {
-                          if (data11.sessionId !== undefined) {
-                            let data13 = data11.sessionId;
-                            const _errs38 = errors;
-                            if (errors === _errs38) {
-                              if (typeof data13 === 'string') {
-                                if (func2(data13) > 128) {
+                          if (data12.sessionId !== undefined) {
+                            let data14 = data12.sessionId;
+                            const _errs40 = errors;
+                            if (errors === _errs40) {
+                              if (typeof data14 === 'string') {
+                                if (func2(data14) > 128) {
                                   validate62.errors = [
                                     {
                                       instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -70866,7 +71489,7 @@ function validate62(
                                   ];
                                   return false;
                                 } else {
-                                  if (func2(data13) < 1) {
+                                  if (func2(data14) < 1) {
                                     validate62.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -70879,7 +71502,7 @@ function validate62(
                                     ];
                                     return false;
                                   } else {
-                                    if (!pattern4.test(data13)) {
+                                    if (!pattern4.test(data14)) {
                                       validate62.errors = [
                                         {
                                           instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -70908,17 +71531,17 @@ function validate62(
                                 return false;
                               }
                             }
-                            var valid5 = _errs38 === errors;
+                            var valid5 = _errs40 === errors;
                           } else {
                             var valid5 = true;
                           }
                           if (valid5) {
-                            if (data11.originCommandId !== undefined) {
-                              let data14 = data11.originCommandId;
-                              const _errs40 = errors;
-                              if (errors === _errs40) {
-                                if (typeof data14 === 'string') {
-                                  if (func2(data14) > 128) {
+                            if (data12.originCommandId !== undefined) {
+                              let data15 = data12.originCommandId;
+                              const _errs42 = errors;
+                              if (errors === _errs42) {
+                                if (typeof data15 === 'string') {
+                                  if (func2(data15) > 128) {
                                     validate62.errors = [
                                       {
                                         instancePath:
@@ -70932,7 +71555,7 @@ function validate62(
                                     ];
                                     return false;
                                   } else {
-                                    if (func2(data14) < 1) {
+                                    if (func2(data15) < 1) {
                                       validate62.errors = [
                                         {
                                           instancePath:
@@ -70946,7 +71569,7 @@ function validate62(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data14)) {
+                                      if (!pattern4.test(data15)) {
                                         validate62.errors = [
                                           {
                                             instancePath:
@@ -70978,17 +71601,17 @@ function validate62(
                                   return false;
                                 }
                               }
-                              var valid5 = _errs40 === errors;
+                              var valid5 = _errs42 === errors;
                             } else {
                               var valid5 = true;
                             }
                             if (valid5) {
-                              if (data11.originStoreId !== undefined) {
-                                let data15 = data11.originStoreId;
-                                const _errs42 = errors;
-                                if (errors === _errs42) {
-                                  if (typeof data15 === 'string') {
-                                    if (func2(data15) > 128) {
+                              if (data12.originStoreId !== undefined) {
+                                let data16 = data12.originStoreId;
+                                const _errs44 = errors;
+                                if (errors === _errs44) {
+                                  if (typeof data16 === 'string') {
+                                    if (func2(data16) > 128) {
                                       validate62.errors = [
                                         {
                                           instancePath:
@@ -71002,7 +71625,7 @@ function validate62(
                                       ];
                                       return false;
                                     } else {
-                                      if (func2(data15) < 1) {
+                                      if (func2(data16) < 1) {
                                         validate62.errors = [
                                           {
                                             instancePath:
@@ -71016,7 +71639,7 @@ function validate62(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern4.test(data15)) {
+                                        if (!pattern4.test(data16)) {
                                           validate62.errors = [
                                             {
                                               instancePath:
@@ -71048,15 +71671,15 @@ function validate62(
                                     return false;
                                   }
                                 }
-                                var valid5 = _errs42 === errors;
+                                var valid5 = _errs44 === errors;
                               } else {
                                 var valid5 = true;
                               }
                               if (valid5) {
-                                if (data11.status !== undefined) {
-                                  let data16 = data11.status;
-                                  const _errs44 = errors;
-                                  if (typeof data16 !== 'string') {
+                                if (data12.status !== undefined) {
+                                  let data17 = data12.status;
+                                  const _errs46 = errors;
+                                  if (typeof data17 !== 'string') {
                                     validate62.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/status',
@@ -71071,14 +71694,14 @@ function validate62(
                                   }
                                   if (
                                     !(
-                                      data16 === 'running' ||
-                                      data16 === 'waiting_interaction' ||
-                                      data16 === 'waiting_execution' ||
-                                      data16 === 'cancelling' ||
-                                      data16 === 'completed' ||
-                                      data16 === 'failed' ||
-                                      data16 === 'cancelled' ||
-                                      data16 === 'interrupted'
+                                      data17 === 'running' ||
+                                      data17 === 'waiting_interaction' ||
+                                      data17 === 'waiting_execution' ||
+                                      data17 === 'cancelling' ||
+                                      data17 === 'completed' ||
+                                      data17 === 'failed' ||
+                                      data17 === 'cancelled' ||
+                                      data17 === 'interrupted'
                                     )
                                   ) {
                                     validate62.errors = [
@@ -71096,14 +71719,14 @@ function validate62(
                                     ];
                                     return false;
                                   }
-                                  var valid5 = _errs44 === errors;
+                                  var valid5 = _errs46 === errors;
                                 } else {
                                   var valid5 = true;
                                 }
                                 if (valid5) {
-                                  if (data11.isActive !== undefined) {
-                                    const _errs46 = errors;
-                                    if (typeof data11.isActive !== 'boolean') {
+                                  if (data12.isActive !== undefined) {
+                                    const _errs48 = errors;
+                                    if (typeof data12.isActive !== 'boolean') {
                                       validate62.errors = [
                                         {
                                           instancePath: instancePath + '/runs/' + i0 + '/isActive',
@@ -71116,17 +71739,17 @@ function validate62(
                                       ];
                                       return false;
                                     }
-                                    var valid5 = _errs46 === errors;
+                                    var valid5 = _errs48 === errors;
                                   } else {
                                     var valid5 = true;
                                   }
                                   if (valid5) {
-                                    if (data11.waitingForResults !== undefined) {
-                                      let data18 = data11.waitingForResults;
-                                      const _errs48 = errors;
-                                      if (errors === _errs48) {
-                                        if (Array.isArray(data18)) {
-                                          if (data18.length > 64) {
+                                    if (data12.waitingForResults !== undefined) {
+                                      let data19 = data12.waitingForResults;
+                                      const _errs50 = errors;
+                                      if (errors === _errs50) {
+                                        if (Array.isArray(data19)) {
+                                          if (data19.length > 64) {
                                             validate62.errors = [
                                               {
                                                 instancePath:
@@ -71144,13 +71767,13 @@ function validate62(
                                             return false;
                                           } else {
                                             var valid6 = true;
-                                            const len1 = data18.length;
+                                            const len1 = data19.length;
                                             for (let i1 = 0; i1 < len1; i1++) {
-                                              let data19 = data18[i1];
-                                              const _errs50 = errors;
-                                              if (errors === _errs50) {
-                                                if (typeof data19 === 'string') {
-                                                  if (func2(data19) > 128) {
+                                              let data20 = data19[i1];
+                                              const _errs52 = errors;
+                                              if (errors === _errs52) {
+                                                if (typeof data20 === 'string') {
+                                                  if (func2(data20) > 128) {
                                                     validate62.errors = [
                                                       {
                                                         instancePath:
@@ -71169,7 +71792,7 @@ function validate62(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func2(data19) < 1) {
+                                                    if (func2(data20) < 1) {
                                                       validate62.errors = [
                                                         {
                                                           instancePath:
@@ -71188,7 +71811,7 @@ function validate62(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data19)) {
+                                                      if (!pattern4.test(data20)) {
                                                         validate62.errors = [
                                                           {
                                                             instancePath:
@@ -71230,7 +71853,7 @@ function validate62(
                                                   return false;
                                                 }
                                               }
-                                              var valid6 = _errs50 === errors;
+                                              var valid6 = _errs52 === errors;
                                               if (!valid6) {
                                                 break;
                                               }
@@ -71251,15 +71874,15 @@ function validate62(
                                           return false;
                                         }
                                       }
-                                      var valid5 = _errs48 === errors;
+                                      var valid5 = _errs50 === errors;
                                     } else {
                                       var valid5 = true;
                                     }
                                     if (valid5) {
-                                      if (data11.createdAt !== undefined) {
-                                        let data20 = data11.createdAt;
-                                        const _errs52 = errors;
-                                        if (!(typeof data20 == 'number' && isFinite(data20))) {
+                                      if (data12.createdAt !== undefined) {
+                                        let data21 = data12.createdAt;
+                                        const _errs54 = errors;
+                                        if (!(typeof data21 == 'number' && isFinite(data21))) {
                                           validate62.errors = [
                                             {
                                               instancePath:
@@ -71273,18 +71896,18 @@ function validate62(
                                           ];
                                           return false;
                                         }
-                                        var valid5 = _errs52 === errors;
+                                        var valid5 = _errs54 === errors;
                                       } else {
                                         var valid5 = true;
                                       }
                                       if (valid5) {
-                                        if (data11.finishedAt !== undefined) {
-                                          let data21 = data11.finishedAt;
-                                          const _errs54 = errors;
-                                          const _errs55 = errors;
-                                          let valid7 = false;
+                                        if (data12.finishedAt !== undefined) {
+                                          let data22 = data12.finishedAt;
                                           const _errs56 = errors;
-                                          if (!(typeof data21 == 'number' && isFinite(data21))) {
+                                          const _errs57 = errors;
+                                          let valid7 = false;
+                                          const _errs58 = errors;
+                                          if (!(typeof data22 == 'number' && isFinite(data22))) {
                                             const err9 = {
                                               instancePath:
                                                 instancePath + '/runs/' + i0 + '/finishedAt',
@@ -71301,10 +71924,10 @@ function validate62(
                                             }
                                             errors++;
                                           }
-                                          var _valid2 = _errs56 === errors;
+                                          var _valid2 = _errs58 === errors;
                                           valid7 = valid7 || _valid2;
-                                          const _errs58 = errors;
-                                          if (data21 !== null) {
+                                          const _errs60 = errors;
+                                          if (data22 !== null) {
                                             const err10 = {
                                               instancePath:
                                                 instancePath + '/runs/' + i0 + '/finishedAt',
@@ -71321,7 +71944,7 @@ function validate62(
                                             }
                                             errors++;
                                           }
-                                          var _valid2 = _errs58 === errors;
+                                          var _valid2 = _errs60 === errors;
                                           valid7 = valid7 || _valid2;
                                           if (!valid7) {
                                             const err11 = {
@@ -71342,27 +71965,27 @@ function validate62(
                                             validate62.errors = vErrors;
                                             return false;
                                           } else {
-                                            errors = _errs55;
+                                            errors = _errs57;
                                             if (vErrors !== null) {
-                                              if (_errs55) {
-                                                vErrors.length = _errs55;
+                                              if (_errs57) {
+                                                vErrors.length = _errs57;
                                               } else {
                                                 vErrors = null;
                                               }
                                             }
                                           }
-                                          var valid5 = _errs54 === errors;
+                                          var valid5 = _errs56 === errors;
                                         } else {
                                           var valid5 = true;
                                         }
                                         if (valid5) {
-                                          if (data11.reason !== undefined) {
-                                            let data22 = data11.reason;
-                                            const _errs60 = errors;
-                                            const _errs61 = errors;
-                                            let valid8 = false;
+                                          if (data12.reason !== undefined) {
+                                            let data23 = data12.reason;
                                             const _errs62 = errors;
-                                            if (typeof data22 !== 'string') {
+                                            const _errs63 = errors;
+                                            let valid8 = false;
+                                            const _errs64 = errors;
+                                            if (typeof data23 !== 'string') {
                                               const err12 = {
                                                 instancePath:
                                                   instancePath + '/runs/' + i0 + '/reason',
@@ -71379,10 +72002,10 @@ function validate62(
                                               }
                                               errors++;
                                             }
-                                            var _valid3 = _errs62 === errors;
+                                            var _valid3 = _errs64 === errors;
                                             valid8 = valid8 || _valid3;
-                                            const _errs64 = errors;
-                                            if (data22 !== null) {
+                                            const _errs66 = errors;
+                                            if (data23 !== null) {
                                               const err13 = {
                                                 instancePath:
                                                   instancePath + '/runs/' + i0 + '/reason',
@@ -71399,7 +72022,7 @@ function validate62(
                                               }
                                               errors++;
                                             }
-                                            var _valid3 = _errs64 === errors;
+                                            var _valid3 = _errs66 === errors;
                                             valid8 = valid8 || _valid3;
                                             if (!valid8) {
                                               const err14 = {
@@ -71420,16 +72043,16 @@ function validate62(
                                               validate62.errors = vErrors;
                                               return false;
                                             } else {
-                                              errors = _errs61;
+                                              errors = _errs63;
                                               if (vErrors !== null) {
-                                                if (_errs61) {
-                                                  vErrors.length = _errs61;
+                                                if (_errs63) {
+                                                  vErrors.length = _errs63;
                                                 } else {
                                                   vErrors = null;
                                                 }
                                               }
                                             }
-                                            var valid5 = _errs60 === errors;
+                                            var valid5 = _errs62 === errors;
                                           } else {
                                             var valid5 = true;
                                           }
@@ -71456,7 +72079,7 @@ function validate62(
                       return false;
                     }
                   }
-                  var valid4 = _errs33 === errors;
+                  var valid4 = _errs35 === errors;
                   if (!valid4) {
                     break;
                   }
@@ -71474,35 +72097,35 @@ function validate62(
                 return false;
               }
             }
-            var valid0 = _errs31 === errors;
+            var valid0 = _errs33 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
             if (data.executions !== undefined) {
-              let data23 = data.executions;
-              const _errs66 = errors;
-              if (errors === _errs66) {
-                if (Array.isArray(data23)) {
+              let data24 = data.executions;
+              const _errs68 = errors;
+              if (errors === _errs68) {
+                if (Array.isArray(data24)) {
                   var valid9 = true;
-                  const len2 = data23.length;
+                  const len2 = data24.length;
                   for (let i2 = 0; i2 < len2; i2++) {
-                    let data24 = data23[i2];
-                    const _errs68 = errors;
-                    if (errors === _errs68) {
-                      if (data24 && typeof data24 == 'object' && !Array.isArray(data24)) {
+                    let data25 = data24[i2];
+                    const _errs70 = errors;
+                    if (errors === _errs70) {
+                      if (data25 && typeof data25 == 'object' && !Array.isArray(data25)) {
                         let missing3;
                         if (
-                          (data24.id === undefined && (missing3 = 'id')) ||
-                          (data24.sessionId === undefined && (missing3 = 'sessionId')) ||
-                          (data24.runId === undefined && (missing3 = 'runId')) ||
-                          (data24.kind === undefined && (missing3 = 'kind')) ||
-                          (data24.definitionId === undefined && (missing3 = 'definitionId')) ||
-                          (data24.definitionVersion === undefined &&
+                          (data25.id === undefined && (missing3 = 'id')) ||
+                          (data25.sessionId === undefined && (missing3 = 'sessionId')) ||
+                          (data25.runId === undefined && (missing3 = 'runId')) ||
+                          (data25.kind === undefined && (missing3 = 'kind')) ||
+                          (data25.definitionId === undefined && (missing3 = 'definitionId')) ||
+                          (data25.definitionVersion === undefined &&
                             (missing3 = 'definitionVersion')) ||
-                          (data24.status === undefined && (missing3 = 'status')) ||
-                          (data24.resultRevision === undefined && (missing3 = 'resultRevision')) ||
-                          (data24.cancelRequestedAt === undefined &&
+                          (data25.status === undefined && (missing3 = 'status')) ||
+                          (data25.resultRevision === undefined && (missing3 = 'resultRevision')) ||
+                          (data25.cancelRequestedAt === undefined &&
                             (missing3 = 'cancelRequestedAt'))
                         ) {
                           validate62.errors = [
@@ -71516,12 +72139,12 @@ function validate62(
                           ];
                           return false;
                         } else {
-                          if (data24.id !== undefined) {
-                            let data25 = data24.id;
-                            const _errs71 = errors;
-                            if (errors === _errs71) {
-                              if (typeof data25 === 'string') {
-                                if (func2(data25) > 128) {
+                          if (data25.id !== undefined) {
+                            let data26 = data25.id;
+                            const _errs73 = errors;
+                            if (errors === _errs73) {
+                              if (typeof data26 === 'string') {
+                                if (func2(data26) > 128) {
                                   validate62.errors = [
                                     {
                                       instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -71534,7 +72157,7 @@ function validate62(
                                   ];
                                   return false;
                                 } else {
-                                  if (func2(data25) < 1) {
+                                  if (func2(data26) < 1) {
                                     validate62.errors = [
                                       {
                                         instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -71547,7 +72170,7 @@ function validate62(
                                     ];
                                     return false;
                                   } else {
-                                    if (!pattern4.test(data25)) {
+                                    if (!pattern4.test(data26)) {
                                       validate62.errors = [
                                         {
                                           instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -71576,17 +72199,17 @@ function validate62(
                                 return false;
                               }
                             }
-                            var valid10 = _errs71 === errors;
+                            var valid10 = _errs73 === errors;
                           } else {
                             var valid10 = true;
                           }
                           if (valid10) {
-                            if (data24.originStoreId !== undefined) {
-                              let data26 = data24.originStoreId;
-                              const _errs73 = errors;
-                              if (errors === _errs73) {
-                                if (typeof data26 === 'string') {
-                                  if (func2(data26) > 128) {
+                            if (data25.originStoreId !== undefined) {
+                              let data27 = data25.originStoreId;
+                              const _errs75 = errors;
+                              if (errors === _errs75) {
+                                if (typeof data27 === 'string') {
+                                  if (func2(data27) > 128) {
                                     validate62.errors = [
                                       {
                                         instancePath:
@@ -71600,7 +72223,7 @@ function validate62(
                                     ];
                                     return false;
                                   } else {
-                                    if (func2(data26) < 1) {
+                                    if (func2(data27) < 1) {
                                       validate62.errors = [
                                         {
                                           instancePath:
@@ -71614,7 +72237,7 @@ function validate62(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data26)) {
+                                      if (!pattern4.test(data27)) {
                                         validate62.errors = [
                                           {
                                             instancePath:
@@ -71646,20 +72269,20 @@ function validate62(
                                   return false;
                                 }
                               }
-                              var valid10 = _errs73 === errors;
+                              var valid10 = _errs75 === errors;
                             } else {
                               var valid10 = true;
                             }
                             if (valid10) {
-                              if (data24.childSessionId !== undefined) {
-                                let data27 = data24.childSessionId;
-                                const _errs75 = errors;
-                                const _errs76 = errors;
-                                let valid11 = false;
+                              if (data25.childSessionId !== undefined) {
+                                let data28 = data25.childSessionId;
                                 const _errs77 = errors;
-                                if (errors === _errs77) {
-                                  if (typeof data27 === 'string') {
-                                    if (func2(data27) > 128) {
+                                const _errs78 = errors;
+                                let valid11 = false;
+                                const _errs79 = errors;
+                                if (errors === _errs79) {
+                                  if (typeof data28 === 'string') {
+                                    if (func2(data28) > 128) {
                                       const err15 = {
                                         instancePath:
                                           instancePath + '/executions/' + i2 + '/childSessionId',
@@ -71676,7 +72299,7 @@ function validate62(
                                       }
                                       errors++;
                                     } else {
-                                      if (func2(data27) < 1) {
+                                      if (func2(data28) < 1) {
                                         const err16 = {
                                           instancePath:
                                             instancePath + '/executions/' + i2 + '/childSessionId',
@@ -71693,7 +72316,7 @@ function validate62(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern4.test(data27)) {
+                                        if (!pattern4.test(data28)) {
                                           const err17 = {
                                             instancePath:
                                               instancePath +
@@ -71734,10 +72357,10 @@ function validate62(
                                     errors++;
                                   }
                                 }
-                                var _valid4 = _errs77 === errors;
+                                var _valid4 = _errs79 === errors;
                                 valid11 = valid11 || _valid4;
-                                const _errs79 = errors;
-                                if (data27 !== null) {
+                                const _errs81 = errors;
+                                if (data28 !== null) {
                                   const err19 = {
                                     instancePath:
                                       instancePath + '/executions/' + i2 + '/childSessionId',
@@ -71754,7 +72377,7 @@ function validate62(
                                   }
                                   errors++;
                                 }
-                                var _valid4 = _errs79 === errors;
+                                var _valid4 = _errs81 === errors;
                                 valid11 = valid11 || _valid4;
                                 if (!valid11) {
                                   const err20 = {
@@ -71775,29 +72398,29 @@ function validate62(
                                   validate62.errors = vErrors;
                                   return false;
                                 } else {
-                                  errors = _errs76;
+                                  errors = _errs78;
                                   if (vErrors !== null) {
-                                    if (_errs76) {
-                                      vErrors.length = _errs76;
+                                    if (_errs78) {
+                                      vErrors.length = _errs78;
                                     } else {
                                       vErrors = null;
                                     }
                                   }
                                 }
-                                var valid10 = _errs75 === errors;
+                                var valid10 = _errs77 === errors;
                               } else {
                                 var valid10 = true;
                               }
                               if (valid10) {
-                                if (data24.parentExecutionId !== undefined) {
-                                  let data28 = data24.parentExecutionId;
-                                  const _errs81 = errors;
-                                  const _errs82 = errors;
-                                  let valid12 = false;
+                                if (data25.parentExecutionId !== undefined) {
+                                  let data29 = data25.parentExecutionId;
                                   const _errs83 = errors;
-                                  if (errors === _errs83) {
-                                    if (typeof data28 === 'string') {
-                                      if (func2(data28) > 128) {
+                                  const _errs84 = errors;
+                                  let valid12 = false;
+                                  const _errs85 = errors;
+                                  if (errors === _errs85) {
+                                    if (typeof data29 === 'string') {
+                                      if (func2(data29) > 128) {
                                         const err21 = {
                                           instancePath:
                                             instancePath +
@@ -71817,7 +72440,7 @@ function validate62(
                                         }
                                         errors++;
                                       } else {
-                                        if (func2(data28) < 1) {
+                                        if (func2(data29) < 1) {
                                           const err22 = {
                                             instancePath:
                                               instancePath +
@@ -71837,7 +72460,7 @@ function validate62(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern4.test(data28)) {
+                                          if (!pattern4.test(data29)) {
                                             const err23 = {
                                               instancePath:
                                                 instancePath +
@@ -71878,10 +72501,10 @@ function validate62(
                                       errors++;
                                     }
                                   }
-                                  var _valid5 = _errs83 === errors;
+                                  var _valid5 = _errs85 === errors;
                                   valid12 = valid12 || _valid5;
-                                  const _errs85 = errors;
-                                  if (data28 !== null) {
+                                  const _errs87 = errors;
+                                  if (data29 !== null) {
                                     const err25 = {
                                       instancePath:
                                         instancePath + '/executions/' + i2 + '/parentExecutionId',
@@ -71898,7 +72521,7 @@ function validate62(
                                     }
                                     errors++;
                                   }
-                                  var _valid5 = _errs85 === errors;
+                                  var _valid5 = _errs87 === errors;
                                   valid12 = valid12 || _valid5;
                                   if (!valid12) {
                                     const err26 = {
@@ -71919,23 +72542,23 @@ function validate62(
                                     validate62.errors = vErrors;
                                     return false;
                                   } else {
-                                    errors = _errs82;
+                                    errors = _errs84;
                                     if (vErrors !== null) {
-                                      if (_errs82) {
-                                        vErrors.length = _errs82;
+                                      if (_errs84) {
+                                        vErrors.length = _errs84;
                                       } else {
                                         vErrors = null;
                                       }
                                     }
                                   }
-                                  var valid10 = _errs81 === errors;
+                                  var valid10 = _errs83 === errors;
                                 } else {
                                   var valid10 = true;
                                 }
                                 if (valid10) {
-                                  if (data24.cancelWithParent !== undefined) {
-                                    const _errs87 = errors;
-                                    if (typeof data24.cancelWithParent !== 'boolean') {
+                                  if (data25.cancelWithParent !== undefined) {
+                                    const _errs89 = errors;
+                                    if (typeof data25.cancelWithParent !== 'boolean') {
                                       validate62.errors = [
                                         {
                                           instancePath:
@@ -71952,17 +72575,17 @@ function validate62(
                                       ];
                                       return false;
                                     }
-                                    var valid10 = _errs87 === errors;
+                                    var valid10 = _errs89 === errors;
                                   } else {
                                     var valid10 = true;
                                   }
                                   if (valid10) {
-                                    if (data24.sessionId !== undefined) {
-                                      let data30 = data24.sessionId;
-                                      const _errs89 = errors;
-                                      if (errors === _errs89) {
-                                        if (typeof data30 === 'string') {
-                                          if (func2(data30) > 128) {
+                                    if (data25.sessionId !== undefined) {
+                                      let data31 = data25.sessionId;
+                                      const _errs91 = errors;
+                                      if (errors === _errs91) {
+                                        if (typeof data31 === 'string') {
+                                          if (func2(data31) > 128) {
                                             validate62.errors = [
                                               {
                                                 instancePath:
@@ -71976,7 +72599,7 @@ function validate62(
                                             ];
                                             return false;
                                           } else {
-                                            if (func2(data30) < 1) {
+                                            if (func2(data31) < 1) {
                                               validate62.errors = [
                                                 {
                                                   instancePath:
@@ -71993,7 +72616,7 @@ function validate62(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern4.test(data30)) {
+                                              if (!pattern4.test(data31)) {
                                                 validate62.errors = [
                                                   {
                                                     instancePath:
@@ -72030,20 +72653,20 @@ function validate62(
                                           return false;
                                         }
                                       }
-                                      var valid10 = _errs89 === errors;
+                                      var valid10 = _errs91 === errors;
                                     } else {
                                       var valid10 = true;
                                     }
                                     if (valid10) {
-                                      if (data24.runId !== undefined) {
-                                        let data31 = data24.runId;
-                                        const _errs91 = errors;
-                                        const _errs92 = errors;
-                                        let valid13 = false;
+                                      if (data25.runId !== undefined) {
+                                        let data32 = data25.runId;
                                         const _errs93 = errors;
-                                        if (errors === _errs93) {
-                                          if (typeof data31 === 'string') {
-                                            if (func2(data31) > 128) {
+                                        const _errs94 = errors;
+                                        let valid13 = false;
+                                        const _errs95 = errors;
+                                        if (errors === _errs95) {
+                                          if (typeof data32 === 'string') {
+                                            if (func2(data32) > 128) {
                                               const err27 = {
                                                 instancePath:
                                                   instancePath + '/executions/' + i2 + '/runId',
@@ -72060,7 +72683,7 @@ function validate62(
                                               }
                                               errors++;
                                             } else {
-                                              if (func2(data31) < 1) {
+                                              if (func2(data32) < 1) {
                                                 const err28 = {
                                                   instancePath:
                                                     instancePath + '/executions/' + i2 + '/runId',
@@ -72077,7 +72700,7 @@ function validate62(
                                                 }
                                                 errors++;
                                               } else {
-                                                if (!pattern4.test(data31)) {
+                                                if (!pattern4.test(data32)) {
                                                   const err29 = {
                                                     instancePath:
                                                       instancePath + '/executions/' + i2 + '/runId',
@@ -72117,10 +72740,10 @@ function validate62(
                                             errors++;
                                           }
                                         }
-                                        var _valid6 = _errs93 === errors;
+                                        var _valid6 = _errs95 === errors;
                                         valid13 = valid13 || _valid6;
-                                        const _errs95 = errors;
-                                        if (data31 !== null) {
+                                        const _errs97 = errors;
+                                        if (data32 !== null) {
                                           const err31 = {
                                             instancePath:
                                               instancePath + '/executions/' + i2 + '/runId',
@@ -72137,7 +72760,7 @@ function validate62(
                                           }
                                           errors++;
                                         }
-                                        var _valid6 = _errs95 === errors;
+                                        var _valid6 = _errs97 === errors;
                                         valid13 = valid13 || _valid6;
                                         if (!valid13) {
                                           const err32 = {
@@ -72158,24 +72781,24 @@ function validate62(
                                           validate62.errors = vErrors;
                                           return false;
                                         } else {
-                                          errors = _errs92;
+                                          errors = _errs94;
                                           if (vErrors !== null) {
-                                            if (_errs92) {
-                                              vErrors.length = _errs92;
+                                            if (_errs94) {
+                                              vErrors.length = _errs94;
                                             } else {
                                               vErrors = null;
                                             }
                                           }
                                         }
-                                        var valid10 = _errs91 === errors;
+                                        var valid10 = _errs93 === errors;
                                       } else {
                                         var valid10 = true;
                                       }
                                       if (valid10) {
-                                        if (data24.kind !== undefined) {
-                                          let data32 = data24.kind;
-                                          const _errs97 = errors;
-                                          if (typeof data32 !== 'string') {
+                                        if (data25.kind !== undefined) {
+                                          let data33 = data25.kind;
+                                          const _errs99 = errors;
+                                          if (typeof data33 !== 'string') {
                                             validate62.errors = [
                                               {
                                                 instancePath:
@@ -72191,9 +72814,9 @@ function validate62(
                                           }
                                           if (
                                             !(
-                                              data32 === 'model' ||
-                                              data32 === 'tool' ||
-                                              data32 === 'job'
+                                              data33 === 'model' ||
+                                              data33 === 'tool' ||
+                                              data33 === 'job'
                                             )
                                           ) {
                                             validate62.errors = [
@@ -72214,14 +72837,14 @@ function validate62(
                                             ];
                                             return false;
                                           }
-                                          var valid10 = _errs97 === errors;
+                                          var valid10 = _errs99 === errors;
                                         } else {
                                           var valid10 = true;
                                         }
                                         if (valid10) {
-                                          if (data24.definitionId !== undefined) {
-                                            const _errs99 = errors;
-                                            if (typeof data24.definitionId !== 'string') {
+                                          if (data25.definitionId !== undefined) {
+                                            const _errs101 = errors;
+                                            if (typeof data25.definitionId !== 'string') {
                                               validate62.errors = [
                                                 {
                                                   instancePath:
@@ -72238,14 +72861,14 @@ function validate62(
                                               ];
                                               return false;
                                             }
-                                            var valid10 = _errs99 === errors;
+                                            var valid10 = _errs101 === errors;
                                           } else {
                                             var valid10 = true;
                                           }
                                           if (valid10) {
-                                            if (data24.definitionVersion !== undefined) {
-                                              const _errs101 = errors;
-                                              if (typeof data24.definitionVersion !== 'string') {
+                                            if (data25.definitionVersion !== undefined) {
+                                              const _errs103 = errors;
+                                              if (typeof data25.definitionVersion !== 'string') {
                                                 validate62.errors = [
                                                   {
                                                     instancePath:
@@ -72262,15 +72885,15 @@ function validate62(
                                                 ];
                                                 return false;
                                               }
-                                              var valid10 = _errs101 === errors;
+                                              var valid10 = _errs103 === errors;
                                             } else {
                                               var valid10 = true;
                                             }
                                             if (valid10) {
-                                              if (data24.status !== undefined) {
-                                                let data35 = data24.status;
-                                                const _errs103 = errors;
-                                                if (typeof data35 !== 'string') {
+                                              if (data25.status !== undefined) {
+                                                let data36 = data25.status;
+                                                const _errs105 = errors;
+                                                if (typeof data36 !== 'string') {
                                                   validate62.errors = [
                                                     {
                                                       instancePath:
@@ -72289,13 +72912,13 @@ function validate62(
                                                 }
                                                 if (
                                                   !(
-                                                    data35 === 'planned' ||
-                                                    data35 === 'dispatching' ||
-                                                    data35 === 'running' ||
-                                                    data35 === 'succeeded' ||
-                                                    data35 === 'failed' ||
-                                                    data35 === 'cancelled' ||
-                                                    data35 === 'outcome_unknown'
+                                                    data36 === 'planned' ||
+                                                    data36 === 'dispatching' ||
+                                                    data36 === 'running' ||
+                                                    data36 === 'succeeded' ||
+                                                    data36 === 'failed' ||
+                                                    data36 === 'cancelled' ||
+                                                    data36 === 'outcome_unknown'
                                                   )
                                                 ) {
                                                   validate62.errors = [
@@ -72319,17 +72942,17 @@ function validate62(
                                                   ];
                                                   return false;
                                                 }
-                                                var valid10 = _errs103 === errors;
+                                                var valid10 = _errs105 === errors;
                                               } else {
                                                 var valid10 = true;
                                               }
                                               if (valid10) {
-                                                if (data24.resultRevision !== undefined) {
-                                                  let data36 = data24.resultRevision;
-                                                  const _errs105 = errors;
-                                                  if (errors === _errs105) {
-                                                    if (typeof data36 === 'string') {
-                                                      if (!pattern18.test(data36)) {
+                                                if (data25.resultRevision !== undefined) {
+                                                  let data37 = data25.resultRevision;
+                                                  const _errs107 = errors;
+                                                  if (errors === _errs107) {
+                                                    if (typeof data37 === 'string') {
+                                                      if (!pattern18.test(data37)) {
                                                         validate62.errors = [
                                                           {
                                                             instancePath:
@@ -72369,21 +72992,21 @@ function validate62(
                                                       return false;
                                                     }
                                                   }
-                                                  var valid10 = _errs105 === errors;
+                                                  var valid10 = _errs107 === errors;
                                                 } else {
                                                   var valid10 = true;
                                                 }
                                                 if (valid10) {
-                                                  if (data24.cancelRequestedAt !== undefined) {
-                                                    let data37 = data24.cancelRequestedAt;
-                                                    const _errs107 = errors;
-                                                    const _errs108 = errors;
-                                                    let valid14 = false;
+                                                  if (data25.cancelRequestedAt !== undefined) {
+                                                    let data38 = data25.cancelRequestedAt;
                                                     const _errs109 = errors;
+                                                    const _errs110 = errors;
+                                                    let valid14 = false;
+                                                    const _errs111 = errors;
                                                     if (
                                                       !(
-                                                        typeof data37 == 'number' &&
-                                                        isFinite(data37)
+                                                        typeof data38 == 'number' &&
+                                                        isFinite(data38)
                                                       )
                                                     ) {
                                                       const err33 = {
@@ -72405,10 +73028,10 @@ function validate62(
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid7 = _errs109 === errors;
+                                                    var _valid7 = _errs111 === errors;
                                                     valid14 = valid14 || _valid7;
-                                                    const _errs111 = errors;
-                                                    if (data37 !== null) {
+                                                    const _errs113 = errors;
+                                                    if (data38 !== null) {
                                                       const err34 = {
                                                         instancePath:
                                                           instancePath +
@@ -72428,7 +73051,7 @@ function validate62(
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid7 = _errs111 === errors;
+                                                    var _valid7 = _errs113 === errors;
                                                     valid14 = valid14 || _valid7;
                                                     if (!valid14) {
                                                       const err35 = {
@@ -72452,27 +73075,27 @@ function validate62(
                                                       validate62.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs108;
+                                                      errors = _errs110;
                                                       if (vErrors !== null) {
-                                                        if (_errs108) {
-                                                          vErrors.length = _errs108;
+                                                        if (_errs110) {
+                                                          vErrors.length = _errs110;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid10 = _errs107 === errors;
+                                                    var valid10 = _errs109 === errors;
                                                   } else {
                                                     var valid10 = true;
                                                   }
                                                   if (valid10) {
-                                                    if (data24.delivery !== undefined) {
-                                                      let data38 = data24.delivery;
-                                                      const _errs113 = errors;
-                                                      const _errs114 = errors;
-                                                      let valid15 = false;
+                                                    if (data25.delivery !== undefined) {
+                                                      let data39 = data25.delivery;
                                                       const _errs115 = errors;
-                                                      if (typeof data38 !== 'string') {
+                                                      const _errs116 = errors;
+                                                      let valid15 = false;
+                                                      const _errs117 = errors;
+                                                      if (typeof data39 !== 'string') {
                                                         const err36 = {
                                                           instancePath:
                                                             instancePath +
@@ -72494,9 +73117,9 @@ function validate62(
                                                       }
                                                       if (
                                                         !(
-                                                          data38 === 'pending' ||
-                                                          data38 === 'consumed' ||
-                                                          data38 === 'suppressed'
+                                                          data39 === 'pending' ||
+                                                          data39 === 'consumed' ||
+                                                          data39 === 'suppressed'
                                                         )
                                                       ) {
                                                         const err37 = {
@@ -72523,10 +73146,10 @@ function validate62(
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid8 = _errs115 === errors;
+                                                      var _valid8 = _errs117 === errors;
                                                       valid15 = valid15 || _valid8;
-                                                      const _errs117 = errors;
-                                                      if (data38 !== null) {
+                                                      const _errs119 = errors;
+                                                      if (data39 !== null) {
                                                         const err38 = {
                                                           instancePath:
                                                             instancePath +
@@ -72546,7 +73169,7 @@ function validate62(
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid8 = _errs117 === errors;
+                                                      var _valid8 = _errs119 === errors;
                                                       valid15 = valid15 || _valid8;
                                                       if (!valid15) {
                                                         const err39 = {
@@ -72570,27 +73193,27 @@ function validate62(
                                                         validate62.errors = vErrors;
                                                         return false;
                                                       } else {
-                                                        errors = _errs114;
+                                                        errors = _errs116;
                                                         if (vErrors !== null) {
-                                                          if (_errs114) {
-                                                            vErrors.length = _errs114;
+                                                          if (_errs116) {
+                                                            vErrors.length = _errs116;
                                                           } else {
                                                             vErrors = null;
                                                           }
                                                         }
                                                       }
-                                                      var valid10 = _errs113 === errors;
+                                                      var valid10 = _errs115 === errors;
                                                     } else {
                                                       var valid10 = true;
                                                     }
                                                     if (valid10) {
-                                                      if (data24.deliveryReason !== undefined) {
-                                                        let data39 = data24.deliveryReason;
-                                                        const _errs119 = errors;
-                                                        const _errs120 = errors;
-                                                        let valid16 = false;
+                                                      if (data25.deliveryReason !== undefined) {
+                                                        let data40 = data25.deliveryReason;
                                                         const _errs121 = errors;
-                                                        if (typeof data39 !== 'string') {
+                                                        const _errs122 = errors;
+                                                        let valid16 = false;
+                                                        const _errs123 = errors;
+                                                        if (typeof data40 !== 'string') {
                                                           const err40 = {
                                                             instancePath:
                                                               instancePath +
@@ -72610,10 +73233,10 @@ function validate62(
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid9 = _errs121 === errors;
+                                                        var _valid9 = _errs123 === errors;
                                                         valid16 = valid16 || _valid9;
-                                                        const _errs123 = errors;
-                                                        if (data39 !== null) {
+                                                        const _errs125 = errors;
+                                                        if (data40 !== null) {
                                                           const err41 = {
                                                             instancePath:
                                                               instancePath +
@@ -72633,7 +73256,7 @@ function validate62(
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid9 = _errs123 === errors;
+                                                        var _valid9 = _errs125 === errors;
                                                         valid16 = valid16 || _valid9;
                                                         if (!valid16) {
                                                           const err42 = {
@@ -72657,16 +73280,16 @@ function validate62(
                                                           validate62.errors = vErrors;
                                                           return false;
                                                         } else {
-                                                          errors = _errs120;
+                                                          errors = _errs122;
                                                           if (vErrors !== null) {
-                                                            if (_errs120) {
-                                                              vErrors.length = _errs120;
+                                                            if (_errs122) {
+                                                              vErrors.length = _errs122;
                                                             } else {
                                                               vErrors = null;
                                                             }
                                                           }
                                                         }
-                                                        var valid10 = _errs119 === errors;
+                                                        var valid10 = _errs121 === errors;
                                                       } else {
                                                         var valid10 = true;
                                                       }
@@ -72698,7 +73321,7 @@ function validate62(
                         return false;
                       }
                     }
-                    var valid9 = _errs68 === errors;
+                    var valid9 = _errs70 === errors;
                     if (!valid9) {
                       break;
                     }
@@ -72716,17 +73339,17 @@ function validate62(
                   return false;
                 }
               }
-              var valid0 = _errs66 === errors;
+              var valid0 = _errs68 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
               if (data.snapshotCursor !== undefined) {
-                let data40 = data.snapshotCursor;
-                const _errs125 = errors;
-                if (errors === _errs125) {
-                  if (typeof data40 === 'string') {
-                    if (!pattern18.test(data40)) {
+                let data41 = data.snapshotCursor;
+                const _errs127 = errors;
+                if (errors === _errs127) {
+                  if (typeof data41 === 'string') {
+                    if (!pattern18.test(data41)) {
                       validate62.errors = [
                         {
                           instancePath: instancePath + '/snapshotCursor',
@@ -72751,17 +73374,17 @@ function validate62(
                     return false;
                   }
                 }
-                var valid0 = _errs125 === errors;
+                var valid0 = _errs127 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (data.storeId !== undefined) {
-                  let data41 = data.storeId;
-                  const _errs127 = errors;
-                  if (errors === _errs127) {
-                    if (typeof data41 === 'string') {
-                      if (func2(data41) > 128) {
+                  let data42 = data.storeId;
+                  const _errs129 = errors;
+                  if (errors === _errs129) {
+                    if (typeof data42 === 'string') {
+                      if (func2(data42) > 128) {
                         validate62.errors = [
                           {
                             instancePath: instancePath + '/storeId',
@@ -72773,7 +73396,7 @@ function validate62(
                         ];
                         return false;
                       } else {
-                        if (func2(data41) < 1) {
+                        if (func2(data42) < 1) {
                           validate62.errors = [
                             {
                               instancePath: instancePath + '/storeId',
@@ -72785,7 +73408,7 @@ function validate62(
                           ];
                           return false;
                         } else {
-                          if (!pattern4.test(data41)) {
+                          if (!pattern4.test(data42)) {
                             validate62.errors = [
                               {
                                 instancePath: instancePath + '/storeId',
@@ -72812,7 +73435,7 @@ function validate62(
                       return false;
                     }
                   }
-                  var valid0 = _errs127 === errors;
+                  var valid0 = _errs129 === errors;
                 } else {
                   var valid0 = true;
                 }
@@ -80089,6 +80712,7 @@ var schema71 = {
         },
         nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
         deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
       },
       required: [
         'id',
@@ -81741,6 +82365,71 @@ function validate70(
                                   } else {
                                     var valid4 = true;
                                   }
+                                  if (valid4) {
+                                    if (data13.historyPurgedAt !== undefined) {
+                                      let data23 = data13.historyPurgedAt;
+                                      const _errs62 = errors;
+                                      if (
+                                        !(
+                                          typeof data23 == 'number' &&
+                                          !(data23 % 1) &&
+                                          !isNaN(data23) &&
+                                          isFinite(data23)
+                                        )
+                                      ) {
+                                        validate70.errors = [
+                                          {
+                                            instancePath: instancePath + '/session/historyPurgedAt',
+                                            schemaPath:
+                                              '#/properties/session/properties/historyPurgedAt/type',
+                                            keyword: 'type',
+                                            params: { type: 'integer' },
+                                            message: 'must be integer',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                      if (errors === _errs62) {
+                                        if (typeof data23 == 'number' && isFinite(data23)) {
+                                          if (data23 > 9007199254740991 || isNaN(data23)) {
+                                            validate70.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/session/historyPurgedAt',
+                                                schemaPath:
+                                                  '#/properties/session/properties/historyPurgedAt/maximum',
+                                                keyword: 'maximum',
+                                                params: {
+                                                  comparison: '<=',
+                                                  limit: 9007199254740991,
+                                                },
+                                                message: 'must be <= 9007199254740991',
+                                              },
+                                            ];
+                                            return false;
+                                          } else {
+                                            if (data23 < 0 || isNaN(data23)) {
+                                              validate70.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/session/historyPurgedAt',
+                                                  schemaPath:
+                                                    '#/properties/session/properties/historyPurgedAt/minimum',
+                                                  keyword: 'minimum',
+                                                  params: { comparison: '>=', limit: 0 },
+                                                  message: 'must be >= 0',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                        }
+                                      }
+                                      var valid4 = _errs62 === errors;
+                                    } else {
+                                      var valid4 = true;
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -81769,20 +82458,20 @@ function validate70(
           }
           if (valid0) {
             if (data.selection !== undefined) {
-              let data23 = data.selection;
-              const _errs62 = errors;
-              if (errors === _errs62) {
-                if (data23 && typeof data23 == 'object' && !Array.isArray(data23)) {
+              let data24 = data.selection;
+              const _errs64 = errors;
+              if (errors === _errs64) {
+                if (data24 && typeof data24 == 'object' && !Array.isArray(data24)) {
                   let missing4;
                   if (
-                    (data23.id === undefined && (missing4 = 'id')) ||
-                    (data23.sessionId === undefined && (missing4 = 'sessionId')) ||
-                    (data23.previousSelectionId === undefined &&
+                    (data24.id === undefined && (missing4 = 'id')) ||
+                    (data24.sessionId === undefined && (missing4 = 'sessionId')) ||
+                    (data24.previousSelectionId === undefined &&
                       (missing4 = 'previousSelectionId')) ||
-                    (data23.boundaryMessageId === undefined && (missing4 = 'boundaryMessageId')) ||
-                    (data23.boundarySeq === undefined && (missing4 = 'boundarySeq')) ||
-                    (data23.tailFromSeq === undefined && (missing4 = 'tailFromSeq')) ||
-                    (data23.ranges === undefined && (missing4 = 'ranges'))
+                    (data24.boundaryMessageId === undefined && (missing4 = 'boundaryMessageId')) ||
+                    (data24.boundarySeq === undefined && (missing4 = 'boundarySeq')) ||
+                    (data24.tailFromSeq === undefined && (missing4 = 'tailFromSeq')) ||
+                    (data24.ranges === undefined && (missing4 = 'ranges'))
                   ) {
                     validate70.errors = [
                       {
@@ -81795,12 +82484,12 @@ function validate70(
                     ];
                     return false;
                   } else {
-                    if (data23.id !== undefined) {
-                      let data24 = data23.id;
-                      const _errs65 = errors;
-                      if (errors === _errs65) {
-                        if (typeof data24 === 'string') {
-                          if (func2(data24) > 128) {
+                    if (data24.id !== undefined) {
+                      let data25 = data24.id;
+                      const _errs67 = errors;
+                      if (errors === _errs67) {
+                        if (typeof data25 === 'string') {
+                          if (func2(data25) > 128) {
                             validate70.errors = [
                               {
                                 instancePath: instancePath + '/selection/id',
@@ -81812,7 +82501,7 @@ function validate70(
                             ];
                             return false;
                           } else {
-                            if (func2(data24) < 1) {
+                            if (func2(data25) < 1) {
                               validate70.errors = [
                                 {
                                   instancePath: instancePath + '/selection/id',
@@ -81824,7 +82513,7 @@ function validate70(
                               ];
                               return false;
                             } else {
-                              if (!pattern4.test(data24)) {
+                              if (!pattern4.test(data25)) {
                                 validate70.errors = [
                                   {
                                     instancePath: instancePath + '/selection/id',
@@ -81851,17 +82540,17 @@ function validate70(
                           return false;
                         }
                       }
-                      var valid7 = _errs65 === errors;
+                      var valid7 = _errs67 === errors;
                     } else {
                       var valid7 = true;
                     }
                     if (valid7) {
-                      if (data23.sessionId !== undefined) {
-                        let data25 = data23.sessionId;
-                        const _errs67 = errors;
-                        if (errors === _errs67) {
-                          if (typeof data25 === 'string') {
-                            if (func2(data25) > 128) {
+                      if (data24.sessionId !== undefined) {
+                        let data26 = data24.sessionId;
+                        const _errs69 = errors;
+                        if (errors === _errs69) {
+                          if (typeof data26 === 'string') {
+                            if (func2(data26) > 128) {
                               validate70.errors = [
                                 {
                                   instancePath: instancePath + '/selection/sessionId',
@@ -81874,7 +82563,7 @@ function validate70(
                               ];
                               return false;
                             } else {
-                              if (func2(data25) < 1) {
+                              if (func2(data26) < 1) {
                                 validate70.errors = [
                                   {
                                     instancePath: instancePath + '/selection/sessionId',
@@ -81887,7 +82576,7 @@ function validate70(
                                 ];
                                 return false;
                               } else {
-                                if (!pattern4.test(data25)) {
+                                if (!pattern4.test(data26)) {
                                   validate70.errors = [
                                     {
                                       instancePath: instancePath + '/selection/sessionId',
@@ -81915,20 +82604,20 @@ function validate70(
                             return false;
                           }
                         }
-                        var valid7 = _errs67 === errors;
+                        var valid7 = _errs69 === errors;
                       } else {
                         var valid7 = true;
                       }
                       if (valid7) {
-                        if (data23.previousSelectionId !== undefined) {
-                          let data26 = data23.previousSelectionId;
-                          const _errs69 = errors;
-                          const _errs70 = errors;
-                          let valid8 = false;
+                        if (data24.previousSelectionId !== undefined) {
+                          let data27 = data24.previousSelectionId;
                           const _errs71 = errors;
-                          if (errors === _errs71) {
-                            if (typeof data26 === 'string') {
-                              if (func2(data26) > 128) {
+                          const _errs72 = errors;
+                          let valid8 = false;
+                          const _errs73 = errors;
+                          if (errors === _errs73) {
+                            if (typeof data27 === 'string') {
+                              if (func2(data27) > 128) {
                                 const err12 = {
                                   instancePath: instancePath + '/selection/previousSelectionId',
                                   schemaPath:
@@ -81944,7 +82633,7 @@ function validate70(
                                 }
                                 errors++;
                               } else {
-                                if (func2(data26) < 1) {
+                                if (func2(data27) < 1) {
                                   const err13 = {
                                     instancePath: instancePath + '/selection/previousSelectionId',
                                     schemaPath:
@@ -81960,7 +82649,7 @@ function validate70(
                                   }
                                   errors++;
                                 } else {
-                                  if (!pattern4.test(data26)) {
+                                  if (!pattern4.test(data27)) {
                                     const err14 = {
                                       instancePath: instancePath + '/selection/previousSelectionId',
                                       schemaPath:
@@ -81995,10 +82684,10 @@ function validate70(
                               errors++;
                             }
                           }
-                          var _valid3 = _errs71 === errors;
+                          var _valid3 = _errs73 === errors;
                           valid8 = valid8 || _valid3;
-                          const _errs73 = errors;
-                          if (data26 !== null) {
+                          const _errs75 = errors;
+                          if (data27 !== null) {
                             const err16 = {
                               instancePath: instancePath + '/selection/previousSelectionId',
                               schemaPath:
@@ -82014,7 +82703,7 @@ function validate70(
                             }
                             errors++;
                           }
-                          var _valid3 = _errs73 === errors;
+                          var _valid3 = _errs75 === errors;
                           valid8 = valid8 || _valid3;
                           if (!valid8) {
                             const err17 = {
@@ -82034,29 +82723,29 @@ function validate70(
                             validate70.errors = vErrors;
                             return false;
                           } else {
-                            errors = _errs70;
+                            errors = _errs72;
                             if (vErrors !== null) {
-                              if (_errs70) {
-                                vErrors.length = _errs70;
+                              if (_errs72) {
+                                vErrors.length = _errs72;
                               } else {
                                 vErrors = null;
                               }
                             }
                           }
-                          var valid7 = _errs69 === errors;
+                          var valid7 = _errs71 === errors;
                         } else {
                           var valid7 = true;
                         }
                         if (valid7) {
-                          if (data23.boundaryMessageId !== undefined) {
-                            let data27 = data23.boundaryMessageId;
-                            const _errs75 = errors;
-                            const _errs76 = errors;
-                            let valid9 = false;
+                          if (data24.boundaryMessageId !== undefined) {
+                            let data28 = data24.boundaryMessageId;
                             const _errs77 = errors;
-                            if (errors === _errs77) {
-                              if (typeof data27 === 'string') {
-                                if (func2(data27) > 128) {
+                            const _errs78 = errors;
+                            let valid9 = false;
+                            const _errs79 = errors;
+                            if (errors === _errs79) {
+                              if (typeof data28 === 'string') {
+                                if (func2(data28) > 128) {
                                   const err18 = {
                                     instancePath: instancePath + '/selection/boundaryMessageId',
                                     schemaPath:
@@ -82072,7 +82761,7 @@ function validate70(
                                   }
                                   errors++;
                                 } else {
-                                  if (func2(data27) < 1) {
+                                  if (func2(data28) < 1) {
                                     const err19 = {
                                       instancePath: instancePath + '/selection/boundaryMessageId',
                                       schemaPath:
@@ -82088,7 +82777,7 @@ function validate70(
                                     }
                                     errors++;
                                   } else {
-                                    if (!pattern4.test(data27)) {
+                                    if (!pattern4.test(data28)) {
                                       const err20 = {
                                         instancePath: instancePath + '/selection/boundaryMessageId',
                                         schemaPath:
@@ -82123,10 +82812,10 @@ function validate70(
                                 errors++;
                               }
                             }
-                            var _valid4 = _errs77 === errors;
+                            var _valid4 = _errs79 === errors;
                             valid9 = valid9 || _valid4;
-                            const _errs79 = errors;
-                            if (data27 !== null) {
+                            const _errs81 = errors;
+                            if (data28 !== null) {
                               const err22 = {
                                 instancePath: instancePath + '/selection/boundaryMessageId',
                                 schemaPath:
@@ -82142,7 +82831,7 @@ function validate70(
                               }
                               errors++;
                             }
-                            var _valid4 = _errs79 === errors;
+                            var _valid4 = _errs81 === errors;
                             valid9 = valid9 || _valid4;
                             if (!valid9) {
                               const err23 = {
@@ -82162,26 +82851,26 @@ function validate70(
                               validate70.errors = vErrors;
                               return false;
                             } else {
-                              errors = _errs76;
+                              errors = _errs78;
                               if (vErrors !== null) {
-                                if (_errs76) {
-                                  vErrors.length = _errs76;
+                                if (_errs78) {
+                                  vErrors.length = _errs78;
                                 } else {
                                   vErrors = null;
                                 }
                               }
                             }
-                            var valid7 = _errs75 === errors;
+                            var valid7 = _errs77 === errors;
                           } else {
                             var valid7 = true;
                           }
                           if (valid7) {
-                            if (data23.boundarySeq !== undefined) {
-                              let data28 = data23.boundarySeq;
-                              const _errs81 = errors;
-                              if (errors === _errs81) {
-                                if (typeof data28 === 'string') {
-                                  if (!pattern18.test(data28)) {
+                            if (data24.boundarySeq !== undefined) {
+                              let data29 = data24.boundarySeq;
+                              const _errs83 = errors;
+                              if (errors === _errs83) {
+                                if (typeof data29 === 'string') {
+                                  if (!pattern18.test(data29)) {
                                     validate70.errors = [
                                       {
                                         instancePath: instancePath + '/selection/boundarySeq',
@@ -82208,17 +82897,17 @@ function validate70(
                                   return false;
                                 }
                               }
-                              var valid7 = _errs81 === errors;
+                              var valid7 = _errs83 === errors;
                             } else {
                               var valid7 = true;
                             }
                             if (valid7) {
-                              if (data23.tailFromSeq !== undefined) {
-                                let data29 = data23.tailFromSeq;
-                                const _errs83 = errors;
-                                if (errors === _errs83) {
-                                  if (typeof data29 === 'string') {
-                                    if (!pattern18.test(data29)) {
+                              if (data24.tailFromSeq !== undefined) {
+                                let data30 = data24.tailFromSeq;
+                                const _errs85 = errors;
+                                if (errors === _errs85) {
+                                  if (typeof data30 === 'string') {
+                                    if (!pattern18.test(data30)) {
                                       validate70.errors = [
                                         {
                                           instancePath: instancePath + '/selection/tailFromSeq',
@@ -82246,32 +82935,32 @@ function validate70(
                                     return false;
                                   }
                                 }
-                                var valid7 = _errs83 === errors;
+                                var valid7 = _errs85 === errors;
                               } else {
                                 var valid7 = true;
                               }
                               if (valid7) {
-                                if (data23.ranges !== undefined) {
-                                  let data30 = data23.ranges;
-                                  const _errs85 = errors;
-                                  if (errors === _errs85) {
-                                    if (Array.isArray(data30)) {
+                                if (data24.ranges !== undefined) {
+                                  let data31 = data24.ranges;
+                                  const _errs87 = errors;
+                                  if (errors === _errs87) {
+                                    if (Array.isArray(data31)) {
                                       var valid10 = true;
-                                      const len0 = data30.length;
+                                      const len0 = data31.length;
                                       for (let i0 = 0; i0 < len0; i0++) {
-                                        let data31 = data30[i0];
-                                        const _errs87 = errors;
-                                        if (errors === _errs87) {
+                                        let data32 = data31[i0];
+                                        const _errs89 = errors;
+                                        if (errors === _errs89) {
                                           if (
-                                            data31 &&
-                                            typeof data31 == 'object' &&
-                                            !Array.isArray(data31)
+                                            data32 &&
+                                            typeof data32 == 'object' &&
+                                            !Array.isArray(data32)
                                           ) {
                                             let missing5;
                                             if (
-                                              (data31.afterSeq === undefined &&
+                                              (data32.afterSeq === undefined &&
                                                 (missing5 = 'afterSeq')) ||
-                                              (data31.throughSeq === undefined &&
+                                              (data32.throughSeq === undefined &&
                                                 (missing5 = 'throughSeq'))
                                             ) {
                                               validate70.errors = [
@@ -82290,12 +82979,12 @@ function validate70(
                                               ];
                                               return false;
                                             } else {
-                                              if (data31.afterSeq !== undefined) {
-                                                let data32 = data31.afterSeq;
-                                                const _errs90 = errors;
-                                                if (errors === _errs90) {
-                                                  if (typeof data32 === 'string') {
-                                                    if (!pattern18.test(data32)) {
+                                              if (data32.afterSeq !== undefined) {
+                                                let data33 = data32.afterSeq;
+                                                const _errs92 = errors;
+                                                if (errors === _errs92) {
+                                                  if (typeof data33 === 'string') {
+                                                    if (!pattern18.test(data33)) {
                                                       validate70.errors = [
                                                         {
                                                           instancePath:
@@ -82333,17 +83022,17 @@ function validate70(
                                                     return false;
                                                   }
                                                 }
-                                                var valid11 = _errs90 === errors;
+                                                var valid11 = _errs92 === errors;
                                               } else {
                                                 var valid11 = true;
                                               }
                                               if (valid11) {
-                                                if (data31.throughSeq !== undefined) {
-                                                  let data33 = data31.throughSeq;
-                                                  const _errs92 = errors;
-                                                  if (errors === _errs92) {
-                                                    if (typeof data33 === 'string') {
-                                                      if (!pattern18.test(data33)) {
+                                                if (data32.throughSeq !== undefined) {
+                                                  let data34 = data32.throughSeq;
+                                                  const _errs94 = errors;
+                                                  if (errors === _errs94) {
+                                                    if (typeof data34 === 'string') {
+                                                      if (!pattern18.test(data34)) {
                                                         validate70.errors = [
                                                           {
                                                             instancePath:
@@ -82383,7 +83072,7 @@ function validate70(
                                                       return false;
                                                     }
                                                   }
-                                                  var valid11 = _errs92 === errors;
+                                                  var valid11 = _errs94 === errors;
                                                 } else {
                                                   var valid11 = true;
                                                 }
@@ -82404,7 +83093,7 @@ function validate70(
                                             return false;
                                           }
                                         }
-                                        var valid10 = _errs87 === errors;
+                                        var valid10 = _errs89 === errors;
                                         if (!valid10) {
                                           break;
                                         }
@@ -82423,7 +83112,7 @@ function validate70(
                                       return false;
                                     }
                                   }
-                                  var valid7 = _errs85 === errors;
+                                  var valid7 = _errs87 === errors;
                                 } else {
                                   var valid7 = true;
                                 }
@@ -82447,13 +83136,13 @@ function validate70(
                   return false;
                 }
               }
-              var valid0 = _errs62 === errors;
+              var valid0 = _errs64 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
               if (data.omittedExtensionState !== undefined) {
-                const _errs94 = errors;
+                const _errs96 = errors;
                 if (typeof data.omittedExtensionState !== 'boolean') {
                   validate70.errors = [
                     {
@@ -82466,34 +83155,34 @@ function validate70(
                   ];
                   return false;
                 }
-                var valid0 = _errs94 === errors;
+                var valid0 = _errs96 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (data.namespaceReport !== undefined) {
-                  let data35 = data.namespaceReport;
-                  const _errs96 = errors;
-                  if (errors === _errs96) {
-                    if (Array.isArray(data35)) {
+                  let data36 = data.namespaceReport;
+                  const _errs98 = errors;
+                  if (errors === _errs98) {
+                    if (Array.isArray(data36)) {
                       var valid12 = true;
-                      const len1 = data35.length;
+                      const len1 = data36.length;
                       for (let i1 = 0; i1 < len1; i1++) {
-                        let data36 = data35[i1];
-                        const _errs98 = errors;
-                        if (errors === _errs98) {
-                          if (data36 && typeof data36 == 'object' && !Array.isArray(data36)) {
+                        let data37 = data36[i1];
+                        const _errs100 = errors;
+                        if (errors === _errs100) {
+                          if (data37 && typeof data37 == 'object' && !Array.isArray(data37)) {
                             let missing6;
                             if (
-                              (data36.extensionId === undefined && (missing6 = 'extensionId')) ||
-                              (data36.contentType === undefined && (missing6 = 'contentType')) ||
-                              (data36.contentVersion === undefined &&
+                              (data37.extensionId === undefined && (missing6 = 'extensionId')) ||
+                              (data37.contentType === undefined && (missing6 = 'contentType')) ||
+                              (data37.contentVersion === undefined &&
                                 (missing6 = 'contentVersion')) ||
-                              (data36.mode === undefined && (missing6 = 'mode')) ||
-                              (data36.ruleVersion === undefined && (missing6 = 'ruleVersion')) ||
-                              (data36.copied === undefined && (missing6 = 'copied')) ||
-                              (data36.rebuilt === undefined && (missing6 = 'rebuilt')) ||
-                              (data36.omitted === undefined && (missing6 = 'omitted'))
+                              (data37.mode === undefined && (missing6 = 'mode')) ||
+                              (data37.ruleVersion === undefined && (missing6 = 'ruleVersion')) ||
+                              (data37.copied === undefined && (missing6 = 'copied')) ||
+                              (data37.rebuilt === undefined && (missing6 = 'rebuilt')) ||
+                              (data37.omitted === undefined && (missing6 = 'omitted'))
                             ) {
                               validate70.errors = [
                                 {
@@ -82506,12 +83195,12 @@ function validate70(
                               ];
                               return false;
                             } else {
-                              if (data36.extensionId !== undefined) {
-                                let data37 = data36.extensionId;
-                                const _errs101 = errors;
-                                if (errors === _errs101) {
-                                  if (typeof data37 === 'string') {
-                                    if (func2(data37) > 128) {
+                              if (data37.extensionId !== undefined) {
+                                let data38 = data37.extensionId;
+                                const _errs103 = errors;
+                                if (errors === _errs103) {
+                                  if (typeof data38 === 'string') {
+                                    if (func2(data38) > 128) {
                                       validate70.errors = [
                                         {
                                           instancePath:
@@ -82528,7 +83217,7 @@ function validate70(
                                       ];
                                       return false;
                                     } else {
-                                      if (func2(data37) < 1) {
+                                      if (func2(data38) < 1) {
                                         validate70.errors = [
                                           {
                                             instancePath:
@@ -82545,7 +83234,7 @@ function validate70(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern137.test(data37)) {
+                                        if (!pattern137.test(data38)) {
                                           validate70.errors = [
                                             {
                                               instancePath:
@@ -82580,17 +83269,17 @@ function validate70(
                                     return false;
                                   }
                                 }
-                                var valid13 = _errs101 === errors;
+                                var valid13 = _errs103 === errors;
                               } else {
                                 var valid13 = true;
                               }
                               if (valid13) {
-                                if (data36.contentType !== undefined) {
-                                  let data38 = data36.contentType;
-                                  const _errs103 = errors;
-                                  if (errors === _errs103) {
-                                    if (typeof data38 === 'string') {
-                                      if (func2(data38) > 512) {
+                                if (data37.contentType !== undefined) {
+                                  let data39 = data37.contentType;
+                                  const _errs105 = errors;
+                                  if (errors === _errs105) {
+                                    if (typeof data39 === 'string') {
+                                      if (func2(data39) > 512) {
                                         validate70.errors = [
                                           {
                                             instancePath:
@@ -82607,7 +83296,7 @@ function validate70(
                                         ];
                                         return false;
                                       } else {
-                                        if (func2(data38) < 1) {
+                                        if (func2(data39) < 1) {
                                           validate70.errors = [
                                             {
                                               instancePath:
@@ -82643,20 +83332,20 @@ function validate70(
                                       return false;
                                     }
                                   }
-                                  var valid13 = _errs103 === errors;
+                                  var valid13 = _errs105 === errors;
                                 } else {
                                   var valid13 = true;
                                 }
                                 if (valid13) {
-                                  if (data36.contentVersion !== undefined) {
-                                    let data39 = data36.contentVersion;
-                                    const _errs105 = errors;
+                                  if (data37.contentVersion !== undefined) {
+                                    let data40 = data37.contentVersion;
+                                    const _errs107 = errors;
                                     if (
                                       !(
-                                        typeof data39 == 'number' &&
-                                        !(data39 % 1) &&
-                                        !isNaN(data39) &&
-                                        isFinite(data39)
+                                        typeof data40 == 'number' &&
+                                        !(data40 % 1) &&
+                                        !isNaN(data40) &&
+                                        isFinite(data40)
                                       )
                                     ) {
                                       validate70.errors = [
@@ -82675,9 +83364,9 @@ function validate70(
                                       ];
                                       return false;
                                     }
-                                    if (errors === _errs105) {
-                                      if (typeof data39 == 'number' && isFinite(data39)) {
-                                        if (data39 > 9007199254740991 || isNaN(data39)) {
+                                    if (errors === _errs107) {
+                                      if (typeof data40 == 'number' && isFinite(data40)) {
+                                        if (data40 > 9007199254740991 || isNaN(data40)) {
                                           validate70.errors = [
                                             {
                                               instancePath:
@@ -82694,7 +83383,7 @@ function validate70(
                                           ];
                                           return false;
                                         } else {
-                                          if (data39 < 1 || isNaN(data39)) {
+                                          if (data40 < 1 || isNaN(data40)) {
                                             validate70.errors = [
                                               {
                                                 instancePath:
@@ -82714,15 +83403,15 @@ function validate70(
                                         }
                                       }
                                     }
-                                    var valid13 = _errs105 === errors;
+                                    var valid13 = _errs107 === errors;
                                   } else {
                                     var valid13 = true;
                                   }
                                   if (valid13) {
-                                    if (data36.mode !== undefined) {
-                                      let data40 = data36.mode;
-                                      const _errs107 = errors;
-                                      if (typeof data40 !== 'string') {
+                                    if (data37.mode !== undefined) {
+                                      let data41 = data37.mode;
+                                      const _errs109 = errors;
+                                      if (typeof data41 !== 'string') {
                                         validate70.errors = [
                                           {
                                             instancePath:
@@ -82738,9 +83427,9 @@ function validate70(
                                       }
                                       if (
                                         !(
-                                          data40 === 'copy' ||
-                                          data40 === 'rebuild' ||
-                                          data40 === 'omit'
+                                          data41 === 'copy' ||
+                                          data41 === 'rebuild' ||
+                                          data41 === 'omit'
                                         )
                                       ) {
                                         validate70.errors = [
@@ -82760,20 +83449,20 @@ function validate70(
                                         ];
                                         return false;
                                       }
-                                      var valid13 = _errs107 === errors;
+                                      var valid13 = _errs109 === errors;
                                     } else {
                                       var valid13 = true;
                                     }
                                     if (valid13) {
-                                      if (data36.ruleVersion !== undefined) {
-                                        let data41 = data36.ruleVersion;
-                                        const _errs109 = errors;
-                                        const _errs110 = errors;
-                                        let valid14 = false;
+                                      if (data37.ruleVersion !== undefined) {
+                                        let data42 = data37.ruleVersion;
                                         const _errs111 = errors;
-                                        if (errors === _errs111) {
-                                          if (typeof data41 === 'string') {
-                                            if (func2(data41) > 128) {
+                                        const _errs112 = errors;
+                                        let valid14 = false;
+                                        const _errs113 = errors;
+                                        if (errors === _errs113) {
+                                          if (typeof data42 === 'string') {
+                                            if (func2(data42) > 128) {
                                               const err24 = {
                                                 instancePath:
                                                   instancePath +
@@ -82793,7 +83482,7 @@ function validate70(
                                               }
                                               errors++;
                                             } else {
-                                              if (func2(data41) < 1) {
+                                              if (func2(data42) < 1) {
                                                 const err25 = {
                                                   instancePath:
                                                     instancePath +
@@ -82835,10 +83524,10 @@ function validate70(
                                             errors++;
                                           }
                                         }
-                                        var _valid5 = _errs111 === errors;
+                                        var _valid5 = _errs113 === errors;
                                         valid14 = valid14 || _valid5;
-                                        const _errs113 = errors;
-                                        if (data41 !== null) {
+                                        const _errs115 = errors;
+                                        if (data42 !== null) {
                                           const err27 = {
                                             instancePath:
                                               instancePath +
@@ -82858,7 +83547,7 @@ function validate70(
                                           }
                                           errors++;
                                         }
-                                        var _valid5 = _errs113 === errors;
+                                        var _valid5 = _errs115 === errors;
                                         valid14 = valid14 || _valid5;
                                         if (!valid14) {
                                           const err28 = {
@@ -82882,29 +83571,29 @@ function validate70(
                                           validate70.errors = vErrors;
                                           return false;
                                         } else {
-                                          errors = _errs110;
+                                          errors = _errs112;
                                           if (vErrors !== null) {
-                                            if (_errs110) {
-                                              vErrors.length = _errs110;
+                                            if (_errs112) {
+                                              vErrors.length = _errs112;
                                             } else {
                                               vErrors = null;
                                             }
                                           }
                                         }
-                                        var valid13 = _errs109 === errors;
+                                        var valid13 = _errs111 === errors;
                                       } else {
                                         var valid13 = true;
                                       }
                                       if (valid13) {
-                                        if (data36.copied !== undefined) {
-                                          let data42 = data36.copied;
-                                          const _errs115 = errors;
+                                        if (data37.copied !== undefined) {
+                                          let data43 = data37.copied;
+                                          const _errs117 = errors;
                                           if (
                                             !(
-                                              typeof data42 == 'number' &&
-                                              !(data42 % 1) &&
-                                              !isNaN(data42) &&
-                                              isFinite(data42)
+                                              typeof data43 == 'number' &&
+                                              !(data43 % 1) &&
+                                              !isNaN(data43) &&
+                                              isFinite(data43)
                                             )
                                           ) {
                                             validate70.errors = [
@@ -82923,9 +83612,9 @@ function validate70(
                                             ];
                                             return false;
                                           }
-                                          if (errors === _errs115) {
-                                            if (typeof data42 == 'number' && isFinite(data42)) {
-                                              if (data42 > 9007199254740991 || isNaN(data42)) {
+                                          if (errors === _errs117) {
+                                            if (typeof data43 == 'number' && isFinite(data43)) {
+                                              if (data43 > 9007199254740991 || isNaN(data43)) {
                                                 validate70.errors = [
                                                   {
                                                     instancePath:
@@ -82945,7 +83634,7 @@ function validate70(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (data42 < 0 || isNaN(data42)) {
+                                                if (data43 < 0 || isNaN(data43)) {
                                                   validate70.errors = [
                                                     {
                                                       instancePath:
@@ -82965,20 +83654,20 @@ function validate70(
                                               }
                                             }
                                           }
-                                          var valid13 = _errs115 === errors;
+                                          var valid13 = _errs117 === errors;
                                         } else {
                                           var valid13 = true;
                                         }
                                         if (valid13) {
-                                          if (data36.rebuilt !== undefined) {
-                                            let data43 = data36.rebuilt;
-                                            const _errs117 = errors;
+                                          if (data37.rebuilt !== undefined) {
+                                            let data44 = data37.rebuilt;
+                                            const _errs119 = errors;
                                             if (
                                               !(
-                                                typeof data43 == 'number' &&
-                                                !(data43 % 1) &&
-                                                !isNaN(data43) &&
-                                                isFinite(data43)
+                                                typeof data44 == 'number' &&
+                                                !(data44 % 1) &&
+                                                !isNaN(data44) &&
+                                                isFinite(data44)
                                               )
                                             ) {
                                               validate70.errors = [
@@ -82997,9 +83686,9 @@ function validate70(
                                               ];
                                               return false;
                                             }
-                                            if (errors === _errs117) {
-                                              if (typeof data43 == 'number' && isFinite(data43)) {
-                                                if (data43 > 9007199254740991 || isNaN(data43)) {
+                                            if (errors === _errs119) {
+                                              if (typeof data44 == 'number' && isFinite(data44)) {
+                                                if (data44 > 9007199254740991 || isNaN(data44)) {
                                                   validate70.errors = [
                                                     {
                                                       instancePath:
@@ -83019,7 +83708,7 @@ function validate70(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (data43 < 0 || isNaN(data43)) {
+                                                  if (data44 < 0 || isNaN(data44)) {
                                                     validate70.errors = [
                                                       {
                                                         instancePath:
@@ -83039,20 +83728,20 @@ function validate70(
                                                 }
                                               }
                                             }
-                                            var valid13 = _errs117 === errors;
+                                            var valid13 = _errs119 === errors;
                                           } else {
                                             var valid13 = true;
                                           }
                                           if (valid13) {
-                                            if (data36.omitted !== undefined) {
-                                              let data44 = data36.omitted;
-                                              const _errs119 = errors;
+                                            if (data37.omitted !== undefined) {
+                                              let data45 = data37.omitted;
+                                              const _errs121 = errors;
                                               if (
                                                 !(
-                                                  typeof data44 == 'number' &&
-                                                  !(data44 % 1) &&
-                                                  !isNaN(data44) &&
-                                                  isFinite(data44)
+                                                  typeof data45 == 'number' &&
+                                                  !(data45 % 1) &&
+                                                  !isNaN(data45) &&
+                                                  isFinite(data45)
                                                 )
                                               ) {
                                                 validate70.errors = [
@@ -83071,9 +83760,9 @@ function validate70(
                                                 ];
                                                 return false;
                                               }
-                                              if (errors === _errs119) {
-                                                if (typeof data44 == 'number' && isFinite(data44)) {
-                                                  if (data44 > 9007199254740991 || isNaN(data44)) {
+                                              if (errors === _errs121) {
+                                                if (typeof data45 == 'number' && isFinite(data45)) {
+                                                  if (data45 > 9007199254740991 || isNaN(data45)) {
                                                     validate70.errors = [
                                                       {
                                                         instancePath:
@@ -83093,7 +83782,7 @@ function validate70(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (data44 < 0 || isNaN(data44)) {
+                                                    if (data45 < 0 || isNaN(data45)) {
                                                       validate70.errors = [
                                                         {
                                                           instancePath:
@@ -83113,7 +83802,7 @@ function validate70(
                                                   }
                                                 }
                                               }
-                                              var valid13 = _errs119 === errors;
+                                              var valid13 = _errs121 === errors;
                                             } else {
                                               var valid13 = true;
                                             }
@@ -83138,7 +83827,7 @@ function validate70(
                             return false;
                           }
                         }
-                        var valid12 = _errs98 === errors;
+                        var valid12 = _errs100 === errors;
                         if (!valid12) {
                           break;
                         }
@@ -83156,7 +83845,7 @@ function validate70(
                       return false;
                     }
                   }
-                  var valid0 = _errs96 === errors;
+                  var valid0 = _errs98 === errors;
                 } else {
                   var valid0 = true;
                 }
@@ -83257,6 +83946,7 @@ var schema73 = {
         },
         nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
         deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
       },
       required: [
         'id',
@@ -84828,6 +85518,71 @@ function validate73(
                                     var valid4 = _errs56 === errors;
                                   } else {
                                     var valid4 = true;
+                                  }
+                                  if (valid4) {
+                                    if (data13.historyPurgedAt !== undefined) {
+                                      let data23 = data13.historyPurgedAt;
+                                      const _errs62 = errors;
+                                      if (
+                                        !(
+                                          typeof data23 == 'number' &&
+                                          !(data23 % 1) &&
+                                          !isNaN(data23) &&
+                                          isFinite(data23)
+                                        )
+                                      ) {
+                                        validate73.errors = [
+                                          {
+                                            instancePath: instancePath + '/session/historyPurgedAt',
+                                            schemaPath:
+                                              '#/properties/session/properties/historyPurgedAt/type',
+                                            keyword: 'type',
+                                            params: { type: 'integer' },
+                                            message: 'must be integer',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                      if (errors === _errs62) {
+                                        if (typeof data23 == 'number' && isFinite(data23)) {
+                                          if (data23 > 9007199254740991 || isNaN(data23)) {
+                                            validate73.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/session/historyPurgedAt',
+                                                schemaPath:
+                                                  '#/properties/session/properties/historyPurgedAt/maximum',
+                                                keyword: 'maximum',
+                                                params: {
+                                                  comparison: '<=',
+                                                  limit: 9007199254740991,
+                                                },
+                                                message: 'must be <= 9007199254740991',
+                                              },
+                                            ];
+                                            return false;
+                                          } else {
+                                            if (data23 < 0 || isNaN(data23)) {
+                                              validate73.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/session/historyPurgedAt',
+                                                  schemaPath:
+                                                    '#/properties/session/properties/historyPurgedAt/minimum',
+                                                  keyword: 'minimum',
+                                                  params: { comparison: '>=', limit: 0 },
+                                                  message: 'must be >= 0',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                        }
+                                      }
+                                      var valid4 = _errs62 === errors;
+                                    } else {
+                                      var valid4 = true;
+                                    }
                                   }
                                 }
                               }
@@ -98182,6 +98937,63 @@ function validate95(
                         } else {
                           var valid0 = true;
                         }
+                        if (valid0) {
+                          if (data.historyPurgedAt !== undefined) {
+                            let data9 = data.historyPurgedAt;
+                            const _errs28 = errors;
+                            if (
+                              !(
+                                typeof data9 == 'number' &&
+                                !(data9 % 1) &&
+                                !isNaN(data9) &&
+                                isFinite(data9)
+                              )
+                            ) {
+                              validate95.errors = [
+                                {
+                                  instancePath: instancePath + '/historyPurgedAt',
+                                  schemaPath: '#/properties/historyPurgedAt/type',
+                                  keyword: 'type',
+                                  params: { type: 'integer' },
+                                  message: 'must be integer',
+                                },
+                              ];
+                              return false;
+                            }
+                            if (errors === _errs28) {
+                              if (typeof data9 == 'number' && isFinite(data9)) {
+                                if (data9 > 9007199254740991 || isNaN(data9)) {
+                                  validate95.errors = [
+                                    {
+                                      instancePath: instancePath + '/historyPurgedAt',
+                                      schemaPath: '#/properties/historyPurgedAt/maximum',
+                                      keyword: 'maximum',
+                                      params: { comparison: '<=', limit: 9007199254740991 },
+                                      message: 'must be <= 9007199254740991',
+                                    },
+                                  ];
+                                  return false;
+                                } else {
+                                  if (data9 < 0 || isNaN(data9)) {
+                                    validate95.errors = [
+                                      {
+                                        instancePath: instancePath + '/historyPurgedAt',
+                                        schemaPath: '#/properties/historyPurgedAt/minimum',
+                                        keyword: 'minimum',
+                                        params: { comparison: '>=', limit: 0 },
+                                        message: 'must be >= 0',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                }
+                              }
+                            }
+                            var valid0 = _errs28 === errors;
+                          } else {
+                            var valid0 = true;
+                          }
+                        }
                       }
                     }
                   }
@@ -98240,6 +99052,7 @@ var schema87 = {
         },
         nextSeq: { type: 'string', pattern: '^(0|[1-9][0-9]*)$' },
         deletedAt: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+        historyPurgedAt: { type: 'integer', minimum: 0, maximum: 9007199254740991 },
       },
       required: [
         'id',
@@ -99374,6 +100187,68 @@ function validate96(
                                 } else {
                                   var valid1 = true;
                                 }
+                                if (valid1) {
+                                  if (data0.historyPurgedAt !== undefined) {
+                                    let data10 = data0.historyPurgedAt;
+                                    const _errs31 = errors;
+                                    if (
+                                      !(
+                                        typeof data10 == 'number' &&
+                                        !(data10 % 1) &&
+                                        !isNaN(data10) &&
+                                        isFinite(data10)
+                                      )
+                                    ) {
+                                      validate96.errors = [
+                                        {
+                                          instancePath: instancePath + '/session/historyPurgedAt',
+                                          schemaPath:
+                                            '#/properties/session/properties/historyPurgedAt/type',
+                                          keyword: 'type',
+                                          params: { type: 'integer' },
+                                          message: 'must be integer',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    if (errors === _errs31) {
+                                      if (typeof data10 == 'number' && isFinite(data10)) {
+                                        if (data10 > 9007199254740991 || isNaN(data10)) {
+                                          validate96.errors = [
+                                            {
+                                              instancePath:
+                                                instancePath + '/session/historyPurgedAt',
+                                              schemaPath:
+                                                '#/properties/session/properties/historyPurgedAt/maximum',
+                                              keyword: 'maximum',
+                                              params: { comparison: '<=', limit: 9007199254740991 },
+                                              message: 'must be <= 9007199254740991',
+                                            },
+                                          ];
+                                          return false;
+                                        } else {
+                                          if (data10 < 0 || isNaN(data10)) {
+                                            validate96.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/session/historyPurgedAt',
+                                                schemaPath:
+                                                  '#/properties/session/properties/historyPurgedAt/minimum',
+                                                keyword: 'minimum',
+                                                params: { comparison: '>=', limit: 0 },
+                                                message: 'must be >= 0',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                      }
+                                    }
+                                    var valid1 = _errs31 === errors;
+                                  } else {
+                                    var valid1 = true;
+                                  }
+                                }
                               }
                             }
                           }
@@ -99402,28 +100277,28 @@ function validate96(
         }
         if (valid0) {
           if (data.runs !== undefined) {
-            let data10 = data.runs;
-            const _errs31 = errors;
-            if (errors === _errs31) {
-              if (Array.isArray(data10)) {
+            let data11 = data.runs;
+            const _errs33 = errors;
+            if (errors === _errs33) {
+              if (Array.isArray(data11)) {
                 var valid4 = true;
-                const len0 = data10.length;
+                const len0 = data11.length;
                 for (let i0 = 0; i0 < len0; i0++) {
-                  let data11 = data10[i0];
-                  const _errs33 = errors;
-                  if (errors === _errs33) {
-                    if (data11 && typeof data11 == 'object' && !Array.isArray(data11)) {
+                  let data12 = data11[i0];
+                  const _errs35 = errors;
+                  if (errors === _errs35) {
+                    if (data12 && typeof data12 == 'object' && !Array.isArray(data12)) {
                       let missing2;
                       if (
-                        (data11.id === undefined && (missing2 = 'id')) ||
-                        (data11.sessionId === undefined && (missing2 = 'sessionId')) ||
-                        (data11.originCommandId === undefined && (missing2 = 'originCommandId')) ||
-                        (data11.originStoreId === undefined && (missing2 = 'originStoreId')) ||
-                        (data11.status === undefined && (missing2 = 'status')) ||
-                        (data11.isActive === undefined && (missing2 = 'isActive')) ||
-                        (data11.createdAt === undefined && (missing2 = 'createdAt')) ||
-                        (data11.finishedAt === undefined && (missing2 = 'finishedAt')) ||
-                        (data11.reason === undefined && (missing2 = 'reason'))
+                        (data12.id === undefined && (missing2 = 'id')) ||
+                        (data12.sessionId === undefined && (missing2 = 'sessionId')) ||
+                        (data12.originCommandId === undefined && (missing2 = 'originCommandId')) ||
+                        (data12.originStoreId === undefined && (missing2 = 'originStoreId')) ||
+                        (data12.status === undefined && (missing2 = 'status')) ||
+                        (data12.isActive === undefined && (missing2 = 'isActive')) ||
+                        (data12.createdAt === undefined && (missing2 = 'createdAt')) ||
+                        (data12.finishedAt === undefined && (missing2 = 'finishedAt')) ||
+                        (data12.reason === undefined && (missing2 = 'reason'))
                       ) {
                         validate96.errors = [
                           {
@@ -99436,12 +100311,12 @@ function validate96(
                         ];
                         return false;
                       } else {
-                        if (data11.id !== undefined) {
-                          let data12 = data11.id;
-                          const _errs36 = errors;
-                          if (errors === _errs36) {
-                            if (typeof data12 === 'string') {
-                              if (func2(data12) > 128) {
+                        if (data12.id !== undefined) {
+                          let data13 = data12.id;
+                          const _errs38 = errors;
+                          if (errors === _errs38) {
+                            if (typeof data13 === 'string') {
+                              if (func2(data13) > 128) {
                                 validate96.errors = [
                                   {
                                     instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -99453,7 +100328,7 @@ function validate96(
                                 ];
                                 return false;
                               } else {
-                                if (func2(data12) < 1) {
+                                if (func2(data13) < 1) {
                                   validate96.errors = [
                                     {
                                       instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -99465,7 +100340,7 @@ function validate96(
                                   ];
                                   return false;
                                 } else {
-                                  if (!pattern4.test(data12)) {
+                                  if (!pattern4.test(data13)) {
                                     validate96.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/id',
@@ -99492,17 +100367,17 @@ function validate96(
                               return false;
                             }
                           }
-                          var valid5 = _errs36 === errors;
+                          var valid5 = _errs38 === errors;
                         } else {
                           var valid5 = true;
                         }
                         if (valid5) {
-                          if (data11.sessionId !== undefined) {
-                            let data13 = data11.sessionId;
-                            const _errs38 = errors;
-                            if (errors === _errs38) {
-                              if (typeof data13 === 'string') {
-                                if (func2(data13) > 128) {
+                          if (data12.sessionId !== undefined) {
+                            let data14 = data12.sessionId;
+                            const _errs40 = errors;
+                            if (errors === _errs40) {
+                              if (typeof data14 === 'string') {
+                                if (func2(data14) > 128) {
                                   validate96.errors = [
                                     {
                                       instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -99515,7 +100390,7 @@ function validate96(
                                   ];
                                   return false;
                                 } else {
-                                  if (func2(data13) < 1) {
+                                  if (func2(data14) < 1) {
                                     validate96.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -99528,7 +100403,7 @@ function validate96(
                                     ];
                                     return false;
                                   } else {
-                                    if (!pattern4.test(data13)) {
+                                    if (!pattern4.test(data14)) {
                                       validate96.errors = [
                                         {
                                           instancePath: instancePath + '/runs/' + i0 + '/sessionId',
@@ -99557,17 +100432,17 @@ function validate96(
                                 return false;
                               }
                             }
-                            var valid5 = _errs38 === errors;
+                            var valid5 = _errs40 === errors;
                           } else {
                             var valid5 = true;
                           }
                           if (valid5) {
-                            if (data11.originCommandId !== undefined) {
-                              let data14 = data11.originCommandId;
-                              const _errs40 = errors;
-                              if (errors === _errs40) {
-                                if (typeof data14 === 'string') {
-                                  if (func2(data14) > 128) {
+                            if (data12.originCommandId !== undefined) {
+                              let data15 = data12.originCommandId;
+                              const _errs42 = errors;
+                              if (errors === _errs42) {
+                                if (typeof data15 === 'string') {
+                                  if (func2(data15) > 128) {
                                     validate96.errors = [
                                       {
                                         instancePath:
@@ -99581,7 +100456,7 @@ function validate96(
                                     ];
                                     return false;
                                   } else {
-                                    if (func2(data14) < 1) {
+                                    if (func2(data15) < 1) {
                                       validate96.errors = [
                                         {
                                           instancePath:
@@ -99595,7 +100470,7 @@ function validate96(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data14)) {
+                                      if (!pattern4.test(data15)) {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -99627,17 +100502,17 @@ function validate96(
                                   return false;
                                 }
                               }
-                              var valid5 = _errs40 === errors;
+                              var valid5 = _errs42 === errors;
                             } else {
                               var valid5 = true;
                             }
                             if (valid5) {
-                              if (data11.originStoreId !== undefined) {
-                                let data15 = data11.originStoreId;
-                                const _errs42 = errors;
-                                if (errors === _errs42) {
-                                  if (typeof data15 === 'string') {
-                                    if (func2(data15) > 128) {
+                              if (data12.originStoreId !== undefined) {
+                                let data16 = data12.originStoreId;
+                                const _errs44 = errors;
+                                if (errors === _errs44) {
+                                  if (typeof data16 === 'string') {
+                                    if (func2(data16) > 128) {
                                       validate96.errors = [
                                         {
                                           instancePath:
@@ -99651,7 +100526,7 @@ function validate96(
                                       ];
                                       return false;
                                     } else {
-                                      if (func2(data15) < 1) {
+                                      if (func2(data16) < 1) {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -99665,7 +100540,7 @@ function validate96(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern4.test(data15)) {
+                                        if (!pattern4.test(data16)) {
                                           validate96.errors = [
                                             {
                                               instancePath:
@@ -99697,15 +100572,15 @@ function validate96(
                                     return false;
                                   }
                                 }
-                                var valid5 = _errs42 === errors;
+                                var valid5 = _errs44 === errors;
                               } else {
                                 var valid5 = true;
                               }
                               if (valid5) {
-                                if (data11.status !== undefined) {
-                                  let data16 = data11.status;
-                                  const _errs44 = errors;
-                                  if (typeof data16 !== 'string') {
+                                if (data12.status !== undefined) {
+                                  let data17 = data12.status;
+                                  const _errs46 = errors;
+                                  if (typeof data17 !== 'string') {
                                     validate96.errors = [
                                       {
                                         instancePath: instancePath + '/runs/' + i0 + '/status',
@@ -99720,14 +100595,14 @@ function validate96(
                                   }
                                   if (
                                     !(
-                                      data16 === 'running' ||
-                                      data16 === 'waiting_interaction' ||
-                                      data16 === 'waiting_execution' ||
-                                      data16 === 'cancelling' ||
-                                      data16 === 'completed' ||
-                                      data16 === 'failed' ||
-                                      data16 === 'cancelled' ||
-                                      data16 === 'interrupted'
+                                      data17 === 'running' ||
+                                      data17 === 'waiting_interaction' ||
+                                      data17 === 'waiting_execution' ||
+                                      data17 === 'cancelling' ||
+                                      data17 === 'completed' ||
+                                      data17 === 'failed' ||
+                                      data17 === 'cancelled' ||
+                                      data17 === 'interrupted'
                                     )
                                   ) {
                                     validate96.errors = [
@@ -99745,14 +100620,14 @@ function validate96(
                                     ];
                                     return false;
                                   }
-                                  var valid5 = _errs44 === errors;
+                                  var valid5 = _errs46 === errors;
                                 } else {
                                   var valid5 = true;
                                 }
                                 if (valid5) {
-                                  if (data11.isActive !== undefined) {
-                                    const _errs46 = errors;
-                                    if (typeof data11.isActive !== 'boolean') {
+                                  if (data12.isActive !== undefined) {
+                                    const _errs48 = errors;
+                                    if (typeof data12.isActive !== 'boolean') {
                                       validate96.errors = [
                                         {
                                           instancePath: instancePath + '/runs/' + i0 + '/isActive',
@@ -99765,17 +100640,17 @@ function validate96(
                                       ];
                                       return false;
                                     }
-                                    var valid5 = _errs46 === errors;
+                                    var valid5 = _errs48 === errors;
                                   } else {
                                     var valid5 = true;
                                   }
                                   if (valid5) {
-                                    if (data11.waitingForResults !== undefined) {
-                                      let data18 = data11.waitingForResults;
-                                      const _errs48 = errors;
-                                      if (errors === _errs48) {
-                                        if (Array.isArray(data18)) {
-                                          if (data18.length > 64) {
+                                    if (data12.waitingForResults !== undefined) {
+                                      let data19 = data12.waitingForResults;
+                                      const _errs50 = errors;
+                                      if (errors === _errs50) {
+                                        if (Array.isArray(data19)) {
+                                          if (data19.length > 64) {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -99793,13 +100668,13 @@ function validate96(
                                             return false;
                                           } else {
                                             var valid6 = true;
-                                            const len1 = data18.length;
+                                            const len1 = data19.length;
                                             for (let i1 = 0; i1 < len1; i1++) {
-                                              let data19 = data18[i1];
-                                              const _errs50 = errors;
-                                              if (errors === _errs50) {
-                                                if (typeof data19 === 'string') {
-                                                  if (func2(data19) > 128) {
+                                              let data20 = data19[i1];
+                                              const _errs52 = errors;
+                                              if (errors === _errs52) {
+                                                if (typeof data20 === 'string') {
+                                                  if (func2(data20) > 128) {
                                                     validate96.errors = [
                                                       {
                                                         instancePath:
@@ -99818,7 +100693,7 @@ function validate96(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func2(data19) < 1) {
+                                                    if (func2(data20) < 1) {
                                                       validate96.errors = [
                                                         {
                                                           instancePath:
@@ -99837,7 +100712,7 @@ function validate96(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data19)) {
+                                                      if (!pattern4.test(data20)) {
                                                         validate96.errors = [
                                                           {
                                                             instancePath:
@@ -99879,7 +100754,7 @@ function validate96(
                                                   return false;
                                                 }
                                               }
-                                              var valid6 = _errs50 === errors;
+                                              var valid6 = _errs52 === errors;
                                               if (!valid6) {
                                                 break;
                                               }
@@ -99900,18 +100775,18 @@ function validate96(
                                           return false;
                                         }
                                       }
-                                      var valid5 = _errs48 === errors;
+                                      var valid5 = _errs50 === errors;
                                     } else {
                                       var valid5 = true;
                                     }
                                     if (valid5) {
-                                      if (data11.configuration !== undefined) {
-                                        const _errs52 = errors;
+                                      if (data12.configuration !== undefined) {
+                                        const _errs54 = errors;
                                         if (
-                                          !validate97(data11.configuration, {
+                                          !validate97(data12.configuration, {
                                             instancePath:
                                               instancePath + '/runs/' + i0 + '/configuration',
-                                            parentData: data11,
+                                            parentData: data12,
                                             parentDataProperty: 'configuration',
                                             rootData,
                                             dynamicAnchors,
@@ -99923,15 +100798,15 @@ function validate96(
                                               : vErrors.concat(validate97.errors);
                                           errors = vErrors.length;
                                         }
-                                        var valid5 = _errs52 === errors;
+                                        var valid5 = _errs54 === errors;
                                       } else {
                                         var valid5 = true;
                                       }
                                       if (valid5) {
-                                        if (data11.createdAt !== undefined) {
-                                          let data21 = data11.createdAt;
-                                          const _errs53 = errors;
-                                          if (!(typeof data21 == 'number' && isFinite(data21))) {
+                                        if (data12.createdAt !== undefined) {
+                                          let data22 = data12.createdAt;
+                                          const _errs55 = errors;
+                                          if (!(typeof data22 == 'number' && isFinite(data22))) {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -99945,18 +100820,18 @@ function validate96(
                                             ];
                                             return false;
                                           }
-                                          var valid5 = _errs53 === errors;
+                                          var valid5 = _errs55 === errors;
                                         } else {
                                           var valid5 = true;
                                         }
                                         if (valid5) {
-                                          if (data11.finishedAt !== undefined) {
-                                            let data22 = data11.finishedAt;
-                                            const _errs55 = errors;
-                                            const _errs56 = errors;
-                                            let valid7 = false;
+                                          if (data12.finishedAt !== undefined) {
+                                            let data23 = data12.finishedAt;
                                             const _errs57 = errors;
-                                            if (!(typeof data22 == 'number' && isFinite(data22))) {
+                                            const _errs58 = errors;
+                                            let valid7 = false;
+                                            const _errs59 = errors;
+                                            if (!(typeof data23 == 'number' && isFinite(data23))) {
                                               const err9 = {
                                                 instancePath:
                                                   instancePath + '/runs/' + i0 + '/finishedAt',
@@ -99973,10 +100848,10 @@ function validate96(
                                               }
                                               errors++;
                                             }
-                                            var _valid2 = _errs57 === errors;
+                                            var _valid2 = _errs59 === errors;
                                             valid7 = valid7 || _valid2;
-                                            const _errs59 = errors;
-                                            if (data22 !== null) {
+                                            const _errs61 = errors;
+                                            if (data23 !== null) {
                                               const err10 = {
                                                 instancePath:
                                                   instancePath + '/runs/' + i0 + '/finishedAt',
@@ -99993,7 +100868,7 @@ function validate96(
                                               }
                                               errors++;
                                             }
-                                            var _valid2 = _errs59 === errors;
+                                            var _valid2 = _errs61 === errors;
                                             valid7 = valid7 || _valid2;
                                             if (!valid7) {
                                               const err11 = {
@@ -100014,27 +100889,27 @@ function validate96(
                                               validate96.errors = vErrors;
                                               return false;
                                             } else {
-                                              errors = _errs56;
+                                              errors = _errs58;
                                               if (vErrors !== null) {
-                                                if (_errs56) {
-                                                  vErrors.length = _errs56;
+                                                if (_errs58) {
+                                                  vErrors.length = _errs58;
                                                 } else {
                                                   vErrors = null;
                                                 }
                                               }
                                             }
-                                            var valid5 = _errs55 === errors;
+                                            var valid5 = _errs57 === errors;
                                           } else {
                                             var valid5 = true;
                                           }
                                           if (valid5) {
-                                            if (data11.reason !== undefined) {
-                                              let data23 = data11.reason;
-                                              const _errs61 = errors;
-                                              const _errs62 = errors;
-                                              let valid8 = false;
+                                            if (data12.reason !== undefined) {
+                                              let data24 = data12.reason;
                                               const _errs63 = errors;
-                                              if (typeof data23 !== 'string') {
+                                              const _errs64 = errors;
+                                              let valid8 = false;
+                                              const _errs65 = errors;
+                                              if (typeof data24 !== 'string') {
                                                 const err12 = {
                                                   instancePath:
                                                     instancePath + '/runs/' + i0 + '/reason',
@@ -100051,10 +100926,10 @@ function validate96(
                                                 }
                                                 errors++;
                                               }
-                                              var _valid3 = _errs63 === errors;
+                                              var _valid3 = _errs65 === errors;
                                               valid8 = valid8 || _valid3;
-                                              const _errs65 = errors;
-                                              if (data23 !== null) {
+                                              const _errs67 = errors;
+                                              if (data24 !== null) {
                                                 const err13 = {
                                                   instancePath:
                                                     instancePath + '/runs/' + i0 + '/reason',
@@ -100071,7 +100946,7 @@ function validate96(
                                                 }
                                                 errors++;
                                               }
-                                              var _valid3 = _errs65 === errors;
+                                              var _valid3 = _errs67 === errors;
                                               valid8 = valid8 || _valid3;
                                               if (!valid8) {
                                                 const err14 = {
@@ -100092,16 +100967,16 @@ function validate96(
                                                 validate96.errors = vErrors;
                                                 return false;
                                               } else {
-                                                errors = _errs62;
+                                                errors = _errs64;
                                                 if (vErrors !== null) {
-                                                  if (_errs62) {
-                                                    vErrors.length = _errs62;
+                                                  if (_errs64) {
+                                                    vErrors.length = _errs64;
                                                   } else {
                                                     vErrors = null;
                                                   }
                                                 }
                                               }
-                                              var valid5 = _errs61 === errors;
+                                              var valid5 = _errs63 === errors;
                                             } else {
                                               var valid5 = true;
                                             }
@@ -100129,7 +101004,7 @@ function validate96(
                       return false;
                     }
                   }
-                  var valid4 = _errs33 === errors;
+                  var valid4 = _errs35 === errors;
                   if (!valid4) {
                     break;
                   }
@@ -100147,36 +101022,36 @@ function validate96(
                 return false;
               }
             }
-            var valid0 = _errs31 === errors;
+            var valid0 = _errs33 === errors;
           } else {
             var valid0 = true;
           }
           if (valid0) {
             if (data.executions !== undefined) {
-              let data24 = data.executions;
-              const _errs67 = errors;
-              if (errors === _errs67) {
-                if (Array.isArray(data24)) {
+              let data25 = data.executions;
+              const _errs69 = errors;
+              if (errors === _errs69) {
+                if (Array.isArray(data25)) {
                   var valid9 = true;
-                  const len2 = data24.length;
+                  const len2 = data25.length;
                   for (let i2 = 0; i2 < len2; i2++) {
-                    let data25 = data24[i2];
-                    const _errs69 = errors;
-                    if (errors === _errs69) {
-                      if (data25 && typeof data25 == 'object' && !Array.isArray(data25)) {
+                    let data26 = data25[i2];
+                    const _errs71 = errors;
+                    if (errors === _errs71) {
+                      if (data26 && typeof data26 == 'object' && !Array.isArray(data26)) {
                         let missing3;
                         if (
-                          (data25.id === undefined && (missing3 = 'id')) ||
-                          (data25.sessionId === undefined && (missing3 = 'sessionId')) ||
-                          (data25.runId === undefined && (missing3 = 'runId')) ||
-                          (data25.kind === undefined && (missing3 = 'kind')) ||
-                          (data25.definitionId === undefined && (missing3 = 'definitionId')) ||
-                          (data25.definitionVersion === undefined &&
+                          (data26.id === undefined && (missing3 = 'id')) ||
+                          (data26.sessionId === undefined && (missing3 = 'sessionId')) ||
+                          (data26.runId === undefined && (missing3 = 'runId')) ||
+                          (data26.kind === undefined && (missing3 = 'kind')) ||
+                          (data26.definitionId === undefined && (missing3 = 'definitionId')) ||
+                          (data26.definitionVersion === undefined &&
                             (missing3 = 'definitionVersion')) ||
-                          (data25.status === undefined && (missing3 = 'status')) ||
-                          (data25.result === undefined && (missing3 = 'result')) ||
-                          (data25.resultRevision === undefined && (missing3 = 'resultRevision')) ||
-                          (data25.cancelRequestedAt === undefined &&
+                          (data26.status === undefined && (missing3 = 'status')) ||
+                          (data26.result === undefined && (missing3 = 'result')) ||
+                          (data26.resultRevision === undefined && (missing3 = 'resultRevision')) ||
+                          (data26.cancelRequestedAt === undefined &&
                             (missing3 = 'cancelRequestedAt'))
                         ) {
                           validate96.errors = [
@@ -100190,12 +101065,12 @@ function validate96(
                           ];
                           return false;
                         } else {
-                          if (data25.id !== undefined) {
-                            let data26 = data25.id;
-                            const _errs72 = errors;
-                            if (errors === _errs72) {
-                              if (typeof data26 === 'string') {
-                                if (func2(data26) > 128) {
+                          if (data26.id !== undefined) {
+                            let data27 = data26.id;
+                            const _errs74 = errors;
+                            if (errors === _errs74) {
+                              if (typeof data27 === 'string') {
+                                if (func2(data27) > 128) {
                                   validate96.errors = [
                                     {
                                       instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -100208,7 +101083,7 @@ function validate96(
                                   ];
                                   return false;
                                 } else {
-                                  if (func2(data26) < 1) {
+                                  if (func2(data27) < 1) {
                                     validate96.errors = [
                                       {
                                         instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -100221,7 +101096,7 @@ function validate96(
                                     ];
                                     return false;
                                   } else {
-                                    if (!pattern4.test(data26)) {
+                                    if (!pattern4.test(data27)) {
                                       validate96.errors = [
                                         {
                                           instancePath: instancePath + '/executions/' + i2 + '/id',
@@ -100250,17 +101125,17 @@ function validate96(
                                 return false;
                               }
                             }
-                            var valid10 = _errs72 === errors;
+                            var valid10 = _errs74 === errors;
                           } else {
                             var valid10 = true;
                           }
                           if (valid10) {
-                            if (data25.originStoreId !== undefined) {
-                              let data27 = data25.originStoreId;
-                              const _errs74 = errors;
-                              if (errors === _errs74) {
-                                if (typeof data27 === 'string') {
-                                  if (func2(data27) > 128) {
+                            if (data26.originStoreId !== undefined) {
+                              let data28 = data26.originStoreId;
+                              const _errs76 = errors;
+                              if (errors === _errs76) {
+                                if (typeof data28 === 'string') {
+                                  if (func2(data28) > 128) {
                                     validate96.errors = [
                                       {
                                         instancePath:
@@ -100274,7 +101149,7 @@ function validate96(
                                     ];
                                     return false;
                                   } else {
-                                    if (func2(data27) < 1) {
+                                    if (func2(data28) < 1) {
                                       validate96.errors = [
                                         {
                                           instancePath:
@@ -100288,7 +101163,7 @@ function validate96(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data27)) {
+                                      if (!pattern4.test(data28)) {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -100320,20 +101195,20 @@ function validate96(
                                   return false;
                                 }
                               }
-                              var valid10 = _errs74 === errors;
+                              var valid10 = _errs76 === errors;
                             } else {
                               var valid10 = true;
                             }
                             if (valid10) {
-                              if (data25.childSessionId !== undefined) {
-                                let data28 = data25.childSessionId;
-                                const _errs76 = errors;
-                                const _errs77 = errors;
-                                let valid11 = false;
+                              if (data26.childSessionId !== undefined) {
+                                let data29 = data26.childSessionId;
                                 const _errs78 = errors;
-                                if (errors === _errs78) {
-                                  if (typeof data28 === 'string') {
-                                    if (func2(data28) > 128) {
+                                const _errs79 = errors;
+                                let valid11 = false;
+                                const _errs80 = errors;
+                                if (errors === _errs80) {
+                                  if (typeof data29 === 'string') {
+                                    if (func2(data29) > 128) {
                                       const err15 = {
                                         instancePath:
                                           instancePath + '/executions/' + i2 + '/childSessionId',
@@ -100350,7 +101225,7 @@ function validate96(
                                       }
                                       errors++;
                                     } else {
-                                      if (func2(data28) < 1) {
+                                      if (func2(data29) < 1) {
                                         const err16 = {
                                           instancePath:
                                             instancePath + '/executions/' + i2 + '/childSessionId',
@@ -100367,7 +101242,7 @@ function validate96(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern4.test(data28)) {
+                                        if (!pattern4.test(data29)) {
                                           const err17 = {
                                             instancePath:
                                               instancePath +
@@ -100408,10 +101283,10 @@ function validate96(
                                     errors++;
                                   }
                                 }
-                                var _valid4 = _errs78 === errors;
+                                var _valid4 = _errs80 === errors;
                                 valid11 = valid11 || _valid4;
-                                const _errs80 = errors;
-                                if (data28 !== null) {
+                                const _errs82 = errors;
+                                if (data29 !== null) {
                                   const err19 = {
                                     instancePath:
                                       instancePath + '/executions/' + i2 + '/childSessionId',
@@ -100428,7 +101303,7 @@ function validate96(
                                   }
                                   errors++;
                                 }
-                                var _valid4 = _errs80 === errors;
+                                var _valid4 = _errs82 === errors;
                                 valid11 = valid11 || _valid4;
                                 if (!valid11) {
                                   const err20 = {
@@ -100449,29 +101324,29 @@ function validate96(
                                   validate96.errors = vErrors;
                                   return false;
                                 } else {
-                                  errors = _errs77;
+                                  errors = _errs79;
                                   if (vErrors !== null) {
-                                    if (_errs77) {
-                                      vErrors.length = _errs77;
+                                    if (_errs79) {
+                                      vErrors.length = _errs79;
                                     } else {
                                       vErrors = null;
                                     }
                                   }
                                 }
-                                var valid10 = _errs76 === errors;
+                                var valid10 = _errs78 === errors;
                               } else {
                                 var valid10 = true;
                               }
                               if (valid10) {
-                                if (data25.parentExecutionId !== undefined) {
-                                  let data29 = data25.parentExecutionId;
-                                  const _errs82 = errors;
-                                  const _errs83 = errors;
-                                  let valid12 = false;
+                                if (data26.parentExecutionId !== undefined) {
+                                  let data30 = data26.parentExecutionId;
                                   const _errs84 = errors;
-                                  if (errors === _errs84) {
-                                    if (typeof data29 === 'string') {
-                                      if (func2(data29) > 128) {
+                                  const _errs85 = errors;
+                                  let valid12 = false;
+                                  const _errs86 = errors;
+                                  if (errors === _errs86) {
+                                    if (typeof data30 === 'string') {
+                                      if (func2(data30) > 128) {
                                         const err21 = {
                                           instancePath:
                                             instancePath +
@@ -100491,7 +101366,7 @@ function validate96(
                                         }
                                         errors++;
                                       } else {
-                                        if (func2(data29) < 1) {
+                                        if (func2(data30) < 1) {
                                           const err22 = {
                                             instancePath:
                                               instancePath +
@@ -100511,7 +101386,7 @@ function validate96(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern4.test(data29)) {
+                                          if (!pattern4.test(data30)) {
                                             const err23 = {
                                               instancePath:
                                                 instancePath +
@@ -100552,10 +101427,10 @@ function validate96(
                                       errors++;
                                     }
                                   }
-                                  var _valid5 = _errs84 === errors;
+                                  var _valid5 = _errs86 === errors;
                                   valid12 = valid12 || _valid5;
-                                  const _errs86 = errors;
-                                  if (data29 !== null) {
+                                  const _errs88 = errors;
+                                  if (data30 !== null) {
                                     const err25 = {
                                       instancePath:
                                         instancePath + '/executions/' + i2 + '/parentExecutionId',
@@ -100572,7 +101447,7 @@ function validate96(
                                     }
                                     errors++;
                                   }
-                                  var _valid5 = _errs86 === errors;
+                                  var _valid5 = _errs88 === errors;
                                   valid12 = valid12 || _valid5;
                                   if (!valid12) {
                                     const err26 = {
@@ -100593,23 +101468,23 @@ function validate96(
                                     validate96.errors = vErrors;
                                     return false;
                                   } else {
-                                    errors = _errs83;
+                                    errors = _errs85;
                                     if (vErrors !== null) {
-                                      if (_errs83) {
-                                        vErrors.length = _errs83;
+                                      if (_errs85) {
+                                        vErrors.length = _errs85;
                                       } else {
                                         vErrors = null;
                                       }
                                     }
                                   }
-                                  var valid10 = _errs82 === errors;
+                                  var valid10 = _errs84 === errors;
                                 } else {
                                   var valid10 = true;
                                 }
                                 if (valid10) {
-                                  if (data25.cancelWithParent !== undefined) {
-                                    const _errs88 = errors;
-                                    if (typeof data25.cancelWithParent !== 'boolean') {
+                                  if (data26.cancelWithParent !== undefined) {
+                                    const _errs90 = errors;
+                                    if (typeof data26.cancelWithParent !== 'boolean') {
                                       validate96.errors = [
                                         {
                                           instancePath:
@@ -100626,17 +101501,17 @@ function validate96(
                                       ];
                                       return false;
                                     }
-                                    var valid10 = _errs88 === errors;
+                                    var valid10 = _errs90 === errors;
                                   } else {
                                     var valid10 = true;
                                   }
                                   if (valid10) {
-                                    if (data25.sessionId !== undefined) {
-                                      let data31 = data25.sessionId;
-                                      const _errs90 = errors;
-                                      if (errors === _errs90) {
-                                        if (typeof data31 === 'string') {
-                                          if (func2(data31) > 128) {
+                                    if (data26.sessionId !== undefined) {
+                                      let data32 = data26.sessionId;
+                                      const _errs92 = errors;
+                                      if (errors === _errs92) {
+                                        if (typeof data32 === 'string') {
+                                          if (func2(data32) > 128) {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -100650,7 +101525,7 @@ function validate96(
                                             ];
                                             return false;
                                           } else {
-                                            if (func2(data31) < 1) {
+                                            if (func2(data32) < 1) {
                                               validate96.errors = [
                                                 {
                                                   instancePath:
@@ -100667,7 +101542,7 @@ function validate96(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern4.test(data31)) {
+                                              if (!pattern4.test(data32)) {
                                                 validate96.errors = [
                                                   {
                                                     instancePath:
@@ -100704,20 +101579,20 @@ function validate96(
                                           return false;
                                         }
                                       }
-                                      var valid10 = _errs90 === errors;
+                                      var valid10 = _errs92 === errors;
                                     } else {
                                       var valid10 = true;
                                     }
                                     if (valid10) {
-                                      if (data25.runId !== undefined) {
-                                        let data32 = data25.runId;
-                                        const _errs92 = errors;
-                                        const _errs93 = errors;
-                                        let valid13 = false;
+                                      if (data26.runId !== undefined) {
+                                        let data33 = data26.runId;
                                         const _errs94 = errors;
-                                        if (errors === _errs94) {
-                                          if (typeof data32 === 'string') {
-                                            if (func2(data32) > 128) {
+                                        const _errs95 = errors;
+                                        let valid13 = false;
+                                        const _errs96 = errors;
+                                        if (errors === _errs96) {
+                                          if (typeof data33 === 'string') {
+                                            if (func2(data33) > 128) {
                                               const err27 = {
                                                 instancePath:
                                                   instancePath + '/executions/' + i2 + '/runId',
@@ -100734,7 +101609,7 @@ function validate96(
                                               }
                                               errors++;
                                             } else {
-                                              if (func2(data32) < 1) {
+                                              if (func2(data33) < 1) {
                                                 const err28 = {
                                                   instancePath:
                                                     instancePath + '/executions/' + i2 + '/runId',
@@ -100751,7 +101626,7 @@ function validate96(
                                                 }
                                                 errors++;
                                               } else {
-                                                if (!pattern4.test(data32)) {
+                                                if (!pattern4.test(data33)) {
                                                   const err29 = {
                                                     instancePath:
                                                       instancePath + '/executions/' + i2 + '/runId',
@@ -100791,10 +101666,10 @@ function validate96(
                                             errors++;
                                           }
                                         }
-                                        var _valid6 = _errs94 === errors;
+                                        var _valid6 = _errs96 === errors;
                                         valid13 = valid13 || _valid6;
-                                        const _errs96 = errors;
-                                        if (data32 !== null) {
+                                        const _errs98 = errors;
+                                        if (data33 !== null) {
                                           const err31 = {
                                             instancePath:
                                               instancePath + '/executions/' + i2 + '/runId',
@@ -100811,7 +101686,7 @@ function validate96(
                                           }
                                           errors++;
                                         }
-                                        var _valid6 = _errs96 === errors;
+                                        var _valid6 = _errs98 === errors;
                                         valid13 = valid13 || _valid6;
                                         if (!valid13) {
                                           const err32 = {
@@ -100832,24 +101707,24 @@ function validate96(
                                           validate96.errors = vErrors;
                                           return false;
                                         } else {
-                                          errors = _errs93;
+                                          errors = _errs95;
                                           if (vErrors !== null) {
-                                            if (_errs93) {
-                                              vErrors.length = _errs93;
+                                            if (_errs95) {
+                                              vErrors.length = _errs95;
                                             } else {
                                               vErrors = null;
                                             }
                                           }
                                         }
-                                        var valid10 = _errs92 === errors;
+                                        var valid10 = _errs94 === errors;
                                       } else {
                                         var valid10 = true;
                                       }
                                       if (valid10) {
-                                        if (data25.kind !== undefined) {
-                                          let data33 = data25.kind;
-                                          const _errs98 = errors;
-                                          if (typeof data33 !== 'string') {
+                                        if (data26.kind !== undefined) {
+                                          let data34 = data26.kind;
+                                          const _errs100 = errors;
+                                          if (typeof data34 !== 'string') {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -100865,9 +101740,9 @@ function validate96(
                                           }
                                           if (
                                             !(
-                                              data33 === 'model' ||
-                                              data33 === 'tool' ||
-                                              data33 === 'job'
+                                              data34 === 'model' ||
+                                              data34 === 'tool' ||
+                                              data34 === 'job'
                                             )
                                           ) {
                                             validate96.errors = [
@@ -100888,14 +101763,14 @@ function validate96(
                                             ];
                                             return false;
                                           }
-                                          var valid10 = _errs98 === errors;
+                                          var valid10 = _errs100 === errors;
                                         } else {
                                           var valid10 = true;
                                         }
                                         if (valid10) {
-                                          if (data25.definitionId !== undefined) {
-                                            const _errs100 = errors;
-                                            if (typeof data25.definitionId !== 'string') {
+                                          if (data26.definitionId !== undefined) {
+                                            const _errs102 = errors;
+                                            if (typeof data26.definitionId !== 'string') {
                                               validate96.errors = [
                                                 {
                                                   instancePath:
@@ -100912,14 +101787,14 @@ function validate96(
                                               ];
                                               return false;
                                             }
-                                            var valid10 = _errs100 === errors;
+                                            var valid10 = _errs102 === errors;
                                           } else {
                                             var valid10 = true;
                                           }
                                           if (valid10) {
-                                            if (data25.definitionVersion !== undefined) {
-                                              const _errs102 = errors;
-                                              if (typeof data25.definitionVersion !== 'string') {
+                                            if (data26.definitionVersion !== undefined) {
+                                              const _errs104 = errors;
+                                              if (typeof data26.definitionVersion !== 'string') {
                                                 validate96.errors = [
                                                   {
                                                     instancePath:
@@ -100936,15 +101811,15 @@ function validate96(
                                                 ];
                                                 return false;
                                               }
-                                              var valid10 = _errs102 === errors;
+                                              var valid10 = _errs104 === errors;
                                             } else {
                                               var valid10 = true;
                                             }
                                             if (valid10) {
-                                              if (data25.status !== undefined) {
-                                                let data36 = data25.status;
-                                                const _errs104 = errors;
-                                                if (typeof data36 !== 'string') {
+                                              if (data26.status !== undefined) {
+                                                let data37 = data26.status;
+                                                const _errs106 = errors;
+                                                if (typeof data37 !== 'string') {
                                                   validate96.errors = [
                                                     {
                                                       instancePath:
@@ -100963,13 +101838,13 @@ function validate96(
                                                 }
                                                 if (
                                                   !(
-                                                    data36 === 'planned' ||
-                                                    data36 === 'dispatching' ||
-                                                    data36 === 'running' ||
-                                                    data36 === 'succeeded' ||
-                                                    data36 === 'failed' ||
-                                                    data36 === 'cancelled' ||
-                                                    data36 === 'outcome_unknown'
+                                                    data37 === 'planned' ||
+                                                    data37 === 'dispatching' ||
+                                                    data37 === 'running' ||
+                                                    data37 === 'succeeded' ||
+                                                    data37 === 'failed' ||
+                                                    data37 === 'cancelled' ||
+                                                    data37 === 'outcome_unknown'
                                                   )
                                                 ) {
                                                   validate96.errors = [
@@ -100993,21 +101868,21 @@ function validate96(
                                                   ];
                                                   return false;
                                                 }
-                                                var valid10 = _errs104 === errors;
+                                                var valid10 = _errs106 === errors;
                                               } else {
                                                 var valid10 = true;
                                               }
                                               if (valid10) {
-                                                if (data25.result !== undefined) {
-                                                  const _errs106 = errors;
+                                                if (data26.result !== undefined) {
+                                                  const _errs108 = errors;
                                                   if (
-                                                    !validate97(data25.result, {
+                                                    !validate97(data26.result, {
                                                       instancePath:
                                                         instancePath +
                                                         '/executions/' +
                                                         i2 +
                                                         '/result',
-                                                      parentData: data25,
+                                                      parentData: data26,
                                                       parentDataProperty: 'result',
                                                       rootData,
                                                       dynamicAnchors,
@@ -101019,17 +101894,17 @@ function validate96(
                                                         : vErrors.concat(validate97.errors);
                                                     errors = vErrors.length;
                                                   }
-                                                  var valid10 = _errs106 === errors;
+                                                  var valid10 = _errs108 === errors;
                                                 } else {
                                                   var valid10 = true;
                                                 }
                                                 if (valid10) {
-                                                  if (data25.resultRevision !== undefined) {
-                                                    let data38 = data25.resultRevision;
-                                                    const _errs107 = errors;
-                                                    if (errors === _errs107) {
-                                                      if (typeof data38 === 'string') {
-                                                        if (!pattern18.test(data38)) {
+                                                  if (data26.resultRevision !== undefined) {
+                                                    let data39 = data26.resultRevision;
+                                                    const _errs109 = errors;
+                                                    if (errors === _errs109) {
+                                                      if (typeof data39 === 'string') {
+                                                        if (!pattern18.test(data39)) {
                                                           validate96.errors = [
                                                             {
                                                               instancePath:
@@ -101069,21 +101944,21 @@ function validate96(
                                                         return false;
                                                       }
                                                     }
-                                                    var valid10 = _errs107 === errors;
+                                                    var valid10 = _errs109 === errors;
                                                   } else {
                                                     var valid10 = true;
                                                   }
                                                   if (valid10) {
-                                                    if (data25.cancelRequestedAt !== undefined) {
-                                                      let data39 = data25.cancelRequestedAt;
-                                                      const _errs109 = errors;
-                                                      const _errs110 = errors;
-                                                      let valid14 = false;
+                                                    if (data26.cancelRequestedAt !== undefined) {
+                                                      let data40 = data26.cancelRequestedAt;
                                                       const _errs111 = errors;
+                                                      const _errs112 = errors;
+                                                      let valid14 = false;
+                                                      const _errs113 = errors;
                                                       if (
                                                         !(
-                                                          typeof data39 == 'number' &&
-                                                          isFinite(data39)
+                                                          typeof data40 == 'number' &&
+                                                          isFinite(data40)
                                                         )
                                                       ) {
                                                         const err33 = {
@@ -101105,10 +101980,10 @@ function validate96(
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid7 = _errs111 === errors;
+                                                      var _valid7 = _errs113 === errors;
                                                       valid14 = valid14 || _valid7;
-                                                      const _errs113 = errors;
-                                                      if (data39 !== null) {
+                                                      const _errs115 = errors;
+                                                      if (data40 !== null) {
                                                         const err34 = {
                                                           instancePath:
                                                             instancePath +
@@ -101128,7 +102003,7 @@ function validate96(
                                                         }
                                                         errors++;
                                                       }
-                                                      var _valid7 = _errs113 === errors;
+                                                      var _valid7 = _errs115 === errors;
                                                       valid14 = valid14 || _valid7;
                                                       if (!valid14) {
                                                         const err35 = {
@@ -101152,27 +102027,27 @@ function validate96(
                                                         validate96.errors = vErrors;
                                                         return false;
                                                       } else {
-                                                        errors = _errs110;
+                                                        errors = _errs112;
                                                         if (vErrors !== null) {
-                                                          if (_errs110) {
-                                                            vErrors.length = _errs110;
+                                                          if (_errs112) {
+                                                            vErrors.length = _errs112;
                                                           } else {
                                                             vErrors = null;
                                                           }
                                                         }
                                                       }
-                                                      var valid10 = _errs109 === errors;
+                                                      var valid10 = _errs111 === errors;
                                                     } else {
                                                       var valid10 = true;
                                                     }
                                                     if (valid10) {
-                                                      if (data25.delivery !== undefined) {
-                                                        let data40 = data25.delivery;
-                                                        const _errs115 = errors;
-                                                        const _errs116 = errors;
-                                                        let valid15 = false;
+                                                      if (data26.delivery !== undefined) {
+                                                        let data41 = data26.delivery;
                                                         const _errs117 = errors;
-                                                        if (typeof data40 !== 'string') {
+                                                        const _errs118 = errors;
+                                                        let valid15 = false;
+                                                        const _errs119 = errors;
+                                                        if (typeof data41 !== 'string') {
                                                           const err36 = {
                                                             instancePath:
                                                               instancePath +
@@ -101194,9 +102069,9 @@ function validate96(
                                                         }
                                                         if (
                                                           !(
-                                                            data40 === 'pending' ||
-                                                            data40 === 'consumed' ||
-                                                            data40 === 'suppressed'
+                                                            data41 === 'pending' ||
+                                                            data41 === 'consumed' ||
+                                                            data41 === 'suppressed'
                                                           )
                                                         ) {
                                                           const err37 = {
@@ -101224,10 +102099,10 @@ function validate96(
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid8 = _errs117 === errors;
+                                                        var _valid8 = _errs119 === errors;
                                                         valid15 = valid15 || _valid8;
-                                                        const _errs119 = errors;
-                                                        if (data40 !== null) {
+                                                        const _errs121 = errors;
+                                                        if (data41 !== null) {
                                                           const err38 = {
                                                             instancePath:
                                                               instancePath +
@@ -101247,7 +102122,7 @@ function validate96(
                                                           }
                                                           errors++;
                                                         }
-                                                        var _valid8 = _errs119 === errors;
+                                                        var _valid8 = _errs121 === errors;
                                                         valid15 = valid15 || _valid8;
                                                         if (!valid15) {
                                                           const err39 = {
@@ -101271,27 +102146,27 @@ function validate96(
                                                           validate96.errors = vErrors;
                                                           return false;
                                                         } else {
-                                                          errors = _errs116;
+                                                          errors = _errs118;
                                                           if (vErrors !== null) {
-                                                            if (_errs116) {
-                                                              vErrors.length = _errs116;
+                                                            if (_errs118) {
+                                                              vErrors.length = _errs118;
                                                             } else {
                                                               vErrors = null;
                                                             }
                                                           }
                                                         }
-                                                        var valid10 = _errs115 === errors;
+                                                        var valid10 = _errs117 === errors;
                                                       } else {
                                                         var valid10 = true;
                                                       }
                                                       if (valid10) {
-                                                        if (data25.deliveryReason !== undefined) {
-                                                          let data41 = data25.deliveryReason;
-                                                          const _errs121 = errors;
-                                                          const _errs122 = errors;
-                                                          let valid16 = false;
+                                                        if (data26.deliveryReason !== undefined) {
+                                                          let data42 = data26.deliveryReason;
                                                           const _errs123 = errors;
-                                                          if (typeof data41 !== 'string') {
+                                                          const _errs124 = errors;
+                                                          let valid16 = false;
+                                                          const _errs125 = errors;
+                                                          if (typeof data42 !== 'string') {
                                                             const err40 = {
                                                               instancePath:
                                                                 instancePath +
@@ -101311,10 +102186,10 @@ function validate96(
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid9 = _errs123 === errors;
+                                                          var _valid9 = _errs125 === errors;
                                                           valid16 = valid16 || _valid9;
-                                                          const _errs125 = errors;
-                                                          if (data41 !== null) {
+                                                          const _errs127 = errors;
+                                                          if (data42 !== null) {
                                                             const err41 = {
                                                               instancePath:
                                                                 instancePath +
@@ -101334,7 +102209,7 @@ function validate96(
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid9 = _errs125 === errors;
+                                                          var _valid9 = _errs127 === errors;
                                                           valid16 = valid16 || _valid9;
                                                           if (!valid16) {
                                                             const err42 = {
@@ -101359,16 +102234,16 @@ function validate96(
                                                             validate96.errors = vErrors;
                                                             return false;
                                                           } else {
-                                                            errors = _errs122;
+                                                            errors = _errs124;
                                                             if (vErrors !== null) {
-                                                              if (_errs122) {
-                                                                vErrors.length = _errs122;
+                                                              if (_errs124) {
+                                                                vErrors.length = _errs124;
                                                               } else {
                                                                 vErrors = null;
                                                               }
                                                             }
                                                           }
-                                                          var valid10 = _errs121 === errors;
+                                                          var valid10 = _errs123 === errors;
                                                         } else {
                                                           var valid10 = true;
                                                         }
@@ -101401,7 +102276,7 @@ function validate96(
                         return false;
                       }
                     }
-                    var valid9 = _errs69 === errors;
+                    var valid9 = _errs71 === errors;
                     if (!valid9) {
                       break;
                     }
@@ -101419,32 +102294,32 @@ function validate96(
                   return false;
                 }
               }
-              var valid0 = _errs67 === errors;
+              var valid0 = _errs69 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
               if (data.messages !== undefined) {
-                let data42 = data.messages;
-                const _errs127 = errors;
-                if (errors === _errs127) {
-                  if (Array.isArray(data42)) {
+                let data43 = data.messages;
+                const _errs129 = errors;
+                if (errors === _errs129) {
+                  if (Array.isArray(data43)) {
                     var valid17 = true;
-                    const len3 = data42.length;
+                    const len3 = data43.length;
                     for (let i3 = 0; i3 < len3; i3++) {
-                      let data43 = data42[i3];
-                      const _errs129 = errors;
-                      if (errors === _errs129) {
-                        if (data43 && typeof data43 == 'object' && !Array.isArray(data43)) {
+                      let data44 = data43[i3];
+                      const _errs131 = errors;
+                      if (errors === _errs131) {
+                        if (data44 && typeof data44 == 'object' && !Array.isArray(data44)) {
                           let missing4;
                           if (
-                            (data43.id === undefined && (missing4 = 'id')) ||
-                            (data43.sessionId === undefined && (missing4 = 'sessionId')) ||
-                            (data43.runId === undefined && (missing4 = 'runId')) ||
-                            (data43.seq === undefined && (missing4 = 'seq')) ||
-                            (data43.status === undefined && (missing4 = 'status')) ||
-                            (data43.role === undefined && (missing4 = 'role')) ||
-                            (data43.content === undefined && (missing4 = 'content'))
+                            (data44.id === undefined && (missing4 = 'id')) ||
+                            (data44.sessionId === undefined && (missing4 = 'sessionId')) ||
+                            (data44.runId === undefined && (missing4 = 'runId')) ||
+                            (data44.seq === undefined && (missing4 = 'seq')) ||
+                            (data44.status === undefined && (missing4 = 'status')) ||
+                            (data44.role === undefined && (missing4 = 'role')) ||
+                            (data44.content === undefined && (missing4 = 'content'))
                           ) {
                             validate96.errors = [
                               {
@@ -101457,12 +102332,12 @@ function validate96(
                             ];
                             return false;
                           } else {
-                            if (data43.id !== undefined) {
-                              let data44 = data43.id;
-                              const _errs132 = errors;
-                              if (errors === _errs132) {
-                                if (typeof data44 === 'string') {
-                                  if (func2(data44) > 128) {
+                            if (data44.id !== undefined) {
+                              let data45 = data44.id;
+                              const _errs134 = errors;
+                              if (errors === _errs134) {
+                                if (typeof data45 === 'string') {
+                                  if (func2(data45) > 128) {
                                     validate96.errors = [
                                       {
                                         instancePath: instancePath + '/messages/' + i3 + '/id',
@@ -101475,7 +102350,7 @@ function validate96(
                                     ];
                                     return false;
                                   } else {
-                                    if (func2(data44) < 1) {
+                                    if (func2(data45) < 1) {
                                       validate96.errors = [
                                         {
                                           instancePath: instancePath + '/messages/' + i3 + '/id',
@@ -101488,7 +102363,7 @@ function validate96(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data44)) {
+                                      if (!pattern4.test(data45)) {
                                         validate96.errors = [
                                           {
                                             instancePath: instancePath + '/messages/' + i3 + '/id',
@@ -101517,17 +102392,17 @@ function validate96(
                                   return false;
                                 }
                               }
-                              var valid18 = _errs132 === errors;
+                              var valid18 = _errs134 === errors;
                             } else {
                               var valid18 = true;
                             }
                             if (valid18) {
-                              if (data43.sessionId !== undefined) {
-                                let data45 = data43.sessionId;
-                                const _errs134 = errors;
-                                if (errors === _errs134) {
-                                  if (typeof data45 === 'string') {
-                                    if (func2(data45) > 128) {
+                              if (data44.sessionId !== undefined) {
+                                let data46 = data44.sessionId;
+                                const _errs136 = errors;
+                                if (errors === _errs136) {
+                                  if (typeof data46 === 'string') {
+                                    if (func2(data46) > 128) {
                                       validate96.errors = [
                                         {
                                           instancePath:
@@ -101541,7 +102416,7 @@ function validate96(
                                       ];
                                       return false;
                                     } else {
-                                      if (func2(data45) < 1) {
+                                      if (func2(data46) < 1) {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -101555,7 +102430,7 @@ function validate96(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern4.test(data45)) {
+                                        if (!pattern4.test(data46)) {
                                           validate96.errors = [
                                             {
                                               instancePath:
@@ -101587,20 +102462,20 @@ function validate96(
                                     return false;
                                   }
                                 }
-                                var valid18 = _errs134 === errors;
+                                var valid18 = _errs136 === errors;
                               } else {
                                 var valid18 = true;
                               }
                               if (valid18) {
-                                if (data43.runId !== undefined) {
-                                  let data46 = data43.runId;
-                                  const _errs136 = errors;
-                                  const _errs137 = errors;
-                                  let valid19 = false;
+                                if (data44.runId !== undefined) {
+                                  let data47 = data44.runId;
                                   const _errs138 = errors;
-                                  if (errors === _errs138) {
-                                    if (typeof data46 === 'string') {
-                                      if (func2(data46) > 128) {
+                                  const _errs139 = errors;
+                                  let valid19 = false;
+                                  const _errs140 = errors;
+                                  if (errors === _errs140) {
+                                    if (typeof data47 === 'string') {
+                                      if (func2(data47) > 128) {
                                         const err43 = {
                                           instancePath: instancePath + '/messages/' + i3 + '/runId',
                                           schemaPath:
@@ -101616,7 +102491,7 @@ function validate96(
                                         }
                                         errors++;
                                       } else {
-                                        if (func2(data46) < 1) {
+                                        if (func2(data47) < 1) {
                                           const err44 = {
                                             instancePath:
                                               instancePath + '/messages/' + i3 + '/runId',
@@ -101633,7 +102508,7 @@ function validate96(
                                           }
                                           errors++;
                                         } else {
-                                          if (!pattern4.test(data46)) {
+                                          if (!pattern4.test(data47)) {
                                             const err45 = {
                                               instancePath:
                                                 instancePath + '/messages/' + i3 + '/runId',
@@ -101670,10 +102545,10 @@ function validate96(
                                       errors++;
                                     }
                                   }
-                                  var _valid10 = _errs138 === errors;
+                                  var _valid10 = _errs140 === errors;
                                   valid19 = valid19 || _valid10;
-                                  const _errs140 = errors;
-                                  if (data46 !== null) {
+                                  const _errs142 = errors;
+                                  if (data47 !== null) {
                                     const err47 = {
                                       instancePath: instancePath + '/messages/' + i3 + '/runId',
                                       schemaPath:
@@ -101689,7 +102564,7 @@ function validate96(
                                     }
                                     errors++;
                                   }
-                                  var _valid10 = _errs140 === errors;
+                                  var _valid10 = _errs142 === errors;
                                   valid19 = valid19 || _valid10;
                                   if (!valid19) {
                                     const err48 = {
@@ -101709,26 +102584,26 @@ function validate96(
                                     validate96.errors = vErrors;
                                     return false;
                                   } else {
-                                    errors = _errs137;
+                                    errors = _errs139;
                                     if (vErrors !== null) {
-                                      if (_errs137) {
-                                        vErrors.length = _errs137;
+                                      if (_errs139) {
+                                        vErrors.length = _errs139;
                                       } else {
                                         vErrors = null;
                                       }
                                     }
                                   }
-                                  var valid18 = _errs136 === errors;
+                                  var valid18 = _errs138 === errors;
                                 } else {
                                   var valid18 = true;
                                 }
                                 if (valid18) {
-                                  if (data43.seq !== undefined) {
-                                    let data47 = data43.seq;
-                                    const _errs142 = errors;
-                                    if (errors === _errs142) {
-                                      if (typeof data47 === 'string') {
-                                        if (!pattern18.test(data47)) {
+                                  if (data44.seq !== undefined) {
+                                    let data48 = data44.seq;
+                                    const _errs144 = errors;
+                                    if (errors === _errs144) {
+                                      if (typeof data48 === 'string') {
+                                        if (!pattern18.test(data48)) {
                                           validate96.errors = [
                                             {
                                               instancePath:
@@ -101757,15 +102632,15 @@ function validate96(
                                         return false;
                                       }
                                     }
-                                    var valid18 = _errs142 === errors;
+                                    var valid18 = _errs144 === errors;
                                   } else {
                                     var valid18 = true;
                                   }
                                   if (valid18) {
-                                    if (data43.status !== undefined) {
-                                      let data48 = data43.status;
-                                      const _errs144 = errors;
-                                      if (typeof data48 !== 'string') {
+                                    if (data44.status !== undefined) {
+                                      let data49 = data44.status;
+                                      const _errs146 = errors;
+                                      if (typeof data49 !== 'string') {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -101779,7 +102654,7 @@ function validate96(
                                         ];
                                         return false;
                                       }
-                                      if (!(data48 === 'complete' || data48 === 'incomplete')) {
+                                      if (!(data49 === 'complete' || data49 === 'incomplete')) {
                                         validate96.errors = [
                                           {
                                             instancePath:
@@ -101797,15 +102672,15 @@ function validate96(
                                         ];
                                         return false;
                                       }
-                                      var valid18 = _errs144 === errors;
+                                      var valid18 = _errs146 === errors;
                                     } else {
                                       var valid18 = true;
                                     }
                                     if (valid18) {
-                                      if (data43.role !== undefined) {
-                                        let data49 = data43.role;
-                                        const _errs146 = errors;
-                                        if (typeof data49 !== 'string') {
+                                      if (data44.role !== undefined) {
+                                        let data50 = data44.role;
+                                        const _errs148 = errors;
+                                        if (typeof data50 !== 'string') {
                                           validate96.errors = [
                                             {
                                               instancePath:
@@ -101821,10 +102696,10 @@ function validate96(
                                         }
                                         if (
                                           !(
-                                            data49 === 'system' ||
-                                            data49 === 'user' ||
-                                            data49 === 'assistant' ||
-                                            data49 === 'tool'
+                                            data50 === 'system' ||
+                                            data50 === 'user' ||
+                                            data50 === 'assistant' ||
+                                            data50 === 'tool'
                                           )
                                         ) {
                                           validate96.errors = [
@@ -101844,14 +102719,14 @@ function validate96(
                                           ];
                                           return false;
                                         }
-                                        var valid18 = _errs146 === errors;
+                                        var valid18 = _errs148 === errors;
                                       } else {
                                         var valid18 = true;
                                       }
                                       if (valid18) {
-                                        if (data43.content !== undefined) {
-                                          const _errs148 = errors;
-                                          if (typeof data43.content !== 'string') {
+                                        if (data44.content !== undefined) {
+                                          const _errs150 = errors;
+                                          if (typeof data44.content !== 'string') {
                                             validate96.errors = [
                                               {
                                                 instancePath:
@@ -101865,29 +102740,29 @@ function validate96(
                                             ];
                                             return false;
                                           }
-                                          var valid18 = _errs148 === errors;
+                                          var valid18 = _errs150 === errors;
                                         } else {
                                           var valid18 = true;
                                         }
                                         if (valid18) {
-                                          if (data43.originMessage !== undefined) {
-                                            let data51 = data43.originMessage;
-                                            const _errs150 = errors;
-                                            if (errors === _errs150) {
+                                          if (data44.originMessage !== undefined) {
+                                            let data52 = data44.originMessage;
+                                            const _errs152 = errors;
+                                            if (errors === _errs152) {
                                               if (
-                                                data51 &&
-                                                typeof data51 == 'object' &&
-                                                !Array.isArray(data51)
+                                                data52 &&
+                                                typeof data52 == 'object' &&
+                                                !Array.isArray(data52)
                                               ) {
                                                 let missing5;
                                                 if (
-                                                  (data51.storeId === undefined &&
+                                                  (data52.storeId === undefined &&
                                                     (missing5 = 'storeId')) ||
-                                                  (data51.sessionId === undefined &&
+                                                  (data52.sessionId === undefined &&
                                                     (missing5 = 'sessionId')) ||
-                                                  (data51.messageId === undefined &&
+                                                  (data52.messageId === undefined &&
                                                     (missing5 = 'messageId')) ||
-                                                  (data51.runId === undefined &&
+                                                  (data52.runId === undefined &&
                                                     (missing5 = 'runId'))
                                                 ) {
                                                   validate96.errors = [
@@ -101909,12 +102784,12 @@ function validate96(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (data51.storeId !== undefined) {
-                                                    let data52 = data51.storeId;
-                                                    const _errs153 = errors;
-                                                    if (errors === _errs153) {
-                                                      if (typeof data52 === 'string') {
-                                                        if (func2(data52) > 128) {
+                                                  if (data52.storeId !== undefined) {
+                                                    let data53 = data52.storeId;
+                                                    const _errs155 = errors;
+                                                    if (errors === _errs155) {
+                                                      if (typeof data53 === 'string') {
+                                                        if (func2(data53) > 128) {
                                                           validate96.errors = [
                                                             {
                                                               instancePath:
@@ -101932,7 +102807,7 @@ function validate96(
                                                           ];
                                                           return false;
                                                         } else {
-                                                          if (func2(data52) < 1) {
+                                                          if (func2(data53) < 1) {
                                                             validate96.errors = [
                                                               {
                                                                 instancePath:
@@ -101950,7 +102825,7 @@ function validate96(
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (!pattern4.test(data52)) {
+                                                            if (!pattern4.test(data53)) {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -101992,17 +102867,17 @@ function validate96(
                                                         return false;
                                                       }
                                                     }
-                                                    var valid20 = _errs153 === errors;
+                                                    var valid20 = _errs155 === errors;
                                                   } else {
                                                     var valid20 = true;
                                                   }
                                                   if (valid20) {
-                                                    if (data51.sessionId !== undefined) {
-                                                      let data53 = data51.sessionId;
-                                                      const _errs155 = errors;
-                                                      if (errors === _errs155) {
-                                                        if (typeof data53 === 'string') {
-                                                          if (func2(data53) > 128) {
+                                                    if (data52.sessionId !== undefined) {
+                                                      let data54 = data52.sessionId;
+                                                      const _errs157 = errors;
+                                                      if (errors === _errs157) {
+                                                        if (typeof data54 === 'string') {
+                                                          if (func2(data54) > 128) {
                                                             validate96.errors = [
                                                               {
                                                                 instancePath:
@@ -102020,7 +102895,7 @@ function validate96(
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (func2(data53) < 1) {
+                                                            if (func2(data54) < 1) {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -102038,7 +102913,7 @@ function validate96(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (!pattern4.test(data53)) {
+                                                              if (!pattern4.test(data54)) {
                                                                 validate96.errors = [
                                                                   {
                                                                     instancePath:
@@ -102080,17 +102955,17 @@ function validate96(
                                                           return false;
                                                         }
                                                       }
-                                                      var valid20 = _errs155 === errors;
+                                                      var valid20 = _errs157 === errors;
                                                     } else {
                                                       var valid20 = true;
                                                     }
                                                     if (valid20) {
-                                                      if (data51.messageId !== undefined) {
-                                                        let data54 = data51.messageId;
-                                                        const _errs157 = errors;
-                                                        if (errors === _errs157) {
-                                                          if (typeof data54 === 'string') {
-                                                            if (func2(data54) > 128) {
+                                                      if (data52.messageId !== undefined) {
+                                                        let data55 = data52.messageId;
+                                                        const _errs159 = errors;
+                                                        if (errors === _errs159) {
+                                                          if (typeof data55 === 'string') {
+                                                            if (func2(data55) > 128) {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -102108,7 +102983,7 @@ function validate96(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (func2(data54) < 1) {
+                                                              if (func2(data55) < 1) {
                                                                 validate96.errors = [
                                                                   {
                                                                     instancePath:
@@ -102126,7 +103001,7 @@ function validate96(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (!pattern4.test(data54)) {
+                                                                if (!pattern4.test(data55)) {
                                                                   validate96.errors = [
                                                                     {
                                                                       instancePath:
@@ -102168,20 +103043,20 @@ function validate96(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid20 = _errs157 === errors;
+                                                        var valid20 = _errs159 === errors;
                                                       } else {
                                                         var valid20 = true;
                                                       }
                                                       if (valid20) {
-                                                        if (data51.runId !== undefined) {
-                                                          let data55 = data51.runId;
-                                                          const _errs159 = errors;
-                                                          const _errs160 = errors;
-                                                          let valid21 = false;
+                                                        if (data52.runId !== undefined) {
+                                                          let data56 = data52.runId;
                                                           const _errs161 = errors;
-                                                          if (errors === _errs161) {
-                                                            if (typeof data55 === 'string') {
-                                                              if (func2(data55) > 128) {
+                                                          const _errs162 = errors;
+                                                          let valid21 = false;
+                                                          const _errs163 = errors;
+                                                          if (errors === _errs163) {
+                                                            if (typeof data56 === 'string') {
+                                                              if (func2(data56) > 128) {
                                                                 const err49 = {
                                                                   instancePath:
                                                                     instancePath +
@@ -102202,7 +103077,7 @@ function validate96(
                                                                 }
                                                                 errors++;
                                                               } else {
-                                                                if (func2(data55) < 1) {
+                                                                if (func2(data56) < 1) {
                                                                   const err50 = {
                                                                     instancePath:
                                                                       instancePath +
@@ -102223,7 +103098,7 @@ function validate96(
                                                                   }
                                                                   errors++;
                                                                 } else {
-                                                                  if (!pattern4.test(data55)) {
+                                                                  if (!pattern4.test(data56)) {
                                                                     const err51 = {
                                                                       instancePath:
                                                                         instancePath +
@@ -102271,10 +103146,10 @@ function validate96(
                                                               errors++;
                                                             }
                                                           }
-                                                          var _valid11 = _errs161 === errors;
+                                                          var _valid11 = _errs163 === errors;
                                                           valid21 = valid21 || _valid11;
-                                                          const _errs163 = errors;
-                                                          if (data55 !== null) {
+                                                          const _errs165 = errors;
+                                                          if (data56 !== null) {
                                                             const err53 = {
                                                               instancePath:
                                                                 instancePath +
@@ -102294,7 +103169,7 @@ function validate96(
                                                             }
                                                             errors++;
                                                           }
-                                                          var _valid11 = _errs163 === errors;
+                                                          var _valid11 = _errs165 === errors;
                                                           valid21 = valid21 || _valid11;
                                                           if (!valid21) {
                                                             const err54 = {
@@ -102319,16 +103194,16 @@ function validate96(
                                                             validate96.errors = vErrors;
                                                             return false;
                                                           } else {
-                                                            errors = _errs160;
+                                                            errors = _errs162;
                                                             if (vErrors !== null) {
-                                                              if (_errs160) {
-                                                                vErrors.length = _errs160;
+                                                              if (_errs162) {
+                                                                vErrors.length = _errs162;
                                                               } else {
                                                                 vErrors = null;
                                                               }
                                                             }
                                                           }
-                                                          var valid20 = _errs159 === errors;
+                                                          var valid20 = _errs161 === errors;
                                                         } else {
                                                           var valid20 = true;
                                                         }
@@ -102354,15 +103229,15 @@ function validate96(
                                                 return false;
                                               }
                                             }
-                                            var valid18 = _errs150 === errors;
+                                            var valid18 = _errs152 === errors;
                                           } else {
                                             var valid18 = true;
                                           }
                                           if (valid18) {
-                                            if (data43.contentFormat !== undefined) {
-                                              let data56 = data43.contentFormat;
-                                              const _errs165 = errors;
-                                              if (typeof data56 !== 'string') {
+                                            if (data44.contentFormat !== undefined) {
+                                              let data57 = data44.contentFormat;
+                                              const _errs167 = errors;
+                                              if (typeof data57 !== 'string') {
                                                 validate96.errors = [
                                                   {
                                                     instancePath:
@@ -102379,7 +103254,7 @@ function validate96(
                                                 ];
                                                 return false;
                                               }
-                                              if (data56 !== 'unsupported') {
+                                              if (data57 !== 'unsupported') {
                                                 validate96.errors = [
                                                   {
                                                     instancePath:
@@ -102396,33 +103271,33 @@ function validate96(
                                                 ];
                                                 return false;
                                               }
-                                              var valid18 = _errs165 === errors;
+                                              var valid18 = _errs167 === errors;
                                             } else {
                                               var valid18 = true;
                                             }
                                             if (valid18) {
-                                              if (data43.outputBody !== undefined) {
-                                                let data57 = data43.outputBody;
-                                                const _errs167 = errors;
-                                                if (errors === _errs167) {
+                                              if (data44.outputBody !== undefined) {
+                                                let data58 = data44.outputBody;
+                                                const _errs169 = errors;
+                                                if (errors === _errs169) {
                                                   if (
-                                                    data57 &&
-                                                    typeof data57 == 'object' &&
-                                                    !Array.isArray(data57)
+                                                    data58 &&
+                                                    typeof data58 == 'object' &&
+                                                    !Array.isArray(data58)
                                                   ) {
                                                     let missing6;
                                                     if (
-                                                      (data57.kind === undefined &&
+                                                      (data58.kind === undefined &&
                                                         (missing6 = 'kind')) ||
-                                                      (data57.executionId === undefined &&
+                                                      (data58.executionId === undefined &&
                                                         (missing6 = 'executionId')) ||
-                                                      (data57.complete === undefined &&
+                                                      (data58.complete === undefined &&
                                                         (missing6 = 'complete')) ||
-                                                      (data57.contentBytes === undefined &&
+                                                      (data58.contentBytes === undefined &&
                                                         (missing6 = 'contentBytes')) ||
-                                                      (data57.reasoningBytes === undefined &&
+                                                      (data58.reasoningBytes === undefined &&
                                                         (missing6 = 'reasoningBytes')) ||
-                                                      (data57.toolCallCount === undefined &&
+                                                      (data58.toolCallCount === undefined &&
                                                         (missing6 = 'toolCallCount'))
                                                     ) {
                                                       validate96.errors = [
@@ -102444,10 +103319,10 @@ function validate96(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (data57.kind !== undefined) {
-                                                        let data58 = data57.kind;
-                                                        const _errs170 = errors;
-                                                        if (typeof data58 !== 'string') {
+                                                      if (data58.kind !== undefined) {
+                                                        let data59 = data58.kind;
+                                                        const _errs172 = errors;
+                                                        if (typeof data59 !== 'string') {
                                                           validate96.errors = [
                                                             {
                                                               instancePath:
@@ -102464,7 +103339,7 @@ function validate96(
                                                           ];
                                                           return false;
                                                         }
-                                                        if (data58 !== 'model_output') {
+                                                        if (data59 !== 'model_output') {
                                                           validate96.errors = [
                                                             {
                                                               instancePath:
@@ -102483,17 +103358,17 @@ function validate96(
                                                           ];
                                                           return false;
                                                         }
-                                                        var valid22 = _errs170 === errors;
+                                                        var valid22 = _errs172 === errors;
                                                       } else {
                                                         var valid22 = true;
                                                       }
                                                       if (valid22) {
-                                                        if (data57.executionId !== undefined) {
-                                                          let data59 = data57.executionId;
-                                                          const _errs172 = errors;
-                                                          if (errors === _errs172) {
-                                                            if (typeof data59 === 'string') {
-                                                              if (func2(data59) > 128) {
+                                                        if (data58.executionId !== undefined) {
+                                                          let data60 = data58.executionId;
+                                                          const _errs174 = errors;
+                                                          if (errors === _errs174) {
+                                                            if (typeof data60 === 'string') {
+                                                              if (func2(data60) > 128) {
                                                                 validate96.errors = [
                                                                   {
                                                                     instancePath:
@@ -102511,7 +103386,7 @@ function validate96(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func2(data59) < 1) {
+                                                                if (func2(data60) < 1) {
                                                                   validate96.errors = [
                                                                     {
                                                                       instancePath:
@@ -102529,7 +103404,7 @@ function validate96(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data59)) {
+                                                                  if (!pattern4.test(data60)) {
                                                                     validate96.errors = [
                                                                       {
                                                                         instancePath:
@@ -102572,15 +103447,15 @@ function validate96(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid22 = _errs172 === errors;
+                                                          var valid22 = _errs174 === errors;
                                                         } else {
                                                           var valid22 = true;
                                                         }
                                                         if (valid22) {
-                                                          if (data57.complete !== undefined) {
-                                                            const _errs174 = errors;
+                                                          if (data58.complete !== undefined) {
+                                                            const _errs176 = errors;
                                                             if (
-                                                              typeof data57.complete !== 'boolean'
+                                                              typeof data58.complete !== 'boolean'
                                                             ) {
                                                               validate96.errors = [
                                                                 {
@@ -102598,17 +103473,17 @@ function validate96(
                                                               ];
                                                               return false;
                                                             }
-                                                            var valid22 = _errs174 === errors;
+                                                            var valid22 = _errs176 === errors;
                                                           } else {
                                                             var valid22 = true;
                                                           }
                                                           if (valid22) {
-                                                            if (data57.contentBytes !== undefined) {
-                                                              let data61 = data57.contentBytes;
-                                                              const _errs176 = errors;
-                                                              if (errors === _errs176) {
-                                                                if (typeof data61 === 'string') {
-                                                                  if (!pattern18.test(data61)) {
+                                                            if (data58.contentBytes !== undefined) {
+                                                              let data62 = data58.contentBytes;
+                                                              const _errs178 = errors;
+                                                              if (errors === _errs178) {
+                                                                if (typeof data62 === 'string') {
+                                                                  if (!pattern18.test(data62)) {
                                                                     validate96.errors = [
                                                                       {
                                                                         instancePath:
@@ -102649,19 +103524,19 @@ function validate96(
                                                                   return false;
                                                                 }
                                                               }
-                                                              var valid22 = _errs176 === errors;
+                                                              var valid22 = _errs178 === errors;
                                                             } else {
                                                               var valid22 = true;
                                                             }
                                                             if (valid22) {
                                                               if (
-                                                                data57.reasoningBytes !== undefined
+                                                                data58.reasoningBytes !== undefined
                                                               ) {
-                                                                let data62 = data57.reasoningBytes;
-                                                                const _errs178 = errors;
-                                                                if (errors === _errs178) {
-                                                                  if (typeof data62 === 'string') {
-                                                                    if (!pattern18.test(data62)) {
+                                                                let data63 = data58.reasoningBytes;
+                                                                const _errs180 = errors;
+                                                                if (errors === _errs180) {
+                                                                  if (typeof data63 === 'string') {
+                                                                    if (!pattern18.test(data63)) {
                                                                       validate96.errors = [
                                                                         {
                                                                           instancePath:
@@ -102702,22 +103577,22 @@ function validate96(
                                                                     return false;
                                                                   }
                                                                 }
-                                                                var valid22 = _errs178 === errors;
+                                                                var valid22 = _errs180 === errors;
                                                               } else {
                                                                 var valid22 = true;
                                                               }
                                                               if (valid22) {
                                                                 if (
-                                                                  data57.toolCallCount !== undefined
+                                                                  data58.toolCallCount !== undefined
                                                                 ) {
-                                                                  let data63 = data57.toolCallCount;
-                                                                  const _errs180 = errors;
+                                                                  let data64 = data58.toolCallCount;
+                                                                  const _errs182 = errors;
                                                                   if (
                                                                     !(
-                                                                      typeof data63 == 'number' &&
-                                                                      !(data63 % 1) &&
-                                                                      !isNaN(data63) &&
-                                                                      isFinite(data63)
+                                                                      typeof data64 == 'number' &&
+                                                                      !(data64 % 1) &&
+                                                                      !isNaN(data64) &&
+                                                                      isFinite(data64)
                                                                     )
                                                                   ) {
                                                                     validate96.errors = [
@@ -102736,14 +103611,14 @@ function validate96(
                                                                     ];
                                                                     return false;
                                                                   }
-                                                                  if (errors === _errs180) {
+                                                                  if (errors === _errs182) {
                                                                     if (
-                                                                      typeof data63 == 'number' &&
-                                                                      isFinite(data63)
+                                                                      typeof data64 == 'number' &&
+                                                                      isFinite(data64)
                                                                     ) {
                                                                       if (
-                                                                        data63 > 9007199254740991 ||
-                                                                        isNaN(data63)
+                                                                        data64 > 9007199254740991 ||
+                                                                        isNaN(data64)
                                                                       ) {
                                                                         validate96.errors = [
                                                                           {
@@ -102766,8 +103641,8 @@ function validate96(
                                                                         return false;
                                                                       } else {
                                                                         if (
-                                                                          data63 < 0 ||
-                                                                          isNaN(data63)
+                                                                          data64 < 0 ||
+                                                                          isNaN(data64)
                                                                         ) {
                                                                           validate96.errors = [
                                                                             {
@@ -102792,20 +103667,20 @@ function validate96(
                                                                       }
                                                                     }
                                                                   }
-                                                                  var valid22 = _errs180 === errors;
+                                                                  var valid22 = _errs182 === errors;
                                                                 } else {
                                                                   var valid22 = true;
                                                                 }
                                                                 if (valid22) {
                                                                   if (
-                                                                    data57.readAvailability !==
+                                                                    data58.readAvailability !==
                                                                     undefined
                                                                   ) {
-                                                                    let data64 =
-                                                                      data57.readAvailability;
-                                                                    const _errs182 = errors;
+                                                                    let data65 =
+                                                                      data58.readAvailability;
+                                                                    const _errs184 = errors;
                                                                     if (
-                                                                      typeof data64 !== 'string'
+                                                                      typeof data65 !== 'string'
                                                                     ) {
                                                                       validate96.errors = [
                                                                         {
@@ -102825,7 +103700,7 @@ function validate96(
                                                                       ];
                                                                       return false;
                                                                     }
-                                                                    if (data64 !== 'unsupported') {
+                                                                    if (data65 !== 'unsupported') {
                                                                       validate96.errors = [
                                                                         {
                                                                           instancePath:
@@ -102847,7 +103722,7 @@ function validate96(
                                                                       return false;
                                                                     }
                                                                     var valid22 =
-                                                                      _errs182 === errors;
+                                                                      _errs184 === errors;
                                                                   } else {
                                                                     var valid22 = true;
                                                                   }
@@ -102876,34 +103751,34 @@ function validate96(
                                                     return false;
                                                   }
                                                 }
-                                                var valid18 = _errs167 === errors;
+                                                var valid18 = _errs169 === errors;
                                               } else {
                                                 var valid18 = true;
                                               }
                                               if (valid18) {
-                                                if (data43.toolCalls !== undefined) {
-                                                  let data65 = data43.toolCalls;
-                                                  const _errs184 = errors;
-                                                  if (errors === _errs184) {
-                                                    if (Array.isArray(data65)) {
+                                                if (data44.toolCalls !== undefined) {
+                                                  let data66 = data44.toolCalls;
+                                                  const _errs186 = errors;
+                                                  if (errors === _errs186) {
+                                                    if (Array.isArray(data66)) {
                                                       var valid23 = true;
-                                                      const len4 = data65.length;
+                                                      const len4 = data66.length;
                                                       for (let i4 = 0; i4 < len4; i4++) {
-                                                        let data66 = data65[i4];
-                                                        const _errs186 = errors;
-                                                        if (errors === _errs186) {
+                                                        let data67 = data66[i4];
+                                                        const _errs188 = errors;
+                                                        if (errors === _errs188) {
                                                           if (
-                                                            data66 &&
-                                                            typeof data66 == 'object' &&
-                                                            !Array.isArray(data66)
+                                                            data67 &&
+                                                            typeof data67 == 'object' &&
+                                                            !Array.isArray(data67)
                                                           ) {
                                                             let missing7;
                                                             if (
-                                                              (data66.id === undefined &&
+                                                              (data67.id === undefined &&
                                                                 (missing7 = 'id')) ||
-                                                              (data66.name === undefined &&
+                                                              (data67.name === undefined &&
                                                                 (missing7 = 'name')) ||
-                                                              (data66.arguments === undefined &&
+                                                              (data67.arguments === undefined &&
                                                                 (missing7 = 'arguments'))
                                                             ) {
                                                               validate96.errors = [
@@ -102928,12 +103803,12 @@ function validate96(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (data66.id !== undefined) {
-                                                                let data67 = data66.id;
-                                                                const _errs189 = errors;
-                                                                if (errors === _errs189) {
-                                                                  if (typeof data67 === 'string') {
-                                                                    if (func2(data67) > 128) {
+                                                              if (data67.id !== undefined) {
+                                                                let data68 = data67.id;
+                                                                const _errs191 = errors;
+                                                                if (errors === _errs191) {
+                                                                  if (typeof data68 === 'string') {
+                                                                    if (func2(data68) > 128) {
                                                                       validate96.errors = [
                                                                         {
                                                                           instancePath:
@@ -102953,7 +103828,7 @@ function validate96(
                                                                       ];
                                                                       return false;
                                                                     } else {
-                                                                      if (func2(data67) < 1) {
+                                                                      if (func2(data68) < 1) {
                                                                         validate96.errors = [
                                                                           {
                                                                             instancePath:
@@ -102974,7 +103849,7 @@ function validate96(
                                                                         return false;
                                                                       } else {
                                                                         if (
-                                                                          !pattern4.test(data67)
+                                                                          !pattern4.test(data68)
                                                                         ) {
                                                                           validate96.errors = [
                                                                             {
@@ -103022,15 +103897,15 @@ function validate96(
                                                                     return false;
                                                                   }
                                                                 }
-                                                                var valid24 = _errs189 === errors;
+                                                                var valid24 = _errs191 === errors;
                                                               } else {
                                                                 var valid24 = true;
                                                               }
                                                               if (valid24) {
-                                                                if (data66.name !== undefined) {
-                                                                  const _errs191 = errors;
+                                                                if (data67.name !== undefined) {
+                                                                  const _errs193 = errors;
                                                                   if (
-                                                                    typeof data66.name !== 'string'
+                                                                    typeof data67.name !== 'string'
                                                                   ) {
                                                                     validate96.errors = [
                                                                       {
@@ -103050,17 +103925,17 @@ function validate96(
                                                                     ];
                                                                     return false;
                                                                   }
-                                                                  var valid24 = _errs191 === errors;
+                                                                  var valid24 = _errs193 === errors;
                                                                 } else {
                                                                   var valid24 = true;
                                                                 }
                                                                 if (valid24) {
                                                                   if (
-                                                                    data66.arguments !== undefined
+                                                                    data67.arguments !== undefined
                                                                   ) {
-                                                                    const _errs193 = errors;
+                                                                    const _errs195 = errors;
                                                                     if (
-                                                                      typeof data66.arguments !==
+                                                                      typeof data67.arguments !==
                                                                       'string'
                                                                     ) {
                                                                       validate96.errors = [
@@ -103084,7 +103959,7 @@ function validate96(
                                                                       return false;
                                                                     }
                                                                     var valid24 =
-                                                                      _errs193 === errors;
+                                                                      _errs195 === errors;
                                                                   } else {
                                                                     var valid24 = true;
                                                                   }
@@ -103110,7 +103985,7 @@ function validate96(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid23 = _errs186 === errors;
+                                                        var valid23 = _errs188 === errors;
                                                         if (!valid23) {
                                                           break;
                                                         }
@@ -103133,14 +104008,14 @@ function validate96(
                                                       return false;
                                                     }
                                                   }
-                                                  var valid18 = _errs184 === errors;
+                                                  var valid18 = _errs186 === errors;
                                                 } else {
                                                   var valid18 = true;
                                                 }
                                                 if (valid18) {
-                                                  if (data43.toolCallId !== undefined) {
-                                                    const _errs195 = errors;
-                                                    if (typeof data43.toolCallId !== 'string') {
+                                                  if (data44.toolCallId !== undefined) {
+                                                    const _errs197 = errors;
+                                                    if (typeof data44.toolCallId !== 'string') {
                                                       validate96.errors = [
                                                         {
                                                           instancePath:
@@ -103157,21 +104032,21 @@ function validate96(
                                                       ];
                                                       return false;
                                                     }
-                                                    var valid18 = _errs195 === errors;
+                                                    var valid18 = _errs197 === errors;
                                                   } else {
                                                     var valid18 = true;
                                                   }
                                                   if (valid18) {
-                                                    if (data43.sourceIds !== undefined) {
-                                                      let data71 = data43.sourceIds;
-                                                      const _errs197 = errors;
-                                                      if (errors === _errs197) {
-                                                        if (Array.isArray(data71)) {
+                                                    if (data44.sourceIds !== undefined) {
+                                                      let data72 = data44.sourceIds;
+                                                      const _errs199 = errors;
+                                                      if (errors === _errs199) {
+                                                        if (Array.isArray(data72)) {
                                                           var valid25 = true;
-                                                          const len5 = data71.length;
+                                                          const len5 = data72.length;
                                                           for (let i5 = 0; i5 < len5; i5++) {
-                                                            const _errs199 = errors;
-                                                            if (typeof data71[i5] !== 'string') {
+                                                            const _errs201 = errors;
+                                                            if (typeof data72[i5] !== 'string') {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -103189,7 +104064,7 @@ function validate96(
                                                               ];
                                                               return false;
                                                             }
-                                                            var valid25 = _errs199 === errors;
+                                                            var valid25 = _errs201 === errors;
                                                             if (!valid25) {
                                                               break;
                                                             }
@@ -103212,17 +104087,17 @@ function validate96(
                                                           return false;
                                                         }
                                                       }
-                                                      var valid18 = _errs197 === errors;
+                                                      var valid18 = _errs199 === errors;
                                                     } else {
                                                       var valid18 = true;
                                                     }
                                                     if (valid18) {
-                                                      if (data43.originCommandId !== undefined) {
-                                                        let data73 = data43.originCommandId;
-                                                        const _errs201 = errors;
-                                                        if (errors === _errs201) {
-                                                          if (typeof data73 === 'string') {
-                                                            if (func2(data73) > 128) {
+                                                      if (data44.originCommandId !== undefined) {
+                                                        let data74 = data44.originCommandId;
+                                                        const _errs203 = errors;
+                                                        if (errors === _errs203) {
+                                                          if (typeof data74 === 'string') {
+                                                            if (func2(data74) > 128) {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -103240,7 +104115,7 @@ function validate96(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (func2(data73) < 1) {
+                                                              if (func2(data74) < 1) {
                                                                 validate96.errors = [
                                                                   {
                                                                     instancePath:
@@ -103258,7 +104133,7 @@ function validate96(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (!pattern4.test(data73)) {
+                                                                if (!pattern4.test(data74)) {
                                                                   validate96.errors = [
                                                                     {
                                                                       instancePath:
@@ -103300,19 +104175,19 @@ function validate96(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid18 = _errs201 === errors;
+                                                        var valid18 = _errs203 === errors;
                                                       } else {
                                                         var valid18 = true;
                                                       }
                                                       if (valid18) {
                                                         if (
-                                                          data43.contextSelectionId !== undefined
+                                                          data44.contextSelectionId !== undefined
                                                         ) {
-                                                          let data74 = data43.contextSelectionId;
-                                                          const _errs203 = errors;
-                                                          if (errors === _errs203) {
-                                                            if (typeof data74 === 'string') {
-                                                              if (func2(data74) > 128) {
+                                                          let data75 = data44.contextSelectionId;
+                                                          const _errs205 = errors;
+                                                          if (errors === _errs205) {
+                                                            if (typeof data75 === 'string') {
+                                                              if (func2(data75) > 128) {
                                                                 validate96.errors = [
                                                                   {
                                                                     instancePath:
@@ -103330,7 +104205,7 @@ function validate96(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func2(data74) < 1) {
+                                                                if (func2(data75) < 1) {
                                                                   validate96.errors = [
                                                                     {
                                                                       instancePath:
@@ -103348,7 +104223,7 @@ function validate96(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data74)) {
+                                                                  if (!pattern4.test(data75)) {
                                                                     validate96.errors = [
                                                                       {
                                                                         instancePath:
@@ -103391,15 +104266,15 @@ function validate96(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid18 = _errs203 === errors;
+                                                          var valid18 = _errs205 === errors;
                                                         } else {
                                                           var valid18 = true;
                                                         }
                                                         if (valid18) {
-                                                          if (data43.inputKind !== undefined) {
-                                                            let data75 = data43.inputKind;
-                                                            const _errs205 = errors;
-                                                            if (typeof data75 !== 'string') {
+                                                          if (data44.inputKind !== undefined) {
+                                                            let data76 = data44.inputKind;
+                                                            const _errs207 = errors;
+                                                            if (typeof data76 !== 'string') {
                                                               validate96.errors = [
                                                                 {
                                                                   instancePath:
@@ -103418,9 +104293,9 @@ function validate96(
                                                             }
                                                             if (
                                                               !(
-                                                                data75 === 'input.steer' ||
-                                                                data75 === 'input.follow_up' ||
-                                                                data75 === 'result.include'
+                                                                data76 === 'input.steer' ||
+                                                                data76 === 'input.follow_up' ||
+                                                                data76 === 'result.include'
                                                               )
                                                             ) {
                                                               validate96.errors = [
@@ -103445,7 +104320,7 @@ function validate96(
                                                               ];
                                                               return false;
                                                             }
-                                                            var valid18 = _errs205 === errors;
+                                                            var valid18 = _errs207 === errors;
                                                           } else {
                                                             var valid18 = true;
                                                           }
@@ -103478,7 +104353,7 @@ function validate96(
                           return false;
                         }
                       }
-                      var valid17 = _errs129 === errors;
+                      var valid17 = _errs131 === errors;
                       if (!valid17) {
                         break;
                       }
@@ -103496,17 +104371,17 @@ function validate96(
                     return false;
                   }
                 }
-                var valid0 = _errs127 === errors;
+                var valid0 = _errs129 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (data.snapshotCursor !== undefined) {
-                  let data76 = data.snapshotCursor;
-                  const _errs207 = errors;
-                  if (errors === _errs207) {
-                    if (typeof data76 === 'string') {
-                      if (!pattern18.test(data76)) {
+                  let data77 = data.snapshotCursor;
+                  const _errs209 = errors;
+                  if (errors === _errs209) {
+                    if (typeof data77 === 'string') {
+                      if (!pattern18.test(data77)) {
                         validate96.errors = [
                           {
                             instancePath: instancePath + '/snapshotCursor',
@@ -103531,17 +104406,17 @@ function validate96(
                       return false;
                     }
                   }
-                  var valid0 = _errs207 === errors;
+                  var valid0 = _errs209 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
                   if (data.storeId !== undefined) {
-                    let data77 = data.storeId;
-                    const _errs209 = errors;
-                    if (errors === _errs209) {
-                      if (typeof data77 === 'string') {
-                        if (func2(data77) > 128) {
+                    let data78 = data.storeId;
+                    const _errs211 = errors;
+                    if (errors === _errs211) {
+                      if (typeof data78 === 'string') {
+                        if (func2(data78) > 128) {
                           validate96.errors = [
                             {
                               instancePath: instancePath + '/storeId',
@@ -103553,7 +104428,7 @@ function validate96(
                           ];
                           return false;
                         } else {
-                          if (func2(data77) < 1) {
+                          if (func2(data78) < 1) {
                             validate96.errors = [
                               {
                                 instancePath: instancePath + '/storeId',
@@ -103565,7 +104440,7 @@ function validate96(
                             ];
                             return false;
                           } else {
-                            if (!pattern4.test(data77)) {
+                            if (!pattern4.test(data78)) {
                               validate96.errors = [
                                 {
                                   instancePath: instancePath + '/storeId',
@@ -103592,7 +104467,7 @@ function validate96(
                         return false;
                       }
                     }
-                    var valid0 = _errs209 === errors;
+                    var valid0 = _errs211 === errors;
                   } else {
                     var valid0 = true;
                   }
@@ -120102,6 +120977,67 @@ function validate124(
                                 var valid1 = _errs24 === errors;
                               } else {
                                 var valid1 = true;
+                              }
+                              if (valid1) {
+                                if (data0.historyPurgedAt !== undefined) {
+                                  let data10 = data0.historyPurgedAt;
+                                  const _errs30 = errors;
+                                  if (
+                                    !(
+                                      typeof data10 == 'number' &&
+                                      !(data10 % 1) &&
+                                      !isNaN(data10) &&
+                                      isFinite(data10)
+                                    )
+                                  ) {
+                                    validate124.errors = [
+                                      {
+                                        instancePath: instancePath + '/' + i0 + '/historyPurgedAt',
+                                        schemaPath: '#/items/properties/historyPurgedAt/type',
+                                        keyword: 'type',
+                                        params: { type: 'integer' },
+                                        message: 'must be integer',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                  if (errors === _errs30) {
+                                    if (typeof data10 == 'number' && isFinite(data10)) {
+                                      if (data10 > 9007199254740991 || isNaN(data10)) {
+                                        validate124.errors = [
+                                          {
+                                            instancePath:
+                                              instancePath + '/' + i0 + '/historyPurgedAt',
+                                            schemaPath:
+                                              '#/items/properties/historyPurgedAt/maximum',
+                                            keyword: 'maximum',
+                                            params: { comparison: '<=', limit: 9007199254740991 },
+                                            message: 'must be <= 9007199254740991',
+                                          },
+                                        ];
+                                        return false;
+                                      } else {
+                                        if (data10 < 0 || isNaN(data10)) {
+                                          validate124.errors = [
+                                            {
+                                              instancePath:
+                                                instancePath + '/' + i0 + '/historyPurgedAt',
+                                              schemaPath:
+                                                '#/items/properties/historyPurgedAt/minimum',
+                                              keyword: 'minimum',
+                                              params: { comparison: '>=', limit: 0 },
+                                              message: 'must be >= 0',
+                                            },
+                                          ];
+                                          return false;
+                                        }
+                                      }
+                                    }
+                                  }
+                                  var valid1 = _errs30 === errors;
+                                } else {
+                                  var valid1 = true;
+                                }
                               }
                             }
                           }

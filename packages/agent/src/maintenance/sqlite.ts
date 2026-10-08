@@ -71,8 +71,7 @@ export function openPrivateDatabase(path: string): Database {
     throw error;
   }
 }
-export function openBackupDatabase(path: string): Database {
-  const db = openPrivateDatabase(path);
+function validateDatabase(db: Database): Database {
   try {
     db.run('PRAGMA busy_timeout=100');
     db.run('PRAGMA synchronous=FULL');
@@ -106,6 +105,17 @@ export function openBackupDatabase(path: string): Database {
     db.close(true);
     throw error;
   }
+}
+export function openBackupDatabase(path: string): Database {
+  return validateDatabase(openPrivateDatabase(path));
+}
+/** Caller must retain the external exclusive profile lease for the entire mutation. */
+export function openMaintenanceDatabase(path: string): Database {
+  closeSync(openPrivate(path));
+  initializeDefaultSqliteEngine();
+  return validateDatabase(
+    new Database(path, constants.SQLITE_OPEN_READWRITE | constants.SQLITE_OPEN_NOFOLLOW),
+  );
 }
 export function capture(db: Database) {
   const row = db
