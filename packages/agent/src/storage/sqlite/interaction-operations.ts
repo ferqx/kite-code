@@ -276,6 +276,8 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
     db.db.run('BEGIN');
     try {
       db.identity(input.expectedStoreId);
+      if (input.origin !== undefined && !['current', 'all'].includes(input.origin))
+        throw new AgentError('interaction_filter_invalid');
       const session = db.row('SELECT id FROM session WHERE id=?', input.sessionId);
       if (!session) throw new AgentError('session_not_found');
       let result: unknown;
@@ -286,7 +288,9 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
           .where(
             and(
               eq(interactions.id, input.interactionId),
-              eq(interactions.originStoreId, input.expectedStoreId),
+              input.origin === 'all'
+                ? undefined
+                : eq(interactions.originStoreId, input.expectedStoreId),
               or(
                 eq(interactions.sessionId, input.sessionId),
                 eq(interactions.presentationSessionId, input.sessionId),
@@ -311,8 +315,8 @@ export function callInteraction(db: SqliteOperations, method: string, args: unkn
         )
           throw new AgentError('interaction_filter_invalid');
         const rows = db.rows(
-          `SELECT * FROM interaction WHERE origin_store_id=? AND (session_id=? OR presentation_session_id=?) AND id>?${input.state ? ' AND state=?' : ''} ORDER BY id LIMIT ?`,
-          input.expectedStoreId,
+          `SELECT * FROM interaction WHERE ${input.origin === 'all' ? '' : 'origin_store_id=? AND '}(session_id=? OR presentation_session_id=?) AND id>?${input.state ? ' AND state=?' : ''} ORDER BY id LIMIT ?`,
+          ...(input.origin === 'all' ? [] : [input.expectedStoreId]),
           input.sessionId,
           input.sessionId,
           input.afterId ?? '',

@@ -55,7 +55,7 @@ export function verifyInteractionHistoryPage(
   let after = previous?.afterId ?? '';
   for (const card of page.interactions) {
     if (
-      card.originStoreId !== scope.storeId ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(card.originStoreId) ||
       (card.sessionId !== scope.sessionId && card.presentationSessionId !== scope.sessionId) ||
       card.ancestry[0] !== card.sessionId ||
       card.ancestry.at(-1) !== card.presentationSessionId ||

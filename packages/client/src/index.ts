@@ -1968,13 +1968,13 @@ export class AgentClient {
   getInteraction(
     sessionId: string,
     interactionId: string,
-    input: Pick<InteractionListQuery, 'storeId'>,
+    input: Pick<InteractionListQuery, 'storeId' | 'origin'>,
     options: { signal?: AbortSignal } = {},
   ) {
     this.requireCapability('interactions');
     validateRequest('InteractionListQuery', input);
     return this.fetchJSON(
-      `/v1/sessions/${encodeURIComponent(sessionId)}/interactions/${encodeURIComponent(interactionId)}?${new URLSearchParams({ storeId: input.storeId })}`,
+      `/v1/sessions/${encodeURIComponent(sessionId)}/interactions/${encodeURIComponent(interactionId)}?${new URLSearchParams(Object.entries(input).map(([key, value]) => [key, String(value)]))}`,
       'Interaction',
       options,
     );
@@ -2558,16 +2558,20 @@ export class AgentClient {
     interaction: Interaction,
     options: { signal?: AbortSignal } = {},
   ) {
+    this.requireConnection();
     const intent = interactionAttachment(structuredClone(interaction));
     if (!intent) throw new ClientError('attachment_missing');
     const result = await this.readArtifact(
       intent.sessionId,
       {
-        expectedStoreId: intent.originStoreId,
+        expectedStoreId: this.serverInfo!.storeId!,
         refId: intent.reference.id,
         scope: intent.reference.scope,
       },
-      { signal: options.signal, expectedReference: intent.reference },
+      {
+        signal: options.signal,
+        expectedReference: { ...intent.reference, storeId: intent.originStoreId },
+      },
     );
     let text: string;
     try {

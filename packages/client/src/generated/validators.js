@@ -154537,6 +154537,7 @@ var schema174 = {
   type: 'object',
   properties: {
     storeId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+    origin: { type: 'string', enum: ['current', 'all'] },
     afterId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
     limit: { type: 'integer', minimum: 1, maximum: 100 },
     state: { type: 'string', enum: ['pending', 'answered', 'cancelled'] },
@@ -154574,7 +154575,15 @@ function validate201(
       } else {
         const _errs1 = errors;
         for (const key0 in data) {
-          if (!(key0 === 'storeId' || key0 === 'afterId' || key0 === 'limit' || key0 === 'state')) {
+          if (
+            !(
+              key0 === 'storeId' ||
+              key0 === 'origin' ||
+              key0 === 'afterId' ||
+              key0 === 'limit' ||
+              key0 === 'state'
+            )
+          ) {
             validate201.errors = [
               {
                 instancePath,
@@ -154650,126 +154659,86 @@ function validate201(
             var valid0 = true;
           }
           if (valid0) {
-            if (data.afterId !== undefined) {
-              let data1 = data.afterId;
+            if (data.origin !== undefined) {
+              let data1 = data.origin;
               const _errs4 = errors;
-              if (errors === _errs4) {
-                if (typeof data1 === 'string') {
-                  if (func2(data1) > 128) {
-                    validate201.errors = [
-                      {
-                        instancePath: instancePath + '/afterId',
-                        schemaPath: '#/properties/afterId/maxLength',
-                        keyword: 'maxLength',
-                        params: { limit: 128 },
-                        message: 'must NOT have more than 128 characters',
-                      },
-                    ];
-                    return false;
-                  } else {
-                    if (func2(data1) < 1) {
-                      validate201.errors = [
-                        {
-                          instancePath: instancePath + '/afterId',
-                          schemaPath: '#/properties/afterId/minLength',
-                          keyword: 'minLength',
-                          params: { limit: 1 },
-                          message: 'must NOT have fewer than 1 characters',
-                        },
-                      ];
-                      return false;
-                    } else {
-                      if (!pattern4.test(data1)) {
-                        validate201.errors = [
-                          {
-                            instancePath: instancePath + '/afterId',
-                            schemaPath: '#/properties/afterId/pattern',
-                            keyword: 'pattern',
-                            params: { pattern: '^[A-Za-z0-9_-]+$' },
-                            message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
-                          },
-                        ];
-                        return false;
-                      }
-                    }
-                  }
-                } else {
-                  validate201.errors = [
-                    {
-                      instancePath: instancePath + '/afterId',
-                      schemaPath: '#/properties/afterId/type',
-                      keyword: 'type',
-                      params: { type: 'string' },
-                      message: 'must be string',
-                    },
-                  ];
-                  return false;
-                }
+              if (typeof data1 !== 'string') {
+                validate201.errors = [
+                  {
+                    instancePath: instancePath + '/origin',
+                    schemaPath: '#/properties/origin/type',
+                    keyword: 'type',
+                    params: { type: 'string' },
+                    message: 'must be string',
+                  },
+                ];
+                return false;
+              }
+              if (!(data1 === 'current' || data1 === 'all')) {
+                validate201.errors = [
+                  {
+                    instancePath: instancePath + '/origin',
+                    schemaPath: '#/properties/origin/enum',
+                    keyword: 'enum',
+                    params: { allowedValues: schema174.properties.origin.enum },
+                    message: 'must be equal to one of the allowed values',
+                  },
+                ];
+                return false;
               }
               var valid0 = _errs4 === errors;
             } else {
               var valid0 = true;
             }
             if (valid0) {
-              if (data.limit !== undefined) {
-                let data2 = data.limit;
+              if (data.afterId !== undefined) {
+                let data2 = data.afterId;
                 const _errs6 = errors;
-                if (
-                  !(typeof data2 == 'number' && !(data2 % 1) && !isNaN(data2) && isFinite(data2))
-                ) {
-                  validate201.errors = [
-                    {
-                      instancePath: instancePath + '/limit',
-                      schemaPath: '#/properties/limit/type',
-                      keyword: 'type',
-                      params: { type: 'integer' },
-                      message: 'must be integer',
-                    },
-                  ];
-                  return false;
-                }
                 if (errors === _errs6) {
-                  if (typeof data2 == 'number' && isFinite(data2)) {
-                    if (data2 > 100 || isNaN(data2)) {
+                  if (typeof data2 === 'string') {
+                    if (func2(data2) > 128) {
                       validate201.errors = [
                         {
-                          instancePath: instancePath + '/limit',
-                          schemaPath: '#/properties/limit/maximum',
-                          keyword: 'maximum',
-                          params: { comparison: '<=', limit: 100 },
-                          message: 'must be <= 100',
+                          instancePath: instancePath + '/afterId',
+                          schemaPath: '#/properties/afterId/maxLength',
+                          keyword: 'maxLength',
+                          params: { limit: 128 },
+                          message: 'must NOT have more than 128 characters',
                         },
                       ];
                       return false;
                     } else {
-                      if (data2 < 1 || isNaN(data2)) {
+                      if (func2(data2) < 1) {
                         validate201.errors = [
                           {
-                            instancePath: instancePath + '/limit',
-                            schemaPath: '#/properties/limit/minimum',
-                            keyword: 'minimum',
-                            params: { comparison: '>=', limit: 1 },
-                            message: 'must be >= 1',
+                            instancePath: instancePath + '/afterId',
+                            schemaPath: '#/properties/afterId/minLength',
+                            keyword: 'minLength',
+                            params: { limit: 1 },
+                            message: 'must NOT have fewer than 1 characters',
                           },
                         ];
                         return false;
+                      } else {
+                        if (!pattern4.test(data2)) {
+                          validate201.errors = [
+                            {
+                              instancePath: instancePath + '/afterId',
+                              schemaPath: '#/properties/afterId/pattern',
+                              keyword: 'pattern',
+                              params: { pattern: '^[A-Za-z0-9_-]+$' },
+                              message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                            },
+                          ];
+                          return false;
+                        }
                       }
                     }
-                  }
-                }
-                var valid0 = _errs6 === errors;
-              } else {
-                var valid0 = true;
-              }
-              if (valid0) {
-                if (data.state !== undefined) {
-                  let data3 = data.state;
-                  const _errs8 = errors;
-                  if (typeof data3 !== 'string') {
+                  } else {
                     validate201.errors = [
                       {
-                        instancePath: instancePath + '/state',
-                        schemaPath: '#/properties/state/type',
+                        instancePath: instancePath + '/afterId',
+                        schemaPath: '#/properties/afterId/type',
                         keyword: 'type',
                         params: { type: 'string' },
                         message: 'must be string',
@@ -154777,21 +154746,94 @@ function validate201(
                     ];
                     return false;
                   }
-                  if (!(data3 === 'pending' || data3 === 'answered' || data3 === 'cancelled')) {
+                }
+                var valid0 = _errs6 === errors;
+              } else {
+                var valid0 = true;
+              }
+              if (valid0) {
+                if (data.limit !== undefined) {
+                  let data3 = data.limit;
+                  const _errs8 = errors;
+                  if (
+                    !(typeof data3 == 'number' && !(data3 % 1) && !isNaN(data3) && isFinite(data3))
+                  ) {
                     validate201.errors = [
                       {
-                        instancePath: instancePath + '/state',
-                        schemaPath: '#/properties/state/enum',
-                        keyword: 'enum',
-                        params: { allowedValues: schema174.properties.state.enum },
-                        message: 'must be equal to one of the allowed values',
+                        instancePath: instancePath + '/limit',
+                        schemaPath: '#/properties/limit/type',
+                        keyword: 'type',
+                        params: { type: 'integer' },
+                        message: 'must be integer',
                       },
                     ];
                     return false;
                   }
+                  if (errors === _errs8) {
+                    if (typeof data3 == 'number' && isFinite(data3)) {
+                      if (data3 > 100 || isNaN(data3)) {
+                        validate201.errors = [
+                          {
+                            instancePath: instancePath + '/limit',
+                            schemaPath: '#/properties/limit/maximum',
+                            keyword: 'maximum',
+                            params: { comparison: '<=', limit: 100 },
+                            message: 'must be <= 100',
+                          },
+                        ];
+                        return false;
+                      } else {
+                        if (data3 < 1 || isNaN(data3)) {
+                          validate201.errors = [
+                            {
+                              instancePath: instancePath + '/limit',
+                              schemaPath: '#/properties/limit/minimum',
+                              keyword: 'minimum',
+                              params: { comparison: '>=', limit: 1 },
+                              message: 'must be >= 1',
+                            },
+                          ];
+                          return false;
+                        }
+                      }
+                    }
+                  }
                   var valid0 = _errs8 === errors;
                 } else {
                   var valid0 = true;
+                }
+                if (valid0) {
+                  if (data.state !== undefined) {
+                    let data4 = data.state;
+                    const _errs10 = errors;
+                    if (typeof data4 !== 'string') {
+                      validate201.errors = [
+                        {
+                          instancePath: instancePath + '/state',
+                          schemaPath: '#/properties/state/type',
+                          keyword: 'type',
+                          params: { type: 'string' },
+                          message: 'must be string',
+                        },
+                      ];
+                      return false;
+                    }
+                    if (!(data4 === 'pending' || data4 === 'answered' || data4 === 'cancelled')) {
+                      validate201.errors = [
+                        {
+                          instancePath: instancePath + '/state',
+                          schemaPath: '#/properties/state/enum',
+                          keyword: 'enum',
+                          params: { allowedValues: schema174.properties.state.enum },
+                          message: 'must be equal to one of the allowed values',
+                        },
+                      ];
+                      return false;
+                    }
+                    var valid0 = _errs10 === errors;
+                  } else {
+                    var valid0 = true;
+                  }
                 }
               }
             }

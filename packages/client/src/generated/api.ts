@@ -1273,6 +1273,7 @@ export type AnswerInteractionRequest = {
 };
 export type InteractionListQuery = {
   storeId: string;
+  origin?: 'current' | 'all';
   afterId?: string;
   limit?: number;
   state?: 'pending' | 'answered' | 'cancelled';

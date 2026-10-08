@@ -676,6 +676,7 @@ export const schemas = {
   }),
   InteractionListQuery: z.strictObject({
     storeId: id,
+    origin: z.enum(['current', 'all']).optional(),
     afterId: id.optional(),
     limit: z.number().int().min(1).max(100).optional(),
     state: z.enum(['pending', 'answered', 'cancelled']).optional(),

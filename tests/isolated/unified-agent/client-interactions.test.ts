@@ -4,11 +4,13 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { NativeInteractionHistoryReads } from '../../../apps/desktop/electron/interaction-history-reads';
 import { startService } from '../../../apps/service/src';
-import { createClient } from '../../../packages/client/src';
+import { createClient, interactionAttachment } from '../../../packages/client/src';
 import { decodeResponse } from '../../../packages/client/src/decode';
 
 async function code(work: Promise<unknown>, expected: string) {
@@ -20,7 +22,7 @@ async function code(work: Promise<unknown>, expected: string) {
   }
   expect((caught as { code?: string })?.code).toBe(expected);
 }
-async function fixture() {
+async function fixture(options: { artifacts?: boolean; sealed?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-interactions-')));
   const selected = { dataRoot: join(root, 'data'), profile: 'new' };
   const store = await openSqliteStore(selected);
@@ -39,6 +41,16 @@ async function fixture() {
     commandId: 'create-root',
     title: 'root',
   });
+  if (options.sealed)
+    await store.forkSession({
+      expectedStoreId,
+      subjectId: 'owner',
+      sourceSessionId: 'root',
+      expectedContextSelectionId: (await store.getView('root')).session.contextSelectionId,
+      newSessionId: 'sealed',
+      commandId: 'seal',
+      title: 'sealed before later interactions',
+    });
   await store.acceptCommand({
     expectedStoreId,
     sessionId: 'root',
@@ -150,8 +162,12 @@ async function fixture() {
   await plan('root-tool');
   await request('root-card', 'root-tool');
   const model = createFixedModel([]);
+  const artifacts = options.artifacts
+    ? createArtifactStore({ profile: selected, store })
+    : undefined;
   const runtime = createRuntime({
     store,
+    artifacts,
     model,
     modelId: 'fixture',
     permissions: {
@@ -179,6 +195,10 @@ async function fixture() {
   });
   await client.connect();
   return {
+    root,
+    selected,
+    profile,
+    artifacts,
     store,
     runtime,
     service,
@@ -199,6 +219,329 @@ async function fixture() {
     },
   };
 }
+test('restored public history preserves questions, plans, child approvals, cancellation and complete attachments without restoring answer authority', async () => {
+  const f = await fixture({ artifacts: true, sealed: true });
+  try {
+    const answers = { reply: '  原问题回答\r\n雪🙂é  ' };
+    const feedback = '  原计划修改反馈\r\n雪🙂é  ';
+    for (const [id, kind] of [
+      ['question', 'question'],
+      ['plan', 'plan_review'],
+    ] as const) {
+      await f.plan(`${id}-tool`);
+      await f.store.markDispatching({
+        ...f.write,
+        executionId: `${id}-tool`,
+        authorization: {
+          allowed: true,
+          revision: 'policy-1',
+          definitionVersion: '1',
+          inputDigest: f.inputDigest,
+        },
+        requirements: [],
+        freshness: { checked: true, source: f.source },
+      });
+      await f.store.requestInteraction({
+        ...f.write,
+        interactionId: `${id}-card`,
+        executionId: `${id}-tool`,
+        attempt: 1,
+        kind,
+        definitionId: 'fixture.tool',
+        definitionVersion: '1',
+        inputDigest: f.inputDigest,
+        policyRevision: 'policy-1',
+        requiredRefs: [],
+        source: f.source,
+        request:
+          kind === 'question'
+            ? {
+                title: '原问题',
+                schema: {
+                  type: 'object',
+                  properties: { reply: { type: 'string' } },
+                  required: ['reply'],
+                  additionalProperties: false,
+                },
+              }
+            : {
+                planId: 'original-plan',
+                version: '1',
+                digest: 'original-digest',
+                content: '原完整计划',
+                allowedModes: ['auto'],
+              },
+      });
+      await f.client.answerInteraction('root', `${id}-card`, {
+        expectedStoreId: f.expectedStoreId,
+        commandId: `answer-${id}`,
+        expectedRevision: '1',
+        answer: kind === 'question' ? { kind, answers } : { kind, decision: 'revise', feedback },
+      });
+    }
+    for (const [id, executionId] of [
+      ['plan-card', 'plan-tool'],
+      ['child-card', 'child-tool'],
+    ]) {
+      if (id === 'child-card')
+        await f.client.answerInteraction('root', id, {
+          expectedStoreId: f.expectedStoreId,
+          commandId: 'answer-child',
+          expectedRevision: '1',
+          answer: { kind: 'approval', decision: 'approve' },
+        });
+      await f.store.acceptInteractionDecision({
+        ...f.write,
+        interactionId: id!,
+        executionId: executionId!,
+        attempt: 1,
+        decisionRevision: '2',
+        definitionId: 'fixture.tool',
+        definitionVersion: '1',
+        inputDigest: f.inputDigest,
+        policyRevision: 'policy-1',
+        requirements: [],
+        freshness: { checked: true, source: f.source },
+      });
+    }
+    await f.plan('large-tool');
+    const text = JSON.stringify({ originalInput: '完整审批末尾雪🙂\r\n'.repeat(6000) });
+    const reference = await f.artifacts!.publish({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 'root',
+      subjectId: 'owner',
+      refId: 'original-review',
+      scope: { kind: 'execution', id: 'large-tool' },
+      mediaType: 'application/json',
+      content: new TextEncoder().encode(text),
+    });
+    await f.store.requestInteraction({
+      ...f.write,
+      interactionId: 'large-card',
+      executionId: 'large-tool',
+      attempt: 1,
+      kind: 'approval',
+      definitionId: 'fixture.tool',
+      definitionVersion: '1',
+      inputDigest: f.inputDigest,
+      policyRevision: 'policy-1',
+      requiredRefs: [],
+      source: f.source,
+      request: {
+        policy: {
+          review: {
+            kind: 'artifact',
+            complete: true,
+            reference: { ...reference, scope: { ...reference.scope } },
+          },
+        },
+      },
+    });
+    await f.client.cancelExecution('root', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel-large',
+      kind: 'execution.cancel',
+      executionId: 'large-tool',
+    });
+    await f.client.answerInteraction('root', 'large-card', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'late-denial',
+      expectedRevision: '1',
+      answer: { kind: 'approval', decision: 'deny' },
+    });
+    const published = (await f.client.listInteractions('root', { storeId: f.expectedStoreId }))
+      .interactions;
+    f.client.disposeNetwork();
+    await f.service.close();
+    const beforeRestore = await openSqliteStore({ ...f.selected, mode: 'readonly' });
+    let original: Awaited<ReturnType<typeof f.client.listInteractions>>['interactions'];
+    try {
+      original = (
+        await beforeRestore.listInteractions({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 'root',
+        })
+      ).interactions;
+      expect(original).toHaveLength(5);
+      expect(original.find((card) => card.id === 'question-card')!.answer).toEqual({
+        kind: 'question',
+        answers,
+      });
+      expect(
+        original.find((card) => card.id === 'question-card')!.acceptedDecisionRevision,
+      ).toBeNull();
+      expect(original.find((card) => card.id === 'plan-card')!.answer).toEqual({
+        kind: 'plan_review',
+        decision: 'revise',
+        feedback,
+      });
+      expect(original.find((card) => card.id === 'plan-card')!.acceptedDecisionRevision).toBe('2');
+      expect(original.find((card) => card.id === 'large-card')!.state).toBe('cancelled');
+      expect(original.find((card) => card.id === 'root-card')!.state).toBe('pending');
+    } finally {
+      await beforeRestore.close();
+    }
+    const backup = await createProfileBackup({
+      profile: f.selected,
+      destinationRoot: join(f.root, 'backup'),
+    });
+    const restored = await restoreProfileBackup({
+      profile: f.selected,
+      expectedStoreId: f.expectedStoreId,
+      backup,
+      intent: 'replace_with_selected_backup',
+    });
+    expect(restored.storeId).not.toBe(f.expectedStoreId);
+    // Maintenance cancels old pending work; it preserves the original request and saved decision.
+    const expectedHistory = published.map((card) =>
+      card.state === 'pending' ? { ...card, state: 'cancelled' as const } : card,
+    );
+    for (const cold of [false, true]) {
+      const store = await openSqliteStore({
+        ...f.selected,
+        ...(cold ? { mode: 'readonly' as const } : {}),
+      });
+      const model = createFixedModel([]);
+      const runtime = createRuntime({
+        store,
+        artifacts: createArtifactStore({
+          profile: f.selected,
+          store,
+          ...(cold ? { mode: 'readonly' as const } : {}),
+        }),
+        model,
+        permissions: {
+          async authorize() {
+            throw Error('history must not request permission');
+          },
+        },
+      });
+      const service = await startService({
+        runtime,
+        profile: f.profile,
+        buildId: 'restored-interaction-history',
+        subjectId: 'owner',
+      });
+      const client = createClient({
+        endpoint: service.endpoint,
+        token: service.bootstrap.token,
+        bootstrap: service.bootstrap,
+        expected: { profile: f.profile, apiMajor: 1, requiredCapabilities: ['interactions'] },
+      });
+      const scope = {
+        generation: 1,
+        viewSelection: 1,
+        historyEpoch: 0,
+        storeId: restored.storeId,
+        sessionId: 'root',
+        workspaceId: 'w',
+      };
+      const history = new NativeInteractionHistoryReads(client, () => scope);
+      try {
+        await client.connect();
+        const before = (await store.getMetadata()).lastChangeCursor;
+        expect(
+          (await client.listInteractions('root', { storeId: restored.storeId })).interactions,
+        ).toEqual([]);
+        expect(
+          (await client.listInteractions('root', { storeId: restored.storeId, state: 'pending' }))
+            .interactions,
+        ).toEqual([]);
+        await code(
+          client.getInteraction('root', 'question-card', { storeId: restored.storeId }),
+          'interaction_not_found',
+        );
+        const rows: typeof original = [];
+        let afterId: string | undefined;
+        let cursor: string | undefined;
+        do {
+          const page = await client.listInteractions('root', {
+            storeId: restored.storeId,
+            origin: 'all',
+            limit: 2,
+            ...(afterId ? { afterId } : {}),
+          });
+          expect(page.snapshotCursor).toBe(cursor ?? page.snapshotCursor);
+          cursor = page.snapshotCursor;
+          rows.push(...page.interactions);
+          afterId = page.nextAfterId ?? undefined;
+        } while (afterId);
+        expect(rows).toEqual(expectedHistory);
+        expect(rows.every((card) => !('subjectId' in card) && !('source' in card))).toBe(true);
+        expect(
+          await client.getInteraction(f.child.session.id, 'child-card', {
+            storeId: restored.storeId,
+            origin: 'all',
+          }),
+        ).toEqual(expectedHistory.find((card) => card.id === 'child-card')!);
+        expect(
+          (await client.listInteractions('sealed', { storeId: restored.storeId, origin: 'all' }))
+            .interactions,
+        ).toEqual([]);
+        await code(
+          client.getInteraction('sealed', 'question-card', {
+            storeId: restored.storeId,
+            origin: 'all',
+          }),
+          'interaction_not_found',
+        );
+        await code(
+          client.listInteractions('root', { storeId: f.expectedStoreId, origin: 'all' }),
+          'store_identity_mismatch',
+        );
+        const page = await history.open({
+          readId: 'restored-history',
+          viewSelection: 1,
+          historyEpoch: 0,
+        });
+        expect(page.page.interactions).toEqual(expectedHistory);
+        const card = rows.find((value) => value.id === 'large-card')!;
+        const attachment = interactionAttachment(card)!;
+        const opened = await history.attachments.open({
+          readId: 'original-body',
+          key: attachment.key,
+        });
+        expect(opened.reference.hash).toBe(createHash('sha256').update(text).digest('hex'));
+        const chunks: Buffer[] = [];
+        let offset = 0;
+        for (;;) {
+          const chunk = history.attachments.read({ readId: 'original-body', offset, limit: 65536 });
+          chunks.push(Buffer.from(chunk.data, 'base64'));
+          offset = chunk.nextOffset;
+          if (chunk.eof) break;
+        }
+        expect(Buffer.concat(chunks).toString()).toBe(text);
+        expect((await client.readInteractionAttachment(card)).reference.storeId).toBe(
+          f.expectedStoreId,
+        );
+        await code(
+          client.readInteractionAttachment({ ...card, originStoreId: 'wrong-origin' }),
+          'artifact_metadata_mismatch',
+        );
+        if (!cold)
+          await code(
+            client.answerInteraction('root', 'root-card', {
+              expectedStoreId: restored.storeId,
+              commandId: 'must-not-answer-restored',
+              expectedRevision: '1',
+              answer: { kind: 'approval', decision: 'approve' },
+            }),
+            'interaction_not_found',
+          );
+        expect((await store.getMetadata()).lastChangeCursor).toBe(before);
+        expect(model.requests).toHaveLength(0);
+        expect(f.model.requests).toHaveLength(0);
+      } finally {
+        history.release();
+        client.disposeNetwork();
+        await service.close();
+      }
+    }
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
 test('paired HTTP projects one child Interaction and answers only the root binding with durable identity/revision receipts', async () => {
   const f = await fixture();
   try {

@@ -148,6 +148,47 @@ async function receipt(page: import('playwright').Page, original: Message) {
   assert.deepEqual(JSON.parse(original.content).answers, facts.answers);
   assert.equal(await count(), 2);
 }
+async function records(
+  page: import('playwright').Page,
+  expected?: { id: string; answer: string; body: string[] },
+  sealed = false,
+) {
+  await openTools(page);
+  const details = page.locator('details[data-interaction-history]');
+  if ((await details.getAttribute('open')) === null) await details.locator('> summary').click();
+  const panel = page.getByRole('region', { name: '交互记录', exact: true });
+  await panel.getByText(`已完整读取 ${sealed ? 0 : 1} 项交互记录。`, { exact: true }).waitFor();
+  const cards = panel.locator('[data-interaction-id]');
+  assert.equal(await cards.count(), sealed ? 0 : 1);
+  let saved: { id: string; answer: string; body: string[] } | undefined;
+  if (!sealed) {
+    const card = cards.first();
+    await card.locator('> summary').click();
+    const answer = (await card.locator('[data-saved-answer]').textContent())!;
+    saved = {
+      id: (await card.getAttribute('data-interaction-id'))!,
+      answer,
+      body: await card.locator('pre').allTextContents(),
+    };
+    assert.deepEqual(JSON.parse(answer), {
+      kind: 'question',
+      answers: { q1: 'q1-o1', q2: { text: facts.answers.q2 } },
+    });
+    for (const question of facts.questions)
+      assert.ok(saved.body.some((text) => text.includes(question.question)));
+    await card.getByText('本次执行已接收该回答；这不表示执行成功。', { exact: true }).waitFor();
+    if (expected) {
+      assert.deepEqual(saved, expected);
+      await card.getByText('恢复历史，只读。', { exact: true }).waitFor();
+    }
+    assert.equal(await card.getByRole('button', { name: '提交回答', exact: true }).count(), 0);
+    for (const button of await card.getByRole('button').all())
+      assert.equal(await button.isDisabled(), true);
+  }
+  await details.locator('> summary').click();
+  await panel.waitFor({ state: 'detached' });
+  return saved;
+}
 async function noWrites(sealed = false) {
   const requests = (await app!.evaluate('globalThis.__questionAudit.requests')) as string[];
   assert.deepEqual(
@@ -222,6 +263,8 @@ try {
     )!;
   assert.ok(original);
   await receipt(page, original);
+  const originalCard = await records(page);
+  assert.ok(originalCard);
   const requests = (await app!.evaluate('globalThis.__questionAudit.requests')) as string[];
   assert.equal(
     requests.filter((entry) => /^POST \/v1\/sessions\/s\/interactions\/[^/]+\/answer$/.test(entry))
@@ -257,6 +300,7 @@ try {
     assert.deepEqual(copy.toolCalls, message.toolCalls);
   }
   await receipt(page, original);
+  await records(page, undefined, true);
   assert.equal(await page.locator('.agent-turn-final').count(), 0);
   await noWrites(true);
   await close();
@@ -273,6 +317,7 @@ try {
     assert.equal((await state(page)).selection!.storeId, restored.storeId);
     assert.deepEqual(await history(page, forkId), copies);
     await receipt(page, original);
+    await records(page, undefined, true);
     assert.equal(await page.locator('.agent-turn-final').count(), 0);
     await noWrites(true);
     await select(page, 'Other questions');
@@ -281,6 +326,7 @@ try {
     await select(page, 'Source questions');
     assert.deepEqual(await history(page, 's'), source);
     await receipt(page, original);
+    await records(page, originalCard);
     await noWrites();
     await close();
     console.log(
@@ -292,6 +338,8 @@ try {
       sourceFreeInstalled: true,
       originalQuestionnaire: true,
       originalAnswersPreserved: true,
+      originalReadonlyInteractionPreserved: true,
+      sealedInteractionsNotInferred: true,
       sealedAndRestoredSource: true,
       explicitFork: true,
       coldRead: true,

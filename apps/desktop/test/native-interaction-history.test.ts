@@ -82,7 +82,7 @@ test('original root history consumes every page and preserves generic child answ
   }
   expect(all).toEqual(rows);
   expect(calls).toHaveLength(3);
-  expect(calls[0]).toEqual(['root', { storeId: 'store', limit: 20 }]);
+  expect(calls[0]).toEqual(['root', { storeId: 'store', origin: 'all', limit: 20 }]);
   expect(all[21]!.answer).toEqual(rows[21]!.answer);
   reader.close('other-reader');
   expect(closed?.aborted).toBe(false);
@@ -91,6 +91,29 @@ test('original root history consumes every page and preserves generic child answ
   await expect(reader.next('history')).rejects.toMatchObject({
     code: 'interaction_history_read_missing',
   });
+});
+
+test('restored readonly history preserves original Store and requests explicit historical admission', async () => {
+  const original = { ...card('restored'), originStoreId: 'original-store' };
+  const reads: unknown[] = [];
+  const reader = new NativeInteractionHistoryReads(
+    {
+      serverInfo: info,
+      listInteractions: async (sessionId, query) => {
+        reads.push([sessionId, query]);
+        return { interactions: [original], nextAfterId: null, snapshotCursor: '10' };
+      },
+    } as ConstructorParameters<typeof NativeInteractionHistoryReads>[0],
+    () => scope,
+  );
+  try {
+    const page = await reader.open({ readId: 'restored', viewSelection: 2, historyEpoch: 3 });
+    expect(page.scope.storeId).toBe('store');
+    expect(page.page.interactions).toEqual([original]);
+    expect(reads).toEqual([['root', { storeId: 'store', origin: 'all', limit: 20 }]]);
+  } finally {
+    reader.close('restored');
+  }
 });
 
 test('a changing page and a late old selection cannot publish a complete history or release another reader', async () => {

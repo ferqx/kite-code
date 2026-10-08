@@ -82,6 +82,14 @@ test('original readonly cards keep saved generic answers, cancellation and exact
       kind: 'approval',
       answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
     },
+    {
+      ...base,
+      id: 'e',
+      originStoreId: 'original-store',
+      state: 'pending',
+      answer: null,
+      revision: '1',
+    },
   ];
   let release!: (page: NativeInteractionHistoryPage) => void;
   let firstRead = true;
@@ -164,7 +172,10 @@ test('original readonly cards keep saved generic answers, cancellation and exact
     expect(container.textContent).not.toContain('原问题回答');
     expect(container.textContent).not.toContain('已完整读取');
     await act(async () => release(nextPage));
-    expect(container.textContent).toContain('已完整读取 4 项交互记录');
+    expect(container.textContent).toContain('已完整读取 5 项交互记录');
+    expect(container.querySelector('[data-interaction-id="e"]')?.textContent).toContain(
+      '恢复历史，只读',
+    );
     expect(container.textContent).toContain('原问题回答 雪🙂');
     expect(container.textContent).toContain('问题 · 已取消');
     expect(container.textContent).toContain('本次执行已接收该回答');

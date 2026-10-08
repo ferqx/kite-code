@@ -158,6 +158,7 @@ export function NativeInteractionHistory({
           <summary>
             {interactionHistoryLabel(card)} · {card.definitionId}
           </summary>
+          {card.originStoreId !== storeId && <p>恢复历史，只读。</p>}
           <p>
             {card.acceptedDecisionRevision === card.revision
               ? '本次执行已接收该回答；这不表示执行成功。'

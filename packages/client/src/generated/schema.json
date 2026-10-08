@@ -6922,6 +6922,10 @@
         "maxLength": 128,
         "pattern": "^[A-Za-z0-9_-]+$"
       },
+      "origin": {
+        "type": "string",
+        "enum": ["current", "all"]
+      },
       "afterId": {
         "type": "string",
         "minLength": 1,

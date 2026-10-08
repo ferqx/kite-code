@@ -826,7 +826,7 @@ export async function startService(options: ServiceOptions) {
   });
   app.get('/v1/sessions/:id/interactions/:interactionId', async (context) => {
     const raw = context.req.queries();
-    const query = schemas.InteractionListQuery.pick({ storeId: true }).safeParse(
+    const query = schemas.InteractionListQuery.pick({ storeId: true, origin: true }).safeParse(
       Object.fromEntries(
         Object.entries(raw).map(([key, values]) => [key, values.length === 1 ? values[0] : values]),
       ),
@@ -836,6 +836,7 @@ export async function startService(options: ServiceOptions) {
       expectedStoreId: query.data.storeId,
       sessionId: context.req.param('id'),
       interactionId: context.req.param('interactionId'),
+      origin: query.data.origin,
     });
     if (!result) throw new HttpFailure('interaction_not_found', 404);
     return context.json(schemas.Interaction.parse(result));

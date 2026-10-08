@@ -1,5 +1,9 @@
 # Store 边界
 
+## 恢复后的只读 Interaction
+
+[Interaction owner](sqlite/interactions/README.md)区分当前原卡观察与明确 `origin:'all'` 的历史读取。当前 Store 仍是准入身份，实际保存的恢复记录保原 origin／来源与 presentation 关系，不隐式查 Fork／Include 祖先；默认查询、回答、决定接纳和派发继续要求当前出处。完整附件沿既有 Artifact 原引用校验，不建立回答 proof。SQL baseline 和维护格式不变；真实公共恢复与 Native 的分别验证范围见 [HTTP／Client 回归](../../../../tests/isolated/unified-agent/client-interactions.test.ts)和 [Native owner](../../../../apps/desktop/README.md#原交互记录只读历史)。
+
 ## 只读授权观察
 
 Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-review.ts)从现有记录推导，未增加持久字段或写操作。工具／Job 的原派发状态、准确 reviewer 状态／决定／原因和原人工 Interaction 的保存／accepted decision 分别保留；它不是派发 grant。reviewer 优先沿实际 dispatch binding 读取准确 carrier；没有该 binding 时仅接纳唯一原 purpose 候选，有歧义不猜最新。人工 accepted 还须原答案 revision 与原 Execution 的 decision binding 相符。

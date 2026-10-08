@@ -778,7 +778,12 @@ export interface Store {
     },
   ): Promise<InteractionRecord>;
   getInteraction(
-    input: WriteContext & { interactionId: string; sessionId: string },
+    input: WriteContext & {
+      interactionId: string;
+      sessionId: string;
+      /** Read-only restored records retain their original Store identity. */
+      origin?: 'current' | 'all';
+    },
   ): Promise<InteractionRecord | null>;
   listInteractions(
     input: WriteContext & {
@@ -786,6 +791,7 @@ export interface Store {
       afterId?: string;
       limit?: number;
       state?: InteractionRecord['state'];
+      origin?: 'current' | 'all';
     },
   ): Promise<InteractionPage>;
   applyInput(input: ApplyInputInput): Promise<InputApplication>;

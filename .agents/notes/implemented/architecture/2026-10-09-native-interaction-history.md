@@ -12,7 +12,7 @@ Status: implemented
 
 历史附件使用独立 NativeInteractionAttachmentReads 实例；仅接纳本次已读卡的原 key，先 GET 原 Interaction 核同一记录，再沿原 SDK／Native reader 核原身份、字节、hash、UTF-8 与 EOF。该实例不进入当前回答链的 loaded proof；历史卡不提供 onAnswer，保存、取消与 accepted revision 分别展示。计划正文使用原格式化组件，修改反馈保原字符串，完整原附件仍可核实后展开。关闭、换会话或 reset 仅撤销所属 GET 与读句柄，不取消业务执行。
 
-现有公共接口的 snapshotCursor 是 Store 观察游标，其他会话或 Model 输出也可能改变它。本片保留一致读取失败和显式重读，没有增加 Core 冻结历史 API，也不承诺持续变化中的多页读取一定完成。当前只核当前 Store 返回的原记录；恢复到新 Store、全部 Fork／Include 组合仍未取得本片资格。Core／Service／Client API、SQL 和私有格式不变。
+现有公共接口的 snapshotCursor 是 Store 观察游标，其他会话或 Model 输出也可能改变它。本片保留一致读取失败和显式重读，没有增加 Core 冻结历史 API，也不承诺持续变化中的多页读取一定完成。当前只读 list／get 增加明确 `origin=all`，按当前 Store 准入读取实际保存的原出处记录；默认 `current` 保原待回答观察与内部执行消费者。恢复不改写原 origin，不补 Fork／Include 来源后来的 Interaction。SDK 附件请求以当前 Store 准入，以原 Store 校验 expectedReference；完整正文与独立历史 reader 不建立回答 proof。只有可选读取 query 和生成合同改变，SQL baseline、私有格式和原写入／接纳／派发守卫保持。离线维护原本将未完成卡取消，历史据实际结果展示取消而不伪造待回答。
 
 本决定部分接续[审批决定](2026-10-09-native-approval-observations.md)与[轮次决定](2026-10-08-native-run-transcript-presentation.md)。前者的有限授权观察和原执行 proof，后者的封存来源、轮次、复制与默认问答结果理由继续适用；本片仅补原 Interaction 记录阅读。当前实现和限制归 [Desktop owner](../../../../apps/desktop/README.md#原交互记录只读历史)。
 
@@ -23,9 +23,11 @@ Status: implemented
 - 拼接不同游标的页，或只读第一页作为全部历史：会展示一次并不存在的完整观察；逐页核同一游标，直到真实 EOF，变化即明确未更新。
 - 新增 Core 冻结历史 API：本片先接既有公共读取和原 UI，保 Core 边界；代价是持续 Store 变化时需要显式重读，不宣称该情形已关闭。
 - 重做问题、计划和审批表单：既有卡片已拥有正文与完整附件阅读；在原侧栏接只读卡，回答保持原当前入口。
+- 默认把恢复记录混入当前 pending 页：现有回答消费者按当前 origin 核卡片，混入会破坏整个当前观察；只读历史明确选择 all，默认 current 保持。
+- 把原 Store 当恢复后 HTTP 准入，或把附件改成新 Store：前者拒绝合法当前连接，后者丢失原引用绑定；当前准入与原出处分别校验。
 
 ## Consequences
 
-原 PC 记录可迁入正式 Native，阅读不增加回答或执行权。原请求、答案与受理是分别可核的事实；完整附件 proof 只服务本次阅读，不形成第二份持久缓存。不同范围、迟到请求和游标漂移不能发布混合结果。
+原 PC 记录可迁入正式 Native，恢复后保原请求、答案、原 accepted revision 和 Store；公共 Service 仍排除私有主体和决策来源。真实 HTTP／SQLite／SDK／Main 首次与冷只读核问题、计划反馈、child 审批、取消、大附件、旧卡回答拒绝、Fork 不补后来记录及零新水位／Model；实际客户端窗口范围归 owner。阅读不增加回答或执行权。原请求、答案与受理是分别可核的事实；完整附件 proof 只服务本次阅读，不形成第二份持久缓存。不同范围、迟到请求和游标漂移不能发布混合结果。
 
 Main 43项分页与附件隔离、原卡 DOM、真实 HTTP／Core 的 child 和自定义 question、macOS 原默认首次／冷读及原计划大附件窗口提供本片证据。准确失败与通过归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原交互记录只读历史)。完整 PC、全部封存／恢复组合、完整 Auto Native 窗口、整片独立审查和全阶段退出仍未关闭；有限入口通过不提升这些资格。

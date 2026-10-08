@@ -16,6 +16,10 @@ Ajv 使用 `ownProperties:true`，必填与属性校验只读取实际 JSON 自�
 
 get/listInteractions 纯查询、同快照、有界 ID keyset，真实 child 和准确展示 root 可读取同一事实。分页不会将整个 group 历史塞入事件。普通重开不自动执行；Worker 丢失后已保存答案可读，显式 recovery 仍按原恢复承诺收束未派发调用并 fence，不能借批准自动接管。恢复/取消保留原 answer/source/input。
 
+原只读查询可明确选择 `origin:'all'`，读取该 Store 实际保存、属于准确来源 Session 或 presentation root 的恢复历史；默认 `origin:'current'` 仍只返回当前 Store 的卡，当前待回答观察保持原资格。`expectedStoreId` 始终核当前准入，返回 `originStoreId` 保原出处；不查 Fork／Include 来源后来的 Interaction，也不把原批准、答案或附件读取升级为新 Store 的执行权。get 和 list 都核同一读事务及 Session，all 保原 keyset、页上限和 snapshotCursor；SQL baseline、写入与接纳守卫不变。离线恢复原本将旧 pending 卡标为 cancelled，历史展示该真实取消状态，并保原请求与已保存决定。
+
+[真实恢复 HTTP／Client／Main 回归](../../../../../../tests/isolated/unified-agent/client-interactions.test.ts)核问题、计划反馈、child 审批、取消与完整原审批附件，首次及冷只读保原 Store／请求／答案／accepted revision；当前查询空、旧卡回答拒绝、Fork 不补后来来源记录、完整元数据／hash／EOF和零新水位／Model 分别核对。客户端实际窗口资格归 [Native owner](../../../../../../apps/desktop/README.md#原交互记录只读历史)。
+
 真实 SQLite tests 位于 test/isolated/storage/interactions.test.ts，覆盖双卡分页、根投影/child direct answer 拒绝、父先完成 detached child、同答案命令幂等、request/answer 触发器回滚、cancel-before-answer、Worker 重开与恢复 fencing、参数/来源/policy/计划变化、必要 refs 缺评估与 stale revision、信息请求在未满足必要计划时仍可接纳但最终派发/完成保持拒绝、信息接纳不覆盖已批准 Tool 绑定、计划信息迟到取消历史、question schema、INT64 revision overflow 整体回滚和接纳重试零事件。此叶子不访问旧用户数据，不调用模型或执行工具。
 
 完整人工审批的原展示请求超过卡片的 32 KiB、2048 节点或 16 层预算时，可信 Core sealer 将完整 `{policy,grants,commandDigest?,definitionId,definitionVersion,input}` canonical JSON 发布为原 Execution scope 的不可变 Artifact。卡片保留定义、原 inputDigest、原 grant 选项和完整正文摘要，并复用已有 `policy.review:{kind:'artifact',complete:true,reference}` 公共附件协议；不是正文前缀或另一种批准。每个原 Execution 的附件 ID 独立，同内容不会借另一 Execution 的引用取得读取资格。原 Execution.input、Interaction.inputDigest、policy revision、source、required refs、答案命令和 accepted revision 保持原身份。

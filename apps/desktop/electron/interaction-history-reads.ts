@@ -48,7 +48,7 @@ export class NativeInteractionHistoryReads {
         const fresh = await client.getInteraction(
           lease.scope.sessionId,
           card.id,
-          { storeId: lease.scope.storeId },
+          { storeId: lease.scope.storeId, origin: 'all' },
           options,
         );
         this.check(lease);
@@ -132,6 +132,7 @@ export class NativeInteractionHistoryReads {
         lease.scope.sessionId,
         {
           storeId: lease.scope.storeId,
+          origin: 'all',
           limit: 20,
           ...(lease.afterId ? { afterId: lease.afterId } : {}),
         },
