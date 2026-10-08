@@ -7,12 +7,10 @@ import { pathToFileURL } from 'node:url';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { verifyTerminalRuntimeBundle } from '@kite-ai/service/runtime-assets';
 
-// The original macOS comparison predates Linux SQLite qualification. Keep its source intact;
-// Linux uses the first committed, admitted Linux source, never a patched older checkout.
-export const TERMINAL_PREDECESSOR_COMMIT =
-  process.platform === 'linux'
-    ? '1b796e30ab0f3638767095d86d4afd374eae662a'
-    : '3140fe6d37131050033c66ffd9637fe7cd967da9';
+// Original committed PC UI with current locked inputs and DB7. Earlier comparisons
+// used 3140 (macOS) / 1b796 (Linux); their locks predate the PC presentation migration.
+// Keep all original-source, dependency, engine and actual-code-change guards below.
+export const TERMINAL_PREDECESSOR_COMMIT = 'a2b6441fde28d9c0f895a26e6a9d2471d2b1b242';
 const baseline = 'packages/agent/src/storage/migrations/0001-baseline.sql';
 const baselineSha256 = '92773869c4d4e68947e9721d5bb6d28e10567c6dc3a82b56726b1a0fb7adee42';
 const workspaces = [

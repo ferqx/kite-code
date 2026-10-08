@@ -2064,7 +2064,7 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 
 ### 30.2.15 回到完整用户能力迁移主线
 
-原PC空间行已接一次Workspace批量移除、默认保留的Main原生确认与持久原申请查询；显式离线GC进一步清理过宽限且任务全部终态的已移除空间正文，同空间Fork一起清理，原receipt／删除边界／Command去重事实保持。活动、未知或待核对工作保留证据，私有未发送草稿保留。单会话物理清理、installed维护与完整永久删除资格仍未闭合，不能据局部通过关闭Workspace／GC退出依赖。DB8／manifest v17仍只承载原申请资产，Core基线未变，详见[当前增量](unified-agent-refactor-v1-progress.md#2026-10-08已移除空间的显式历史正文清理)。
+原PC空间行已接一次Workspace批量移除、默认保留的Main原生确认与持久原申请查询；显式离线GC进一步清理过宽限且任务全部终态的已移除空间正文，同空间Fork一起清理，原receipt／删除边界／Command去重事实保持。活动、未知或待核对工作保留证据，私有未发送草稿保留。单会话物理清理及存活Fork来源保留、macOS安装版五项常用维护已取得对应入口的有限证据；其余维护恢复与完整永久删除资格仍未闭合，不能据局部通过宣布全阶段退出。DB8／manifest v17仍只承载原申请资产，Core基线未变，详见[当前增量](unified-agent-refactor-v1-progress.md#2026-10-08已移除空间的显式历史正文清理)。
 
 用户要求先执行方案主线，停止追加资源优化切片。正式 TUI 的 `/resume` 搜索与 D 默认保留确认现已接公共单 Session 删除；实际完整候选/共享80×24终端核默认零写、只删除另一原 Session、当前活动 Run 保持及最终完成。实现和当前验证范围归[阶段进度](unified-agent-refactor-v1-progress.md#2026-10-08正式-tui-会话搜索与删除确认)，不重复已闭合的 Native Chrome 与默认 Shell 资格。
 
@@ -2075,6 +2075,8 @@ Main SIGKILL 后默认父 EOF 收尾 Service/Job；Service SIGKILL 后 guardian 
 原安排任务页与右侧编辑表单已接入 Native，沿现行手册仅提供页面草稿、禁用保存，不以 UI 状态补造服务调度；工作台仍隐藏。实际入口与原草稿往返、晚创建隔离及源码外窗口结果见[安排任务进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-安排任务草稿页)。原新对话准备与首次发送亦已接正式 Native，沿原页面／建议／项目分支／模型权限选择、已有创建和输入链完成，未知只查原提交，失败保原 Session 和草稿；真实窗口及消息接管修复见[新对话进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-新对话准备与首次发送)。原全局目录状态／时间排序亦已接公共同快照 activity 并复用 Sidebar，未选中原会话的 pending、真实事件时间、分页冲突／失败保事实和 macOS 冷读已核；见[目录进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-全局会话状态与时间排序)。剩余 PC 页面细节及后序依赖仍按原计划推进，完整阶段退出未通过。
 
 原环境信息卡和只读子详情已接入当前会话，保留原卡布局、准确停止、完整日志与返回主会话的草稿／等待提示；全局总览继续独立读取。实际 scope、目录 reset 与 macOS 窗口证据见[环境卡进度](unified-agent-refactor-v1-progress.md#2026-10-08原-pc-环境信息卡与只读子详情)。后续按原依赖推进 Workspace 批量移除／物理 GC、installed 恢复与发布样本、macOS 原资源退出、独立审查及阶段完整回归后最终旧路径退役；本片局部通过不关闭这些依赖。
+
+当前 macOS DB8 原代码回退也已沿复用原页面收束有限边界：固定相同11项依赖的a2b6441f原DB7源码，保真实Agent／Main／renderer差异、原四次兼容窗口和新两冷窗口；旧私有格式拒绝保数据，切回当前版本后只查原申请，六Service普通退出和最终卸载保持。准确失败、当前513断言／320.79秒及限制归[进度](unified-agent-refactor-v1-progress.md#2026-10-08native-db8-真实代码回退)。原17MiB页面刷新红、macOS RSS／八轮／全资源退出、其余必要恢复、独立审查、完整默认与最终旧路径退役仍未闭合；Win／Linux按用户顺序留到重构后Actions，37能力partial、wholeV13=false。
 
 ### 30.3 第一条执行闭环
 

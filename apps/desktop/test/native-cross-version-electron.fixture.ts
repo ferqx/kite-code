@@ -11,6 +11,7 @@ import type {
   NativeModelOutputChunk,
   NativeModelOutputOpen,
   NativeState,
+  NativeWorkspaceRemoval,
 } from '../src/native-bridge';
 import { readNativeModelOutput } from '../src/native-model-output';
 
@@ -19,7 +20,7 @@ async function openSessionTools(page: import('playwright').Page) {
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
 }
 
-const [launcher, home, control, desktopPackage] = process.argv.slice(2) as string[];
+const [launcher, home, control, desktopPackage, mode] = process.argv.slice(2) as string[];
 const { _electron } = createRequire(desktopPackage!)('playwright') as typeof import('playwright');
 const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) as {
   storeId: string;
@@ -28,7 +29,13 @@ const expected = JSON.parse(readFileSync(join(home!, 'expected.json'), 'utf8')) 
   tasks: string[];
   bodies: string[];
 };
-type Physical = { path: string; method: string; output?: ModelOutputSnapshot };
+type Physical = {
+  path: string;
+  method: string;
+  query: string;
+  body?: string;
+  output?: ModelOutputSnapshot;
+};
 type Globals = typeof globalThis & {
   versionPhysical: Physical[];
   versionServer?: Promise<ServerInfo>;
@@ -141,7 +148,12 @@ async function launch(index: number) {
     target.versionPhysical = [];
     globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
       const url = new URL(String(args[0]));
-      const row: Physical = { path: url.pathname, method: args[1]?.method ?? 'GET' };
+      const row: Physical = {
+        path: url.pathname,
+        query: url.search,
+        method: args[1]?.method ?? 'GET',
+        ...(typeof args[1]?.body === 'string' ? { body: args[1].body } : {}),
+      };
       target.versionPhysical.push(row);
       // Read the actual admitted Service's public identity using this caller's own headers.
       target.versionServer ??= original(new URL('/v1/server', url), {
@@ -157,6 +169,11 @@ async function launch(index: number) {
     }) as typeof fetch;
   });
   await page.getByRole('button', { name: 'Native real versions', exact: true }).click();
+  if (mode === 'db8-cold' && index === 0) {
+    const failure = page.getByRole('alertdialog', { name: '操作未完成', exact: true });
+    await failure.getByText('draft_storage_unavailable', { exact: true }).waitFor();
+    await failure.getByRole('button', { name: '确定', exact: true }).click();
+  }
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
     .waitFor();
@@ -186,8 +203,7 @@ async function read(page: Page, count: number) {
   });
   const outputs = page
     .getByRole('region', { name: '会话消息', exact: true })
-    .locator('article')
-    .filter({ has: page.locator('small', { hasText: /^assistant ·/ }) });
+    .getByRole('article', { name: 'assistant 消息', exact: true });
   if (count) await outputs.nth(count - 1).waitFor();
   assert.equal(await outputs.count(), count);
   for (let index = 0; index < count; index++) {
@@ -342,99 +358,236 @@ async function close(sequence: number) {
   stage('ordinary_exit', { sequence, pid, exit, exclusive: true });
 }
 try {
-  let launched = await launch(0);
-  await launched.page.evaluate(async () => {
-    const current = (await window.kiteNative!.request({
-      method: 'state',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.mode',
-      generation: 1,
-      observationId: current.selection!.permissions!.observationId,
-      mode: 'full',
-      makeDefault: false,
+  if (mode === 'db8-cold') {
+    const saved = JSON.parse(
+      readFileSync(join(home!, 'native-db8-intent.json'), 'utf8'),
+    ) as NativeWorkspaceRemoval;
+    assert.equal(
+      (await query<{ candidateId: string }>('rollback')).candidateId,
+      expected.candidates[0]!.id,
+    );
+    let cold = await launch(0);
+    const rejected = await cold.page.evaluate(async (sessionId) => {
+      try {
+        await window.kiteNative!.request({ method: 'draft.read', generation: 1, sessionId });
+        return 'unexpected_success';
+      } catch (error) {
+        const failure = error as { code?: string; message?: string };
+        return failure.code ?? failure.message;
+      }
+    }, expected.sessionId);
+    assert.equal(rejected, 'draft_storage_unavailable');
+    assert.equal((await state(cold.page)).callerUnavailable, true);
+    await read(cold.page, 3);
+    const oldPhysical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
+    assert.ok(oldPhysical.every((row) => row.method === 'GET'));
+    assert.equal((await query<{ unchanged: boolean }>('db8-private')).unchanged, true);
+    await close(4);
+    assert.equal(
+      (await query<{ candidateId: string }>('rollback')).candidateId,
+      expected.candidates[1]!.id,
+    );
+    cold = await launch(1);
+    await read(cold.page, 3);
+    const original = (await state(cold.page)).workspaceRemovalSubmissions!.find(
+      (row) => row.commandId === saved.commandId,
+    )!;
+    assert.equal(original.phase, 'unknown');
+    assert.equal(original.storeId, saved.storeId);
+    assert.equal(original.workspaceId, saved.workspaceId);
+    assert.equal((await query<{ unchanged: boolean }>('db8-private')).unchanged, true);
+    await app!.evaluate(() => {
+      (globalThis as Globals).versionPhysical = [];
     });
-    const updated = (await window.kiteNative!.request({
-      method: 'permission.refresh',
-      generation: 1,
-    })) as NativeState;
-    await window.kiteNative!.request({
-      method: 'permission.trust',
-      generation: 1,
-      observationId: updated.selection!.permissions!.observationId,
-      trusted: true,
+    await cold.page.getByRole('button', { name: '查询原移除', exact: true }).click();
+    const lookedUp = await waitState(
+      cold.page,
+      (value) =>
+        value.workspaceRemovalSubmissions?.some(
+          (row) => row.commandId === saved.commandId && row.phase === 'applied',
+        ) === true,
+    );
+    const applied = lookedUp.workspaceRemovalSubmissions!.find(
+      (row) => row.commandId === saved.commandId,
+    )!;
+    assert.equal(applied.receipt!.originStoreId, saved.storeId);
+    assert.equal(applied.receipt!.workspaceId, saved.workspaceId);
+    assert.equal(applied.receipt!.deletedSessions, 0);
+    const physical = await app!.evaluate(() => (globalThis as Globals).versionPhysical);
+    assert.ok(physical.every((row) => row.method === 'GET'));
+    assert.ok(
+      physical.some(
+        (row) =>
+          row.path === `/v1/workspaces/${saved.workspaceId}/removals/${saved.commandId}` &&
+          row.query === `?storeId=${saved.storeId}`,
+      ),
+    );
+    await close(5);
+    assert.equal((await query<{ removed: boolean }>('uninstall')).removed, true);
+    writeFileSync(
+      join(home!, 'native-db8-report.json'),
+      JSON.stringify({ owned, saved, rejected, applied, oldPhysical, physical }),
+    );
+    stage('db8_cold_complete', {
+      normalExits: 2,
+      oldPrivateError: rejected,
+      originalCommandId: saved.commandId,
+      storeId: saved.storeId,
+      newModelCalls: 0,
+      restoredData: false,
     });
-  });
-  await launched.page.getByText('当前模式：full；默认模式：auto', { exact: true }).waitFor();
-  await launched.page
-    .getByText(/^工作区：native-version-workspace；信任状态：trusted；版本：/)
-    .waitFor();
-  const first = await run(launched.page, 0);
-  phases.push({
-    instanceId: launched.server.instanceId,
-    candidateId: expected.candidates[0]!.id,
-    outputs: first,
-  });
-  const upgraded = await query<{ candidateId: string; previousCandidateId: string }>('upgrade');
-  assert.equal(upgraded.candidateId, expected.candidates[1]!.id);
-  assert.equal(upgraded.previousCandidateId, expected.candidates[0]!.id);
-  assert.equal(
-    await app!.evaluate(() => process.execPath),
-    join(expected.candidates[0]!.root, expected.candidates[0]!.electron),
-  );
-  assert.equal((await query<{ blocked: boolean }>('busy')).blocked, true);
-  const held = await query<{ outer: boolean; inner: boolean }[]>('locks');
-  assert.deepEqual(held, [
-    { outer: true, inner: true },
-    { outer: false, inner: false },
-  ]);
-  await read(launched.page, 1);
-  await close(0);
-  launched = await launch(1);
-  await read(launched.page, 1);
-  const second = await run(launched.page, 1);
-  phases.push({
-    instanceId: launched.server.instanceId,
-    candidateId: expected.candidates[1]!.id,
-    outputs: second,
-  });
-  await close(1);
-  assert.equal(
-    (await query<{ candidateId: string }>('rollback')).candidateId,
-    expected.candidates[0]!.id,
-  );
-  launched = await launch(0);
-  await read(launched.page, 2);
-  const third = await run(launched.page, 2);
-  phases.push({
-    instanceId: launched.server.instanceId,
-    candidateId: expected.candidates[0]!.id,
-    outputs: third,
-  });
-  await close(2);
-  assert.equal(
-    (await query<{ candidateId: string }>('rollback')).candidateId,
-    expected.candidates[1]!.id,
-  );
-  launched = await launch(1);
-  const final = await read(launched.page, 3);
-  phases.push({
-    instanceId: launched.server.instanceId,
-    candidateId: expected.candidates[1]!.id,
-    outputs: final,
-  });
-  await close(3);
-  assert.equal((await query<{ removed: boolean }>('uninstall')).removed, true);
-  writeFileSync(join(home!, 'native-version-report.json'), JSON.stringify({ owned, phases }));
-  stage('complete', {
-    windows: 4,
-    normalExits: 4,
-    modelCalls: 3,
-    fullBodyBytes: Buffer.byteLength(expected.bodies[1]!),
-    fullBodyHash: createHash('sha256').update(expected.bodies[1]!).digest('hex'),
-    restoredData: false,
-  });
+  } else {
+    let launched = await launch(0);
+    await launched.page.evaluate(async () => {
+      const current = (await window.kiteNative!.request({
+        method: 'state',
+        generation: 1,
+      })) as NativeState;
+      await window.kiteNative!.request({
+        method: 'permission.mode',
+        generation: 1,
+        observationId: current.selection!.permissions!.observationId,
+        mode: 'full',
+        makeDefault: false,
+      });
+      const updated = (await window.kiteNative!.request({
+        method: 'permission.refresh',
+        generation: 1,
+      })) as NativeState;
+      await window.kiteNative!.request({
+        method: 'permission.trust',
+        generation: 1,
+        observationId: updated.selection!.permissions!.observationId,
+        trusted: true,
+      });
+    });
+    await launched.page.getByText('当前模式：full；默认模式：auto', { exact: true }).waitFor();
+    await launched.page
+      .getByText(/^工作区：native-version-workspace；信任状态：trusted；版本：/)
+      .waitFor();
+    const first = await run(launched.page, 0);
+    phases.push({
+      instanceId: launched.server.instanceId,
+      candidateId: expected.candidates[0]!.id,
+      outputs: first,
+    });
+    const upgraded = await query<{ candidateId: string; previousCandidateId: string }>('upgrade');
+    assert.equal(upgraded.candidateId, expected.candidates[1]!.id);
+    assert.equal(upgraded.previousCandidateId, expected.candidates[0]!.id);
+    assert.equal(
+      await app!.evaluate(() => process.execPath),
+      join(expected.candidates[0]!.root, expected.candidates[0]!.electron),
+    );
+    assert.equal((await query<{ blocked: boolean }>('busy')).blocked, true);
+    const held = await query<{ outer: boolean; inner: boolean }[]>('locks');
+    assert.deepEqual(held, [
+      { outer: true, inner: true },
+      { outer: false, inner: false },
+    ]);
+    await read(launched.page, 1);
+    await close(0);
+    launched = await launch(1);
+    await read(launched.page, 1);
+    const second = await run(launched.page, 1);
+    phases.push({
+      instanceId: launched.server.instanceId,
+      candidateId: expected.candidates[1]!.id,
+      outputs: second,
+    });
+    await close(1);
+    assert.equal(
+      (await query<{ candidateId: string }>('rollback')).candidateId,
+      expected.candidates[0]!.id,
+    );
+    launched = await launch(0);
+    await read(launched.page, 2);
+    const third = await run(launched.page, 2);
+    phases.push({
+      instanceId: launched.server.instanceId,
+      candidateId: expected.candidates[0]!.id,
+      outputs: third,
+    });
+    await close(2);
+    assert.equal(
+      (await query<{ candidateId: string }>('rollback')).candidateId,
+      expected.candidates[1]!.id,
+    );
+    launched = await launch(1);
+    const final = await read(launched.page, 3);
+    phases.push({
+      instanceId: launched.server.instanceId,
+      candidateId: expected.candidates[1]!.id,
+      outputs: final,
+    });
+    if (process.platform === 'darwin') {
+      const witness = (await state(launched.page)).directory!.workspaces.find(
+        (w) => w.id === 'db8-removal-workspace',
+      )!;
+      assert.ok(witness);
+      await app!.evaluate(({ dialog }) => {
+        dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+        const original = globalThis.fetch;
+        let drop = true;
+        globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+          const response = await original(...args);
+          if (
+            drop &&
+            new URL(String(args[0])).pathname === '/v1/workspaces/db8-removal-workspace/remove' &&
+            response.ok
+          ) {
+            drop = false;
+            throw Error('owned_db8_lost_reply');
+          }
+          return response;
+        }) as typeof fetch;
+        (globalThis as Globals).versionPhysical = [];
+      });
+      await launched.page
+        .getByRole('button', { name: `移除 ${witness.name}`, exact: true })
+        .locator('..')
+        .hover();
+      await launched.page
+        .getByRole('button', { name: `移除 ${witness.name}`, exact: true })
+        .click();
+      const unknownState = await waitState(
+        launched.page,
+        (value) =>
+          value.workspaceRemovalSubmissions?.some(
+            (row) => row.workspaceId === witness.id && row.phase === 'unknown',
+          ) === true,
+      );
+      const saved = unknownState.workspaceRemovalSubmissions!.find(
+        (row) => row.workspaceId === witness.id,
+      )!;
+      assert.equal(saved.storeId, expected.storeId);
+      assert.ok(saved.commandId);
+      const posts = (await app!.evaluate(() => (globalThis as Globals).versionPhysical)).filter(
+        (row) => row.method === 'POST',
+      );
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0]!.path, '/v1/workspaces/db8-removal-workspace/remove');
+      assert.deepEqual(JSON.parse(posts[0]!.body!), {
+        expectedStoreId: expected.storeId,
+        commandId: saved.commandId,
+      });
+      writeFileSync(join(home!, 'native-db8-intent.json'), JSON.stringify(saved));
+      stage('db8_original_sidebar_unknown', { commandId: saved.commandId, singlePost: true });
+    }
+    await close(3);
+    // macOS keeps these same installed candidates for the separate bounded DB8 cold
+    // driver. That driver performs the original uninstall after both ordinary exits.
+    if (process.platform !== 'darwin')
+      assert.equal((await query<{ removed: boolean }>('uninstall')).removed, true);
+    writeFileSync(join(home!, 'native-version-report.json'), JSON.stringify({ owned, phases }));
+    stage('complete', {
+      windows: 4,
+      normalExits: 4,
+      modelCalls: 3,
+      fullBodyBytes: Buffer.byteLength(expected.bodies[1]!),
+      fullBodyHash: createHash('sha256').update(expected.bodies[1]!).digest('hex'),
+      restoredData: false,
+    });
+  }
 } catch (error) {
   if (app) {
     try {

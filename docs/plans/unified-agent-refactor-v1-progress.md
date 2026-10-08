@@ -2774,3 +2774,18 @@ durable HEAD `9000661be3ed7361d04b256d374f8409a778715f` 加本轮owned diff，�
 剩余退出依赖仍四项：① DB8原旧代码回退及其余必要维护恢复窗口（原前驱只接DB7的源码边界已核，实际DB8回退运行资格未取得）；② macOS原RSS／八轮／全资源退出及原17MiB页面completed刷新红；③ 完整迁移独立审查（本逻辑轮fresh只读Agent仅一次尝试、thread limit拒绝，Root自检不替代）；④ 前置闭合后的完整默认阶段回归、旧路径最终退役与Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active；安装常用链通过不代表整体完成。
 
 Native／CLI owner、维护合同、客户端／CLI手册、release control与原持久决定同步；不制造生产边界或新数据格式diff。Root唯一Git owner，无关AGENTS.md原SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保持不暂存。iteration_complete／stage／commit只覆盖本增量，文档门禁、最终owned冻结和正常本地hooks独立核验；本地授权不扩大到push／PR／发布。
+
+
+## 2026-10-08：Native DB8 真实代码回退
+
+沿 durable el-refactor／HEAD `927eceb450d59552d6724174d921eb3098683037` 继续已确认PC迁移。当前窗口继续使用原SessionPage／Sidebar／Conversation／Composer／RightSidebar；本片只补DB8已安装旧代码回退边界，不新建页面、生产安装器或存储grammar。新基线旧源码固定到PC展示层迁入后的DB7提交 `a2b6441fde28d9c0f895a26e6a9d2471d2b1b242`：原3140／1b796的锁输入已经变化，守卫准确拒绝，不能沿用其旧资格。全部11项依赖、format1 SQL SHA、原源码前后dirty=false、旧自己的两层builder、真实Agent／Main／renderer差异、源码与原输出删除仍保持；当前Linux组合依用户顺序留到重构后的Actions。
+
+- macOS Native原整文件 `bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/native-cross-version.test.ts` actual0／1pass／513条Bun及driver断言／320.79秒。日志 `/private/tmp/kite-db8-rollback-native-window-final-20261008.log`；前四A→B→A→B窗口94.968秒内完成，三次Provider、352041B完整正文及hash／ref／原Command-Run-Model／caller／冷GET游标／回退后新上下文保持。第四B沿原Sidebar／Main确认callback移除一个空空间，物理成功reply丢失后唯一POST，原申请unknown，真正Node owner产生DB8。
+- 同一已安装候选再完成两个冷窗口，只交换代码指针。原a2 DB7 Native显示并返回draft_storage_unavailable／callerUnavailable，兼容Core历史及完整三回答可只读；原私有DB8 bytes／inode、配置与项目文件保持。切回当前B后unknown保原Store／Workspace／Command，明确「查询原移除」才GET已应用原回执（deletedSessions0），新POST／Provider增量0。查询前原私有bytes保持，查询只保存原结果；最终统一实际卸载保查询后的Core／Node bytes／inode／配置／项目。六个准确所属Service均普通退出，所有候选双EX可取。整例420秒／原driver120秒／窗口15秒保持，新冷段独立60秒；没有重复卸载再安装，也没有恢复数据或改user_version。
+- 共享固定前驱变化只复验必要Terminal原整文件，actual0／1pass／336断言／249.85秒，日志 `/private/tmp/kite-db8-rollback-terminal-predecessor-20261008.log`。原四冷实例／352041B／新上下文／精确stop-EX／保数据卸载保持，不扩TUI矩阵。两测试输入、候选与日志SHA归 `/private/tmp/kite-db8-rollback-finite-result-20261008.json`；四最终夹具SHA在实际作业后逐项相等，代码仍为HEAD加dirty，不冒称clean发布或T029。
+
+失败不重标：native-window-20261008.log为原3140的bun.lock守卫，actual1／206ms；native-window-current为已完成首模型后旧消息标记定位失败，actual1／198.785秒，现按原页面的会话消息article定位，全文／scope／数量断言保留。native-window-ui原整例actual1／420.88秒，四窗口实际144.264秒但重复安装后的新增冷段未完成；不能以四窗口结果冒称原120秒窗口或整例通过。随后只调整同一制品的验证顺序、最终卸载一次，原期限与保数据断言保持。native-window-sequential实际1／291.20秒：原四窗口95.422秒，旧DB8拒绝显示成立，新夹具却只读跨桥Error.code得到undefined；现沿现有页面code或message处理，成功仍为unexpected_success失败。完整日志均为 `/private/tmp/kite-db8-rollback-` 前缀，自有失败根保诊断，准确所属进程收尾另核，没有排除测试或删断言。
+
+Native／Terminal owner、maintenance、测试入口、产品手册、release control、§30.2.15及两份原持久决定同步；生产权限、Core基线、DB8／v17 grammar、Service／Client API及正式默认Shell未改。最终Root和精确八workspace typecheck实际0，日志 `/private/tmp/kite-db8-rollback-types-final-20261008.log`；文档结构、all作用域影响、plan-evidence及四owned夹具Biome实际0，对应同前缀docs／docs-impact／plan-evidence／format-delivery日志保留。`/private/tmp/kite-db8-rollback-processes-20261008.json`另核六准确Service身份与全部本任务失败根，剩余所属进程0。本片尚未运行阶段完整默认，原17MiB刷新红保持；正常hooks仍在实际本地提交时独立执行。iteration_complete仅收束这项已安装兼容边界；不以局部通过关闭整个V1.3。
+
+当前按依赖保四项退出缺口：① macOS原17MiB页面completed刷新红、RSS／八轮稳定性与全资源退出，下一项先处理真实PC刷新失败；② 其余计划必要维护恢复／发布中断窗口，T029首发前无适用新基线已发布样本且首发后兼容要求保持；③ 完整迁移独立审查（本逻辑轮只读新Agent仅尝试一次，thread limit拒绝，Root自检不替代）；④ 前置闭合后的完整默认阶段回归、旧路径最终退役及重构后的Win／Linux Actions。37能力仍partial、wholeV13=false、Goal active。Root唯一Git owner，无关AGENTS.md SHA256 `911c4bbe55b64dc129e4cf9085f8bb1e931a235b7e46d42f09cc985b428fb258`保持不暂存，授权仅本地stage／commit，不扩大到push／PR／发布。

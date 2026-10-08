@@ -30,6 +30,13 @@ try {
       workspaceId: 'native-version-workspace',
       title: 'Native real versions',
     });
+    if (process.platform === 'darwin')
+      await store.createWorkspace({
+        expectedStoreId: before.storeId,
+        id: 'db8-removal-workspace',
+        name: 'DB8 rollback witness',
+        rootUri: pathToFileURL(`${workspace}-db8`).href,
+      });
     console.log(JSON.stringify({ storeId: before.storeId, engine: getLoadedSqliteEngine() }));
   } else {
     const view = await store.getView(sessionId),

@@ -90,6 +90,10 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       workspace = join(root, 'workspace'),
       prefix = join(root, 'installed');
     for (const path of [home, workspace]) mkdirSync(path, { mode: 0o700 });
+    if (process.platform === 'darwin') {
+      mkdirSync(`${workspace}-db8`, { mode: 0o700 });
+      writeFileSync(join(`${workspace}-db8`, 'retained-project'), 'original DB8 project bytes');
+    }
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
       profile: 'default',
@@ -111,6 +115,9 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           coreInode: number;
           nativeInode: number;
         }
+      | undefined;
+    let db8Private:
+      | { bytes: Buffer<ArrayBuffer>; inode: number; config: Buffer<ArrayBuffer> }
       | undefined;
     try {
       const req = createRequire(join(repositoryRoot, 'apps/desktop/package.json')),
@@ -251,6 +258,16 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           const url = new URL(request.url),
             path = url.pathname;
           try {
+            if (path === '/db8-private') {
+              expect(db8Private).toBeDefined();
+              expect(readFileSync(privatePath)).toEqual(db8Private!.bytes);
+              expect(lstatSync(privatePath).ino).toBe(db8Private!.inode);
+              expect(readFileSync(configurationPath)).toEqual(db8Private!.config);
+              expect(readFileSync(join(`${workspace}-db8`, 'retained-project'), 'utf8')).toBe(
+                'original DB8 project bytes',
+              );
+              return Response.json({ unchanged: true });
+            }
             if (path === '/process') {
               const pid = Number(url.searchParams.get('pid'));
               const startIdentity = readProcessStartIdentity(pid);
@@ -472,14 +489,81 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       }
       expect(requests).toHaveLength(3);
       expect(requests[2]!.contextHasB).toBe(true);
-      expect(uninstalled).toBe(true);
-      expect(existsSync(prefix)).toBe(false);
-      expect(preserved).toBeDefined();
-      unchanged(preserved!);
       for (const owned of report.owned)
         expect(inspectProcess(owned.pid, owned.startIdentity)).toBe('dead');
       for (const candidate of candidates)
         expect(verifyNativeRuntimeBundle(candidate.root).digest).toBe(candidate.digest);
+      let db8Rollback: unknown;
+      if (process.platform === 'darwin') {
+        expect(readFileSync(privatePath).readUInt32BE(60)).toBe(8);
+        db8Private = {
+          bytes: readFileSync(privatePath),
+          inode: lstatSync(privatePath).ino,
+          config: readFileSync(configurationPath),
+        };
+        await execute(
+          [
+            realpathSync(Bun.which('node')!),
+            join(root, 'electron-driver.mjs'),
+            join(prefix, 'bin/kite-desktop'),
+            home,
+            provider.url.href.replace(/\/$/, ''),
+            join(repositoryRoot, 'apps/desktop/package.json'),
+            'db8-cold',
+          ],
+          home,
+          home,
+          60000,
+        );
+        const report = JSON.parse(readFileSync(join(home, 'native-db8-report.json'), 'utf8')) as {
+          owned: { pid: number; startIdentity: string; root: string }[];
+          saved: { commandId: string; storeId: string; workspaceId: string };
+          rejected: string;
+          applied: {
+            receipt: {
+              commandId: string;
+              originStoreId: string;
+              deletedSessions: number;
+              outcome: string;
+            };
+          };
+          oldPhysical: { method: string }[];
+          physical: { method: string }[];
+        };
+        expect(report.owned).toHaveLength(2);
+        for (const owned of report.owned)
+          expect(inspectProcess(owned.pid, owned.startIdentity)).toBe('dead');
+        expect(report.rejected).toBe('draft_storage_unavailable');
+        expect(report.saved.storeId).toBe(originalStoreId);
+        expect(report.applied.receipt).toMatchObject({
+          commandId: report.saved.commandId,
+          originStoreId: originalStoreId,
+          deletedSessions: 0,
+          outcome: 'workspace_removed',
+        });
+        expect(report.oldPhysical.every((row) => row.method === 'GET')).toBe(true);
+        expect(report.physical.every((row) => row.method === 'GET')).toBe(true);
+        expect(requests).toHaveLength(3);
+        expect(readFileSync(join(`${workspace}-db8`, 'retained-project'), 'utf8')).toBe(
+          'original DB8 project bytes',
+        );
+        db8Rollback = {
+          oldPrivateError: report.rejected,
+          originalCommandId: report.saved.commandId,
+          owned: report.owned,
+          normalExits: 2,
+          dataRestored: false,
+          newProviderCalls: 0,
+          originalPrivateBytesAndInodeRetainedBeforeLookup: true,
+          currentVersionOriginalLookup: true,
+          uninstalled: true,
+        };
+        console.log(`NATIVE_DB8_REAL_CODE_ROLLBACK ${JSON.stringify(db8Rollback)}`);
+      }
+      expect(uninstalled).toBe(true);
+      expect(existsSync(prefix)).toBe(false);
+      expect(preserved).toBeDefined();
+      unchanged(preserved!);
       console.log(
         `NATIVE_REAL_CODE_COMPATIBILITY ${JSON.stringify({ prior: predecessor.provenance, current: current.terminal.manifest.source, changedAgentFiles: changedAgentFiles.map((file) => file.path), entrypointHashes, candidates: candidates.map((value) => ({ native: value.digest, terminal: value.terminal.digest })), archives, probeHash, driverHash, storeId: originalStoreId, commands: facts.at(-1)!.commands.map((value) => value.id), runs: facts.at(-1)!.runs.map((value) => value.id), fullBodyBytes: Buffer.byteLength(bodies[1]!), fullBodyHash: hash(bodies[1]!), requests, instances: report.phases.map((value) => value.instanceId), owned: report.owned, normalExits: 4, exclusiveAfterStops: true, coreAndNativeInodesRetained: true, dataRestored: false, cleanup: 'confirmed' })}`,
       );
